@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isNotFoundError } from '@nemo/common/src/api/common/utils';
+import { FILESET_NAME_MAX_LENGTH } from '@nemo/common/src/utils/filesetName';
 import { agentOptimizationCreateRunStrategyJob } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import {
@@ -11,7 +12,8 @@ import {
 } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { rollbackFileset } from '@studio/api/agents/agentSpecFileset';
-import { type FilesetEntry, uploadFilesetEntries } from '@studio/api/files/uploadFilesetEntries';
+import type { FilesetEntry } from '@studio/api/files/types';
+import { uploadFilesetEntries } from '@studio/api/files/uploadFilesetEntries';
 import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
 
 export interface LaunchOptimizeStudyParams {
@@ -20,6 +22,8 @@ export interface LaunchOptimizeStudyParams {
   entries: readonly FilesetEntry[];
   /** The optimize YAML, as a path relative to the bundle root. */
   optimizeConfig: string;
+  /** Name for the study; the server generates one when omitted. */
+  name?: string;
 }
 
 /**
@@ -95,21 +99,25 @@ export const deleteStudioBundleFileset = async (
 };
 
 // Every launch stages its own bundle, so re-running a study never mutates the inputs of an earlier one.
-export const optimizeBundleFilesetName = (agentName: string, now = Date.now()): string =>
-  `${agentName}-optimize-${now.toString(36)}`;
+// The agent segment is truncated, not the suffix, so a long agent name still fits a fileset name.
+export const optimizeBundleFilesetName = (agentName: string, now = Date.now()): string => {
+  const suffix = `-optimize-${now.toString(36)}`;
+  const base = agentName.slice(0, FILESET_NAME_MAX_LENGTH - suffix.length).replace(/-+$/, '');
+  return `${base}${suffix}`;
+};
 
 export const launchOptimizeStudy = async ({
   workspace,
   agentName,
   entries,
   optimizeConfig,
+  name,
 }: LaunchOptimizeStudyParams): Promise<RunStrategyJob> => {
   const filesetName = optimizeBundleFilesetName(agentName);
 
   await filesCreateFileset(workspace, {
     name: filesetName,
     description: `Optimize bundle for ${agentName}`,
-    // The stamp deleting the study checks for; see STUDIO_BUNDLE_STAMP.
     custom_fields: { [STUDIO_BUNDLE_STAMP]: agentName },
   });
 
@@ -117,6 +125,7 @@ export const launchOptimizeStudy = async ({
     await uploadFilesetEntries(workspace, filesetName, entries);
 
     return await agentOptimizationCreateRunStrategyJob(workspace, {
+      ...(name ? { name } : {}),
       spec: {
         strategy: STUDIO_OPTIMIZE_STRATEGY,
         optimize_config: optimizeConfig,

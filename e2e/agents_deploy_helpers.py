@@ -48,7 +48,7 @@ def unique_name(prefix: str) -> str:
 
 def agents_resource(client: NemoClient) -> AgentsResource:
     """Plugin ``agents`` resource driven by the typed platform client."""
-    return AgentsResource(client)  # ty: ignore[invalid-argument-type]
+    return AgentsResource(client)
 
 
 def wait_for_openai_model(

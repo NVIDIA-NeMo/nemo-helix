@@ -18,11 +18,10 @@ RUN apt-get update \
 WORKDIR /workspace
 
 # The Fabric entrypoint, its Hermes adapter, and the MCP SDK the tool server uses.
-# nemo-relay is pinned <0.8 because the Fabric adapters cap it there (same reason the uploaded
-# plugins.toml uses observability schema 3).
+# nemo-relay is pinned to the 0.9 line because the Fabric 0.4 adapters require >=0.9,<0.10.
 #
 # `hermes-agent` is what provides the `hermes` CLI used below. It is deliberately NOT a platform
-# dependency — it pins a vulnerable requests (see TODO(AIRCORE-952) in plugins/nemo-agents) — and
+# dependency — it pins a vulnerable requests (see the TODO in plugins/nemo-agents) — and
 # `nemo-fabric-adapters-hermes` ships only the adapter, no binary. Without it the build dies with
 # `hermes: not found` (exit 127). Installing it *here* is the right trade: this is a throwaway
 # victim image, built to be attacked inside a sandbox, never shipped or served to anyone.
@@ -32,7 +31,7 @@ RUN python -m venv /workspace/.venv \
       "nemo-fabric" \
       "nemo-fabric-adapters-hermes" \
       "hermes-agent" \
-      "nemo-relay>=0.7.2,<0.8" \
+      "nemo-relay>=0.9.3,<0.10" \
       "mcp[cli]"
 
 COPY agent.yaml /workspace/agent.yaml

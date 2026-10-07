@@ -31,7 +31,7 @@ from data_designer.config.errors import InvalidConfigError
 from data_designer.interface.data_designer import DataDesigner
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
 from nemo_data_designer_plugin.sdk._engine_pass import run_engine_pass
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from pydantic import BaseModel, Field, computed_field
 
 # The engine's compile step is the source of truth on column→alias→provider
@@ -68,8 +68,8 @@ def _validate(data_designer: DataDesigner, config_builder: dd.DataDesignerConfig
 async def validate_config(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoHelix | None = None,
-    async_sdk: AsyncNeMoHelix | None = None,
+    client: NemoClient | None = None,
+    async_client: AsyncNemoClient | None = None,
     workspace: str,
     config_source: str | None = None,
 ) -> ValidationReport:
@@ -86,10 +86,10 @@ async def validate_config(
 
     Args:
         config_builder: The Data Designer config to validate.
-        sdk: Sync NeMoHelix SDK. Used for engine-level compile validation
-            and as a fallback to derive ``async_sdk`` when one is not supplied.
-        async_sdk: Async NeMoHelix SDK. If omitted but ``sdk`` is supplied,
-            an async wrapper is built via ``sync_to_async_sdk``.
+        client: Sync typed platform client. Used for engine-level compile validation
+            and as a fallback to derive ``async_client`` when one is not supplied.
+        async_client: Async typed platform client. If omitted but ``client`` is supplied,
+            an async sibling is built via ``NemoClient.to_async``.
         workspace: Workspace used to resolve provider references and seed
             sources for the remote context. Pass ``"default"`` if you have
             no better value.
@@ -100,12 +100,12 @@ async def validate_config(
         A ``ValidationReport``.
 
     Raises:
-        ValueError: If neither ``sdk`` nor ``async_sdk`` is provided.
+        ValueError: If neither ``client`` nor ``async_client`` is provided.
     """
     result = await run_engine_pass(
         config_builder,
-        sdk=sdk,
-        async_sdk=async_sdk,
+        client=client,
+        async_client=async_client,
         workspace=workspace,
         engine_call=_validate,
         engine_errors=_ENGINE_ERRORS,
@@ -124,8 +124,8 @@ async def validate_config(
 def validate_config_sync(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoHelix | None = None,
-    async_sdk: AsyncNeMoHelix | None = None,
+    client: NemoClient | None = None,
+    async_client: AsyncNemoClient | None = None,
     workspace: str,
     config_source: str | None = None,
 ) -> ValidationReport:
@@ -133,8 +133,8 @@ def validate_config_sync(
     return asyncio.run(
         validate_config(
             config_builder,
-            sdk=sdk,
-            async_sdk=async_sdk,
+            client=client,
+            async_client=async_client,
             workspace=workspace,
             config_source=config_source,
         )

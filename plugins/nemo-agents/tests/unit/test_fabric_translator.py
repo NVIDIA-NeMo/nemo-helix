@@ -77,6 +77,47 @@ def _example_yaml_config() -> dict[str, Any]:
 
 
 class TestTranslateAgentConfig:
+    @pytest.mark.parametrize("kind", ["remote-agent", "nvidia.fabric.remote-agent"])
+    @pytest.mark.parametrize("api_type", ["openai-responses", "openai-completions", "anthropic-messages"])
+    def test_remote_agent_keeps_endpoint_in_harness_settings(self, kind: str, api_type: str) -> None:
+        example_path = Path(__file__).parents[2] / "examples/nemo-agent-config/agent-remote.yaml"
+        config = load_agent_config(example_path)
+        config.harnesses["remote-agent"].kind = kind
+        config.harnesses["remote-agent"].settings["api_type"] = api_type
+
+        translated = translate_agent_config(config)
+
+        assert translated.harness is not None
+        assert translated.harness.adapter_id == "nvidia.fabric.remote-agent"
+        assert translated.harness.resolution == "preinstalled"
+        assert translated.harness.settings["base_url"] == "https://agent.example.com/v1"
+        assert translated.harness.settings["api_type"] == api_type
+        assert translated.models["default"].base_url is None
+        assert translated.models["default"].api_key_env == "REMOTE_AGENT_API_KEY"
+
+    @pytest.mark.parametrize("harness_override", [False, True])
+    def test_forwards_model_sampling_parameters(self, harness_override: bool) -> None:
+        payload = _example_yaml_config()
+        payload["models"]["default"].update(top_p=0.9, max_tokens=1024)
+        payload["models"]["fast"] = {
+            "provider": "openai",
+            "model": "fast-model",
+            "top_p": 0.0,
+            "max_tokens": 256,
+        }
+        if harness_override:
+            payload["harnesses"]["hermes"]["model"].update(top_p=0.5, max_tokens=512)
+        else:
+            del payload["harnesses"]["hermes"]["model"]
+
+        config = AgentConfig.model_validate(payload)
+        fabric_config = translate_agent_config(config)
+
+        assert fabric_config.models["default"].top_p == (0.5 if harness_override else 0.9)
+        assert fabric_config.models["default"].max_tokens == (512 if harness_override else 1024)
+        assert fabric_config.models["fast"].top_p == 0.0
+        assert fabric_config.models["fast"].max_tokens == 256
+
     def test_repository_example_uses_current_codex_and_isolated_hermes_adapters(self) -> None:
         example_path = Path(__file__).parents[2] / "examples/nemo-agent-config/agent.yaml"
         config = load_agent_config(example_path)

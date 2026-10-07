@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from nemo_evaluator.jobs.agent_spec import (
     AgentRunnerTarget,
+    GymAgentSource,
     GymPlacement,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
@@ -85,6 +86,7 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
 
     ``jobs_dir`` is optional at construction and deliberately omitted from submission: workers
     supply job-owned storage. Standalone execution requires an explicit directory.
+    Only ``env_secrets`` references travel; the platform resolves them with its own resolver.
     """
     config = runner._config
     if config is None:
@@ -102,9 +104,7 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
         "quiet": True,
         "agent_dir": None,
         "timeout_multiplier": None,
-        "agent_timeout_multiplier": None,
         "verifier_timeout_multiplier": None,
-        "agent_setup_timeout_multiplier": None,
         "environment_build_timeout_multiplier": None,
     }
     for field, default in required_defaults.items():
@@ -127,6 +127,8 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
         "artifacts",
         "trace_dir",
         "reward_key",
+        "agent_setup_timeout_multiplier",
+        "agent_timeout_multiplier",
     )
     try:
         target = HarborRunnerTarget(source=source, **{name: getattr(config, name) for name in carried_fields})
@@ -146,7 +148,8 @@ def _gym_target(runner: GymAgentTaskRunner, placement: GymPlacement) -> GymRunne
     plainly rather than inventing rejections to look careful. The placement only adds to that; it
     overrides nothing. Gym's settings are all *behaviour*
     (which environment, which agent, how many attempts, how long to wait) rather than *location*:
-    there is no work root, no local base directory, and no injected callable to lose. The one thing
+    there is no work root or local base directory. Only ``env_secrets`` references travel; a custom
+    local secret resolver is replaced by the platform's resolver. The one thing
     that reads like a local path, ``agent_config``, is resolved relative to the Gym installation
     rather than the caller's filesystem, and the job container is required to have Gym installed
     regardless.
@@ -162,10 +165,11 @@ def _gym_target(runner: GymAgentTaskRunner, placement: GymPlacement) -> GymRunne
     raised from the transport, naming neither the runner nor the field. Checking here turns that
     into the refusal this module promises.
     """
+    config = runner.config
     target = GymRunnerTarget(
-        **runner.config.model_dump(),
+        **config.model_dump(exclude={"agent", "agent_config"}),
+        source=GymAgentSource(component=config.agent, config=config.agent_config, instance=placement.agent_ref_name),
         environment=placement.environment,
-        agent_ref_name=placement.agent_ref_name,
     )
     try:
         target.model_dump(mode="json")

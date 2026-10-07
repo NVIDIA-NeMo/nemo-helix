@@ -13,7 +13,6 @@ from typing import Any
 
 import pytest
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.client import EntitiesClient
 from nhx.core.inference_gateway.testing.harness import IGWLoopbackHarness, IGWPluginHarness
 from nhx.testing.mock_chat_completions import ChatCompletion, chat_completion
@@ -117,7 +116,7 @@ class TestMiddlewareConfigCaching:
         that predates that guard — and IGW must keep failing closed when it happens, so the tests
         build it the way it actually arises rather than through the guarded endpoint.
         """
-        client_from_platform(harness.sdk, EntitiesClient).delete_entity_by_name(
+        EntitiesClient.from_client(harness.client).delete_entity_by_name(
             name=config_name,
             workspace=harness.workspace,
             entity_type=GUARDRAILS_PLUGIN_CONFIG_TYPE,

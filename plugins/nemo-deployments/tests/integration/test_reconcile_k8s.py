@@ -3,7 +3,7 @@
 
 """Integration test for deployment reconciliation against a real k8s backend.
 
-Requires AIRCORE-757 K8sDeploymentBackend to be registered in BACKEND_CLASSES.
+Requires the K8sDeploymentBackend to be registered in BACKEND_CLASSES.
 
 The puller/server scenario has no PVC mount (unlike ``test_reconcile_docker.py``): kind's
 default ``local-path`` StorageClass uses ``WaitForFirstConsumer`` binding, so an unconsumed
@@ -40,7 +40,7 @@ from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconcile
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 pytestmark = [
-    pytest.mark.skipif("k8s" not in BACKEND_CLASSES, reason="Requires K8sDeploymentBackend (AIRCORE-757)"),
+    pytest.mark.skipif("k8s" not in BACKEND_CLASSES, reason="Requires K8sDeploymentBackend"),
     skip_without_kubeconfig,
 ]
 
@@ -53,12 +53,12 @@ NGINX_IMAGE = "docker.io/library/nginx:alpine"
 
 @pytest.fixture
 def k8s_registry() -> ExecutorRegistry:
-    mock_sdk = MagicMock()
+    mock_client = MagicMock()
     with (
-        patch("nemo_deployments_plugin.backends.k8s.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.k8s.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.k8s.backend.NemoEntitiesClient"),
     ):
-        backend = K8sDeploymentBackend(mock_sdk, {"default_namespace": NAMESPACE, "request_timeout": 30})
+        backend = K8sDeploymentBackend(mock_client, {"default_namespace": NAMESPACE, "request_timeout": 30})
     return ExecutorRegistry({"k8s": backend}, default_executor="k8s")
 
 

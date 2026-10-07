@@ -49,7 +49,8 @@
                 "json_path": "helpfulness"
               },
               "minimum": 0,
-              "maximum": 4
+              "maximum": 4,
+              "is_integer": true
             }
           ],
           "prompt_template": {
@@ -86,7 +87,7 @@
           "ignore_request_failure": false,
           "job_type": "online"
         },
-        "digest": "b7040127c0dfe0a1cacd165207e9b21a12a6232d7f21ddad7984ac03c95ae37f",
+        "digest": "bc3b57f6ae0cb4864197036595e30e301b8df2b2b3c64a605ac460eaad9aa83f",
         "kind": "inline"
       }
     }

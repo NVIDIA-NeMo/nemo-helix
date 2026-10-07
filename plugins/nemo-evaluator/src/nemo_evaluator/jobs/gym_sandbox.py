@@ -27,7 +27,9 @@ from pathlib import Path
 from typing import Any
 
 from nemo_evaluator.config import EvaluatorConfig
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import GymRunnerTarget, RegisteredAgentSource
+from nemo_evaluator.jobs.secret_env import GYM_SANDBOX_PLAN_ENVVAR, JobEnvSecretSource
+from nemo_evaluator_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
@@ -71,6 +73,11 @@ def _asset_config_path(parent: str, value: str) -> str:
     return f"{parent}/{name}/configs/{flavor or name}.yaml"
 
 
+def has_staged_environment(target: GymRunnerTarget) -> bool:
+    """Whether the job stages an environment tree the host must mount: a FileSet, a registered agent's package, or both."""
+    return target.environment is not None or isinstance(target.source, RegisteredAgentSource)
+
+
 def gym_global_config(target: GymRunnerTarget) -> dict[str, Any]:
     """Build the Gym global config for a target, as nested data rather than Hydra strings.
 
@@ -106,7 +113,7 @@ def gym_global_config(target: GymRunnerTarget) -> dict[str, Any]:
         else:
             config[key] = value
 
-    if target.environment is not None:
+    if has_staged_environment(target):
         # Gym does not read this key. The host uses it to rebuild config_paths.
         config[ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY] = {
             "agent_instance": target.agent_ref_name or target.agent,
@@ -169,11 +176,6 @@ def require_no_plaintext_credentials(target: GymRunnerTarget) -> None:
     )
 
 
-#: Step-environment variable carrying the resolved :class:`SandboxPlan` to the job. Its presence
-#: *is* the decision to sandbox: the job container has no evaluator configuration to consult.
-GYM_SANDBOX_PLAN_ENVVAR = "NEMO_EVALUATOR_GYM_SANDBOX_PLAN"
-
-
 class SandboxPlan(BaseModel):
     """The deployment's sandbox settings, resolved and validated once, service-side.
 
@@ -214,7 +216,7 @@ def resolve_sandbox_plan(
     quietly running user environment code beside this job's credentials. A FileSet environment
     cannot run colocated at all -- ``GymAgentTaskRunner`` would ignore the staged package.
     """
-    if target.environment is not None:
+    if has_staged_environment(target):
         require_fileset_environment_sandboxed(target, config)
     if not config.sandboxed_gym_default:
         return None
@@ -248,12 +250,17 @@ def resolve_sandbox_plan(
 
 def require_fileset_environment_sandboxed(target: GymRunnerTarget, config: EvaluatorConfig) -> None:
     """Refuse a custom environment that colocated execution would silently ignore."""
-    if target.environment is None:
+    if not has_staged_environment(target):
         return
     if not config.sandboxed_gym_default:
+        what = (
+            "A registered agent's Gym package"
+            if isinstance(target.source, RegisteredAgentSource)
+            else "Gym environment FileSets"
+        )
         raise SandboxUnavailableError(
-            "Gym environment FileSets require sandboxed execution. Enable `sandboxed_gym_default`, "
-            "or omit `target.environment` so colocated GymAgentTaskRunner cannot ignore the staged package."
+            f"{what} require sandboxed execution. Enable `sandboxed_gym_default`, or select a Gym agent by "
+            "`component` without `target.environment`, so colocated GymAgentTaskRunner cannot ignore the staged package."
         )
     require_sandbox_available(config)
     require_no_plaintext_credentials(target)
@@ -274,7 +281,7 @@ def require_fileset_sandbox_storage_identity(
     execution_profile: BaseExecutionProfile | None,
 ) -> None:
     """Fail when staging would write PVC A and OpenSandbox would mount PVC B."""
-    if target.environment is None or config.sandbox_host_provider == "docker":
+    if not has_staged_environment(target) or config.sandbox_host_provider == "docker":
         return
     job_claim = job_storage_pvc_name(execution_profile) if execution_profile is not None else None
     sandbox_claim = config.sandbox_job_storage_pvc_claim
@@ -305,7 +312,7 @@ def _egress_rules(plan: SandboxPlan) -> list[dict[str, Any]]:
     return rules
 
 
-def host_env(target: GymRunnerTarget) -> dict[str, str]:
+def host_env(target: GymRunnerTarget, *, workspace: str) -> dict[str, str]:
     """The target's own environment variables, for the Gym host container.
 
     Two sources, both belonging to the job rather than the deployment: ``env_vars`` travels on the
@@ -318,17 +325,10 @@ def host_env(target: GymRunnerTarget) -> dict[str, str]:
     the run instead, since the sandbox executes the environment's own code.
     """
     env = dict(target.env_vars)
-    for name in target.env_secrets:
-        value = os.environ.get(name)
-        if value is None:
-            # The service resolves every `env_secrets` entry into the job container, so a missing
-            # one means the resolution failed. Failing here names the variable; letting it through
-            # fails inside the sandbox as whatever the environment does without its credential.
-            raise SandboxUnavailableError(
-                f"`env_secrets` entry {name!r} was not resolved into this job's environment, so the "
-                "sandboxed Gym host cannot be given it."
-            )
-        env[name] = value
+    try:
+        env.update(env_secret_values(target.env_secrets, JobEnvSecretSource(workspace=workspace)))
+    except ValueError as error:
+        raise SandboxUnavailableError(str(error)) from error
     return env
 
 
@@ -354,7 +354,7 @@ def serve_config(
     """
     environment_pvc_claim = plan.job_storage_pvc_claim
     host_provider_options = dict(plan.host_provider_options)
-    fileset_environment = target.environment is not None
+    fileset_environment = has_staged_environment(target)
 
     if fileset_environment:
         # Each FileSet is staged onto this job's persistent directory. A shared environment mount
@@ -418,7 +418,7 @@ def serve_config(
         # orchestrator, so it is deliberately absent here.
         "policy_base_urls": plan.policy_base_urls,
         "gym_global_config": gym_global_config(target),
-        "host_env": host_env(target),
+        "host_env": host_env(target, workspace=workspace),
     }
 
 
@@ -461,18 +461,23 @@ class SessionBackedGymRunner:
         """Identify the run before a session exists, so provenance does not depend on provisioning."""
         from nemo_evaluator_sdk.agent_eval.trials import RunnerInfo
 
-        if self._delegate is not None:
-            info = self._delegate.runner_info()
-            return info.model_copy(update={"config": {**info.config, **self._rollout_settings}})
-        return RunnerInfo(
-            name="gym",
-            kind="runner",
-            config={
-                "mode": "sandboxed",
-                "resources_server": self._target.resources_server,
-                "agent": self._target.agent,
-                "reward_key": self._target.reward_key,
-            },
+        info = (
+            self._delegate.runner_info()
+            if self._delegate is not None
+            else RunnerInfo(
+                name="gym", kind="runner", config={"mode": "sandboxed", "reward_key": self._target.reward_key}
+            )
+        )
+        return info.model_copy(
+            update={
+                "config": {
+                    **info.config,
+                    **self._rollout_settings,
+                    "resources_server": self._target.resources_server,
+                    "agent": self._target.agent,
+                    "env_secrets": {name: ref.root for name, ref in self._target.env_secrets.items()},
+                }
+            }
         )
 
     def run_aggregate_scores(self) -> Any:

@@ -270,9 +270,13 @@ class HarborAgentTaskRunner:
     ``job_dir`` is the directory Harbor writes its per-trial
     ``<task>__<hash>/result.json`` files into.
 
-    ``secret_resolver`` names the env var holding each ``env_secrets`` entry; it must implement
-    :class:`~nemo_evaluator_sdk.resolver_protocols.EnvSecretSource`. Defaults to
-    :class:`~nemo_evaluator_sdk.resolvers.LocalSecretResolver`; platform jobs pass their own.
+    ``secret_resolver`` must implement
+    :class:`~nemo_evaluator_sdk.resolver_protocols.EnvSecretSource` when ``config.env_secrets``
+    is set. ``None`` (the default) uses :class:`~nemo_evaluator_sdk.resolvers.LocalSecretResolver`
+    to find each secret in this process's environment. Platform jobs pass a source that names
+    the variable injected under each ``env_secrets`` key. Harbor receives a ``${NAME}`` template
+    for that variable, so a value-only :class:`~nemo_evaluator_sdk.resolver_protocols.SecretResolver`
+    cannot be used here.
     """
 
     def __init__(
@@ -419,7 +423,7 @@ class HarborAgentTaskRunner:
                     # Harbor resumes per trial and keeps completed work — including
                     # with `agent_dir` set, now that the scoped import path is
                     # content-addressed rather than a fresh uuid per run and Harbor's
-                    # JobConfig comparison can therefore match (AALGO-430).
+                    # JobConfig comparison can therefore match.
                     force_rerun=(self._config.force_rerun or stale),
                     env_templates=env_templates,
                 )
@@ -1189,7 +1193,7 @@ def scoped_harbor_agent_import(
     when deciding whether an existing job directory may be resumed. A random suffix
     made that comparison fail on every rerun, so Harbor raised ``FileExistsError``
     instead of resuming and its per-trial resume was unreachable for any caller that
-    sets ``agent_dir`` (AALGO-430). Content-addressing keeps distinct agents isolated
+    sets ``agent_dir``. Content-addressing keeps distinct agents isolated
     while letting an unchanged agent resume — and makes an *edited* agent invalidate
     the job dir on Harbor's own terms.
 

@@ -6,9 +6,9 @@
 ``create_data_designer`` needs three engine components: a secret resolver,
 seed readers, and a person reader. The real implementations
 (:class:`~data_designer_nemo.context.execution.DataDesignerExecutionContext`) all need a
-sync ``NeMoHelix``, and an async caller cannot build one — rebuilding a sync
-SDK from an async one is deliberately unsupported (see
-:mod:`data_designer_nemo.sdk_translation`).
+sync ``NemoClient``, and an async caller cannot build one: only the sync client
+converts (:meth:`NemoClient.to_async`), because the engine's seed and person
+readers call fsspec synchronously.
 
 A model probe needs none of them. ``DataDesigner.check_models`` resolves model
 aliases, sends one tiny generation per alias, and reads no data: no seed is

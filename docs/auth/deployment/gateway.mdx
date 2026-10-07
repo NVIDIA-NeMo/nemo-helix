@@ -5,7 +5,7 @@
 title: "Gateway Integration"
 description: ""
 ---
-In production, a gateway (reverse proxy, ingress controller, or service mesh) often sits in front of the NeMo Helix. This page explains the recommended enforced gateway path for bearer-token authentication, what headers the gateway must set, and which paths skip authorization.
+In production, a gateway (reverse proxy, ingress controller, or service mesh) often sits in front of NeMo Helix. This page explains the recommended enforced gateway path for bearer-token authentication, what headers the gateway must set, and which paths skip authorization.
 
 For the security architecture, see [Security Model](/documentation/access-control/security-model).
 
@@ -13,7 +13,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 NeMo Helix services trust identity headers only after a bearer token has been validated. In gateway deployments, the recommended path is:
 
-1. The gateway calls `/apis/auth/ext-authz` before forwarding protected API requests.
+1. The gateway calls `/apis/auth/ext-authz/<original-request-path>` before forwarding protected API requests.
 2. The auth service validates the bearer token and returns trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers.
 3. The gateway forwards those trusted headers to NeMo Helix services.
 4. Services run their normal PDP authorization checks using the trusted principal and scopes.

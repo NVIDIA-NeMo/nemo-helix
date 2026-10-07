@@ -62,7 +62,7 @@ class _Retry:
 _RETRY = _Retry()
 
 # Service-bound keys are machine-to-machine credentials owned by the platform, not
-# by the creating individual (AIRCORE-986). Every lifecycle operation therefore
+# by the creating individual. Every lifecycle operation therefore
 # uses this callback to require a current HelixAdmin, including when the caller
 # originally created the key.
 AdminOverride = Callable[[], Awaitable[bool]]
@@ -134,7 +134,7 @@ class AccessKeyRegistry:
     async def list_for_principal(
         self, principal: str, *, page: int, page_size: int, include_service_accounts: bool = False
     ) -> AccessKeyListResponse:
-        # Service-bound keys are platform-owned, not creator-owned (AIRCORE-986): a
+        # Service-bound keys are platform-owned, not creator-owned: a
         # HelixAdmin other than the creator can already revoke/suspend one via
         # _get_owned's admin_override, so listing must surface every service-bound key
         # to any current admin rather than only the one who happened to create it.
@@ -646,7 +646,7 @@ class PersistentAccessKeyIssuer:
         self._workspaces_client = workspaces_client
         self.principal = principal.id
         # Lets any current HelixAdmin revoke or suspend a service-bound key;
-        # see AdminOverride and AIRCORE-986. Memoized for the lifetime of this issuer
+        # see AdminOverride. Memoized for the lifetime of this issuer
         # instance (one per request, see get_access_key_issuer) so that an endpoint-level
         # pre-check (is_platform_admin) and create_async's own defense-in-depth re-check
         # share a single PDP has_role round trip instead of each paying for one.

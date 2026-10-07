@@ -253,21 +253,8 @@ def _lazy_entry(obj: click.Group, cmd_name: str) -> Any | None:
 
 
 def cli_module(module_path: str) -> ModuleType:
-    """Import a CLI module from source or from the vendored SDK package."""
-    source_name = f"nemo_helix_ext.cli.{module_path}"
-    try:
-        return import_module(source_name)
-    except ModuleNotFoundError as exc:
-        if not is_missing_source_cli_module(exc.name, source_name):
-            raise
-        return import_module(f"nemo_helix.cli.{module_path}")
-
-
-def is_missing_source_cli_module(missing_name: str | None, source_name: str) -> bool:
-    """Return whether import failed because the source CLI module is unavailable."""
-    if missing_name is None:
-        return False
-    return source_name == missing_name or source_name.startswith(f"{missing_name}.")
+    """Import a module from the ``nemo_helix_ext.cli`` package."""
+    return import_module(f"nemo_helix_ext.cli.{module_path}")
 
 
 @cache

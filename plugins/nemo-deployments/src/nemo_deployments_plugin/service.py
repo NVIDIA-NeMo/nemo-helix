@@ -10,8 +10,8 @@ from typing import ClassVar
 
 from nemo_deployments_plugin.backends.registry import ExecutorRegistry, ExecutorSpec
 from nemo_deployments_plugin.config import DeploymentsConfig
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.service import NemoService, RouterSpec
 
 logger = logging.getLogger(__name__)
@@ -70,11 +70,11 @@ class DeploymentsService(NemoService):
 
     async def on_startup(self) -> None:
         config = DeploymentsConfig.get()
-        sdk: AsyncNeMoHelix = get_async_platform_sdk(as_service="deployments", internal=True)
+        client: AsyncNemoClient = get_async_nemo_client(as_service="deployments", internal=True)
         specs = [ExecutorSpec(name=e.name, backend=e.backend, config=e.config) for e in config.executors]
         if specs:
             self._executor_registry = ExecutorRegistry.from_config(
-                sdk,
+                client,
                 specs,
                 default_executor=config.default_executor,
             )

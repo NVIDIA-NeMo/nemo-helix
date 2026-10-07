@@ -25,6 +25,7 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
     FabricConfigSource,
     FabricRunnerTarget,
+    GymAgentSource,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
@@ -302,7 +303,9 @@ def _publish(client: _FakeClient | None, *, required: bool = True, agent_name: s
         (HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model_name="m")), ("oracle", "m")),
         (HarborRunnerTarget(source=HarborImportedAgentSource(import_path="pkg:Agent")), ("pkg:Agent", None)),
         (
-            GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
+            GymRunnerTarget(
+                source=GymAgentSource(component="simple_agent", config="conf/agent.yaml"), resources_server="mcqa"
+            ),
             ("simple_agent", None),
         ),
         (FabricRunnerTarget(source=FabricConfigSource(config={}, model="p/m")), (None, "p/m")),
@@ -355,7 +358,9 @@ def test_agent_name_derived_from_agent_target_needs_no_override() -> None:
 
 def test_agent_name_derived_from_gym_target_needs_no_override() -> None:
     spec = _input_spec(
-        GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
+        GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="conf/agent.yaml"), resources_server="mcqa"
+        ),
         PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-1")),
     )
     assert spec.publication is not None
@@ -575,7 +580,18 @@ class _FakeEvaluator:
                 )
                 for task in tasks
             ],
-            scores=[],
+            scores=[
+                AgentEvalTaskScore(
+                    id=f"{task.id}:score",
+                    run_id="run-1",
+                    task_id=task.id,
+                    trial_id=f"{task.id}:trial",
+                    metric_type="accuracy",
+                    status=AgentEvalScoreStatus.COMPLETED,
+                    outputs=[MetricOutput(name="score", value=1.0)],
+                )
+                for task in tasks
+            ],
             summary=AgentEvalSummary(),
             metadata=RunMetadata(started_at=self._started_at),
         )
@@ -640,7 +656,7 @@ def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: Mock
         "status": HelixJobStatus.COMPLETED,
         "evaluation_id": "eval-1",
         "trial_count": 1,
-        "evaluator_result_count": 0,
+        "evaluator_result_count": 1,
         "skipped": [],
     }
     assert len(client.atif_calls) == 1

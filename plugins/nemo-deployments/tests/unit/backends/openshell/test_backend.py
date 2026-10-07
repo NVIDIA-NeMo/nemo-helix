@@ -29,6 +29,7 @@ from nemo_deployments_plugin.backends.openshell.backend import (
     _MAX_ROUTABLE_NAME_LEN,
     _READINESS_EXEC_TIMEOUT_MARGIN_SECONDS,
     _SERVE_DEAD_EXIT,
+    _SERVE_LOG,
     _SERVE_PENDING_EXIT,
     _SERVE_PID_GRACE_SECONDS,
     _SERVE_PIDFILE,
@@ -36,6 +37,7 @@ from nemo_deployments_plugin.backends.openshell.backend import (
     _delivery_script,
     _readiness_probe_command,
     _sandbox_name,
+    _serve_launch_script,
     _service_name,
 )
 from nemo_deployments_plugin.backends.registry import BACKEND_CLASSES
@@ -53,8 +55,8 @@ from nemo_deployments_plugin.entities import (
     WorkloadIdentitySpec,
 )
 from nemo_deployments_plugin.secrets import SecretResolutionError
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 pytest.importorskip("openshell")  # platform-restricted extra; skip where not installed (e.g. CI)
@@ -209,29 +211,25 @@ def test_registry_contains_openshell() -> None:
 
 
 async def test_load_deployment_config_wraps_an_entities_client_that_accepts_query_params() -> None:
-    """init() must adapt the SDK with client_from_platform(AsyncEntitiesClient), not wrap the
-    raw generated AsyncEntitiesResource (AIRCORE-977).
+    """init() must build an AsyncEntitiesClient from the platform client (AIRCORE-977).
 
-    NemoEntitiesClient.get() forwards a ``query_params`` kwarg. The generated resource does not
-    accept it, so wrapping the resource made every first reconcile die with
-    ``TypeError: ... unexpected keyword argument 'query_params'`` before any request left the box.
-    Drive the real contract with a live entities client over a mock transport: a 404 must surface
-    as NemoEntityNotFoundError, which is only reachable once ``get_entity_by_name(query_params=...)``
-    is accepted and the request actually goes out.
+    NemoEntitiesClient.get() forwards a ``query_params`` kwarg. Drive the real contract with a
+    live entities client over a mock transport: a 404 must surface as NemoEntityNotFoundError,
+    which is only reachable once ``get_entity_by_name(query_params=...)`` is accepted and the
+    request actually goes out.
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"detail": "not found"}, request=request)
 
-    sdk = AsyncNeMoHelix(
+    client = AsyncNemoClient(
         base_url="http://entities.test",
         workspace="default",
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     with patch("grpc.insecure_channel", return_value=MagicMock()):
-        backend = OpenShellDeploymentBackend(sdk, {"gateway_endpoint": "http://127.0.0.1:17670"})
+        backend = OpenShellDeploymentBackend(client, {"gateway_endpoint": "http://127.0.0.1:17670"})
 
-    # Old (buggy) wrapping raised TypeError about query_params here; the fix reaches the 404.
     with pytest.raises(NemoEntityNotFoundError):
         await backend._load_deployment_config("default", "missing-config")
 
@@ -264,8 +262,13 @@ def test_service_name_clamped_and_distinct() -> None:
         # READY is not here: a READY sandbox triggers the read_status provisioning state
         # machine (launch/expose), covered by the read_status provisioning tests below.
         (pb.SANDBOX_PHASE_PROVISIONING, "STARTING"),
+        (pb.SANDBOX_PHASE_STARTING, "STARTING"),
         (pb.SANDBOX_PHASE_ERROR, "FAILED"),
         (pb.SANDBOX_PHASE_DELETING, "DELETING"),
+        # An operator stop is drift, not a failure: FAILED would tear down the sandbox and its state.
+        (pb.SANDBOX_PHASE_STOPPING, "LOST"),
+        (pb.SANDBOX_PHASE_STOPPED, "LOST"),
+        (pb.SANDBOX_PHASE_COMPLETED, "SUCCEEDED"),
     ],
 )
 async def test_read_status_maps_phase(
@@ -281,14 +284,113 @@ async def test_read_status_includes_exposed_endpoints(
 ) -> None:
     mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
     svc = MagicMock(url="http://nhx-x--http.openshell.localhost:18080/")
-    svc.endpoint.service_name = "http"
-    mock_stub.ListServices.return_value = MagicMock(services=[svc])
+    svc.endpoint.name = "http"
+    mock_stub.ListServices.return_value = MagicMock(services=[svc], next_page_token="")
+    mock_stub.ExecSandbox.return_value = _exec_events(0)  # launch marker present, serve alive
 
     update = await openshell_backend.read_status(workspace="default", name="srv")
 
     assert update.status == "READY"
     assert [e.url for e in update.endpoints] == ["http://nhx-x--http.openshell.localhost:18080/"]
     assert update.endpoints[0].name == "http"
+
+
+async def test_read_status_relaunches_after_a_restart_that_kept_its_exposure(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+) -> None:
+    # A stop/start keeps the exposed service but clears this boot's launch marker: the
+    # workload must be relaunched, not reported READY on the strength of the old exposure.
+    mock_entities.get.return_value = _config()
+    mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+    svc = MagicMock(url="http://nhx-x--http.openshell.localhost:18080/")
+    svc.endpoint.name = "http"
+    mock_stub.ListServices.return_value = MagicMock(services=[svc], next_page_token="")
+    mock_stub.ExecSandbox.side_effect = [
+        _exec_events(1),  # no ready marker this boot
+        _exec_events(1),  # no launch marker this boot
+        _exec_events(0),  # relaunch ok
+    ]
+
+    update = await openshell_backend.read_status(workspace="default", name="srv")
+
+    assert update.status == "STARTING"
+    assert "setsid" in " ".join(_exec_requests(mock_stub)[-1].command)
+
+
+async def test_read_status_gates_surviving_exposure_on_this_boots_readiness(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+) -> None:
+    mock_entities.get.return_value = _config()
+    mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+    svc = MagicMock(url="http://nhx-x--http.openshell.localhost:18080/")
+    svc.endpoint.name = "http"
+    mock_stub.ListServices.return_value = MagicMock(services=[svc], next_page_token="")
+    # Exposure present but this boot's relaunched serve has not passed readiness yet: the fast
+    # path does not apply, readiness gates READY, and the existing service is reused.
+    mock_stub.ExecSandbox.side_effect = [
+        _exec_events(1),  # no ready marker this boot
+        _exec_events(0),  # launch marker present
+        _exec_events(0),  # liveness: alive
+        _exec_events(0),  # readiness: reachable
+        _exec_events(0),  # ready marker written
+    ]
+
+    update = await openshell_backend.read_status(workspace="default", name="srv")
+
+    assert update.status == "READY"
+    assert "nemo-serve.ready" in " ".join(_exec_requests(mock_stub)[-1].command)
+    assert [e.url for e in update.endpoints] == ["http://nhx-x--http.openshell.localhost:18080/"]
+    mock_stub.ExposeService.assert_not_called()
+
+
+def _owned_sandbox(phase: int) -> MagicMock:
+    labels = {MANAGED_BY_KEY: MANAGED_BY_LABEL, DEPLOYMENT_WORKSPACE_LABEL: "default", DEPLOYMENT_NAME_LABEL: "srv"}
+    return _sandbox(phase, labels=labels)
+
+
+async def test_drift_recovery_restarts_a_stopped_sandbox_in_place(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock
+) -> None:
+    mock_stub.GetSandbox.return_value = _owned_sandbox(pb.SANDBOX_PHASE_STOPPED)
+
+    update = await openshell_backend.create_deployment(
+        workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
+    )
+
+    assert update.status == "STARTING"
+    request = mock_stub.StartSandbox.call_args.args[0]
+    assert request.name == _sandbox_name("default", "srv")
+    assert request.workspace_scope.workspace == "default"
+    mock_stub.CreateSandbox.assert_not_called()
+
+
+async def test_drift_recovery_stays_lost_when_start_fails(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock
+) -> None:
+    mock_stub.GetSandbox.return_value = _owned_sandbox(pb.SANDBOX_PHASE_STOPPED)
+    mock_stub.StartSandbox.side_effect = FakeRpcError(grpc.StatusCode.UNAVAILABLE, "gateway blip")
+
+    update = await openshell_backend.create_deployment(
+        workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
+    )
+
+    assert update.status == "LOST"
+    assert "StartSandbox failed" in update.status_message
+    mock_stub.CreateSandbox.assert_not_called()
+    mock_stub.DeleteSandbox.assert_not_called()
+
+
+async def test_drift_recovery_leaves_a_stopping_sandbox_alone(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock
+) -> None:
+    mock_stub.GetSandbox.return_value = _owned_sandbox(pb.SANDBOX_PHASE_STOPPING)
+
+    update = await openshell_backend.create_deployment(
+        workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
+    )
+
+    assert update.status == "LOST"
+    mock_stub.StartSandbox.assert_not_called()
 
 
 async def test_read_status_not_found_is_lost(
@@ -415,7 +517,7 @@ async def test_list_managed_deployment_names(
             }
         )
     )
-    mock_stub.ListSandboxes.return_value = MagicMock(sandboxes=[sandbox])
+    mock_stub.ListSandboxes.return_value = MagicMock(sandboxes=[sandbox], next_page_token="")
     names = await openshell_backend.list_managed_deployment_names()
     assert names == ["default/srv"]
 
@@ -502,6 +604,25 @@ async def test_create_injects_serve_path_into_sandbox_environment(
     expected = openshell_backend._executor_config.serve_path
     assert spec.environment["PATH"] == expected
     assert spec.template.environment["PATH"] == expected
+
+
+async def test_identity_labels_stay_off_the_workload_container(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+) -> None:
+    # The driver copies template labels onto the container/pod; managed-by there makes a
+    # docker/k8s executor's orphan sweep delete the sandbox as one of its own deployments.
+    mock_entities.get.return_value = _config()
+    mock_stub.GetSandbox.side_effect = _not_found()
+    mock_stub.CreateSandbox.return_value = MagicMock()
+
+    await openshell_backend.create_deployment(
+        workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
+    )
+
+    request = mock_stub.CreateSandbox.call_args.args[0]
+    assert request.labels[MANAGED_BY_KEY] == MANAGED_BY_LABEL
+    assert request.labels[DEPLOYMENT_NAME_LABEL] == "srv"
+    assert dict(request.spec.template.labels) == {}
 
 
 async def test_create_injects_serve_virtual_env_into_sandbox_environment(
@@ -612,6 +733,42 @@ async def test_read_status_launches_serve_when_ready(
     mock_stub.ExposeService.assert_not_called()
 
 
+async def test_every_rpc_is_workspace_scoped_and_addresses_the_sandbox_by_name(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+) -> None:
+    mock_entities.get.return_value = _config()
+    mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY, sandbox_id="uuid-not-a-name")
+    mock_stub.ExecSandbox.side_effect = [_exec_events(1), _exec_events(0)]
+
+    await openshell_backend.read_status(workspace="default", name="srv")
+
+    sandbox_name = _sandbox_name("default", "srv")
+    requests = [
+        mock_stub.GetSandbox.call_args.args[0],
+        mock_stub.ListServices.call_args.args[0],
+        *_exec_requests(mock_stub),
+    ]
+    assert all(req.workspace_scope.workspace == "default" for req in requests)
+    assert [req.sandbox for req in _exec_requests(mock_stub)] == [sandbox_name, sandbox_name]
+    assert _exec_requests(mock_stub)[0].execution_timeout.seconds == 120
+
+
+async def test_list_managed_deployment_names_follows_pagination(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock
+) -> None:
+    def _managed(name: str) -> MagicMock:
+        labels = {MANAGED_BY_KEY: MANAGED_BY_LABEL, DEPLOYMENT_WORKSPACE_LABEL: "default", DEPLOYMENT_NAME_LABEL: name}
+        return MagicMock(metadata=MagicMock(labels=labels))
+
+    mock_stub.ListSandboxes.side_effect = [
+        MagicMock(sandboxes=[_managed("a")], next_page_token="p2"),
+        MagicMock(sandboxes=[_managed("b")], next_page_token=""),
+    ]
+
+    assert await openshell_backend.list_managed_deployment_names() == ["default/a", "default/b"]
+    assert [call.args[0].page_token for call in mock_stub.ListSandboxes.call_args_list] == ["", "p2"]
+
+
 async def test_read_status_transient_rpc_error_is_unknown(
     openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
 ) -> None:
@@ -685,6 +842,7 @@ async def test_read_status_starting_when_readiness_probe_yields_no_exit(
         _exec_events(0),  # marker present
         _exec_events(0),  # liveness: alive
         _exec_events(0),  # readiness: reachable
+        _exec_events(0),  # ready marker written
     ]
     mock_stub.ExposeService.return_value = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
 
@@ -710,6 +868,7 @@ async def test_read_status_ready_when_default_tcp_probe_connects(
         _exec_events(0),  # marker present
         _exec_events(0),  # liveness: alive
         _exec_events(0),  # readiness: reachable
+        _exec_events(0),  # ready marker written
     ]
     mock_stub.ExposeService.return_value = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
 
@@ -746,9 +905,10 @@ async def test_read_status_fails_when_serve_process_died(
     # Ports exposed but the workload is gone.
     mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
     svc = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
-    svc.endpoint.service_name = "http"
-    mock_stub.ListServices.return_value = MagicMock(services=[svc])
+    svc.endpoint.name = "http"
+    mock_stub.ListServices.return_value = MagicMock(services=[svc], next_page_token="")
     mock_stub.ExecSandbox.side_effect = [
+        _exec_events(0),  # launch marker present
         _exec_events(9),  # liveness probe: pid is gone
         _exec_events(0, stdout="ValueError: unknown model\n"),  # log tail
     ]
@@ -786,9 +946,9 @@ async def test_read_status_stays_ready_when_liveness_is_undecidable(
     # deployment, so an undecided probe must not flap it.
     mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
     svc = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
-    svc.endpoint.service_name = "http"
-    mock_stub.ListServices.return_value = MagicMock(services=[svc])
-    mock_stub.ExecSandbox.return_value = _exec_events(10)
+    svc.endpoint.name = "http"
+    mock_stub.ListServices.return_value = MagicMock(services=[svc], next_page_token="")
+    mock_stub.ExecSandbox.side_effect = [_exec_events(0), _exec_events(10)]  # marker present; probe undecided
 
     update = await openshell_backend.read_status(workspace="default", name="srv")
 
@@ -1039,7 +1199,7 @@ def test_liveness_probe_is_pending_when_the_marker_is_unusable(tmp_path: Path, m
     assert _run_probe(tmp_path, pid=None, marker=marker) == _SERVE_PENDING_EXIT
 
 
-# --- AIRCORE-999: config_files are delivered into the sandbox, or fail loudly ---
+# --- config_files are delivered into the sandbox, or fail loudly ---
 
 
 async def test_delivers_config_file_before_launch_streaming_content_on_stdin(
@@ -1358,3 +1518,58 @@ async def test_config_delivery_with_marker_but_no_exit_event_succeeds(
     assert len(_delivery_requests(mock_stub)) == 1
     # Launch proceeded after the confirmed delivery.
     assert any("setsid" in p for r in _exec_requests(mock_stub) for p in r.command)
+
+
+def _run_launch_script(
+    tmp_path: Path, workdir: str, *, home: Path | None = None
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    marker, pidfile, log = tmp_path / "launched", tmp_path / "serve.pid", tmp_path / "serve.log"
+    script = (
+        _serve_launch_script(["pwd"], workdir)
+        .replace(_LAUNCH_MARKER, str(marker))
+        .replace(_SERVE_PIDFILE, str(pidfile))
+        .replace(_SERVE_LOG, str(log))
+    )
+    env = {**os.environ, "HOME": str(home or tmp_path)}
+    proc = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True, check=False, env=env)
+    return proc, marker, pidfile
+
+
+def test_launch_script_fails_without_a_marker_when_the_workdir_is_unusable(tmp_path: Path) -> None:
+    # A sandbox identity that cannot enter the workdir (the k8s driver runs as a
+    # different uid than the docker driver) must fail the launch with the shell's
+    # error, not report a launch whose workload never started.
+    proc, marker, pidfile = _run_launch_script(tmp_path, str(tmp_path / "missing"))
+
+    assert proc.returncode != 0
+    assert "missing" in proc.stderr
+    assert not marker.exists()
+    assert not pidfile.exists()
+
+
+def test_launch_script_starts_the_workload_in_a_usable_workdir(tmp_path: Path) -> None:
+    proc, marker, pidfile = _run_launch_script(tmp_path, str(tmp_path))
+
+    assert proc.returncode == 0
+    assert marker.exists()
+    for _ in range(50):
+        if pidfile.exists():
+            break
+        time.sleep(0.05)
+    assert pidfile.exists()
+
+
+def test_launch_script_defaults_to_the_sandbox_identitys_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+
+    proc, marker, pidfile = _run_launch_script(tmp_path, "~", home=home)
+
+    assert proc.returncode == 0
+    assert marker.exists()
+    log = tmp_path / "serve.log"
+    for _ in range(50):
+        if log.exists() and log.read_text().strip():
+            break
+        time.sleep(0.05)
+    assert log.read_text().strip() == str(home)

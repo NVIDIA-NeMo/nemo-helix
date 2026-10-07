@@ -18,7 +18,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.sdk import AgentsResource, AsyncAgentsResource, agents_sdk_resources
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 _Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -29,27 +29,25 @@ def _read_json(req: httpx.Request) -> dict[str, Any]:
     return body
 
 
-def _platform(
+def _client(
     handler: _Handler,
     *,
     workspace: str | None = "team-a",
     default_headers: Mapping[str, str] | None = None,
-) -> NeMoHelix:
-    return NeMoHelix(
+) -> NemoClient:
+    return NemoClient(
         base_url="https://test",
         workspace=workspace,
         default_headers=default_headers,
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
-        max_retries=0,
     )
 
 
-def _async_platform(handler: _Handler, *, workspace: str | None = "team-a") -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(
+def _async_client(handler: _Handler, *, workspace: str | None = "team-a") -> AsyncNemoClient:
+    return AsyncNemoClient(
         base_url="https://test",
         workspace=workspace,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-        max_retries=0,
     )
 
 
@@ -61,7 +59,7 @@ def test_create_resolves_default_model_placeholder_before_post() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "calc"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
     config = {"llms": {"llm": {"_type": "openai", "model_name": "${NEMO_DEFAULT_MODEL}"}}}
 
     with patch("nemo_agents_plugin.utils.get_default_model", return_value="team-a/nemotron"):
@@ -77,7 +75,7 @@ def test_create_rejects_unresolved_default_model_placeholder() -> None:
     def handler(_req: httpx.Request) -> httpx.Response:
         raise AssertionError("should not POST unresolved agent config")
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
     config = {"llms": {"llm": {"_type": "openai", "model_name": "$NEMO_DEFAULT_MODEL"}}}
 
     with (
@@ -94,7 +92,7 @@ def test_agents_resource_uses_default_workspace_when_platform_workspace_is_unset
         paths.append(req.url.path)
         return httpx.Response(201, json={"name": "calc"})
 
-    resource = AgentsResource(_platform(handler, workspace=None))
+    resource = AgentsResource(_client(handler, workspace=None))
 
     resource.create(name="calc", config={})
     resource.jobs.execute.create(spec={"agent": "calc", "input": "2+2"})
@@ -112,11 +110,21 @@ async def test_async_agents_resource_uses_default_workspace_when_platform_worksp
         paths.append(req.url.path)
         return httpx.Response(201, json={"name": "execute-a1b2"})
 
-    await AsyncAgentsResource(_async_platform(handler, workspace=None)).jobs.execute.create(
+    await AsyncAgentsResource(_async_client(handler, workspace=None)).jobs.execute.create(
         spec={"agent": "calc", "input": "2+2"}
     )
 
     assert paths == ["/apis/agents/v2/workspaces/default/jobs/execute"]
+
+
+def test_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
+    with pytest.raises(TypeError, match="AgentsResource requires .*NemoClient"):
+        AgentsResource(object())  # type: ignore[arg-type]
+
+
+def test_async_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
+    with pytest.raises(TypeError, match="AsyncAgentsResource requires .*AsyncNemoClient"):
+        AsyncAgentsResource(object())  # type: ignore[arg-type]
 
 
 def test_deployments_create_uses_client_workspace_by_default() -> None:
@@ -127,7 +135,7 @@ def test_deployments_create_uses_client_workspace_by_default() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "calc-dep"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
 
     result = client.deployments.create(agent="calc", deployment_mode="k8s", image="repo/calc:1.0")
 
@@ -143,7 +151,7 @@ def test_deployments_create_forwards_image_entrypoint_mode() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "calc-dep"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
 
     client.deployments.create(
         agent="calc",
@@ -164,10 +172,20 @@ def test_deployments_create_rejects_image_entrypoint_for_subprocess() -> None:
     def handler(_req: httpx.Request) -> httpx.Response:
         raise AssertionError("should not POST image entrypoint mode for subprocess")
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
 
     with pytest.raises(ValueError, match="use_image_entrypoint"):
         client.deployments.create(agent="calc", use_image_entrypoint=True)
+
+
+def test_deployments_create_rejects_image_entrypoint_for_openshell() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not POST image entrypoint mode for openshell")
+
+    client = AgentsResource(_client(handler))
+
+    with pytest.raises(ValueError, match="use_image_entrypoint"):
+        client.deployments.create(agent="calc", deployment_mode="openshell", use_image_entrypoint=True)
 
 
 def test_invoke_sends_session_id_as_header() -> None:
@@ -179,7 +197,7 @@ def test_invoke_sends_session_id_as_header() -> None:
         captured["session_id"] = req.headers.get(SESSION_ID_HEADER)
         return httpx.Response(200, json={"id": "completion-id"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
 
     result = client.invoke(input="Continue", deployment="calc-dep", session_id="session-entity-id")
 
@@ -199,7 +217,7 @@ def test_invoke_without_session_id_omits_header() -> None:
         captured["session_id"] = req.headers.get(SESSION_ID_HEADER)
         return httpx.Response(200, json={"id": "completion-id"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
 
     client.invoke(input="Hello", agent="calc")
 
@@ -210,7 +228,7 @@ def test_invoke_rejects_empty_session_id() -> None:
     def handler(_req: httpx.Request) -> httpx.Response:
         raise AssertionError("should not invoke with an empty session ID")
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
 
     with pytest.raises(ValueError, match="session_id must not be empty"):
         client.invoke(input="Hello", agent="calc", session_id="")
@@ -228,7 +246,7 @@ def test_deployments_create_forwards_environment() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "d1"})
 
-    client = AgentsResource(_platform(handler, workspace="default"))
+    client = AgentsResource(_client(handler, workspace="default"))
     client.deployments.create(agent="calc", environment="default/env1")
 
     assert captured["body"]["environment"] == "default/env1"
@@ -242,7 +260,7 @@ def test_environment_specs_create_posts_inline_fields() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "ben"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
     result = client.environment_specs.create(
         name="ben", spec={"env": {"LOG_LEVEL": "debug"}, "secrets": {"TOK": "default/tok"}}
     )
@@ -260,7 +278,7 @@ def test_environments_create_with_refs() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "env1"})
 
-    client = AgentsResource(_platform(handler, workspace="default"))
+    client = AgentsResource(_client(handler, workspace="default"))
     client.environments.create(name="env1", environment_spec="default/ben", compute_spec="default/big")
 
     assert captured["path"] == "/apis/agents/v2/workspaces/default/environments"
@@ -275,7 +293,7 @@ def test_environments_create_omits_unset_refs() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "env2"})
 
-    client = AgentsResource(_platform(handler, workspace="default"))
+    client = AgentsResource(_client(handler, workspace="default"))
     client.environments.create(name="env2", environment_spec="default/ben")
 
     assert "compute_spec" not in captured["body"]
@@ -291,7 +309,7 @@ def test_compute_specs_get_and_delete() -> None:
             return httpx.Response(204)
         return httpx.Response(200, json={"name": "big"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
     got = client.compute_specs.get("big")
     client.compute_specs.delete("big")
 
@@ -309,7 +327,7 @@ def test_execute_job_create_posts_spec_to_job_collection() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "execute-a1b2"})
 
-    resource = AgentsResource(_platform(handler))
+    resource = AgentsResource(_client(handler))
 
     result = resource.jobs.execute.create(spec={"agent": "calc", "input": "2+2"}, workspace="team-a")
 
@@ -329,7 +347,7 @@ def test_execute_job_create_omits_name_when_unset() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "execute-a1b2"})
 
-    AgentsResource(_platform(handler)).jobs.execute.create(spec={"agent": "calc", "input": "hi"})
+    AgentsResource(_client(handler)).jobs.execute.create(spec={"agent": "calc", "input": "hi"})
 
     assert isinstance(captured["body"], dict)
     assert "name" not in captured["body"]
@@ -342,7 +360,7 @@ def test_execute_job_create_includes_name_and_description_when_given() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "execute-a1b2"})
 
-    AgentsResource(_platform(handler)).jobs.execute.create(
+    AgentsResource(_client(handler)).jobs.execute.create(
         spec={"agent": "calc", "input": "hi"}, name="run-1", description="demo"
     )
 
@@ -373,7 +391,7 @@ def test_execute_job_get_and_list_results_paths() -> None:
             )
         return httpx.Response(200, json={"name": "execute-a1b2"})
 
-    jobs = AgentsResource(_platform(handler)).jobs.execute
+    jobs = AgentsResource(_client(handler)).jobs.execute
 
     jobs.get("execute-a1b2", workspace="team-a")
     jobs.list_results("execute-a1b2", workspace="team-a")
@@ -391,7 +409,7 @@ def test_execute_job_download_result_returns_bytes() -> None:
         paths.append(req.url.path)
         return httpx.Response(200, content=b'{"status": "succeeded"}\n')
 
-    jobs = AgentsResource(_platform(handler)).jobs.execute
+    jobs = AgentsResource(_client(handler)).jobs.execute
 
     content = jobs.download_result("fabric_run_result", job="execute-a1b2", workspace="team-a")
 
@@ -406,7 +424,7 @@ def test_execute_job_download_result_uses_client_workspace_when_unset() -> None:
         paths.append(req.url.path)
         return httpx.Response(200, content=b"tarball")
 
-    jobs = AgentsResource(_platform(handler, workspace=None)).jobs.execute
+    jobs = AgentsResource(_client(handler, workspace=None)).jobs.execute
 
     assert jobs.download_result("output_workdir", job="execute-a1b2") == b"tarball"
     assert paths == ["/apis/agents/v2/workspaces/default/jobs/execute/execute-a1b2/results/output_workdir/download"]
@@ -420,7 +438,7 @@ async def test_async_execute_job_download_result_returns_bytes() -> None:
         paths.append(req.url.path)
         return httpx.Response(200, content=b"tarball")
 
-    jobs = AsyncAgentsResource(_async_platform(handler)).jobs.execute
+    jobs = AsyncAgentsResource(_async_client(handler)).jobs.execute
 
     assert await jobs.download_result("output_workdir", job="execute-a1b2", workspace="team-a") == b"tarball"
     assert paths == ["/apis/agents/v2/workspaces/team-a/jobs/execute/execute-a1b2/results/output_workdir/download"]
@@ -434,7 +452,7 @@ def test_execute_job_get_accepts_workspace_positionally() -> None:
         paths.append(req.url.path)
         return httpx.Response(200, json={"name": "execute-a1b2"})
 
-    jobs = AgentsResource(_platform(handler)).jobs.execute
+    jobs = AgentsResource(_client(handler)).jobs.execute
 
     jobs.get("execute-a1b2", "team-a")
 
@@ -448,7 +466,7 @@ def test_execute_job_create_uses_client_workspace_by_default() -> None:
         paths.append(req.url.path)
         return httpx.Response(201, json={"name": "execute-a1b2"})
 
-    AgentsResource(_platform(handler, workspace="team-a")).jobs.execute.create(spec={"agent": "calc", "input": "2+2"})
+    AgentsResource(_client(handler, workspace="team-a")).jobs.execute.create(spec={"agent": "calc", "input": "2+2"})
 
     assert paths[0] == "/apis/agents/v2/workspaces/team-a/jobs/execute"
 
@@ -475,7 +493,7 @@ def test_execute_job_get_and_list_results_use_client_workspace_by_default() -> N
             )
         return httpx.Response(200, json={"name": "execute-a1b2"})
 
-    jobs = AgentsResource(_platform(handler, workspace="team-a")).jobs.execute
+    jobs = AgentsResource(_client(handler, workspace="team-a")).jobs.execute
 
     jobs.get("execute-a1b2")
     jobs.list_results("execute-a1b2")
@@ -493,9 +511,9 @@ async def test_async_execute_job_create_uses_client_workspace_by_default() -> No
         paths.append(req.url.path)
         return httpx.Response(201, json={"name": "execute-a1b2"})
 
-    platform = _async_platform(handler, workspace="team-a")
+    async_client = _async_client(handler, workspace="team-a")
 
-    await AsyncAgentsResource(platform).jobs.execute.create(spec={"agent": "calc", "input": "2+2"})
+    await AsyncAgentsResource(async_client).jobs.execute.create(spec={"agent": "calc", "input": "2+2"})
 
     assert paths[0] == "/apis/agents/v2/workspaces/team-a/jobs/execute"
 
@@ -508,9 +526,9 @@ async def test_async_execute_job_create_mirrors_sync_shape() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "execute-a1b2"})
 
-    platform = _async_platform(handler, workspace=None)
+    async_client = _async_client(handler, workspace=None)
 
-    result = await AsyncAgentsResource(platform).jobs.execute.create(
+    result = await AsyncAgentsResource(async_client).jobs.execute.create(
         spec={"agent": "calc", "input": "2+2"}, workspace="team-a"
     )
 
@@ -532,7 +550,7 @@ def test_environment_specs_create_accepts_typed_model() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "ben"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
     spec = EnvironmentSpecInline(env={"LOG_LEVEL": "debug"}, secrets={"TOK": "default/tok"})
     client.environment_specs.create(name="ben", spec=spec)
 
@@ -549,7 +567,7 @@ def test_environment_specs_create_accepts_dict_spec() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "ben"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
     client.environment_specs.create(name="ben", spec={"provider": "local"})
 
     assert captured["body"] == {"name": "ben", "provider": "local"}
@@ -568,7 +586,7 @@ def test_environment_specs_create_name_arg_is_authoritative() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "wanted"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
     client.environment_specs.create(name="wanted", spec={"name": "sneaky", "provider": "local"})
 
     assert captured["body"]["name"] == "wanted"
@@ -582,7 +600,7 @@ def test_compute_specs_create_accepts_typed_model() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "big"})
 
-    client = AgentsResource(_platform(handler))
+    client = AgentsResource(_client(handler))
     spec = ComputeSpecInline(resources=ComputeResources(limits={"cpu": "2"}))
     client.compute_specs.create(name="big", spec=spec)
 
@@ -598,7 +616,7 @@ def test_environments_create_accepts_typed_model() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "env1"})
 
-    client = AgentsResource(_platform(handler, workspace="default"))
+    client = AgentsResource(_client(handler, workspace="default"))
     spec = AgentEnvironmentInline(environment_spec="default/ben")
     client.environments.create(name="env1", spec=spec, compute_spec="default/big")
 
@@ -609,7 +627,7 @@ def test_environments_create_accepts_typed_model() -> None:
 
 
 def test_default_headers_are_sent_on_every_request() -> None:
-    """``platform.default_headers`` (how the CLI threads its token) reach the wire."""
+    """``client.default_headers`` (how the CLI threads its token) reach the wire."""
     auth_headers: list[str | None] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -618,7 +636,7 @@ def test_default_headers_are_sent_on_every_request() -> None:
             return httpx.Response(204)
         return httpx.Response(200, json={"name": "big"})
 
-    client = AgentsResource(_platform(handler, default_headers={"Authorization": "Bearer tok-123"}))
+    client = AgentsResource(_client(handler, default_headers={"Authorization": "Bearer tok-123"}))
     client.compute_specs.create(name="big", spec=ComputeSpecInline())
     client.compute_specs.get("big")
     client.compute_specs.delete("big")

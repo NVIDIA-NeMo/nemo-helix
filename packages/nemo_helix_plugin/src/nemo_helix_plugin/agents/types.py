@@ -23,7 +23,7 @@ JsonObject: TypeAlias = JsonMap
 StringMap: TypeAlias = dict[str, str]
 
 DeploymentStatus: TypeAlias = Literal["pending", "starting", "running", "failed", "deleting"]
-DeploymentMode: TypeAlias = Literal["subprocess", "docker", "k8s"]
+DeploymentMode: TypeAlias = Literal["subprocess", "docker", "k8s", "openshell"]
 EndpointProtocol: TypeAlias = Literal["http", "https", "grpc", "tcp"]
 SessionLifecycleStatus: TypeAlias = Literal["active", "expired", "lost", "closed"]
 AgentJobCollection: TypeAlias = Literal[
@@ -270,7 +270,7 @@ class AgentDeployment(EntityMetadata):
     deployment_mode: DeploymentMode = Field(default="subprocess", description="Runtime backend.")
     endpoint: str = Field(default="", description="Subprocess loopback endpoint.")
     endpoints: list[Endpoint] = Field(default_factory=list, description="Routable endpoints for container modes.")
-    image: str = Field(default="", description="Container image for docker/k8s modes.")
+    image: str = Field(default="", description="Container image for docker/k8s/openshell modes.")
     use_image_entrypoint: bool = Field(
         default=False,
         description="Container modes only: preserve the image ENTRYPOINT/CMD.",
@@ -307,6 +307,62 @@ class CreateAgentRequest(BaseModel):
     config_format: str = Field(default=NAT_WORKFLOW_CONFIG_FORMAT, description="Config format identifier.")
 
 
+class CreateSampleAgentRequest(BaseModel):
+    """Model to use when provisioning the packaged email security sample."""
+
+    model: str = Field(description="Workspace-qualified model entity, for example default/my-model.")
+
+
+class SampleAgentResponse(BaseModel):
+    """Provisioned sample agent and its workspace and deployment state."""
+
+    status: Literal["created", "resumed", "already_exists"]
+    workspace: str
+    studio_url: str = Field(description="Studio path relative to the platform origin.")
+    agent: str
+    deployment: str
+    deployment_status: DeploymentStatus
+
+
+SampleAgentComponent: TypeAlias = Literal["workspace", "agent", "deployment", "dataset", "evaluation_config"]
+SampleAgentComponentStatus: TypeAlias = Literal["created", "existing", "submitted", "uploaded", "updated"]
+
+
+class SampleAgentStreamEvent(BaseModel):
+    """One NDJSON frame from sample-agent provisioning."""
+
+    kind: Literal["progress", "done", "error"]
+    component: SampleAgentComponent | None = None
+    status: SampleAgentComponentStatus | None = None
+    workspace: str | None = None
+    result: SampleAgentResponse | None = None
+    message: str | None = None
+    status_code: int | None = None
+    failed_step: str | None = None
+    retryable: bool | None = None
+
+
+class SampleAgentRetryDetail(BaseModel):
+    """Workspace retained when sample provisioning fails and can be retried."""
+
+    workspace: str
+    studio_url: str = Field(description="Studio path relative to the platform origin.")
+    failed_step: Literal["agent deployment", "sample files"]
+    retryable: Literal[True]
+
+
+class SampleAgentConflictResponse(BaseModel):
+    """Error response when the existing deployment locks a different model."""
+
+    detail: str
+
+
+class SampleAgentRetryResponse(BaseModel):
+    """Error response for a retryable sample provisioning failure."""
+
+    detail: SampleAgentRetryDetail
+
+
 class CreateDeploymentRequest(BaseModel):
     """Request body for ``POST /v2/workspaces/{workspace}/deployments``."""
 
@@ -317,11 +373,11 @@ class CreateDeploymentRequest(BaseModel):
     )
     deployment_mode: DeploymentMode = Field(
         default="subprocess",
-        description="Runtime backend: subprocess (default), docker, or k8s.",
+        description="Runtime backend: subprocess (default), docker, k8s, or openshell.",
     )
     image: str = Field(
         default="",
-        description="Container image for docker/k8s modes. Ignored for subprocess.",
+        description="Container image for docker/k8s/openshell modes. Ignored for subprocess.",
     )
     use_image_entrypoint: bool = Field(
         default=False,

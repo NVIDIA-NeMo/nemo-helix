@@ -2,22 +2,35 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from collections.abc import Iterator
+from typing import cast
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from nhx.common.controller import Loop
 from nhx.common.controller.controller_manager import ControllerManager
 from nhx.common.service import RouterConfig, Service
 from nhx.platform_runner.health import create_platform_health_router
 
 
+class _StatusLoop:
+    def __init__(self, *, healthy: bool) -> None:
+        self.is_healthy = healthy
+        self.unhealthy_reason = None
+
+
 class ProbeService(Service):
-    def __init__(self, name: str, *, ready: bool = True) -> None:
+    def __init__(self, name: str, *, ready: bool = True, readiness_message: str = "") -> None:
         super().__init__(name=name, module_name=f"nhx.{name}")
         self.ready = ready
+        self._readiness_message = readiness_message
 
     def get_routers(self) -> list[RouterConfig]:
         return []
+
+    @property
+    def readiness_message(self) -> str:
+        return self._readiness_message
 
     async def is_ready(self) -> bool:
         return self.ready
@@ -87,6 +100,16 @@ def test_status_remains_healthy_when_new_service_is_registered_after_it_is_ready
     assert client.get("/health/ready").status_code == 200
 
 
+def test_status_includes_service_readiness_message() -> None:
+    message = "Docker daemon is unavailable. Start Docker Desktop on macOS/Windows or the Docker service on Linux."
+    client = _client_for([ProbeService("intake", ready=False, readiness_message=message)])
+
+    status_response = client.get("/status")
+
+    assert status_response.status_code == 200
+    assert status_response.json()["services"]["not_ready"] == [{"name": "intake", "message": message}]
+
+
 def test_registered_not_ready_service_degrades_status_and_blocks_readiness() -> None:
     entities = ProbeService("entities", ready=True)
     models = ProbeService("models", ready=False)
@@ -119,3 +142,17 @@ def test_failed_controller_makes_top_level_status_unhealthy() -> None:
         "status": {"models": False},
     }
     assert client.get("/health/ready").status_code == 503
+
+
+def test_status_reports_runner_selector_instead_of_loop_names() -> None:
+    manager = ControllerManager.get_instance()
+    with manager.controller_registration_context("jobs"):
+        manager.register("job_scheduler", cast(Loop, _StatusLoop(healthy=True)))
+        manager.register("job_reconciler", cast(Loop, _StatusLoop(healthy=True)))
+    client = _client_for([ProbeService("entities", ready=True)])
+
+    payload = client.get("/status").json()
+
+    assert payload["status"] == "healthy"
+    assert payload["controllers"] == {"healthy": True, "status": {"jobs": True}}
+    assert client.get("/health/ready").status_code == 200

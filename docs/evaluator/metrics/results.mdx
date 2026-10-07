@@ -36,17 +36,12 @@ result = LocalEvaluator().run_sync(
 ## Get Results from a Submitted Job
 
 ```python
-import os
-
 from nemo_evaluator.sdk import Evaluator
 from nemo_evaluator_sdk import RunConfig, ExactMatchMetric
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-sdk = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-evaluator: Evaluator = sdk.evaluator  # this object is an Evaluator resource
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
 
 metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
 

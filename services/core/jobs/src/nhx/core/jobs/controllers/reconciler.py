@@ -6,8 +6,7 @@ import threading
 import time
 from typing import cast
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import (
@@ -33,15 +32,15 @@ class JobReconciler(HeartbeatMixin, Controller):
     def __init__(
         self,
         backend_registry: BackendRegistry,
-        nhx_sdk: NeMoHelix,
+        nemo_client: NemoClient,
         stop_signal: threading.Event | None = None,
     ) -> None:
         self._backend_registry = backend_registry
-        self._nhx_sdk = nhx_sdk
-        # Typed Jobs client sharing the SDK's transport; every call passes
+        self._nemo_client = nemo_client
+        # Typed Jobs client sharing the platform client's transport; every call passes
         # ``workspace=`` explicitly (incl. cross-workspace "-"), so the client's
         # default workspace is never relied upon.
-        self._jobs = client_from_platform(nhx_sdk, JobsClient)
+        self._jobs = JobsClient.from_client(nemo_client)
         self._stop_signal = stop_signal
         self._is_healthy = False
         self._logger = logger
@@ -121,7 +120,7 @@ class JobReconciler(HeartbeatMixin, Controller):
                         logger.info(f"Updating job step status from '{step.status}' to '{job_update.status}'")
                         if job_update.status == HelixJobStatus.ERROR and step.status != HelixJobStatus.ERROR:
                             log_job_diagnostics_if_debug(
-                                self._nhx_sdk,
+                                self._nemo_client,
                                 step,
                                 logger=self._logger,
                                 context="step transitioned to error during reconciliation",
@@ -156,7 +155,7 @@ class JobReconciler(HeartbeatMixin, Controller):
                 except Exception:
                     logger.exception("Unexpected error when reconciling job step")
                     log_job_diagnostics_if_debug(
-                        self._nhx_sdk,
+                        self._nemo_client,
                         step,
                         logger=self._logger,
                         context="unexpected reconciliation error",

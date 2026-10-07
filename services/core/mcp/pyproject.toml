@@ -7,7 +7,6 @@ description = "Model Context Protocol server for NeMo Helix"
 dependencies = [
     "nhx-common",
     "nhx-entities",
-    "nemo-helix-sdk",
     "fastmcp>=3.2.0",  # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High): fix in >=3.2.0
 ]
 requires-python = ">=3.11,<3.15"
@@ -33,7 +32,6 @@ nemo-mcp = "nhx.core.mcp.main:main"
 [tool.uv.sources]
 nhx-common = { workspace = true }
 nhx-entities = { workspace = true }
-nemo-helix-sdk = { workspace = true }
 
 
 [build-system]

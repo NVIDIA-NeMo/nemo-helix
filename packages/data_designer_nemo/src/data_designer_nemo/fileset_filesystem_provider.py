@@ -13,7 +13,7 @@ from data_designer.engine.resources.seed_reader import (
 from data_designer_nemo.filesystem import make_filesystem
 from filesets import FilesetFileSystem, FilesetPathError, build_fileset_ref, parse_fileset_ref
 from fsspec.implementations.dirfs import DirFileSystem
-from nemo_helix_plugin.client.adapter import SyncHelixClient
+from nemo_helix_plugin.client.client import NemoClient
 
 
 class _FilesetDirFileSystem(DirFileSystem):
@@ -66,12 +66,12 @@ class FilesetFileSystemProvider:
 
     def __init__(
         self,
-        sdk: SyncHelixClient,
+        client: NemoClient,
         *,
         workspace: str,
         validated_roots: set[str] | None = None,
     ) -> None:
-        self._sdk = sdk
+        self._client = client
         self._filesystem: FilesetFileSystem | None = None
         self._workspace = workspace
         self._validated_roots = set(validated_roots or ())
@@ -105,7 +105,7 @@ class FilesetFileSystemProvider:
         if self._filesystem is not None:
             return self._filesystem
 
-        filesystem = make_filesystem(self._sdk)
+        filesystem = make_filesystem(self._client)
         self._filesystem = filesystem
         return filesystem
 

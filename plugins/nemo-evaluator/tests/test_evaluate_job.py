@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import nemo_evaluator.cli as evaluator_cli
 import pytest
-from models import ResolvedModelReference
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.evaluate import (
@@ -45,6 +44,7 @@ from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.f1 import F1Metric
 from nemo_evaluator_sdk.metrics.llm_judge import LLMJudgeMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nemo_evaluator_sdk.resolver_protocols import MissingSecretError
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values import (
     Agent,
@@ -58,6 +58,7 @@ from nemo_evaluator_sdk.values import (
     SecretRef,
 )
 from nemo_evaluator_sdk.values.models import ModelRef
+from nemo_evaluator_sdk.values.results import RowScore
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.commands import add_job_commands
@@ -67,6 +68,7 @@ from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.refs import ResolvedModelReference
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -360,6 +362,37 @@ def test_evaluate_job_survives_result_persistence_failure(tmp_path: Path, mocker
     assert result["status"] == "completed"
     aggregate_scores = _load_artifact_payload(result)["aggregate_scores"]["scores"]
     assert aggregate_scores[0]["name"] == "exact-match.exact-match"
+
+
+def test_evaluate_job_fails_when_no_row_scored(tmp_path: Path, mocker: MockerFixture) -> None:
+    """The dataset-driven path: ``ignore_request_failure`` leaves every row a NaN
+    placeholder, and the job must report that instead of completing on an empty aggregate."""
+    nan_row = RowScore(
+        item={"expected": "blue"},
+        sample={"output_text": None, "response": {}, "inference_error": "SSL: WRONG_VERSION_NUMBER"},
+        metrics={"exact-match": [MetricOutput(name="exact-match", value=float("nan"))]},
+        requests=[],
+        metric_errors={"exact-match": "SSL: WRONG_VERSION_NUMBER"},
+    )
+    evaluator = mocker.Mock()
+    evaluator.run_sync.return_value = EvaluationResult(
+        row_scores=[nan_row, nan_row], aggregate_scores=AggregatedMetricResult(scores=[])
+    )
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
+    persist = mocker.patch("nemo_evaluator.jobs.evaluate.persist_evaluate_result")
+    publish = mocker.patch.object(EvaluateJob, "_publish_result")
+    report = mocker.patch("nemo_evaluator.jobs.evaluate.report_run_outcome")
+    ctx = _make_job_context(tmp_path)
+
+    result = _run_evaluate_job(_exact_match_spec(), tmp_path, ctx=ctx)
+
+    assert result["status"] == "failed"
+    assert result["reason"].startswith("No usable scores across 2 rows (2 reported errors)")
+    assert result["evaluation"]["failed"] is True
+    assert (ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME).exists()
+    persist.assert_called_once()
+    publish.assert_called_once()
+    assert report.call_args.args[0].failed
 
 
 def test_evaluate_job_applies_metric_job_params_once(tmp_path: Path) -> None:
@@ -1107,9 +1140,10 @@ def _assert_job_secret_resolver(backend: LocalBackend) -> None:
         mp.delenv("DEFAULT_OPENAI_API_KEY", raising=False)
         mp.setenv("OPENAI_API_KEY", "target-key")
         mp.setenv("NVIDIA_BUILD_API_KEY", "metric-key")
-        assert resolver.find_env_name(SecretRef("default/openai-api-key")) is None
+        with pytest.raises(MissingSecretError):
+            resolver.env_var_for(SecretRef("default/openai-api-key"))
         # A bare ref's own names are still searched.
-        assert resolver.find_env_name(SecretRef("nvidia-build-api-key")) == "NVIDIA_BUILD_API_KEY"
+        assert resolver.env_var_for(SecretRef("nvidia-build-api-key")) == "NVIDIA_BUILD_API_KEY"
 
 
 class TestEvaluateJobRun:
@@ -1169,6 +1203,7 @@ class TestEvaluateJobRun:
         assert run_result == {
             "status": "completed",
             "artifact": run_result["artifact"],
+            "evaluation": run_result["evaluation"],
         }
         assert "result" not in run_result
         _assert_saved_result_artifact(run_result, ctx, result_payload)
@@ -1202,6 +1237,7 @@ class TestEvaluateJobRun:
         assert run_result == {
             "status": "completed",
             "artifact": run_result["artifact"],
+            "evaluation": run_result["evaluation"],
         }
         assert "result" not in run_result
         _assert_saved_result_artifact(run_result, ctx, result_payload)

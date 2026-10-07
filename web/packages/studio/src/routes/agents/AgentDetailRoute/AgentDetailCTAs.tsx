@@ -28,6 +28,7 @@ export interface AgentDetailCTAsProps {
   tab: AgentDetailTab;
   agentName?: string;
   canDeploy: boolean;
+  isAgentPending: boolean;
   canRunEvaluation: boolean;
   isDeploying: boolean;
   canOptimize: boolean;
@@ -51,6 +52,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   tab,
   agentName,
   canDeploy,
+  isAgentPending,
   canRunEvaluation,
   isDeploying,
   canOptimize,
@@ -69,18 +71,18 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
     },
     {
       id: 'deploy',
-      label: isDeploying ? 'Deploying...' : 'Deploy',
-      disabled: !agentName || !canDeploy || isDeploying,
+      label: !canDeploy && !isAgentPending ? 'Upload' : isDeploying ? 'Deploying...' : 'Deploy',
+      disabled: !agentName || isDeploying || isAgentPending,
       onClick: onDeploy,
       ref: deployButtonRef,
     },
   ];
 
-  if (tab === 'optimizations' && canOptimize) {
+  if (tab === 'optimizations') {
     actions.push({
       id: 'optimize',
       label: 'Optimize',
-      disabled: !agentName || !onOptimize,
+      disabled: !agentName || !onOptimize || !canOptimize,
       onClick: onOptimize,
     });
   }

@@ -4,7 +4,6 @@
 import datetime
 import tempfile
 from collections.abc import Iterator
-from contextlib import ExitStack
 from pathlib import Path
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,6 +21,7 @@ from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable as FactoryEnv
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec as FactoryHelixJobSpec
 from nemo_helix_plugin.jobs.api_factory import HelixJobStep as FactoryHelixJobStep
 from nemo_helix_plugin.jobs.api_factory import job_route_factory
+from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.common.config import Configuration, HelixConfig, ImagePullSecret
 from nhx.common.entities.client import EntityClient
 from nhx.common.jobs.constants import (
@@ -282,29 +282,12 @@ def mock_files_client():
     return mock_files
 
 
-# Controller modules that import ``client_from_platform`` to build a typed Jobs
-# client. The fixture patches it in each so the shared ``mock_jobs`` client is
-# returned for ``JobsClient`` requests.
-#
-# The backends (docker/subprocess/kubernetes_job) build their client once in
-# ``JobBackend.__init__`` (base module) and reuse it via ``self._jobs``, so they
-# no longer import ``client_from_platform`` directly — patching ``base`` covers
-# them. ``common`` has a standalone helper that still builds its own client.
-_JOBS_CLIENT_CONTROLLER_MODULES = (
-    "nhx.core.jobs.controllers.scheduler",
-    "nhx.core.jobs.controllers.reconciler",
-    "nhx.core.jobs.controllers.diagnostics",
-    "nhx.core.jobs.controllers.backends.base",
-    "nhx.core.jobs.controllers.backends.kubernetes.common",
-)
-
-
 @fixture
 def mock_jobs_client():
     """Mock of the typed ``JobsClient`` used by the controllers.
 
     Methods return ``.data()``/``.items()``-aware responses so call sites like
-    ``client_from_platform(sdk, JobsClient).get_job_step(...).data()`` work. Tests
+    ``JobsClient.from_client(client).get_job_step(...).data()`` work. Tests
     set ``.return_value`` on the individual methods and assert against them.
     """
     return MagicMock()
@@ -317,19 +300,17 @@ def mock_secrets_client():
 
 
 @fixture
-def mock_nhx_client(mock_files_client, mock_jobs_client):
-    """Create a flexible mock of NeMoHelix for the controllers.
+def mock_nemo_client(mock_jobs_client):
+    """Create a ``NemoClient`` whose transport rejects every request.
 
-    ``client_from_platform`` is patched in every controller module that builds a
-    typed Jobs client. The patches dispatch on the requested client type:
-    ``JobsClient`` requests resolve to ``mock_jobs_client``; anything else falls
-    back to the files client.
+    ``JobsClient.from_client`` is patched to return ``mock_jobs_client`` so the
+    controllers talk to the mock instead of the (unreachable) platform.
     """
 
     def _unexpected_request(request: httpx.Request) -> httpx.Response:
         raise AssertionError(f"Unexpected platform request in jobs unit test: {request.method} {request.url}")
 
-    mock_client = NemoClient(
+    nemo_client = NemoClient(
         base_url="http://localhost:8080",
         workspace="default",
         http_client=httpx.Client(
@@ -337,22 +318,8 @@ def mock_nhx_client(mock_files_client, mock_jobs_client):
             base_url="http://localhost:8080",
         ),
     )
-    mock_client.beta = MagicMock()
-
-    from nemo_helix_plugin.jobs.client import JobsClient
-
-    def _dispatch(_sdk, client_type):
-        if client_type is JobsClient:
-            return mock_jobs_client
-        return mock_files_client
-
-    patchers = [
-        patch(f"{module}.client_from_platform", side_effect=_dispatch) for module in _JOBS_CLIENT_CONTROLLER_MODULES
-    ]
-    with ExitStack() as stack:
-        for patcher in patchers:
-            stack.enter_context(patcher)
-        yield mock_client
+    with patch.object(JobsClient, "from_client", return_value=mock_jobs_client):
+        yield nemo_client
 
 
 @fixture
@@ -543,10 +510,10 @@ jobs:
 
 
 @pytest.fixture
-def backend_registry(mock_nhx_client, job_config_with_many_profiles) -> BackendRegistry:
+def backend_registry(mock_nemo_client, job_config_with_many_profiles) -> BackendRegistry:
     """Create a backend registry with test configuration."""
     return BackendRegistry.from_config(
-        nhx_sdk=mock_nhx_client,
+        nemo_client=mock_nemo_client,
         profiles=job_config_with_many_profiles.executors,
         # Mock the backends. Register the real SubprocessJobBackend to satisfy
         # the subprocess/default executor that ships in
@@ -574,7 +541,7 @@ def hello_world_job_config(
     output_spec: HelloWorldJobConfig,
     entity_client: EntityClient,
     job_name: str | None,
-    sdk,
+    async_client: AsyncNemoClient,
 ) -> FactoryHelixJobSpec:
     return FactoryHelixJobSpec(
         steps=[
@@ -624,7 +591,7 @@ async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles
             app.dependency_overrides[get_entity_client] = override_get_entity_client
             app.dependency_overrides[get_nemo_client] = lambda: test_nemo_client
 
-            # Mount under /apis/jobs so SDK requests (e.g. /apis/jobs/v2/workspaces/default/jobs) hit the app
+            # Mount under /apis/jobs so client requests (e.g. /apis/jobs/v2/workspaces/default/jobs) hit the app
             api_prefix = "/apis/jobs"
             app.include_router(rerun_router, prefix=api_prefix)
             app.include_router(router, prefix=api_prefix)

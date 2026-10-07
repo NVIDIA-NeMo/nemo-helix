@@ -475,7 +475,7 @@ def check_relay_artifacts_dir(agent_config: dict[str, Any]) -> str | None:
 # --------------------------------------------------------------------------- #
 def _agents_resource(client: NemoClient) -> AgentsResource:
     """Build the agents plugin resource explicitly; a typed client has no ``.agents`` plugin attribute."""
-    return AgentsResource(client)  # ty: ignore[invalid-argument-type]
+    return AgentsResource(client)
 
 
 def _fetch_agent_config(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:

@@ -17,8 +17,7 @@ from data_designer.logging import RandomEmoji
 from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError
 from nemo_data_designer_plugin.sdk.job_results import DataDesignerJobResults
 from nemo_data_designer_plugin.sdk.logging import with_logging
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError
 from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
 from nemo_helix_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobLogsQueryParams
@@ -115,7 +114,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
-        platform: NeMoHelix,
+        platform: NemoClient,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ) -> None: ...
@@ -125,14 +124,14 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         *,
         job_name: str,
         client: DataDesignerClient | None = None,
-        platform: NeMoHelix | None = None,
+        platform: NemoClient | None = None,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ):
         if client is None:
             if platform is None:
                 raise TypeError("DataDesignerJobResource requires either client= or platform=")
-            client = client_from_platform(platform, DataDesignerClient)
+            client = DataDesignerClient.from_client(platform)
         elif platform is not None:
             raise TypeError("Pass only one of client= or platform=")
 
@@ -377,7 +376,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
-        platform: AsyncNeMoHelix,
+        platform: AsyncNemoClient,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ) -> None: ...
@@ -387,14 +386,14 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         *,
         job_name: str,
         client: AsyncDataDesignerClient | None = None,
-        platform: AsyncNeMoHelix | None = None,
+        platform: AsyncNemoClient | None = None,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ):
         if client is None:
             if platform is None:
                 raise TypeError("AsyncDataDesignerJobResource requires either client= or platform=")
-            client = client_from_platform(platform, AsyncDataDesignerClient)
+            client = AsyncDataDesignerClient.from_client(platform)
         elif platform is not None:
             raise TypeError("Pass only one of client= or platform=")
 

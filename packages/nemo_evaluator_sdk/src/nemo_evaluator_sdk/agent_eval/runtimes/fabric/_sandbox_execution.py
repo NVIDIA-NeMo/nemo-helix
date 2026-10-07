@@ -89,7 +89,6 @@ class SandboxExecution:
         provider: SandboxProvider,
         image: str,
         env: Mapping[str, str],
-        model: str | None,
         timeout_s: int,
         capture_trajectory: bool,
         trajectory_extra: Mapping[str, Any] | None,
@@ -100,7 +99,6 @@ class SandboxExecution:
         self._provider = provider
         self._image = image
         self._env = dict(env)
-        self._model = model
         self._timeout_s = timeout_s
         self._capture_trajectory = capture_trajectory
         self._trajectory_extra = dict(trajectory_extra) if trajectory_extra else None
@@ -221,7 +219,7 @@ class SandboxExecution:
     ) -> dict[str, Any]:
         """The supplied agent config with the runtime's in-container settings merged on last.
 
-        The workspace, artifact roots, default model, trajectory telemetry, and any natively-injected
+        The workspace, artifact roots, trajectory telemetry, and any natively-injected
         skill paths are evaluator-owned, so they are applied over whatever the caller's config declared.
         Stays plain dicts rather than round-tripping through the host's ``FabricConfig`` — the sandbox
         may run a different Fabric build, so the config is only required to survive JSON transport, not
@@ -244,12 +242,6 @@ class SandboxExecution:
             "workspace": _WORKSPACE_DIR,
             "artifacts": _ARTIFACTS_DIR,
         }
-        if self._model:
-            provider = self._model.split("/", maxsplit=1)[0] if "/" in self._model else "openai"
-            config["models"] = {
-                **_section(config, "models"),
-                "default": {"provider": provider, "model": self._model},
-            }
         if self._capture_trajectory:
             config.update(
                 _common.relay_telemetry_fragment(

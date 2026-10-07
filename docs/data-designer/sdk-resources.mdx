@@ -16,17 +16,14 @@ This page explains the SDK objects used for Data Designer API execution.
 The `DataDesignerResource` is the initial SDK object for working with Data Designer through the SDK.
 It provides Data Designer API preview and create operations for Data Designer configurations.
 
-A `DataDesignerResource` is accessed directly from a `NeMoHelix` instance:
+Build a `DataDesignerResource` from a `NemoClient` instance:
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-data_designer = client.data_designer  # this object is a DataDesignerResource
+client = NemoClient.from_config()
+data_designer = DataDesignerResource(client)
 ```
 
 The `DataDesignerResource` is primarily used to make Data Designer API preview requests (`preview`) and create jobs (`create`),
@@ -59,7 +56,7 @@ config_builder = dd.DataDesignerConfigBuilder(
 )
 # Add columns, constraints, seed datasets, processors, and profilers here.
 
-report = client.data_designer.validate(config_builder)
+report = data_designer.validate(config_builder)
 
 if not report.ok:
     for error in report.errors:
@@ -69,7 +66,7 @@ if not report.ok:
 The `workspace` keyword argument selects the workspace used to resolve provider references and seed sources. It falls back to the platform client's workspace, then to `"default"`.
 
 ```python
-report = client.data_designer.validate(config_builder, workspace="my-workspace")
+report = data_designer.validate(config_builder, workspace="my-workspace")
 ```
 
 ### Checking models
@@ -79,7 +76,7 @@ report = client.data_designer.validate(config_builder, workspace="my-workspace")
 This is the companion to `validate()`. A provider can resolve while still refusing to serve the model named alongside it, so a green `ValidationReport` is not a promise that a preview will run — only a live request can tell you that.
 
 ```python
-report = client.data_designer.check_models(config_builder)
+report = data_designer.check_models(config_builder)
 
 if not report.ok:
     for error in report.errors:

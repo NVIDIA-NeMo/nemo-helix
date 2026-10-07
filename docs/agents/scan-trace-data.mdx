@@ -86,16 +86,12 @@ The skill drives this workflow directly. To inspect what was written, list
 and download files from the security fileset:
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
-for f in client.files.list(fileset="nemo-agent-security"):
-    print(f.remote_path)
+for f in client.files.list_files(name="nemo-agent-security").data().data:
+    print(f.path)
 ```
 
 </Tab>

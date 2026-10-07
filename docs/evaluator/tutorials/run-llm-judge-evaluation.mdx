@@ -61,7 +61,7 @@ pip install pandas scipy matplotlib
 
 Before you begin, here is a quick overview of the resources you will use:
 
-- **Evaluator resource**: The plugin SDK resource mounted at `client.evaluator`. Use it to run metrics locally or submit durable platform jobs.
+- **Evaluator resource**: The plugin SDK resource built with `Evaluator.from_client(client)`. Use it to run metrics locally or submit durable platform jobs.
 - **Metric**: An inline Python object that defines how to score model outputs. In this tutorial, we create LLM judge metrics that prompt a model to rate responses.
 - **Fileset**: A dataset registered with NeMo Helix. The evaluator plugin SDK accepts fileset references directly, so this tutorial passes the registered HelpSteer2 split to evaluations as a `FilesetRef`.
 - **Workspace**: A workspace that isolates your resources. Secrets, filesets, and jobs belong to a workspace.
@@ -70,35 +70,30 @@ Before you begin, here is a quick overview of the resources you will use:
 
 ---
 
-## 1. Initialize the SDK and Create a Workspace
+## 1. Create a Workspace and Initialize the SDK
 
-Create a dedicated workspace for this tutorial to keep your resources isolated from other projects:
+Create a dedicated workspace for this tutorial to keep your resources isolated from other projects, and make it the default workspace for your current CLI context:
+
+```bash
+nemo workspaces create llm-as-judge-tutorial
+nemo config set --workspace llm-as-judge-tutorial
+```
+
+If the workspace already exists from a previous run, the create command reports a conflict; continue with the second command. To return to your original workspace after the tutorial, run `nemo config set --workspace default`.
+
+Create a client from your current CLI context. It connects to the deployment and workspace saved in the context, using the credentials from `nemo auth login`. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ```python
-import os
-import uuid
-
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import ConflictError, NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-# Workspace for this tutorial.
-WORKSPACE = "llm-as-judge-tutorial"
-
-# Create an SDK instance to interact with the NeMo Helix.
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
-
-# Create the workspace
-try:
-    client.workspaces.create(name=WORKSPACE)
-    print(f"Workspace '{WORKSPACE}' created")
-except ConflictError:
-    print(f"Workspace '{WORKSPACE}' already exists, continuing...")
+# Create a NemoClient from the current CLI context.
+client = NemoClient.from_config()
+WORKSPACE = client.resolve_workspace()
+evaluator = Evaluator.from_client(client)
 
 # Verify evaluator plugin connectivity.
+print(f"Using workspace '{WORKSPACE}' at {client.base_url}")
 print(evaluator.plugin_status())
 ```
 
@@ -114,6 +109,8 @@ Get your `NVIDIA_API_KEY` to access the models on NVIDIA Build:
     - Steps: click "Generate API Key"
 
 ```python
+import os
+
 # Export NVIDIA_API_KEY before running this tutorial.
 # For quick local testing only:
 # os.environ["NVIDIA_API_KEY"] = "<your-nvidia-api-key>"
@@ -124,18 +121,17 @@ if not nvidia_api_key:
     raise ValueError(f"{NVIDIA_BUILD_API_KEY_ENV} is not set")
 
 try:
-    nvidia_api_key_secret = client.secrets.create(
-        name="nvidia-api-key",
-        workspace=WORKSPACE,
-        value=nvidia_api_key,
-    )
+    from pydantic import SecretStr
+    from nemo_helix_plugin.client.errors import ConflictError
+    from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+    nvidia_api_key_secret = client.secrets.create_secret(
+        body=HelixSecretCreateRequest(name="nvidia-api-key", value=SecretStr(nvidia_api_key)),
+    ).data()
     print("Created secret: nvidia-api-key")
 except ConflictError:
     print("Secret 'nvidia-api-key' already exists, retrieving...")
-    nvidia_api_key_secret = client.secrets.retrieve(
-        name="nvidia-api-key",
-        workspace=WORKSPACE,
-    )
+    nvidia_api_key_secret = client.secrets.get_secret(name="nvidia-api-key").data()
     print("Retrieved existing secret: nvidia-api-key")
 
 print(
@@ -197,42 +193,48 @@ When using hosted APIs, keep `parallelism` low to avoid rate-limit errors. You c
 Register [HelpSteer2](https://huggingface.co/datasets/nvidia/HelpSteer2) as a fileset. The fileset remains the durable dataset registration.
 
 ```python
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.metadata import DatasetMetadataContent, FilesetMetadata
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
 
 DATASET_NAME = "helpsteer2-eval"
 DATASET_SPLIT_PATH = "validation.jsonl.gz"
 
 try:
-    fileset = client.files.filesets.create(
-        name=DATASET_NAME,
-        description="NVIDIA HelpSteer2 dataset for quality evaluation",
-        storage=HuggingfaceStorageConfigParam(
-            type="huggingface",
-            repo_id="nvidia/HelpSteer2",
-            repo_type="dataset",
+    fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            description="NVIDIA HelpSteer2 dataset for quality evaluation",
+            purpose=FilesetPurpose.DATASET,
+            storage=HuggingfaceStorageConfig(
+                type=StorageConfigType.HUGGINGFACE,
+                repo_id="nvidia/HelpSteer2",
+                repo_type="dataset",
+            ),
+            metadata=FilesetMetadata(
+                dataset=DatasetMetadataContent(
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "prompt": {"type": "string"},
+                            "response": {"type": "string"},
+                            "helpfulness": {"type": "number"},
+                            "correctness": {"type": "number"},
+                            "coherence": {"type": "number"},
+                            "complexity": {"type": "number"},
+                            "verbosity": {"type": "number"},
+                        },
+                        "required": ["prompt", "response"],
+                        "additionalProperties": True,
+                    }
+                )
+            ),
         ),
-        metadata={
-            "dataset": {
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "prompt": {"type": "string"},
-                        "response": {"type": "string"},
-                        "helpfulness": {"type": "number"},
-                        "correctness": {"type": "number"},
-                        "coherence": {"type": "number"},
-                        "complexity": {"type": "number"},
-                        "verbosity": {"type": "number"},
-                    },
-                    "required": ["prompt", "response"],
-                    "additionalProperties": True,
-                }
-            },
-        },
-    )
+    ).data()
     print(f"Registered HelpSteer2 fileset: {fileset.workspace}/{fileset.name}")
 except ConflictError:
-    fileset = client.files.filesets.retrieve(name=DATASET_NAME)
+    fileset = client.files.get_fileset(name=DATASET_NAME).data()
     print(f"{fileset.workspace}/{fileset.name} dataset already registered")
 ```
 
@@ -653,29 +655,29 @@ If your judge's distribution looks very different from humans, such as always sc
 To delete the workspace, you must first delete all resources within it. Delete jobs first, then filesets, secrets, and the workspace.
 
 ```python
-from nemo_helix import NotFoundError
+from nemo_helix_plugin.client.errors import NotFoundError
 
 # Delete remote evaluation jobs. Local SDK results are in-memory
 # objects and do not create platform jobs.
 for job_name in [job_v1.name, job_v2.name]:
     try:
-        client.jobs.delete(name=job_name, workspace=WORKSPACE)
+        client.jobs.delete_job(name=job_name, workspace=WORKSPACE)
     except Exception:
         pass
 
 # Delete fileset and secret.
 try:
-    client.files.filesets.delete(name=DATASET_NAME, workspace=WORKSPACE)
+    client.files.delete_fileset(name=DATASET_NAME, workspace=WORKSPACE)
 except NotFoundError:
     pass
 
 try:
-    client.secrets.delete(name=nvidia_api_key_secret.name, workspace=WORKSPACE)
+    client.secrets.delete_secret(name=nvidia_api_key_secret.name, workspace=WORKSPACE)
 except NotFoundError:
     pass
 
 # Now delete the workspace.
-client.workspaces.delete(name=WORKSPACE)
+client.workspaces.delete_workspace(name=WORKSPACE)
 print("Cleanup complete!")
 ```
 
@@ -690,7 +692,13 @@ Workspaces cannot be deleted while they contain resources. The code above delete
 
 ### Connection refused or "Cannot connect to host"
 
-The platform isn't running. Start it with:
+Check that your current CLI context points at the deployment you expect:
+
+```bash
+nemo config view
+```
+
+If you're using a local deployment, the platform might not be running. Start it with:
 
 ```bash
 nemo services run
@@ -704,10 +712,10 @@ curl -s http://localhost:8080/health/ready
 
 ### Workspace already exists
 
-If you're re-running the tutorial, delete the existing workspace first:
+If you're re-running the tutorial and want to start fresh, delete the existing workspace first:
 
 ```python
-client.workspaces.delete(name=WORKSPACE)
+client.workspaces.delete_workspace(name=WORKSPACE)
 ```
 
 ### Local NVIDIA Build authentication fails
@@ -781,19 +789,26 @@ If scores show `None` or the job fails with parsing errors:
 For gated or private datasets, create a secret with your Hugging Face token:
 
 ```python
-client.secrets.create(name="hf-token", value="hf_your_token_here")
-```
+from pydantic import SecretStr
+from nemo_helix_plugin.files.metadata import DatasetMetadataContent, FilesetMetadata
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_helix_plugin.schema import SecretRef
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
-Then reference it in the fileset:
-
-```python
-client.files.filesets.create(
-    name="my-dataset",
-    storage=HuggingfaceStorageConfigParam(
-        type="huggingface",
-        repo_id="org/dataset",
-        repo_type="dataset",
-        token_secret="hf-token",
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(name="hf-token", value=SecretStr("hf_your_token_here")),
+)
+client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="my-dataset",
+        purpose=FilesetPurpose.DATASET,
+        storage=HuggingfaceStorageConfig(
+            type=StorageConfigType.HUGGINGFACE,
+            repo_id="org/dataset",
+            repo_type="dataset",
+            token_secret=SecretRef(root="hf-token"),
+        ),
     ),
 )
 ```

@@ -18,9 +18,9 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-import yaml
 from nemo_helix_ext.cli.commands.setup import (
     KeyValidationResult,
+    KeyValidationStatus,
     ModelPair,
     SetupClients,
     _auto_setup,
@@ -142,7 +142,7 @@ def _quiet(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Iterator[None]:
     with (
         patch("nemo_helix_ext.cli.telemetry.emit.emit_event"),
         patch(f"{SETUP_MOD}._pause"),
-        patch(f"{SETUP_MOD}._validate_api_key", return_value=KeyValidationResult(passed=True, message="")),
+        patch(f"{SETUP_MOD}._validate_api_key", return_value=KeyValidationResult(status=KeyValidationStatus.VALID)),
     ):
         yield
 
@@ -234,44 +234,69 @@ class TestAutoSetupWire:
 
 
 class TestSampleSetupWire:
-    def test_complete_sample_path_creates_workspace_and_uploads_runnable_assets(self) -> None:
-        workspace = {
-            "id": "workspace-sample",
-            "name": "sample",
-            "description": "Sample workspace created by the NeMo setup flow.",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:00Z",
-        }
-        fileset = {
-            "id": "fileset-esec",
-            "name": "esec-eval-data",
-            "workspace": "sample",
-            "description": "Evaluation dataset for the NeMo setup sample email security agent.",
-            "purpose": "dataset",
-            "storage": {"type": "local", "path": "/data/esec-eval-data"},
-            "metadata": {},
-            "custom_fields": {},
-            "project": "",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:00Z",
-        }
-
-        def uploaded_file(path: str) -> dict:
-            return {
-                "file_ref": f"sample/esec-eval-data#{path}",
-                "file_url": f"/apis/files/v2/workspaces/sample/filesets/esec-eval-data/-/{path}",
-                "path": path,
-                "size": 1,
-                "cache_status": None,
-            }
-
+    @pytest.mark.parametrize(
+        ("sample_status", "http_status", "expected_message"),
+        [("created", 201, "Created sample workspace"), ("already_exists", 200, "Found existing sample workspace")],
+    )
+    def test_complete_sample_path_calls_agents_api_and_uses_returned_workspace(
+        self, sample_status: str, http_status: int, expected_message: str
+    ) -> None:
+        created = sample_status == "created"
+        workspace = "sample-uuid123"
+        frames = [
+            {
+                "kind": "progress",
+                "component": "workspace",
+                "status": "created" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "progress",
+                "component": "agent",
+                "status": "created" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "progress",
+                "component": "deployment",
+                "status": "submitted" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "progress",
+                "component": "dataset",
+                "status": "uploaded" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "progress",
+                "component": "evaluation_config",
+                "status": "uploaded" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "done",
+                "result": {
+                    "status": sample_status,
+                    "workspace": workspace,
+                    "studio_url": f"/studio/workspaces/{workspace}/dashboard",
+                    "agent": "email-security-triage",
+                    "deployment": "email-security-triage-123",
+                    "deployment_status": "pending",
+                },
+            },
+        ]
         recorder = Recorder(
             [
-                httpx.Response(404, json={"detail": "not found"}),
-                httpx.Response(201, json=workspace),
-                httpx.Response(201, json=fileset),
-                httpx.Response(200, json=uploaded_file("dataset.jsonl")),
-                httpx.Response(200, json=uploaded_file("eval-config.yaml")),
+                httpx.Response(
+                    http_status,
+                    text="\n".join(json.dumps(frame) for frame in frames) + "\n",
+                    headers={"content-type": "application/x-ndjson"},
+                ),
+                httpx.Response(
+                    200,
+                    json={"name": "email-security-triage-123", "agent": "email-security-triage", "status": "running"},
+                ),
             ]
         )
         state, clients = make_context_and_clients(recorder)
@@ -289,7 +314,6 @@ class TestSampleSetupWire:
             patch(f"{SETUP_MOD}._maybe_install_skills"),
             patch(f"{SETUP_MOD}._print_setup_complete"),
             patch(f"{SETUP_MOD}._prompt_post_setup_path", return_value="sample"),
-            patch(f"{SETUP_MOD}._maybe_deploy_sample_agent", return_value=True) as deploy_agent,
             patch(f"{SETUP_MOD}.console") as console,
         ):
             selected_path = _run_interactive_mode(
@@ -301,39 +325,16 @@ class TestSampleSetupWire:
             )
 
         assert selected_path == "sample"
-        deploy_agent.assert_called_once_with(
-            "http://test",
-            "sample",
-            model_pair.default,
-            headers=None,
-            certificate_authority=None,
-        )
         assert recorder.calls() == [
-            ("GET", "/apis/entities/v2/workspaces/sample"),
-            ("POST", "/apis/entities/v2/workspaces"),
-            ("POST", "/apis/files/v2/workspaces/sample/filesets"),
-            ("PUT", "/apis/files/v2/workspaces/sample/filesets/esec-eval-data/-/dataset.jsonl"),
-            ("PUT", "/apis/files/v2/workspaces/sample/filesets/esec-eval-data/-/eval-config.yaml"),
+            ("POST", "/apis/agents/v2/sample-agent"),
+            ("GET", "/apis/agents/v2/workspaces/sample-uuid123/deployments/email-security-triage-123"),
         ]
-        assert body_of(recorder.requests[1]) == {
-            "name": "sample",
-            "description": "Sample workspace created by the NeMo setup flow.",
-        }
-        assert body_of(recorder.requests[2]) == {
-            "name": "esec-eval-data",
-            "description": "Evaluation dataset for the NeMo setup sample email security agent.",
-            "purpose": "dataset",
-        }
-        dataset = [json.loads(line) for line in recorder.requests[3].content.splitlines() if line]
-        assert dataset
-        assert all("user_message" in row and "emails" in row for row in dataset)
-        eval_config = yaml.safe_load(recorder.requests[4].content)
-        assert eval_config["dataset"] == "sample/esec-eval-data#dataset.jsonl"
-        assert eval_config["metrics"]
+        assert body_of(recorder.requests[0]) == {"model": model_pair.default}
 
         completion_panel = console.print.call_args.args[0]
-        assert "http://test/studio/workspaces/sample/dashboard" in completion_panel.renderable
-        assert "nemo workspaces delete sample" in completion_panel.renderable
+        assert "http://test/studio/workspaces/sample-uuid123/dashboard" in completion_panel.renderable
+        assert "nemo workspaces delete sample-uuid123" in completion_panel.renderable
+        assert expected_message in " ".join(str(call) for call in console.print.call_args_list)
 
 
 class TestRegisterProviderWire:

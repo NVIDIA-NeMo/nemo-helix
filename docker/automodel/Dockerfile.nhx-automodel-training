@@ -34,10 +34,10 @@ RUN uv pip freeze --python ${VIRTUAL_ENV}/bin/python --exclude-editable > /tmp/b
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --overrides /app/docker/automodel/no_override_requirements.txt \
-    -e /app/sdk/python/nemo-helix \
+
     -e /app/packages/filesets \
-    -e /app/packages/models \
     -e /app/packages/nemo_helix_plugin \
+    -e /app/packages/nemo_helix_ext \
     -e /app/packages/nhx_common \
     -e /app/packages/nhx_customization_common \
     -e "/app/services/automodel[training]"

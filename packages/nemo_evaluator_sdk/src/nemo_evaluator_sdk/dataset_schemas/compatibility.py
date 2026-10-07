@@ -182,14 +182,22 @@ def _is_redundant_missing_field_error(error: str, missing_canonical_fields: set[
 
 
 def apply_column_mapping_to_row(row: dict[str, Any], column_mapping: FieldMapping | None = None) -> dict[str, Any]:
-    """Augment a dataset row with canonical evaluator fields."""
+    """Augment a dataset row with canonical evaluator fields.
+
+    A mapped canonical field is set from its path, or left unset when the path resolves to nothing.
+    It never falls back to a dataset column that happens to share the name: canonical fields and
+    dataset columns occupy one namespace, so without this the mapping would silently fail to take
+    effect and the column's own value would be scored in its place.
+    """
     if column_mapping is None:
         return dict(row)
 
     mapped = dict(row)
     for canonical_name, dataset_path in column_mapping.mapping().items():
         value = get_value_at_path(row, dataset_path)
-        if value is not _MISSING:
+        if value is _MISSING:
+            mapped.pop(canonical_name, None)
+        else:
             mapped[canonical_name] = value
     return mapped
 

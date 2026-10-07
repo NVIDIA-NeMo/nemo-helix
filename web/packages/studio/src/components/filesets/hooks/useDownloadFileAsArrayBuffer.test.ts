@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useDownloadFileAsArrayBuffer } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
+import {
+  useDownloadFileAsArrayBuffer,
+  useFetchFileAsArrayBuffer,
+} from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { useWorkers } from '@studio/providers/workers/useWorkers';
 import { renderHook } from '@testing-library/react';
 
@@ -28,6 +31,7 @@ type Handlers = {
   onError?: (e: unknown) => void;
 };
 let handlers: Handlers | undefined;
+const terminateWorker = vi.fn();
 
 describe('useDownloadFileAsArrayBuffer', () => {
   beforeEach(() => {
@@ -38,6 +42,7 @@ describe('useDownloadFileAsArrayBuffer', () => {
       createWorker: ((_worker: unknown, opts: Handlers) => {
         handlers = opts;
       }) as unknown as ReturnType<typeof useWorkers>['createWorker'],
+      terminateWorker,
     } as unknown as ReturnType<typeof useWorkers>);
   });
 
@@ -110,5 +115,78 @@ describe('useDownloadFileAsArrayBuffer', () => {
     handlers?.onError?.(new Error('transport failure'));
 
     await expect(promise).resolves.toBeNull();
+  });
+});
+
+describe('useFetchFileAsArrayBuffer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    handlers = undefined;
+
+    mockUseWorkers.mockReturnValue({
+      createWorker: ((_worker: unknown, opts: Handlers) => {
+        handlers = opts;
+      }) as unknown as ReturnType<typeof useWorkers>['createWorker'],
+      terminateWorker,
+    } as unknown as ReturnType<typeof useWorkers>);
+  });
+
+  const fetchFile = (signal?: AbortSignal) =>
+    renderHook(() => useFetchFileAsArrayBuffer()).result.current({
+      workspace: 'ws',
+      datasetName: 'ds',
+      path: 'data/a.txt',
+      signal,
+    });
+
+  it('resolves to the arrayBuffer when the worker reports done', async () => {
+    const buffer = new ArrayBuffer(4);
+
+    const promise = fetchFile();
+    handlers?.onMessage({ data: { done: true, arrayBuffer: buffer } });
+
+    await expect(promise).resolves.toBe(buffer);
+  });
+
+  it('rejects with the error the worker reports', async () => {
+    const promise = fetchFile();
+    handlers?.onMessage({ data: { done: true, error: 'Unable to find base file.' } });
+
+    await expect(promise).rejects.toThrow('Unable to find base file.');
+  });
+
+  it('rejects when the worker fires onError', async () => {
+    const promise = fetchFile();
+    handlers?.onError?.(new ErrorEvent('error', { message: 'transport failure' }));
+
+    await expect(promise).rejects.toThrow('transport failure');
+  });
+  it('terminates the worker and rejects when the signal aborts', async () => {
+    const controller = new AbortController();
+    const promise = fetchFile(controller.signal);
+
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    expect(terminateWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects without starting a worker when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(fetchFile(controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(workerConstructor).not.toHaveBeenCalled();
+  });
+
+  it('ignores an abort after the download has finished', async () => {
+    const controller = new AbortController();
+    const promise = fetchFile(controller.signal);
+    handlers?.onMessage({ data: { done: true, arrayBuffer: new ArrayBuffer(1) } });
+    await promise;
+
+    controller.abort();
+
+    expect(terminateWorker).not.toHaveBeenCalled();
   });
 });

@@ -304,11 +304,12 @@ class QuickstartConfig(BaseModel):
         )
 
     def resolve_best_image(self) -> str:
-        """Return the best available image for the installed SDK build.
+        """Return the best available image for the ``NHX_IMAGE_TAG`` release tag.
 
-        If no image is explicitly configured, this method looks up the image
-        tag for the installed SDK build and selects the right registry based
-        on whether the tag is an internal or public release:
+        If no image is explicitly configured, this method reads the image tag
+        from the ``NHX_IMAGE_TAG`` environment variable (for example
+        ``NHX_IMAGE_TAG=26.03``) and selects the right registry based on
+        whether the tag is an internal or public release:
 
         - **Internal tags** (``nightly-YYYYMMDD``, ``YY.MM-kN``) live in the
           private NGC registry.  An NGC API key is required and a registry
@@ -317,13 +318,8 @@ class QuickstartConfig(BaseModel):
         - **Public GA tags** (e.g. ``26.03``) live in the public NGC registry.
           No key is required; the image is returned directly if it exists.
 
-        The image tag is sourced from (in priority order):
-
-        1. ``NHX_IMAGE_TAG`` environment variable — overrides the SDK-baked
-           tag so you can test against a specific release without reinstalling
-           (e.g. ``NHX_IMAGE_TAG=26.03``).
-        2. ``__image_tag__`` stamped into the installed ``nemo-helix`` SDK
-           (``nemo_helix._version``) at release time.
+        Without ``NHX_IMAGE_TAG`` there is no tag to resolve and ``self.image``
+        is returned unchanged.
 
         The access check is performed via the Docker daemon's distribution
         endpoint (a lightweight manifest HEAD — no image data is transferred).
@@ -334,15 +330,7 @@ class QuickstartConfig(BaseModel):
         if self.image is not None and self.image != "":
             return self.image
 
-        # NHX_IMAGE_TAG overrides the SDK-baked tag for pre-release testing.
-        image_tag: str | None = os.environ.get("NHX_IMAGE_TAG") or None
-        if image_tag is None:
-            try:
-                from nemo_helix._version import __image_tag__
-            except ImportError:
-                return self.image
-            image_tag = __image_tag__
-
+        image_tag = os.environ.get("NHX_IMAGE_TAG")
         if not image_tag:
             return self.image
 

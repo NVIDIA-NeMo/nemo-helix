@@ -96,6 +96,13 @@ class InsightsService(NemoService):
         ]
 
 
+# The jobs backing AnalysisRuns read and write Insights through a task client,
+# which calls as ``service:insights`` on behalf of the run's submitter.
+# A principal-only rule would deny those calls whenever authz is enforced.
+# Delete stays principal-only: the job never removes an Insight.
+_ANALYST_CALLERS = [CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL]
+
+
 def _build_insights_router() -> APIRouter:
     router = APIRouter()
 
@@ -106,7 +113,7 @@ def _build_insights_router() -> APIRouter:
         tags=["Insights Insights"],
     )
     @scope.write
-    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[InsightPerms.CREATE])
+    @path_rule(callers=_ANALYST_CALLERS, permissions=[InsightPerms.CREATE])
     async def create_insight(
         workspace: str,
         body: CreateInsightRequest,
@@ -136,7 +143,7 @@ def _build_insights_router() -> APIRouter:
         tags=["Insights Insights"],
     )
     @scope.read
-    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[InsightPerms.LIST])
+    @path_rule(callers=_ANALYST_CALLERS, permissions=[InsightPerms.LIST])
     async def list_insights(
         workspace: str,
         spans_service: SpansServiceDep,
@@ -214,7 +221,7 @@ def _build_insights_router() -> APIRouter:
         tags=["Insights Insights"],
     )
     @scope.read
-    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[InsightPerms.READ])
+    @path_rule(callers=_ANALYST_CALLERS, permissions=[InsightPerms.READ])
     async def get_insight(
         workspace: str,
         insight_id: str,
@@ -239,7 +246,7 @@ def _build_insights_router() -> APIRouter:
         tags=["Insights Insights"],
     )
     @scope.write
-    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[InsightPerms.UPDATE])
+    @path_rule(callers=_ANALYST_CALLERS, permissions=[InsightPerms.UPDATE])
     async def update_insight(
         workspace: str,
         insight_id: str,

@@ -28,11 +28,17 @@ A-Z), digits (0-9), underscores, hyphens, and dots. For example:
 deployment. The default is `subprocess`; `docker` and `k8s` run the agent as a
 durable container through the deployments plugin.
 
-| Mode | Runs as | Survives a platform restart | Requires |
+| Mode | Runs as | Survives a control plane restart | Requires |
 | ------ | --------- | ----------------------------- | ---------- |
-| `subprocess` (default) | A local FastAPI server on the platform host | No | Nothing extra |
+| `subprocess` (default) | A local FastAPI server on the control plane host | No | Nothing extra for the agent process |
 | `docker` | A Docker container | Yes | A container image and a configured `docker` executor |
 | `k8s` | A Kubernetes Deployment + Service | Yes | A container image and a configured `k8s` executor |
+
+<Note>
+
+Subprocess agent deploy does not mean the control plane can start without Docker. Default local startup still starts the deployments controller with a Docker-backed executor for model deployments on the control plane. Agent deploys use an executor that matches their mode: `--mode docker` requires a Docker-backed executor, and `--mode k8s` requires a `k8s` executor. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
+
+</Note>
 
 In every mode the agent is reached the same way — through the Agents gateway,
 which resolves the agent's active deployment and proxies the request, so
@@ -122,7 +128,7 @@ import yaml
 
 with open("research-agent/agent.yaml") as f:
     config = yaml.safe_load(f)
-client.agents.create(
+agents.create(
     name="research-agent",
     config=config,
     config_format=config["config_format"],
@@ -158,22 +164,24 @@ nemo agents environments create research \
 <Tab title="Python SDK">
 
 ```python
-client.secrets.create(name="research-github-pat", value=os.environ["GITHUB_PAT"])
+sdk.secrets.create(name="research-github-pat", value=os.environ["GITHUB_PAT"])
 
-client.agents.environment_specs.create(
+agents.environment_specs.create(
     name="research",
-    provider="local",
-    env={"LOG_LEVEL": "debug"},
-    mcp={
-        "github": {
-            "url": "docker",
-            "env": {"GITHUB_TOOLSETS": "repos,issues"},
-            "secrets": {"GITHUB_PERSONAL_ACCESS_TOKEN": "default/research-github-pat"},
-        }
+    spec={
+        "provider": "local",
+        "env": {"LOG_LEVEL": "debug"},
+        "mcp": {
+            "github": {
+                "url": "docker",
+                "env": {"GITHUB_TOOLSETS": "repos,issues"},
+                "secrets": {"GITHUB_PERSONAL_ACCESS_TOKEN": "default/research-github-pat"},
+            }
+        },
     },
 )
 
-client.agents.environments.create(
+agents.environments.create(
     name="research",
     environment_spec="default/research",
     compute_spec={"resources": {"limits": {"cpu": "2", "memory": "4Gi"}}},
@@ -207,13 +215,13 @@ nemo agents deployments get research-deployment
 <Tab title="Python SDK">
 
 ```python
-client.agents.deployments.create(
+agents.deployments.create(
     agent="research-agent",
     name="research-deployment",
     environment="default/research",
 )
 
-client.agents.deployments.get("research-deployment")
+agents.deployments.get("research-deployment")
 ```
 
 </Tab>
@@ -233,8 +241,9 @@ on `nemo agents undeploy`. No image or executor configuration is required.
 <Tab title="CLI">
 
 ```bash
-# Confirm that the local Platform instance is ready
-export NHX_BASE_URL=http://localhost:8080
+# Confirm that the Platform instance is ready
+# (export NHX_BASE_URL first if your CLI context points at a remote deployment)
+: "${NHX_BASE_URL:=http://localhost:8080}"
 
 curl -fsS --connect-timeout 2 --max-time 5 \
   "$NHX_BASE_URL/health/ready" >/dev/null || {
@@ -263,35 +272,32 @@ nemo agents invoke \
 <Tab title="Python SDK">
 
 ```python
-import os
-
 import yaml
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
+agents = AgentsResource(client)
 
 # Register the agent from an agent.yaml
 with open(
     "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
 ) as f:
     config = yaml.safe_load(f)
-client.agents.create(
+agents.create(
     name="calculator-agent",
     config=config,
     config_format=config["config_format"],
 )
 
 # Deploy as a local subprocess
-client.agents.deployments.create(
+agents.deployments.create(
     agent="calculator-agent",
     name="calculator-agent-deployment",
 )
 
 # Invoke through the Agents gateway
-response = client.agents.invoke(
+response = agents.invoke(
     deployment="calculator-agent-deployment",
     input="What is 12 multiplied by 8?",
 )
@@ -451,34 +457,31 @@ nemo agents invoke \
 <Tab title="Python SDK">
 
 ```python
-import os
-
 import yaml
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
+agents = AgentsResource(client)
 
 with open(
     "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
 ) as f:
     config = yaml.safe_load(f)
-client.agents.create(
+agents.create(
     name="calculator-agent",
     config=config,
     config_format=config["config_format"],
 )
 
-client.agents.deployments.create(
+agents.deployments.create(
     agent="calculator-agent",
     name="calculator-agent-docker",
     deployment_mode="docker",
     image="calculator-agent:local",
 )
 
-response = client.agents.invoke(
+response = agents.invoke(
     deployment="calculator-agent-docker",
     input="What is 12 multiplied by 8?",
 )
@@ -521,34 +524,31 @@ nemo agents invoke \
 <Tab title="Python SDK">
 
 ```python
-import os
-
 import yaml
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
+agents = AgentsResource(client)
 
 with open(
     "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
 ) as f:
     config = yaml.safe_load(f)
-client.agents.create(
+agents.create(
     name="calculator-agent",
     config=config,
     config_format=config["config_format"],
 )
 
-client.agents.deployments.create(
+agents.deployments.create(
     agent="calculator-agent",
     name="calculator-agent-k8s",
     deployment_mode="k8s",
     image="<registry>/calculator-agent:1.0.0",
 )
 
-response = client.agents.invoke(
+response = agents.invoke(
     deployment="calculator-agent-k8s",
     input="What is 12 multiplied by 8?",
 )
@@ -589,7 +589,9 @@ conventions apply to `agent.yaml`:
 - **Set `models.default.model` to the Inference Gateway entity name.** The
   models controller creates these names by replacing slashes and dots with
   hyphens (`nvidia/nemotron-3.5-lightning-30b-a3b` becomes
-  `nvidia-nemotron-3-5-lightning-30b-a3b`).
+  `nvidia-nemotron-3-5-lightning-30b-a3b`). The bundled calculator config uses
+  `${NEMO_DEFAULT_MODEL}`; the CLI resolves it from the active context or the
+  environment before creating the agent.
 - **Leave `base_url` unset for a Platform-routed model.** When `provider` is
   `nvidia`, `openai`, or `openai-compatible`, the deployment supplies the
   Inference Gateway URL. `api_key_env` names the environment variable expected
@@ -601,7 +603,7 @@ The calculator agent uses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    model: ${NEMO_DEFAULT_MODEL}
     api_key_env: NVIDIA_API_KEY
 ```
 
@@ -660,16 +662,13 @@ nemo agents deployments get calculator-agent-deployment
 <Tab title="Python SDK">
 
 ```python
-import os
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-from nemo_helix import NeMoHelix
+client = NemoClient.from_config()
+agents = AgentsResource(client)
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-
-deployment = client.agents.deployments.get("calculator-agent-deployment")
+deployment = agents.deployments.get("calculator-agent-deployment")
 print(deployment["deployment_mode"], deployment["status"], deployment["endpoints"])
 ```
 
@@ -729,20 +728,17 @@ nemo agents delete calculator-agent
 <Tab title="Python SDK">
 
 ```python
-import os
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-from nemo_helix import NeMoHelix
-
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
+agents = AgentsResource(client)
 
 # Stop the running deployment (removes the process/container/k8s objects)
-client.agents.deployments.delete("calculator-agent-deployment")
+agents.deployments.delete("calculator-agent-deployment")
 
 # Remove the agent entity
-client.agents.delete("calculator-agent")
+agents.delete("calculator-agent")
 ```
 
 </Tab>

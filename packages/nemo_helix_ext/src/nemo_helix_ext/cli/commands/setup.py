@@ -19,32 +19,29 @@ import sys
 import time
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 import httpx
 import typer
-import yaml as _yaml
+from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.agents.types import CreateSampleAgentRequest, SampleAgentResponse, SampleAgentStreamEvent
 from nemo_helix_plugin.capabilities import probe_docker
 from nemo_helix_plugin.cli_options import WORKSPACE_HELP
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.entities import DEFAULT_WORKSPACE, parse_qualified_name
-from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose, UpdateFilesetRequest
+from nemo_helix_plugin.entities import DEFAULT_WORKSPACE
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
-from nemo_helix_plugin.models.refs import model_entity_route_openai_url
 from nemo_helix_plugin.models.types import CreateModelProviderRequest, UpsertModelProviderRequest
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretUpdateRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.common.config import nhx_user_data_dir
-from nhx.platform_runner.config import DEFAULT_LOCAL_SERVICES_BIND_HOST, HelixAppConfig
+from nhx.platform_runner.config import DEFAULT_LOCAL_SERVICES_BIND_HOST, HelixAppConfig, default_state_root
 from pydantic import SecretStr
 from rich import box
 from rich.console import Console
@@ -64,6 +61,7 @@ from nemo_helix_ext.cli.telemetry.events import OnboardingStepEvent, TaskStatusE
 from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 from nemo_helix_ext.config.config import Config
 from nemo_helix_ext.config.models import DEFAULT_BASE_URL, ConfigFile, ConfigParams, LocalServicesConfig, NoAuthUser
+from nemo_helix_ext.config.urls import display_url
 from nemo_helix_ext.local.install import services_extra_install_command
 from nemo_helix_ext.local.process import (
     PortConflict,
@@ -82,7 +80,7 @@ from nemo_helix_ext.ui.prompts import (
     prompt_confirm,
     prompt_multiselect,
     prompt_password,
-    prompt_select,
+    prompt_search_select,
     prompt_text,
     provider_name_validator,
 )
@@ -97,6 +95,41 @@ _SUPPORTED_PYTHON_MAX = (3, 14)
 CHECK = "[green]✓[/green]"
 CROSS = "[red]✗[/red]"
 WARN = "[yellow]![/yellow]"
+
+
+_LEGACY_DIR_NAME = "nm" + "p"
+
+
+def _legacy_config_dir() -> Path:
+    """Return the pre-rename user config directory."""
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home).expanduser() / _LEGACY_DIR_NAME
+    return Path.home() / ".config" / _LEGACY_DIR_NAME
+
+
+def _legacy_state_dir() -> Path:
+    """Return the pre-rename user state directory."""
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        return Path(xdg_state_home).expanduser() / _LEGACY_DIR_NAME
+    return Path.home() / ".local" / "state" / _LEGACY_DIR_NAME
+
+
+def _print_legacy_directory_notice() -> None:
+    """Warn setup users when pre-rename config/state directories remain."""
+    legacy_dirs = [path for path in (_legacy_config_dir(), _legacy_state_dir()) if path.exists()]
+    if not legacy_dirs:
+        return
+
+    legacy_list = ", ".join(f"[cyan]{escape(str(path))}[/cyan]" for path in legacy_dirs)
+    console.print(
+        f"{WARN} Found legacy pre-rename config/state directories from before the {_LEGACY_DIR_NAME} → nhx rename: "
+        f"{legacy_list}. NeMo Helix now reads [cyan]{escape(str(Config.get_default_config_path()))}[/cyan] "
+        f"and [cyan]{escape(str(default_state_root()))}[/cyan]; the legacy directories are ignored.\n",
+        soft_wrap=True,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Known provider catalog
@@ -192,12 +225,29 @@ _PROBE_CONFIGS: dict[str, ProbeConfig] = {
 }
 
 
+class KeyValidationStatus(StrEnum):
+    """Outcome categories for an API key validation probe."""
+
+    VALID = "valid"
+    REJECTED = "rejected"
+    INCONCLUSIVE = "inconclusive"
+
+
 @dataclass(frozen=True)
 class KeyValidationResult:
     """Outcome of an API key validation probe."""
 
-    passed: bool
-    message: str
+    status: KeyValidationStatus
+    message: str = ""
+
+    @property
+    def passed(self) -> bool:
+        """True when setup may continue without treating the key as rejected.
+
+        ``INCONCLUSIVE`` is fail-open (same posture as non-2xx probes for OpenAI
+        and other auth-required list endpoints). Only ``REJECTED`` blocks auto setup.
+        """
+        return self.status != KeyValidationStatus.REJECTED
 
 
 @dataclass(frozen=True)
@@ -237,7 +287,17 @@ _AUTO_ENV_VARS: tuple[tuple[str, str], ...] = (
 _KEY_VALIDATION_TIMEOUT = 10.0
 _KEY_REJECTED_STATUS_CODES = (401, 403)
 _KEY_REJECTED_MESSAGE = "API key validation failed. The provider rejected the credentials."
+_KEY_UNVERIFIED_SUFFIX = "Credentials were neither accepted nor rejected."
 _PROBE_DETAIL_MAX_CHARS = 200
+# Key validation uses a smaller candidate budget than post-setup model selection.
+_KEY_VALIDATION_CHAT_MAX_ATTEMPTS = 3
+
+_KEY_VALIDATION_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("continue", "Continue without verifying the key"),
+    ("reenter", "Re-enter API key"),
+    ("abort", "Abort setup"),
+)
+
 
 # Catalog listing is not entitlement-scoped; only a successful chat request counts.
 _MODEL_PROBE_TIMEOUT = 20.0
@@ -257,22 +317,15 @@ _SERVICE_STARTUP_TIMEOUT_SECONDS = 240
 _SERVICE_STARTUP_POLL_INTERVAL = 0.5
 _AGENT_DEPLOY_TIMEOUT_SECONDS = 120
 _AGENT_DEPLOY_POLL_INTERVAL = 1
-_AGENT_API_READINESS_TIMEOUT = 30
-_AGENT_API_READINESS_POLL_INTERVAL = 1
 _KILL_WAIT_TIMEOUT = 10
 _CONTROLLER_HEALTH_RETRY_DELAY = 3.0
 _POST_START_REACHABLE_RETRIES = 6
 _POST_START_REACHABLE_DELAY = 2.0
 
 _SAMPLE_AGENT_NAME = "email-security-triage"
-_SAMPLE_AGENT_DESCRIPTION = "Email security triage sample agent created by the NeMo setup flow."
 _SAMPLE_DATASET_FILESET = "esec-eval-data"
 _SAMPLE_DATASET_FILENAME = "dataset.jsonl"
-_SAMPLE_DATASET_DESCRIPTION = "Evaluation dataset for the NeMo setup sample email security agent."
-_SAMPLE_EVAL_CONFIG_SOURCE = "eval-config.dataset-driven.yml"
 _SAMPLE_EVAL_CONFIG_FILENAME = "eval-config.yaml"
-_SAMPLE_WORKSPACE_NAME = "sample"
-_SAMPLE_WORKSPACE_DESCRIPTION = "Sample workspace created by the NeMo setup flow."
 _LOCAL_CONTEXT_NAME = "local"
 
 
@@ -389,7 +442,7 @@ def _prompt_remote_base_url(*, default_url: str = "", certificate_authority: str
         if _check_platform_reachable_with_retries(base_url, certificate_authority=certificate_authority):
             return base_url
 
-        console.print(f"{CROSS} Unable to connect to NeMo Helix at {base_url}.")
+        console.print(f"{CROSS} Unable to connect to NeMo Helix at {display_url(base_url)}.")
 
 
 def _resolve_setup_workspace(cli_context: CLIContext, workspace: str | None) -> str:
@@ -763,7 +816,7 @@ def _wait_for_models_impl(
                     provider_msg = getattr(provider, "status_message", None) or ""
 
                     if _NON_COMPLIANT_MARKER in provider_msg:
-                        url_hint = f" ({host_url})" if host_url else ""
+                        url_hint = f" ({display_url(host_url)})" if host_url else ""
                         console.print(
                             f"\n  {WARN} Provider '{provider_name}'{url_hint} returned a non-OpenAI "
                             f"compliant response from GET /v1/models."
@@ -776,7 +829,7 @@ def _wait_for_models_impl(
                         return []
 
                     if provider_status in _PROVIDER_UNHEALTHY_STATUSES:
-                        url_hint = f" ({host_url})" if host_url else ""
+                        url_hint = f" ({display_url(host_url)})" if host_url else ""
                         console.print(f"\n  {WARN} Provider '{provider_name}'{url_hint} is in {provider_status} state.")
                         if provider_msg:
                             console.print(f"  {provider_msg}")
@@ -1076,7 +1129,7 @@ def _prompt_reachable_remote_connection(base_url: str) -> Literal["ready", "conn
     """Ask how to proceed when a configured remote Platform is already reachable."""
     hostname = _platform_host_label(base_url)
     action = prompt_choice(
-        message=f"Platform reachable at {hostname} ({base_url}). What would you like to do?",
+        message=f"Platform reachable at {hostname} ({display_url(base_url)}). What would you like to do?",
         options=[
             (_RemoteConnectionChoice.CONTINUE, "Continue with this remote Platform"),
             (_RemoteConnectionChoice.START_LOCAL, "Start local services instead"),
@@ -1085,7 +1138,7 @@ def _prompt_reachable_remote_connection(base_url: str) -> Literal["ready", "conn
         default=_RemoteConnectionChoice.CONTINUE,
     )
     if action == _RemoteConnectionChoice.CONTINUE:
-        console.print(f"{CHECK} Platform already running at {base_url}\n")
+        console.print(f"{CHECK} Platform already running at {display_url(base_url)}\n")
         return "ready"
     if action == _RemoteConnectionChoice.CHANGE_REMOTE:
         return "connect_remote"
@@ -1277,14 +1330,14 @@ def _maybe_start_services(
 
     if already_running and start_services is not True:
         if _is_local_base_url(base_url) or auto:
-            console.print(f"{CHECK} Platform already running at {base_url}\n")
+            console.print(f"{CHECK} Platform already running at {display_url(base_url)}\n")
             return "ready"
         return _prompt_reachable_remote_connection(base_url)
 
     should_start = start_services
     if should_start is None:
         if auto:
-            console.print(f"{CROSS} Cannot reach platform at {base_url}")
+            console.print(f"{CROSS} Cannot reach platform at {display_url(base_url)}")
             console.print("  Start the platform first, or pass --start-services:")
             console.print("    [cyan]nemo setup --auto --start-services[/cyan]")
             console.print("    [cyan]nemo services run[/cyan]")
@@ -1292,7 +1345,7 @@ def _maybe_start_services(
         if not _is_local_base_url(base_url):
             return "connect_remote"
         action = prompt_choice(
-            message=f"Platform not reachable at {base_url}. Start local services?",
+            message=f"Platform not reachable at {display_url(base_url)}. Start local services?",
             options=[
                 ("yes", "Yes, start services now"),
                 ("remote", "No, I want to connect to a remote Platform instance"),
@@ -1305,7 +1358,7 @@ def _maybe_start_services(
         should_start = action == "yes"
 
     if not should_start:
-        console.print(f"{CROSS} Cannot reach platform at {base_url}")
+        console.print(f"{CROSS} Cannot reach platform at {display_url(base_url)}")
         console.print("  Start the platform first:")
         console.print("    [cyan]nemo services run[/cyan]   (local development)")
         raise typer.Exit(1)
@@ -1368,7 +1421,7 @@ def _maybe_start_services(
             console.print(f"  {DOCKER_PREFLIGHT_MESSAGE}")
         raise typer.Exit(1)
 
-    console.print(f"{CHECK} Platform running at {base_url} (pid {proc.pid})\n")
+    console.print(f"{CHECK} Platform running at {display_url(base_url)} (pid {proc.pid})\n")
     return "ready"
 
 
@@ -1749,101 +1802,14 @@ def _maybe_install_skills(
 
 
 # ---------------------------------------------------------------------------
-# Agent deployment
+# Sample agent setup
 # ---------------------------------------------------------------------------
 
 
-def _agents_plugin_available() -> bool:
-    """Return True if the nemo-agents plugin is importable."""
-    return importlib.util.find_spec("nemo_agents_plugin") is not None
-
-
-def _sample_asset_path(name: str) -> Traversable | None:
-    """Return a packaged Email Security Triage asset, or None."""
-    try:
-        from email_security_triage.resources import sample_file
-
-        candidate = sample_file(name)
-        if candidate.is_file():
-            return candidate
-    except (ImportError, ModuleNotFoundError):
-        logger.debug("email_security_triage package not importable; sample assets unavailable", exc_info=True)
-
-    return None
-
-
-def _sample_agent_config_path() -> Traversable | None:
-    """Return the packaged Email Security Triage config YAML, or None."""
-    return _sample_asset_path("agent.yaml")
-
-
-def _upload_sample_dataset(files_client: FilesClient, workspace: str) -> bool:
-    """Create the sample dataset fileset and upload its packaged JSONL data."""
-    dataset = _sample_asset_path(_SAMPLE_DATASET_FILENAME)
-    if dataset is None:
-        console.print(f"  {WARN} Could not find Email Security Triage dataset, skipping dataset upload")
-        return False
-
-    try:
-        fileset = files_client.create_fileset(
-            workspace=workspace,
-            body=CreateFilesetRequest(
-                name=_SAMPLE_DATASET_FILESET,
-                description=_SAMPLE_DATASET_DESCRIPTION,
-                purpose=FilesetPurpose.DATASET,
-            ),
-            exist_ok=True,
-        ).data()
-        if fileset.purpose != FilesetPurpose.DATASET:
-            files_client.update_fileset(
-                workspace=workspace,
-                name=_SAMPLE_DATASET_FILESET,
-                body=UpdateFilesetRequest(purpose=FilesetPurpose.DATASET),
-            ).data()
-        files_client.upload_file(
-            workspace=workspace,
-            name=_SAMPLE_DATASET_FILESET,
-            path=_SAMPLE_DATASET_FILENAME,
-            content=dataset.read_bytes(),
-        ).data()
-    except Exception as exc:
-        console.print(f"  {WARN} Sample dataset upload failed: {exc}")
-        return False
-
-    console.print(f"  {CHECK} Uploaded dataset '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_DATASET_FILENAME}'")
-    return True
-
-
-def _upload_sample_eval_config(files_client: FilesClient, workspace: str) -> bool:
-    """Upload the sample's dataset-driven evaluation config for later use."""
-    config_asset = _sample_asset_path(_SAMPLE_EVAL_CONFIG_SOURCE)
-    if config_asset is None:
-        console.print(f"  {WARN} Could not find Email Security Triage eval config, skipping config upload")
-        return False
-
-    try:
-        config = _yaml.safe_load(config_asset.read_text(encoding="utf-8"))
-        if not isinstance(config, dict):
-            raise ValueError("packaged eval config must be a mapping")
-        config["dataset"] = f"{workspace}/{_SAMPLE_DATASET_FILESET}#{_SAMPLE_DATASET_FILENAME}"
-        files_client.upload_file(
-            workspace=workspace,
-            name=_SAMPLE_DATASET_FILESET,
-            path=_SAMPLE_EVAL_CONFIG_FILENAME,
-            content=_yaml.safe_dump(config, sort_keys=False).encode(),
-        ).data()
-    except Exception as exc:
-        console.print(f"  {WARN} Sample eval config upload failed: {exc}")
-        return False
-
-    console.print(f"  {CHECK} Uploaded evaluation config '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_EVAL_CONFIG_FILENAME}'")
-    return True
-
-
-def _print_sample_setup_complete(base_url: str, *, complete: bool) -> None:
+def _print_sample_setup_complete(base_url: str, workspace: str, *, complete: bool) -> None:
     """Print the sample workspace completion card."""
-    studio_url = f"{base_url.rstrip('/')}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
-    remove_command = f"nemo workspaces delete {_SAMPLE_WORKSPACE_NAME}"
+    studio_url = f"{display_url(base_url)}/studio/workspaces/{workspace}/dashboard"
+    remove_command = f"nemo workspaces delete {workspace}"
     if complete:
         status = f"{CHECK} [green bold]Sample workspace ready[/green bold]"
         message = "Explore the sample agent, dataset, and evaluation configuration in Studio."
@@ -1872,264 +1838,57 @@ def _print_sample_setup_complete(base_url: str, *, complete: bool) -> None:
     )
 
 
-def _agent_exists(
-    base_url: str,
-    workspace: str,
-    headers: dict[str, str] | None = None,
-    *,
-    agent_name: str = _SAMPLE_AGENT_NAME,
-    certificate_authority: str | None = None,
-) -> bool:
-    """Return True if the named agent already exists on the platform."""
-    tls_config = httpx_tls_config_from_env(certificate_authority)
-    try:
-        resp = httpx.get(
-            f"{base_url.rstrip('/')}/apis/agents/v2/workspaces/{workspace}/agents/{agent_name}",
-            headers=headers,
-            timeout=10.0,
-            **tls_config,
-        )
-        return resp.status_code == 200
-    except Exception:
-        return False
-
-
-def _agents_api_ready(
-    base_url: str,
-    workspace: str,
-    headers: dict[str, str] | None = None,
-    *,
-    certificate_authority: str | None = None,
-) -> bool:
-    """Return True if the agents API is responding."""
-    tls_config = httpx_tls_config_from_env(certificate_authority)
-    try:
-        resp = httpx.get(
-            f"{base_url.rstrip('/')}/apis/agents/v2/workspaces/{workspace}/agents",
-            headers=headers,
-            timeout=3.0,
-            **tls_config,
-        )
-        return resp.status_code == 200
-    except Exception:
-        return False
-
-
-def _deploy_setup_agent(
-    base_url: str,
-    workspace: str,
-    config_path: Traversable,
-    default_model: str,
-    headers: dict[str, str] | None = None,
-    *,
-    agent_name: str = _SAMPLE_AGENT_NAME,
-    description: str = _SAMPLE_AGENT_DESCRIPTION,
-    certificate_authority: str | None = None,
-) -> bool:
-    """Deploy a packaged setup agent and emit one ``agent_deployed`` event.
-
-    Telemetry wrapper around :func:`_deploy_setup_agent_impl`: COMPLETED when the
-    deployment reaches running, ERROR when it fails, times out, or raises.
-    """
-    try:
-        deployed = _deploy_setup_agent_impl(
-            base_url,
-            workspace,
-            config_path,
-            default_model,
-            headers=headers,
-            agent_name=agent_name,
-            description=description,
-            certificate_authority=certificate_authority,
-        )
-    except Exception:
-        emit.emit_event(
-            OnboardingStepEvent(step="agent_deployed", task_status=TaskStatusEnum.ERROR, agent_deployed=False)
-        )
-        raise
-    task_status = TaskStatusEnum.COMPLETED if deployed else TaskStatusEnum.ERROR
-    emit.emit_event(OnboardingStepEvent(step="agent_deployed", task_status=task_status, agent_deployed=deployed))
-    return deployed
-
-
-def _deploy_setup_agent_impl(
-    base_url: str,
-    workspace: str,
-    config_path: Traversable,
-    default_model: str,
-    headers: dict[str, str] | None = None,
-    *,
-    agent_name: str = _SAMPLE_AGENT_NAME,
-    description: str = _SAMPLE_AGENT_DESCRIPTION,
-    certificate_authority: str | None = None,
-) -> bool:
-    """Create and deploy a packaged setup agent. Returns True on success."""
-    # Optional plugin: import here so ``nemo setup`` works without nemo-agents installed.
-    from nemo_agents_plugin.utils import expand_env_vars
-
-    api_base = base_url.rstrip("/")
-    tls_config = httpx_tls_config_from_env(certificate_authority)
-
-    if not _agent_exists(
-        base_url,
-        workspace,
-        headers=headers,
-        agent_name=agent_name,
-        certificate_authority=certificate_authority,
-    ):
-        config_dict = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        config_dict = expand_env_vars(config_dict, vars_dict={"NEMO_DEFAULT_MODEL": default_model})
-        config_format = config_dict["config_format"]
-        # Fabric sends ``model`` to the OpenAI-compatible endpoint, where a
-        # workspace-qualified entity ID is invalid. Bind the exact entity
-        # route so an agent in ``sample`` can still use a model in ``default``.
-        model_workspace, model_name = parse_qualified_name(default_model)
-        model_config = config_dict["models"]["default"]
-        model_config["model"] = model_name
-        model_config["base_url"] = model_entity_route_openai_url(
-            base_url=base_url,
-            workspace=model_workspace,
-            name=model_name,
-        )
-        payload = {
-            "name": agent_name,
-            "description": description,
-            "config": config_dict,
-            "config_format": config_format,
-        }
-        resp = httpx.post(
-            f"{api_base}/apis/agents/v2/workspaces/{workspace}/agents",
-            headers=headers,
-            json=payload,
-            timeout=30.0,
-            **tls_config,
-        )
-        resp.raise_for_status()
-        console.print(f"  {CHECK} Created agent '{agent_name}'")
-    else:
-        console.print(f"  {CHECK} Agent '{agent_name}' already exists")
-
-    resp = httpx.post(
-        f"{api_base}/apis/agents/v2/workspaces/{workspace}/deployments",
-        headers=headers,
-        json={"agent": agent_name},
-        timeout=30.0,
-        **tls_config,
-    )
-    if resp.status_code == 409:
-        console.print(f"  {CHECK} Agent '{agent_name}' already deployed")
-        return True
-
-    resp.raise_for_status()
-    deployment_name = resp.json().get("name", "")
-
-    # Poll the specific deployment we just created by name, not the full
-    # list.  Previous runs may leave stale "failed" deployments that would
-    # confuse a list-and-scan approach.
-    start = time.monotonic()
-    deadline = start + _AGENT_DEPLOY_TIMEOUT_SECONDS
-    terminal_status: str | None = None
-    with console.status(f"[bold cyan]Deploying agent '{agent_name}'...") as spinner:
-        while time.monotonic() < deadline:
-            elapsed = int(time.monotonic() - start)
-            spinner.update(f"[bold cyan]Deploying agent '{agent_name}'... ({elapsed}s)")
+def _wait_for_sample_deployment(agents_client: AgentsClient, sample: SampleAgentResponse, *, submitted: bool) -> bool:
+    """Wait for the deployment returned by the sample-agent API to reach running."""
+    status = sample.deployment_status
+    deadline = time.monotonic() + _AGENT_DEPLOY_TIMEOUT_SECONDS
+    activity = "Deploying" if submitted else "Waiting for"
+    with console.status(f"[bold cyan]{activity} agent '{sample.agent}'..."):
+        while status not in {"running", "failed"} and time.monotonic() < deadline:
             try:
-                dep_resp = httpx.get(
-                    f"{api_base}/apis/agents/v2/workspaces/{workspace}/deployments/{deployment_name}",
-                    headers=headers,
-                    timeout=3.0,
-                    **tls_config,
-                )
-                if dep_resp.status_code == 200:
-                    dep_status = dep_resp.json().get("status", "")
-                    if dep_status in {"running", "failed"}:
-                        terminal_status = dep_status
-                        break
+                status = agents_client.get_deployment(workspace=sample.workspace, name=sample.deployment).data().status
             except Exception:
-                logger.debug("Agent deployment status poll failed", exc_info=True)
-            _pause(_AGENT_DEPLOY_POLL_INTERVAL)
+                logger.debug("Sample agent deployment status poll failed", exc_info=True)
+            if status not in {"running", "failed"}:
+                _pause(_AGENT_DEPLOY_POLL_INTERVAL)
 
-    if terminal_status == "running":
-        console.print(f"  {CHECK} Deployed agent '{agent_name}'")
+    if status == "running":
+        if submitted:
+            console.print(f"  {CHECK} Deployed agent '{sample.agent}'")
+        else:
+            console.print(f"  {CHECK} Agent '{sample.agent}' is running")
         return True
-    if terminal_status == "failed":
+    if status == "failed":
         console.print(f"  {CROSS} Agent deployment failed")
-        return False
-
-    console.print(f"  {WARN} Agent deployment did not reach running state within {_AGENT_DEPLOY_TIMEOUT_SECONDS}s")
+    else:
+        console.print(f"  {WARN} Agent deployment did not reach running state within {_AGENT_DEPLOY_TIMEOUT_SECONDS}s")
     return False
 
 
-def _wait_for_agents_api(
-    base_url: str,
-    workspace: str,
-    headers: dict[str, str] | None = None,
-    *,
-    certificate_authority: str | None = None,
-) -> bool:
-    """Wait for the agents API to become ready."""
-    start = time.monotonic()
-    deadline = start + _AGENT_API_READINESS_TIMEOUT
-    with console.status("[bold cyan]Waiting for agents API...") as spinner:
-        while time.monotonic() < deadline:
-            elapsed = int(time.monotonic() - start)
-            spinner.update(f"[bold cyan]Waiting for agents API... ({elapsed}s)")
-            if _agents_api_ready(
-                base_url,
-                workspace,
-                headers=headers,
-                certificate_authority=certificate_authority,
-            ):
-                return True
-            _pause(_AGENT_API_READINESS_POLL_INTERVAL)
-    return False
-
-
-def _maybe_deploy_sample_agent(
-    base_url: str,
-    workspace: str,
-    default_model: str | None,
-    headers: dict[str, str] | None = None,
-    *,
-    certificate_authority: str | None = None,
-) -> bool:
-    """Create and deploy the packaged Fabric sample agent when prerequisites are available."""
-    if not _agents_plugin_available():
-        console.print(f"  {WARN} nemo-agents plugin not installed, skipping sample agent deployment")
-        return False
-
-    if not default_model:
-        console.print(f"  {WARN} No default model selected, skipping sample agent deployment")
-        return False
-
-    config_path = _sample_agent_config_path()
-    if config_path is None:
-        console.print(f"  {WARN} Could not find Email Security Triage config YAML, skipping sample agent deployment")
-        return False
-
-    if not _wait_for_agents_api(
-        base_url,
-        workspace,
-        headers=headers,
-        certificate_authority=certificate_authority,
-    ):
-        console.print(f"  {WARN} Agents API not ready at {base_url}, skipping sample agent deployment")
-        return False
-
-    try:
-        return _deploy_setup_agent(
-            base_url,
-            workspace,
-            config_path,
-            default_model,
-            headers=headers,
-            agent_name=_SAMPLE_AGENT_NAME,
-            description=_SAMPLE_AGENT_DESCRIPTION,
-            certificate_authority=certificate_authority,
-        )
-    except Exception as exc:
-        console.print(f"  {WARN} Sample agent deployment failed: {exc}")
-        return False
+def _print_sample_progress(event: SampleAgentStreamEvent) -> None:
+    """Render a provisioning frame without claiming an existing resource was created."""
+    if event.component == "workspace":
+        if event.status in {"created", "existing"}:
+            action = "Created" if event.status == "created" else "Found existing"
+            console.print(f"  {CHECK} {action} sample workspace '{event.workspace}'")
+    elif event.component == "agent":
+        if event.status in {"created", "existing"}:
+            action = "Created" if event.status == "created" else "Found existing"
+            console.print(f"  {CHECK} {action} agent '{_SAMPLE_AGENT_NAME}'")
+    elif event.component == "deployment":
+        if event.status in {"submitted", "existing"}:
+            action = "Submitted" if event.status == "submitted" else "Found existing"
+            console.print(f"  {CHECK} {action} agent deployment")
+    elif event.component == "dataset":
+        action = {"uploaded": "Uploaded", "updated": "Updated", "existing": "Found existing"}.get(event.status)
+        if action:
+            console.print(f"  {CHECK} {action} dataset '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_DATASET_FILENAME}'")
+    elif event.component == "evaluation_config":
+        if event.status in {"uploaded", "existing"}:
+            action = "Uploaded" if event.status == "uploaded" else "Found existing"
+            console.print(
+                f"  {CHECK} {action} evaluation config '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_EVAL_CONFIG_FILENAME}'"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -2189,6 +1948,63 @@ def _collect_credential(provider: KnownProvider) -> str:
     return key.strip()
 
 
+def _reprompt_api_key(label: str) -> str:
+    """Ask the user to enter a different API key during interactive validation."""
+    key = prompt_password(
+        f"{label} API key: ",
+        validator=non_empty_validator("API key"),
+    )
+    return key.strip()
+
+
+def _confirm_interactive_api_key(
+    *,
+    provider_name: str,
+    host_url: str,
+    api_key: str,
+    auth_header_format: str | None,
+    default_extra_headers: dict[str, str] | None,
+    label: str,
+) -> str:
+    """Validate ``api_key`` interactively; re-prompt or continue on non-valid outcomes.
+
+    Returns the API key to register. Raises ``typer.Exit`` on abort; ``UserCancelled``
+    from prompts propagates to the interactive setup handler.
+    """
+    current_key = api_key
+    while True:
+        console.print("\n  Validating API key...")
+        key_result = _validate_api_key(
+            provider_name,
+            host_url,
+            current_key,
+            auth_header_format=auth_header_format,
+            default_extra_headers=default_extra_headers,
+        )
+        if key_result.status == KeyValidationStatus.VALID:
+            console.print(f"  {CHECK} API key validated")
+            return current_key
+
+        if key_result.status == KeyValidationStatus.REJECTED:
+            console.print(f"  {CROSS} {escape(key_result.message)}")
+            console.print("  Enter a different API key, or cancel to exit.")
+            current_key = _reprompt_api_key(label)
+            continue
+
+        console.print(f"  {WARN} {escape(key_result.message)}")
+        action = prompt_choice(
+            "API key could not be verified. What next?",
+            options=_KEY_VALIDATION_ACTIONS,
+            default="reenter",
+            indent=2,
+        )
+        if action == "continue":
+            return current_key
+        if action == "abort":
+            raise typer.Exit(1)
+        current_key = _reprompt_api_key(label)
+
+
 def _register_provider_interactive(
     clients: SetupClients,
     *,
@@ -2220,7 +2036,7 @@ def _register_provider_interactive(
             auth_header_format=auth_header_format,
             default_extra_headers=default_extra_headers,
         )
-        console.print(f"  {CHECK} Updated provider '{provider_name}' ({host_url})")
+        console.print(f"  {CHECK} Updated provider '{provider_name}' ({display_url(host_url)})")
     else:
         _create_provider(
             clients,
@@ -2231,7 +2047,7 @@ def _register_provider_interactive(
             auth_header_format=auth_header_format,
             default_extra_headers=default_extra_headers,
         )
-        console.print(f"  {CHECK} Registered provider '{provider_name}' ({host_url})")
+        console.print(f"  {CHECK} Registered provider '{provider_name}' ({display_url(host_url)})")
 
 
 def _probe_response_detail(resp: httpx.Response) -> str:
@@ -2272,19 +2088,31 @@ def _catalog_model_ids(resp: httpx.Response) -> list[str]:
 
 
 def _nvidia_build_chat_candidates(model_ids: list[str]) -> list[str]:
+    """Return a short list of chat models for key validation (NVIDIA-first, smallest first)."""
     chat_ids = [model_id for model_id in model_ids if _is_usable_chat_model_entity(model_id)]
-    ordered = _order_candidates_by_size(chat_ids, largest_first=True)
-    return ordered[:_MODEL_PROBE_MAX_ATTEMPTS]
+    ordered = _order_candidates_by_size(chat_ids, largest_first=False)
+    return ordered[:_KEY_VALIDATION_CHAT_MAX_ATTEMPTS]
+
+
+def _inconclusive_message(summary: str, resp: httpx.Response | None = None) -> str:
+    """Build fail-open copy that never blames the key for an unverified probe."""
+    base = f"Could not verify API key: {summary} {_KEY_UNVERIFIED_SUFFIX}"
+    if resp is None:
+        return base
+    return _with_probe_detail(base, resp)
 
 
 def _probe_status_result(resp: httpx.Response) -> KeyValidationResult:
     if resp.status_code in _KEY_REJECTED_STATUS_CODES:
-        return KeyValidationResult(passed=False, message=_with_probe_detail(_KEY_REJECTED_MESSAGE, resp))
+        return KeyValidationResult(
+            status=KeyValidationStatus.REJECTED,
+            message=_with_probe_detail(_KEY_REJECTED_MESSAGE, resp),
+        )
     if resp.is_success:
-        return KeyValidationResult(passed=True, message="")
+        return KeyValidationResult(status=KeyValidationStatus.VALID)
     return KeyValidationResult(
-        passed=True,
-        message=_with_probe_detail(f"Provider probe received HTTP {resp.status_code}.", resp),
+        status=KeyValidationStatus.INCONCLUSIVE,
+        message=_inconclusive_message(f"probe received HTTP {resp.status_code}.", resp),
     )
 
 
@@ -2298,10 +2126,13 @@ def _nvidia_build_chat_probe(
     """POST chat completions to catalog candidates until auth is proven or exhausted."""
     candidates = _nvidia_build_chat_candidates(_catalog_model_ids(catalog_resp))
     if not candidates:
-        return KeyValidationResult(passed=True, message="Provider catalog listed no usable chat models.")
+        return KeyValidationResult(
+            status=KeyValidationStatus.INCONCLUSIVE,
+            message=_inconclusive_message("provider catalog listed no usable chat models."),
+        )
 
     chat_url = f"{host_url.rstrip('/')}/v1/chat/completions"
-    last_warning = "Provider probe did not find a callable chat model."
+    last_warning = _inconclusive_message("probe did not find a callable chat model.")
     for model_id in candidates:
         body = {
             "model": model_id,
@@ -2312,18 +2143,18 @@ def _nvidia_build_chat_probe(
             chat_resp = httpx.request("POST", chat_url, headers=headers, json=body, timeout=timeout)
         except httpx.TimeoutException:
             logger.debug("NVIDIA Build chat probe timed out for '%s'", model_id)
-            last_warning = "Provider probe timed out."
+            last_warning = _inconclusive_message("provider probe timed out.")
             continue
         except Exception as exc:
             logger.debug("NVIDIA Build chat probe failed for '%s': %s", model_id, exc)
-            last_warning = f"Provider probe failed ({exc})."
+            last_warning = _inconclusive_message(f"provider probe failed ({exc}).")
             continue
         if chat_resp.status_code in _KEY_REJECTED_STATUS_CODES:
             return _probe_status_result(chat_resp)
         if chat_resp.is_success:
-            return KeyValidationResult(passed=True, message="")
+            return KeyValidationResult(status=KeyValidationStatus.VALID)
         last_warning = _probe_status_result(chat_resp).message
-    return KeyValidationResult(passed=True, message=last_warning)
+    return KeyValidationResult(status=KeyValidationStatus.INCONCLUSIVE, message=last_warning)
 
 
 def _validate_api_key(
@@ -2338,19 +2169,22 @@ def _validate_api_key(
     """Probe the provider with the API key to detect auth failures early.
 
     Makes a lightweight request to an auth-required endpoint.
-    Returns ``passed=False`` only on a definitive 401/403 credential rejection.
+    Returns ``REJECTED`` only on a definitive 401/403 credential rejection.
     Unavailable probe targets, other HTTP statuses, network errors, and unknown
-    providers are treated as *passed* (with a warning message) so setup can
-    still register the provider.
+    providers are ``INCONCLUSIVE`` (fail-open) so setup can still register the
+    provider after an explicit warning.
     """
     if not api_key:
-        return KeyValidationResult(passed=True, message="")
+        return KeyValidationResult(status=KeyValidationStatus.VALID)
 
     probe = _PROBE_CONFIGS.get(provider_name)
     if probe is None:
         return KeyValidationResult(
-            passed=True,
-            message=f"No validation probe configured for provider '{provider_name}'; skipping key check.",
+            status=KeyValidationStatus.INCONCLUSIVE,
+            message=(
+                f"Could not verify API key: no validation probe configured for "
+                f"provider '{provider_name}'. {_KEY_UNVERIFIED_SUFFIX}"
+            ),
         )
 
     headers: dict[str, str] = {}
@@ -2378,14 +2212,20 @@ def _validate_api_key(
         if resp.is_success:
             if provider_name == "nvidia-build":
                 return _nvidia_build_chat_probe(host_url, headers, resp, timeout=timeout)
-            return KeyValidationResult(passed=True, message="")
+            return KeyValidationResult(status=KeyValidationStatus.VALID)
         return _probe_status_result(resp)
     except httpx.TimeoutException:
         logger.debug("API key validation timed out for '%s'", provider_name)
-        return KeyValidationResult(passed=True, message="Provider probe timed out.")
+        return KeyValidationResult(
+            status=KeyValidationStatus.INCONCLUSIVE,
+            message=_inconclusive_message("provider probe timed out."),
+        )
     except Exception as exc:
         logger.debug("API key validation failed for '%s': %s", provider_name, exc)
-        return KeyValidationResult(passed=True, message=f"Provider probe failed ({exc}).")
+        return KeyValidationResult(
+            status=KeyValidationStatus.INCONCLUSIVE,
+            message=_inconclusive_message(f"provider probe failed ({exc})."),
+        )
 
 
 def _select_model_pair(
@@ -2409,17 +2249,25 @@ def _select_model_pair(
     if suggested is None:
         console.print(f"  {WARN} None of the discovered models served a test request; choose a model explicitly.")
 
-    default_model = prompt_select(
+    default_model = prompt_search_select(
         "Choose your default model (used for quality-critical agent work):",
         choices=display_models,
         default=suggested.default if suggested else None,
-        hint="Press Enter to accept the default." if suggested else "Choose a model you can access.",
+        hint="Press Enter to accept the default, or type to search."
+        if suggested
+        else "Type to search models you can access.",
     )
-    fast = prompt_select(
+    fast_default = suggested.fast if suggested else default_model
+    fast_hint = (
+        "Press Enter to reuse the default model, or type to search."
+        if fast_default == default_model
+        else "Press Enter to accept the suggested fast model, or type to search."
+    )
+    fast = prompt_search_select(
         "Choose your fast model (used for latency-sensitive agent work):",
         choices=display_models,
-        default=suggested.fast if suggested else default_model,
-        hint="Press Enter to reuse the default model.",
+        default=fast_default,
+        hint=fast_hint,
     )
     return ModelPair(default=default_model, fast=fast)
 
@@ -2448,14 +2296,16 @@ def _check_ollama_running(host_url: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
+def _auto_setup(clients: SetupClients, workspace: str, inference_base_url: str | None = None) -> str | None:
     """Register a provider from environment variables and return its name."""
+    override_base_url = inference_base_url.strip() if inference_base_url else ""
     for key_var, url_var in _AUTO_ENV_VARS:
         api_key = os.environ.get(key_var)
         if not api_key:
             continue
 
-        base_url = os.environ.get(url_var, "").strip() if url_var else ""
+        base_url = override_base_url or (os.environ.get(url_var, "").strip() if url_var else "")
+        env_provider = next((p for p in KNOWN_PROVIDERS if p.env_var == key_var and p.requires_api_key), None)
         if base_url:
             known = _resolve_provider_for_url(base_url)
             if known:
@@ -2464,18 +2314,16 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
                 hostname = urlparse(base_url).hostname or "custom"
                 provider_name = hostname.replace(".", "-")
             host_url = base_url
-            auth_header_format = known.auth_header_format if known else None
-            default_extra_headers = known.default_extra_headers if known else None
+            auth_provider = known or env_provider
+            auth_header_format = auth_provider.auth_header_format if auth_provider else None
+            default_extra_headers = auth_provider.default_extra_headers if auth_provider else None
         else:
-            for p in KNOWN_PROVIDERS:
-                if p.env_var == key_var and p.requires_api_key:
-                    provider_name = p.name
-                    host_url = p.host_url
-                    auth_header_format = p.auth_header_format
-                    default_extra_headers = p.default_extra_headers
-                    break
-            else:
+            if env_provider is None:
                 continue
+            provider_name = env_provider.name
+            host_url = env_provider.host_url
+            auth_header_format = env_provider.auth_header_format
+            default_extra_headers = env_provider.default_extra_headers
 
         key_result = _validate_api_key(
             provider_name,
@@ -2484,11 +2332,11 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
             auth_header_format=auth_header_format,
             default_extra_headers=default_extra_headers,
         )
-        if not key_result.passed:
+        if key_result.status == KeyValidationStatus.REJECTED:
             console.print(f"  {CROSS} {escape(key_result.message)}")
             console.print(f"  Check the value of ${key_var} and try again.")
             raise typer.Exit(1)
-        if key_result.message:
+        if key_result.status == KeyValidationStatus.INCONCLUSIVE:
             console.print(f"  {WARN} {escape(key_result.message)}")
 
         secret_name = f"{provider_name}-api-key"
@@ -2509,7 +2357,7 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
                 auth_header_format=auth_header_format,
                 default_extra_headers=default_extra_headers,
             )
-            console.print(f"  {CHECK} Updated provider '{provider_name}' ({host_url})")
+            console.print(f"  {CHECK} Updated provider '{provider_name}' ({display_url(host_url)})")
         else:
             _create_provider(
                 clients,
@@ -2520,7 +2368,7 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
                 auth_header_format=auth_header_format,
                 default_extra_headers=default_extra_headers,
             )
-            console.print(f"  {CHECK} Registered provider '{provider_name}' ({host_url})")
+            console.print(f"  {CHECK} Registered provider '{provider_name}' ({display_url(host_url)})")
 
         return provider_name
 
@@ -2623,6 +2471,13 @@ def setup_command(
             help=f"Seconds to wait for platform readiness (default: {_SERVICE_STARTUP_TIMEOUT_SECONDS})",
         ),
     ] = None,
+    inference_base_url: Annotated[
+        str | None,
+        typer.Option(
+            "--inference-base-url",
+            help=("Base URL for the provider registered by --auto. Equivalent to NEMO_DEFAULT_INFERENCE_BASE_URL."),
+        ),
+    ] = None,
 ) -> None:
     """Set up NeMo Helix: connect or start services, configure a provider, install skills.
 
@@ -2646,15 +2501,17 @@ def setup_command(
     (CI, piped input), pass --auto to use environment variables instead.
 
     Use --auto for non-interactive setup from environment variables
-    (NEMO_DEFAULT_INFERENCE_KEY, NVIDIA_API_KEY, OPENAI_API_KEY,
-    ANTHROPIC_API_KEY, GEMINI_API_KEY).
-    Override the selected pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
+    (NEMO_DEFAULT_INFERENCE_KEY with optional NEMO_DEFAULT_INFERENCE_BASE_URL,
+    NVIDIA_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
+    Override the provider URL with --inference-base-url. Override the selected
+    pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
 
     Examples:
       nemo setup
       nemo setup --auto
       nemo setup --auto --start-services --install-skills
       nemo setup --auto --start-services --ready-timeout 360
+      nemo setup --auto --start-services --inference-base-url https://inference-api.nvidia.com/v1
       NHX_BASE_URL=https://nhx.example.com NHX_ACCESS_TOKEN=... nemo setup --auto --no-start-services
       nemo setup --workspace my-workspace
       nemo setup --no-install-skills
@@ -2666,6 +2523,7 @@ def setup_command(
     _require_supported_python()
 
     console.print("\n[bold cyan]NeMo Helix Setup[/bold cyan]\n")
+    _print_legacy_directory_notice()
     if resume:
         console.print(f"{CHECK} Retrying setup using the normal idempotent setup path.\n")
 
@@ -2717,10 +2575,10 @@ def setup_command(
         raise typer.Exit(0) from None
 
     if not _check_platform_reachable_with_retries(base_url, certificate_authority=certificate_authority):
-        console.print(f"\n{CROSS} Cannot reach platform at {base_url}")
+        console.print(f"\n{CROSS} Cannot reach platform at {display_url(base_url)}")
         raise typer.Exit(1)
 
-    console.print(f"{CHECK} Platform reachable at {base_url}\n")
+    console.print(f"{CHECK} Platform reachable at {display_url(base_url)}\n")
 
     # Ensure the config file exists on disk so later Config.write() calls
     # (e.g. saving the default model) can find the cluster and context.
@@ -2763,6 +2621,7 @@ def setup_command(
                 skills_from=skills_from_list,
                 skills_path=skills_path,
                 certificate_authority=certificate_authority,
+                inference_base_url=inference_base_url,
             )
         else:
             _run_interactive_mode(
@@ -2803,10 +2662,11 @@ def _run_auto_mode(
     skills_from: list[str] | None = None,
     skills_path: Path | None = None,
     certificate_authority: str | None = None,
+    inference_base_url: str | None = None,
 ) -> None:
     """Non-interactive provider registration from environment variables."""
     console.print("[bold]Auto-detecting provider from environment...[/bold]\n")
-    provider_name = _auto_setup(clients, workspace)
+    provider_name = _auto_setup(clients, workspace, inference_base_url=inference_base_url)
     if provider_name is None:
         console.print(f"{CROSS} No provider credentials found in environment.")
         env_var_names = ", ".join(key for key, _ in _AUTO_ENV_VARS)
@@ -2902,22 +2762,16 @@ def _run_interactive_mode(
         provider_name, host_url, api_key, auth_header_format, default_extra_headers = _interactive_collect_provider()
 
         if api_key:
-            console.print("\n  Validating API key...")
-            key_result = _validate_api_key(
-                provider_name,
-                host_url,
-                api_key,
+            known = _KNOWN_PROVIDERS_BY_NAME.get(provider_name)
+            label = known.label if known is not None else provider_name
+            api_key = _confirm_interactive_api_key(
+                provider_name=provider_name,
+                host_url=host_url,
+                api_key=api_key,
                 auth_header_format=auth_header_format,
                 default_extra_headers=default_extra_headers,
+                label=label,
             )
-            if not key_result.passed:
-                console.print(f"  {CROSS} {escape(key_result.message)}")
-                console.print("  Please check your API key and run [cyan]nemo setup[/cyan] again.")
-                raise typer.Exit(1)
-            if key_result.message:
-                console.print(f"  {WARN} {escape(key_result.message)}")
-            else:
-                console.print(f"  {CHECK} API key validated")
 
         console.print("\n[bold]Step 3: Register model provider[/bold]\n")
         _register_provider_interactive(
@@ -2973,32 +2827,62 @@ def _run_interactive_mode(
 
         selected_path = _prompt_post_setup_path()
         if selected_path == "sample":
-            workspaces_client = cli_context.typed_client(WorkspacesClient)
-            try:
-                workspace_created = _ensure_workspace_exists(
-                    workspaces_client,
-                    _SAMPLE_WORKSPACE_NAME,
-                    description=_SAMPLE_WORKSPACE_DESCRIPTION,
-                )
-            except Exception as exc:
-                console.print(f"  {WARN} Could not create workspace '{_SAMPLE_WORKSPACE_NAME}': {exc}")
+            if not default_model:
+                console.print(f"  {WARN} No default model selected, skipping sample agent setup")
                 return selected_path
-            if workspace_created:
-                console.print(f"  {CHECK} Created workspace '{_SAMPLE_WORKSPACE_NAME}'")
-            agent_ready = _maybe_deploy_sample_agent(
-                base_url,
-                _SAMPLE_WORKSPACE_NAME,
-                default_model,
-                headers=_platform_request_headers(cli_context),
-                certificate_authority=certificate_authority,
+
+            agents_client = cli_context.typed_client(AgentsClient)
+            progress_workspace = None
+            deployment_submitted = False
+            try:
+                sample = None
+                with agents_client.create_sample_agent(
+                    body=CreateSampleAgentRequest(model=default_model)
+                ).stream() as events:
+                    for event in events:
+                        if event.kind == "progress":
+                            _print_sample_progress(event)
+                            progress_workspace = event.workspace or progress_workspace
+                            deployment_submitted |= event.component == "deployment" and event.status == "submitted"
+                        elif event.kind == "error":
+                            console.print(f"  {WARN} {event.message or 'Sample agent setup failed'}")
+                            if event.workspace:
+                                _print_sample_setup_complete(base_url, event.workspace, complete=False)
+                            return selected_path
+                        elif event.kind == "done":
+                            sample = event.result
+            except NemoHTTPError as exc:
+                detail = exc.body.get("detail") if isinstance(exc.body, dict) else None
+                if isinstance(detail, dict):
+                    workspace_name = detail.get("workspace")
+                    if isinstance(workspace_name, str):
+                        console.print(
+                            f"  {WARN} Sample agent setup failed at {detail.get('failed_step', 'provisioning')}"
+                        )
+                        _print_sample_setup_complete(base_url, workspace_name, complete=False)
+                        return selected_path
+                console.print(f"  {WARN} Could not create sample agent: {exc.detail}")
+                return selected_path
+            except Exception as exc:
+                console.print(f"  {WARN} Could not create sample agent: {exc}")
+                if progress_workspace:
+                    _print_sample_setup_complete(base_url, progress_workspace, complete=False)
+                return selected_path
+
+            if sample is None:
+                console.print(f"  {WARN} Sample agent setup ended without a completion event")
+                if progress_workspace:
+                    _print_sample_setup_complete(base_url, progress_workspace, complete=False)
+                return selected_path
+            agent_ready = _wait_for_sample_deployment(agents_client, sample, submitted=deployment_submitted)
+            emit.emit_event(
+                OnboardingStepEvent(
+                    step="agent_deployed",
+                    task_status=TaskStatusEnum.COMPLETED if agent_ready else TaskStatusEnum.ERROR,
+                    agent_deployed=agent_ready,
+                )
             )
-            files_client = cli_context.typed_client(FilesClient)
-            dataset_ready = _upload_sample_dataset(files_client, _SAMPLE_WORKSPACE_NAME)
-            eval_config_ready = dataset_ready and _upload_sample_eval_config(files_client, _SAMPLE_WORKSPACE_NAME)
-            _print_sample_setup_complete(
-                base_url,
-                complete=all((agent_ready, dataset_ready, eval_config_ready)),
-            )
+            _print_sample_setup_complete(base_url, sample.workspace, complete=agent_ready)
         return selected_path
 
     except UserCancelled:
@@ -3046,7 +2930,10 @@ def _print_setup_complete(
     if not _verify_platform_health(base_url, certificate_authority=certificate_authority):
         raise typer.Exit(1)
 
-    lines = [f"[bold]Provider:[/bold] {provider_name}"]
+    lines = [
+        f"[bold]Platform:[/bold] {display_url(base_url)}",
+        f"[bold]Provider:[/bold] {provider_name}",
+    ]
     if default_model:
         lines.append(f"[bold]Default model:[/bold] {_display_model_name(default_model)}")
     if fast_model:
@@ -3062,29 +2949,6 @@ def _print_setup_complete(
             padding=(1, 1),
         )
     )
-
-
-def _ensure_workspace_exists(
-    workspaces_client: WorkspacesClient,
-    name: str,
-    *,
-    description: str | None = None,
-) -> bool:
-    """Ensure a workspace exists and return whether it was created."""
-    try:
-        workspaces_client.get_workspace(name=name).data()
-        return False
-    except Exception:
-        try:
-            workspaces_client.create_workspace(body=CreateWorkspaceRequest(name=name, description=description)).data()
-            return True
-        except Exception as create_err:
-            # Treat a workspace created concurrently as success without hiding real failures.
-            try:
-                workspaces_client.get_workspace(name=name).data()
-                return False
-            except Exception:
-                raise create_err from None
 
 
 def _prompt_post_setup_path() -> str:

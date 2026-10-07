@@ -57,11 +57,18 @@ export interface UseBaseModelsResult {
   refetch: () => void;
 }
 
+export const getBaseModelsQueryKeyPrefix = (workspace: string) => [
+  QUERY_PREFIX_ENTITY_STORE,
+  'base-models',
+  'infinite',
+  workspace,
+];
+
 const getBaseModelsQueryKey = (
   workspace: string,
   filter?: ModelEntityFilterInput,
   sort?: ModelEntitySortField
-) => [QUERY_PREFIX_ENTITY_STORE, 'base-models', 'infinite', workspace, filter, sort];
+) => [...getBaseModelsQueryKeyPrefix(workspace), filter, sort];
 
 const getNextPageParam = (lastPage: ModelEntitysPage) => {
   if (!lastPage.pagination) return undefined;

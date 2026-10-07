@@ -15,21 +15,24 @@ Select it with ``agent_import_path`` and hand it the agent through ``agent_kwarg
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent",
         agent_kwargs={
             "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
-            "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
+            "fabric_package": "nemo-fabric[deepagents,relay]==0.4.0",
         },
         env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
     )
 
 It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabric's install/run
 keywords -- and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is
-required: the harness extra to install cannot be derived from the config.
+required: the harness extra to install cannot be derived from the config. It is split like a shell
+command line, so a caller can pin a harness's own dependencies next to the Fabric distribution
+(``"nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0"``); a specifier that contains spaces, such as
+one with an environment marker, must be quoted (``"'pkg==1.0; python_version<\"3.13\"'"``).
 
 Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
 yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstalledAgent._exec``
 prefixes ``set -o pipefail`` onto every command it runs for every installed agent, so a ``/bin/sh``
 backend cannot run any of them; Docker and Daytona execute through bash, Harbor's HF sandbox does
 not. glibc because ``nemo-fabric-runtime`` publishes no musllinux wheels, so Alpine-based tasks fail
-at the final ``uv pip install`` with an unsatisfiable resolution -- 0.3.0 publishes macOS arm64 and
+at the final ``uv pip install`` with an unsatisfiable resolution -- 0.4.0 publishes macOS arm64, Windows, and
 manylinux wheels only, and this is not something the agent can work around.
 """
 
@@ -108,6 +111,14 @@ def _version_string(name: str, value: str | float | int) -> str:
     return value
 
 
+def _quoted_requirements(package: str) -> str:
+    """``fabric_package`` split like a shell command line, each requirement re-quoted as one argument."""
+    requirements = shlex.split(package)
+    if not requirements:
+        raise ValueError("fabric_package must name at least one requirement")
+    return " ".join(shlex.quote(requirement) for requirement in requirements)
+
+
 class FabricInstalledAgent(BaseInstalledAgent):
     """A Harbor installed agent that delegates the run to a wrapped :class:`NemoFabricAgent`.
 
@@ -175,7 +186,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
         if not self.fabric.fabric_package:
             raise ValueError(
                 "fabric_package is required: name the Fabric distribution and harness extra to "
-                'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.3.0"'
+                'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.4.0"'
             )
 
     @staticmethod
@@ -300,7 +311,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
             'if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; fi; '
             f"uv python install {python_version}; "
             f"uv venv {shlex.quote(self._venv_path)} --python {python_version} --clear; "
-            f"uv pip install --python {shlex.quote(self._venv_python)} {shlex.quote(package)}"
+            f"uv pip install --python {shlex.quote(self._venv_python)} {_quoted_requirements(package)}"
         )
 
     @property

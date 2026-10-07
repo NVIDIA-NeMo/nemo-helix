@@ -45,17 +45,12 @@ Terminology on this page:
 Minimal sync evaluation with a built-in metric:
 
 ```python
-import os
-
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_evaluator_sdk import ExactMatchMetric
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-evaluator: Evaluator = client.evaluator
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
 
 metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
 

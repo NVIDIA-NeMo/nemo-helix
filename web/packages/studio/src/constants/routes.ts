@@ -62,6 +62,13 @@ export const ROUTES = {
     jobs: `/workspaces/:${P.workspace}/jobs`,
     jobDetail: `/workspaces/:${P.workspace}/jobs/:${P.jobName}`,
     newCustomizationJob: `/workspaces/:${P.workspace}/fine-tune/new`,
+    /**
+     * The full fine-tuning form. A sibling route rather than a step inside
+     * `newCustomizationJob`, so it survives a reload and answers to browser back.
+     * Named for the "build from scratch" tile that reaches it, but it also serves
+     * the template hand-off, `?model=` deep links, and Clone.
+     */
+    newCustomizationJobScratch: `/workspaces/:${P.workspace}/fine-tune/new/scratch`,
     baseModels: `/workspaces/:${P.workspace}/base-models`,
     /** Base models list with a specific model panel open (model name in path) */
     baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}`,

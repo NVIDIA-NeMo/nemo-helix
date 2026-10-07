@@ -13,6 +13,7 @@ Uses the create_test_client pattern for fast in-memory testing.
 from typing import Generator
 
 import pytest
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import (
     CreateWorkspaceRequest,
@@ -67,6 +68,25 @@ class TestWorkspaceCRUD:
         # Without auth, created_by/updated_by are empty string
         assert workspace.created_by == ""
         assert workspace.updated_by == ""
+
+    def test_sample_workspace_name_is_reserved(self, client: WorkspacesClient):
+        """Ordinary callers cannot create names in the sample namespace."""
+        name = short_unique_name("sample")
+
+        with pytest.raises(PermissionDeniedError):
+            client.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
+
+        with pytest.raises(PermissionDeniedError):
+            client.with_headers({"X-NHX-Principal-Id": "service:other"}).create_workspace(
+                body=CreateWorkspaceRequest(name=name)
+            ).data()
+
+        created = (
+            client.with_headers({"X-NHX-Principal-Id": "service:agents"})
+            .create_workspace(body=CreateWorkspaceRequest(name=name))
+            .data()
+        )
+        assert created.name == name
 
     def test_create_duplicate_workspace_fails(self, client: WorkspacesClient):
         """Test that creating a duplicate workspace returns 409."""

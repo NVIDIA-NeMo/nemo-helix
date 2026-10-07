@@ -95,11 +95,13 @@ error. A practical test: the trace can answer _where did the system go wrong, an
 
 ### Setup
 
-The examples assume a running NeMo Helix reachable at `$NHX_BASE_URL`. Point at whatever you have,
-whether a deployed platform or a local one from `nemo setup` or `nemo quickstart up`:
+The examples call the Intake API directly with `curl`, which can't read your CLI context. They use
+`$NHX_BASE_URL`, which defaults to a local platform from `nemo setup` or `nemo quickstart up`. If your
+current context points at a deployed platform, export its URL as `NHX_BASE_URL` first. For details,
+refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
 
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080
+: "${NHX_BASE_URL:=http://127.0.0.1:8080}"
 export WORKSPACE=default
 export NHX_STUDIO_URL="$NHX_BASE_URL/studio"
 export NHX_ACCESS_TOKEN="$(nemo auth token)"
@@ -264,7 +266,7 @@ A stock Harbor `trajectory.json` does **not** carry this value. Harbor writes re
 below. For example:
 
 ```json
-"extra": { "verifier_result": { "rewards": { "solved": 1, "groundedness": 0.8 } } }
+{ "extra": { "verifier_result": { "rewards": { "solved": 1, "groundedness": 0.8 } } } }
 ```
 
 **Explicitly, through the API.** Post a result against a span and session. Unlike the ATIF automatic

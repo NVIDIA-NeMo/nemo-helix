@@ -7,9 +7,9 @@ This module bridges the nhx CLI config file (~/.config/nhx/config.yaml) and the
 platform HTTP clients.  When the active user is an OAuthUser, the bootstrap
 wires up **transparent token refresh** so that every HTTP request made through a
 client automatically carries a valid Bearer token — no manual token management
-needed.  It has no dependency on any generated SDK; ``factory.py`` layers the
-``NeMoHelix`` constructors on top, and :func:`build_nemo_client` /
-:func:`build_async_nemo_client` build typed ``NemoClient`` instances directly.
+needed.  :func:`build_nemo_client` / :func:`build_async_nemo_client` build typed
+``NemoClient`` instances directly, and ``factory.py`` exposes the same resolution
+as constructor arguments for clients that take an httpx client and headers.
 
 High-level flow
 ===============
@@ -33,7 +33,7 @@ performed inline before the request proceeds.
 Concurrency safety
 ==================
 
-Three layers prevent race conditions when multiple SDK instances or processes
+Three layers prevent race conditions when multiple client instances or processes
 share the same config file:
 
 1. **In-process thread lock** — ``OIDCTokenProvider._lock`` serializes concurrent
@@ -62,7 +62,7 @@ import httpx
 from nemo_helix_plugin.client.auth import TokenProviderAuth
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 
 from nemo_helix_ext.auth.helpers import NHXOIDCConfig, build_effective_scope, discover_nhx_config
 from nemo_helix_ext.auth.token_provider import (
@@ -124,7 +124,7 @@ class _ProviderCacheKey:
 
 # Process-wide cache: (config_path, context, OIDC settings, CA) → shared OIDCTokenProvider.
 # This avoids redundant refresh-token grants when the user creates multiple
-# NeMoHelix() instances pointing at the same context.
+# clients pointing at the same context.
 _TOKEN_PROVIDER_CACHE: dict[_ProviderCacheKey, OIDCTokenProvider] = {}
 
 
@@ -255,7 +255,7 @@ class _LazyWorkloadTokenExchangeProvider:
 def _make_auth_event_hook(provider: AccessTokenProvider):
     """Create a **sync** httpx request event hook that injects the Bearer token.
 
-    Called before every SDK HTTP request.  ``provider.get_access_token()``
+    Called before every HTTP request.  ``provider.get_access_token()``
     returns the cached token if still valid, or performs an inline
     refresh_token grant if the token is expired/about-to-expire.
     """
@@ -268,7 +268,7 @@ def _make_auth_event_hook(provider: AccessTokenProvider):
 
 
 def _make_async_auth_event_hook(provider: AccessTokenProvider):
-    """Create an **async** httpx request event hook for AsyncNeMoHelix.
+    """Create an **async** httpx request event hook that injects the Bearer token.
 
     The actual refresh still runs in a worker thread (via
     ``provider.get_access_token_async``) so it doesn't block the event loop.
@@ -302,7 +302,7 @@ def _make_config_persister(context_name: str, config_path: Path | None = None):
     nhx config file.
 
     After a successful refresh, the provider calls this so that the CLI and
-    other SDK processes pick up the rotated tokens without re-authenticating.
+    other processes pick up the rotated tokens without re-authenticating.
     """
     from nemo_helix_ext.config.config import Config, ConfigParams
 
@@ -611,15 +611,7 @@ def resolve_bootstrap(
 # Typed client construction
 # ---------------------------------------------------------------------------
 
-# Matches the retry behaviour the generated SDK applied by default, so the CLI
-# keeps the same resilience against transient gateway errors.
-DEFAULT_RETRY_POLICY = RetryPolicy(
-    max_retries=2,
-    retryable_status_codes=(408, 409, 429),
-    retry_all_server_errors=True,
-    respect_retry_decision_headers=True,
-    respect_retry_after_headers=True,
-)
+DEFAULT_RETRY_POLICY = PLATFORM_DEFAULT_RETRY_POLICY
 
 
 # Connect phase cap for CLI clients. A blackholed endpoint fails in seconds
@@ -690,6 +682,7 @@ def build_nemo_client(
         timeout=resolved_timeout,
         retry=retry,
         http_client=http_client,
+        owns_http_client=True,
     )
 
 
@@ -728,6 +721,7 @@ def build_async_nemo_client(
         timeout=resolved_timeout,
         retry=retry,
         http_client=http_client,
+        owns_http_client=True,
     )
 
 
@@ -760,6 +754,7 @@ def build_direct_nemo_client(
         timeout=resolved_timeout,
         retry=retry,
         http_client=http_client,
+        owns_http_client=True,
     )
 
 
@@ -787,4 +782,5 @@ def build_direct_async_nemo_client(
         timeout=resolved_timeout,
         retry=retry,
         http_client=http_client,
+        owns_http_client=True,
     )

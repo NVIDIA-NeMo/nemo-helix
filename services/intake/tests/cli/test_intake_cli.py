@@ -350,7 +350,7 @@ def test_spans_evaluator_results_list_is_not_paginated(intake_cli) -> None:
     assert recorder.last.url.path == f"{WS}/spans/span-1/evaluator-results"
     assert dict(recorder.last.url.params) == {}
     assert json.loads(result.stdout) == [
-        {**EVALUATOR_RESULT, "string_value": None, "comment": None, "created_by": None}
+        {**EVALUATOR_RESULT, "status": "SCORED", "string_value": None, "comment": None, "created_by": None}
     ]
 
 

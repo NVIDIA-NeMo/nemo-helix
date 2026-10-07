@@ -193,7 +193,9 @@ class TestComputeScores:
             "Available item keys=['prompt']. \n"
             "Available sample keys=['output_text'].\n"
             "Dataset item has missing_key='reference' but the 'reference' template references it.\n"
-            "Ensure that the dataset provides the fields referenced by the templates."
+            "Supply this field: add it to the dataset, or bind it with a field_mapping. If a field_mapping "
+            "already binds it, the mapped path did not resolve for this row -- correct the path, since a "
+            "dataset column of this name does not satisfy a binding that misses."
         )
 
     @pytest.mark.asyncio
@@ -209,7 +211,9 @@ class TestComputeScores:
             "Available item keys=['reference']. \n"
             "Available sample keys=['output_text'].\n"
             "Dataset item has missing_key='prediction' but the 'candidate' template references it.\n"
-            "Ensure that the dataset provides the fields referenced by the templates."
+            "Supply this field: add it to the dataset, or bind it with a field_mapping. If a field_mapping "
+            "already binds it, the mapped path did not resolve for this row -- correct the path, since a "
+            "dataset column of this name does not satisfy a binding that misses."
         )
 
     @pytest.mark.asyncio
@@ -227,7 +231,9 @@ class TestComputeScores:
             "Available item keys=['prompt']. \n"
             "Available sample keys=['output_text'].\n"
             "Dataset item has missing_key='reference' but the 'reference' template references it.\n"
-            "Ensure that the dataset provides the fields referenced by the templates."
+            "Supply this field: add it to the dataset, or bind it with a field_mapping. If a field_mapping "
+            "already binds it, the mapped path did not resolve for this row -- correct the path, since a "
+            "dataset column of this name does not satisfy a binding that misses."
         )
 
     @pytest.mark.asyncio

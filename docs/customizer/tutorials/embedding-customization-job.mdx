@@ -35,7 +35,7 @@ Stage 1 writes contrastive rows as JSONL:
 
 ## Prerequisites
 
-- A running NeMo Helix at `NHX_BASE_URL`, default `http://localhost:8080`. See the [Quickstart](/documentation/get-started).
+- A running NeMo Helix and a CLI context that points at it. See the [Quickstart](/documentation/get-started) and [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 - The Python SDK: `pip install "nemo-helix[all]"`, or `make bootstrap` from the repo root.
 - An NGC API key for the `nvcr.io` NIM images.
 - GPU capacity: 4× 80 GB for the validated training job, about 40 GB for mining and evaluation. Serving the base and tuned NIMs side by side takes two GPUs.
@@ -43,12 +43,22 @@ Stage 1 writes contrastive rows as JSONL:
 
 ## 1. Initialize the SDK
 
+The SDK and the `nemo` CLI connect to the deployment in your current CLI context. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments). These examples use the `default` workspace. If your current CLI context uses a different workspace, run `nemo config set --workspace default` first.
+
+In environments without a CLI configuration file, such as Google Colab, set `NHX_BASE_URL` (and `NHX_ACCESS_TOKEN` for an authenticated deployment) before you create the client. `NemoClient.from_config()` reads both:
+
+```python
+import os
+
+os.environ["NHX_BASE_URL"] = "<YOUR_NHX_BASE_URL>"
+```
+
+Export your NGC API key. It becomes a Platform secret so the cluster can pull NIM images:
+
 ```sh
-export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 export NGC_API_KEY=<YOUR_NGC_API_KEY>
 ```
 
-The `nemo` CLI reads `NHX_BASE_URL` too, and `--base-url` overrides it per command. The NGC key becomes a Platform secret so the cluster can pull NIM images:
 
 ```bash
 echo "$NGC_API_KEY" | nemo secrets create ngc-api-key --workspace default --from-file -
@@ -60,11 +70,31 @@ import os
 import time
 import uuid
 from IPython.display import clear_output
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    CreateModelEntityRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
+    UpdateModelEntityRequest,
+)
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nemo_customizer.sdk import Customization
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
+from pydantic import SecretStr
+from nemo_helix_plugin.schema import SecretRef
 
-NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
-print(f"Platform: {NHX_BASE_URL}")
+client = NemoClient.from_config()
+customization = Customization.from_client(client)
+data_designer = DataDesignerResource(client)
+print(f"Platform: {client.base_url}")
 
 ```
 
@@ -88,7 +118,7 @@ nemo models get nemotron-3-embed-1b --workspace default
 The entity is ready once `nemo models get` reports a non-null `fileset` and a populated `spec`. For a gated repo, create the token first with `nemo secrets create hf-token --value "$HF_TOKEN"` and add `"token_secret":"hf-token"` to `--storage`.
 
 ```python
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
 NGC_API_KEY = os.environ.get("NGC_API_KEY")
 if not NGC_API_KEY:
@@ -96,7 +126,7 @@ if not NGC_API_KEY:
 
 NGC_SECRET_NAME = "ngc-api-key"
 try:
-    client.secrets.create(name=NGC_SECRET_NAME, workspace="default", value=NGC_API_KEY)
+    client.secrets.create_secret(body=HelixSecretCreateRequest(name=NGC_SECRET_NAME, value=SecretStr(NGC_API_KEY))).data()
     print(f"Created secret: {NGC_SECRET_NAME}")
 except ConflictError:
     print(f"Secret '{NGC_SECRET_NAME}' already exists")
@@ -105,41 +135,50 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 HF_REPO_ID = "nvidia/Nemotron-3-Embed-1B-BF16"
 MODEL_NAME = "nemotron-3-embed-1b"
 
-storage_kwargs = {"type": "huggingface", "repo_id": HF_REPO_ID, "repo_type": "model"}
 if HF_TOKEN:
     try:
-        client.secrets.create(name="hf-token", workspace="default", value=HF_TOKEN)
+        client.secrets.create_secret(body=HelixSecretCreateRequest(name="hf-token", value=SecretStr(HF_TOKEN))).data()
     except ConflictError:
         pass
-    storage_kwargs["token_secret"] = "hf-token"
-
-storage = HuggingfaceStorageConfigParam(**storage_kwargs)
-try:
-    client.files.filesets.create(
-        workspace="default",
-        name=MODEL_NAME,
-        purpose="model",
-        description="Nemotron 3 Embed 1B BF16 checkpoint",
-        storage=storage,
+    storage = HuggingfaceStorageConfig(
+        repo_id=HF_REPO_ID,
+        repo_type="model",
+        token_secret=SecretRef("hf-token"),
     )
+else:
+    storage = HuggingfaceStorageConfig(
+        repo_id=HF_REPO_ID,
+        repo_type="model",
+    )
+try:
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            purpose=FilesetPurpose.MODEL,
+            description="Nemotron 3 Embed 1B BF16 checkpoint",
+            storage=storage,
+        ),
+    ).data()
 except ConflictError:
     print("Base model fileset already exists")
 
 try:
-    base_model = client.models.create(
-        workspace="default",
-        name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-        trust_remote_code=True,
-    )
+    base_model = client.models.create_model(
+        body=CreateModelEntityRequest(
+            name=MODEL_NAME,
+            fileset=f"default/{MODEL_NAME}",
+            trust_remote_code=True,
+        ),
+    ).data()
     print(f"Created Model Entity: {MODEL_NAME}")
 except ConflictError:
-    base_model = client.models.update(
-        workspace="default",
+    base_model = client.models.update_model(
         name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-        trust_remote_code=True,
-    )
+        body=UpdateModelEntityRequest(
+            fileset=f"default/{MODEL_NAME}",
+            trust_remote_code=True,
+        ),
+    ).data()
     print(f"Updated Model Entity: {MODEL_NAME}")
 
 print("Waiting for ModelSpec...")
@@ -148,7 +187,7 @@ while not getattr(base_model, "spec", None):
     if time.time() - spec_start > 180:
         raise TimeoutError("ModelSpec not populated")
     time.sleep(3)
-    base_model = client.models.retrieve(workspace="default", name=MODEL_NAME)
+    base_model = client.models.get_model(name=MODEL_NAME).data()
 print(f"fileset={base_model.fileset} spec={base_model.spec}")
 if not base_model.fileset:
     raise RuntimeError("Entity has a null fileset; it cannot be trained. Recreate from the Hugging Face fileset.")
@@ -179,7 +218,7 @@ nemo jobs watch <prepare-job> --workspace default
 ```
 
 ```python
-from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig
+from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalMiningOptions, RetrievalPrepareJobConfig
 
 NVDOCS_SDG = "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/nv_pp_dd_sdg.json"
 
@@ -189,12 +228,12 @@ prepare_spec = RetrievalPrepareJobConfig(
     model=f"default/{MODEL_NAME}",
     hard_negatives_to_mine=5,
     hard_neg_margin=0.95,
-    mining={
-        "query_embedding_batch_size": 64,
-        "document_embedding_batch_size": 64,
-    },
+    mining=RetrievalMiningOptions(
+        query_embedding_batch_size=64,
+        document_embedding_batch_size=64,
+    ),
 )
-prepare_job = client.data_designer.retrieval_prepare(prepare_spec, workspace="default")
+prepare_job = data_designer.retrieval_prepare(prepare_spec, workspace="default")
 print(f"Prepare job: {prepare_job.name}")
 
 prepare_job.wait_until_done()
@@ -250,18 +289,16 @@ fileset_ref, _, remote_prefix = ARTIFACTS_REF.partition("#")
 job_fileset = fileset_ref.split("/", 1)[-1]
 local_dir = Path(tempfile.mkdtemp(prefix="nvdocs-artifacts-"))
 
-client.files.download(
-    remote_path=f"{remote_prefix}/training.jsonl",
-    local_path=str(local_dir / "training.jsonl"),
-    fileset=job_fileset,
-    workspace="default",
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.get(
+    rpath=f"default/{job_fileset}/{remote_prefix}/training.jsonl",
+    lpath=str(local_dir / "training.jsonl"),
 )
 # eval_beir arrives under local_dir; a destination already named eval_beir nests as eval_beir/eval_beir
-client.files.download(
-    remote_path=f"{remote_prefix}/eval_beir",
-    local_path=str(local_dir),
-    fileset=job_fileset,
-    workspace="default",
+fs.get(
+    rpath=f"default/{job_fileset}/{remote_prefix}/eval_beir",
+    lpath=str(local_dir),
+    recursive=True,
 )
 if not (local_dir / "eval_beir" / "corpus.jsonl").is_file():
     raise RuntimeError(f"eval_beir/corpus.jsonl missing under {local_dir}")
@@ -271,6 +308,8 @@ qrels_path = local_dir / "eval_beir" / "qrels" / "test.tsv"
 with qrels_path.open(encoding="utf-8", newline="") as stream:
     reader = csv.DictReader(stream, delimiter="\t")
     header = reader.fieldnames
+    if header is None:
+        raise RuntimeError(f"{qrels_path} is missing a header")
     seen: set[tuple[str, str]] = set()
     kept: list[dict[str, str]] = []
     for row in reader:
@@ -285,19 +324,19 @@ with qrels_path.open("w", encoding="utf-8", newline="") as stream:
 print(f"qrels judgments: {len(kept)}")
 
 try:
-    client.files.filesets.create(
-        workspace="default",
-        name=TRAINING_FILESET,
-        purpose="dataset",
-        description="NVDocs mined retrieval artifacts",
-    )
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=TRAINING_FILESET,
+            purpose=FilesetPurpose.DATASET,
+            description="NVDocs mined retrieval artifacts",
+        ),
+    ).data()
 except ConflictError:
     pass
-client.files.upload(
-    local_path=f"{local_dir}/",
-    remote_path="",
-    fileset=TRAINING_FILESET,
-    workspace="default",
+fs.put(
+    lpath=f"{local_dir}/",
+    rpath=f"default/{TRAINING_FILESET}/",
+    recursive=True,
 )
 TRAINING_REF = f"default/{TRAINING_FILESET}"
 print("dataset.training and retrieve-eval dataset:", TRAINING_REF)
@@ -361,7 +400,18 @@ nemo jobs watch embed-nvdocs --workspace default
 `training.recipe`, `training.finetuning_type`, and `training.retrieval.export.primary` have no per-flag form; supply them through `--spec` or `--spec-file`.
 
 ```python
-from nemo_automodel_plugin.schema import AutomodelJobInput
+from nemo_automodel_plugin.schema import (
+    AutomodelJobInput,
+    BatchSpec,
+    DatasetSpec,
+    ExportSpec,
+    OptimizerSpec,
+    OutputRequest,
+    ParallelismSpec,
+    RetrievalSpec,
+    ScheduleSpec,
+    TrainingSpec,
+)
 
 job_suffix = uuid.uuid4().hex[:4]
 JOB_NAME = f"embed-nvdocs-{job_suffix}"
@@ -369,58 +419,62 @@ OUTPUT_NAME = f"nemotron-3-embed-1b-tuned-{job_suffix}"
 
 spec = AutomodelJobInput(
     model=f"default/{MODEL_NAME}",
-    dataset={"training": TRAINING_REF},
-    training={
-        "training_type": "sft",
-        "recipe": "bi_encoder",
-        "finetuning_type": "all_weights",
-        "execution_profile": "gpu",
-        "max_seq_length": 512,
-        "precision": "bf16",
-        "attn_implementation": "flash_attention_2",
-        "retrieval": {
-            "query_max_length": 512,
-            "passage_max_length": 512,
-            "train_n_passages": 5,
-            "do_distributed_inbatch_negative": False,
-            "export": {"primary": "hf"},
-        },
-    },
-    schedule={
-        "epochs": 3,
-        "seed": 42,
-        "validation_split": 0.01,
-        "val_check_interval": 0.25,
-        "checkpoint_selection": "both",
-    },
-    batch={"global_batch_size": 128, "micro_batch_size": 8},
-    optimizer={
-        "learning_rate": 2.5e-5,
-        "min_learning_rate": 1.25e-5,
-        "warmup_steps": 432,
-        "weight_decay": 0.01,
-        "lr_decay_style": "cosine",
-    },
-    parallelism={"num_gpus_per_node": 4, "tensor_parallel_size": 1},
-    output={"name": OUTPUT_NAME},
+    dataset=DatasetSpec(training=TRAINING_REF),
+    training=TrainingSpec(
+        training_type="sft",
+        recipe="bi_encoder",
+        finetuning_type="all_weights",
+        execution_profile="gpu",
+        max_seq_length=512,
+        precision="bf16",
+        attn_implementation="flash_attention_2",
+        retrieval=RetrievalSpec(
+            query_max_length=512,
+            passage_max_length=512,
+            train_n_passages=5,
+            do_distributed_inbatch_negative=False,
+            export=ExportSpec(primary="hf"),
+        ),
+    ),
+    schedule=ScheduleSpec(
+        epochs=3,
+        seed=42,
+        validation_split=0.01,
+        val_check_interval=0.25,
+        checkpoint_selection="both",
+    ),
+    batch=BatchSpec(global_batch_size=128, micro_batch_size=8),
+    optimizer=OptimizerSpec(
+        learning_rate=2.5e-5,
+        min_learning_rate=1.25e-5,
+        warmup_steps=432,
+        weight_decay=0.01,
+        lr_decay_style="cosine",
+    ),
+    parallelism=ParallelismSpec(num_gpus_per_node=4, tensor_parallel_size=1),
+    output=OutputRequest(name=OUTPUT_NAME),
 )
 
-job = client.customization.automodel.jobs.create(spec=spec, workspace="default", name=JOB_NAME)
-print(f"Submitted {job.job.name}")
+job = customization.automodel.jobs.create(
+    spec=spec.model_dump(mode="json", exclude_unset=True),
+    workspace="default",
+    name=JOB_NAME,
+)
+print(f"Submitted job: {JOB_NAME}")
 print(f"Output model: {OUTPUT_NAME}")
 ```
 
 ```python
+import time
+
+# Poll the job until it reaches a terminal state
 while True:
-    status = client.jobs.get_status(name=job.job.name, workspace="default")
-    clear_output(wait=True)
-    print(status.model_dump_json(indent=2))
-    if status.status in ("completed", "failed", "cancelled", "error"):
+    status = client.jobs.get_status(name=JOB_NAME, workspace="default")
+    print(f"Status: {status.status}")
+    if status.status.lower() in ("completed", "failed", "cancelled", "error"):
         break
     time.sleep(30)
 
-if status.status != "completed":
-    raise RuntimeError(f"Training finished with status: {status.status}")
 ```
 
 ### Interpreting contrastive loss
@@ -469,47 +523,52 @@ TUNED_CFG = f"embed-tuned-cfg-{deploy_suffix}"
 BASE_DEP = f"embed-base-{deploy_suffix}"
 TUNED_DEP = f"embed-tuned-{deploy_suffix}"
 
-executor = {
-    "gpu": 1,
-    "image_name": NIM_IMAGE,
-    "image_tag": NIM_TAG,
-    "override_config": {"nimLegacy": False},
-}
-
-base_cfg = client.inference.deployment_configs.create(
-    workspace="default",
-    name=BASE_CFG,
-    engine="nim",
-    model_spec={},
-    executor_config=executor,
-    model_entity_id=f"default/{MODEL_NAME}",
-)
-tuned_cfg = client.inference.deployment_configs.create(
-    workspace="default",
-    name=TUNED_CFG,
-    engine="nim",
-    model_spec={"model_namespace": "default", "model_name": OUTPUT_NAME},
-    executor_config=executor,
-    model_entity_id=f"default/{OUTPUT_NAME}",
+executor = ContainerExecutorConfig(
+    gpu=1,
+    image_name=NIM_IMAGE,
+    image_tag=NIM_TAG,
+    override_config={"nimLegacy": False},
 )
 
-base_deployment = client.inference.deployments.create(
-    workspace="default", name=BASE_DEP, config=base_cfg.name
-)
-tuned_deployment = client.inference.deployments.create(
-    workspace="default", name=TUNED_DEP, config=tuned_cfg.name
-)
+base_cfg = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name=BASE_CFG,
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(),
+        executor_config=executor,
+        model_entity_id=f"default/{MODEL_NAME}",
+    ),
+).data()
+tuned_cfg = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name=TUNED_CFG,
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name=OUTPUT_NAME,
+        ),
+        executor_config=executor,
+        model_entity_id=f"default/{OUTPUT_NAME}",
+    ),
+).data()
+
+base_deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(name=BASE_DEP, config=base_cfg.name),
+).data()
+tuned_deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(name=TUNED_DEP, config=tuned_cfg.name),
+).data()
 print(base_deployment.name, tuned_deployment.name)
 
 ```
 
 ```python
 for deployment in (BASE_DEP, TUNED_DEP):
-    if not client.models.wait_for_status(deployment, "READY", workspace="default", timeout=2700):
+    if not client.models.wait_for_deployment_status(deployment, "READY", workspace="default", timeout=2700):
         raise RuntimeError(f"{deployment} did not reach READY")
 
 for entity in (MODEL_NAME, OUTPUT_NAME):
-    providers = client.models.retrieve(workspace="default", name=entity).model_providers
+    providers = client.models.get_model(name=entity).data().model_providers
     print(entity, "providers:", providers)
     if not providers:
         raise RuntimeError(f"{entity} has no model_providers; retrieve-eval cannot score it")
@@ -527,17 +586,25 @@ nemo inference gateway provider post v1/embeddings embed-tuned --workspace defau
 ```
 
 ```python
-resp = client.inference.gateway.provider.post(
-    "v1/embeddings",
+from typing import Any, cast
+
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+resp = InferenceGatewayClient.from_client(client).provider_post(
     name=TUNED_DEP,
     workspace="default",
-    body={
-        "model": f"default/{OUTPUT_NAME}",
-        "input": ["What does NVLink connect?"],
-        "input_type": "query",
-    },
-)
-print("dim", len(resp["data"][0]["embedding"]))
+    trailing_uri="v1/embeddings",
+    body=JsonBody(
+        {
+            "model": f"default/{OUTPUT_NAME}",
+            "input": ["What does NVLink connect?"],
+            "input_type": "query",
+        }
+    ),
+).data()
+resp_body = cast(dict[str, Any], resp)
+print("dim", len(resp_body["data"][0]["embedding"]))
 
 ```
 

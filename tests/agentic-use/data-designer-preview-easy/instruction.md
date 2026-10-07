@@ -3,9 +3,9 @@
 
 # Data Designer Preview
 
-You have access to the `nemo` CLI and the NeMo Helix Python SDK for NeMo Helix operations. Your task is to set up inference and generate a preview of synthetic data using the Data Designer with both sampler and LLM-generated columns.
+You have access to the `nemo` CLI and the NeMo Helix Python clients for NeMo Helix operations. Your task is to set up inference and generate a preview of synthetic data using the Data Designer with both sampler and LLM-generated columns.
 
-The `nemo` CLI is available at `/app/.venv/bin/nemo`. The Python SDK is available at `/app/.venv/bin/python` with `from nemo_helix import NeMoHelix`. Both connect to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The Python clients are available at `/app/.venv/bin/python` with `from nemo_helix_plugin.client.client import NemoClient`. Both connect to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Context
 
@@ -24,33 +24,41 @@ The `ANTHROPIC_API_KEY` environment variable contains an API key that works with
 - `nemo inference providers list` - List all registered providers
 - `nemo inference providers retrieve <name>` - Get provider details
 
-### Model Registration (Python SDK)
+### Model Registration (Python client)
 
 Register a served model so the inference gateway maps a model entity to an upstream model:
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import ServedModelMapping, UpdateModelProviderStatusRequest
 
-sdk = NeMoHelix(base_url="http://localhost:8080")
-sdk.inference.providers.update_status(
+client = NemoClient(base_url="http://localhost:8080")
+ModelsClient.from_client(client).update_provider_status(
     name="<provider_name>",
     workspace="default",
-    served_models=[{
-        "model_entity_id": "default/<model_entity_name>",
-        "served_model_name": "<upstream_model_name>",
-    }],
+    body=UpdateModelProviderStatusRequest(
+        served_models=[
+            ServedModelMapping(
+                model_entity_id="default/<model_entity_name>",
+                served_model_name="<upstream_model_name>",
+            )
+        ],
+    ),
 )
 ```
 
-### Data Designer Preview (Python SDK)
+### Data Designer Preview (Python client)
 
-The `nemo data-designer preview` CLI command is not available. Use the Python SDK instead:
+The `nemo data-designer preview` CLI command is not available. Use the Python client instead:
 
 ```python
 import data_designer.config as dd
-from nemo_helix import NeMoHelix
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+data_designer = DataDesignerResource(client)
 
 # Build config with the ConfigBuilder
 config_builder = dd.DataDesignerConfigBuilder(
@@ -104,7 +112,7 @@ config_builder.add_column(
 )
 
 # Run preview
-preview_results = client.data_designer.preview(config_builder, num_records=10)
+preview_results = data_designer.preview(config_builder, num_records=10)
 print(preview_results.dataset)
 ```
 

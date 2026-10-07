@@ -16,7 +16,7 @@ from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.service import ExceptionHandler, NemoService, RouterSpec
 from nemo_scaled_evals_plugin.authz import scope, stamp_router_authz
 from nemo_scaled_evals_plugin.migrations import apply_sql
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.db import close_pool, open_pool
 from scaled_evals.api.routers import (
     admin,
@@ -161,7 +161,7 @@ class ScaledEvalsService(NemoService):
         `/v1/readyz` reporting `object_store` as the authoritative check.
         """
         try:
-            bucket = s3.ensure_bucket()
+            bucket = artifacts.ensure_bucket()
         except Exception:
             logger.exception("scaled-evals: object store unavailable; /v1/readyz will report object_store failure")
             return

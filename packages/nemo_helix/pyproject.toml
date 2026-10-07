@@ -123,7 +123,6 @@ entities-service = [
   "nhx-common",
   "lark>=1.1.0",
   "fastmcp>=3.2.0",
-  "nemo-helix-sdk",
   "alembic>=1.13.1",
 ]
 
@@ -151,6 +150,7 @@ files-service = [
 filesets = [
   "anyio>=4.0.0",
   "fsspec>=2023.1.0",
+  "nemo-helix-plugin",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -237,12 +237,6 @@ jobs-service = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-models = [
-  "nemo-helix-sdk",
-  "openai",
-]
-
-# Generated from [tool.bundle-package]; do not edit by hand.
 models-service = [
   "fastapi>=0.115.8",
   "pydantic>=2.10.6",
@@ -288,29 +282,30 @@ nemo-agents-plugin = [
   "python-on-whales>=0.60",
   "anthropic>=0.88.0",
   "rich>=13.7.1",
-  "nemo-fabric[relay,streaming]>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-claude>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-codex>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
+  "nemo-fabric[relay,streaming]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-claude = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-claude[harness]>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-codex = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-codex[harness]>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-deepagents = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-deepagents[harness]>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -367,7 +362,6 @@ nemo-data-designer-plugin = [
 nemo-deployments-plugin = [
   "fastapi>=0.115",
   "httpx>=0.27",
-  "nemo-helix-sdk",
   "nemo-helix-plugin",
   "pydantic>=2.10.6",
   "pyyaml>=6.0",
@@ -400,8 +394,8 @@ nemo-evaluator-sdk = [
   "ragas==0.4.3",
   "langchain-openai>=1.3.5",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
-  "nemo-relay>=0.7.3,<0.8",
-  "nemo-fabric>=0.3.0,<0.4.0",
+  "nemo-relay>=0.9.3,<0.10",
+  "nemo-fabric>=0.4.0,<0.5.0",
   "opentelemetry-proto>=1.27.0",
   "pytrec-eval-terrier==0.5.10",
 ]
@@ -418,7 +412,6 @@ nemo-guardrails-plugin = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-helix-ext = [
-  "nemo-helix-sdk",
   "nemo-helix-plugin",
   "typer>=0.20.0",
   "rich>=13.7.1",
@@ -440,7 +433,6 @@ nemo-helix-plugin = [
   "filesets",
   "jsonschema>=4.0.0",
   "lark>=1.1.0",
-  "nemo-helix-sdk",
   "openai>=1.109.1",
   "pydantic>=2.12.0",
   "pydantic-settings>=2.8.1",
@@ -449,42 +441,20 @@ nemo-helix-plugin = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-nemo-helix-sdk = [
-  "httpx>=0.23.0, <1",
-  "pydantic>=2.0.0,<3",
-  "typing-extensions>=4.14, <5",
-  "anyio>=4.0.0,<5",
-  "distro>=1.7.0, <2",
-  "sniffio",
-  "nemo-helix-plugin",
-  "typer>=0.20.0",
-  "rich>=13.7.1",
-  "prompt_toolkit>=3.0.0",
-  "requests>=2.31.0",
-  "pyyaml>=6.0.0",
-  "docker>=7.0.0",
-  "ngcsdk>=4.8.2",
-  "nvidia-ml-py>=13.0.0",
-  "psutil>=5.9.0",
-  "openai",
-  "fsspec>=2023.1.0",
-]
-
-# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-insights-plugin = [
   "fastapi>=0.115",
   "httpx",
-  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137",
-  "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
+  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137",
+  "nemo-fabric-adapter-contract>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-common>=0.4.0,<0.5.0",
   "nemo-helix-plugin",
-  "nemo-relay>=0.7,<0.8",
-  "nooa>=0.0.9",
+  "nemo-relay>=0.9.3,<0.10",
+  "nooa>=0.0.10,<0.0.11",
   "opentelemetry-exporter-otlp>=1.42.1",
   "opentelemetry-sdk>=1.42.1",
   "pydantic>=2.12.0",
   "pyyaml>=6.0.3",
-  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest",
+  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest",
   "typer>=0.20.0",
   "tzdata==2026.2",
 ]
@@ -534,8 +504,10 @@ nemo-safe-synthesizer-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-switchyard = [
   "httpx>=0.27.0,<1",
+  "nemo-agent-optimization-plugin",
   "nemo-helix-plugin",
   "nemo-switchyard==0.3.0",
+  "pyyaml>=6.0.2",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -556,9 +528,9 @@ nhx-common = [
   "pydantic-settings>=2.8.1",
   "fastapi[standard]>=0.137.2",
   "lark>=1.1.0",
+  "nemo-helix-ext",
   "nemo-helix-plugin",
   "pyyaml>=6.0.2",
-  "nemo-helix-sdk",
   "sqlalchemy>=2.0.0",
   "huggingface-hub>=1.0.1,<2.0.0",
   "hvac>=2.3.0",
@@ -670,7 +642,6 @@ unsloth-service = [
   "nhx-common",
   "nhx-customization-common",
   "nemo-helix-plugin",
-  "nemo-helix-sdk",
   "pydantic>=2.10.6",
   "pydantic-settings>=2.6.1",
   "httpx>=0.27.0",
@@ -771,6 +742,7 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "agent-optimization.run-strategy" = "nemo_agent_optimization_plugin.jobs.run_strategy:RunStrategyJob"
 "evaluator.retrieve-eval" = "nemo_evaluator.jobs.retrieve_eval:RetrieveEvalJob"
 "agent-optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
+"agent-optimization.switchyard" = "nemo_switchyard.jobs.optimize:SwitchyardOptimizeJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.logging_provider"]
@@ -795,10 +767,6 @@ evaluator = "nemo_evaluator.sdk.resources:evaluator_sdk_resources"
 safe_synthesizer = "nemo_safe_synthesizer_plugin.sdk.resources:safe_synthesizer_sdk_resources"
 insights = "nemo_insights_plugin.sdk:insights_sdk_resources"
 customization = "nemo_customizer.sdk.resources:customization_sdk_resources"
-
-# Generated from [tool.bundle-package]; do not edit this table by hand.
-[project.entry-points."nemo.sdk_provider"]
-platform = "nhx.common.sdk_factory:HelixSDKProvider"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.seed"]
@@ -834,7 +802,6 @@ customizer = "nemo_customizer.skills:get_skills_path"
 [tool.uv.sources]
 nemo-helix-ext = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
-models = { workspace = true }
 filesets = { workspace = true }
 nhx-build-tools = { workspace = true }
 
@@ -880,7 +847,6 @@ nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_
 # The CLI. nemo-helix-ext registers its own scripts under private names so the
 # workspace venv only exposes one `nemo`; the wrapper publishes the public names.
 nemo-helix-ext = { source = "../../packages/nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", inherit = { "entry-points" = ["nemo.*"] }, scripts = [{ name = "nemo", value = "nemo_helix_ext.cli.app:cli" }, { name = "nhx", value = "nemo_helix_ext.cli.app:cli" }], force_include = { "../../../../docs" = "nemo_helix_ext/cli/docs" } }
-models = { source = "../../packages/models/src/models", module = "models" }
 filesets = { source = "../../packages/filesets/src/filesets", module = "filesets" }
 nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk", inherit = { "optional-dependencies" = ["harbor"] } }
 data-designer-nemo = { source = "../../packages/data_designer_nemo/src/data_designer_nemo", module = "data_designer_nemo" }
@@ -936,13 +902,6 @@ nhx-unsloth = { source = "../../services/unsloth/src/nhx/unsloth", module = "nhx
 # unpublished workspace members.
 [tool.bundle-package-published]
 packages = ["nemo-sandboxed-gym"]
-
-# Generated nemo_helix module. Bundled only while runtime packages still import
-# it; the wheel takes no scripts, entry points, or extras from its pyproject.
-# Remove this entry together with sdk/python/nemo-helix.
-[tool.bundle-package.nemo-helix-sdk]
-source = "../../sdk/python/nemo-helix/src/nemo_helix"
-module = "nemo_helix"
 
 [tool.bundle-package.nemo-agent-config-example-email-security-triage]
 source = "../../plugins/nemo-agents/examples/nemo-agent-config/email-security-triage/src/email_security_triage"

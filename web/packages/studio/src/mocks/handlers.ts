@@ -12,6 +12,7 @@ import {
   TraceMetricBucketParam,
 } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { agentDeploymentCapabilitiesHandlers } from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { agentOptimizeJobsHandlers } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { customizerHandlers } from '@studio/mocks/handlers/customizer';
 import { deploymentsHandlers } from '@studio/mocks/handlers/deployments';
@@ -118,6 +119,9 @@ const mockAgents = (workspace: unknown) => {
  * but tests can override these with `server.use`.
  */
 export const handlers = [
+  // Platform readiness probe gating the whole app (HelixGuard)
+  http.get(`${PLATFORM_BASE_URL}/health/ready`, () => HttpResponse.json({ status: 'ready' })),
+
   ...sampleDatasetsHandlers,
 
   // Evaluator V2 — fixtures loaded on first use to keep initial handler graph smaller
@@ -719,6 +723,7 @@ export const handlers = [
   http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`, () =>
     HttpResponse.json({ data: [], total: 0 })
   ),
+  ...agentDeploymentCapabilitiesHandlers,
   http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`, () =>
     HttpResponse.json({
       data: [

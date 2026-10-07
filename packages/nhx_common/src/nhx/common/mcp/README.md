@@ -89,15 +89,16 @@ All MCP servers should follow this pattern:
 ```python
 # In any MCP server (e.g., services/core/entities/src/nhx/core/entities/mcp/server.py)
 from fastmcp import FastMCP
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.mcp import format_error_response
-from nhx.common.sdk_factory import get_platform_sdk
 
 def create_server(base_url: str | None = None) -> FastMCP:
     """Create MCP server with tools."""
     server = FastMCP("Service Name")
 
-    # Use shared SDK factory (same as REST services)
-    nemo_client = get_platform_sdk(base_url)
+    # Use the shared typed-client factory (same as REST services)
+    models_client = AsyncModelsClient.from_client(get_async_nemo_client(base_url=base_url))
 
     @server.tool(description="Tool description for AI agents")
     async def my_tool(param: str) -> dict[str, Any]:
@@ -111,7 +112,7 @@ def create_server(base_url: str | None = None) -> FastMCP:
             Dictionary with success and result data
         """
         try:
-            result = nemo_client.some_operation(param)
+            result = await models_client.get_model(name=param)
             return {
                 "success": True,
                 "result": result,
@@ -133,14 +134,13 @@ When service teams build their own MCP servers:
 ```python
 # services/guardrails/src/nhx/guardrails/mcp/server.py
 from fastmcp import FastMCP
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nhx.common.client_factory import get_nemo_client
 from nhx.common.mcp import format_error_response
-from nhx.common.sdk_factory import get_platform_sdk
 
 guardrails = FastMCP("NeMo Guardrails")
-client = client_from_platform(get_platform_sdk(), GuardrailClient)
+client = GuardrailClient.from_client(get_nemo_client())
 
 @guardrails.tool()
 async def create_guardrail_config(config: dict[str, object]):
@@ -160,7 +160,7 @@ async def create_guardrail_config(config: dict[str, object]):
 
 **Benefits**:
 
-- Use same SDK factory as REST services (consistency across platform)
+- Use the same typed-client factory as REST services (consistency across platform)
 - No need to duplicate client creation logic
 - Automatic consistency with other MCP servers
 - Focus on domain-specific tool logic
@@ -189,14 +189,14 @@ platform.mount(guardrails)  # All tools use same patterns
 
 ### Adding New Features
 
-MCP servers use `nhx.common.sdk_factory.get_platform_sdk()` for SDK client creation, which is the same factory used by REST services. This ensures:
+MCP servers use `nhx.common.client_factory.get_nemo_client()` / `get_async_nemo_client()` for typed client creation, which is the same factory used by REST services. This ensures:
 
-- **Consistency**: MCP and REST services use identical SDK configuration
-- **Centralized updates**: Changes to SDK factory benefit both MCP and REST
+- **Consistency**: MCP and REST services use identical client configuration
+- **Centralized updates**: Changes to the client factory benefit both MCP and REST
 - **Auth support**: Automatic service principal auth via `as_service` parameter
 - **Test injection**: HTTP client injection for testing (same as REST services)
 
-See `packages/nhx_common/src/nhx/common/sdk_factory.py` for SDK factory implementation and configuration options.
+See `packages/nhx_common/src/nhx/common/client_factory.py` for the factory implementation and configuration options.
 
 ### Adding Error Enhancements
 
@@ -226,7 +226,7 @@ Potential additions to this module:
 
 - **Rate limiting decorators** - Throttle tool calls per agent
 - **Metrics collection** - Track tool usage across servers
-- **Caching utilities** - Cache expensive SDK calls
+- **Caching utilities** - Cache expensive platform calls
 - **Validation helpers** - Common parameter validation patterns
 - **Authentication decorators** - Workspace/role-based access control
 

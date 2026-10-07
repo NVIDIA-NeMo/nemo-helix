@@ -11,7 +11,7 @@
 # and copying them onto a fresh base would break that.
 
 # Match the NCCL the pinned RL lock overrides. Bump with NEMO_RL_REF.
-ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:26.07-cuda13.3-devel-ubuntu24.04
+ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:26.09-cuda13.4-devel-ubuntu24.04
 
 # Source. Default clones the soluwalana/RL fork at the given ref; override with a local checkout via
 # `--build-context nemo-rl=<path>` or point elsewhere via the NEMO_RL_{REPO,REF} build-args. Gym is
@@ -243,7 +243,7 @@ uv pip install --directory /tmp --python /opt/nemo_rl_venv/bin/python \
     "${OTEL_UPGRADE[@]}" \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7" \
-    "wandb>=0.29.0" \
+    "wandb>=0.30.0" \
     "${OTEL_PINS[@]}"
 uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
     -e /opt/nemo-rl/3rdparty/Gym-workspace/Gym
@@ -310,7 +310,7 @@ sync_venv() {
         uv sync ${UV_SYNC_MODE} --inexact --no-install-project --directory /opt/nemo-rl "$@" "${SKIP[@]}"
     if [[ " $* " == *" --extra nemo_gym "* ]]; then
         uv pip install --directory /tmp --python "${venv}/bin/python" \
-            "nemo-sandboxed-gym[server,opensandbox,ray]==0.1.0a1" \
+            "nemo-sandboxed-gym[server,opensandbox,ray]==${NEMO_SANDBOXED_GYM_VERSION}" \
             "opensandbox>=0.1.9"
     fi
     # --python selects the venv. --directory keeps uv from reading the git pins in pyproject.toml.
@@ -337,7 +337,8 @@ COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/n
 RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
     git -C /opt/nemo-rl apply --verbose \
     /tmp/patches/nemo-rl-verifiers-pin.patch \
-    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch
+    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch \
+    /tmp/patches/nemo-rl-transformers-5.17-tokenizer.patch
 
 # Editable root only. Dependencies were installed by the syncs above.
 RUN <<"EOF" bash -eu
@@ -360,6 +361,7 @@ ARG TARGETARCH
 # mlflow-skinny, sqlparse, hydra-core, and OpenTelemetry afterwards, then drop
 # mlflow, pynvml, and mooncake.
 RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
+    --mount=type=bind,source=docker/rl/hf-stack-overrides.txt,target=/tmp/hf-stack-overrides.txt,readonly \
     <<"EOF" bash -eu
 set -x
 umask 022
@@ -396,11 +398,22 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
     if "${py}" -c 'import importlib.metadata as m; m.version("hydra-core")' >/dev/null 2>&1; then
         uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "hydra-core>=1.3.4,<1.4"
     fi
+    # GHSA-8mcc-hrx5-hvxc, GHSA-7833-fr7j-v32q, GHSA-284h-m62q-gf8w (Critical). Same floor as the
+    # nhx-gym-tasks lock's gitpython>=3.1.62 constraint (BDSA-2026-{30097,30098,31388}).
+    if "${py}" -c 'import importlib.metadata as m; m.version("gitpython")' >/dev/null 2>&1; then
+        uv pip install --python "${py}" --no-deps --upgrade-package gitpython "gitpython>=3.1.62"
+    fi
+    if "${py}" -c 'import importlib.metadata as m; m.version("transformers")' >/dev/null 2>&1; then
+        uv pip install --directory /tmp --python "${py}" \
+            --overrides /tmp/hf-stack-overrides.txt \
+            --upgrade-package transformers --upgrade-package huggingface-hub --upgrade-package tokenizers \
+            -r /tmp/hf-stack-overrides.txt
+    fi
     if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") or importlib.util.find_spec("opentelemetry") else 1)'; then
         # Outside the project, or uv keeps opentelemetry-api 1.45.
         args=(--directory /tmp --python "${py}" "${OTEL_UPGRADE[@]}" "${OTEL_PINS[@]}")
         if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") else 1)'; then
-            uv pip install "${args[@]}" --upgrade-package wandb "wandb>=0.29.0"
+            uv pip install "${args[@]}" --upgrade-package wandb "wandb>=0.30.0"
         else
             uv pip install "${args[@]}"
         fi
@@ -422,6 +435,7 @@ for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
         && ! compgen -G "${d}mlflow_skinny-*.dist-info" >/dev/null \
         && ! compgen -G "${d}hydra_core-*.dist-info" >/dev/null \
         && ! compgen -G "${d}sqlparse-*.dist-info" >/dev/null \
+        && ! compgen -G "${d}gitpython-*.dist-info" >/dev/null \
         && ! compgen -G "${d}mooncake_transfer_engine_cuda13-*.dist-info" >/dev/null; then
         continue
     fi

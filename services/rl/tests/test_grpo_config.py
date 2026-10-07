@@ -596,13 +596,25 @@ def test_sandbox_server_protocol_reaches_the_host_provider(
     step, _ = _prepared_step(tmp_path)
     assert step.gym is not None
 
-    # Unset leaves NeMo-RL's default in place rather than asserting one here.
+    # Unset leaves NeMo-RL's https default in place rather than asserting one here.
     sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
-    assert sandbox["host_provider_options"] == {}
+    assert "protocol" not in sandbox["host_provider_options"]["connection"]
 
     step.gym.sandbox_server_protocol = "http"
     sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
-    assert sandbox["host_provider_options"] == {"connection": {"protocol": "http"}}
+    assert sandbox["host_provider_options"]["connection"]["protocol"] == "http"
+
+
+def test_the_sdk_request_timeout_covers_the_hosts_ready_wait(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The driver lengthens the create timeout itself. A value set here also covers destroy."""
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+
+    sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
+
+    assert "request_timeout_s" not in sandbox["host_provider_options"]["connection"]
 
 
 def test_generation_sampling_comes_from_the_grpo_hyperparameters(
@@ -802,6 +814,20 @@ def test_sandbox_resources_reach_the_sandbox_when_the_operator_sets_them(
     assert sandbox["resources"] == {"cpu": "2", "memory": "8Gi"}
     # create.resource must match resources.
     assert sandbox["host_provider_options"]["create"] == {"resource": {"cpu": "2", "memory": "8Gi"}}
+
+
+def test_memory_mib_is_converted_to_an_sdk_memory_limit(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+    assert step.gym is not None
+    step.gym.sandbox_resources = {"cpu": "2", "memory_mib": "8192"}
+
+    sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
+
+    assert sandbox["resources"] == {"cpu": "2", "memory_mib": "8192"}
+    assert sandbox["host_provider_options"]["create"] == {"resource": {"cpu": "2", "memory": "8192Mi"}}
 
 
 def test_sandbox_resources_unset_leaves_the_provider_default(

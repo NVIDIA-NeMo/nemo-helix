@@ -204,18 +204,6 @@ def test_legacy_get_status_alias_unwraps_response() -> None:
     assert status.status == "created"
 
 
-def test_legacy_jobs_type_import_paths_resolve_to_source_owned_models() -> None:
-    from nemo_helix.types import HelixJobStatusResponse as TopLevelStatusResponse
-    from nemo_helix.types.jobs import HelixJobStep
-    from nemo_helix.types.shared import HelixJobStatusResponse as SharedStatusResponse
-    from nemo_helix_plugin.jobs.schemas import HelixJobStatusResponse
-    from nemo_helix_plugin.jobs.types import HelixJobStepResponse
-
-    assert HelixJobStep is HelixJobStepResponse
-    assert SharedStatusResponse is HelixJobStatusResponse
-    assert TopLevelStatusResponse is HelixJobStatusResponse
-
-
 def test_delete_job_returns_none() -> None:
     mock_http = _mock_http(
         httpx.Response(

@@ -14,6 +14,7 @@ from nemo_evaluator.api.fields import TasksetRef
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
+    GymAgentSource,
     GymPlacement,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
@@ -29,7 +30,8 @@ from pydantic import ValidationError
 
 #: Target fields a runtime config cannot supply, so a round-trip cannot check them here: ``kind``
 #: discriminates the target union, and the other two come from the ``GymPlacement``.
-WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name"}
+#: ``resolved_config`` is what submit-time resolution of a registered agent writes; a live runner never has one.
+WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name", "resolved_config"}
 
 #: The runtime's three agent-selection fields become the target's one ``source``.
 HARBOR_AGENT_VALUES = {
@@ -48,6 +50,8 @@ HARBOR_CARRIED_VALUES = {
     "artifacts": ["/app/output"],
     "trace_dir": "/app/traces",
     "reward_key": "score",
+    "agent_setup_timeout_multiplier": 12.0,
+    "agent_timeout_multiplier": 5.0,
 }
 HARBOR_REJECTED_VALUES = {
     "job_name": "existing-job",
@@ -55,9 +59,7 @@ HARBOR_REJECTED_VALUES = {
     "quiet": False,
     "agent_dir": Path("local-agent"),
     "timeout_multiplier": 2.0,
-    "agent_timeout_multiplier": 2.0,
     "verifier_timeout_multiplier": 2.0,
-    "agent_setup_timeout_multiplier": 2.0,
     "environment_build_timeout_multiplier": 2.0,
 }
 
@@ -76,15 +78,6 @@ def test_harbor_configuration_survives_submission_without_local_storage(tmp_path
         "source": {"import_path": "custom_agent:Agent", "model_name": "model"},  # the import path wins
         **HARBOR_CARRIED_VALUES,
     }
-
-
-def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_path):
-    runner = HarborAgentTaskRunner(
-        config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
-    )
-    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
-    with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
-        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 
 
 _FAKE_KEY = "sk-not-a-real-key-0123456789"
@@ -118,6 +111,15 @@ def test_nested_harbor_target_error_does_not_echo_the_value():
         )
     assert "plaintext credentials" in str(excinfo.value)
     assert _FAKE_KEY not in str(excinfo.value)
+
+
+def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_path):
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
+    )
+    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
+    with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
+        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 
 
 def test_every_harbor_runtime_field_has_a_submission_policy():
@@ -205,7 +207,26 @@ def test_a_gym_runner_describes_itself_as_a_submittable_target() -> None:
     # Every runtime field arrives, unchanged. What is excluded is the set with no runtime
     # counterpart, listed in one place so a new wire-only field is a deliberate addition here
     # rather than a puzzling failure.
-    assert target.model_dump(exclude=WIRE_ONLY_TARGET_FIELDS) == config.model_dump()
+    assert target.model_dump(exclude=WIRE_ONLY_TARGET_FIELDS | {"source"}) == config.model_dump(
+        exclude={"agent", "agent_config"}
+    )
+    assert target.source == GymAgentSource(component=config.agent, config=config.agent_config)
+
+
+def test_gym_runner_submission_carries_refs_but_not_custom_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Resolver:
+        def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
+            return "PRIVATE_SRC"
+
+    monkeypatch.setenv("PRIVATE_SRC", "private-value")
+    config = GymRuntimeConfig(
+        agent="a", agent_config="a.yaml", resources_server="r", env_secrets={"KEY": SecretRef("ws/key")}
+    )
+    target = runner_to_target(GymAgentTaskRunner(config=config, secret_resolver=Resolver()))
+    assert target.env_secrets == {"KEY": SecretRef("ws/key")}
+    serialized = target.model_dump_json()
+    assert "private-value" not in serialized
+    assert "PRIVATE_SRC" not in serialized
 
 
 def test_every_field_actually_travels_rather_than_defaulting() -> None:
@@ -341,8 +362,7 @@ def test_a_hand_written_target_cannot_name_a_variable_both_ways_either() -> None
     # Same rule as GymRuntimeConfig, because a hand-written spec never passes through one.
     with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
         GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="c",
+            source=GymAgentSource(component="simple_agent", config="c"),
             resources_server="mcqa",
             env_vars={"GYM_MODEL_KEY": "plaintext"},
             env_secrets={"GYM_MODEL_KEY": SecretRef("evals/nvidia-api-key")},

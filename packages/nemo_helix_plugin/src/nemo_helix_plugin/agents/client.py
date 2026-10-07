@@ -18,6 +18,7 @@ from nemo_helix_plugin.client.method import method
 
 
 class _AgentsMethods:
+    create_sample_agent = method(endpoints.create_sample_agent)
     get_agent = method(endpoints.get_agent)
     list_agents = method(endpoints.list_agents)
     create_agent = method(endpoints.create_agent)

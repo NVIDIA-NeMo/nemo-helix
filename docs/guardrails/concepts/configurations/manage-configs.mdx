@@ -8,20 +8,21 @@ description: ""
 
 <a id="guardrails-manage-configurations"></a>
 
-Guardrail configuration management operations (create, update, retrieve, list, delete) are available through `client.guardrail.configs`. Refer to [Configuration Structure](/documentation/guardrail-models/core-concepts/configurations/configuration-structure) for details on the configuration data schema.
+Guardrail configuration management operations (create, update, retrieve, list, delete) are available through `client.guardrail`. Refer to [Configuration Structure](/documentation/guardrail-models/core-concepts/configurations/configuration-structure) for details on the configuration data schema.
 
 ---
 
 ## Setup
 
 ```python
-import os
-from nemo_helix import NeMoHelix
-
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.guardrail.types import (
+    CreateGuardrailConfigRequest,
+    UpdateGuardrailConfigRequest,
+    ListGuardrailConfigsQueryParams,
 )
+
+client = NemoClient.from_config()
 ```
 
 ---
@@ -55,11 +56,13 @@ config_data = {
     },
 }
 
-config = client.guardrail.configs.create(
-    name="my-guardrail-config",
-    description="Self-check guardrail configuration",
-    data=config_data,
-)
+config = client.guardrail.create_guardrail_config(
+    body=CreateGuardrailConfigRequest(
+        name="my-guardrail-config",
+        description="Self-check guardrail configuration",
+        data=config_data,
+    ),
+).data()
 
 ```
 
@@ -119,10 +122,10 @@ config = client.guardrail.configs.create(
 List configurations in the workspace.
 
 ```python
-configs = client.guardrail.configs.list()
+configs = client.guardrail.list_guardrail_configs()
 
-print(f"Found {len(configs.data)} configurations:")
-for c in configs.data:
+print(f"Found {len(configs.items())} configurations:")
+for c in configs.items():
     print(f"{c.name}: {c.description}")
 ```
 
@@ -130,11 +133,15 @@ Use the `filter` parameter to narrow results by `name`, `description`, `project`
 
 ```python
 # Filter by exact name
-configs = client.guardrail.configs.list(filter={"name": "my-guardrail-config"})
+configs = client.guardrail.list_guardrail_configs(
+    query_params=ListGuardrailConfigsQueryParams(filter='{"name": "my-guardrail-config"}')
+)
 
 # Filter by created_at range
-configs = client.guardrail.configs.list(
-    filter={"created_at": {"$gte": "2026-01-01T00:00:00"}}
+configs = client.guardrail.list_guardrail_configs(
+    query_params=ListGuardrailConfigsQueryParams(
+        filter='{"created_at": {"$gte": "2026-01-01T00:00:00"}}'
+    )
 )
 ```
 
@@ -207,9 +214,9 @@ configs = client.guardrail.configs.list(
 Retrieve a specific configuration in the workspace by name.
 
 ```python
-config = client.guardrail.configs.retrieve(
+config = client.guardrail.get_guardrail_config(
     name="my-guardrail-config",
-)
+).data()
 ```
 
 <Accordion title="Example Output">
@@ -268,17 +275,19 @@ config = client.guardrail.configs.retrieve(
 Update one or more fields on an existing configuration.
 
 ```python
-updated_config = client.guardrail.configs.update(
+updated_config = client.guardrail.update_guardrail_config(
     name="my-guardrail-config",
-    description="Updated guardrail configuration",
-    data={
-        "rails": {
-            "output": {
-                "streaming": {"enabled": True, "chunk_size": 300, "context_size": 100}
+    body=UpdateGuardrailConfigRequest(
+        description="Updated guardrail configuration",
+        data={
+            "rails": {
+                "output": {
+                    "streaming": {"enabled": True, "chunk_size": 300, "context_size": 100}
+                }
             }
-        }
-    },
-)
+        },
+    ),
+).data()
 
 print(f"Updated config: {updated_config.name}")
 ```
@@ -344,7 +353,7 @@ print(f"Updated config: {updated_config.name}")
 Delete a configuration in the workspace by name.
 
 ```python
-client.guardrail.configs.delete(
+client.guardrail.delete_guardrail_config(
     name="my-guardrail-config",
 )
 

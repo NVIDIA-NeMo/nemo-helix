@@ -206,9 +206,14 @@ class InstanceStillRunningError(Exception):
 class PortConflict:
     """Structured port conflict for terminal rendering by CLI callers."""
 
-    kind: Literal["foreign", "nemo_instance"]
+    kind: Literal["foreign", "nemo_instance", "not_permitted"]
     port: int
     scope: str | None = None
+    host: str | None = None
+
+
+_BIND_NOT_PERMITTED_ERRNOS = frozenset({errno.EPERM, errno.EACCES})
+_PRIVILEGED_PORT_CEILING = 1024
 
 
 def _normalize_bind_host(host: str) -> str:
@@ -234,25 +239,32 @@ def _instance_owns_listener(
     return desc.config.port == port and _normalize_bind_host(desc.config.host) == _normalize_bind_host(host)
 
 
-def is_port_bindable(host: str, port: int) -> bool:
-    """Return True if *host*:*port* can be bound on at least one address family.
+def port_bind_error(host: str, port: int) -> OSError | None:
+    """Return None if *host*:*port* can be bound on at least one address family, else the bind error.
 
     Uses ``getaddrinfo`` so IPv4 and IPv6 hosts (for example ``::``) are probed
-    with the correct socket family instead of always using ``AF_INET``.
+    with the correct socket family instead of always using ``AF_INET``. When
+    every family fails, a permission error wins over other errors so callers
+    can tell a denied bind apart from an occupied port.
     """
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE)
-    except OSError:
-        return False
+    except OSError as err:
+        return err
     if not infos:
-        return False
+        return OSError(errno.EADDRNOTAVAIL, f"no address for {host}")
+    errors: list[OSError] = []
     for family, socktype, proto, _, sockaddr in infos:
-        with contextlib.suppress(OSError):
+        try:
             with socket.socket(family, socktype, proto) as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(sockaddr)  # noqa: S104  # nosec B104
-            return True
-    return False
+        except OSError as err:
+            errors.append(err)
+            continue
+        return None
+    denied = [err for err in errors if err.errno in _BIND_NOT_PERMITTED_ERRNOS]
+    return (denied or errors)[0]
 
 
 def check_port_available_for_start(
@@ -264,12 +276,17 @@ def check_port_available_for_start(
 ) -> PortConflict | None:
     """Return conflict info when *port* cannot be bound, else None.
 
-    Classifies conflicts as ``nemo_instance`` only when a live instance for
-    *scope* is recorded on the same host and port. Otherwise reports ``foreign``.
-    Does not log or print — callers render to the terminal.
+    Reports ``not_permitted`` when the OS denies the bind (EPERM/EACCES), which
+    is not a port conflict at all. Classifies conflicts as ``nemo_instance``
+    only when a live instance for *scope* is recorded on the same host and port.
+    Otherwise reports ``foreign``. Does not log or print; callers render to the
+    terminal.
     """
-    if is_port_bindable(host, port):
+    err = port_bind_error(host, port)
+    if err is None:
         return None
+    if err.errno in _BIND_NOT_PERMITTED_ERRNOS:
+        return PortConflict(kind="not_permitted", port=port, host=host)
     if _instance_owns_listener(scope, host, port, base_dir=base_dir):
         return PortConflict(kind="nemo_instance", port=port, scope=scope)
     return PortConflict(kind="foreign", port=port)
@@ -278,8 +295,23 @@ def check_port_available_for_start(
 def format_port_conflict(err: PortConflict) -> list[str]:
     """Return actionable message lines for terminal display.
 
-    Message text depends on ``err.kind`` (foreign process vs NeMo instance).
+    Message text depends on ``err.kind`` (foreign process, NeMo instance, or denied bind).
     """
+    if err.kind == "not_permitted":
+        address = f"{err.host}:{err.port}" if err.host else f"port {err.port}"
+        if err.port < _PRIVILEGED_PORT_CEILING:
+            return [
+                f"Not permitted to listen on {address} (EPERM/EACCES).",
+                f"Ports below {_PRIVILEGED_PORT_CEILING} need elevated privileges. Choose a higher port:",
+                f"nemo services run --port {SUGGESTED_ALT_PORT}",
+            ]
+        return [
+            f"Not permitted to listen on {address} (EPERM/EACCES). This is not a port conflict.",
+            "The OS denied this process a listening socket, which usually means it runs inside a",
+            "sandbox (for example a coding agent's shell). Another port will fail the same way.",
+            "Start the platform from a shell or service manager outside the sandbox.",
+            "Coding agents: stop and ask the user how they want to host the platform.",
+        ]
     if err.kind == "nemo_instance":
         owner = f" '{err.scope}'" if err.scope else ""
         return [
@@ -306,6 +338,10 @@ class InstanceDescriptor(BaseModel):
     transport: Literal["tcp", "uds"] = "tcp"
     mode: Literal["foreground", "background", "daemon"] = "background"
     create_time: float = 0.0
+    # Process group of the launcher. Background start uses a new session, so
+    # this stays valid after the leader exits and ``stop --force`` can signal
+    # descendants that still hold the flock.
+    pgid: int | None = None
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @model_validator(mode="after")
@@ -330,6 +366,7 @@ class InstanceDescriptor(BaseModel):
             transport=transport,
             mode=mode,
             create_time=get_create_time(resolved_pid),
+            pgid=_process_group_id(resolved_pid),
         )
 
 
@@ -445,6 +482,52 @@ def validate_pid(pid: int, expected_create_time: float, *, tolerance: float = 2.
 def get_create_time(pid: int) -> float:
     """Return the create_time for *pid*.  Raises if the process doesn't exist."""
     return psutil.Process(pid).create_time()
+
+
+def _process_group_id(pid: int) -> int | None:
+    """Return *pid*'s process group, or None when the pid is already gone."""
+    try:
+        return os.getpgid(pid)
+    except ProcessLookupError:
+        return None
+    except OSError:
+        logger.debug("Failed to read process group for pid %s", pid, exc_info=True)
+        return None
+
+
+def _signal_saved_process_group(pgid: int, leader_create_time: float) -> None:
+    """SIGTERM a group recorded while its leader was alive, then SIGKILL if it remains.
+
+    If *pgid* now belongs to a different process, do nothing. A dead leader
+    does not retire the group while a descendant remains. SIGKILL follows only
+    after the group is still present at the end of the shutdown grace period.
+    """
+    try:
+        leader = psutil.Process(pgid)
+    except psutil.NoSuchProcess:
+        leader = None
+    except psutil.AccessDenied:
+        return
+    if leader is not None and abs(leader.create_time() - leader_create_time) >= 2.0:
+        return
+
+    def _send(sig: int) -> bool:
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            logger.debug("Failed to signal process group %s with signal %s", pgid, sig, exc_info=True)
+        return True
+
+    if not _send(signal.SIGTERM):
+        return
+    deadline = time.monotonic() + _SIGKILL_WAIT_TIMEOUT
+    while time.monotonic() < deadline:
+        if not _send(0):
+            return
+        _pause(_SIGTERM_POLL_INTERVAL)
+    _send(signal.SIGKILL)
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +737,26 @@ def stop_instance(
     pid = desc.pid
     if not validate_pid(pid, desc.create_time):
         logger.debug("PID %d doesn't match recorded create_time, cleaning up descriptor", pid)
+        # killpg may have already signaled the lock holder. Wait for the flock
+        # to drop before deciding the scope is still occupied, matching the
+        # normal stop path. Preserve the descriptor only if the lock outlives
+        # that wait.
+        if is_instance_alive(scope, base_dir=base_dir):
+            if desc.pgid is not None:
+                _signal_saved_process_group(desc.pgid, desc.create_time)
+            if not _wait_until_instance_lock_released(
+                scope,
+                base_dir=base_dir,
+                timeout=min(_LOCK_RELEASE_WAIT_TIMEOUT, timeout),
+            ):
+                logger.warning(
+                    "Instance %r pid %d is stale but the lock is still held; preserving descriptor",
+                    scope,
+                    pid,
+                )
+                return StopResult(stopped_pids=[])
+        if _stop_should_preserve_descriptor(scope, desc, base_dir=base_dir):
+            return StopResult(stopped_pids=[])
         remove_descriptor(scope, base_dir=base_dir)
         return StopResult(stopped_pids=[])
 
@@ -722,6 +825,23 @@ def stop_instance(
     else:
         remove_descriptor(scope, base_dir=base_dir)
     return StopResult(stopped_pids=[pid], swept_children=swept)
+
+
+def _stop_should_preserve_descriptor(
+    scope: str,
+    desc: InstanceDescriptor,
+    *,
+    base_dir: Path | None,
+) -> bool:
+    """True when the scope was replaced or re-locked before stop finished deleting it."""
+    if is_instance_alive(scope, base_dir=base_dir):
+        logger.warning("Instance %r lock is held again; preserving descriptor", scope)
+        return True
+    current = read_descriptor(scope, base_dir=base_dir)
+    if current is not None and (current.pid != desc.pid or current.create_time != desc.create_time):
+        logger.warning("Instance %r descriptor changed during stop; preserving replacement descriptor", scope)
+        return True
+    return False
 
 
 def _wait_for_lock_release(scope: str, *, base_dir: Path | None, timeout: float) -> bool:

@@ -12,12 +12,25 @@ import {
   getAgentsListDeploymentsQueryKey,
   useAgentsCreateDeployment,
 } from '@nemo/sdk/generated/agents/agent-deployments';
-import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
-import { Accordion, Stack } from '@nvidia/foundations-react-core';
+import { useAgentsGetAgent, useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
+import { Accordion, Stack, Text } from '@nvidia/foundations-react-core';
+import { buildThenDeployNavigation } from '@studio/api/agents/buildThenDeploy';
+import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
+import {
+  type DeploymentMode,
+  DeploymentModeAvailabilityMode,
+  type DeploymentModes,
+  IMAGE_DEPLOYMENT_MODES,
+  useDeploymentModes,
+} from '@studio/api/agents/useDeploymentModes';
+import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
+import { ImageBuildFirstNotice } from '@studio/components/ImageBuildFirstNotice';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
+import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
+import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
 // Whether a container deployment needs an image depends on the server's configured
@@ -25,16 +38,35 @@ import { z } from 'zod';
 const deploymentFormSchema = z.object({
   name: z.literal('').or(entityNameSchema('Deployment name')).optional(),
   agent: z.string().min(1, 'Agent is required'),
-  deploymentMode: z.enum(['subprocess', 'docker', 'k8s']),
+  deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode),
   image: z.string().optional(),
 });
 
 type DeploymentFormData = z.infer<typeof deploymentFormSchema>;
 
-const makeDefaultValues = (agent?: string, image?: string): DeploymentFormData => ({
+const OFFERED_MODES: readonly DeploymentMode[] = AGENT_CONTAINER_DEPLOYMENTS_ENABLED
+  ? ['subprocess', ...IMAGE_DEPLOYMENT_MODES]
+  : ['subprocess'];
+
+const deployableModes = (modes: DeploymentModes): readonly DeploymentMode[] =>
+  modes.status === 'ready'
+    ? OFFERED_MODES.filter((mode) => modes.enabled.includes(mode))
+    : OFFERED_MODES;
+
+const defaultModeFor = (image: string | undefined, modes: DeploymentModes): DeploymentMode => {
+  const deployable = deployableModes(modes);
+  const imageMode = deployable.find((mode) => mode !== 'subprocess');
+  return (image && imageMode) || deployable.at(0) || 'subprocess';
+};
+
+const makeDefaultValues = (
+  agent: string | undefined,
+  image: string | undefined,
+  modes: DeploymentModes
+): DeploymentFormData => ({
   name: '',
   agent: agent ?? '',
-  deploymentMode: image && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? 'docker' : 'subprocess',
+  deploymentMode: defaultModeFor(image, modes),
   image: image ?? '',
 });
 
@@ -55,7 +87,20 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   initialImage,
 }) => {
   const toast = useToast();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const imageBuildsUnsupported = useImageBuildsUnsupported();
+  const deploymentModes = useDeploymentModes(workspace, { enabled: open });
+  // An image's runtime depends on the modes, so deploying it waits for them; a failed read falls back to all modes.
+  const awaitingModesForImage =
+    Boolean(initialImage) &&
+    AGENT_CONTAINER_DEPLOYMENTS_ENABLED &&
+    deploymentModes.status === 'loading';
+  const availableModes = deployableModes(deploymentModes);
+  const noDeployableMode = availableModes.length === 0;
+  const hasImageMode = availableModes.some((mode) => mode !== 'subprocess');
+  const subprocessUnavailable =
+    deploymentModes.status === 'ready' && !availableModes.includes('subprocess');
 
   const { data: agentsResponse, isLoading: isAgentsLoading } = useAgentsListAgents(
     workspace,
@@ -101,14 +146,44 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
     reset: resetForm,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(deploymentFormSchema),
-    defaultValues: makeDefaultValues(agentProp, initialImage),
+    defaultValues: makeDefaultValues(agentProp, initialImage, deploymentModes),
     disabled: isPending,
     mode: 'onChange',
   });
   const deploymentMode = watch('deploymentMode');
+  const selectedAgent = watch('agent');
+  const enteredImage = watch('image')?.trim();
+
+  const { data: selectedAgentDetails, isLoading: isSelectedAgentLoading } = useAgentsGetAgent(
+    workspace,
+    selectedAgent,
+    { query: { enabled: open && Boolean(selectedAgent) } }
+  );
+  // Without an image or a configured default, the platform can only deploy what it builds first.
+  const needsImageBuild =
+    !enteredImage &&
+    deploymentMode !== 'subprocess' &&
+    deploymentModes.status === 'ready' &&
+    !deploymentModes.withoutImage.includes(deploymentMode) &&
+    !imageBuildsUnsupported;
+  const buildImageFirst =
+    needsImageBuild && selectedAgentDetails?.config_format === FABRIC_CONFIG_FORMAT;
+  // Until the agent loads, a submit would skip the build and be rejected for having no image.
+  const awaitingAgentForImageBuild = needsImageBuild && isSelectedAgentLoading;
+
+  // The modes can arrive after the dialog opens; a default they rule out would be rejected on submit.
+  useEffect(() => {
+    if (
+      deploymentModes.status === 'ready' &&
+      !deployableModes(deploymentModes).includes(deploymentMode)
+    ) {
+      setValue('deploymentMode', defaultModeFor(initialImage, deploymentModes));
+    }
+  }, [deploymentModes, deploymentMode, initialImage, setValue]);
 
   // Opened when a packaged tag is prefilled, so it is not hidden behind a
   // disclosure the user never opened.
@@ -116,20 +191,25 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
     initialImage ? 'advanced' : undefined
   );
 
+  // Without subprocess the runtime is a container one, so it shouldn't stay hidden.
+  useEffect(() => {
+    if (subprocessUnavailable) setAdvancedOpen('advanced');
+  }, [subprocessUnavailable]);
+
   // Seeded on the open transition only. A packaging job can finish while this
   // dialog is open, and reseeding then would wipe what the user has typed.
   const wasOpen = useRef(open);
   useEffect(() => {
     if (open && !wasOpen.current) {
-      resetForm(makeDefaultValues(agentProp, initialImage));
+      resetForm(makeDefaultValues(agentProp, initialImage, deploymentModes));
       setAdvancedOpen(initialImage ? 'advanced' : undefined);
     }
     wasOpen.current = open;
-  }, [open, agentProp, initialImage, resetForm]);
+  }, [open, agentProp, initialImage, resetForm, deploymentModes]);
 
   const reset = () => {
     resetMutation();
-    resetForm(makeDefaultValues(agentProp, initialImage));
+    resetForm(makeDefaultValues(agentProp, initialImage, deploymentModes));
   };
 
   const resetAndClose = () => {
@@ -138,6 +218,16 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   };
 
   const onSubmit: SubmitHandler<DeploymentFormData> = async (formData) => {
+    if (buildImageFirst) {
+      resetAndClose();
+      navigate(
+        ...buildThenDeployNavigation(workspace, formData.agent, {
+          mode: formData.deploymentMode,
+          deploymentName: formData.name || undefined,
+        })
+      );
+      return;
+    }
     try {
       await createDeployment(formData);
     } catch {
@@ -153,13 +243,20 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
       open={open}
       onClose={resetAndClose}
       title="Deploy Agent"
-      submitButtonText="Deploy"
+      submitButtonText={buildImageFirst ? 'Build image and deploy' : 'Deploy'}
       onSubmit={handleSubmit(onSubmit)}
       disabled={isPending}
       loading={isPending}
+      submitDisabled={awaitingModesForImage || noDeployableMode || awaitingAgentForImageBuild}
       errorText={errorMessage}
     >
       <Stack gap="density-xl">
+        {noDeployableMode ? (
+          <Text className="text-secondary" kind="body/regular/sm">
+            This platform has no deployment mode enabled for agents. Ask your platform admin to
+            allow subprocess deployments or configure a Docker or Kubernetes executor.
+          </Text>
+        ) : null}
         <ControlledTextInput
           useControllerProps={{ control, name: 'name' }}
           name="name"
@@ -173,7 +270,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
             are the container path, so they sit behind a disclosure rather than in front
             of everyone — and the whole section is absent when the platform refuses
             container deployments, since there would be nothing advanced to choose. */}
-        {AGENT_CONTAINER_DEPLOYMENTS_ENABLED && (
+        {AGENT_CONTAINER_DEPLOYMENTS_ENABLED && hasImageMode && (
           <Accordion
             className="[&>div]:border-b-0"
             value={advancedOpen}
@@ -187,11 +284,10 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
                   <Stack gap="density-lg" className="pt-density-md">
                     <ControlledSelect
                       useControllerProps={{ control, name: 'deploymentMode' }}
-                      items={[
-                        { value: 'subprocess', children: 'Subprocess' },
-                        { value: 'docker', children: 'Docker' },
-                        { value: 'k8s', children: 'Kubernetes' },
-                      ]}
+                      items={availableModes.map((mode) => ({
+                        value: mode,
+                        children: deploymentModeLabel(mode),
+                      }))}
                       formFieldProps={{
                         slotLabel: 'Runtime',
                         slotInfo:
@@ -206,11 +302,13 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
                         placeholder="nvcr.io/org/team/agent:tag"
                         formFieldProps={{
                           slotError: errors.image?.message,
-                          slotInfo:
-                            'The backend pulls this image using its configured registry credentials. Leave empty to use the deployment default, if one is configured.',
+                          slotInfo: buildImageFirst
+                            ? 'The backend pulls this image using its configured registry credentials. Leave empty to build one for this agent.'
+                            : 'The backend pulls this image using its configured registry credentials. Leave empty to use the deployment default, if one is configured.',
                         }}
                       />
                     )}
+                    {buildImageFirst ? <ImageBuildFirstNotice mode={deploymentMode} /> : null}
                   </Stack>
                 ),
               },

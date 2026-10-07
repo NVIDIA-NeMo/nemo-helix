@@ -184,9 +184,19 @@ def _mock_analyst_models(client: NemoClient, workspace: str) -> tuple[str, str]:
     return f"{workspace}/{default_model}", f"{workspace}/{fast_model}"
 
 
-def _insights(client: NemoClient) -> InsightsPluginResource:
-    """High-level insights resource driven by the typed platform client."""
-    return InsightsPluginResource(client)  # ty: ignore[invalid-argument-type]
+@pytest.fixture
+def insights(client: NemoClient) -> InsightsPluginResource:
+    return InsightsPluginResource(client)
+
+
+@pytest.fixture
+def intake(client: NemoClient) -> IntakeClient:
+    return IntakeClient.from_client(client)
+
+
+@pytest.fixture
+def agents_client(client: NemoClient) -> AgentsClient:
+    return AgentsClient.from_client(client)
 
 
 def _job_diagnostics(client: NemoClient, workspace: str, job_name: str, prefix: str) -> str:
@@ -216,8 +226,8 @@ def _job_diagnostics(client: NemoClient, workspace: str, job_name: str, prefix: 
     return "\n".join(parts)
 
 
-def _list_job_results(client: NemoClient, workspace: str, job_name: str) -> dict[str, Any]:
-    return AgentsClient.from_client(client).list_execute_job_results(name=job_name, workspace=workspace).data()
+def _list_job_results(agents_client: AgentsClient, workspace: str, job_name: str) -> dict[str, Any]:
+    return agents_client.list_execute_job_results(name=job_name, workspace=workspace).data()
 
 
 def _download_job_result(client: NemoClient, workspace: str, job_name: str, result_name: str) -> str:
@@ -227,9 +237,8 @@ def _download_job_result(client: NemoClient, workspace: str, job_name: str, resu
     return response.text
 
 
-def _wait_for_spans(client: NemoClient, *, workspace: str, agent_name: str, timeout: float = 120.0) -> list[Any]:
+def _wait_for_spans(intake: IntakeClient, *, workspace: str, agent_name: str, timeout: float = 120.0) -> list[Any]:
     """Poll Intake: Relay posts as the run ends and ingest is asynchronous."""
-    intake = IntakeClient.from_client(client)
     deadline = time.monotonic() + timeout
     while True:
         page = intake.list_spans(
@@ -254,10 +263,15 @@ def _created_insight_id(report: str) -> str:
     return match.group("insight_id")
 
 
-def test_analysis_run_persists_insights_and_saves_its_report(client: NemoClient, workspace: str) -> None:
+def test_analysis_run_persists_insights_and_saves_its_report(
+    client: NemoClient,
+    workspace: str,
+    insights: InsightsPluginResource,
+    intake: IntakeClient,
+    agents_client: AgentsClient,
+) -> None:
     """One analysis run, end to end, through the supported API surface."""
     target_agent = unique_name("analyzed-agent")
-    intake = IntakeClient.from_client(client)
     now = datetime.now(timezone.utc) - timedelta(seconds=5)
     intake.create_spans(
         workspace=workspace,
@@ -293,7 +307,7 @@ def test_analysis_run_persists_insights_and_saves_its_report(client: NemoClient,
         pytest.fail("Seeded traces did not become queryable")
     default_model, fast_model = _mock_analyst_models(client, workspace)
 
-    created = _insights(client).analysis_runs.create(
+    created = insights.analysis_runs.create(
         workspace=workspace,
         agent=target_agent,
         default_model=default_model,
@@ -309,7 +323,7 @@ def test_analysis_run_persists_insights_and_saves_its_report(client: NemoClient,
     assert created.job is not None
     assert created.job["name"] == run_name
 
-    final = _insights(client).analysis_runs.wait(
+    final = insights.analysis_runs.wait(
         workspace=workspace,
         name=run_name,
         timeout=JOB_TIMEOUT_SECONDS,
@@ -320,13 +334,13 @@ def test_analysis_run_persists_insights_and_saves_its_report(client: NemoClient,
     )
 
     # The run survives as a queryable record, not just as a job.
-    listed = _insights(client).analysis_runs.list_runs(workspace=workspace, agent=target_agent)
+    listed = insights.analysis_runs.list_runs(workspace=workspace, agent=target_agent)
     assert run_name in {run.name for run in listed.data}
     assert final.run.default_model == default_model
     assert final.run.fast_model == fast_model
 
     # The execute extension saves a durable report of what the run did.
-    result_names = {str(result["name"]) for result in _list_job_results(client, workspace, run_name)["data"]}
+    result_names = {str(result["name"]) for result in _list_job_results(agents_client, workspace, run_name)["data"]}
     assert REPORT_RESULT_NAME in result_names, f"Saved results: {sorted(result_names)}"
     report = _download_job_result(client, workspace, run_name, REPORT_RESULT_NAME)
     assert ANALYST_SUMMARY in report
@@ -338,11 +352,11 @@ def test_analysis_run_persists_insights_and_saves_its_report(client: NemoClient,
     # Relay carries the Analyst's own trajectory to Intake. Nothing in this
     # test configures telemetry: the agents plugin wires the export, Fabric
     # resolves it, and the adapter activates it.
-    spans = _wait_for_spans(client, workspace=workspace, agent_name="insights-analyst")
+    spans = _wait_for_spans(intake, workspace=workspace, agent_name="insights-analyst")
     assert spans, "the Analyst ran but its trajectory never reached Intake"
 
     insight_id = _created_insight_id(report)
-    filed = _insights(client).insights.get(workspace=workspace, insight_id=insight_id)
+    filed = insights.insights.get(workspace=workspace, insight_id=insight_id)
     assert filed.title == INSIGHT_TITLE
     assert filed.description == INSIGHT_DESCRIPTION
     assert filed.agent == target_agent

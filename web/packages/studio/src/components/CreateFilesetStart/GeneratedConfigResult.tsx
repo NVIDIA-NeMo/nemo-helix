@@ -133,6 +133,10 @@ export const GeneratedConfigResult: FC<GeneratedConfigResultProps> = ({
         <Banner kind="inline" status="error">
           This draft can&apos;t be loaded into the builder yet:
           <IssueList items={validation.errors} />
+          <Text kind="body/regular/sm" className="mt-density-sm">
+            Larger models generate valid configurations more reliably. If these errors persist,
+            consider selecting a larger model.
+          </Text>
           {fixHandler ? <FixButton label="Fix these errors" onFix={fixHandler} /> : null}
         </Banner>
       )}

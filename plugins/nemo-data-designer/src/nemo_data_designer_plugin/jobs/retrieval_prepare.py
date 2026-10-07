@@ -88,7 +88,7 @@ class RetrievalPrepareJob(NemoJob):
                 "nemo_data_designer_plugin.jobs.retrieval_prepare",
                 spec,
                 profile=profile,
-                async_sdk=async_sdk,
+                async_client=async_sdk,
                 hf_token_secret=spec.job_config.hf_token_secret,
             )
         ]
@@ -100,7 +100,7 @@ class RetrievalPrepareJob(NemoJob):
                 await model_download_step(
                     spec.model_fileset,
                     profile=profile,
-                    async_sdk=async_sdk,
+                    async_client=async_sdk,
                 )
             )
             steps.append(
@@ -109,7 +109,7 @@ class RetrievalPrepareJob(NemoJob):
                     RETRIEVAL_MINE_MODULE,
                     mine_spec,
                     profile=profile,
-                    async_sdk=async_sdk,
+                    async_client=async_sdk,
                     gpu=True,
                 )
             )
@@ -122,26 +122,26 @@ class RetrievalPrepareJob(NemoJob):
         return _run_convert(step.job_config, work_dir(ctx, "stage1_data_prep"), ctx, sdk)
 
 
-def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NemoClient) -> Path:
+def _materialize_input(ref: str, dest: Path, ctx: JobContext, client: NemoClient) -> Path:
     hf_token = hf_token_from_env()
     if Path(ref).is_absolute():
-        return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
+        return materialize_corpus(ref, dest=dest, client=client, workspace=ctx.workspace, hf_token=hf_token)
     storage_root = (ctx.storage.persistent or ctx.storage.ephemeral).resolve()
     staged = (storage_root / ref).resolve()
     if not staged.is_relative_to(storage_root):
         raise ValueError(f"Staged input path escapes job storage: {ref}")
     if staged.exists():
         return staged
-    return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
+    return materialize_corpus(ref, dest=dest, client=client, workspace=ctx.workspace, hf_token=hf_token)
 
 
-def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NemoClient) -> dict:
+def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, client: NemoClient) -> dict:
     if job.train_input_file:
         train_file = _materialize_input(
             job.train_input_file,
             ctx.storage.ephemeral / "train_input",
             ctx,
-            sdk,
+            client,
         )
         if train_file.is_dir():
             candidate = train_file / "train.json"
@@ -158,7 +158,7 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
             job.sdg_input,
             ctx.storage.ephemeral / "sdg_input",
             ctx,
-            sdk,
+            client,
         )
         from nemo_data_designer_plugin.retrieval.conversion import execute_conversion
 

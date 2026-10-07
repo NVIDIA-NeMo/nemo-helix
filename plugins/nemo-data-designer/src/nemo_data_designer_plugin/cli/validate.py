@@ -12,7 +12,7 @@ from data_designer.cli.ui import print_error, print_header, print_success
 from nemo_data_designer_plugin.cli._context import (
     OutputFormat,
     load_builder_or_exit,
-    resolve_sdks_or_exit,
+    resolve_clients_or_exit,
     resolve_workspace,
 )
 from nemo_data_designer_plugin.sdk.validation import ValidationReport, validate_config_sync
@@ -58,13 +58,13 @@ def validate_command(
     `nemo data-designer check-models` for that.
     """
     config_builder = load_builder_or_exit(config_source)
-    sdk, async_sdk = resolve_sdks_or_exit(typer_ctx)
-    resolved_workspace = resolve_workspace(workspace, sdk=sdk, async_sdk=async_sdk)
+    client, async_client = resolve_clients_or_exit(typer_ctx)
+    resolved_workspace = resolve_workspace(workspace, client=client, async_client=async_client)
 
     report = validate_config_sync(
         config_builder,
-        sdk=sdk,
-        async_sdk=async_sdk,
+        client=client,
+        async_client=async_client,
         workspace=resolved_workspace,
         config_source=config_source,
     )

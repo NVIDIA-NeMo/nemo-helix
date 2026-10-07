@@ -10,8 +10,6 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Self, TypeVar
 
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.customization_contributor import (
     CustomizationContributor,
@@ -110,10 +108,6 @@ class Customization:
     def from_client(cls, client: NemoClient) -> Self:
         return cls(make_customization_sdk_context(client))
 
-    @classmethod
-    def from_platform(cls, platform: NeMoHelix) -> Self:
-        return cls.from_client(client_from_platform(platform, NemoClient))
-
     @property
     def automodel(self) -> CustomizationBackendResource:
         return _require_resource_attribute(type(self).__name__, "automodel", self._automodel)
@@ -156,10 +150,6 @@ class AsyncCustomization:
     def from_client(cls, client: AsyncNemoClient) -> Self:
         return cls(make_async_customization_sdk_context(client))
 
-    @classmethod
-    def from_platform(cls, platform: AsyncNeMoHelix) -> Self:
-        return cls.from_client(client_from_platform(platform, AsyncNemoClient))
-
     @property
     def automodel(self) -> AsyncCustomizationBackendResource:
         return _require_resource_attribute(type(self).__name__, "automodel", self._automodel)
@@ -178,7 +168,7 @@ class AsyncCustomization:
         return _coerce_health_payload(response.data().model_dump(mode="json"))
 
 
-customization_sdk_resources = NemoPluginSDKResources[NeMoHelix, Customization, AsyncNeMoHelix, AsyncCustomization](
-    sync_resource=Customization.from_platform,
-    async_resource=AsyncCustomization.from_platform,
+customization_sdk_resources = NemoPluginSDKResources[NemoClient, Customization, AsyncNemoClient, AsyncCustomization](
+    sync_resource=Customization.from_client,
+    async_resource=AsyncCustomization.from_client,
 )

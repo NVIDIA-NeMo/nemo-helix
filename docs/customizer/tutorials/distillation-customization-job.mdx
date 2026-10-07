@@ -73,10 +73,14 @@ pip install evaluate rouge_score datasets
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
+The SDK connects to the deployment in your current CLI context, using its base URL, default workspace, and credentials. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments). These examples use the `default` workspace. If your current CLI context uses a different workspace, run `nemo config set --workspace default` first.
 
-```sh
-export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
+In environments without a CLI configuration file, such as Google Colab, set `NHX_BASE_URL` (and `NHX_ACCESS_TOKEN` for an authenticated deployment) before you create the client. `NemoClient.from_config()` reads both:
+
+```python
+import os
+
+os.environ["NHX_BASE_URL"] = "<YOUR_NHX_BASE_URL>"
 ```
 
 ```python
@@ -86,13 +90,28 @@ import time
 import uuid
 from pathlib import Path
 
-from nemo_helix import NeMoHelix, ConflictError
-
-NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NeMoHelix(
-    base_url=NHX_BASE_URL,
-    workspace="default"
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    CreateModelEntityRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
+    UpdateModelEntityRequest,
 )
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nemo_customizer.sdk import Customization
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
+from pydantic import SecretStr
+from nemo_helix_plugin.schema import SecretRef
+
+client = NemoClient.from_config()
+customization = Customization.from_client(client)
 ```
 
 ### 2. Prepare Dataset
@@ -169,24 +188,25 @@ with open(f"{DATASET_PATH}/training.jsonl", 'r') as f:
 DATASET_NAME = "kd-dataset"
 
 try:
-    client.files.filesets.create(
-        workspace="default",
-        name=DATASET_NAME,
-        description="Knowledge distillation training data"
-    )
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            description="Knowledge distillation training data",
+        ),
+    ).data()
     print(f"Created fileset: {DATASET_NAME}")
 except ConflictError:
     print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
 
-client.files.upload(
-    local_path=f"{DATASET_PATH}/",
-    remote_path="",
-    fileset=DATASET_NAME,
-    workspace="default"
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(
+    lpath=f"{DATASET_PATH}/",
+    rpath=f"default/{DATASET_NAME}/",
+    recursive=True,
 )
 
 print("Uploaded files:")
-print(json.dumps([f.model_dump() for f in client.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_NAME).data().data], indent=2))
 ```
 
 ### 3. Secrets Setup
@@ -212,16 +232,14 @@ def create_or_get_secret(name: str, value: str | None, label: str):
     if not value:
         raise ValueError(f"{label} is not set")
     try:
-        secret = client.secrets.create(
-            name=name,
-            workspace="default",
-            value=value,
-        )
+        secret = client.secrets.create_secret(
+            body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
+        ).data()
         print(f"Created secret: {name}")
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        return client.secrets.retrieve(name=name, workspace="default")
+        return client.secrets.get_secret(name=name).data()
 
 
 hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
@@ -238,7 +256,7 @@ Knowledge distillation requires **two** model entities:
 Using the Instruct variants ensures the output model includes a chat template, which is required for the `/chat/completions` inference endpoint.
 
 ```python
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
 SPEC_TIMEOUT_SECONDS = 120
 
@@ -246,35 +264,37 @@ SPEC_TIMEOUT_SECONDS = 120
 def create_model(hf_repo: str, model_name: str, description: str):
     """Create a fileset + model entity and wait for ModelSpec."""
     try:
-        client.files.filesets.create(
-            workspace="default",
-            name=model_name,
-            description=description,
-            storage=HuggingfaceStorageConfigParam(
-                type="huggingface",
-                repo_id=hf_repo,
-                repo_type="model",
-                token_secret=hf_secret.name
-            )
+        client.files.create_fileset(
+            body=CreateFilesetRequest(
+                name=model_name,
+                description=description,
+                storage=HuggingfaceStorageConfig(
+                    repo_id=hf_repo,
+                    repo_type="model",
+                    token_secret=SecretRef(hf_secret.name),
+                ),
+            ),
         )
         print(f"Created fileset: {model_name}")
     except ConflictError:
         print(f"Fileset '{model_name}' already exists.")
 
     try:
-        model = client.models.create(
-            workspace="default",
-            name=model_name,
-            fileset=f"default/{model_name}",
-        )
+        model = client.models.create_model(
+            body=CreateModelEntityRequest(
+                name=model_name,
+                fileset=f"default/{model_name}",
+            ),
+        ).data()
         print(f"Created Model Entity: {model_name}")
     except ConflictError:
         print(f"Model '{model_name}' already exists. Updating fileset.")
-        model = client.models.update(
-            workspace="default",
+        model = client.models.update_model(
             name=model_name,
-            fileset=f"default/{model_name}",
-        )
+            body=UpdateModelEntityRequest(
+                fileset=f"default/{model_name}",
+            ),
+        ).data()
 
     print(f"Waiting for ModelSpec on {model_name}...")
     spec_start = time.time()
@@ -282,7 +302,7 @@ def create_model(hf_repo: str, model_name: str, description: str):
         if time.time() - spec_start > SPEC_TIMEOUT_SECONDS:
             raise TimeoutError(f"ModelSpec not populated within {SPEC_TIMEOUT_SECONDS}s")
         time.sleep(2)
-        model = client.models.retrieve(workspace="default", name=model_name)
+        model = client.models.get_model(name=model_name).data()
     print(f"ModelSpec populated: {model.spec}")
     return model
 
@@ -335,7 +355,7 @@ teacher_spec = AutomodelJobInput(
     output={"name": TEACHER_OUTPUT_NAME},
 )
 
-teacher_job = client.customization.automodel.jobs.create(
+teacher_job = customization.automodel.jobs.create(
     spec=teacher_spec, workspace="default", name=TEACHER_JOB_NAME
 )
 
@@ -346,40 +366,18 @@ print(f"Output teacher model: {TRAINED_TEACHER_NAME}")
 ```
 
 ```python
-from IPython.display import clear_output
+import time
 
+teacher_status = None
+while True:
+    teacher_status = client.jobs.get_status(name=TEACHER_JOB_NAME, workspace="default")
+    print(f"Status: {teacher_status.status}")
+    if teacher_status.status.lower() in ("completed", "failed", "cancelled", "error"):
+        break
+    time.sleep(15)
 
-def wait_for_job(job_name: str):
-    """Poll job status until completion."""
-    while True:
-        status = client.jobs.get_status(name=job_name, workspace="default")
-        clear_output(wait=True)
-        print(f"Job: {job_name}")
-        print(f"Status: {status.status}")
+assert teacher_status.status.lower() == "completed"
 
-        for job_step in status.steps or []:
-            if job_step.name == "training":
-                for task in job_step.tasks or []:
-                    details = task.status_details or {}
-                    step = details.get("step")
-                    max_steps = details.get("max_steps")
-                    if step is not None and max_steps is not None:
-                        print(f"Progress: Step {step}/{max_steps} ({step / max_steps * 100:.1f}%)")
-                    phase = details.get("phase")
-                    if phase:
-                        print(f"Phase: {phase}")
-                    break
-                break
-
-        if status.status in ("completed", "failed", "cancelled", "error"):
-            print(f"\nJob finished: {status.status}")
-            return status
-
-        time.sleep(10)
-
-
-teacher_status = wait_for_job(TEACHER_JOB_NAME)
-assert teacher_status.status == "completed"
 ```
 
 ---
@@ -395,26 +393,28 @@ baseline_suffix = uuid.uuid4().hex[:4]
 BASELINE_DEPLOYMENT_CONFIG = f"baseline-student-cfg-{baseline_suffix}"
 BASELINE_DEPLOYMENT_NAME = f"baseline-student-{baseline_suffix}"
 
-baseline_deployment_config = client.inference.deployment_configs.create(
-    workspace="default",
-    name=BASELINE_DEPLOYMENT_CONFIG,
-    engine="vllm",
-    model_spec={
-        "model_namespace": "default",
-        "model_name": student_model.name,
-    },
-    executor_config={
-        "gpu": 1,
-        "image_name": "vllm/vllm-openai",
-        "image_tag": "v0.22.1",
-    },
-)
+baseline_deployment_config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name=BASELINE_DEPLOYMENT_CONFIG,
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name=student_model.name,
+        ),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="docker.io/vllm/vllm-openai",
+            image_tag="v0.22.1",
+        ),
+    ),
+).data()
 
-baseline_deployment = client.inference.deployments.create(
-    workspace="default",
-    name=BASELINE_DEPLOYMENT_NAME,
-    config=baseline_deployment_config.name
-)
+baseline_deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name=BASELINE_DEPLOYMENT_NAME,
+        config=baseline_deployment_config.name,
+    ),
+).data()
 
 print(f"Baseline student deployment: {baseline_deployment.name}")
 
@@ -426,7 +426,7 @@ def wait_for_deployment(deployment_name: str, timeout_minutes: int = 30):
     start = time.time()
     timeout = timeout_minutes * 60
     while True:
-        dep = client.inference.deployments.retrieve(name=deployment_name, workspace="default")
+        dep = client.models.get_deployment(name=deployment_name).data()
         elapsed = time.time() - start
         clear_output(wait=True)
         print(f"Deployment: {deployment_name}")
@@ -438,13 +438,14 @@ def wait_for_deployment(deployment_name: str, timeout_minutes: int = 30):
             remaining = int(timeout - elapsed)
             if remaining <= 0:
                 raise TimeoutError(f"Deployment timeout after {timeout_minutes} minutes")
-            if not client.models.wait_for_status(
+            if not client.models.wait_for_deployment_status(
                 deployment_name=deployment_name,
                 desired_status="READY",
                 workspace="default",
                 timeout=remaining,
-                check_gateway=True,
             ):
+                raise TimeoutError("Deployment did not become ready")
+            if not client.models.wait_for_gateway(deployment_name, workspace="default", timeout=remaining):
                 raise TimeoutError("Inference gateway did not become ready")
             return dep
         if dep.status in ("FAILED", "ERROR", "TERMINATED", "LOST"):
@@ -460,8 +461,8 @@ try:
 except Exception:
     # Free GPUs if readiness fails before the later baseline-cleanup cell runs.
     try:
-        client.inference.deployments.delete(name=BASELINE_DEPLOYMENT_NAME, workspace="default")
-        if not client.models.wait_for_status(
+        client.models.delete_deployment(name=BASELINE_DEPLOYMENT_NAME)
+        if not client.models.wait_for_deployment_status(
             deployment_name=BASELINE_DEPLOYMENT_NAME,
             desired_status="DELETED",
             workspace="default",
@@ -470,7 +471,7 @@ except Exception:
             raise TimeoutError(
                 f"Deployment {BASELINE_DEPLOYMENT_NAME} was not deleted within timeout"
             )
-        client.inference.deployment_configs.delete(name=BASELINE_DEPLOYMENT_CONFIG, workspace="default")
+        client.models.delete_deployment_config(name=BASELINE_DEPLOYMENT_CONFIG)
     except Exception as cleanup_error:
         print(f"Baseline cleanup after readiness failure also failed: {cleanup_error}")
     raise
@@ -493,6 +494,10 @@ print(f"Sample reference: {reference_completions[0]}")
 ```
 
 ```python
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+
 def generate_completions(
     deployment_name: str,
     output_model_name: str,
@@ -500,6 +505,7 @@ def generate_completions(
     questions: list[str],
 ) -> list[str]:
     """Generate completions for a list of context/question pairs using a deployed model."""
+    gateway = InferenceGatewayClient.from_client(client)
     completions = []
     for context, question in zip(contexts, questions):
         messages = [
@@ -508,17 +514,19 @@ def generate_completions(
                 "content": f"Based on the following context, answer the question.\n\nContext: {context}\n\nQuestion: {question}",
             }
         ]
-        response = client.inference.gateway.provider.post(
-            "v1/chat/completions",
+        response = gateway.provider_post(
             name=deployment_name,
             workspace="default",
-            body={
-                "model": f"default/{output_model_name}",
-                "messages": messages,
-                "temperature": 0,
-                "max_tokens": 128,
-            }
-        )
+            trailing_uri="v1/chat/completions",
+            body=JsonBody(
+                {
+                    "model": f"default/{output_model_name}",
+                    "messages": messages,
+                    "temperature": 0,
+                    "max_tokens": 128,
+                }
+            ),
+        ).data()
         completions.append(response["choices"][0]["message"]["content"])
     return completions
 
@@ -534,10 +542,10 @@ print(f"\nSample baseline output: {baseline_completions[0]}")
 Delete the baseline student deployment to free GPU resources for the distillation training job and subsequent distilled model deployment.
 
 ```python
-client.inference.deployments.delete(name=BASELINE_DEPLOYMENT_NAME, workspace="default")
+client.models.delete_deployment(name=BASELINE_DEPLOYMENT_NAME)
 print(f"Deleted baseline deployment: {BASELINE_DEPLOYMENT_NAME}")
 
-if not client.models.wait_for_status(
+if not client.models.wait_for_deployment_status(
     deployment_name=BASELINE_DEPLOYMENT_NAME,
     desired_status="DELETED",
     workspace="default",
@@ -547,7 +555,7 @@ if not client.models.wait_for_status(
         f"Deployment {BASELINE_DEPLOYMENT_NAME} was not deleted within timeout"
     )
 
-client.inference.deployment_configs.delete(name=BASELINE_DEPLOYMENT_CONFIG, workspace="default")
+client.models.delete_deployment_config(name=BASELINE_DEPLOYMENT_CONFIG)
 print(f"Deleted baseline deployment config: {BASELINE_DEPLOYMENT_CONFIG}")
 ```
 
@@ -593,7 +601,7 @@ kd_spec = AutomodelJobInput(
     output={"name": KD_OUTPUT_NAME},
 )
 
-kd_job = client.customization.automodel.jobs.create(
+kd_job = customization.automodel.jobs.create(
     spec=kd_spec, workspace="default", name=KD_JOB_NAME
 )
 
@@ -605,9 +613,21 @@ print(f"Output student model: {DISTILLED_STUDENT_NAME}")
 
 ### 10. Track Distillation Progress
 
+The same progress display used for teacher training prints completion percentage and the latest loss, and charts loss by step once history is available.
+
 ```python
-kd_status = wait_for_job(KD_JOB_NAME)
-assert kd_status.status == "completed"
+import time
+
+kd_status = None
+while True:
+    kd_status = client.jobs.get_status(name=KD_JOB_NAME, workspace="default")
+    print(f"Status: {kd_status.status}")
+    if kd_status.status.lower() in ("completed", "failed", "cancelled", "error"):
+        break
+    time.sleep(15)
+
+assert kd_status.status.lower() == "completed"
+
 ```
 
 ---
@@ -623,26 +643,28 @@ deploy_suffix_2 = uuid.uuid4().hex[:4]
 STUDENT_DEPLOYMENT_CONFIG = f"kd-student-deploy-cfg-{deploy_suffix_2}"
 STUDENT_DEPLOYMENT_NAME = f"kd-student-deploy-{deploy_suffix_2}"
 
-student_deployment_config = client.inference.deployment_configs.create(
-    workspace="default",
-    name=STUDENT_DEPLOYMENT_CONFIG,
-    engine="vllm",
-    model_spec={
-        "model_namespace": "default",
-        "model_name": DISTILLED_STUDENT_NAME,
-    },
-    executor_config={
-        "gpu": 1,
-        "image_name": "vllm/vllm-openai",
-        "image_tag": "v0.22.1",
-    },
-)
+student_deployment_config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name=STUDENT_DEPLOYMENT_CONFIG,
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name=DISTILLED_STUDENT_NAME,
+        ),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="docker.io/vllm/vllm-openai",
+            image_tag="v0.22.1",
+        ),
+    ),
+).data()
 
-student_deployment = client.inference.deployments.create(
-    workspace="default",
-    name=STUDENT_DEPLOYMENT_NAME,
-    config=student_deployment_config.name
-)
+student_deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name=STUDENT_DEPLOYMENT_NAME,
+        config=student_deployment_config.name,
+    ),
+).data()
 
 print(f"Student deployment: {student_deployment.name}")
 
@@ -725,7 +747,7 @@ For detailed information on all available hyperparameters, recommended values, a
 - Verify authentication secrets are configured (refer to [Managing Secrets](/documentation/get-started/core-concepts/manage-secrets))
 - For gated Hugging Face models (Llama, Gemma), accept the license on the model page
 - Check both `model` (student) and `teacher_model` URNs are correct
-- Ensure both model entities exist: `client.models.retrieve(name=..., workspace="default")`
+- Ensure both model entities exist: `client.models.get_model(name=...)`
 
 **Job fails with OOM (Out of Memory) error:**
 
@@ -748,9 +770,9 @@ KD loads both models, so OOM is more likely than with SFT:
 - Teacher and student must use the same tokenizer. Use models from the same family (e.g., Llama 3.2 1B Instruct + Llama 3.2 3B Instruct)
 
 **Deployment fails:**
-- Verify output model exists: `client.models.retrieve(name=DISTILLED_STUDENT_NAME, workspace="default")`
-- Check job logs: `client.jobs.get_logs(name=kd_job.job.name, workspace="default")`
-- Check student deployment status: `client.inference.deployments.retrieve(name=student_deployment.name, workspace="default")`
+- Verify output model exists: `client.models.get_model(name=DISTILLED_STUDENT_NAME)`
+- Check job logs: `client.jobs.get_logs(name=kd_job.job.name)`
+- Check student deployment status: `client.models.get_deployment(name=student_deployment.name)`
 - The distilled model has the same size as the student, so GPU requirements match the student model
 
 

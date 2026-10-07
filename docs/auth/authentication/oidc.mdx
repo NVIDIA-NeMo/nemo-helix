@@ -89,8 +89,7 @@ Do not use `id_token` solely to work around an opaque access token. Confirm the 
 The `auth.admin_email` setting identifies the bootstrap admin, but the role binding is created by the platform seed task. Docker quickstart runs platform seed automatically, and Helm deployments run the platform-seed Job by default. For source installs, start services with `platform.seed_on_startup: true` or `NHX_SEED_ON_STARTUP=true`; if services are already running, run the seed task manually after services are healthy:
 
 ```bash
-# Set NHX_BASE_URL first if services are not on http://localhost:8080.
-curl -sf http://localhost:8080/health/ready
+curl -sf "${NHX_BASE_URL:-http://localhost:8080}/health/ready"
 uv run python -m nhx.platform_seed
 ```
 

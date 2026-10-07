@@ -39,6 +39,7 @@ _AUTH_PROXY_ON_BEHALF_OF_ENVVAR = "NHX_AUTH_PROXY_ON_BEHALF_OF"
 _AUTH_PROXY_HOST_ENVVAR = "NHX_AUTH_PROXY_HOST"
 _AUTH_PROXY_PORT_ENVVAR = "NHX_AUTH_PROXY_PORT"
 _AUTH_PROXY_STATE_HOME_ENVVAR = "XDG_STATE_HOME"
+_AUTH_PROXY_DATA_DIR_ENVVAR = "NHX_DATA_DIR"
 _AUTH_PROXY_COMMAND = ["nemo", "services", "run", "--sidecars", "auth-proxy"]
 
 
@@ -101,6 +102,8 @@ def build_auth_proxy_container(config: DeploymentConfig, *, docker: bool = False
         # process lock and descriptor under XDG_STATE_HOME, so keep that
         # ephemeral state in the universally writable container /tmp instead.
         EnvVar(name=_AUTH_PROXY_STATE_HOME_ENVVAR, value="/tmp"),
+        # Same reason: keep the default data dir off the image-owned home.
+        EnvVar(name=_AUTH_PROXY_DATA_DIR_ENVVAR, value="/tmp/nhx-data"),
     ]
     if on_behalf_of:
         env.append(EnvVar(name=_AUTH_PROXY_ON_BEHALF_OF_ENVVAR, value=on_behalf_of))

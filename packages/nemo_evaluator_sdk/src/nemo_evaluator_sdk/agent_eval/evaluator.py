@@ -39,6 +39,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     RunAggregationsProvider,
     RunnerInfo,
     TrialAwareMetricsProvider,
+    TrialError,
     TrialMeasurements,
 )
 from nemo_evaluator_sdk.agent_eval.usage_keys import (
@@ -740,6 +741,7 @@ def _failed_generation_trial(task: AgentEvalTask, target: Model | Agent, exc: Ex
         task_id=task.id,
         status=AgentEvalTrialStatus.FAILED,
         output=None,
+        error=TrialError(type=exc.__class__.__name__, message=str(exc)),
         evidence=CandidateEvidence(
             descriptors={
                 "error": EvidenceDescriptor(

@@ -8,24 +8,20 @@ description: ""
 <a id="evaluator-nhx-sdk-resources"></a>
 
 The `nemo_evaluator_sdk` package provides context-agnostic objects for defining metrics, datasets, evaluation configuration, and result handling.
-When you want to execute those evaluations through the NeMo Helix Evaluator plugin, use the Evaluator SDK resource mounted on the `nemo_helix` SDK.
-This page explains the NeMo Helix-specific objects used to submit durable platform jobs and retrieve evaluator job results.
+When you want to execute those evaluations through NeMo Helix Evaluator plugin, use the Evaluator SDK resource mounted on the `nemo_helix` SDK.
+This page explains NeMo Helix-specific objects used to submit durable platform jobs and retrieve evaluator job results.
 
 ## Evaluator
 
 The `Evaluator` resource is the sync SDK object for working with the Evaluator plugin on NeMo Helix.
-It is accessed directly from a `NeMoHelix` instance:
+Build it from a `NemoClient` instance:
 
 ```python
-import os
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
 ```
 
 The primary execution method is `submit`, which creates a durable remote platform job whose lifecycle you manage through the returned job resource.
@@ -71,19 +67,15 @@ print(result.aggregate_scores)
 
 ## AsyncEvaluator
 
-The `AsyncEvaluator` resource provides the same Evaluator plugin surface for `AsyncNeMoHelix`.
+The `AsyncEvaluator` resource provides the same Evaluator plugin surface for `AsyncNemoClient`.
 Async methods must be awaited:
 
 ```python
-import os
 from nemo_evaluator.sdk import AsyncEvaluator
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
-client = AsyncNeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-evaluator: AsyncEvaluator = client.evaluator
+async_client = AsyncNemoClient.from_config()
+async_evaluator = AsyncEvaluator.from_client(async_client)
 ```
 
 | Method | Description | Returns |
@@ -106,7 +98,7 @@ dataset = [
 ]
 
 async def main() -> None:
-    job = await evaluator.submit(metric=metric, dataset=dataset)
+    job = await async_evaluator.submit(metric=metric, dataset=dataset)
     await job.wait_until_done()
     result = await job.get_result()
     print(result.aggregate_scores)

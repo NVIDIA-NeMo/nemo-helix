@@ -9,7 +9,7 @@ Users configure chat_template and tool_call_config on a **fileset** via
 ``metadata.model.tool_calling``, NOT directly on the model entity.  The async
 model-spec background task reads the fileset's ``metadata.model.tool_calling``,
 merges them into the ``ModelSpec``, and writes the result back to the
-model entity with ``sdk.models.update(spec=...)``.  Downstream, the Docker
+model entity with ``ModelsClient.update_model(body=...)``.  Downstream, the Docker
 backend reads ``model_entity.spec`` (and optional deployment-level overrides)
 to build the NIM container's environment variables.
 
@@ -32,6 +32,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from nemo_helix_plugin.files.client import FilesClient
 from nhx.common.config import Runtime
 from nhx.common.files.metadata import FilesetMetadata, ModelMetadataContent, ToolCallingMetadataContent
 from nhx.core.models.app import ModelWeightsType, get_model_weights_type
@@ -199,7 +200,7 @@ def sample_deployment():
 #   2. User updates the fileset with metadata.model.tool_calling
 #   3. Model-spec background task runs (analyze_checkpoint):
 #      — reads the updated fileset, merges metadata into the ModelSpec,
-#        and writes the result back to the model entity via sdk.models.update()
+#        and writes the result back to the model entity via ModelsClient.update_model()
 #   4. Retrieve the model entity and verify the spec was populated
 #
 # The Files service is not running in these tests, so fileset operations
@@ -215,16 +216,16 @@ def _update_fileset_and_run_task(test_clients, model_name, metadata, tmp_path):
 
     1. **Update fileset** — mock the files client to simulate the user adding
        ``metadata`` to their fileset.
-    2. **Run analyze_checkpoint** — the task calls ``client_from_platform(sdk, FilesClient).get_fileset()``
+    2. **Run analyze_checkpoint** — the task calls ``FilesClient.from_client(client).get_fileset()``
        (mocked to return the now-updated fileset), merges ``metadata.model.tool_calling``
-       into a ``ModelSpec``, and calls the *real* ``sdk.models.update(spec=...)``.
+       into a ``ModelSpec``, and calls the *real* ``ModelsClient.update_model(body=...)``.
 
     ``nhx.core.models.parallelism.api`` depends on torch/accelerate (GPU deps
     not available in the test environment), so we inject a mock module into
     ``sys.modules`` so the lazy import inside ``analyze_checkpoint`` resolves
     without touching the real GPU module.
     """
-    sdk = test_clients.sdk
+    client = test_clients.client
 
     # -- Step 1: Build the updated fileset representation ---------------------
     updated_fileset = SimpleNamespace(
@@ -255,7 +256,7 @@ def _update_fileset_and_run_task(test_clients, model_name, metadata, tmp_path):
         models_url=None,
     )
 
-    runner = ModelSpecRunner(sdk=sdk, job_ctx=job_ctx)
+    runner = ModelSpecRunner(client=client, job_ctx=job_ctx)
 
     # Base ModelSpec that infer_model_cfg_from_hf would normally produce
     base_spec = ModelSpec(**MINIMAL_SPEC)
@@ -271,14 +272,14 @@ def _update_fileset_and_run_task(test_clients, model_name, metadata, tmp_path):
         parent.__path__ = []
         modules_patch["nhx.core.models.parallelism"] = parent
 
-    # Task calls client_from_platform(sdk, FilesClient).get_fileset() → gets the updated fileset
+    # Task calls FilesClient.from_client(client).get_fileset() → gets the updated fileset
     with (
         patch.dict(sys.modules, modules_patch),
-        patch("nhx.core.models.tasks.model_spec.run.client_from_platform", return_value=mock_files_client),
-        patch.object(sdk.files, "list", return_value=SimpleNamespace(data=[])),
-        patch.object(runner.filesystem_sdk, "get"),
+        patch.object(FilesClient, "from_client", return_value=mock_files_client),
+        patch("nhx.core.models.tasks.model_spec.run.transfer") as mock_transfer,
         patch("nhx.core.models.tasks.model_spec.run.os.listdir", return_value=["config.json"]),
     ):
+        mock_transfer.list_files.return_value = SimpleNamespace(data=[])
         config = ModelSpecTaskConfig(workspace=DEFAULT_WORKSPACE, name=model_name)
         runner.analyze_checkpoint(config)
 

@@ -279,11 +279,13 @@
           "groups": [
             {
               "ids": [
+                "GO-2026-6505",
                 "GHSA-8wmf-6v46-5gfg"
               ],
               "aliases": [
                 "CVE-2026-81870",
-                "GHSA-8wmf-6v46-5gfg"
+                "GHSA-8wmf-6v46-5gfg",
+                "GO-2026-6505"
               ],
               "max_severity": "2.0"
             }
@@ -293,6 +295,170 @@
             "BSD-3-Clause"
           ],
           "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/zipkin",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/zipkin"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/sdk",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/sdk"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-81870",
+                "GHSA-8wmf-6v46-5gfg"
+              ],
+              "database_specific": {
+                "review_status": "UNREVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6505"
+              },
+              "details": "OpenTelemetry-Go: Exporter config logging may leak endpoint URLs in info logs in go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+              "id": "GO-2026-6505",
+              "modified": "2026-10-01T20:45:11.273005775Z",
+              "published": "2026-10-01T20:23:56Z",
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/security/advisories/GHSA-8wmf-6v46-5gfg"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-81870"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/commit/3a1412d2b3bc4e4231fbeac2ed42117ae541bb38"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/pull/8438"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/releases/tag/exporters/zipkin/v1.45.0"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/releases/tag/sdk/v1.45.0"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "summary": "OpenTelemetry-Go: Exporter config logging may leak endpoint URLs in info logs in go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+            },
             {
               "affected": [
                 {
@@ -417,7 +583,8 @@
                 }
               ],
               "aliases": [
-                "CVE-2026-81870"
+                "CVE-2026-81870",
+                "GO-2026-6505"
               ],
               "database_specific": {
                 "cwe_ids": [
@@ -431,7 +598,7 @@
               },
               "details": "### Summary\n\nOpenTelemetry Go versions 1.5.0 through 1.44.0 can include trace exporter endpoint configuration in an internal diagnostic log emitted when an SDK `TracerProvider` is created. The default OpenTelemetry logger does not emit this event. Exposure requires an application to install a logger that enables OpenTelemetry's internal Info-level diagnostics and for someone other than the intended audience to have access to those logs.\n\nThe logged configuration can disclose the address of the trace collector and whether the OTLP/HTTP connection is configured as insecure. The Zipkin exporter logs its complete collector URL, so credentials in URL userinfo or tokens in the query string are also disclosed if an application embeds them there. OTLP authentication headers, TLS key material, and exported span data are not included in this log.\n\nExporter `MarshalLog` implementations that caused this configuration to be included in internal logs were introduced by [`a1fff3c`](https://github.com/open-telemetry/opentelemetry-go/commit/a1fff3c2588c783d1f3f6fd2315aa2660fc6d330).\n\n### Details\n\nWhen `sdk/trace.NewTracerProvider` constructs a provider, it records a `TracerProvider created` internal Info event containing the provider configuration. In affected versions, the configuration's `MarshalLog` methods recursively include:\n\n1. the provider's span processors;\n2. each processor's span exporter; and\n3. for the OTLP trace exporter, its client configuration.\n\nThis causes the following values to be present in the event:\n\n- OTLP trace gRPC: the configured endpoint;\n- OTLP trace HTTP: the configured endpoint and the `Insecure` flag; and\n- Zipkin: the complete collector URL.\n\nOpenTelemetry Go does not emit this event with its default logger, which only emits errors. An application must explicitly configure a sufficiently verbose logger with `otel.SetLogger`. The required `logr` verbosity is version-dependent:\n\n- versions 1.5.0 through 1.14.x use `V(1)` for this Info event; and\n- versions 1.15.0 through 1.44.0 use `V(4)`.\n\nOTLP header configuration is not part of the marshaled object, so credentials supplied with `WithHeaders` or the corresponding environment variables are not exposed. The documented OTLP `WithEndpoint` input is a collector address rather than a credential-bearing URL. The higher-risk case is therefore the Zipkin collector URL, which is retained and logged in full, or an application passing sensitive data in an OTLP endpoint outside the documented format.\n\n### Proof of concept\n\nThe following program demonstrates the behavior with OpenTelemetry Go 1.44.0. It deliberately places credentials and a token in the Zipkin collector URL and enables internal Info logging:\n\n```go\npackage main\n\nimport (\n\t\"bytes\"\n\t\"context\"\n\t\"fmt\"\n\n\t\"github.com/go-logr/logr/funcr\"\n\t\"go.opentelemetry.io/otel\"\n\t\"go.opentelemetry.io/otel/exporters/zipkin\"\n\tsdktrace \"go.opentelemetry.io/otel/sdk/trace\"\n)\n\nfunc main() {\n\tvar logs bytes.Buffer\n\totel.SetLogger(funcr.New(func(_, args string) {\n\t\t_, _ = logs.WriteString(args)\n\t}, funcr.Options{Verbosity: 4}))\n\n\texporter, err := zipkin.New(\n\t\t\"http://user:pass@zipkin.internal:9411/api/v2/spans?token=secret\",\n\t)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\n\ttp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))\n\t_ = tp.Shutdown(context.Background())\n\n\tfmt.Println(logs.String())\n}\n```\n\nThe `TracerProvider created` event contains:\n\n```text\nhttp://user:pass@zipkin.internal:9411/api/v2/spans?token=secret\n```\n\nFor versions before 1.15.0, set `funcr.Options{Verbosity: 1}` instead.\n\n### Impact\n\nThis is a conditional disclosure through application logs. Affected applications must enable verbose OpenTelemetry internal diagnostics and configure a trace exporter containing information they do not intend to expose to readers of those logs. In that configuration, a person or system with log access can learn the trace collector address and internal network topology. If credentials or tokens are embedded directly in a Zipkin collector URL, those values can also be recovered from the logs.\n\nThere is no exposure with the default OpenTelemetry logger, and the vulnerable log is generated from local application configuration rather than remotely supplied span data. OTLP authentication headers, certificate or private-key contents, and telemetry payloads are not logged by this path.\n\n### Remediation\n\nUpgrade the affected OpenTelemetry Go modules to version 1.45.0 or later. The fix in [`3a1412d`](https://github.com/open-telemetry/opentelemetry-go/commit/3a1412d2b3bc4e4231fbeac2ed42117ae541bb38) stops recursively marshaling exporter and client configuration and records their types instead.\n\nIf an immediate upgrade is not possible:\n\n- keep OpenTelemetry internal logging below the Info verbosity described above;\n- do not embed credentials or tokens in exporter endpoint URLs; use authentication headers or another supported credential mechanism; and\n- restrict access to existing logs and rotate any credentials that may already have been recorded.",
               "id": "GHSA-8wmf-6v46-5gfg",
-              "modified": "2026-09-17T20:45:06.677326550Z",
+              "modified": "2026-10-01T20:55:52.479756803Z",
               "published": "2026-09-17T20:31:06Z",
               "references": [
                 {
@@ -483,11 +650,13 @@
           "groups": [
             {
               "ids": [
+                "GO-2026-6505",
                 "GHSA-8wmf-6v46-5gfg"
               ],
               "aliases": [
                 "CVE-2026-81870",
-                "GHSA-8wmf-6v46-5gfg"
+                "GHSA-8wmf-6v46-5gfg",
+                "GO-2026-6505"
               ],
               "max_severity": "2.0"
             }
@@ -497,6 +666,170 @@
             "BSD-3-Clause"
           ],
           "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/zipkin",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/zipkin"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/sdk",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/sdk"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-81870",
+                "GHSA-8wmf-6v46-5gfg"
+              ],
+              "database_specific": {
+                "review_status": "UNREVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6505"
+              },
+              "details": "OpenTelemetry-Go: Exporter config logging may leak endpoint URLs in info logs in go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+              "id": "GO-2026-6505",
+              "modified": "2026-10-01T20:45:11.273005775Z",
+              "published": "2026-10-01T20:23:56Z",
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/security/advisories/GHSA-8wmf-6v46-5gfg"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-81870"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/commit/3a1412d2b3bc4e4231fbeac2ed42117ae541bb38"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/pull/8438"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/releases/tag/exporters/zipkin/v1.45.0"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/releases/tag/sdk/v1.45.0"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "summary": "OpenTelemetry-Go: Exporter config logging may leak endpoint URLs in info logs in go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+            },
             {
               "affected": [
                 {
@@ -621,7 +954,8 @@
                 }
               ],
               "aliases": [
-                "CVE-2026-81870"
+                "CVE-2026-81870",
+                "GO-2026-6505"
               ],
               "database_specific": {
                 "cwe_ids": [
@@ -635,7 +969,7 @@
               },
               "details": "### Summary\n\nOpenTelemetry Go versions 1.5.0 through 1.44.0 can include trace exporter endpoint configuration in an internal diagnostic log emitted when an SDK `TracerProvider` is created. The default OpenTelemetry logger does not emit this event. Exposure requires an application to install a logger that enables OpenTelemetry's internal Info-level diagnostics and for someone other than the intended audience to have access to those logs.\n\nThe logged configuration can disclose the address of the trace collector and whether the OTLP/HTTP connection is configured as insecure. The Zipkin exporter logs its complete collector URL, so credentials in URL userinfo or tokens in the query string are also disclosed if an application embeds them there. OTLP authentication headers, TLS key material, and exported span data are not included in this log.\n\nExporter `MarshalLog` implementations that caused this configuration to be included in internal logs were introduced by [`a1fff3c`](https://github.com/open-telemetry/opentelemetry-go/commit/a1fff3c2588c783d1f3f6fd2315aa2660fc6d330).\n\n### Details\n\nWhen `sdk/trace.NewTracerProvider` constructs a provider, it records a `TracerProvider created` internal Info event containing the provider configuration. In affected versions, the configuration's `MarshalLog` methods recursively include:\n\n1. the provider's span processors;\n2. each processor's span exporter; and\n3. for the OTLP trace exporter, its client configuration.\n\nThis causes the following values to be present in the event:\n\n- OTLP trace gRPC: the configured endpoint;\n- OTLP trace HTTP: the configured endpoint and the `Insecure` flag; and\n- Zipkin: the complete collector URL.\n\nOpenTelemetry Go does not emit this event with its default logger, which only emits errors. An application must explicitly configure a sufficiently verbose logger with `otel.SetLogger`. The required `logr` verbosity is version-dependent:\n\n- versions 1.5.0 through 1.14.x use `V(1)` for this Info event; and\n- versions 1.15.0 through 1.44.0 use `V(4)`.\n\nOTLP header configuration is not part of the marshaled object, so credentials supplied with `WithHeaders` or the corresponding environment variables are not exposed. The documented OTLP `WithEndpoint` input is a collector address rather than a credential-bearing URL. The higher-risk case is therefore the Zipkin collector URL, which is retained and logged in full, or an application passing sensitive data in an OTLP endpoint outside the documented format.\n\n### Proof of concept\n\nThe following program demonstrates the behavior with OpenTelemetry Go 1.44.0. It deliberately places credentials and a token in the Zipkin collector URL and enables internal Info logging:\n\n```go\npackage main\n\nimport (\n\t\"bytes\"\n\t\"context\"\n\t\"fmt\"\n\n\t\"github.com/go-logr/logr/funcr\"\n\t\"go.opentelemetry.io/otel\"\n\t\"go.opentelemetry.io/otel/exporters/zipkin\"\n\tsdktrace \"go.opentelemetry.io/otel/sdk/trace\"\n)\n\nfunc main() {\n\tvar logs bytes.Buffer\n\totel.SetLogger(funcr.New(func(_, args string) {\n\t\t_, _ = logs.WriteString(args)\n\t}, funcr.Options{Verbosity: 4}))\n\n\texporter, err := zipkin.New(\n\t\t\"http://user:pass@zipkin.internal:9411/api/v2/spans?token=secret\",\n\t)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\n\ttp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))\n\t_ = tp.Shutdown(context.Background())\n\n\tfmt.Println(logs.String())\n}\n```\n\nThe `TracerProvider created` event contains:\n\n```text\nhttp://user:pass@zipkin.internal:9411/api/v2/spans?token=secret\n```\n\nFor versions before 1.15.0, set `funcr.Options{Verbosity: 1}` instead.\n\n### Impact\n\nThis is a conditional disclosure through application logs. Affected applications must enable verbose OpenTelemetry internal diagnostics and configure a trace exporter containing information they do not intend to expose to readers of those logs. In that configuration, a person or system with log access can learn the trace collector address and internal network topology. If credentials or tokens are embedded directly in a Zipkin collector URL, those values can also be recovered from the logs.\n\nThere is no exposure with the default OpenTelemetry logger, and the vulnerable log is generated from local application configuration rather than remotely supplied span data. OTLP authentication headers, certificate or private-key contents, and telemetry payloads are not logged by this path.\n\n### Remediation\n\nUpgrade the affected OpenTelemetry Go modules to version 1.45.0 or later. The fix in [`3a1412d`](https://github.com/open-telemetry/opentelemetry-go/commit/3a1412d2b3bc4e4231fbeac2ed42117ae541bb38) stops recursively marshaling exporter and client configuration and records their types instead.\n\nIf an immediate upgrade is not possible:\n\n- keep OpenTelemetry internal logging below the Info verbosity described above;\n- do not embed credentials or tokens in exporter endpoint URLs; use authentication headers or another supported credential mechanism; and\n- restrict access to existing logs and rotate any credentials that may already have been recorded.",
               "id": "GHSA-8wmf-6v46-5gfg",
-              "modified": "2026-09-17T20:45:06.677326550Z",
+              "modified": "2026-10-01T20:55:52.479756803Z",
               "published": "2026-09-17T20:31:06Z",
               "references": [
                 {
@@ -720,11 +1054,13 @@
           "groups": [
             {
               "ids": [
+                "GO-2026-6505",
                 "GHSA-8wmf-6v46-5gfg"
               ],
               "aliases": [
                 "CVE-2026-81870",
-                "GHSA-8wmf-6v46-5gfg"
+                "GHSA-8wmf-6v46-5gfg",
+                "GO-2026-6505"
               ],
               "max_severity": "2.0"
             }
@@ -734,6 +1070,170 @@
             "BSD-3-Clause"
           ],
           "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/exporters/zipkin",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/zipkin"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6505.json"
+                  },
+                  "ecosystem_specific": {},
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "go.opentelemetry.io/otel/sdk",
+                    "purl": "pkg:golang/go.opentelemetry.io/otel/sdk"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "1.5.0"
+                        },
+                        {
+                          "fixed": "1.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-81870",
+                "GHSA-8wmf-6v46-5gfg"
+              ],
+              "database_specific": {
+                "review_status": "UNREVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6505"
+              },
+              "details": "OpenTelemetry-Go: Exporter config logging may leak endpoint URLs in info logs in go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+              "id": "GO-2026-6505",
+              "modified": "2026-10-01T20:45:11.273005775Z",
+              "published": "2026-10-01T20:23:56Z",
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/security/advisories/GHSA-8wmf-6v46-5gfg"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-81870"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/commit/3a1412d2b3bc4e4231fbeac2ed42117ae541bb38"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/pull/8438"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/releases/tag/exporters/zipkin/v1.45.0"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/open-telemetry/opentelemetry-go/releases/tag/sdk/v1.45.0"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "summary": "OpenTelemetry-Go: Exporter config logging may leak endpoint URLs in info logs in go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+            },
             {
               "affected": [
                 {
@@ -858,7 +1358,8 @@
                 }
               ],
               "aliases": [
-                "CVE-2026-81870"
+                "CVE-2026-81870",
+                "GO-2026-6505"
               ],
               "database_specific": {
                 "cwe_ids": [
@@ -872,7 +1373,7 @@
               },
               "details": "### Summary\n\nOpenTelemetry Go versions 1.5.0 through 1.44.0 can include trace exporter endpoint configuration in an internal diagnostic log emitted when an SDK `TracerProvider` is created. The default OpenTelemetry logger does not emit this event. Exposure requires an application to install a logger that enables OpenTelemetry's internal Info-level diagnostics and for someone other than the intended audience to have access to those logs.\n\nThe logged configuration can disclose the address of the trace collector and whether the OTLP/HTTP connection is configured as insecure. The Zipkin exporter logs its complete collector URL, so credentials in URL userinfo or tokens in the query string are also disclosed if an application embeds them there. OTLP authentication headers, TLS key material, and exported span data are not included in this log.\n\nExporter `MarshalLog` implementations that caused this configuration to be included in internal logs were introduced by [`a1fff3c`](https://github.com/open-telemetry/opentelemetry-go/commit/a1fff3c2588c783d1f3f6fd2315aa2660fc6d330).\n\n### Details\n\nWhen `sdk/trace.NewTracerProvider` constructs a provider, it records a `TracerProvider created` internal Info event containing the provider configuration. In affected versions, the configuration's `MarshalLog` methods recursively include:\n\n1. the provider's span processors;\n2. each processor's span exporter; and\n3. for the OTLP trace exporter, its client configuration.\n\nThis causes the following values to be present in the event:\n\n- OTLP trace gRPC: the configured endpoint;\n- OTLP trace HTTP: the configured endpoint and the `Insecure` flag; and\n- Zipkin: the complete collector URL.\n\nOpenTelemetry Go does not emit this event with its default logger, which only emits errors. An application must explicitly configure a sufficiently verbose logger with `otel.SetLogger`. The required `logr` verbosity is version-dependent:\n\n- versions 1.5.0 through 1.14.x use `V(1)` for this Info event; and\n- versions 1.15.0 through 1.44.0 use `V(4)`.\n\nOTLP header configuration is not part of the marshaled object, so credentials supplied with `WithHeaders` or the corresponding environment variables are not exposed. The documented OTLP `WithEndpoint` input is a collector address rather than a credential-bearing URL. The higher-risk case is therefore the Zipkin collector URL, which is retained and logged in full, or an application passing sensitive data in an OTLP endpoint outside the documented format.\n\n### Proof of concept\n\nThe following program demonstrates the behavior with OpenTelemetry Go 1.44.0. It deliberately places credentials and a token in the Zipkin collector URL and enables internal Info logging:\n\n```go\npackage main\n\nimport (\n\t\"bytes\"\n\t\"context\"\n\t\"fmt\"\n\n\t\"github.com/go-logr/logr/funcr\"\n\t\"go.opentelemetry.io/otel\"\n\t\"go.opentelemetry.io/otel/exporters/zipkin\"\n\tsdktrace \"go.opentelemetry.io/otel/sdk/trace\"\n)\n\nfunc main() {\n\tvar logs bytes.Buffer\n\totel.SetLogger(funcr.New(func(_, args string) {\n\t\t_, _ = logs.WriteString(args)\n\t}, funcr.Options{Verbosity: 4}))\n\n\texporter, err := zipkin.New(\n\t\t\"http://user:pass@zipkin.internal:9411/api/v2/spans?token=secret\",\n\t)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\n\ttp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))\n\t_ = tp.Shutdown(context.Background())\n\n\tfmt.Println(logs.String())\n}\n```\n\nThe `TracerProvider created` event contains:\n\n```text\nhttp://user:pass@zipkin.internal:9411/api/v2/spans?token=secret\n```\n\nFor versions before 1.15.0, set `funcr.Options{Verbosity: 1}` instead.\n\n### Impact\n\nThis is a conditional disclosure through application logs. Affected applications must enable verbose OpenTelemetry internal diagnostics and configure a trace exporter containing information they do not intend to expose to readers of those logs. In that configuration, a person or system with log access can learn the trace collector address and internal network topology. If credentials or tokens are embedded directly in a Zipkin collector URL, those values can also be recovered from the logs.\n\nThere is no exposure with the default OpenTelemetry logger, and the vulnerable log is generated from local application configuration rather than remotely supplied span data. OTLP authentication headers, certificate or private-key contents, and telemetry payloads are not logged by this path.\n\n### Remediation\n\nUpgrade the affected OpenTelemetry Go modules to version 1.45.0 or later. The fix in [`3a1412d`](https://github.com/open-telemetry/opentelemetry-go/commit/3a1412d2b3bc4e4231fbeac2ed42117ae541bb38) stops recursively marshaling exporter and client configuration and records their types instead.\n\nIf an immediate upgrade is not possible:\n\n- keep OpenTelemetry internal logging below the Info verbosity described above;\n- do not embed credentials or tokens in exporter endpoint URLs; use authentication headers or another supported credential mechanism; and\n- restrict access to existing logs and rotate any credentials that may already have been recorded.",
               "id": "GHSA-8wmf-6v46-5gfg",
-              "modified": "2026-09-17T20:45:06.677326550Z",
+              "modified": "2026-10-01T20:55:52.479756803Z",
               "published": "2026-09-17T20:31:06Z",
               "references": [
                 {
@@ -1746,7 +2247,7 @@
               },
               "details": "Context was not properly tracked across template branches for JS template literals, leading to possibly incorrect escaping of content when branches were used. Additionally template actions within JS template literals did not properly track the brace depth, leading to incorrect escaping being applied.\n\nThese issues could cause actions within JS template literals to be incorrectly or improperly escaped, leading to XSS vulnerabilities.",
               "id": "GO-2026-4865",
-              "modified": "2026-07-10T10:44:23.724783758Z",
+              "modified": "2026-10-07T10:41:46.025548889Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -1763,8 +2264,9 @@
                 }
               ],
               "related": [
-                "CGA-w5jp-g3cv-wvfm",
-                "RHSA-2026:19181",
+                "RHSA-2026:10217",
+                "RHSA-2026:10219",
+                "RHSA-2026:22112",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -1836,7 +2338,7 @@
               },
               "details": "tar.Reader can allocate an unbounded amount of memory when reading a maliciously-crafted archive containing a large number of sparse regions encoded in the \"old GNU sparse map\" format.",
               "id": "GO-2026-4869",
-              "modified": "2026-05-15T10:59:23.054049848Z",
+              "modified": "2026-10-07T10:41:45.714787203Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -1853,7 +2355,9 @@
                 }
               ],
               "related": [
-                "CGA-6f85-jvrm-qq3w",
+                "RHSA-2026:10217",
+                "RHSA-2026:10219",
+                "RHSA-2026:22112",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -1931,7 +2435,7 @@
               },
               "details": "If one side of the TLS connection sends multiple key update messages post-handshake in a single record, the connection can deadlock, causing uncontrolled consumption of resources. This can lead to a denial of service.\n\nThis only affects TLS 1.3.",
               "id": "GO-2026-4870",
-              "modified": "2026-09-29T10:56:42.953142554Z",
+              "modified": "2026-10-03T10:41:52.139752358Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -2022,6 +2526,7 @@
                 "RHSA-2026:26447",
                 "RHSA-2026:27076",
                 "RHSA-2026:28038",
+                "RHSA-2026:28046",
                 "RHSA-2026:28047",
                 "RHSA-2026:28074",
                 "RHSA-2026:29035",
@@ -2188,7 +2693,7 @@
               },
               "details": "When processing HTTP/2 SETTINGS frames, transport will enter an infinite loop of writing CONTINUATION frames if it receives a SETTINGS_MAX_FRAME_SIZE with a value of 0.",
               "id": "GO-2026-4918",
-              "modified": "2026-09-16T10:41:36.686823140Z",
+              "modified": "2026-10-07T10:41:46.070042506Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -2224,7 +2729,11 @@
                 "RHSA-2026:63636",
                 "RHSA-2026:63637",
                 "RHSA-2026:63639",
-                "RHSA-2026:66350"
+                "RHSA-2026:66350",
+                "RHSA-2026:71443",
+                "RHSA-2026:74376",
+                "RHSA-2026:74427",
+                "RHSA-2026:74581"
               ],
               "schema_version": "1.7.5",
               "summary": "Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE in net/http/internal/http2 in golang.org/x/net"
@@ -2287,7 +2796,7 @@
               },
               "details": "Validating certificate chains which use policies is unexpectedly inefficient when certificates in the chain contain a very large number of policy mappings, possibly causing denial of service.\n\nThis only affects validation of otherwise trusted certificate chains, issued by a root CA in the VerifyOptions.Roots CertPool, or in the system certificate pool.",
               "id": "GO-2026-4946",
-              "modified": "2026-09-29T10:56:43.010349464Z",
+              "modified": "2026-10-03T10:41:52.434115228Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -2313,6 +2822,7 @@
                 "RHSA-2026:18027",
                 "RHSA-2026:18032",
                 "RHSA-2026:19135",
+                "RHSA-2026:19350",
                 "RHSA-2026:19353",
                 "RHSA-2026:19450",
                 "RHSA-2026:19719",
@@ -2451,7 +2961,7 @@
               },
               "details": "During chain building, the amount of work that is done is not correctly limited when a large number of intermediate certificates are passed in VerifyOptions.Intermediates, which can lead to a denial of service. This affects both direct users of crypto/x509 and users of crypto/tls.",
               "id": "GO-2026-4947",
-              "modified": "2026-09-29T10:56:43.241865278Z",
+              "modified": "2026-10-03T10:41:52.559243025Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -2529,6 +3039,7 @@
                 "RHSA-2026:26447",
                 "RHSA-2026:27076",
                 "RHSA-2026:28038",
+                "RHSA-2026:28046",
                 "RHSA-2026:28047",
                 "RHSA-2026:28074",
                 "RHSA-2026:28886",
@@ -2953,7 +3464,7 @@
               },
               "details": "Pathological inputs could cause DoS through consumePhrase when parsing an email address according to RFC 5322.",
               "id": "GO-2026-4977",
-              "modified": "2026-09-24T10:41:42.457153787Z",
+              "modified": "2026-10-07T10:41:46.157915498Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -3019,7 +3530,9 @@
                 "RHSA-2026:68504",
                 "RHSA-2026:68527",
                 "RHSA-2026:68534",
-                "RHSA-2026:70201"
+                "RHSA-2026:70201",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic string concatenation in consumePhrase in net/mail"
@@ -3403,7 +3916,7 @@
               },
               "details": "Well-crafted inputs reaching ParseAddress, ParseAddressList, and ParseDate were able to trigger excessive CPU exhaustion and memory allocations.",
               "id": "GO-2026-4986",
-              "modified": "2026-09-24T10:41:42.580314663Z",
+              "modified": "2026-10-07T10:41:45.865352723Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -3464,7 +3977,9 @@
                 "RHSA-2026:68334",
                 "RHSA-2026:68504",
                 "RHSA-2026:68527",
-                "RHSA-2026:68534"
+                "RHSA-2026:68534",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic string concatentation in consumeComment in net/mail"
@@ -3599,7 +4114,7 @@
               },
               "details": "The ToASCII and ToUnicode functions incorrectly accept Punycode-encoded labels that decode to an ASCII-only label. For example, ToUnicode(\"xn--example-.com\") incorrectly returns the name \"example.com\" rather than an error.\n\nThis behavior can lead to privilege escalation in programs using the idna package. For example, a program which performs privilege checks on the ASCII hostname may reject \"example.com\" but permit \"xn--example-.com\". If that program subsequently converts the ASCII hostname to Unicode, it will inadvertently permits access to the Unicode name \"example.com\".",
               "id": "GO-2026-5026",
-              "modified": "2026-09-29T10:56:43.041153988Z",
+              "modified": "2026-10-07T10:41:45.942803600Z",
               "published": "2026-05-22T02:46:43Z",
               "references": [
                 {
@@ -3693,9 +4208,14 @@
                 "RHSA-2026:68504",
                 "RHSA-2026:68534",
                 "RHSA-2026:69235",
+                "RHSA-2026:70585",
+                "RHSA-2026:70614",
+                "RHSA-2026:70645",
                 "RHSA-2026:72276",
                 "RHSA-2026:72737",
-                "RHSA-2026:72805"
+                "RHSA-2026:72805",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna"
@@ -3760,7 +4280,7 @@
               },
               "details": "(*x509.Certificate).VerifyHostname previously called matchHostnames in a loop over all DNS Subject Alternative Name (SAN) entries. This caused strings.Split(host, \".\") to execute repeatedly on the same input hostname.\n\nWith a large DNS SAN list, verification costs scaled quadratically based on the number of SAN entries multiplied by the hostname's label count. Because x509.Verify validates hostnames before building the certificate chain, this overhead occurred even for untrusted certificates.",
               "id": "GO-2026-5037",
-              "modified": "2026-09-17T10:41:36.463498335Z",
+              "modified": "2026-10-02T10:41:43.926190093Z",
               "published": "2026-06-02T21:39:47Z",
               "references": [
                 {
@@ -3818,7 +4338,8 @@
                 "RHSA-2026:60354",
                 "RHSA-2026:61253",
                 "RHSA-2026:68334",
-                "RHSA-2026:68335"
+                "RHSA-2026:68335",
+                "RHSA-2026:70645"
               ],
               "schema_version": "1.7.5",
               "summary": "Inefficient candidate hostname parsing in crypto/x509"
@@ -3880,7 +4401,7 @@
               },
               "details": "Decoding a maliciously-crafted MIME header containing many invalid encoded-words can consume excessive CPU.",
               "id": "GO-2026-5038",
-              "modified": "2026-09-29T10:56:43.218943240Z",
+              "modified": "2026-10-07T10:41:46.133454638Z",
               "published": "2026-06-02T21:39:47Z",
               "references": [
                 {
@@ -3941,11 +4462,21 @@
                 "RHSA-2026:68534",
                 "RHSA-2026:69235",
                 "RHSA-2026:69308",
+                "RHSA-2026:70614",
+                "RHSA-2026:70645",
                 "RHSA-2026:71113",
                 "RHSA-2026:71114",
+                "RHSA-2026:71443",
                 "RHSA-2026:72276",
                 "RHSA-2026:72737",
-                "RHSA-2026:72805"
+                "RHSA-2026:72805",
+                "RHSA-2026:74503",
+                "RHSA-2026:74504",
+                "RHSA-2026:74505",
+                "RHSA-2026:74506",
+                "RHSA-2026:74796",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic complexity in WordDecoder.DecodeHeader in mime"
@@ -4007,7 +4538,7 @@
               },
               "details": "When returning errors, functions in the net/textproto package would include its input as part of the error. This might allow an attacker to inject misleading content to errors that are printed or logged.",
               "id": "GO-2026-5039",
-              "modified": "2026-08-31T10:25:58.939163086Z",
+              "modified": "2026-10-03T10:41:52.575378248Z",
               "published": "2026-06-02T21:39:47Z",
               "references": [
                 {
@@ -4024,7 +4555,6 @@
                 }
               ],
               "related": [
-                "CGA-v7pm-5wx9-g4q8",
                 "RHSA-2026:23262",
                 "RHSA-2026:23264",
                 "RHSA-2026:29980",
@@ -4033,7 +4563,8 @@
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
                 "RHSA-2026:57649",
-                "RHSA-2026:61253"
+                "RHSA-2026:61253",
+                "RHSA-2026:66364"
               ],
               "schema_version": "1.7.5",
               "summary": "Arbitrary inputs are included in errors without any escaping in net/textproto"
@@ -4112,7 +4643,7 @@
               },
               "details": "Handshakes which used Encrypted Client Hello could be de-anonymized by a passive network observer due to a disclosure of pre-shared key identities in the unencrypted client hello.",
               "id": "GO-2026-5856",
-              "modified": "2026-07-31T10:44:49.202644503Z",
+              "modified": "2026-10-03T10:41:52.186009042Z",
               "published": "2026-07-07T21:34:47Z",
               "references": [
                 {
@@ -4129,12 +4660,12 @@
                 }
               ],
               "related": [
-                "CGA-c2qp-qchh-369w",
                 "RHSA-2026:36477",
                 "RHSA-2026:36510",
                 "RHSA-2026:37435",
                 "RHSA-2026:37436",
-                "RHSA-2026:38995"
+                "RHSA-2026:38995",
+                "RHSA-2026:66364"
               ],
               "schema_version": "1.7.5",
               "summary": "Invoking Encrypted Client Hello privacy leak in crypto/tls"
@@ -4205,7 +4736,7 @@
               },
               "details": "Enforce a recursion limit in Unmarshal to prevent stack exhaustion when parsing deeply-nested, recursive structures.",
               "id": "GO-2026-5972",
-              "modified": "2026-09-29T10:56:43.099039813Z",
+              "modified": "2026-10-07T10:41:45.909997834Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -4300,14 +4831,28 @@
                 "RHSA-2026:70103",
                 "RHSA-2026:70201",
                 "RHSA-2026:70391",
+                "RHSA-2026:70585",
+                "RHSA-2026:70614",
                 "RHSA-2026:70640",
                 "RHSA-2026:70641",
+                "RHSA-2026:70645",
                 "RHSA-2026:71112",
                 "RHSA-2026:71113",
                 "RHSA-2026:71114",
+                "RHSA-2026:71443",
+                "RHSA-2026:71445",
+                "RHSA-2026:71672",
                 "RHSA-2026:72276",
                 "RHSA-2026:72737",
-                "RHSA-2026:72805"
+                "RHSA-2026:72805",
+                "RHSA-2026:74503",
+                "RHSA-2026:74504",
+                "RHSA-2026:74505",
+                "RHSA-2026:74506",
+                "RHSA-2026:74796",
+                "RHSA-2026:75689",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Enforce maximum recursion depth in encoding/asn1"
@@ -4379,7 +4924,7 @@
               },
               "details": "Previously, DecodeElement would reset the depth counter causing it to never fire; this could lead to stack exhaustion.",
               "id": "GO-2026-6088",
-              "modified": "2026-09-28T10:56:56.357083177Z",
+              "modified": "2026-10-07T10:41:46.001674133Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -4451,11 +4996,18 @@
                 "RHSA-2026:69961",
                 "RHSA-2026:70103",
                 "RHSA-2026:70201",
+                "RHSA-2026:70585",
+                "RHSA-2026:70614",
+                "RHSA-2026:70645",
                 "RHSA-2026:71112",
                 "RHSA-2026:71113",
                 "RHSA-2026:71114",
                 "RHSA-2026:71420",
-                "RHSA-2026:72276"
+                "RHSA-2026:71443",
+                "RHSA-2026:71445",
+                "RHSA-2026:72276",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Add recursion depth guard during decode in encoding/xml"
@@ -4527,7 +5079,7 @@
               },
               "details": "When a server is configured to support unencrypted HTTP/2, it reads a few bytes from each new connection to see if they contain the HTTP/2 client preface. ReadHeaderTimeout is unexpectedly not being applied when doing this.",
               "id": "GO-2026-6089",
-              "modified": "2026-09-29T10:56:42.975685124Z",
+              "modified": "2026-10-07T10:41:45.889550693Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -4607,8 +5159,15 @@
                 "RHSA-2026:71112",
                 "RHSA-2026:71113",
                 "RHSA-2026:71114",
+                "RHSA-2026:71445",
+                "RHSA-2026:71672",
                 "RHSA-2026:72737",
-                "RHSA-2026:72805"
+                "RHSA-2026:72805",
+                "RHSA-2026:74504",
+                "RHSA-2026:74505",
+                "RHSA-2026:74506",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Apply ReadHeaderTimeout when doing unencrypted HTTP/2 check in net/http"
@@ -4686,7 +5245,7 @@
               },
               "details": "Handshake messages, such as KeyUpdate, are always considered as state-advancing, regardless of whether a handshake has been completed or not. As a result, a malicious client can keep sending KeyUpdate messages to force the server to keep performing key derivation operations indefinitely.",
               "id": "GO-2026-6090",
-              "modified": "2026-09-29T10:56:42.884324394Z",
+              "modified": "2026-10-07T10:41:46.270018548Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -4782,14 +5341,28 @@
                 "RHSA-2026:70103",
                 "RHSA-2026:70201",
                 "RHSA-2026:70391",
+                "RHSA-2026:70585",
+                "RHSA-2026:70614",
                 "RHSA-2026:70640",
                 "RHSA-2026:70641",
+                "RHSA-2026:70645",
                 "RHSA-2026:71112",
                 "RHSA-2026:71113",
                 "RHSA-2026:71114",
+                "RHSA-2026:71443",
+                "RHSA-2026:71445",
+                "RHSA-2026:71672",
                 "RHSA-2026:72276",
                 "RHSA-2026:72737",
-                "RHSA-2026:72805"
+                "RHSA-2026:72805",
+                "RHSA-2026:74503",
+                "RHSA-2026:74504",
+                "RHSA-2026:74505",
+                "RHSA-2026:74506",
+                "RHSA-2026:74796",
+                "RHSA-2026:75689",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Limit handshake messages we are willing to accept post-handshake in crypto/tls"
@@ -4859,7 +5432,7 @@
               },
               "details": "Previously, pathological inputs could close an unescaped '/' early, allowing for attack-controlled data to inject arbitrary content, potentially leading to XSS.",
               "id": "GO-2026-6091",
-              "modified": "2026-09-25T10:41:52.899286820Z",
+              "modified": "2026-10-07T10:41:45.811639577Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -4939,11 +5512,24 @@
                 "RHSA-2026:69961",
                 "RHSA-2026:70201",
                 "RHSA-2026:70391",
+                "RHSA-2026:70585",
+                "RHSA-2026:70614",
                 "RHSA-2026:70640",
                 "RHSA-2026:70641",
                 "RHSA-2026:71112",
                 "RHSA-2026:71113",
-                "RHSA-2026:71114"
+                "RHSA-2026:71114",
+                "RHSA-2026:71443",
+                "RHSA-2026:71445",
+                "RHSA-2026:71672",
+                "RHSA-2026:74503",
+                "RHSA-2026:74504",
+                "RHSA-2026:74505",
+                "RHSA-2026:74506",
+                "RHSA-2026:74796",
+                "RHSA-2026:75689",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Fix Javascript regexp context tracking in html/template"
@@ -5008,7 +5594,7 @@
               },
               "details": "Previously, resolving relative paths containing parent directory ('..') segments performed string conversions and buffer rewrites on each step, resulting in quadratic time complexity and high memory allocation overhead.\n\nNow, path resolution operates on a byte buffer using index-based backtracking for '..' segments, eliminating the quadratic time complexity and significantly reducing memory allocations.",
               "id": "GO-2026-6218",
-              "modified": "2026-09-29T10:56:42.916303178Z",
+              "modified": "2026-10-07T10:41:45.740266615Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -5105,16 +5691,29 @@
                 "RHSA-2026:70191",
                 "RHSA-2026:70201",
                 "RHSA-2026:70391",
+                "RHSA-2026:70585",
+                "RHSA-2026:70614",
                 "RHSA-2026:70640",
                 "RHSA-2026:70641",
+                "RHSA-2026:70645",
                 "RHSA-2026:71112",
                 "RHSA-2026:71113",
                 "RHSA-2026:71114",
                 "RHSA-2026:71420",
+                "RHSA-2026:71443",
+                "RHSA-2026:71445",
                 "RHSA-2026:71619",
+                "RHSA-2026:71672",
                 "RHSA-2026:72276",
                 "RHSA-2026:72737",
-                "RHSA-2026:72805"
+                "RHSA-2026:72805",
+                "RHSA-2026:74503",
+                "RHSA-2026:74504",
+                "RHSA-2026:74505",
+                "RHSA-2026:74506",
+                "RHSA-2026:74796",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Avoid quadratic complexity in resolvePath in net/url"

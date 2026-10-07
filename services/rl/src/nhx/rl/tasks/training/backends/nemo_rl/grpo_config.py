@@ -277,11 +277,16 @@ def _resolve_gym_paths(
 
 def _sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
     """``create.resource`` must match ``sandbox.resources``."""
-    options: dict[str, Any] = {}
+    connection: dict[str, Any] = {}
     if gym.sandbox_server_protocol:
-        options["connection"] = {"protocol": gym.sandbox_server_protocol}
+        connection["protocol"] = gym.sandbox_server_protocol
+    options: dict[str, Any] = {"connection": connection}
     if gym.sandbox_resources:
-        options["create"] = {"resource": dict(gym.sandbox_resources)}
+        resource = dict(gym.sandbox_resources)
+        memory_mib = resource.pop("memory_mib", None)
+        if memory_mib and not resource.get("memory"):
+            resource["memory"] = f"{memory_mib}Mi"
+        options["create"] = {"resource": resource}
     return options
 
 

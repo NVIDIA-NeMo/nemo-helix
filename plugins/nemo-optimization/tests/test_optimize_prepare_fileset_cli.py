@@ -76,7 +76,7 @@ def _patch_upload(record: dict[str, Any]) -> ExitStack:
 
     stack = ExitStack()
     stack.enter_context(patch("nemo_optimization.optimize_cli._platform_sdk", return_value=_StubSDK()))
-    stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=object()))
+    stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io.FilesClient.from_client", return_value=object()))
     stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=manager))
     return stack
 

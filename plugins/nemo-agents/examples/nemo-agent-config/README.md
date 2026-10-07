@@ -51,6 +51,25 @@ The selected harness is controlled by `default_harness`. To try another harness
 from the same config today, edit `default_harness` before creating or invoking
 the agent.
 
+## Model parameters
+
+Models can set optional `top_p` and `max_tokens` parameters:
+
+```yaml
+models:
+  default:
+    provider: openai
+    model: openai/gpt-5.4
+    top_p: 0.9
+    max_tokens: 1024
+```
+
+`top_p` must be between 0 and 1, inclusive. `max_tokens` must be a positive
+integer no larger than `18446744073709551615`. Omit either field to keep the
+adapter's default. Support depends on the selected harness and model.
+These fields also work under `harnesses.<name>.model`, which replaces
+`models.default` for the selected harness; individual fields are not merged.
+
 ## Invoke
 
 `agent.yaml` is the telemetry-neutral multi-harness example. Set
@@ -130,7 +149,7 @@ In this example, Claude uses its harness-local Anthropic model config.
 
 Hermes Agent has dependencies that conflict with the NeMo Helix environment, so
 use the repository helper to install Fabric's pinned Hermes source and matching
-adapter in a separate Python 3.12 environment:
+adapter in a separate Python 3.14 environment:
 
 ```bash
 script/dev-install-hermes.sh
@@ -141,6 +160,47 @@ Set `default_harness: hermes` in `agent.yaml`. For subprocess deployments,
 export `ADAPTER_PYTHON` before starting NeMo Helix, or restart NeMo Helix after
 exporting it. The NeMo Helix service launches the agent subprocess, so exporting
 `ADAPTER_PYTHON` only in the later CLI shell is not enough.
+
+### Remote Agent
+
+Use [agent-remote.yaml](agent-remote.yaml) to connect to a running agent; no
+harness extra is needed. Set `harnesses.remote-agent.settings.base_url` to its
+API root (including `/v1`), `models.default.model` to its model name, and
+`REMOTE_AGENT_API_KEY` if authentication is required. For an unauthenticated
+endpoint, remove `models.default.api_key_env` to skip credential lookup.
+
+The endpoint must support SSE. Set `api_type` to `openai-responses` (default),
+`openai-completions`, or `anthropic-messages`. Configure skills, MCP, and tool
+policy on the remote agent.
+
+For live streaming and sessions, use a Relay-instrumented OpenAI Responses or
+Chat Completions endpoint and a running collector reachable by both services.
+Update the example config:
+
+```yaml
+harnesses:
+  remote-agent:
+    kind: remote-agent
+    settings:
+      base_url: https://agent.example.com/v1
+      api_type: openai-responses
+      relay_streaming: true
+telemetry:
+  enabled: true
+  provider: relay
+  atof:
+    enabled: true
+    sinks:
+      - type: stream
+        name: nemo-fabric-stream
+        url: https://collector.example.com
+        transport: ndjson
+```
+
+Configure the remote agent to publish NDJSON ATOF events to the collector's
+`/v1/atof` endpoint and carry `metadata.nemo_fabric_request_id` into its Relay
+events. Use `header_env` on the sink if the collector requires authentication.
+Helix connects to the collector without starting or stopping it.
 
 ## Relay Local Files
 

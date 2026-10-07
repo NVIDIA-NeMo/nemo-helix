@@ -10,9 +10,9 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_helix.types.inference import ModelProvider, ServedModelMapping
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
 from nemo_helix_plugin.inference_middleware import ImmediateResponse, InferenceRequest, NemoInferenceMiddleware
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nemo_helix_plugin.models.types import ModelProvider, ServedModelMapping
 from nhx.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
     global_model_cache,
@@ -23,24 +23,18 @@ from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelEntityIn
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 
-def _autoprovisioned_vms_for_cache(model_cache: ModelCache) -> list[SDKVirtualModel]:
+def _autoprovisioned_vms_for_cache(model_cache: ModelCache) -> list[VirtualModel]:
     """Mirror conftest.autoprovisioned_vms_for_cache for tests that build a custom ModelCache.
 
     Local copy because the unit tests directory has no ``__init__.py`` so the
     conftest helper isn't importable.
     """
     return [
-        SDKVirtualModel(
-            id=f"{workspace}/{name}",
-            entity_id=f"{workspace}/{name}",
+        VirtualModel(
             workspace=workspace,
             name=name,
-            parent=workspace,
-            db_version=1,
             default_model_entity=f"{workspace}/{name}",
             autoprovisioned=True,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
         )
         for (workspace, name) in model_cache.model_entity_info_map.keys()
         if "&adapters/" not in name
@@ -164,8 +158,8 @@ def test_model_entity_proxy_no_default_vm_preserves_qualified_body_model(
     # Custom VM named "alias-router" with no default_model_entity; the client supplies the
     # real (qualified) model entity in the body.
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "alias-router")])
-    # _make_sdk_vm falls back default_model_entity to "ws/name"; force it truly unset.
+    vm_cache.rebuild([_make_vm("e2e-test", "alias-router")])
+    # _make_vm falls back default_model_entity to "ws/name"; force it truly unset.
     vm_cache.virtual_model_map[("e2e-test", "alias-router")].default_model_entity = None
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
@@ -381,7 +375,7 @@ def test_model_router_routes_cross_workspace_lora(
     vm_cache = VirtualModelCache()
     vm_cache.rebuild(
         [
-            _make_sdk_vm(
+            _make_vm(
                 workspace="ws-a",
                 name="base",
                 default_model_entity="ws-a/base",
@@ -447,7 +441,7 @@ def test_model_router_routes_url_encoded_cross_workspace_lora(
     vm_cache = VirtualModelCache()
     vm_cache.rebuild(
         [
-            _make_sdk_vm(
+            _make_vm(
                 workspace="ws-a",
                 name="base",
                 default_model_entity="ws-a/base",
@@ -505,7 +499,7 @@ def test_model_router_adapter_routes_through_base_vm(
     cache.rebuild_model_entity_map()
     app.dependency_overrides[global_model_cache] = lambda: cache
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("ws", "base", default_model_entity="ws/base")])
+    vm_cache.rebuild([_make_vm("ws", "base", default_model_entity="ws/base")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     response = client.post(
@@ -524,20 +518,14 @@ def test_model_router_adapter_routes_through_base_vm(
 # ---------------------------------------------------------------------------
 
 
-def _make_sdk_vm(
+def _make_vm(
     workspace: str,
     name: str,
     default_model_entity: str | None = None,
-) -> SDKVirtualModel:
-    return SDKVirtualModel(
-        id=f"{workspace}/{name}",
-        entity_id=f"{workspace}/{name}",
+) -> VirtualModel:
+    return VirtualModel(
         name=name,
         workspace=workspace,
-        parent=workspace,
-        db_version=1,
-        created_at="2026-01-01T00:00:00Z",
-        updated_at="2026-01-01T00:00:00Z",
         default_model_entity=default_model_entity or f"{workspace}/{name}",
     )
 
@@ -546,7 +534,7 @@ def test_model_entity_proxy_routes_via_virtual_model(app: FastAPI, client: TestC
     """VirtualModel in cache → proxy resolves via default_model_entity."""
     vm_cache = VirtualModelCache()
     # Alias "my-alias" → existing entity "meta_llama-3.2-1b-instruct"
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-alias", "e2e-test/meta_llama-3.2-1b-instruct")])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-alias", "e2e-test/meta_llama-3.2-1b-instruct")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     response = client.get("/v2/workspaces/e2e-test/model/my-alias/-/v1/completions")
@@ -578,15 +566,9 @@ def test_model_entity_proxy_virtual_model_no_default_model_entity_no_middleware_
     vm_cache = VirtualModelCache()
     vm_cache.rebuild(
         [
-            SDKVirtualModel(
-                id="ws/mw-only",
-                entity_id="ws/mw-only",
+            VirtualModel(
                 name="mw-only",
                 workspace="ws",
-                parent="ws",
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
                 default_model_entity=None,
             )
         ]
@@ -634,7 +616,7 @@ def test_model_entity_proxy_executes_request_middleware(app: FastAPI, client: Te
     )
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-router", default_model_entity=None)])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-router", default_model_entity=None)])
     registry = _make_registry_with_request_middleware("e2e-test", "my-router", plugin)
 
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
@@ -652,7 +634,7 @@ def test_model_entity_proxy_immediate_response_skips_proxy(app: FastAPI, client:
     plugin.process_request = AsyncMock(return_value=ImmediateResponse(data={"id": "direct", "choices": []}))
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-router", default_model_entity=None)])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-router", default_model_entity=None)])
     registry = _make_registry_with_request_middleware("e2e-test", "my-router", plugin)
 
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
@@ -694,7 +676,7 @@ def test_model_entity_proxy_middleware_body_mutations_reach_backend(
     )
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-vm", default_model_entity=None)])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-vm", default_model_entity=None)])
     registry = _make_registry_with_request_middleware("e2e-test", "my-vm", plugin)
 
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache

@@ -180,17 +180,20 @@ runs:
             - 'plugins/_temporary-scaled-evals/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
+            # test_files_backend.py imports these from outside the plugin tree.
+            - 'packages/filesets/src/filesets/resources.py'
+            - 'packages/nhx_testing/src/nhx/testing/**'
+            - 'services/core/files/src/nhx/core/files/service.py'
+            - 'services/core/secrets/src/nhx/core/secrets/service.py'
           e2e:
             - 'e2e/**'
           docs:
             - 'docs/**'
-            - 'sdk/python/nemo-helix/src/**'
           tools:
             - 'tools/**'
             - 'packages/nemo_helix_ext/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_common/**'
-            - 'sdk/python/nemo-helix/src/nemo_helix/**'
           web-studio:
             - 'web/**'
             - '.nvmrc'
@@ -219,7 +222,6 @@ runs:
             - 'packages/**'
             - 'services/**'
             - 'plugins/**'
-            - 'sdk/python/nemo-helix/**'
           k8s-smoke:
             - 'e2e/k8s/scripts/**'
             - 'e2e/k8s/values/**'
@@ -229,11 +231,10 @@ runs:
           guardrails-benchmark:
             - 'plugins/nemo-guardrails/**'
             - 'services/guardrails/**'
-            - 'sdk/python/nemo-helix/src/nemo_helix/**'
+            - 'packages/nemo_helix_plugin/**'
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
             - 'packages/nemo_helix_plugin/**'
-            - 'sdk/python/nemo-helix/src/nemo_helix/**'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'

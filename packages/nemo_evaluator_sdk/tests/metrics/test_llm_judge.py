@@ -23,6 +23,7 @@ from nemo_evaluator_sdk.inference import (
 from nemo_evaluator_sdk.metrics.llm_judge import (
     LLMJudgeMetric,
     ScoreParserRegex,
+    _selected_rubric_label,
     default_judge_prompt_template_chat,
     default_judge_prompt_template_completions,
     generate_structured_output,
@@ -138,6 +139,26 @@ def test_regex_score_parser_nan():
     parser = ScoreParserRegex(score=_new_range_score(RegexScoreParser(pattern="SIMILARITY: (\\d+)")))
     score = parser.parse("no match")
     assert math.isnan(score.value)
+
+
+def test_regex_score_parser_unfilled_optional_group_is_nan():
+    """An optional group the judge reply leaves empty is an unparseable reply, not a metric error."""
+    parser = ScoreParserRegex(score=_new_range_score(RegexScoreParser(pattern=r"SCORE:\s*(\d+)?")))
+    assert math.isnan(parser.parse("SCORE: n/a").value)
+
+
+def test_regex_score_parser_rubric_unfilled_optional_group_is_nan_with_no_label():
+    metric_score = RubricScore(
+        name="quality",
+        rubric=[
+            Rubric(label="good", value=1),
+            Rubric(label="bad", value=0),
+        ],
+        parser=RegexScoreParser(pattern=r"QUALITY:\s*(good|bad)?"),
+    )
+    score = ScoreParserRegex(score=metric_score).parse("QUALITY: unsure")
+    assert math.isnan(score.value)
+    assert _selected_rubric_label(score) == ""
 
 
 @pytest.mark.parametrize(
@@ -484,7 +505,7 @@ class TestLLMJudgeMetric:
                 "type": "object",
                 "properties": {
                     "helpfulness": {
-                        "type": "integer",
+                        "type": "number",
                         "minimum": 1,
                         "maximum": 5,
                     }
@@ -1153,6 +1174,7 @@ class TestGenerateStructuredOutput:
                     name="accuracy",
                     minimum=1,
                     maximum=5,
+                    is_integer=True,
                     parser=JSONScoreParser(json_path="score"),
                 )
             ],
@@ -1188,7 +1210,7 @@ class TestGenerateStructuredOutput:
         assert generate_structured_output(metric) == {
             "schema": {
                 "type": "object",
-                "properties": {"score": {"type": "integer", "minimum": 1, "maximum": 5}},
+                "properties": {"score": {"type": "number", "minimum": 1, "maximum": 5}},
                 "required": ["score"],
             }
         }
@@ -1205,8 +1227,33 @@ class TestGenerateStructuredOutput:
         assert generate_structured_output(metric) == {
             "schema": {
                 "type": "object",
-                "properties": {"score": {"type": "integer", "minimum": 1, "maximum": 5}},
+                "properties": {"score": {"type": "number", "minimum": 1, "maximum": 5}},
                 "required": ["score"],
+            }
+        }
+
+    def test_range_from_json_integer_bounds_allows_fractional_scores(self):
+        metric = LLMJudgeMetric.model_validate(
+            llm_judge_param_dict({"scores": [{"name": "behaviour", "minimum": 0, "maximum": 1}]})
+        )
+        assert generate_structured_output(metric) == {
+            "schema": {
+                "type": "object",
+                "properties": {"behaviour": {"type": "number", "minimum": 0, "maximum": 1}},
+                "required": ["behaviour"],
+            }
+        }
+
+    def test_integer_range_generates_integer_schema(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RangeScore(name="accuracy", minimum=1, maximum=5, is_integer=True)],
+        )
+        assert generate_structured_output(metric) == {
+            "schema": {
+                "type": "object",
+                "properties": {"accuracy": {"type": "integer", "minimum": 1, "maximum": 5}},
+                "required": ["accuracy"],
             }
         }
 
@@ -1288,6 +1335,89 @@ class TestGenerateStructuredOutput:
 
         assert request["extra_body"]["nvext"]["max_thinking_tokens"] == 256
         assert "guided_json" in request["extra_body"]["nvext"]
+
+    def test_render_request_offline_default_serializes_item_as_json_content(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            job_type=SupportedJobTypes.OFFLINE,
+        )
+        metric.apply_evaluation_job_params(RunConfig())
+        item = {"question": "Capital of France?", "output": "Paris"}
+
+        request = metric._render_request(item, {})
+
+        assert json.loads(request["messages"][-1]["content"]) == item
+
+    def test_render_request_keeps_content_parts_lists(self):
+        parts = [{"type": "text", "text": "Rate this answer."}]
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            prompt_template={"messages": [{"role": "user", "content": "{{ item.parts }}"}]},
+        )
+
+        request = metric._render_request({"parts": parts}, {})
+
+        assert request["messages"][-1]["content"] == parts
+
+    def test_render_request_serializes_record_lists_with_type_keys(self):
+        events = [{"type": "search_result", "text": "Paris is the capital"}]
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            prompt_template={"messages": [{"role": "user", "content": "{{ item.events }}"}]},
+        )
+
+        request = metric._render_request({"events": events}, {})
+
+        assert json.loads(request["messages"][-1]["content"]) == events
+
+    def test_render_request_sends_string_prompt_as_chat_with_response_format(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template="Rate this answer: {{ item.answer }}",
+        )
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "prompt" not in request
+        assert request["messages"][-1] == {"role": "user", "content": "Rate this answer: Paris"}
+        assert "response_format" in request
+
+    def test_render_request_keeps_string_prompt_when_structured_output_unsupported(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template="Rate this answer: {{ item.answer }}",
+        )
+        for hook in metric._preprocess_hooks:
+            if isinstance(hook, InferenceStructuredOutput):
+                hook.set_mode(StructuredOutputMode.UNSUPPORTED)
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "messages" not in request
+        assert request["prompt"].endswith("Rate this answer: Paris")
+
+    @pytest.mark.parametrize("mode", [StructuredOutputMode.ROOT_GUIDED_JSON, StructuredOutputMode.NVEXT_GUIDED_JSON])
+    def test_render_request_keeps_prompt_and_completion_options_with_guided_json(self, mode):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template={"prompt": "Rate this answer: {{ item.answer }}", "echo": False},
+        )
+        for hook in metric._preprocess_hooks:
+            if isinstance(hook, InferenceStructuredOutput):
+                hook.set_mode(mode)
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "messages" not in request
+        assert request["prompt"].endswith("Rate this answer: Paris")
+        assert request["echo"] is False
+        assert "guided_json" in json.dumps(request["extra_body"])
 
 
 # =============================================================================

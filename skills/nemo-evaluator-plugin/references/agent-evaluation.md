@@ -58,7 +58,7 @@ runner = GymAgentTaskRunner(
         resources_server="mcqa",
     )
 )
-job = client.evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)
+job = evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)
 job.wait_until_done()
 ```
 
@@ -165,10 +165,20 @@ kept next to the qualified `agent` ref. The agent runs fresh for every trial;
 an existing deployment is never called.
 
 ```python
-from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget, GymRunnerTarget, HarborRunnerTarget, RegisteredAgentSource
 
-target = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+on_host = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+in_task_containers = HarborRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))
+in_gym = GymRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"), resources_server="mcqa")
 ```
+
+On Harbor the resolved agent runs as the SDK's installed Fabric agent with its
+config in `agent_kwargs.fabric_config`; a registered source has no `model_name`.
+On Gym the staging step assembles a `wheels-v1` environment package (the platform's
+`nemo_registered_agent` component, the resolved config as an agent instance, the
+agent's Ethos files, a wheelhouse with the Fabric harness) that only the sandboxed
+Gym host runs; `policy_*` Hydra settings default to the agent's default model, and a
+user `target.environment` FileSet must itself be `wheels-v1`.
 
 There is no model override — a different model is a different registered
 agent. To reshape the run, pass `environment=` (an `EnvironmentSpecInline`, the
@@ -211,11 +221,12 @@ For a durable job that uses components already installed in `nhx-gym-tasks`,
 submit the validated live runner as shown above or build a `GymRunnerTarget`:
 
 ```python
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import GymAgentSource, GymRunnerTarget
 
 target = GymRunnerTarget(
-    agent="simple_agent",
-    agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+    source=GymAgentSource(
+        component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    ),
     resources_server="mcqa",
     num_repeats=1,
     concurrency=4,
@@ -245,27 +256,29 @@ compiles them into two ordered Jobs steps:
 
 ```python
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import GymAgentSource, GymRunnerTarget
 
 target = GymRunnerTarget(
     environment=FilesetRef(root="default/my-gym-environment"),
-    agent="simple_agent",
-    agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+    source=GymAgentSource(
+        component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    ),
     resources_server="custom_greeting",
     env_secrets={"MODEL_API_KEY": "default/my-model-api-key"},
 )
 ```
 
-`agent_config` can be omitted when the FileSet declares the selected agent.
-Set `agent_ref_name` when the package registers that agent under a different
-instance name. Use `env_secrets`, not `env_vars`, for credentials; sandboxed
+`source.config` can be omitted when the FileSet declares the selected agent.
+Set `source.instance` when the package registers that agent under a different
+instance name than its component. Use `env_secrets`, not `env_vars`, for credentials; sandboxed
 jobs reject credential-shaped plaintext environment variables.
 
-From a live runner, `client.evaluator.submit(tasks=..., target=runner,
+From a live runner, `evaluator.submit(tasks=..., target=runner,
 placement=GymPlacement(...))` builds this target without rebuilding it by hand.
 `env_secrets` lives on `GymRuntimeConfig` (it means the same locally, resolved
 from your environment); `environment` and `agent_ref_name` live on the
-`GymPlacement`, because only a deployment can honor them.
+`GymPlacement`, because only a deployment can honor them, and the submission
+folds them into the target's `environment` and `source.instance`.
 
 `max_concurrent_tasks` limits tasks evaluated concurrently. Target-specific
 settings such as inference parallelism or Harbor
@@ -278,23 +291,27 @@ without invoking the original model, agent, or runner. Keep stable `task_id`
 values so trials match task definitions.
 
 Individual trials are stored in the run bundle, not as queryable result entities.
-Retrieve the run index, download its bundle, and hydrate `trials.jsonl`:
+Retrieve the run index, download its bundle, and hydrate `trials.jsonl`. The index record names the
+bundle in `stored.bundle_ref`:
 
 ```python
 from nemo_evaluator_sdk.agent_eval.persistence import read_trials
 
-stored = client.evaluator.agent_eval_results.retrieve("<result-name>")
-client.files.download(remote_path=stored.bundle_ref, local_path="previous-run")
-trials = read_trials("previous-run")
+stored = evaluator.agent_eval_results.retrieve("<result-name>")
+print(stored.bundle_ref)
 ```
 
-CLI equivalent for downloading the bundle:
+Download the bundle with the CLI, then read the trials from the extracted directory:
 
 ```bash
 nemo jobs results download agent-eval-results \
   --job <job-name> --output-file agent-eval-results.tar.gz
 mkdir -p previous-run
 tar -xzf agent-eval-results.tar.gz -C previous-run --strip-components=1
+```
+
+```python
+trials = read_trials("previous-run")
 ```
 
 Pass the hydrated `trials` with the same task definitions and omit `target`.
@@ -328,13 +345,13 @@ defaults to the run's `work_dir` (`AgentEvalRunConfig.work_dir`); pass
 
 Use the in-memory result for programmatic follow-up and the bundle for
 inspection, sharing, or rescoring. Platform jobs persist the bundle and create
-a queryable record under `client.evaluator.agent_eval_results`.
+a queryable record under `evaluator.agent_eval_results`.
 
 A platform job hands back an `AgentEvaluatorJobResource`, which is not the
 dataset-driven job handle: it offers `name`, `job`, `get_job_status()`,
 `check_if_complete()`, and `wait_until_done()`, but no `get_result()` or
 `download_artifacts()`. Read the scores through
-`client.evaluator.agent_eval_results`.
+`evaluator.agent_eval_results`.
 
 Inspect failed and partial trials and score diagnostics before interpreting
 aggregate values; a high mean with low coverage can hide missing or failed

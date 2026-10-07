@@ -47,21 +47,27 @@ def _agents_response() -> dict[str, Any]:
     }
 
 
-def _deployments_response() -> dict[str, Any]:
+def _deployments_response(
+    *,
+    name: str = "nemo-agent-deployment",
+    endpoint: str = "http://localhost:8001",
+    endpoints: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "name": name,
+        "agent": "nemo-agent",
+        "workspace": "default",
+        "status": "running",
+        "endpoint": endpoint,
+        "config": {"workflow": {"_type": "react_agent"}},
+        "port": 8001,
+        "pid": 67890,
+        "created_at": "2026-05-12T20:01:00.123456",
+    }
+    if endpoints is not None:
+        row["endpoints"] = endpoints
     return {
-        "data": [
-            {
-                "name": "nemo-agent-deployment",
-                "agent": "nemo-agent",
-                "workspace": "default",
-                "status": "running",
-                "endpoint": "http://localhost:8001",
-                "config": {"workflow": {"_type": "react_agent"}},
-                "port": 8001,
-                "pid": 67890,
-                "created_at": "2026-05-12T20:01:00.123456",
-            }
-        ],
+        "data": [row],
         "pagination": {
             "page": 1,
             "page_size": 1,
@@ -153,6 +159,81 @@ class TestDeploymentsListOutput:
         printed = json.loads(result.stdout)
         assert [deployment["name"] for deployment in printed["data"]] == ["nemo-agent-deployment"]
         assert printed["data"][0]["status"] == "running"
+
+    @pytest.mark.parametrize("fmt", ["table", "markdown", "csv"])
+    def test_container_list_shows_projected_http_url(self, app, fmt: str) -> None:
+        response = _deployments_response(
+            name="local-calc-docker",
+            endpoint="",
+            endpoints=[{"name": "port-8000", "url": "http://localhost:49154", "protocol": "http"}],
+        )
+        with _install_mock_transport(response):
+            result = runner.invoke(app, ["deployments", "list", "--output-format", fmt])
+
+        assert result.exit_code == 0, result.output
+        # Rich clips the default table to the terminal; markdown and CSV keep the full URL.
+        expected = "http://loc" if fmt == "table" else "http://localhost:49154"
+        assert expected in result.stdout
+
+    def test_list_prefers_scalar_endpoint_over_projected_urls(self, app) -> None:
+        response = _deployments_response(
+            endpoint="http://127.0.0.1:49153",
+            endpoints=[{"name": "port-8000", "url": "http://localhost:49154", "protocol": "http"}],
+        )
+        with _install_mock_transport(response):
+            result = runner.invoke(app, ["deployments", "list", "--output-format", "markdown"])
+
+        assert result.exit_code == 0, result.output
+        assert "http://127.0.0.1:49153" in result.stdout
+        assert "http://localhost:49154" not in result.stdout
+
+    def test_list_prefers_http_endpoint_over_earlier_non_http(self, app) -> None:
+        response = _deployments_response(
+            name="local-calc-docker",
+            endpoint="",
+            endpoints=[
+                {"name": "metrics", "url": "tcp://localhost:9090", "protocol": "tcp"},
+                {"name": "port-8000", "url": "http://localhost:49154", "protocol": "http"},
+            ],
+        )
+        with _install_mock_transport(response):
+            result = runner.invoke(app, ["deployments", "list", "--output-format", "markdown"])
+
+        assert result.exit_code == 0, result.output
+        assert "http://localhost:49154" in result.stdout
+        assert "tcp://localhost:9090" not in result.stdout
+
+    def test_list_shows_first_url_when_no_http_endpoint_exists(self, app) -> None:
+        response = _deployments_response(
+            name="local-calc-docker",
+            endpoint="",
+            endpoints=[{"name": "metrics", "url": "tcp://localhost:9090", "protocol": "tcp"}],
+        )
+        with _install_mock_transport(response):
+            result = runner.invoke(app, ["deployments", "list", "--output-format", "markdown"])
+
+        assert result.exit_code == 0, result.output
+        assert "tcp://localhost:9090" in result.stdout
+
+    def test_list_stays_blank_when_deployment_has_no_address(self, app) -> None:
+        response = _deployments_response(name="local-calc-docker", endpoint="", endpoints=[])
+        with _install_mock_transport(response), _on_a_terminal():
+            result = runner.invoke(app, ["deployments", "list"])
+
+        assert result.exit_code == 0, result.output
+        assert "http" not in result.stdout
+        assert "tcp://" not in result.stdout
+
+    def test_container_list_json_keeps_empty_scalar_endpoint(self, app) -> None:
+        endpoints = [{"name": "port-8000", "url": "http://localhost:49154", "protocol": "http"}]
+        response = _deployments_response(name="local-calc-docker", endpoint="", endpoints=endpoints)
+        with _install_mock_transport(response):
+            result = runner.invoke(app, ["deployments", "list", "--output-format", "json"])
+
+        assert result.exit_code == 0, result.output
+        printed = json.loads(result.stdout)
+        assert printed["data"][0]["endpoint"] == ""
+        assert printed["data"][0]["endpoints"] == endpoints
 
 
 class _CodeState:

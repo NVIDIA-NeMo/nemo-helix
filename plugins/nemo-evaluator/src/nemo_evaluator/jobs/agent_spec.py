@@ -13,6 +13,7 @@ each other.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, Self, TypeAlias
 
@@ -27,6 +28,7 @@ from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinit
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
@@ -45,7 +47,7 @@ class ModelTarget(BaseModel):
     The prompt template *is* the request sent to the model, so it lives here with the endpoint.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["model"] = "model"
     model: Model = Field(description="The model endpoint to generate trials against.")
@@ -135,7 +137,7 @@ class FabricRunnerTarget(BaseModel):
     is gone — fold any overlay into the config.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["fabric"] = "fabric"
     source: FabricSource = Field(
@@ -190,6 +192,13 @@ class FabricRunnerTarget(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _env_vars_are_fabric_safe(self) -> Self:
+        """Reject environment overrides once an inline or registered agent config is available."""
+        if self.config is not None:
+            validate_fabric_env(self.config, self.env_secrets)
+        return self
+
     @property
     def config(self) -> dict[str, Any] | None:
         """The Fabric config the job runs: the inline one, or the registered agent's once resolved."""
@@ -224,9 +233,15 @@ class HarborImportedAgentSource(BaseModel):
     model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
 
 
-#: What Harbor runs in each task container. The shapes share no required field, so a document is exactly
-#: one of them.
-HarborAgentSource: TypeAlias = HarborBuiltinAgentSource | HarborImportedAgentSource
+#: What Harbor runs in each task container. The three shapes share no required field, so a document is
+#: exactly one of them.
+HarborAgentSource: TypeAlias = HarborBuiltinAgentSource | HarborImportedAgentSource | RegisteredAgentSource
+
+#: The SDK's installed Fabric agent, which a registered agent runs as: it brings its own Python, so any
+#: task image works.
+REGISTERED_AGENT_HARBOR_IMPORT_PATH = (
+    "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent"
+)
 
 _LEGACY_HARBOR_AGENT_FIELDS = ("agent_name", "agent_import_path", "agent_model_name")
 
@@ -247,8 +262,11 @@ class HarborRunnerTarget(BaseModel):
     kind: Literal["harbor"] = "harbor"
     source: HarborAgentSource = Field(
         default_factory=lambda: HarborBuiltinAgentSource(name="oracle"),
-        description="The agent Harbor runs in each task container: a built-in agent by `name`, or your own by "
-        "`import_path`.",
+        description="The agent Harbor runs in each task container: a built-in agent by `name`, your own by "
+        "`import_path`, or a registered platform `agent` (with an optional `environment`). A registered agent is "
+        "resolved at submit into the SDK's installed Fabric agent with the agent's translated config in "
+        "`agent_kwargs.fabric_config`, so it runs as registered — identity, skills, MCP servers, and telemetry "
+        "included — and stays, qualified, as the run's provenance.",
     )
     agent_kwargs: dict[str, JsonValue] = Field(
         default_factory=dict,
@@ -280,6 +298,16 @@ class HarborRunnerTarget(BaseModel):
     )
     reward_key: str = Field(
         default="reward", description="Key read from Harbor's per-trial rewards mapping to score against."
+    )
+    agent_setup_timeout_multiplier: float | None = Field(
+        default=None,
+        gt=0,
+        description="Harbor agent-setup timeout multiplier. An agent that installs itself into the task container "
+        "(a Fabric harness, a registered agent) needs several times Harbor's default, which is tuned for prebuilt "
+        "agents.",
+    )
+    agent_timeout_multiplier: float | None = Field(
+        default=None, gt=0, description="Harbor agent-phase timeout multiplier, applied to every trial."
     )
 
     @model_validator(mode="before")
@@ -320,13 +348,65 @@ class HarborRunnerTarget(BaseModel):
 
     @property
     def agent_import_path(self) -> str | None:
-        """The Harbor agent class to import, if the source names one."""
-        return self.source.import_path if isinstance(self.source, HarborImportedAgentSource) else None
+        """The Harbor agent class to import; a registered agent runs as the installed Fabric agent."""
+        if isinstance(self.source, HarborImportedAgentSource):
+            return self.source.import_path
+        if isinstance(self.source, RegisteredAgentSource):
+            return REGISTERED_AGENT_HARBOR_IMPORT_PATH
+        return None
 
     @property
     def agent_model_name(self) -> str | None:
-        """The model slug handed to the agent."""
-        return self.source.model_name
+        """The model slug handed to a built-in or imported agent."""
+        return None if isinstance(self.source, RegisteredAgentSource) else self.source.model_name
+
+
+class GymAgentSource(BaseModel):
+    """A Gym agent, selected the way ``gym`` selects one: a component, its config, and the instance.
+
+    The keys are Gym's words rather than the target's former ``agent`` / ``agent_config`` /
+    ``agent_ref_name``: a sibling source member names a platform agent under ``agent``, and the union's
+    members must share no required key.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    component: str = Field(description="Gym agent component to collect rollouts with, e.g. `simple_agent` (--agent).")
+    config: str | None = Field(
+        default=None,
+        description="Repo-relative agent config passed to `gym env start` (--config). Required without an "
+        "environment FileSet; with a FileSet it is used only when the package does not declare the selected "
+        "instance.",
+    )
+    instance: str | None = Field(
+        default=None,
+        description="Gym agent *instance*, as distinct from the `component` it configures. Defaults to "
+        "`component`. Set it whenever the two differ, which is common in stock Gym: `rewoo_agent` is an instance "
+        "of the `langgraph_agent` component, as are the whole `anyswe_*` and `anyterminal_*` families of theirs. "
+        "It keys the resources-server binding, decides whether an environment package declares the agent, and is "
+        "stamped as each row's `agent_ref`. Requires sandboxed execution.",
+    )
+
+
+#: What Gym collects rollouts with. A registered platform agent runs through the component the staging
+#: step writes into the environment package, so the shapes share no required key.
+GymSource: TypeAlias = GymAgentSource | RegisteredAgentSource
+
+#: The Gym agent component the staging step writes into the environment package for a registered agent.
+REGISTERED_AGENT_GYM_COMPONENT = "nemo_registered_agent"
+
+_LEGACY_GYM_AGENT_FIELDS = {"agent": "component", "agent_config": "config", "agent_ref_name": "instance"}
+
+
+def registered_agent_gym_instance(agent: AgentRef) -> str:
+    """The Gym agent instance a registered agent is registered under: its name, made a Hydra key."""
+    name = agent.root.rpartition("/")[2]
+    return "registered_" + re.sub(r"[^a-z0-9_]", "_", name.lower())
+
+
+def registered_agent_gym_config_path(agent: AgentRef) -> str:
+    """Package-relative path of the agent-instance config the staging step generates."""
+    return f"responses_api_agents/{REGISTERED_AGENT_GYM_COMPONENT}/configs/{registered_agent_gym_instance(agent)}.yaml"
 
 
 class GymRunnerTarget(BaseModel):
@@ -338,7 +418,7 @@ class GymRunnerTarget(BaseModel):
     to materialize the selected tasks for rollout collection.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["gym"] = "gym"
     environment: FilesetRef | None = Field(
@@ -346,11 +426,17 @@ class GymRunnerTarget(BaseModel):
         description="Environment FileSet containing a native-v1 or wheels-v1 Gym package. "
         "The complete FileSet is staged read-only; file fragments are not supported.",
     )
-    agent: str = Field(description="Agent name to collect rollouts with, e.g. 'simple_agent'.")
-    agent_config: str | None = Field(
+    source: GymSource = Field(
+        description="The agent Gym collects rollouts with: a Gym agent by `component` (with its `config` and "
+        "optionally the `instance` the package registers it under), or a registered platform `agent` (with an "
+        "optional `environment`). A registered agent is resolved at submit into `resolved_config`; the job's "
+        "staging step turns that into an environment package running the platform's Gym agent component, so "
+        "the agent runs as registered — identity, skills, MCP servers — with its model on Gym's policy server.",
+    )
+    resolved_config: dict[str, Any] | None = Field(
         default=None,
-        description="Repo-relative built-in agent config. Required without an environment FileSet; "
-        "with a FileSet it is used only when the package does not declare the selected agent instance.",
+        description="Set by submit-time resolution of a registered `agent`, never by the submitter: the Fabric "
+        "config the agent resolved to, which the staging step writes into the Gym environment package.",
     )
     resources_server: str = Field(
         description="Resources-server (environment) name, e.g. 'mcqa' (--resources-server).",
@@ -378,14 +464,6 @@ class GymRunnerTarget(BaseModel):
         "configurable only this way — `wmt_translation` reads `WMT_TRANSLATION_COMET_PY_CACHE` for its "
         "model-cache root and defaults to a container-only path — and a job spec has no ambient "
         "environment to inherit from, so whatever the environment needs has to travel in the spec.",
-    )
-    agent_ref_name: str | None = Field(
-        default=None,
-        description="Gym agent *instance*, as distinct from the `agent` component it configures. Defaults "
-        "to `agent`. Set it whenever the two differ, which is common in stock Gym: `rewoo_agent` is an "
-        "instance of the `langgraph_agent` component, as are the whole `anyswe_*` and `anyterminal_*` "
-        "families of theirs. It keys the resources-server binding, decides whether an environment package "
-        "declares the agent, and is stamped as each row's `agent_ref`. Requires sandboxed execution.",
     )
     env_secrets: dict[str, SecretRef] = Field(
         default_factory=dict,
@@ -432,10 +510,35 @@ class GymRunnerTarget(BaseModel):
             raise ValueError("environment FileSet references must not include a file fragment")
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_agent_fields(cls, data: Any) -> Any:
+        """Accept the pre-``source`` flat fields for one release. Deprecated since 0.8; remove in 0.9."""
+        if not isinstance(data, dict) or "source" in data or not any(k in data for k in _LEGACY_GYM_AGENT_FIELDS):
+            return data
+        lifted = {key: value for key, value in data.items() if key not in _LEGACY_GYM_AGENT_FIELDS}
+        lifted["source"] = {
+            new_key: data[old_key]
+            for old_key, new_key in _LEGACY_GYM_AGENT_FIELDS.items()
+            if data.get(old_key) is not None
+        }
+        logger.warning(
+            "GymRunnerTarget: top-level `agent` / `agent_config` / `agent_ref_name` are deprecated; select the "
+            "agent under `source` as `component` / `config` / `instance`. This shape stops being accepted in the "
+            "release after 0.8."
+        )
+        return lifted
+
     @model_validator(mode="after")
     def _require_builtin_agent_config_without_environment(self) -> Self:
-        if self.environment is None and self.agent_config is None:
-            raise ValueError("The agent_config field is required when no environment FileSet is supplied")
+        if isinstance(self.source, GymAgentSource) and self.environment is None and self.source.config is None:
+            raise ValueError("`source.config` is required when no environment FileSet is supplied")
+        return self
+
+    @model_validator(mode="after")
+    def _resolved_config_belongs_to_a_registered_agent(self) -> Self:
+        if self.resolved_config is not None and not isinstance(self.source, RegisteredAgentSource):
+            raise ValueError("`resolved_config` is the resolution of a registered `agent`; a Gym agent needs none")
         return self
 
     @model_validator(mode="after")
@@ -444,6 +547,27 @@ class GymRunnerTarget(BaseModel):
         if overlap:
             raise ValueError(f"{overlap} appear in both env_vars and env_secrets; name each variable once")
         return self
+
+    @property
+    def agent(self) -> str:
+        """The Gym agent component (`--agent`); the platform's component for a registered agent."""
+        if isinstance(self.source, RegisteredAgentSource):
+            return REGISTERED_AGENT_GYM_COMPONENT
+        return self.source.component
+
+    @property
+    def agent_config(self) -> str | None:
+        """The package-relative agent config (`--config`); generated at staging for a registered agent."""
+        if isinstance(self.source, RegisteredAgentSource):
+            return registered_agent_gym_config_path(self.source.agent)
+        return self.source.config
+
+    @property
+    def agent_ref_name(self) -> str | None:
+        """The Gym agent instance, when it differs from the component; always set for a registered agent."""
+        if isinstance(self.source, RegisteredAgentSource):
+            return registered_agent_gym_instance(self.source.agent)
+        return self.source.instance
 
 
 class GymPlacement(BaseModel):
@@ -481,11 +605,27 @@ AgentRunnerTarget: TypeAlias = FabricRunnerTarget | GymRunnerTarget | HarborRunn
 Target: TypeAlias = ModelTarget | AgentTarget | AgentRunnerTarget
 
 
-def registered_agent_name(target: Target | None) -> str | None:
-    """The bare name of the registered agent a Fabric target names, if any."""
-    if isinstance(target, FabricRunnerTarget) and isinstance(target.source, RegisteredAgentSource):
-        return target.source.agent.root.rpartition("/")[2]
+def registered_agent_source(target: Target | None) -> RegisteredAgentSource | None:
+    """The registered agent a Fabric, Harbor or Gym target runs, if it runs one."""
+    if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget)) and isinstance(
+        target.source, RegisteredAgentSource
+    ):
+        return target.source
     return None
+
+
+def registered_agent_config(target: FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget) -> dict[str, Any] | None:
+    """The Fabric config a registered agent resolved to: Fabric and Gym carry it whole, Harbor inside ``agent_kwargs``."""
+    if isinstance(target, (FabricRunnerTarget, GymRunnerTarget)):
+        return target.resolved_config
+    config = target.agent_kwargs.get("fabric_config")
+    return config if isinstance(config, dict) else None
+
+
+def registered_agent_name(target: Target | None) -> str | None:
+    """The bare name of the registered agent a Fabric or Harbor target names, if any."""
+    source = registered_agent_source(target)
+    return source.agent.root.rpartition("/")[2] if source is not None else None
 
 
 def registered_agent_config_needs_files(config: Mapping[str, Any]) -> bool:
@@ -495,10 +635,10 @@ def registered_agent_config_needs_files(config: Mapping[str, Any]) -> bool:
     return bool(skills.get("paths") or discovery.get("local_paths"))
 
 
-def registered_agent_files(target: FabricRunnerTarget) -> FilesetRef | None:
+def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget) -> FilesetRef | None:
     """The FileSet a registered agent's files are staged from: the snapshot resolution took, if it took one."""
-    source = target.source
-    return source.files if isinstance(source, RegisteredAgentSource) else None
+    source = registered_agent_source(target)
+    return source.files if source is not None else None
 
 
 def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[str | None, str | None]:
@@ -519,8 +659,12 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
     if isinstance(target, AgentTarget):
         return target.agent.name, None
     if isinstance(target, HarborRunnerTarget):
+        if isinstance(target.source, RegisteredAgentSource):
+            return registered_agent_name(target), None
         return target.agent_import_path or target.agent_name, target.agent_model_name
     if isinstance(target, GymRunnerTarget):
+        if isinstance(target.source, RegisteredAgentSource):
+            return registered_agent_name(target), None
         return target.agent, None
     if isinstance(target, ModelTarget):
         return None, target.model.name
@@ -720,11 +864,16 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
 
     @model_validator(mode="after")
     def _reject_resolution_outputs_on_submit(self) -> Self:
-        if isinstance(self.target, FabricRunnerTarget):
-            if self.target.resolved_config is not None:
-                raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
-            if isinstance(self.target.source, RegisteredAgentSource) and self.target.source.files is not None:
-                raise ValueError("`source.files` is set by registered-agent resolution, not the submitter")
+        target = self.target
+        if isinstance(target, (FabricRunnerTarget, GymRunnerTarget)) and target.resolved_config is not None:
+            raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
+        source = registered_agent_source(target)
+        if source is not None and source.files is not None:
+            raise ValueError("`source.files` is set by registered-agent resolution, not the submitter")
+        if isinstance(target, HarborRunnerTarget) and source is not None and "fabric_config" in target.agent_kwargs:
+            raise ValueError(
+                "`agent_kwargs.fabric_config` is derived from the registered `agent`; pass one or the other"
+            )
         return self
 
 
@@ -737,11 +886,18 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
 
     @model_validator(mode="after")
     def _reject_unresolved_registered_agent(self) -> Self:
-        if isinstance(self.target, FabricRunnerTarget) and self.target.config is None:
-            raise ValueError(
-                f"AgentEvalSpec Fabric target names registered agent {registered_agent_name(self.target)!r} but has "
-                "no `resolved_config`; it must be resolved before run"
-            )
+        target = self.target
+        if (
+            isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
+            and registered_agent_source(target) is not None
+        ):
+            if registered_agent_config(target) is None:
+                raise ValueError(
+                    f"AgentEvalSpec {target.kind} target names registered agent {registered_agent_name(target)!r} but "
+                    "carries no resolved config; it must be resolved before run"
+                )
+        elif isinstance(target, FabricRunnerTarget) and target.config is None:
+            raise ValueError("AgentEvalSpec Fabric target has no config")
         return self
 
     @model_validator(mode="after")

@@ -13,8 +13,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_safe_synthesizer_plugin.sdk.job import SafeSynthesizerJob
+from nemo_safe_synthesizer_plugin.sdk.resources import SafeSynthesizerJobsResource
 from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
@@ -42,7 +45,7 @@ def _merge_config(config: _ConfigInput, kwargs: dict[str, Any]) -> dict[str, Any
 class SafeSynthesizerJobBuilder:
     """Fluent builder for Safe Synthesizer plugin jobs."""
 
-    def __init__(self, client: NeMoHelix, workspace: str = "default"):
+    def __init__(self, client: NemoClient, workspace: str = "default"):
         self._client = client
         self._workspace = workspace
 
@@ -150,7 +153,7 @@ class SafeSynthesizerJobBuilder:
     def create_job(self, **kwargs: Any) -> SafeSynthesizerJob:
         """Upload input data and create the Safe Synthesizer job."""
         self._resolve_datasource()
-        response = self._client.safe_synthesizer.jobs.create(
+        response = SafeSynthesizerJobsResource(self._client).create(
             workspace=self._workspace,
             spec=self._build_job_spec(),
             **kwargs,
@@ -232,12 +235,13 @@ class SafeSynthesizerJobBuilder:
 
     def _upload_to_fileset(self, dataset_path: str | Path, filename: str, fileset_name: str) -> str:
         dataset_path = self._validate_dataset_path(dataset_path)
-        self._client.files.upload(
-            local_path=str(dataset_path),
-            remote_path=filename,
-            fileset=fileset_name,
+        files = FilesClient.from_client(self._client)
+        files.create_fileset(body=CreateFilesetRequest(name=fileset_name), workspace=self._workspace, exist_ok=True)
+        files.upload_file(
+            name=fileset_name,
             workspace=self._workspace,
-            fileset_auto_create=True,
+            path=filename,
+            content=dataset_path.read_bytes(),
         )
         return f"{self._workspace}/{fileset_name}#{filename}"
 

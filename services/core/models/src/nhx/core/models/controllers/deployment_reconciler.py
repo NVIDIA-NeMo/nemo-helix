@@ -10,8 +10,7 @@ from enum import Enum, auto
 from logging import getLogger
 from typing import Awaitable, Callable, Optional
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import (
@@ -151,7 +150,7 @@ class ModelDeploymentReconciler:
 
     def __init__(
         self,
-        models_sdk: AsyncNeMoHelix,
+        client: AsyncNemoClient,
         backend_registry: BackendRegistry,
         controller_config: ControllerConfig,
         entity_cache: ModelEntityCache,
@@ -160,15 +159,14 @@ class ModelDeploymentReconciler:
         """Initialize the deployment reconciler.
 
         Args:
-            models_sdk: SDK client for Models API interactions
+            client: Typed platform client for Models API interactions
             backend_registry: Registry of available service backends
             controller_config: Controller configuration containing deployment settings
             entity_cache: Model Entity reads and staged writes for the current phase
             emit_heartbeat: Called as each unit of work finishes so a long pass is
                 distinguishable from a stalled one
         """
-        self._models_sdk = models_sdk
-        self._models_client = client_from_platform(models_sdk, AsyncModelsClient)
+        self._models_client = AsyncModelsClient.from_client(client)
         self._backend_registry = backend_registry
         self._controller_config = controller_config
         self._entity_cache = entity_cache

@@ -7,27 +7,29 @@ This package provides `FilesetFileSystem`, an fsspec-compatible filesystem for w
 
 ## Quick Start
 
-The `FilesetFileSystem` is available directly from the SDK via `sdk.files.fsspec`:
+The `FilesetFileSystem` is available from `FilesResource.fsspec`, which wraps a typed `NemoClient`:
 
 ```python
-from nemo_helix import NeMoHelix
+from filesets.resources import FilesResource
+from nemo_helix_plugin.client.client import NemoClient
 
-sdk = NeMoHelix(base_url="http://nhx-host")
+client = NemoClient(base_url="http://nhx-host")
+files = FilesResource(client)
 
 # List files
-sdk.files.fsspec.ls("my-workspace/my-fileset/")
+files.fsspec.ls("my-workspace/my-fileset/")
 
 # Read a file
-content = sdk.files.fsspec.cat("my-workspace/my-fileset/config.json")
+content = files.fsspec.cat("my-workspace/my-fileset/config.json")
 
 # Write a file
-sdk.files.fsspec.pipe("my-workspace/my-fileset/data.txt", b"hello world")
+files.fsspec.pipe("my-workspace/my-fileset/data.txt", b"hello world")
 
 # Download files
-sdk.files.fsspec.get("my-workspace/my-fileset/", "/local/path/", recursive=True)
+files.fsspec.get("my-workspace/my-fileset/", "/local/path/", recursive=True)
 
 # Upload files
-sdk.files.fsspec.put("/local/file.txt", "my-workspace/my-fileset/file.txt")
+files.fsspec.put("/local/file.txt", "my-workspace/my-fileset/file.txt")
 ```
 
 ## Migration from Datastore (HuggingFace Hub)
@@ -36,12 +38,12 @@ sdk.files.fsspec.put("/local/file.txt", "my-workspace/my-fileset/file.txt")
 
 | Datastore (Old) | Files Service (New) |
 |-----------------|---------------------|
-| `HfFileSystem` | `sdk.files.fsspec` |
-| `huggingface_hub.HfApi` | `nemo_helix.NeMoHelix` SDK |
+| `HfFileSystem` | `FilesResource.fsspec` |
+| `huggingface_hub.HfApi` | `nemo_helix_plugin.client.client.NemoClient` with `FilesResource` |
 | HuggingFace Hub protocol (`/v1/hf`) | Files API (`/v2/workspaces/{ws}/filesets/{name}`) |
 | Repositories + Branches | Workspaces + Filesets |
 
-> **Note:** Use `sdk.files` as the entry point for all file operations. Use `sdk.files.filesets` for fileset entity management (create, delete, retrieve) and `sdk.files.upload/download/list/delete` for file content operations.
+> **Note:** Use `FilesResource` as the entry point for file content operations (`files.upload/download/list/delete`). Use the typed client at `files.client` (`FilesClient`) for fileset entity management (`create_fileset`, `delete_fileset`, `get_fileset`).
 
 ### Concept Mapping
 
@@ -64,11 +66,13 @@ endpoint = f"{nds_host}/v1/hf"
 api = HfApi(endpoint=endpoint, token=token)
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
-from nemo_helix import NeMoHelix
+from filesets.resources import FilesResource
+from nemo_helix_plugin.client.client import NemoClient
 
-sdk = NeMoHelix(base_url=nhx_host, default_headers={"Authorization": f"Bearer {token}"})
+client = NemoClient(base_url=nhx_host, default_headers={"Authorization": f"Bearer {token}"})
+files = FilesResource(client)
 ```
 
 ---
@@ -84,14 +88,21 @@ requests.post(f"{nds_host}/v1/datastore/namespaces", json={"namespace": namespac
 api.create_repo(f"{namespace}/{repo_name}", repo_type="model", exist_ok=True)
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Workspaces are typically pre-created, but filesets can be created:
-sdk.files.filesets.create(
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
+files.client.create_fileset(
     workspace="my-workspace",
-    name="my-fileset",
-    description="Model checkpoint storage",
-    purpose="model",  # or "dataset", or empty/unset
+    body=CreateFilesetRequest(
+        name="my-fileset",
+        description="Model checkpoint storage",
+        purpose="model",  # or "dataset", or empty/unset
+    ),
+    exist_ok=True,
 )
 ```
 
@@ -109,16 +120,16 @@ files = api.list_repo_files(repo_id="namespace/repo", revision="main")
 items = api.list_repo_tree(repo_id="namespace/repo", recursive=True)
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 # List directory contents
-files = sdk.files.fsspec.ls("my-workspace/my-fileset/subdir/")
+files = files.fsspec.ls("my-workspace/my-fileset/subdir/")
 
 # Find all files recursively
-all_files = sdk.files.fsspec.find("my-workspace/my-fileset/")
+all_files = files.fsspec.find("my-workspace/my-fileset/")
 
 # Glob patterns
-parquet_files = sdk.files.fsspec.glob("my-workspace/my-fileset/**/*.parquet")
+parquet_files = files.fsspec.glob("my-workspace/my-fileset/**/*.parquet")
 ```
 
 ---
@@ -136,13 +147,13 @@ local_path = api.snapshot_download(
 )
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 # Download entire fileset
-sdk.files.fsspec.get("my-workspace/my-fileset/", "/local/destination/", recursive=True)
+files.fsspec.get("my-workspace/my-fileset/", "/local/destination/", recursive=True)
 
 # Download specific subdirectory
-sdk.files.fsspec.get("my-workspace/my-fileset/checkpoints/", "/local/destination/checkpoints/", recursive=True)
+files.fsspec.get("my-workspace/my-fileset/checkpoints/", "/local/destination/checkpoints/", recursive=True)
 ```
 
 **With progress tracking:**
@@ -150,7 +161,7 @@ sdk.files.fsspec.get("my-workspace/my-fileset/checkpoints/", "/local/destination
 from fsspec.callbacks import TqdmCallback
 
 with TqdmCallback(tqdm_kwargs={"desc": "Downloading"}) as callback:
-    sdk.files.fsspec.get("my-workspace/my-fileset/", "/local/destination/", recursive=True, callback=callback)
+    files.fsspec.get("my-workspace/my-fileset/", "/local/destination/", recursive=True, callback=callback)
 ```
 
 ---
@@ -167,16 +178,16 @@ local_path = api.hf_hub_download(
 )
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 # Download to local file
-sdk.files.fsspec.get("my-workspace/my-fileset/config.json", "/local/dir/config.json")
+files.fsspec.get("my-workspace/my-fileset/config.json", "/local/dir/config.json")
 
 # Or read directly into memory
-content = sdk.files.fsspec.cat("my-workspace/my-fileset/config.json")
+content = files.fsspec.cat("my-workspace/my-fileset/config.json")
 
 # Or open as file-like object
-with sdk.files.fsspec.open("my-workspace/my-fileset/config.json", "rb") as f:
+with files.fsspec.open("my-workspace/my-fileset/config.json", "rb") as f:
     data = json.load(f)
 ```
 
@@ -194,16 +205,16 @@ api.upload_file(
 )
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 # Upload from local file (streaming, memory-efficient)
-sdk.files.fsspec.put("/local/file.txt", "my-workspace/my-fileset/data/file.txt")
+files.fsspec.put("/local/file.txt", "my-workspace/my-fileset/data/file.txt")
 
 # Or write bytes directly
-sdk.files.fsspec.pipe("my-workspace/my-fileset/data/file.txt", b"file contents")
+files.fsspec.pipe("my-workspace/my-fileset/data/file.txt", b"file contents")
 
 # Or use file-like interface
-with sdk.files.fsspec.open("my-workspace/my-fileset/data/file.txt", "wb") as f:
+with files.fsspec.open("my-workspace/my-fileset/data/file.txt", "wb") as f:
     f.write(b"file contents")
 ```
 
@@ -222,10 +233,10 @@ api.upload_folder(
 )
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 # Upload entire directory
-sdk.files.fsspec.put("/local/model/", "my-workspace/my-fileset/checkpoints/", recursive=True)
+files.fsspec.put("/local/model/", "my-workspace/my-fileset/checkpoints/", recursive=True)
 ```
 
 **With filtering (manual):**
@@ -237,7 +248,7 @@ for local_file in local_dir.rglob("*"):
     if local_file.is_file() and not local_file.suffix == ".tmp":
         relative = local_file.relative_to(local_dir)
         remote_path = f"my-workspace/my-fileset/checkpoints/{relative}"
-        sdk.files.fsspec.put(str(local_file), remote_path)
+        files.fsspec.put(str(local_file), remote_path)
 ```
 
 ---
@@ -253,16 +264,16 @@ api.delete_branch(repo_id="namespace/repo", branch="feature-branch", repo_type="
 api.delete_repo(repo_id="namespace/repo", repo_type="model")
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 # Delete single file
-sdk.files.fsspec.rm("my-workspace/my-fileset/path/to/file.txt")
+files.fsspec.rm("my-workspace/my-fileset/path/to/file.txt")
 
 # Delete multiple files
-sdk.files.fsspec.rm(["my-workspace/my-fileset/file1.txt", "my-workspace/my-fileset/file2.txt"])
+files.fsspec.rm(["my-workspace/my-fileset/file1.txt", "my-workspace/my-fileset/file2.txt"])
 
-# Delete entire fileset (use SDK for fileset management)
-sdk.files.filesets.delete("my-fileset", workspace="my-workspace")
+# Delete entire fileset (use the typed client for fileset management)
+files.client.delete_fileset(name="my-fileset", workspace="my-workspace")
 ```
 
 ---
@@ -274,16 +285,16 @@ sdk.files.filesets.delete("my-fileset", workspace="my-workspace")
 exists = api.repo_exists(repo_id="namespace/repo", repo_type="model")
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 # Check fileset exists
-exists = sdk.files.fsspec.exists("my-workspace/my-fileset/")
+exists = files.fsspec.exists("my-workspace/my-fileset/")
 
 # Check file exists
-exists = sdk.files.fsspec.exists("my-workspace/my-fileset/config.json")
+exists = files.fsspec.exists("my-workspace/my-fileset/config.json")
 
 # Get file info
-info = sdk.files.fsspec.info("my-workspace/my-fileset/config.json")
+info = files.fsspec.info("my-workspace/my-fileset/config.json")
 # Returns: {"name": "...", "size": 1234, "type": "file"}
 ```
 
@@ -307,12 +318,12 @@ future = api.run_as_future(api.list_repo_files, repo_id="namespace/repo")
 files = await asyncio.wait_for(asyncio.wrap_future(future), timeout=30)
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 # Async methods (prefixed with _) can be called directly from async context
-files = await sdk.files.fsspec._ls("my-workspace/my-fileset/")
-content = await sdk.files.fsspec._cat_file("my-workspace/my-fileset/config.json")
-await sdk.files.fsspec._get("my-workspace/my-fileset/", "/local/dest/", recursive=True)
+files = await files.fsspec._ls("my-workspace/my-fileset/")
+content = await files.fsspec._cat_file("my-workspace/my-fileset/config.json")
+await files.fsspec._get("my-workspace/my-fileset/", "/local/dest/", recursive=True)
 ```
 
 > **Note:** The `_` prefix for async methods is an fsspec convention, not a private API indicator. See [fsspec async docs](https://filesystem-spec.readthedocs.io/en/latest/async.html).
@@ -327,15 +338,15 @@ await sdk.files.fsspec._get("my-workspace/my-fileset/", "/local/dest/", recursiv
 import pandas as pd
 
 # Read parquet
-with sdk.files.fsspec.open("my-workspace/my-fileset/data.parquet", "rb") as f:
+with files.fsspec.open("my-workspace/my-fileset/data.parquet", "rb") as f:
     df = pd.read_parquet(f)
 
 # Write parquet
-with sdk.files.fsspec.open("my-workspace/my-fileset/output.parquet", "wb") as f:
+with files.fsspec.open("my-workspace/my-fileset/output.parquet", "wb") as f:
     df.to_parquet(f)
 
 # Or pass filesystem directly
-df = pd.read_parquet("my-workspace/my-fileset/data.parquet", filesystem=sdk.files.fsspec)
+df = pd.read_parquet("my-workspace/my-fileset/data.parquet", filesystem=files.fsspec)
 ```
 
 ### PyArrow
@@ -344,11 +355,11 @@ df = pd.read_parquet("my-workspace/my-fileset/data.parquet", filesystem=sdk.file
 import pyarrow.parquet as pq
 
 # Read parquet dataset
-dataset = pq.ParquetDataset("my-workspace/my-fileset/data/", filesystem=sdk.files.fsspec)
+dataset = pq.ParquetDataset("my-workspace/my-fileset/data/", filesystem=files.fsspec)
 table = dataset.read()
 
 # Write parquet
-pq.write_table(table, "my-workspace/my-fileset/output.parquet", filesystem=sdk.files.fsspec)
+pq.write_table(table, "my-workspace/my-fileset/output.parquet", filesystem=files.fsspec)
 ```
 
 ### DuckDB
@@ -357,7 +368,7 @@ pq.write_table(table, "my-workspace/my-fileset/output.parquet", filesystem=sdk.f
 import duckdb
 
 # Register filesystem and query directly
-duckdb.register_filesystem(sdk.files.fsspec)
+duckdb.register_filesystem(files.fsspec)
 result = duckdb.sql("SELECT * FROM 'fileset://my-workspace/my-fileset/data.parquet'")
 ```
 
@@ -385,31 +396,31 @@ class NemoDataStoreClient:
         return await asyncio.wait_for(asyncio.wrap_future(future), timeout=30)
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 class FilesetClient:
-    def __init__(self, sdk: NeMoHelix):
-        self.sdk = sdk
+    def __init__(self, files: FilesResource):
+        self.files = files
 
     def download_model(self, workspace: str, fileset: str, destination: str) -> str:
-        self.sdk.files.fsspec.get(f"{workspace}/{fileset}/", destination, recursive=True)
+        self.files.fsspec.get(f"{workspace}/{fileset}/", destination, recursive=True)
         return destination
 
     def get_flat_files_list(self, workspace: str, fileset: str) -> list[str]:
-        return self.sdk.files.fsspec.find(f"{workspace}/{fileset}/")
+        return self.files.fsspec.find(f"{workspace}/{fileset}/")
 
 
 # Async version - same initialization, just use async methods
 class AsyncFilesetClient:
-    def __init__(self, sdk: NeMoHelix):
-        self.sdk = sdk
+    def __init__(self, files: AsyncFilesResource):
+        self.files = files
 
     async def download_model(self, workspace: str, fileset: str, destination: str) -> str:
-        await self.sdk.files.fsspec._get(f"{workspace}/{fileset}/", destination, recursive=True)
+        await self.files.fsspec._get(f"{workspace}/{fileset}/", destination, recursive=True)
         return destination
 
     async def get_flat_files_list(self, workspace: str, fileset: str) -> list[str]:
-        return await self.sdk.files.fsspec._find(f"{workspace}/{fileset}/")
+        return await self.files.fsspec._find(f"{workspace}/{fileset}/")
 ```
 
 ---
@@ -439,10 +450,10 @@ except HfHubHTTPError as e:
     print(f"HTTP error: {e.response.status_code}")
 ```
 
-**After (SDK):**
+**After (typed client):**
 ```python
 try:
-    sdk.files.fsspec.ls("my-workspace/my-fileset/")
+    files.fsspec.ls("my-workspace/my-fileset/")
 except FileNotFoundError:
     print("Fileset or path not found")
 except PermissionError:
@@ -455,14 +466,14 @@ except Exception as e:
 
 ## Advanced: Standalone FilesetFileSystem
 
-If you need a `FilesetFileSystem` instance without going through the SDK (e.g., for custom configuration), you can import it directly:
+If you need a `FilesetFileSystem` instance without going through `FilesResource` (e.g., for custom configuration), construct it directly from a `FilesClient`:
 
 ```python
-from nemo_helix import NeMoHelix
-from nemo_helix.filesets import FilesetFileSystem
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
 
-sdk = NeMoHelix(base_url="http://nhx-host")
-fs = FilesetFileSystem(sdk=sdk)
+files_client = FilesClient(base_url="http://nhx-host")
+fs = FilesetFileSystem(client=files_client)
 ```
 
 ## Protocol Registration
@@ -470,16 +481,16 @@ fs = FilesetFileSystem(sdk=sdk)
 To use `fileset://` URLs with fsspec or libraries that support fsspec URLs:
 
 ```python
-from nemo_helix.filesets import FilesetFileSystem
+from filesets import FilesetFileSystem
 
 # Register the fileset:// protocol globally with fsspec
 FilesetFileSystem.register_fsspec()
 
 # Now you can use fileset:// URLs with fsspec
 import fsspec
-fs = fsspec.filesystem("fileset", sdk=sdk)
+fs = fsspec.filesystem("fileset", client=files_client)
 
 # Or with pandas (after registration)
 import pandas as pd
-df = pd.read_parquet("fileset://my-workspace/my-fileset/data.parquet", storage_options={"sdk": sdk})
+df = pd.read_parquet("fileset://my-workspace/my-fileset/data.parquet", storage_options={"client": files_client})
 ```

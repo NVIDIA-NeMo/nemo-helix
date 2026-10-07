@@ -27,12 +27,7 @@ To list jobs or get job definitions (model entity, hyperparameters, spec), use [
 
 Before you can get the status of a customization job, make sure that you have:
 
-- Obtained the base URL of your NeMo Helix.
-- Set the `NHX_BASE_URL` environment variable to your NeMo Helix endpoint
-
-```bash
-export NHX_BASE_URL="https://your-nhx-base-url"
-```
+- Configured a CLI context that points at your NeMo Helix deployment. Refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ---
 
@@ -43,18 +38,14 @@ A submitted customization job runs on the platform's Jobs service, so you poll i
 Use the SDK to get detailed job status:
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 # Initialize the client
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Get job status (use the job name returned at submission)
 job_name = "automodel-a1b2c3d4e5f6"
-status = client.jobs.get_status(name=job_name, workspace="default")
+status = client.jobs.get_job_status(name=job_name, workspace="default").data()
 
 print(f"Job: {status.name}")
 print(f"Status: {status.status}")
@@ -71,6 +62,8 @@ for step in status.steps or []:
                 print(f"    Progress: {current_step}/{max_steps}")
 ```
 
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
 ### CLI
 
 ```bash
@@ -79,9 +72,11 @@ nemo jobs get-status automodel-a1b2c3d4e5f6 --workspace default
 
 ### REST API
 
+This example uses `NHX_BASE_URL` when it is set and falls back to `http://localhost:8080`. If your CLI context points at a remote deployment, export its URL first, and add an `Authorization: Bearer $(nemo auth token)` header for authenticated deployments. Refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
+
 ```bash
 curl -X GET \
-  "${NHX_BASE_URL}/apis/jobs/v2/workspaces/default/jobs/automodel-a1b2c3d4e5f6/status" \
+  "${NHX_BASE_URL:-http://localhost:8080}/apis/jobs/v2/workspaces/default/jobs/automodel-a1b2c3d4e5f6/status" \
   -H 'Accept: application/json' \
   | jq
 ```

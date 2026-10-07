@@ -49,8 +49,7 @@ from nemo_data_designer_plugin.sdk.validation import (
     validate_config,
     validate_config_sync,
 )
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
 from nemo_helix_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobRequest, PreviewRequest
@@ -62,8 +61,8 @@ from pydantic import BaseModel, TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-HelixResourceClient = NeMoHelix | AsyncNeMoHelix
-HelixResourceClientT = TypeVar("HelixResourceClientT", NeMoHelix, AsyncNeMoHelix)
+HelixResourceClient = NemoClient | AsyncNemoClient
+HelixResourceClientT = TypeVar("HelixResourceClientT", NemoClient, AsyncNemoClient)
 
 _PREVIEW_FRAME_ADAPTER = TypeAdapter(PreviewFrame)
 _KNOWN_PREVIEW_FRAME_KINDS = {
@@ -223,13 +222,13 @@ class _BaseDataDesignerResource(Generic[HelixResourceClientT]):
 
 
 @with_logging
-class DataDesignerResource(_BaseDataDesignerResource[NeMoHelix]):
+class DataDesignerResource(_BaseDataDesignerResource[NemoClient]):
     """High-level sync client for the Data Designer plugin service."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
+    def __init__(self, platform: NemoClient) -> None:
         super().__init__(platform)
-        self._data_designer_client = client_from_platform(platform, DataDesignerClient)
-        self._models_client = client_from_platform(platform, ModelsClient)
+        self._data_designer_client = DataDesignerClient.from_client(platform)
+        self._models_client = ModelsClient.from_client(platform)
 
     def preview(
         self,
@@ -247,7 +246,7 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoHelix]):
             num_records: The number of records to generate. Must be less than or equal to the
                 service-side configured max number of preview records.
             workspace: The workspace to run the request in. If not supplied, uses the workspace
-                of the base NeMoHelix object.
+                of the base platform client.
             timeout: The timeout for the preview call in seconds.
 
         Returns:
@@ -294,7 +293,7 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoHelix]):
             config_builder: Data Designer configuration builder.
             num_records: The number of records to generate.
             workspace: The workspace in which to run the job. If not supplied, uses
-                the workspace of the base NeMoHelix object.
+                the workspace of the base platform client.
             wait_until_done: Set to True to poll the job status and block until the
                 job reaches a terminal state.
 
@@ -367,7 +366,7 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoHelix]):
         resolved_workspace = workspace or self._platform.workspace or "default"
         return validate_config_sync(
             config_builder,
-            sdk=self._platform,
+            client=self._platform,
             workspace=resolved_workspace,
         )
 
@@ -403,7 +402,7 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoHelix]):
         resolved_workspace = workspace or self._platform.workspace or "default"
         return check_models_config_sync(
             config_builder,
-            sdk=self._platform,
+            client=self._platform,
             workspace=resolved_workspace,
         )
 
@@ -463,13 +462,13 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoHelix]):
 
 
 @with_logging
-class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoHelix]):
+class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNemoClient]):
     """High-level async client for the Data Designer plugin service."""
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
+    def __init__(self, platform: AsyncNemoClient) -> None:
         super().__init__(platform)
-        self._data_designer_client = client_from_platform(platform, AsyncDataDesignerClient)
-        self._models_client = client_from_platform(platform, AsyncModelsClient)
+        self._data_designer_client = AsyncDataDesignerClient.from_client(platform)
+        self._models_client = AsyncModelsClient.from_client(platform)
 
     async def preview(
         self,
@@ -487,7 +486,7 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoHelix]):
             num_records: The number of records to generate. Must be less than or equal to the
                 service-side configured max number of preview records.
             workspace: The workspace to run the request in. If not supplied, uses the workspace
-                of the base NeMoHelix object.
+                of the base platform client.
             timeout: The timeout for the preview call in seconds.
 
         Returns:
@@ -535,7 +534,7 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoHelix]):
             config_builder: Data Designer configuration builder.
             num_records: The number of records to generate.
             workspace: The workspace in which to run the job. If not supplied, uses
-                the workspace of the base NeMoHelix object.
+                the workspace of the base platform client.
             wait_until_done: Set to True to poll the job status and block until the
                 job reaches a terminal state.
 
@@ -596,7 +595,7 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoHelix]):
         resolved_workspace = workspace or self._platform.workspace or "default"
         return await validate_config(
             config_builder,
-            async_sdk=self._platform,
+            async_client=self._platform,
             workspace=resolved_workspace,
         )
 
@@ -610,7 +609,7 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoHelix]):
         resolved_workspace = workspace or self._platform.workspace or "default"
         return await check_models_config(
             config_builder,
-            async_sdk=self._platform,
+            async_client=self._platform,
             workspace=resolved_workspace,
         )
 

@@ -40,6 +40,7 @@ class EvaluationSessionRow:
     cached_tokens: int | None
     cost_total_usd: float | None
     evaluator_scores: dict[str, float] = field(default_factory=dict)
+    failed_evaluators: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

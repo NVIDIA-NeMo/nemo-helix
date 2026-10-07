@@ -156,7 +156,7 @@ Gym reads it two different ways depending on where the server sits:
 | Inside a Gym checkout (`../../pyproject.toml` exists) | `uv pip install -r requirements.txt <head deps>` |
 | Staged FileSet (the normal case) | `(echo 'nemo-gym==<image version>' && grep -v -F '../..' requirements.txt) \| uv pip install -r /dev/stdin <head deps>` |
 
-The second form is why a Gym server copies cleanly: its `-e nemo-gym[dev] @ ../../` line, meaningless outside a checkout, is stripped and replaced with a version pin. It is also why vendoring **the image's exact `nemo-gym` version** matters — a mismatch means uv ignores your wheel and resolves upstream from PyPI.
+The second form is why a Gym server copies cleanly: its `-e nemo-gym[dev] @ ../../` line, meaningless outside a checkout, is stripped and replaced with `nemo-gym==<image version>`. Vendor a wheel of the `nemo_gym` library at that version, including the `dev` extra (`vllm_model` and `simple_agent` install `nemo-gym[dev]`). Do not `uv build` the Gym checkout: that wheel contains every built-in server.
 
 **Do not ship a literally empty `requirements.txt`.** The file's *existence* is what makes Gym treat the directory as a server, and an empty one does currently install (`grep` finds nothing, `nemo-gym` and the head deps still reach uv). But the resulting venv contains only `nemo-gym`, `ray` and `openai` — so any other import in `app.py` fails at the first rollout — and it leaves the install command's `grep` exiting non-zero, which is harmless only because nothing enables `pipefail` on this path today. List the server's real imports; if it genuinely has none beyond `nemo-gym`, write a comment line rather than leaving the file empty.
 
@@ -200,14 +200,23 @@ Before hand-building anything, check whether an example already covers the case.
 `scripts/grpo-examples/` ships two, and they are **examples** — nothing in the platform calls
 them, and the supported contract is the FileSet layout itself.
 
+Do not `uv run` these from the project `.venv`. `wheels-v1` downloads wheels with
+`sys.executable -m pip`, so that interpreter must be a dedicated environment. A mutated
+project environment no longer matches `uv.lock`, and `flox activate` then fails recreating
+`.venv`, which blocks commits and uploads. `.venv*` is gitignored.
+
 ```bash
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
+
 # Any Gym server -> an environment package
-uv run scripts/grpo-examples/gym_to_env_package.py \
-  --gym-root ~/workspace/Gym --server resources_servers/math_with_judge \
+.venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \
+  --gym-root ~/workspace/Gym --nemo-rl-root ~/workspace/RL \
+  --server resources_servers/math_with_judge \
   --format wheels-v1 --arch x86_64 --out-dir /tmp/mwj-env
 
-# math_with_judge rollout rows (adds agent_ref and expected_answer)
-uv run --with datasets scripts/grpo-examples/prepare_math_with_judge.py \
+# math_with_judge rollout rows (adds agent_ref and expected_answer).
+# --no-project so this does not sync the project .venv.
+uv run --no-project --with datasets scripts/grpo-examples/prepare_math_with_judge.py \
   --out-dir /tmp/mwj-data --train-size 512
 ```
 
@@ -361,10 +370,10 @@ That snapshot is two artifacts: `hub_environment.parquet`, with `vf_env_args.dat
 
 **Run it on a host with internet.** Training clusters have no hub egress and consume uploaded FileSets only.
 
-`pi-to-gym-conversion` is a console script that ships with `nemo-rl-plugin`, so on an installed platform run it bare. From a repo checkout, generating a dataset needs the `conversion` extra (verifiers), and it belongs in its own environment: the converter installs the untrusted hub wheel into whatever interpreter runs it, and a `uv sync` of the repo `.venv` prunes both that wheel and `verifiers` back out.
+`pi-to-gym-conversion` is a console script that ships with `nemo-rl-plugin`, so on an installed platform run it bare. From a repo checkout, generating a dataset needs the `conversion` extra (verifiers), and it belongs in its own environment: the converter installs the untrusted hub wheel into whatever interpreter runs it, and a `uv sync` of the repo `.venv` prunes both that wheel and `verifiers` back out. The same environment is what `gym_to_env_package.py` must use — its `pip download` runs as `sys.executable`.
 
 ```bash
-UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra conversion
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
 .venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
@@ -373,7 +382,7 @@ UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra convers
   --validation-fraction 0.1
 ```
 
-`--validate-only` needs neither, so the plain `uv run --package nhx-rl pi-to-gym-conversion` used below for validation is fine from the repo `.venv`.
+`--validate-only` needs neither extra nor hub access. Run it with the same interpreter (`uv run --package nhx-rl` would sync the project `.venv`).
 
 | Flag | Use it for |
 |---|---|
@@ -496,16 +505,12 @@ EOF
 )
 
 mkdir -p my-env/wheels
-
-# Build nemo-gym from the checkout, never from an index: the image's version is not published,
-# and a same-versioned upstream wheel would be different code.
-uv build --wheel --out-dir my-env/wheels "$RL/3rdparty/Gym-workspace/Gym"
-GYM_WHEEL=$(ls my-env/wheels/nemo_gym-"$GYM_VERSION"-*.whl)
+GYM_WHEEL=my-env/wheels/nemo_gym-${GYM_VERSION}-py3-none-any.whl
+grep -v -e '../..' -e 'nemo-gym' -e '^#' resources_servers/my_env/requirements.txt > server.in
 
 # Resolve and download are separate steps: `--platform` requires `--no-deps`, and resolving
 # on the build host would evaluate environment markers for the wrong OS.
 cat > closure.in <<EOF
-nemo-gym[dev] @ file://$GYM_WHEEL
 ray[default]==$RAY_VERSION
 openai==$OPENAI_VERSION
 pip
@@ -513,7 +518,7 @@ setuptools>=61,<81
 setuptools-scm
 hydra-core>=1.3,<1.4
 omegaconf>=2.2,<2.4
--r resources_servers/my_env/requirements.txt
+-r server.in
 EOF
 uv pip compile closure.in --output-file closure.txt --no-header --no-config \
   --python-platform "$ARCH-unknown-linux-gnu" --python-version 3.13
@@ -538,10 +543,7 @@ done
 uv run --package nhx-rl pi-to-gym-conversion --validate-only ./my-env
 ```
 
-The `[dev]` extra, not the bare wheel: servers that resolve into the Gym tree install
-`nemo-gym[dev]`, so the closure has to cover that extra too. `setuptools` is capped below 81 —
-the release that removed `pkg_resources`, which Gym's pinned hydra imports at import time — and
-`setuptools-scm` is there because building Gym from source needs its `build-system.requires`.
+`setuptools` is capped below 81 — the release that removed `pkg_resources`, which Gym's pinned hydra imports at import time.
 
 The sub-venv is created with `uv venv --seed`, so nothing carries over from the image — omit `ray[default]` / `openai` and the venv build reaches for an index even when the environment's own closure is complete. A `nemo-gym` version mismatch is worse than an omission: uv ignores your wheel and silently resolves upstream from PyPI.
 
@@ -566,7 +568,7 @@ Keep the Gym directory structure, drop `data/` and `tests/` so no `.jsonl` survi
 
 Do **not** convert the server into a setuptools package installed as `resources_servers.<impl>`, and do not add a root `pyproject.toml`: Gym runs `{server_type}/{implementation}/` directly and treats a root `pyproject.toml` as "this is a Gym checkout" — see § **How Gym finds the implementation directory**.
 
-**Vendor `nemo-gym` at the image's exact version.** Gym builds each server's venv from its `requirements.txt`, which in the source tree starts `-e nemo-gym[dev] @ ../../`. Outside a Gym checkout that relative path does not exist, so `setup_env_command` rewrites the line to `nemo-gym==<image version>`. If the environment must run our Gym fork, `pip download nemo-gym==X` fetches *upstream* at that version string — build the wheel from the fork checkout instead (`uv build --wheel <gym-root>`) and confirm the built version matches.
+Vendor one `nemo_gym` library wheel at the image version, with the `dev` extra. Gym rewrites `-e nemo-gym[dev] @ ../../` to `nemo-gym==<image version>` and installs that pin into each server venv. Do not `uv build` the checkout: that wheel contains every built-in server.
 
 Validate the tree with `--validate-only`.
 
@@ -575,7 +577,7 @@ Validate the tree with `--validate-only`.
 Cheapest possible failure. Run it on every package, whichever path built it:
 
 ```bash
-uv run --package nhx-rl pi-to-gym-conversion --validate-only ./my-env-pkg
+.venv-conversion/bin/pi-to-gym-conversion --validate-only ./my-env-pkg
 # {"valid": true, "format": "adapter-wheels-v1", "name": "ascii-tree"}
 ```
 

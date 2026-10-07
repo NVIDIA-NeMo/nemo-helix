@@ -26,7 +26,7 @@ import httpx
 from evaluation import export
 from evaluation.intake_client import build_basic_auth_intake_client
 from evaluation.registry import Subject
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 LOCAL_URL = "http://localhost:8080"  # the local NeMo Helix (the default restore/analyze target)
 EXPORT_KIND = "evaluation-export"
@@ -139,7 +139,7 @@ def workspaces_for_subject(subject: Subject) -> list[str]:
     )
 
 
-def _basic_auth_intake_client_for(subject: Subject, source_url: str) -> AsyncNeMoHelix | None:
+def _basic_auth_intake_client_for(subject: Subject, source_url: str) -> AsyncNemoClient | None:
     """Build this subject's configured basic-auth Intake client, if needed."""
     if subject.config.get("auth") != "basic":
         return None

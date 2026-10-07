@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.config import HelixConfig
 from nemo_helix_plugin.entities import EntityClient
@@ -40,31 +39,14 @@ def get_service_config() -> Any:
     )
 
 
-def get_sdk_client() -> AsyncNeMoHelix:
-    """FastAPI dependency for getting the async platform SDK client.
-
-    This is a placeholder — the actual client is injected via
-    app.dependency_overrides in Service.create_app().
-    """
-    raise RuntimeError(
-        "get_sdk_client() was called without being overridden. Ensure your Service subclass calls super().create_app()."
-    )
-
-
-def get_sync_sdk_client() -> NeMoHelix:
-    """FastAPI dependency for getting the sync platform SDK client.
-
-    This is a placeholder — the actual client is injected via
-    app.dependency_overrides in Service.create_app().
-    """
-    raise RuntimeError(
-        "get_sync_sdk_client() was called without being overridden. "
-        "Ensure your Service subclass calls super().create_app()."
-    )
-
-
 def get_nemo_client() -> AsyncNemoClient:
-    """FastAPI dependency for getting the async NemoClient.
+    """FastAPI dependency for getting the request-scoped async NemoClient.
+
+    The injected client carries the caller's principal and trace headers, so
+    downstream calls are authorized as the caller. Derive service clients from it::
+
+        async def handler(client: AsyncNemoClient = Depends(get_nemo_client)):
+            files_client = AsyncFilesClient.from_client(client)
 
     This is a placeholder. The actual client is injected via
     app.dependency_overrides in Service.create_app().
@@ -76,7 +58,7 @@ def get_nemo_client() -> AsyncNemoClient:
 
 
 def get_sync_nemo_client() -> NemoClient:
-    """FastAPI dependency for getting the sync NemoClient.
+    """FastAPI dependency for getting the request-scoped sync NemoClient.
 
     This is a placeholder. The actual client is injected via
     app.dependency_overrides in Service.create_app().

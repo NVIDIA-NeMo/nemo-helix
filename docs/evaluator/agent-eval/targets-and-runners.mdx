@@ -136,7 +136,7 @@ Gym is **not** a dependency of this SDK — it imports Ray at module load, which
 by constraint. Install it into its own environment and put its `bin` on `PATH`.
 
 It can also be submitted as a platform job from the live runner object, via
-`client.evaluator.submit(tasks=..., target=runner)`, rather than described again as a spec.
+`evaluator.submit(tasks=..., target=runner)`, rather than described again as a spec.
 
 Platform job specifications use `GymRunnerTarget`. A submission builds one from two places, split by
 what the setting is *about*:
@@ -146,10 +146,11 @@ what the setting is *about*:
   only the resolver differs, so a local run resolves it from your environment.
 - **A `GymPlacement`**, passed to `submit`, carries what the deployment decides: `environment` (a
   staged FileSet, requiring sandboxed execution) and `agent_ref_name` (the agent instance a
-  sandboxed host routes rollouts to).
+  sandboxed host routes rollouts to). On the target, the agent is one field, `source`, holding the
+  `component`, its `config`, and that `instance`.
 
 ```python
-client.evaluator.submit(tasks=..., target=runner, placement=GymPlacement(environment=...))
+evaluator.submit(tasks=..., target=runner, placement=GymPlacement(environment=...))
 ```
 
 The overloads accept a `GymPlacement` only with a `GymAgentTaskRunner`, so a placement cannot be
@@ -172,6 +173,9 @@ covers several agent frontends:
 | `nvidia.fabric.claude` | Claude |
 | `nvidia.fabric.hermes` | Hermes SDK (`transport="library"`) |
 | `nvidia.fabric.langchain.deepagents` | LangChain deepagents — **not** installed by this SDK's `fabric` extra (see below) |
+
+Fabric 0.4 also ships Cline, OpenClaw, OpenCode, Qwen Code, and Pi adapters. NeMo Helix does not
+install those; add the matching `nemo-fabric-adapters-*` package yourself to use one.
 
 `FabricAgentRuntime` runs that config on the host by default, capturing an ATIF trajectory. Pass
 `sandbox=<SandboxProvider>` to run the same configuration inside a sandbox instead; `image` and

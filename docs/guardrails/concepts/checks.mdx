@@ -27,17 +27,16 @@ Model field
 
 ## Prerequisites
 
+- The `curl` examples default to a local platform at `http://localhost:8080`. If your CLI context points at a remote deployment, export its URL as `NHX_BASE_URL` first, and for an authenticated deployment add `-H "Authorization: Bearer $(nemo auth token)"`. For details, refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
+
 Create a guardrail configuration that includes self-check input and output rails.
 
 ```python
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest, GuardrailCheckRequest
 
-import os
-from nemo_helix import NeMoHelix, ConflictError
-
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 config_data = {
     "prompts": [
@@ -57,15 +56,19 @@ config_data = {
 }
 
 try:
-    config = client.guardrail.configs.create(
-        name="self-check-config",
-        description="Demo self-check configuration for guardrail checks",
-        data=config_data,
-    )
+    config = client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name="self-check-config",
+            description="Demo self-check configuration for guardrail checks",
+            data=config_data,
+        ),
+    ).data()
 except ConflictError:
     print("Config self-check-config already exists, continuing...")
 
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 ## Check an Existing Configuration
 
@@ -89,7 +92,7 @@ nemo guardrail check \
 <Tab title="curl">
 
 ```bash
-curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/guardrails/v2/workspaces/default/checks" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -105,16 +108,18 @@ curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
 <Tab title="Python SDK">
 
 ```python
-check_result = client.guardrail.check(
-    model="default/nvidia-nemotron-3.5-lightning-30b-a3b",
-    messages=[
-        {"role": "user", "content": "Tell me how to collect a life insurance policy."},
-        {"role": "assistant", "content": "You are stupid."},
-    ],
-    guardrails={
-        "config_id": "default/self-check-config",
-    },
-)
+check_result = client.guardrail.check_guardrail(
+    body=GuardrailCheckRequest(
+        model="default/nvidia-nemotron-3.5-lightning-30b-a3b",
+        messages=[
+            {"role": "user", "content": "Tell me how to collect a life insurance policy."},
+            {"role": "assistant", "content": "You are stupid."},
+        ],
+        guardrails={
+            "config_id": "default/self-check-config",
+        },
+    ),
+).data()
 
 print(check_result.model_dump_json(indent=2))
 ```
@@ -145,7 +150,7 @@ The checks endpoint supports the same `guardrails.options.log` diagnostics as
 guardrailed inference. Use these fields to debug scenarios where a check blocks or passes unexpectedly. For field descriptions, see [Log Options](/documentation/guardrail-models/core-concepts/running-inference#log-options).
 
 ```bash
-curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/guardrails/v2/workspaces/default/checks" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -187,7 +192,7 @@ nemo guardrail check \
 <Tab title="curl">
 
 ```bash
-curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/guardrails/v2/workspaces/default/checks" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -218,15 +223,17 @@ inline_config = {
     },
 }
 
-check_result = client.guardrail.check(
-    model="default/nvidia-nemotron-3.5-lightning-30b-a3b",
-    messages=[
-        {"role": "user", "content": "Hello, how are you?"},
-    ],
-    guardrails={
-        "config": inline_config,
-    },
-)
+check_result = client.guardrail.check_guardrail(
+    body=GuardrailCheckRequest(
+        model="default/nvidia-nemotron-3.5-lightning-30b-a3b",
+        messages=[
+            {"role": "user", "content": "Hello, how are you?"},
+        ],
+        guardrails={
+            "config": inline_config,
+        },
+    ),
+).data()
 
 print(check_result.model_dump_json(indent=2))
 

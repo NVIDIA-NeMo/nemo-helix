@@ -14,13 +14,14 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from nemo_evaluator.api.schemas import AgentRef
+from nemo_evaluator.api.schemas import AgentEvalResultSummary, AgentRef
 from nemo_evaluator.entities import AgentEvalResultEntity, EvaluateResultEntity
 from nemo_evaluator.jobs import result_persistence
 from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
     FabricConfigSource,
     FabricRunnerTarget,
+    GymAgentSource,
     GymRunnerTarget,
     HarborImportedAgentSource,
     HarborRunnerTarget,
@@ -34,7 +35,7 @@ from nemo_evaluator.jobs.result_persistence import (
     persist_agent_eval_result,
     persist_evaluate_result,
 )
-from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
+from nemo_evaluator_sdk.agent_eval.results import AgentEvalMetricOutputCoverage, AgentEvalResult, AgentEvalSummary
 from nemo_evaluator_sdk.enums import AgentFormat
 from nemo_evaluator_sdk.values import Agent, GenericAgent, Model
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult
@@ -102,13 +103,30 @@ def _agent() -> Agent:
             ("fabric", "calculator-agent", None),
         ),
         (
-            GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
+            GymRunnerTarget(
+                source=GymAgentSource(component="simple_agent", config="conf/agent.yaml"), resources_server="mcqa"
+            ),
             ("gym", "simple_agent", None),
+        ),
+        (
+            GymRunnerTarget(
+                source=RegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
+                resources_server="mcqa",
+                resolved_config={"harness": {"adapter_id": "x"}},
+            ),
+            ("gym", "calculator-agent", None),  # not the shared platform component name
         ),
         (HarborRunnerTarget(), ("harbor", "oracle", None)),
         (
             HarborRunnerTarget(source=HarborImportedAgentSource(import_path="wrapper:Agent")),
             ("harbor", "wrapper:Agent", None),
+        ),
+        (
+            HarborRunnerTarget(
+                source=RegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
+                agent_kwargs={"fabric_config": {"harness": {"adapter_id": "x"}}},
+            ),
+            ("harbor", "calculator-agent", None),  # not the shared FabricInstalledAgent import path
         ),
         (None, (None, None, None)),
     ],
@@ -179,8 +197,18 @@ def _ctx(tmp_path: Path, job_id: str | None) -> JobContext:
     )
 
 
+_SUMMARY = AgentEvalSummary(
+    task_count=2,
+    trial_count=4,
+    score_count=4,
+    error_count=1,
+    error_trial_ids={"ConnectError": ["t3"]},
+    metric_coverage={"accuracy": {"score": AgentEvalMetricOutputCoverage(total=4, scored=3, failed=1)}},
+)
+
+
 def _agent_result() -> AgentEvalResult:
-    return AgentEvalResult(run_id="run-1", tasks=[], trials=[], scores=[], summary=AgentEvalSummary())
+    return AgentEvalResult(run_id="run-1", tasks=[], trials=[], scores=[], summary=_SUMMARY)
 
 
 def _eval_result() -> EvaluationResult:
@@ -217,6 +245,10 @@ def test_persist_agent_eval_result_builds_entity_and_saves(tmp_path: Path, mocke
     assert entity.target_name == "openai/gpt-5.4"
     assert entity.target_url is None
     assert entity.bundle_ref == "fileset://dev/agent-eval-results#b"
+    # The summary rollup is copied under its own names; the per-trial tables stay in the bundle.
+    assert entity.summary == AgentEvalResultSummary(
+        task_count=2, trial_count=4, score_count=4, error_count=1, metric_coverage=_SUMMARY.metric_coverage
+    )
 
 
 def test_persist_evaluate_result_records_dataset_and_metric_types(tmp_path: Path, mocker: MockerFixture) -> None:
@@ -239,6 +271,7 @@ def test_persist_evaluate_result_records_dataset_and_metric_types(tmp_path: Path
     assert entity.target_kind == "model"
     assert entity.dataset_ref == "dev/my-dataset"
     assert entity.metric_types == ["exact_match"]
+    assert (entity.row_count, entity.error_row_count) == (0, 0)
 
 
 def test_persist_skips_when_no_job_id(tmp_path: Path, mocker: MockerFixture) -> None:

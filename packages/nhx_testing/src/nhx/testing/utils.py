@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, get_args, get_type_hints
 
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
@@ -421,6 +421,16 @@ def igw_mock_provider_mode(prefix: str = "igw-mock-") -> Iterator[None]:
         Configuration.clear_override(InferenceGatewayConfig)
 
 
+def _igw_cache_model_types() -> tuple[type[Any], type[Any]]:
+    """Return the (ModelProvider, VirtualModel) classes the in-process IGW caches store."""
+    from nhx.core.inference_gateway.api.model_cache import ModelProviderInfo
+    from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+
+    provider_type = get_type_hints(ModelProviderInfo)["model_provider"]
+    virtual_model_type = get_args(get_type_hints(VirtualModelCache)["virtual_model_map"])[1]
+    return provider_type, virtual_model_type
+
+
 def add_mock_provider(
     client: NemoClient,
     *,
@@ -650,30 +660,25 @@ def add_mock_provider(
 
     try:
         # From integration tests, we can directly update the local model cache to speed up
-        # subsequent requests. The IGW caches are typed with the generated SDK models, so the
-        # seeded entries are built from those types.
-        from nemo_helix.types.inference import ModelProvider as CacheModelProvider
-        from nemo_helix.types.inference import ServedModelMapping as CacheServedModelMapping
-        from nemo_helix.types.inference.virtual_model import VirtualModel as CacheVirtualModel
+        # subsequent requests. The seeded entries are validated into whatever model types
+        # the IGW caches declare, so this helper follows the cache's own contract.
+        cache_provider_type, cache_virtual_model_type = _igw_cache_model_types()
 
         model_cache = global_model_cache()
+        now = datetime.now()
         provider_info = ModelProviderInfo(
-            model_provider=CacheModelProvider(
-                id=get_random_id("provider"),
-                workspace=workspace,
-                name=prefixed_name,
-                host_url=host_url,
-                default_extra_headers=default_extra_headers or None,
-                served_models=[
-                    CacheServedModelMapping(
-                        model_entity_id=sm.model_entity_id,
-                        served_model_name=sm.served_model_name,
-                    )
-                    for sm in served_model_mappings
-                ],
-                enabled_models=enabled_models,
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
+            model_provider=cache_provider_type.model_validate(
+                {
+                    "id": get_random_id("provider"),
+                    "workspace": workspace,
+                    "name": prefixed_name,
+                    "host_url": host_url,
+                    "default_extra_headers": default_extra_headers or None,
+                    "served_models": [sm.model_dump() for sm in served_model_mappings],
+                    "enabled_models": enabled_models,
+                    "created_at": now,
+                    "updated_at": now,
+                }
             )
         )
         model_cache.update_model_info(provider_info)
@@ -683,22 +688,23 @@ def add_mock_provider(
         # this call hit the right cache state without waiting for the IGW's next
         # background refresh tick. This in-place seed is purely a latency optimization.
         virtual_model_cache = global_virtual_model_cache()
-        now = datetime.now()
         for entity_name in served_models:
             key = (workspace, entity_name)
             if key in virtual_model_cache.virtual_model_map:
                 continue
-            virtual_model_cache.virtual_model_map[key] = CacheVirtualModel(
-                id=f"{workspace}/{entity_name}",
-                entity_id=f"{workspace}/{entity_name}",
-                workspace=workspace,
-                name=entity_name,
-                parent=workspace,
-                db_version=1,
-                default_model_entity=f"{workspace}/{entity_name}",
-                autoprovisioned=should_autoprovision_virtual_model,
-                created_at=now,
-                updated_at=now,
+            virtual_model_cache.virtual_model_map[key] = cache_virtual_model_type.model_validate(
+                {
+                    "id": f"{workspace}/{entity_name}",
+                    "entity_id": f"{workspace}/{entity_name}",
+                    "workspace": workspace,
+                    "name": entity_name,
+                    "parent": workspace,
+                    "db_version": 1,
+                    "default_model_entity": f"{workspace}/{entity_name}",
+                    "autoprovisioned": should_autoprovision_virtual_model,
+                    "created_at": now,
+                    "updated_at": now,
+                }
             )
     except RuntimeError:
         # From E2E tests, the local cache is not available (app runs in a separate process).

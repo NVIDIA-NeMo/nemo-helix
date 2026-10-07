@@ -14,6 +14,10 @@ CLI testing:
 API testing:
 - create_test_client: Helper for creating FastAPI test clients with in-memory storage
 - ClientContext: Container for all client types returned by create_test_client
+- TestClientHttpAdapter: httpx.Client adapter that routes typed clients through a TestClient
+- nemo_client_for_test_client / async_nemo_client_for_app: typed clients routed to an in-process app
+- mock_nemo_client / mock_async_nemo_client: typed clients backed by an httpx.MockTransport handler
+- request_scoped_nemo_client_overrides: get_nemo_client/get_sync_nemo_client overrides for bare FastAPI apps
 - TEST_USER_EMAIL, TEST_ADMIN_EMAIL: Constants for test principals
 - subprocess_job_executor_patch: Opt into cpu/default to subprocess/default translation
 
@@ -28,7 +32,7 @@ Utilities:
 
 Task testing:
 - task_harness: Task integration test context manager
-- TaskContext: Context for running tasks with SDK access
+- TaskContext: Context for running tasks with typed client access
 - TaskResult: Result of a task execution
 
 Docker testing:
@@ -44,7 +48,18 @@ Notebook testing:
 - cleanup_temp_venv_and_kernel: Remove a temporary venv and kernel spec
 """
 
-from .client import TEST_ADMIN_EMAIL, TEST_USER_EMAIL, ClientContext, SDKTestClientAdapter, create_test_client
+from .client import (
+    TEST_ADMIN_EMAIL,
+    TEST_USER_EMAIL,
+    ClientContext,
+    TestClientHttpAdapter,
+    async_nemo_client_for_app,
+    create_test_client,
+    mock_async_nemo_client,
+    mock_nemo_client,
+    nemo_client_for_test_client,
+    request_scoped_nemo_client_overrides,
+)
 from .docker import (
     DEFAULT_RETRY_CONFIG,
     MOCK_NIM_NGINX_CONF,
@@ -91,7 +106,12 @@ __all__ = [
     # API testing
     "create_test_client",
     "ClientContext",
-    "SDKTestClientAdapter",
+    "TestClientHttpAdapter",
+    "async_nemo_client_for_app",
+    "mock_async_nemo_client",
+    "mock_nemo_client",
+    "nemo_client_for_test_client",
+    "request_scoped_nemo_client_overrides",
     "TEST_USER_EMAIL",
     "TEST_ADMIN_EMAIL",
     "subprocess_job_executor_patch",

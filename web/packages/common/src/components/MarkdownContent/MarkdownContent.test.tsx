@@ -42,8 +42,8 @@ describe('MarkdownContent', () => {
       render(<MarkdownContent content={'```typescript\nconst value = 1;\n```'} />);
 
       expect(screen.getByTestId('nv-code-snippet-code')).toHaveClass(
-        '[&&]:bg-gray-050',
-        'dark:[&&]:bg-gray-900'
+        '!bg-gray-050',
+        'dark:!bg-gray-900'
       );
     });
 
@@ -51,10 +51,10 @@ describe('MarkdownContent', () => {
       render(<MarkdownContent content="Use `const value = 1` inline." />);
 
       expect(screen.getByTestId('nv-code-snippet-code')).toHaveClass(
-        '[&&]:bg-gray-050',
-        'dark:[&&]:bg-gray-900',
-        '[&&]:rounded',
-        '[&&]:font-sans'
+        '!bg-gray-050',
+        'dark:!bg-gray-900',
+        '!rounded',
+        '!font-sans'
       );
     });
   });

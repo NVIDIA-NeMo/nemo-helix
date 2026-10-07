@@ -10,6 +10,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
+from nemo_evaluator_sdk.dataset_schemas.common import _MISSING, get_value_at_path
 from nemo_evaluator_sdk.dataset_schemas.compatibility import apply_column_mapping_to_row
 from nemo_evaluator_sdk.datasets.loader import prepare_dataset_rows
 from nemo_evaluator_sdk.execution import benchmark_execution
@@ -23,6 +24,7 @@ from nemo_evaluator_sdk.execution.metric_execution import (
 from nemo_evaluator_sdk.execution.utils import prepare_metric_for_execution, unique_metric_keys
 from nemo_evaluator_sdk.inference import PostprocessResponse, PreprocessRequest
 from nemo_evaluator_sdk.metrics.protocol import Metric
+from nemo_evaluator_sdk.resolver_protocols import SecretResolver
 from nemo_evaluator_sdk.resolvers import LocalModelResolver, LocalSecretResolver
 from nemo_evaluator_sdk.session import begin_evaluation_session
 from nemo_evaluator_sdk.values import DatasetInput, FieldMapping, Model
@@ -47,15 +49,37 @@ def _prepare_rows(
     )
     if field_mapping is None:
         return rows
-    return [apply_column_mapping_to_row(row, field_mapping) for row in rows]
+    mapped = [apply_column_mapping_to_row(row, field_mapping) for row in rows]
+    # Reported per mapping entry so the message carries the path, not just the canonical name: the
+    # two are easy to confuse when a dataset column shares that name. Checked against the raw rows
+    # because a resolved mapping and an unresolved one are indistinguishable after mapping.
+    for name, path in field_mapping.mapping().items():
+        misses = [index for index, row in enumerate(rows) if get_value_at_path(row, path) is _MISSING]
+        if not misses:
+            continue
+        log.warning(
+            "field_mapping %r -> %r resolved nothing on %d of %d rows (first at index %d); those rows leave %r unset.",
+            name,
+            path,
+            len(misses),
+            len(rows),
+            misses[0],
+            name,
+        )
+    return mapped
 
 
 class LocalBackend:
     """Local backend that executes metrics in-process."""
 
     def __init__(self) -> None:
-        """Create a local backend with local resolver defaults."""
-        self.secret_resolver = LocalSecretResolver()
+        """Create a local backend with local resolver defaults.
+
+        ``secret_resolver`` is annotated as the protocol rather than the concrete default because
+        it is meant to be swapped: the default reads ``os.environ``, which suits a job container
+        and not a request handler. It is only ever passed on as a ``SecretResolver``.
+        """
+        self.secret_resolver: SecretResolver = LocalSecretResolver()
         self.model_resolver = LocalModelResolver()
 
     async def _evaluate_one(

@@ -12,11 +12,13 @@
 
 Make the agents you ship faster, more accurate, and safer.
 
-NeMo Helix brings NVIDIA NeMo libraries together under one CLI, Python SDK, and web UI. Hardening, evaluation, and tuning for the agents you put in production.
+NeMo Helix is an open source control plane for improving and hardening production agents. It runs on your infrastructure and plugs into your platform. Evaluate behavior, test changes and measure the results through repeatable workflows. Run Helix locally or on Kubernetes, and access it through REST APIs, a CLI or a Python SDK. Helix also includes NeMo Studio, a lightweight web UI for observability and orchestration.
+
+NeMo Helix uses modular plugins for the infrastructure agents need to run at scale. Choose the capabilities you need, from agent execution and sandboxing to file storage, secrets, authentication, model management and inference middleware. Each comes with a default implementation that you can replace with your own infrastructure or tools.
 
 ## Get started
 
-**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (NVIDIA Build, OpenAI, Anthropic, Google Gemini, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required when starting local services.
+**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (NVIDIA Build, OpenAI, Anthropic, Google Gemini, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because deployments default to the Docker executor; remote-deployment, CLI-only, and configs that omit or reconfigure deployments do not require it. See [Local Docker and Executors](docs/get-started/local-docker-and-executors.mdx) for the subprocess vs Docker matrix.
 
 Quick install from PyPI:
 
@@ -24,6 +26,9 @@ Quick install from PyPI:
 curl -LsSf https://astral.sh/uv/0.10.10/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv tool install "nemo-helix[all]"
+uv tool update-shell
+# Then restart the shell
+
 
 nemo setup
 ```
@@ -133,7 +138,7 @@ See the [current release notes](https://docs.nvidia.com/nemo-helix/documentation
 
 ## Skills
 
-`nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. NeMo Helix-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
+`nemo setup` installs NeMo skills into your agent of choice, either into the local directory or globally. NeMo Helix-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
 
 To install or refresh skills for a built-in coding agent, use `--agent`. For another Agent Skills-compatible harness, point `--path` at that harness's skills directory.
 

@@ -15,7 +15,8 @@ Run these from the repo root (they wrap `cd docs/fern && npm run …`):
 | `make docs` | Local dev server (live preview) |
 | `make docs-watch` | Local dev server plus repo-level watcher for `docs/**` changes outside `docs/fern/` |
 | `make docs-check` | `fern check` + MDX validation + NotebookViewer artifact validation + gated-link check (what CI runs) |
-| `make docs-lint-snippets` | Syntax-check Python fenced snippets across all docs |
+| `make docs-lint-snippets` | Syntax-check Python fenced snippets across all docs, type-check the curated executable-doc subset, and run `docs-check-base-url` |
+| `make docs-check-base-url` | Flag snippets that bypass the CLI context: Python that reads `NHX_BASE_URL`, or shell that assigns it a literal URL |
 | `make docs-check-python-snippets DOCS_PATH=...` | Syntax-check and type-check Python fenced snippets in one doc |
 | `make docs-run-notebook DOCS_PATH=...` | Execute the source notebook for one Fern `.mdx`/`.ipynb` doc using `nemo-nb` markers |
 | `make docs-broken-links` | Report broken links |
@@ -31,6 +32,7 @@ Use `make docs` when you are only editing `docs/fern/` config. Use `make docs-wa
 - **Publication state is nav-derived.** Do not maintain or rely on a hard-coded list of gated directories. Check `docs/fern/versions/latest.yml`: listed pages are published in Latest, and omitted pages are gated. `docs/fern/gated-nav.yml` contains reference blocks for some gated features. To publish one: move its block into `latest.yml`, re-add inbound links, run `make docs-check && make docs-broken-links`.
 - **Don't link into gated pages.** A link from a published page into a gated page is a dead link. `make docs-check` fails on it; `make docs-fix-links` delinks it to plain text. (Replaces the old MkDocs `hide_unready_docs` auto-delinking.)
 - **Internal links** use canonical nav URLs like `/documentation/get-started/core-concepts/workspaces`, not relative `.md`/source paths. `make docs-broken-links` is the check.
+- **Connect through the CLI context, not `NHX_BASE_URL`.** Build Python clients with `NemoClient.from_config()` and leave `NHX_BASE_URL` unset for `nemo` commands. Direct-URL tools such as `curl` may default it with `${NHX_BASE_URL:-http://localhost:8080}`. Mark a deliberate override with `{/* @nemo-docs: allow-nhx-base-url */}` before the fence. `make docs-check-base-url` enforces this; see `docs/cli/connect-to-deployments.mdx` for the user-facing guidance.
 - **No `{{variable}}` substitutions.** Fern has no substitution step; product names are inlined as literal text. (Prompt-template tokens like `` `{{input}}` `` inside backticks are real content — leave them.)
 
 ## Generated pages — do not hand-edit

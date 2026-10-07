@@ -1,25 +1,24 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for client_factory module."""
+"""Tests for building typed clients from the nhx config: auth wiring, TLS, overrides and failures."""
 
 import json
-import sys
 import time
 from base64 import urlsafe_b64encode
-from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 import yaml
-from nemo_helix import AsyncNeMoHelix, DefaultHttpxClient, NeMoHelix, not_given
 from nemo_helix_ext.auth.helpers import NHXOIDCConfig, decode_jwt_claims
-from nemo_helix_ext.client.factory import create_client
+from nemo_helix_ext.client.bootstrap import build_async_nemo_client, build_nemo_client
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
-from nemo_helix_plugin.client.client import NemoClientRuntime
+from nemo_helix_plugin.client.auth import TokenProviderAuth
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.endpoint import get
+from pydantic import BaseModel
 
 
 def _make_jwt(claims: dict) -> str:
@@ -94,124 +93,134 @@ _MOCK_WORKLOAD_NHX_CONFIG = NHXOIDCConfig(
 )
 
 
-class TestCreateClientOAuth:
+class Probe(BaseModel):
+    ok: bool
+
+
+@get("/apis/test/v2/probe")
+def probe() -> Probe:
+    raise NotImplementedError
+
+
+def _wire(client: NemoClient) -> list[httpx.Request]:
+    """Swap the transport for a recorder that answers every request, keeping the builder's auth hook."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    client._http = httpx.Client(
+        transport=httpx.MockTransport(handler), auth=client._http.auth, headers=client._http.headers
+    )
+    return seen
+
+
+def _async_wire(client: AsyncNemoClient) -> list[httpx.Request]:
+    """Async twin of :func:`_wire`."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    client._http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), auth=client._http.auth, headers=client._http.headers
+    )
+    return seen
+
+
+def _sent_authorization(client: NemoClient) -> str | None:
+    """Send a probe request and return the ``Authorization`` header that reached the wire."""
+    seen = _wire(client)
+    client.send(probe())
+    return seen[0].headers.get("Authorization")
+
+
+def _multi_context_config(tmp_path):
+    config = {
+        "current_context": "default",
+        "clusters": [
+            {"name": "cluster-one", "base_url": "http://localhost:8080"},
+            {"name": "cluster-two", "base_url": "http://localhost:9090"},
+        ],
+        "users": [
+            {"name": "user-one", "type": "api-key", "api_key": "nvapi-one"},
+            {"name": "user-two", "type": "api-key", "api_key": "nvapi-two"},
+        ],
+        "contexts": [
+            {"name": "default", "cluster": "cluster-one", "user": "user-one", "workspace": "workspace-one"},
+            {"name": "target-context", "cluster": "cluster-two", "user": "user-two", "workspace": "workspace-two"},
+        ],
+    }
+    config_path = tmp_path / "config.yaml"
+    with open(config_path, "w") as f:
+        yaml.safe_dump(config, f)
+    return config_path
+
+
+class TestBuildNemoClientOAuth:
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    def test_creates_client_from_stored_oauth_tokens(self, _mock_discover, tmp_path):
+    def test_builds_client_from_stored_oauth_tokens(self, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-        )
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        assert str(client.base_url).rstrip("/") == "http://localhost:8080"
+        assert isinstance(client, NemoClient)
+        assert client.base_url.rstrip("/") == "http://localhost:8080"
         assert client.workspace == "test-workspace"
 
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    def test_event_hook_injects_fresh_token(self, _mock_discover, tmp_path):
+    def test_sends_the_stored_token_on_each_request(self, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-        )
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        httpx_client = client._client
-        assert len(httpx_client._event_hooks["request"]) == 1
+        assert isinstance(client._http.auth, TokenProviderAuth)
+        assert _sent_authorization(client) == f"Bearer {token}"
 
-        request = httpx_client.build_request("GET", "http://localhost:8080/test")
-        httpx_client._event_hooks["request"][0](request)
-        assert request.headers["Authorization"] == f"Bearer {token}"
-
+    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    def test_oauth_uses_sdk_default_httpx_client(self, _mock_discover, tmp_path):
+    def test_uses_nemo_scoped_ca_bundle(self, _mock_discover, mock_httpx_client, tmp_path, monkeypatch):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-        )
-
-        client = create_client(config_path=config_path)
-        try:
-            assert isinstance(client._client, DefaultHttpxClient)
-        finally:
-            client.close()
-
-    @patch("nemo_helix_ext.client.factory.DefaultHttpxClient")
-    @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    def test_oauth_uses_nemo_scoped_ca_bundle(self, _mock_discover, mock_default_httpx_client, tmp_path, monkeypatch):
-        token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-        )
-        http_client = httpx.Client()
-        mock_default_httpx_client.return_value = http_client
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
         monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
 
-        client = create_client(config_path=config_path)
-        try:
-            assert client is not None
-        finally:
-            client.close()
+        build_nemo_client(config_path=config_path)
 
-        assert mock_default_httpx_client.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"
+        assert mock_httpx_client.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"
 
-    @patch("nemo_helix_ext.client.factory.DefaultHttpxClient")
+    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    def test_oauth_uses_context_certificate_authority(
-        self, _mock_discover, mock_default_httpx_client, tmp_path, monkeypatch
-    ):
+    def test_uses_context_certificate_authority(self, _mock_discover, mock_httpx_client, tmp_path, monkeypatch):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         context_ca = str(tmp_path / "context-ca.pem")
         config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-            certificate_authority=context_ca,
+            tmp_path, token=token, refresh_token="refresh_abc", certificate_authority=context_ca
         )
-        http_client = httpx.Client()
-        mock_default_httpx_client.return_value = http_client
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
-        client = create_client(config_path=config_path)
-        try:
-            assert client is not None
-        finally:
-            client.close()
+        build_nemo_client(config_path=config_path)
 
-        assert mock_default_httpx_client.call_args.kwargs["verify"] == context_ca
+        assert mock_httpx_client.call_args.kwargs["verify"] == context_ca
         assert _mock_discover.call_args.kwargs["certificate_authority"] == context_ca
 
-    @patch("nemo_helix_ext.client.factory.DefaultHttpxClient")
+    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     def test_env_ca_bundle_overrides_context_certificate_authority(
-        self, _mock_discover, mock_default_httpx_client, tmp_path, monkeypatch
+        self, _mock_discover, mock_httpx_client, tmp_path, monkeypatch
     ):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-            certificate_authority="/tmp/context-ca.pem",
+            tmp_path, token=token, refresh_token="refresh_abc", certificate_authority="/tmp/context-ca.pem"
         )
-        http_client = httpx.Client()
-        mock_default_httpx_client.return_value = http_client
         monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/env-ca.pem")
 
-        client = create_client(config_path=config_path)
-        try:
-            assert client is not None
-        finally:
-            client.close()
+        build_nemo_client(config_path=config_path)
 
-        assert mock_default_httpx_client.call_args.kwargs["verify"] == "/tmp/env-ca.pem"
+        assert mock_httpx_client.call_args.kwargs["verify"] == "/tmp/env-ca.pem"
         assert _mock_discover.call_args.kwargs["certificate_authority"] == "/tmp/context-ca.pem"
 
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
@@ -219,29 +228,19 @@ class TestCreateClientOAuth:
     def test_persist_refreshed_tokens_writes_to_config(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
         new_token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
-
-        config_path = _write_config(
-            tmp_path,
-            token=expired_token,
-            refresh_token="refresh_abc",
-        )
+        config_path = _write_config(tmp_path, token=expired_token, refresh_token="refresh_abc")
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "access_token": new_token,
-            "refresh_token": "new_refresh",
-        }
+        mock_response.json.return_value = {"access_token": new_token, "refresh_token": "new_refresh"}
         mock_post.return_value = mock_response
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        assert client is not None
+        assert _sent_authorization(client) == f"Bearer {new_token}"
         mock_post.assert_called_once()
-
         with open(config_path) as f:
-            saved_config = yaml.safe_load(f)
-        saved_user = saved_config["users"][0]
+            saved_user = yaml.safe_load(f)["users"][0]
         assert saved_user["token"] == new_token
         assert saved_user["refresh_token"] == "new_refresh"
 
@@ -249,14 +248,12 @@ class TestCreateClientOAuth:
     def test_explicit_access_token_overrides_config_auth(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
-        client = create_client(config_path=config_path, access_token="explicit-access-token-123")
+        client = build_nemo_client(config_path=config_path, access_token="explicit-access-token-123")
 
-        request = client._client.build_request("GET", "http://localhost:8080/test")
-        client._client._event_hooks["request"][0](request)
-        assert request.headers["Authorization"] == "Bearer explicit-access-token-123"
+        assert _sent_authorization(client) == "Bearer explicit-access-token-123"
 
 
-class TestCreateClientOAuthUserAuthDisabledCluster:
+class TestBuildNemoClientAuthDisabledCluster:
     """Regression tests: OAuthUser context pointed at a cluster with no auth.
 
     This happens when a config context was previously authenticated against a
@@ -266,52 +263,33 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
     """
 
     @patch(
-        "nemo_helix.client.bootstrap.discover_nhx_config",
-        return_value=NHXOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
-    )
-    @patch(
         "nemo_helix_ext.client.bootstrap.discover_nhx_config",
         return_value=NHXOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
     )
     @patch("nemo_helix_ext.auth.token_provider.httpx.post")
-    def test_expired_token_on_auth_disabled_cluster_does_not_attempt_refresh(
-        self, mock_post, _mock_ext_discover, _mock_sdk_discover, tmp_path
-    ):
+    def test_expired_token_on_auth_disabled_cluster_does_not_attempt_refresh(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=expired_token,
-            refresh_token="refresh_abc",
-        )
+        config_path = _write_config(tmp_path, token=expired_token, refresh_token="refresh_abc")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        assert str(client.base_url).rstrip("/") == "http://localhost:8080"
+        assert client.base_url.rstrip("/") == "http://localhost:8080"
+        assert _sent_authorization(client) is None
         mock_post.assert_not_called()
-        assert "Authorization" not in client._custom_headers
 
-    @patch(
-        "nemo_helix.client.bootstrap.discover_nhx_config",
-        return_value=NHXOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
-    )
     @patch(
         "nemo_helix_ext.client.bootstrap.discover_nhx_config",
         return_value=NHXOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
     )
-    def test_valid_token_on_auth_disabled_cluster_skips_token_provider(
-        self, _mock_ext_discover, _mock_sdk_discover, tmp_path
-    ):
+    def test_valid_token_on_auth_disabled_cluster_skips_token_provider(self, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-        )
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        assert "Authorization" not in client._custom_headers
-        assert client._client._event_hooks["request"] == []
+        assert client._auth is None
+        assert client._http.auth is None or not isinstance(client._http.auth, TokenProviderAuth)
+        assert _sent_authorization(client) is None
 
     @patch(
         "nemo_helix_ext.client.bootstrap.discover_nhx_config",
@@ -323,11 +301,9 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        request = client._client.build_request("GET", "http://localhost:8080/test")
-        client._client._event_hooks["request"][0](request)
-        assert request.headers["Authorization"] == f"Bearer {token}"
+        assert _sent_authorization(client) == f"Bearer {token}"
 
     @patch(
         "nemo_helix_ext.client.bootstrap.discover_nhx_config",
@@ -337,11 +313,9 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        request = client._client.build_request("GET", "http://localhost:8080/test")
-        client._client._event_hooks["request"][0](request)
-        assert request.headers["Authorization"] == f"Bearer {token}"
+        assert _sent_authorization(client) == f"Bearer {token}"
 
     @patch(
         "nemo_helix_ext.client.bootstrap.discover_nhx_config",
@@ -352,10 +326,10 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
         config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
 
         with pytest.raises(ValueError, match="bearer_token_source"):
-            create_client(config_path=config_path)
+            build_nemo_client(config_path=config_path)
 
 
-class TestCreateClientWorkloadIdentity:
+class TestBuildNemoClientWorkloadIdentity:
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_WORKLOAD_NHX_CONFIG)
     @patch("nemo_helix_ext.auth.workload_exchange.token_exchange_grant")
     def test_exchanges_workload_identity_token_file(self, mock_exchange, _mock_discover, tmp_path, monkeypatch):
@@ -366,17 +340,15 @@ class TestCreateClientWorkloadIdentity:
         monkeypatch.setenv("NHX_BASE_URL", "https://api.example.com")
         monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
 
-        client = create_client()
+        client = build_nemo_client()
 
         try:
-            assert str(client.base_url).rstrip("/") == "https://api.example.com"
-            assert "Authorization" not in client._custom_headers
+            assert client.base_url.rstrip("/") == "https://api.example.com"
+            assert "Authorization" not in client.default_headers
             _mock_discover.assert_not_called()
             mock_exchange.assert_not_called()
 
-            request = client._client.build_request("GET", "https://api.example.com/test")
-            client._client._event_hooks["request"][0](request)
-            assert request.headers["Authorization"] == f"Bearer {access_token}"
+            assert _sent_authorization(client) == f"Bearer {access_token}"
         finally:
             client.close()
 
@@ -387,11 +359,10 @@ class TestCreateClientWorkloadIdentity:
         assert mock_exchange.call_args.kwargs["audience"] == "nemo-helix"
         assert mock_exchange.call_args.kwargs["scope"] == "openid email groups"
 
-    @patch("nemo_helix_ext.client.factory.DefaultHttpxClient")
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_WORKLOAD_NHX_CONFIG)
     @patch("nemo_helix_ext.auth.workload_exchange.token_exchange_grant")
     def test_workload_identity_discovery_uses_context_certificate_authority(
-        self, mock_exchange, _mock_discover, mock_default_httpx_client, tmp_path, monkeypatch
+        self, mock_exchange, _mock_discover, tmp_path, monkeypatch
     ):
         subject_token_file = tmp_path / "workload-token"
         subject_token_file.write_text("subject-token-one\n", encoding="utf-8")
@@ -402,23 +373,22 @@ class TestCreateClientWorkloadIdentity:
         monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
+        real_httpx_client = httpx.Client
+
         def default_httpx_client(*args, **kwargs):
             kwargs["verify"] = True
-            return httpx.Client(*args, **kwargs)
+            return real_httpx_client(*args, **kwargs)
 
-        mock_default_httpx_client.side_effect = default_httpx_client
-
-        client = create_client(config_path=config_path)
+        with patch("nemo_helix_ext.client.bootstrap.httpx.Client", side_effect=default_httpx_client) as client_cls:
+            client = build_nemo_client(config_path=config_path)
         try:
-            request = client._client.build_request("GET", "http://localhost:8080/test")
-            client._client._event_hooks["request"][0](request)
-            assert request.headers["Authorization"] == f"Bearer {access_token}"
+            assert _sent_authorization(client) == f"Bearer {access_token}"
         finally:
             client.close()
 
         assert _mock_discover.call_args.kwargs["certificate_authority"] == context_ca
         assert mock_exchange.call_args.kwargs["certificate_authority"] == context_ca
-        assert mock_default_httpx_client.call_args.kwargs["verify"] == context_ca
+        assert client_cls.call_args.kwargs["verify"] == context_ca
 
     @pytest.mark.asyncio
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_WORKLOAD_NHX_CONFIG)
@@ -433,17 +403,18 @@ class TestCreateClientWorkloadIdentity:
         monkeypatch.setenv("NHX_BASE_URL", "https://api.example.com")
         monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
 
-        client = AsyncNeMoHelix()
+        client = build_async_nemo_client()
+        seen = _async_wire(client)
 
         try:
-            assert str(client.base_url).rstrip("/") == "https://api.example.com"
-            assert "Authorization" not in client._custom_headers
+            assert isinstance(client, AsyncNemoClient)
+            assert client.base_url.rstrip("/") == "https://api.example.com"
+            assert "Authorization" not in client.default_headers
             _mock_discover.assert_not_called()
             mock_exchange.assert_not_called()
 
-            request = client._client.build_request("GET", "https://api.example.com/test")
-            await client._client._event_hooks["request"][0](request)
-            assert request.headers["Authorization"] == f"Bearer {access_token}"
+            await client.send(probe())
+            assert seen[0].headers["Authorization"] == f"Bearer {access_token}"
         finally:
             await client.close()
 
@@ -462,132 +433,102 @@ class TestCreateClientWorkloadIdentity:
         monkeypatch.setenv("NHX_ACCESS_TOKEN", "env-access-token-123")
         monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
 
-        client = create_client()
+        client = build_nemo_client()
 
         try:
-            request = client._client.build_request("GET", "https://api.example.com/test")
-            client._client._event_hooks["request"][0](request)
-            assert request.headers["Authorization"] == "Bearer env-access-token-123"
+            assert _sent_authorization(client) == "Bearer env-access-token-123"
         finally:
             client.close()
 
 
-class TestCreateClientApiKey:
+class TestBuildNemoClientApiKey:
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    def test_creates_client_with_api_key(self, _mock_discover, tmp_path):
+    def test_builds_client_with_api_key(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        assert str(client.base_url).rstrip("/") == "http://localhost:8080"
+        assert client.base_url.rstrip("/") == "http://localhost:8080"
         assert client.workspace == "test-workspace"
-        assert "Authorization" in client._custom_headers
-        assert client._custom_headers["Authorization"] == "Bearer nvapi-test-key-123"
+        assert _sent_authorization(client) == "Bearer nvapi-test-key-123"
 
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    def test_creates_client_with_email_api_key(self, _mock_discover, tmp_path):
+    def test_builds_client_with_email_api_key(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="admin@example.com")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        assert "Authorization" in client._custom_headers
-        token = client._custom_headers["Authorization"].split(" ", 1)[1]
+        token = (_sent_authorization(client) or "").split(" ", 1)[1]
         claims = decode_jwt_claims(token)
         assert claims["sub"] == "admin@example.com"
         assert claims["email"] == "admin@example.com"
 
+    @pytest.mark.asyncio
+    @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
+    async def test_async_client_uses_config_for_api_key(self, _mock_discover, tmp_path):
+        config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
-class TestCreateClientNoAuth:
-    def test_creates_client_without_auth(self, tmp_path):
+        client = build_async_nemo_client(config_path=config_path)
+        try:
+            assert client.base_url.rstrip("/") == "http://localhost:8080"
+            assert client.workspace == "test-workspace"
+            assert client._auth is not None
+        finally:
+            await client.close()
+
+
+class TestBuildNemoClientNoAuth:
+    def test_builds_client_without_auth(self, tmp_path):
         config_path = _write_config(tmp_path, user_type="no-auth")
 
-        client = create_client(config_path=config_path)
+        client = build_nemo_client(config_path=config_path)
 
-        assert str(client.base_url).rstrip("/") == "http://localhost:8080"
+        assert client.base_url.rstrip("/") == "http://localhost:8080"
         assert client.workspace == "test-workspace"
-        # No auth headers should be set
-        assert "Authorization" not in client._custom_headers
+        assert "Authorization" not in client.default_headers
+        assert _sent_authorization(client) is None
 
-    @patch("nemo_helix_ext.client.factory.DefaultHttpxClient")
-    def test_non_oauth_context_uses_context_certificate_authority(
-        self, mock_default_httpx_client, tmp_path, monkeypatch
-    ):
+    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
+    def test_non_oauth_context_uses_context_certificate_authority(self, mock_httpx_client, tmp_path, monkeypatch):
         context_ca = str(tmp_path / "context-ca.pem")
-        config_path = _write_config(
-            tmp_path,
-            user_type="no-auth",
-            certificate_authority=context_ca,
-        )
-        http_client = httpx.Client()
-        mock_default_httpx_client.return_value = http_client
+        config_path = _write_config(tmp_path, user_type="no-auth", certificate_authority=context_ca)
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
-        client = create_client(config_path=config_path)
-        try:
-            assert str(client.base_url).rstrip("/") == "http://localhost:8080"
-        finally:
-            client.close()
+        client = build_nemo_client(config_path=config_path)
 
-        mock_default_httpx_client.assert_called_once_with(verify=context_ca)
+        assert client.base_url.rstrip("/") == "http://localhost:8080"
+        assert mock_httpx_client.call_args.kwargs["verify"] == context_ca
 
 
-class TestCreateClientTimeout:
-    @patch("nemo_helix_ext.client.factory.NeMoHelix")
-    def test_default_timeout_preserves_sdk_constructor_default(self, mock_client_ctor, tmp_path):
-        config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
-
-        create_client(config_path=config_path)
-
-        assert mock_client_ctor.call_args.kwargs["timeout"] is not_given
-
-    @patch("nemo_helix_ext.client.factory.NeMoHelix")
-    def test_explicit_timeout_is_forwarded(self, mock_client_ctor, tmp_path):
-        config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
-
-        create_client(config_path=config_path, timeout=42.0)
-
-        assert mock_client_ctor.call_args.kwargs["timeout"] == 42.0
-
-
-class TestCreateClientProviderReuse:
+class TestBuildNemoClientProviderReuse:
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     @patch("nemo_helix_ext.client.bootstrap.OIDCTokenProvider")
     def test_reuses_oauth_provider_for_same_context(self, mock_provider_cls, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-        )
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
 
         provider = MagicMock()
         provider.get_access_token.return_value = token
         provider.reload_tokens.return_value = False
         mock_provider_cls.return_value = provider
 
-        create_client(config_path=config_path)
-        create_client(config_path=config_path)
+        build_nemo_client(config_path=config_path)
+        build_nemo_client(config_path=config_path)
 
         assert mock_provider_cls.call_count == 1
         provider_kwargs = mock_provider_cls.call_args.kwargs
         assert callable(provider_kwargs["load_tokens"])
         assert callable(provider_kwargs["refresh_lock"])
 
+    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    @patch("nemo_helix_ext.client.factory.DefaultHttpxClient")
     @patch("nemo_helix_ext.client.bootstrap.OIDCTokenProvider")
     def test_context_certificate_authority_participates_in_provider_cache_key(
-        self, mock_provider_cls, mock_default_httpx_client, _mock_discover, tmp_path, monkeypatch
+        self, mock_provider_cls, _mock_discover, _mock_httpx_client, tmp_path, monkeypatch
     ):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         first_ca = str(tmp_path / "first-ca.pem")
         second_ca = str(tmp_path / "second-ca.pem")
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-            certificate_authority=first_ca,
-        )
         first_provider = MagicMock()
         first_provider.get_access_token.return_value = token
         first_provider.reload_tokens.return_value = False
@@ -595,17 +536,12 @@ class TestCreateClientProviderReuse:
         second_provider.get_access_token.return_value = token
         second_provider.reload_tokens.return_value = False
         mock_provider_cls.side_effect = [first_provider, second_provider]
-        mock_default_httpx_client.side_effect = [httpx.Client(), httpx.Client()]
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
-        first_client = create_client(config_path=config_path)
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-            certificate_authority=second_ca,
-        )
-        second_client = create_client(config_path=config_path)
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc", certificate_authority=first_ca)
+        first_client = build_nemo_client(config_path=config_path)
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc", certificate_authority=second_ca)
+        second_client = build_nemo_client(config_path=config_path)
         try:
             assert first_client is not None
             assert second_client is not None
@@ -618,100 +554,74 @@ class TestCreateClientProviderReuse:
         assert certificate_authorities == [first_ca, second_ca]
 
 
-class TestCreateClientOverrides:
+class TestBuildNemoClientOverrides:
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     def test_base_url_override_uses_explicit_url_with_context_auth(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
-        client = create_client(config_path=config_path, base_url="http://localhost:9090")
+        client = build_nemo_client(config_path=config_path, base_url="http://localhost:9090")
 
-        assert str(client.base_url).rstrip("/") == "http://localhost:9090"
+        assert client.base_url.rstrip("/") == "http://localhost:9090"
         assert client.workspace == "test-workspace"
-        assert client._custom_headers["Authorization"] == "Bearer nvapi-test-key-123"
+        assert _sent_authorization(client) == "Bearer nvapi-test-key-123"
 
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     def test_context_override_uses_selected_context(self, _mock_discover, tmp_path):
-        config = {
-            "current_context": "default",
-            "clusters": [
-                {"name": "cluster-one", "base_url": "http://localhost:8080"},
-                {"name": "cluster-two", "base_url": "http://localhost:9090"},
-            ],
-            "users": [
-                {"name": "user-one", "type": "api-key", "api_key": "nvapi-one"},
-                {"name": "user-two", "type": "api-key", "api_key": "nvapi-two"},
-            ],
-            "contexts": [
-                {
-                    "name": "default",
-                    "cluster": "cluster-one",
-                    "user": "user-one",
-                    "workspace": "workspace-one",
-                },
-                {
-                    "name": "target-context",
-                    "cluster": "cluster-two",
-                    "user": "user-two",
-                    "workspace": "workspace-two",
-                },
-            ],
-        }
-        config_path = tmp_path / "config.yaml"
-        with open(config_path, "w") as f:
-            yaml.safe_dump(config, f)
+        config_path = _multi_context_config(tmp_path)
 
-        client = create_client(config_path=config_path, context_name="target-context")
+        client = build_nemo_client(config_path=config_path, context_name="target-context")
 
-        assert str(client.base_url).rstrip("/") == "http://localhost:9090"
+        assert client.base_url.rstrip("/") == "http://localhost:9090"
         assert client.workspace == "workspace-two"
-        assert client._custom_headers["Authorization"] == "Bearer nvapi-two"
+        assert _sent_authorization(client) == "Bearer nvapi-two"
+
+    @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
+    def test_async_context_override_uses_selected_context(self, _mock_discover, tmp_path):
+        config_path = _multi_context_config(tmp_path)
+
+        client = build_async_nemo_client(config_path=config_path, context_name="target-context")
+
+        assert client.base_url.rstrip("/") == "http://localhost:9090"
+        assert client.workspace == "workspace-two"
 
     def test_context_override_fails_for_missing_context(self, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
         with pytest.raises(ValueError, match="Context 'missing-context' not found"):
-            create_client(config_path=config_path, context_name="missing-context")
+            build_nemo_client(config_path=config_path, context_name="missing-context")
 
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     def test_access_token_override_uses_bearer_token(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "override-user"})
 
-        client = create_client(config_path=config_path, access_token=token)
+        client = build_nemo_client(config_path=config_path, access_token=token)
 
-        request = client._client.build_request("GET", "http://localhost:8080/test")
-        client._client._event_hooks["request"][0](request)
-        assert request.headers["Authorization"] == f"Bearer {token}"
+        assert _sent_authorization(client) == f"Bearer {token}"
 
 
-class TestCreateClientBootstrapFailures:
+class TestBuildNemoClientBootstrapFailures:
     def test_explicit_missing_config_file_fails_fast(self, tmp_path):
         missing_config_path = tmp_path / "missing-config.yaml"
 
         with pytest.raises(FileNotFoundError, match=f"Config file not found at {missing_config_path}"):
-            create_client(config_path=missing_config_path)
+            build_nemo_client(config_path=missing_config_path)
 
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     def test_expired_oauth_token_without_refresh_token_fails(self, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=expired_token,
-            refresh_token=None,
-        )
+        config_path = _write_config(tmp_path, token=expired_token, refresh_token=None)
+
+        client = build_nemo_client(config_path=config_path)
 
         with pytest.raises(RuntimeError, match="no refresh token is available"):
-            create_client(config_path=config_path)
+            _sent_authorization(client)
 
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     @patch("nemo_helix_ext.auth.token_provider.httpx.post")
     def test_refresh_grant_failure_surfaces_clear_error(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=expired_token,
-            refresh_token="refresh_abc",
-        )
+        config_path = _write_config(tmp_path, token=expired_token, refresh_token="refresh_abc")
 
         mock_response = MagicMock()
         mock_response.status_code = 401
@@ -723,459 +633,24 @@ class TestCreateClientBootstrapFailures:
         }
         mock_post.return_value = mock_response
 
+        client = build_nemo_client(config_path=config_path)
+
         with pytest.raises(RuntimeError, match=r"Token refresh failed: invalid_grant - invalid refresh token"):
-            create_client(config_path=config_path)
+            _sent_authorization(client)
 
 
-class TestClientConstructorBootstrapBypass:
-    def test_sdk_constructors_allocate_fresh_default_runtime(self):
-        sync_client_a = NeMoHelix(base_url="http://override-host:8081")
-        sync_client_b = NeMoHelix(base_url="http://override-host:8081")
-        explicit_runtime = NemoClientRuntime()
-        explicit_client = NeMoHelix(
-            base_url="http://override-host:8081",
-            nemo_client_runtime=explicit_runtime,
-        )
-        try:
-            assert sync_client_a.nemo_client_runtime is not sync_client_b.nemo_client_runtime
-            assert explicit_client.nemo_client_runtime is explicit_runtime
-        finally:
-            sync_client_a.close()
-            sync_client_b.close()
-            explicit_client.close()
-
-    @pytest.mark.asyncio
-    async def test_async_sdk_constructor_allocates_fresh_default_runtime(self):
-        async_client_a = AsyncNeMoHelix(base_url="http://override-host:8081")
-        async_client_b = AsyncNeMoHelix(base_url="http://override-host:8081")
-        explicit_runtime = NemoClientRuntime()
-        explicit_client = AsyncNeMoHelix(
-            base_url="http://override-host:8081",
-            nemo_client_runtime=explicit_runtime,
-        )
-        try:
-            assert async_client_a.nemo_client_runtime is not async_client_b.nemo_client_runtime
-            assert explicit_client.nemo_client_runtime is explicit_runtime
-        finally:
-            await async_client_a.close()
-            await async_client_b.close()
-            await explicit_client.close()
-
-    @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
-    def test_sync_constructor_with_base_url_skips_config_bootstrap(self, mock_build_client_kwargs):
-        mock_build_client_kwargs.side_effect = AssertionError("bootstrap should not be called")
-
-        client = NeMoHelix(base_url="http://override-host:8081", workspace="test-workspace")
-        try:
-            assert str(client.base_url).rstrip("/") == "http://override-host:8081"
-            assert client.workspace == "test-workspace"
-        finally:
-            client.close()
-
-        mock_build_client_kwargs.assert_not_called()
-
-    @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
-    def test_sync_constructor_env_base_url_still_bootstraps_when_base_url_omitted(
-        self, mock_build_client_kwargs, monkeypatch
-    ):
-        monkeypatch.setenv("NEMO_HELIX_BASE_URL", "http://env-host:8081")
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="http://env-host:8081",
-            workspace="test-workspace",
-            default_headers=None,
-            http_client=None,
-            client_verify=True,
-        )
-
-        client = NeMoHelix()
-        try:
-            assert str(client.base_url).rstrip("/") == "http://env-host:8081"
-            assert client.workspace == "test-workspace"
-        finally:
-            client.close()
-
-        assert mock_build_client_kwargs.call_args.kwargs["base_url"] == "http://env-host:8081"
-
-    @patch("nemo_helix._client.DefaultHttpxClient")
-    @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
-    def test_sync_constructor_direct_mode_uses_nemo_scoped_ca_bundle(
-        self, mock_build_client_kwargs, mock_default_httpx_client, monkeypatch
-    ):
-        mock_build_client_kwargs.side_effect = AssertionError("bootstrap should not be called")
-        mock_default_httpx_client.return_value = httpx.Client()
-        monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
-
-        client = NeMoHelix(base_url="https://override-host:8081", workspace="test-workspace")
-        try:
-            assert str(client.base_url).rstrip("/") == "https://override-host:8081"
-        finally:
-            client.close()
-
-        mock_build_client_kwargs.assert_not_called()
-        mock_default_httpx_client.assert_called_once_with(verify="/tmp/nemo-ca.pem")
-
-    @patch("nemo_helix._client.DefaultHttpxClient")
-    @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
-    def test_sync_constructor_uses_context_certificate_authority(
-        self, mock_build_client_kwargs, mock_default_httpx_client, monkeypatch
-    ):
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="https://config-host:8443",
-            workspace="test-workspace",
-            default_headers=None,
-            http_client=None,
-            client_verify="/ctx/ca.pem",
-        )
-        mock_default_httpx_client.return_value = httpx.Client()
-        monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
-
-        client = NeMoHelix(config_path=Path("/tmp/config.yaml"))
-        try:
-            assert str(client.base_url).rstrip("/") == "https://config-host:8443"
-            assert client.workspace == "test-workspace"
-        finally:
-            client.close()
-
-        mock_default_httpx_client.assert_called_once_with(verify="/ctx/ca.pem")
-
-    @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
-    def test_sync_copy_with_access_token_bootstraps_instead_of_reusing_http_client(self, mock_build_client_kwargs):
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="http://override-host:8081",
-            workspace="test-workspace",
-            default_headers={"Authorization": "Bearer replacement-token"},
-            http_client=None,
-            client_verify=True,
-        )
-
-        client = NeMoHelix(base_url="http://original-host:8081", workspace="original-workspace")
-        original_http_client = client._client
-        copied = client.copy(access_token="replacement-token")
-        try:
-            assert copied._client is not original_http_client
-        finally:
-            copied.close()
-            client.close()
-
-        assert mock_build_client_kwargs.call_args.kwargs["access_token"] == "replacement-token"
-
-    @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
-    def test_sync_constructor_with_workload_file_and_base_url_bootstraps(self, mock_build_client_kwargs, monkeypatch):
-        monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, "/var/run/secrets/nemo-helix/workload/token")
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="http://override-host:8081",
-            workspace="test-workspace",
-            default_headers=None,
-            http_client=None,
-            client_verify=True,
-        )
-
-        client = NeMoHelix(base_url="http://override-host:8081", workspace="test-workspace")
-        try:
-            assert str(client.base_url).rstrip("/") == "http://override-host:8081"
-        finally:
-            client.close()
-
-        assert mock_build_client_kwargs.call_args.kwargs["base_url"] == "http://override-host:8081"
-
-    @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
-    def test_sync_constructor_passes_context_name_to_bootstrap(self, mock_build_client_kwargs):
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="http://override-host:8081",
-            workspace="test-workspace",
-            default_headers=None,
-            http_client=None,
-            client_verify=True,
-        )
-
-        client = NeMoHelix(config_path=Path("/tmp/config.yaml"), context_name="target-context")
-        try:
-            assert str(client.base_url).rstrip("/") == "http://override-host:8081"
-            assert client.workspace == "test-workspace"
-        finally:
-            client.close()
-
-        assert mock_build_client_kwargs.call_args.kwargs["context_name"] == "target-context"
-
-    def test_sync_constructor_rejects_legacy_context_argument(self):
-        with pytest.raises(TypeError, match="unexpected keyword argument 'context'"):
-            NeMoHelix(context="ctx-b")  # ty: ignore[unknown-argument]
-
-    @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
-    def test_sync_constructor_with_http_client_skips_config_bootstrap(self, mock_build_client_kwargs):
-        mock_build_client_kwargs.side_effect = AssertionError("bootstrap should not be called")
-
-        http_client = httpx.Client(base_url="http://override-host:8081")
-        client = NeMoHelix(
-            base_url="http://override-host:8081",
-            workspace="test-workspace",
-            http_client=http_client,
-        )
-        try:
-            assert str(client.base_url).rstrip("/") == "http://override-host:8081"
-            assert client.workspace == "test-workspace"
-        finally:
-            client.close()
-
-        mock_build_client_kwargs.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix_ext.client.factory.build_async_client_init_kwargs")
-    async def test_async_constructor_with_base_url_skips_config_bootstrap(self, mock_build_client_kwargs):
-        mock_build_client_kwargs.side_effect = AssertionError("bootstrap should not be called")
-
-        client = AsyncNeMoHelix(base_url="http://override-host:8081", workspace="test-workspace")
-        try:
-            assert str(client.base_url).rstrip("/") == "http://override-host:8081"
-            assert client.workspace == "test-workspace"
-        finally:
-            await client.close()
-
-        mock_build_client_kwargs.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix_ext.client.factory.build_async_client_init_kwargs")
-    async def test_async_constructor_env_base_url_still_bootstraps_when_base_url_omitted(
-        self, mock_build_client_kwargs, monkeypatch
-    ):
-        monkeypatch.setenv("NEMO_HELIX_BASE_URL", "http://env-host:8081")
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="http://env-host:8081",
-            workspace="test-workspace",
-            default_headers=None,
-            http_client=None,
-            client_verify=True,
-        )
-
-        client = AsyncNeMoHelix()
-        try:
-            assert str(client.base_url).rstrip("/") == "http://env-host:8081"
-            assert client.workspace == "test-workspace"
-        finally:
-            await client.close()
-
-        assert mock_build_client_kwargs.call_args.kwargs["base_url"] == "http://env-host:8081"
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix._client.DefaultAsyncHttpxClient")
-    @patch("nemo_helix_ext.client.factory.build_async_client_init_kwargs")
-    async def test_async_constructor_direct_mode_uses_nemo_scoped_ca_bundle(
-        self, mock_build_client_kwargs, mock_default_httpx_client, monkeypatch
-    ):
-        mock_build_client_kwargs.side_effect = AssertionError("bootstrap should not be called")
-        mock_default_httpx_client.return_value = httpx.AsyncClient()
-        monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
-
-        client = AsyncNeMoHelix(base_url="https://override-host:8081", workspace="test-workspace")
-        try:
-            assert str(client.base_url).rstrip("/") == "https://override-host:8081"
-        finally:
-            await client.close()
-
-        mock_build_client_kwargs.assert_not_called()
-        mock_default_httpx_client.assert_called_once_with(verify="/tmp/nemo-ca.pem")
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix._client.DefaultAsyncHttpxClient")
-    @patch("nemo_helix_ext.client.factory.build_async_client_init_kwargs")
-    async def test_async_constructor_uses_context_certificate_authority(
-        self, mock_build_client_kwargs, mock_default_httpx_client, monkeypatch
-    ):
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="https://config-host:8443",
-            workspace="test-workspace",
-            default_headers=None,
-            http_client=None,
-            client_verify="/ctx/ca.pem",
-        )
-        mock_default_httpx_client.return_value = httpx.AsyncClient()
-        monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
-
-        client = AsyncNeMoHelix(config_path=Path("/tmp/config.yaml"))
-        try:
-            assert str(client.base_url).rstrip("/") == "https://config-host:8443"
-            assert client.workspace == "test-workspace"
-        finally:
-            await client.close()
-
-        mock_default_httpx_client.assert_called_once_with(verify="/ctx/ca.pem")
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix_ext.client.factory.build_async_client_init_kwargs")
-    async def test_async_copy_with_access_token_bootstraps_instead_of_reusing_http_client(
-        self, mock_build_client_kwargs
-    ):
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="http://override-host:8081",
-            workspace="test-workspace",
-            default_headers={"Authorization": "Bearer replacement-token"},
-            http_client=None,
-            client_verify=True,
-        )
-
-        client = AsyncNeMoHelix(base_url="http://original-host:8081", workspace="original-workspace")
-        original_http_client = client._client
-        copied = client.copy(access_token="replacement-token")
-        try:
-            assert copied._client is not original_http_client
-        finally:
-            await copied.close()
-            await client.close()
-
-        assert mock_build_client_kwargs.call_args.kwargs["access_token"] == "replacement-token"
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix_ext.client.factory.build_async_client_init_kwargs")
-    async def test_async_constructor_with_workload_file_and_base_url_bootstraps(
-        self, mock_build_client_kwargs, monkeypatch
-    ):
-        monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, "/var/run/secrets/nemo-helix/workload/token")
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="http://override-host:8081",
-            workspace="test-workspace",
-            default_headers=None,
-            http_client=None,
-            client_verify=True,
-        )
-
-        client = AsyncNeMoHelix(base_url="http://override-host:8081", workspace="test-workspace")
-        try:
-            assert str(client.base_url).rstrip("/") == "http://override-host:8081"
-        finally:
-            await client.close()
-
-        assert mock_build_client_kwargs.call_args.kwargs["base_url"] == "http://override-host:8081"
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix_ext.client.factory.build_async_client_init_kwargs")
-    async def test_async_constructor_with_http_client_skips_config_bootstrap(self, mock_build_client_kwargs):
-        mock_build_client_kwargs.side_effect = AssertionError("bootstrap should not be called")
-
-        http_client = httpx.AsyncClient(base_url="http://override-host:8081")
-        client = AsyncNeMoHelix(
-            base_url="http://override-host:8081",
-            workspace="test-workspace",
-            http_client=http_client,
-        )
-        try:
-            assert str(client.base_url).rstrip("/") == "http://override-host:8081"
-            assert client.workspace == "test-workspace"
-        finally:
-            await client.close()
-
-        mock_build_client_kwargs.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix_ext.client.factory.build_async_client_init_kwargs")
-    async def test_async_constructor_passes_context_name_to_bootstrap(self, mock_build_client_kwargs):
-        mock_build_client_kwargs.return_value = MagicMock(
-            base_url="http://override-host:8081",
-            workspace="test-workspace",
-            default_headers=None,
-            http_client=None,
-            client_verify=True,
-        )
-
-        client = AsyncNeMoHelix(config_path=Path("/tmp/config.yaml"), context_name="target-context")
-        try:
-            assert str(client.base_url).rstrip("/") == "http://override-host:8081"
-            assert client.workspace == "test-workspace"
-        finally:
-            await client.close()
-
-        assert mock_build_client_kwargs.call_args.kwargs["context_name"] == "target-context"
-
-
-class TestAsyncNeMoHelixInit:
+class TestBuildAsyncNemoClientOAuth:
     @pytest.mark.asyncio
     @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    async def test_async_client_uses_config_for_api_key(self, _mock_discover, tmp_path):
-        config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
-
-        client = AsyncNeMoHelix(config_path=config_path)
-        try:
-            assert str(client.base_url).rstrip("/") == "http://localhost:8080"
-            assert client.workspace == "test-workspace"
-            assert client._custom_headers["Authorization"] == "Bearer nvapi-test-key-123"
-        finally:
-            await client.close()
-
-
-class TestPluginSDKMounting:
-    def test_sync_client_mounts_plugin_resource(self):
-        plugin_resource = MagicMock(name="plugin-resource")
-        plugin_container = MagicMock()
-        plugin_container.sync_resource.return_value = plugin_resource
-        plugin_discovery = SimpleNamespace(discover_sdk=MagicMock(return_value={"example": plugin_container}))
-
-        with patch.dict(sys.modules, {"nemo_helix_plugin.discovery": plugin_discovery}):
-            client = NeMoHelix(base_url="http://localhost:8080", workspace="test-workspace")
-
-            assert client.example is plugin_resource
-            assert client.example is plugin_resource
-            client.close()
-
-        plugin_container.sync_resource.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_async_client_mounts_plugin_resource(self):
-        plugin_resource = MagicMock(name="async-plugin-resource")
-        plugin_container = MagicMock()
-        plugin_container.async_resource.return_value = plugin_resource
-        plugin_discovery = SimpleNamespace(discover_sdk=MagicMock(return_value={"example": plugin_container}))
-
-        with patch.dict(sys.modules, {"nemo_helix_plugin.discovery": plugin_discovery}):
-            client = AsyncNeMoHelix(base_url="http://localhost:8080", workspace="test-workspace")
-
-            assert client.example is plugin_resource
-            assert client.example is plugin_resource
-            await client.close()
-
-        plugin_container.async_resource.assert_called_once()
-
-    def test_sync_client_raises_attribute_error_for_async_only_plugin(self):
-        plugin_container = SimpleNamespace(sync_resource=None, async_resource=MagicMock())
-        plugin_discovery = SimpleNamespace(discover_sdk=MagicMock(return_value={"example": plugin_container}))
-
-        with patch.dict(sys.modules, {"nemo_helix_plugin.discovery": plugin_discovery}):
-            client = NeMoHelix(base_url="http://localhost:8080", workspace="test-workspace")
-
-            with pytest.raises(AttributeError, match="example"):
-                _ = client.example
-
-            client.close()
-
-    @pytest.mark.asyncio
-    async def test_async_client_raises_attribute_error_for_sync_only_plugin(self):
-        plugin_container = SimpleNamespace(sync_resource=MagicMock(), async_resource=None)
-        plugin_discovery = SimpleNamespace(discover_sdk=MagicMock(return_value={"example": plugin_container}))
-
-        with patch.dict(sys.modules, {"nemo_helix_plugin.discovery": plugin_discovery}):
-            client = AsyncNeMoHelix(base_url="http://localhost:8080", workspace="test-workspace")
-
-            with pytest.raises(AttributeError, match="example"):
-                _ = client.example
-
-            await client.close()
-
-    @pytest.mark.asyncio
-    @patch("nemo_helix.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    @patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    async def test_async_client_oauth_hook_injects_fresh_token(self, _mock_ext_discover, _mock_sdk_discover, tmp_path):
+    async def test_sends_the_stored_token_on_each_request(self, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
-        config_path = _write_config(
-            tmp_path,
-            token=token,
-            refresh_token="refresh_abc",
-        )
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
 
-        client = AsyncNeMoHelix(config_path=config_path)
+        client = build_async_nemo_client(config_path=config_path)
+        seen = _async_wire(client)
         try:
-            httpx_client = client._client
-            assert len(httpx_client._event_hooks["request"]) == 1
-
-            request = httpx_client.build_request("GET", "http://localhost:8080/test")
-            await httpx_client._event_hooks["request"][0](request)
-            assert request.headers["Authorization"] == f"Bearer {token}"
+            assert isinstance(client._http.auth, TokenProviderAuth)
+            await client.send(probe())
+            assert seen[0].headers["Authorization"] == f"Bearer {token}"
         finally:
             await client.close()

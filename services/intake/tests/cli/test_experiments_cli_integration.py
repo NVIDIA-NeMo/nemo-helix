@@ -22,7 +22,7 @@ from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_rep
 from nhx.intake.cli import ExperimentsCLI
 from nhx.intake.config import ClickHouseConfig, IntakeConfig
 from nhx.intake.service import IntakeService
-from nhx.testing import SDKTestClientAdapter, create_test_client
+from nhx.testing import TestClientHttpAdapter, create_test_client
 from typer.testing import CliRunner
 
 app = ExperimentsCLI().get_cli()
@@ -41,7 +41,7 @@ def asgi_client() -> Iterator[NemoClient]:
             service_configs={IntakeService: intake_config},
         ) as test_client:
             yield NemoClient(
-                base_url=str(test_client.base_url), workspace="default", http_client=SDKTestClientAdapter(test_client)
+                base_url=str(test_client.base_url), workspace="default", http_client=TestClientHttpAdapter(test_client)
             )
 
 

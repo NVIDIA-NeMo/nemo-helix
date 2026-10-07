@@ -51,13 +51,10 @@ Unlike `content-safety`, this configuration does not require a dedicated safety 
 Default configurations live in the `system` workspace. Reference them in your VirtualModel's middleware entry as `system/<config_name>`.
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 ```
 
 Create a VirtualModel that uses the `content-safety` default configuration:
@@ -77,23 +74,25 @@ nemo inference virtual-models create guarded-with-defaults \
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.create(
-    name="guarded-with-defaults",
-    default_model_entity="system/nvidia-nemotron-3.5-lightning-30b-a3b",
-    request_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "system/content-safety",
-        }
-    ],
-    response_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "system/content-safety",
-        }
-    ],
+client.inference.virtual_models.create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="guarded-with-defaults",
+        default_model_entity="system/nvidia-nemotron-3.5-lightning-30b-a3b",
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="system/content-safety",
+            )
+        ],
+        response_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="system/content-safety",
+            )
+        ],
+    ),
 )
 ```
 
@@ -124,7 +123,7 @@ nemo inference virtual-models delete guarded-with-defaults
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.delete(name="guarded-with-defaults")
+client.inference.virtual_models.delete_virtual_model(name="guarded-with-defaults")
 ```
 
 </Tab>

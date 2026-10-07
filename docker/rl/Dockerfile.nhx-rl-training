@@ -71,10 +71,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv \
     uv-glue pip install --python /opt/nemo_rl_venv/bin/python --no-cache \
     --overrides /tmp/base-overrides.txt \
-    -e /app/sdk/python/nemo-helix \
+
     -e /app/packages/filesets \
-    -e /app/packages/models \
     -e /app/packages/nemo_helix_plugin \
+    -e /app/packages/nemo_helix_ext \
     -e /app/packages/nhx_common \
     -e /app/packages/nhx_customization_common \
     -e "/app/packages/sandboxed_gym[server,ray]" \

@@ -17,6 +17,7 @@ so egress verification can still ask the sandbox what policy it actually applied
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from datetime import timedelta
@@ -33,6 +34,7 @@ from sandboxed_gym.sandbox_types import (
 
 if TYPE_CHECKING:
     from opensandbox import Sandbox
+    from opensandbox.models.execd import OutputMessage
 
 LOGGER = logging.getLogger(__name__)
 
@@ -133,13 +135,19 @@ def _volumes(spec: SandboxSpec) -> list[Any]:
     return [volume if isinstance(volume, Volume) else Volume.model_validate(volume) for volume in volumes]
 
 
-def _joined_output(messages: Any) -> str | None:
-    """Concatenate the SDK's per-line output messages into one stream, or ``None`` if empty."""
-    if not messages:
+def _joined_output(messages: list[OutputMessage] | None) -> str | None:
+    """Rejoin the SDK's per-line output messages into one stream, or ``None`` if there was none.
+
+    execd strips line terminators, so whether the output ended in a newline is not recoverable.
+    """
+    if not messages or not any(message.text for message in messages):
         return None
-    parts = [str(getattr(message, "content", message) or "") for message in messages]
-    joined = "".join(parts)
-    return joined or None
+    return "\n".join(message.text.rstrip("\n") for message in messages)
+
+
+#: Added to ``ready_timeout_s`` for the create request. The server answers only once the pod is
+#: Running, so a pod that makes it just inside the ready wait still needs the response to arrive.
+CREATE_REQUEST_HEADROOM_S = 30.0
 
 
 def connection_config(connection: Mapping[str, Any] | None) -> Any:
@@ -194,14 +202,23 @@ class OpenSandboxDriver:
         # Kept off `SandboxHandle`, which mirrors NeMo-Gym's type field for field.
         self._workdirs: dict[str, str] = {}
 
+    def _create_connection_config(self, spec: SandboxSpec) -> Any:
+        """The create POST stays open until the pod is Running, so its timeout must cover the ready wait."""
+        if self._connection.get("request_timeout_s") is not None or spec.ready_timeout_s is None:
+            return self._connection_config
+        request_timeout_s = spec.ready_timeout_s + CREATE_REQUEST_HEADROOM_S
+        return connection_config({**self._connection, "request_timeout_s": request_timeout_s})
+
     async def create(self, spec: SandboxSpec) -> SandboxHandle:
         from opensandbox import Sandbox
+        from opensandbox.exceptions import SandboxTimeoutException
 
         if spec.image is None:
             raise EpisodeBackendError("an episode image is required")
 
         create_attempt_id = uuid4().hex
         metadata = {**spec.metadata, _SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
+        create_connection_config = self._create_connection_config(spec)
         try:
             sandbox = await Sandbox.create(
                 spec.image,
@@ -217,16 +234,19 @@ class OpenSandboxDriver:
                 # Large runtime images flake on the SDK's create-time probe, and the job host polls
                 # `/health` itself once routes resolve. The caller decides; the SDK default stands.
                 skip_health_check=bool(self._create_options.get("skip_health_check", False)),
-                connection_config=self._connection_config,
+                connection_config=create_connection_config,
             )
-            sandbox_id = getattr(sandbox, "sandbox_id", None) or (await sandbox.get_info()).id
+            sandbox_id = getattr(sandbox, "id", None) or (await sandbox.get_info()).id
+            if create_connection_config is not self._connection_config:
+                sandbox = await self._reattach_under_base_connection(sandbox, sandbox_id)
             if spec.workdir:
                 self._workdirs[sandbox_id] = spec.workdir
             return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=sandbox)
-        except BaseException:
+        except BaseException as exc:
             try:
-                removed = await self.destroy_sandboxes_matching(
-                    {_SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
+                removed = await asyncio.wait_for(
+                    self.destroy_sandboxes_matching({_SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}),
+                    timeout=30,
                 )
                 if removed:
                     LOGGER.warning(
@@ -237,7 +257,32 @@ class OpenSandboxDriver:
             except BaseException:
                 # Preserve the create failure: it is the actionable cause.
                 LOGGER.exception("failed to reconcile sandbox create attempt %s", create_attempt_id)
+            if isinstance(exc, SandboxTimeoutException):
+                request_timeout_s = create_connection_config.request_timeout.total_seconds()
+                raise EpisodeBackendError(
+                    f"OpenSandbox did not answer the create request within the SDK request timeout of "
+                    f"{request_timeout_s:g}s; the server may still have been creating the sandbox (image pull, VM "
+                    f"boot). Set connection.request_timeout_s to at least the server's sandbox_create_timeout_seconds."
+                ) from exc
             raise
+
+    async def _reattach_under_base_connection(self, created: Sandbox, sandbox_id: str) -> Sandbox:
+        """Swap the create-time connection for the configured one once the sandbox exists."""
+        from opensandbox import Sandbox
+
+        try:
+            reattached = await Sandbox.connect(
+                sandbox_id, connection_config=self._connection_config, skip_health_check=True
+            )
+        except Exception:
+            LOGGER.warning(
+                "sandbox %s keeps its create-time request timeout: reattaching under the configured connection failed",
+                sandbox_id,
+                exc_info=True,
+            )
+            return created
+        await created.close()
+        return reattached
 
     def _sandbox(self, handle: SandboxHandle) -> Sandbox:
         return handle.raw  # ty: ignore[invalid-return-type] - provider-owned opaque state
@@ -295,7 +340,7 @@ class OpenSandboxDriver:
             # A sandbox the control plane no longer knows about is gone, which the contract models
             # as a status rather than an error.
             return SandboxStatus.UNKNOWN
-        reported = str(getattr(info.status, "value", info.status)).lower()
+        reported = info.status.state.lower()
         if reported in _STATUS_ALIASES:
             return _STATUS_ALIASES[reported]
         try:

@@ -20,6 +20,7 @@ from nemo_agents_plugin.fabric.runtime import (
     FabricRuntimeResult,
     FabricRuntimeStartError,
     FabricRuntimeStream,
+    fabric_streaming_options,
     invoke_fabric_runtime,
     run_fabric_agent_once,
     stream_fabric_agent_once,
@@ -96,8 +97,9 @@ class FabricSessionManager:
                 fabric_config,
                 base_dir=self._base_dir,
                 streaming=True,
+                **fabric_streaming_options(fabric_config),
             )
-        except FabricError as error:
+        except (FabricError, FabricRuntimeStartError) as error:
             raise FabricSessionStartError(f"Fabric runtime startup failed: {error}") from error
 
         try:

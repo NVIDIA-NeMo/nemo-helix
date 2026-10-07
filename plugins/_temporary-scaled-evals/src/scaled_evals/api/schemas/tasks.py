@@ -32,13 +32,21 @@ class TaskUpdate(BaseModel):
 
 # Nested in POST /v1/tasks response (upload field)
 class TaskUpload(BaseModel):
+    """Where the client uploads the task-pack tarball, directly to the Files service.
+
+    The client uploads out-of-band via the nemo-helix Files SDK, e.g.
+    ``sdk.files.upload(local_path=<tarball>, remote_path=remote_path)`` (or a direct
+    ``PUT /v2/workspaces/{workspace}/filesets/{fileset}/-/{path}``). Bytes never transit the
+    scaled-evals control plane. This replaces the former presigned-PUT block.
+    """
+
     method: Literal["PUT"] = "PUT"
-    url: str
-    headers: dict[str, str] = Field(default_factory=lambda: {"Content-Type": "application/gzip"})
-    # "put" is an ordinary S3-compatible presigned PUT. "gcs_resumable" is a
-    # GCS upload session URL; clients must include Content-Range for the full
-    # tarball bytes.
-    mode: Literal["put", "gcs_resumable"] = "put"
+    workspace: str
+    fileset: str
+    path: str
+    # The `<workspace>/<fileset>#<path>` ref the Files SDK accepts directly, so the client
+    # does not hand-assemble it.
+    remote_path: str
 
 
 # Response: GET /v1/tasks/{id}, /by-slug/{slug}, and list items

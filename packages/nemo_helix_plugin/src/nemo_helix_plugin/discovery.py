@@ -51,22 +51,29 @@ import logging
 import os
 from functools import cache
 from importlib.metadata import EntryPoint, entry_points
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from nemo_helix_plugin.cli import NemoCLI
-from nemo_helix_plugin.controller import NemoController
-from nemo_helix_plugin.customization_contributor import (
-    CustomizationContributor,
-    CustomizationContributorDiscoveryError,
-)
-from nemo_helix_plugin.function import NemoFunction
-from nemo_helix_plugin.inference_middleware import NemoInferenceMiddleware
-from nemo_helix_plugin.interface import PluginManifest
-from nemo_helix_plugin.job import NemoJob
-from nemo_helix_plugin.sandbox import SandboxImageProfile
-from nemo_helix_plugin.sdk import NemoPluginSDKResources
-from nemo_helix_plugin.seed import NemoSeedJob
-from nemo_helix_plugin.service import NemoService
+if TYPE_CHECKING:
+    # Deferred to keep CLI startup fast: these are used almost entirely in type
+    # annotations on the discover_* typed wrappers (`-> dict[str, type[NemoService]]`).
+    # Importing them eagerly made `import nemo_helix_plugin.discovery` drag the whole
+    # plugin-primitive surface (service -> fastapi, job -> client, pydantic, ...) into
+    # every `nemo` invocation, even though the only thing the CLI calls at startup is
+    # `discover_entry_points` (which needs none of them). The few runtime uses below
+    # (isinstance / raise) re-import locally inside the function that needs them.
+    from nemo_helix_plugin.cli import NemoCLI
+    from nemo_helix_plugin.controller import NemoController
+    from nemo_helix_plugin.customization_contributor import (
+        CustomizationContributor,
+    )
+    from nemo_helix_plugin.function import NemoFunction
+    from nemo_helix_plugin.inference_middleware import NemoInferenceMiddleware
+    from nemo_helix_plugin.interface import PluginManifest
+    from nemo_helix_plugin.job import NemoJob
+    from nemo_helix_plugin.sandbox import SandboxImageProfile
+    from nemo_helix_plugin.sdk import NemoPluginSDKResources
+    from nemo_helix_plugin.seed import NemoSeedJob
+    from nemo_helix_plugin.service import NemoService
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +231,8 @@ def discover_manifests() -> dict[str, PluginManifest]:
     Entry-point values are **not loaded** — this function is cheap and has no
     import side-effects.
     """
+    from nemo_helix_plugin.interface import PluginManifest  # noqa: PLC0415 — runtime construction below
+
     manifests: dict[str, PluginManifest] = {}
 
     for group in _ALL_SURFACE_GROUPS:
@@ -261,7 +270,6 @@ def discover_services() -> dict[str, type[NemoService]]:
     A mismatch is logged as a warning — the entry-point key always wins for
     routing purposes.
     """
-    from nemo_helix_plugin.service import NemoService
 
     raw = discover("nemo.services")
     result: dict[str, type[NemoService]] = {}
@@ -275,7 +283,7 @@ def discover_services() -> dict[str, type[NemoService]]:
                 getattr(cls, "__qualname__", cls),
                 cls_name,
             )
-        result[key] = cast(type[NemoService], cls)
+        result[key] = cast("type[NemoService]", cls)
     return result
 
 
@@ -287,7 +295,6 @@ def discover_cli() -> dict[str, type[NemoCLI]]:
 
     Validates that each class's ``name`` attribute matches its entry-point key.
     """
-    from nemo_helix_plugin.cli import NemoCLI
 
     raw = discover("nemo.cli")
     result: dict[str, type[NemoCLI]] = {}
@@ -300,13 +307,13 @@ def discover_cli() -> dict[str, type[NemoCLI]]:
                 getattr(cls, "__qualname__", cls),
                 cls_name,
             )
-        result[key] = cast(type[NemoCLI], cls)
+        result[key] = cast("type[NemoCLI]", cls)
     return result
 
 
 def discover_agent_cli() -> dict[str, type[NemoCLI]]:
     """Discover ``NemoCLI`` subclasses contributed beneath ``nemo agents``."""
-    return {key: cast(type[NemoCLI], cls) for key, cls in discover(AGENT_CLI_GROUP).items()}
+    return {key: cast("type[NemoCLI]", cls) for key, cls in discover(AGENT_CLI_GROUP).items()}
 
 
 def discover_jobs() -> dict[str, type[NemoJob]]:
@@ -319,7 +326,6 @@ def discover_jobs() -> dict[str, type[NemoJob]]:
     Validates that each class's ``name`` attribute matches the job-name suffix
     of its entry-point key (the part after the first ``"."``).
     """
-    from nemo_helix_plugin.job import NemoJob
 
     raw = discover("nemo.jobs")
     result: dict[str, type[NemoJob]] = {}
@@ -335,7 +341,7 @@ def discover_jobs() -> dict[str, type[NemoJob]]:
                 cls_name,
                 expected_suffix,
             )
-        result[key] = cast(type[NemoJob], cls)
+        result[key] = cast("type[NemoJob]", cls)
     return result
 
 
@@ -354,7 +360,6 @@ def discover_functions() -> dict[str, type[NemoFunction]]:
     first ``"."``). A mismatch is logged as a warning — the entry-point
     key always wins for routing purposes.
     """
-    from nemo_helix_plugin.function import NemoFunction
 
     raw = discover("nemo.functions")
     result: dict[str, type[NemoFunction]] = {}
@@ -370,7 +375,7 @@ def discover_functions() -> dict[str, type[NemoFunction]]:
                 cls_name,
                 expected_suffix,
             )
-        result[key] = cast(type[NemoFunction], cls)
+        result[key] = cast("type[NemoFunction]", cls)
     return result
 
 
@@ -385,7 +390,6 @@ def discover_controllers() -> dict[str, type[NemoController]]:
     A mismatch is logged as a warning — the entry-point key always wins for
     identification purposes.
     """
-    from nemo_helix_plugin.controller import NemoController
 
     raw = discover("nemo.controllers")
     result: dict[str, type[NemoController]] = {}
@@ -399,7 +403,7 @@ def discover_controllers() -> dict[str, type[NemoController]]:
                 getattr(cls, "__qualname__", cls),
                 cls_name,
             )
-        result[key] = cast(type[NemoController], cls)
+        result[key] = cast("type[NemoController]", cls)
     return result
 
 
@@ -412,7 +416,6 @@ def discover_seed_jobs() -> dict[str, type[NemoSeedJob]]:
 
     Validates that each class's ``name`` attribute matches its entry-point key.
     """
-    from nemo_helix_plugin.seed import NemoSeedJob
 
     raw = discover("nemo.seed")
     result: dict[str, type[NemoSeedJob]] = {}
@@ -425,7 +428,7 @@ def discover_seed_jobs() -> dict[str, type[NemoSeedJob]]:
                 getattr(cls, "__qualname__", cls),
                 cls_name,
             )
-        result[key] = cast(type[NemoSeedJob], cls)
+        result[key] = cast("type[NemoSeedJob]", cls)
     return result
 
 
@@ -447,7 +450,10 @@ def discover_sdk() -> dict[str, NemoPluginSDKResources[Any, Any, Any, Any]]:
     :class:`~nemo_helix_plugin.sdk.NemoPluginSDKResources` are logged as a
     warning and excluded.
     """
+    from nemo_helix_plugin.sdk import NemoPluginSDKResources  # noqa: PLC0415 — heavy import, runtime isinstance below
+
     result: dict[str, NemoPluginSDKResources[Any, Any, Any, Any]] = {}
+
     for key, value in discover("nemo.sdk").items():
         if not isinstance(value, NemoPluginSDKResources):
             logger.warning(
@@ -516,7 +522,7 @@ def discover_sandbox_profiles() -> dict[str, SandboxImageProfile]:
     runtime name (e.g. ``"openshell"``), used by ``nemo agents package
     --sandbox-runtime <name>`` to resolve the right profile.
     """
-    return cast(dict[str, SandboxImageProfile], discover("nemo.sandbox_profiles"))
+    return cast("dict[str, SandboxImageProfile]", discover("nemo.sandbox_profiles"))
 
 
 def _instantiate_customization_contributor(loaded: object) -> CustomizationContributor:
@@ -545,6 +551,10 @@ def discover_customization_contributors() -> dict[str, CustomizationContributor]
     """
 
     result: dict[str, CustomizationContributor] = {}
+
+    # Runtime use of a deferred (TYPE_CHECKING) symbol: import it locally so the module
+    # top level stays import-light. See the TYPE_CHECKING block at the top of this file.
+    from nemo_helix_plugin.customization_contributor import CustomizationContributorDiscoveryError
 
     for ep in discover_entry_points(CUSTOMIZATION_CONTRIBUTORS_GROUP).values():
         try:
@@ -592,6 +602,7 @@ def discover_inference_middleware() -> dict[str, type[NemoInferenceMiddleware]]:
     :attr:`~nemo_helix_plugin.inference_middleware.MiddlewareCall.name` references in
     VirtualModel configs, and what IGW uses to key its plugin registry.
     """
-    from nemo_helix_plugin.inference_middleware import NemoInferenceMiddleware
 
-    return {key: cast(type[NemoInferenceMiddleware], cls) for key, cls in discover("nemo.inference_middleware").items()}
+    return {
+        key: cast("type[NemoInferenceMiddleware]", cls) for key, cls in discover("nemo.inference_middleware").items()
+    }

@@ -26,14 +26,13 @@ Two agent formats are supported:
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 ## Managing Secrets for Agent Endpoints
 
@@ -44,9 +43,14 @@ For `evaluator.submit(...)` jobs, `api_key_secret` must name a NeMo Helix secret
 For remote `evaluator.submit(...)` jobs, create the secret in the platform workspace before submitting the job:
 
 ```python
-client.secrets.create(
-    name="my-agent-api-key",
-    value=os.environ["MY_AGENT_API_KEY"],
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="my-agent-api-key",
+        value=SecretStr(os.environ["MY_AGENT_API_KEY"]),
+    ),
 )
 ```
 
@@ -159,9 +163,14 @@ Use the `nemo_agent_toolkit` format when evaluating agents built with the [NeMo 
 Create the platform secret used by the NAT endpoint:
 
 ```python
-client.secrets.create(
-    name="my-nat-api-key",
-    value=os.environ["MY_NAT_API_KEY"],
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="my-nat-api-key",
+        value=SecretStr(os.environ["MY_NAT_API_KEY"]),
+    ),
 )
 ```
 
@@ -199,10 +208,10 @@ result = nat_job.get_result()
 Delete the jobs and secrets created by these examples:
 
 ```python
-client.jobs.delete(generic_job.name, workspace="default")
-client.jobs.delete(nat_job.name, workspace="default")
-client.secrets.delete("my-agent-api-key", workspace="default")
-client.secrets.delete("my-nat-api-key", workspace="default")
+client.jobs.delete_job(name=generic_job.name, workspace="default")
+client.jobs.delete_job(name=nat_job.name, workspace="default")
+client.secrets.delete_secret(name="my-agent-api-key", workspace="default")
+client.secrets.delete_secret(name="my-nat-api-key", workspace="default")
 ```
 
 ## Model vs Agent: When to Use Which

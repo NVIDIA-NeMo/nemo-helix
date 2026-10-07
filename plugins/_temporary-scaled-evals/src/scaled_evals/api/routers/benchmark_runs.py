@@ -9,7 +9,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import Database, get_db, get_stream_database_factory
@@ -170,7 +170,7 @@ def preflight_benchmark_run_request(
         db,
         body,
         current,
-        object_exists=s3.object_exists,
+        object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
     )
     return result.report
@@ -192,7 +192,7 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         db,
         body,
         current,
-        object_exists=s3.object_exists,
+        object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
     )
     if isinstance(preflight, BlockedPreflight):
@@ -423,7 +423,7 @@ def download_benchmark_archive(run_id: str, database_factory: StreamDatabaseFact
     if row is None or row["status"] != "ready" or not row["object_key"]:
         raise _http_error(404, "not_found", "benchmark archive not ready")
     return StreamingResponse(
-        s3.stream_object(row["object_key"]),
+        artifacts.stream_object(row["object_key"]),
         media_type="application/gzip",
         headers={"Content-Disposition": f'attachment; filename="{run_id}-results.tar.gz"'},
     )

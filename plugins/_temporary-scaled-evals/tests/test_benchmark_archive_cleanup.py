@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("scaled_evals")
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.benchmark_archive import build_benchmark_archive
@@ -31,10 +31,10 @@ def connect():
 @pytest.mark.parametrize("delete_fails", [False, True])
 def test_upload_failure_or_lease_loss_removes_uploaded_object(monkeypatch, failure, delete_fails):
     source = tar_bytes(harbor_files())
-    monkeypatch.setattr(s3, "stream_object", lambda key: iter([source]))
-    monkeypatch.setattr(s3, "list_objects", lambda prefix: [])
+    monkeypatch.setattr(artifacts, "stream_object", lambda key: iter([source]))
+    monkeypatch.setattr(artifacts, "list_objects", lambda prefix: [])
     deleted = MagicMock(side_effect=OSError("delete unavailable") if delete_fails else None)
-    monkeypatch.setattr(s3, "delete_object", deleted)
+    monkeypatch.setattr(artifacts, "delete_object", deleted)
     uploaded = False
 
     def upload(path, key, *, content_type):
@@ -48,7 +48,7 @@ def test_upload_failure_or_lease_loss_removes_uploaded_object(monkeypatch, failu
         if uploaded and failure == "lease":
             raise RuntimeError("lease lost during upload")
 
-    monkeypatch.setattr(s3, "upload_file", upload)
+    monkeypatch.setattr(artifacts, "upload_file", upload)
     with pytest.raises((OSError, RuntimeError), match="upload"):
         build_benchmark_archive(job(members=[member(archive_size_bytes=len(source))]), check_claim=check_claim)
     deleted.assert_called_once_with(KEY)
@@ -66,7 +66,7 @@ def test_worker_cleans_only_unpublished_objects(monkeypatch, failure):
         lambda *args, **kwargs: {"object_key": KEY, "size_bytes": 123},
     )
     deleted = MagicMock()
-    monkeypatch.setattr(s3, "delete_object", deleted)
+    monkeypatch.setattr(artifacts, "delete_object", deleted)
 
     def finish(*args, **kwargs):
         if failure == "success":
@@ -116,9 +116,9 @@ def test_reconciliation_protects_current_upload_and_published_object(monkeypatch
         "benchmark-runs/bmr_other/archives/gen/claim.tar.gz",
         "benchmark-runs/bmr_1/artifacts/trace.json",
     ]
-    monkeypatch.setattr(s3, "list_objects", lambda prefix: [{"key": key} for key in keys])
+    monkeypatch.setattr(artifacts, "list_objects", lambda prefix: [{"key": key} for key in keys])
     deleted = MagicMock()
-    monkeypatch.setattr(s3, "delete_object", deleted)
+    monkeypatch.setattr(artifacts, "delete_object", deleted)
     cleanup_benchmark_archives(connect, "bmr_1")
     deleted.assert_called_once_with(OTHER)
 
@@ -127,9 +127,9 @@ def test_cleanup_delete_failure_can_be_retried(monkeypatch):
     repo = MagicMock(spec=BenchmarkArchiveRepository)
     repo.lock_for_cleanup.return_value = job(status="failed", object_key=None)
     monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveRepository", lambda conn: repo)
-    monkeypatch.setattr(s3, "list_objects", lambda prefix: [{"key": KEY}])
+    monkeypatch.setattr(artifacts, "list_objects", lambda prefix: [{"key": KEY}])
     deleted = MagicMock(side_effect=[OSError("store unavailable"), None])
-    monkeypatch.setattr(s3, "delete_object", deleted)
+    monkeypatch.setattr(artifacts, "delete_object", deleted)
     with pytest.raises(OSError, match="store unavailable"):
         cleanup_benchmark_archives(connect, "bmr_1")
     assert cleanup_benchmark_archives(connect, "bmr_1") == 1
@@ -146,9 +146,9 @@ def test_idle_dispatcher_reconciles_crashed_upload(monkeypatch):
     monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
     monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveRepository", lambda conn: repo)
     monkeypatch.setattr(settings, "dispatch_kubernetes_jobs_enabled", False)
-    monkeypatch.setattr(s3, "list_objects", lambda prefix: [{"key": KEY}, {"key": OTHER}])
+    monkeypatch.setattr(artifacts, "list_objects", lambda prefix: [{"key": KEY}, {"key": OTHER}])
     deleted = MagicMock()
-    monkeypatch.setattr(s3, "delete_object", deleted)
+    monkeypatch.setattr(artifacts, "delete_object", deleted)
     worker = Dispatcher(connect=connect)
     for method in (
         # Drained first now that Platform Jobs is the default execution path.
@@ -172,9 +172,9 @@ def test_repeated_reconciliation_catches_upload_that_finished_after_worker_death
     repo.lock_for_cleanup.return_value = job(status="failed", object_key=None)
     monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveRepository", lambda conn: repo)
     objects = []
-    monkeypatch.setattr(s3, "list_objects", lambda prefix: objects.copy())
+    monkeypatch.setattr(artifacts, "list_objects", lambda prefix: objects.copy())
     deleted = MagicMock()
-    monkeypatch.setattr(s3, "delete_object", deleted)
+    monkeypatch.setattr(artifacts, "delete_object", deleted)
     cleanup_benchmark_archives(connect, "bmr_1")
     deleted.assert_not_called()
     objects.append({"key": KEY})
@@ -192,8 +192,8 @@ def test_reconciliation_rechecks_reference_after_listing(monkeypatch):
         state.update(status="ready", object_key=KEY)
         return [{"key": KEY}]
 
-    monkeypatch.setattr(s3, "list_objects", list_objects)
+    monkeypatch.setattr(artifacts, "list_objects", list_objects)
     deleted = MagicMock()
-    monkeypatch.setattr(s3, "delete_object", deleted)
+    monkeypatch.setattr(artifacts, "delete_object", deleted)
     cleanup_benchmark_archives(connect, "bmr_1")
     deleted.assert_not_called()

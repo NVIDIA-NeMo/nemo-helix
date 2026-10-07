@@ -35,7 +35,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Convert a Prime Intellect hub environment to adapter-wheels-v1 + Gym JSONL. "
             "Run on a machine with internet; training clusters consume the output offline. "
-            "Invoke via: uv run --package nhx-rl pi-to-gym-conversion ..."
+            "Invoke from a dedicated env, not the project .venv: "
+            "UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl "
+            "--extra conversion && .venv-conversion/bin/pi-to-gym-conversion ..."
         ),
     )
     # Not required: --validate-only checks a package that already exists on disk and never

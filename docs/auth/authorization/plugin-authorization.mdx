@@ -35,6 +35,7 @@ A permission id follows the grammar `<service>.<resource>.<action>`, joined from
 
 You never hand-build id strings. Declare permissions in a typed `PermissionSet` and reference the members:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from nemo_helix_plugin.authz import PermissionSet, perm
 
@@ -46,6 +47,7 @@ class ItemPerms(PermissionSet, namespace="myplugin.items"):
 
 Inside a `PermissionSet(namespace="a.b")`, `perm("desc")` mints the id `a.b.<member-name-lowercased>`. For a compound id, pass `suffix=`:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 class DeploymentPerms(PermissionSet, namespace="deployments.deployments"):
     STATUS_UPDATE = perm(
@@ -62,6 +64,7 @@ A plugin owns one `AuthzScope`, which mints both the coarse OAuth scope and the 
 
 When the permission namespace nests deeper than the OAuth scope, use `child()` — the scope stays put while the permission id deepens:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from nemo_helix_plugin.authz import AuthzScope
 
@@ -78,6 +81,7 @@ scope.child("deployments").permission("create", description="Create a deployment
 
 For a hand-written route, `@router.<method>` is the **outermost** (top) decorator; `@scope.read`/`@scope.write` and `@path_rule` sit under it. The scope decorator and the path rule are independent, so their order relative to each other does not matter.
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from fastapi import APIRouter
 from nemo_helix_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
@@ -111,6 +115,7 @@ Stacking `@path_rule` on the same handler adds OR-alternatives: any satisfied ru
 
 A controller-only write route pins the caller kind to `SERVICE_PRINCIPAL` and requires the compound permission:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from typing import Any
 from nemo_helix_plugin.authz import CallerKind, path_rule
@@ -118,11 +123,12 @@ from nemo_helix_plugin.authz import CallerKind, path_rule
 @router.put("/v2/workspaces/{workspace}/deployments/{name}/status", response_model=Deployment)
 @scope.write
 @path_rule(callers=[CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.STATUS_UPDATE])
-async def update_deployment_status(workspace: str, name: str, body: Any) -> Deployment: ...
+async def update_deployment_status(workspace: str, name: str, body: dict) -> Deployment: ...
 ```
 
 An authenticated-but-permissionless route passes `permissions=[]`:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 @router.put("/blob/{name}")
 @scope.write
@@ -134,6 +140,7 @@ async def upload_blob(name: str, request: Request) -> BlobUploadResponse: ...
 
 Jobs and functions are mounted through route factories rather than hand-written handlers. You **must** pass `authz=` — the kwarg defaults to `None`, and a factory called without it leaves its routes unruled, which fails closed at bundle time.
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from nemo_helix_plugin.authz import AuthzScope
 from nemo_helix_plugin.functions.routes import add_function_routes
@@ -164,6 +171,7 @@ Hand-written routes are unaffected: they still declare their own callers with `@
 
 Some permissions are not 1:1 with a route — they are checked in middleware, declared ahead of the route that will reference them, or need to be granted to a role the default heuristic misses. Declare these on your `NemoService` via two escape hatches; both are merged into the derived catalog.
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from nemo_helix_plugin.authz import Permission
 from nemo_helix_plugin.service import NemoService, RouterSpec

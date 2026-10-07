@@ -6,56 +6,65 @@
 Registered under the ``nemo.sdk`` entry-point group. The platform lazily
 instantiates this plugin's sync or async SDK resource as ``client.agents``.
 
-Usage (once the SDK hub is wired up)::
+Usage::
 
-    from nemohelix import NeMo
+    from nemo_agents_plugin.sdk import AgentsResource
+    from nemo_agents_plugin.entities import (
+        ComputeResources,
+        ComputeSpecInline,
+        EnvironmentSpecInline,
+    )
+    from nemo_helix_plugin.client.client import NemoClient
 
-    nemo = NeMo(base_url="http://localhost:8000")
+    client = NemoClient(base_url="http://localhost:8000", workspace="default")
+    agents = AgentsResource(client)
 
     # Agent CRUD
-    agent = nemo.agents.create(name="calculator", config={...})
-    agents = nemo.agents.list()
-    agent = nemo.agents.get("calculator")
-    nemo.agents.delete("calculator")
+    agent = agents.create(name="calculator", config={...})
+    all_agents = agents.list()
+    agent = agents.get("calculator")
+    agents.delete("calculator")
 
     # Deployment lifecycle
-    dep = nemo.agents.deployments.create(agent="calculator")  # subprocess
-    dep = nemo.agents.deployments.create(
+    dep = agents.deployments.create(agent="calculator")  # subprocess
+    dep = agents.deployments.create(
         agent="calculator", deployment_mode="docker", image="calculator:local"
     )
-    deps = nemo.agents.deployments.list()
-    dep = nemo.agents.deployments.get("calculator-a1b2")
-    nemo.agents.deployments.delete("calculator-a1b2")
+    deps = agents.deployments.list()
+    dep = agents.deployments.get("calculator-a1b2")
+    agents.deployments.delete("calculator-a1b2")
 
     # Environments / specs (the request/fulfill split)
-    spec = nemo.agents.environment_specs.create(
+    spec = agents.environment_specs.create(
         name="ben",
         spec=EnvironmentSpecInline(
             env={"LOG_LEVEL": "debug"},
             secrets={"GITHUB_PERSONAL_ACCESS_TOKEN": "default/ben-pat"},
         ),
     )
-    env = nemo.agents.environments.create(name="repo-research-ben", environment_spec="default/ben")
-    cs = nemo.agents.compute_specs.create(
+    env = agents.environments.create(name="repo-research-ben", environment_spec="default/ben")
+    cs = agents.compute_specs.create(
         name="big", spec=ComputeSpecInline(resources=ComputeResources(limits={"cpu": "2"})),
     )
-    dep = nemo.agents.deployments.create(agent="calculator", environment="default/repo-research-ben")
+    dep = agents.deployments.create(agent="calculator", environment="default/repo-research-ben")
 
     # Invocation (routes through the agents gateway)
-    result = nemo.agents.invoke(agent="calculator", input="What is 2+2?")
-    result = nemo.agents.invoke(
+    result = agents.invoke(agent="calculator", input="What is 2+2?")
+    result = agents.invoke(
         deployment="calculator-a1b2",
         session_id="session-entity-id",
         input="Continue",
     )
 
     # agents.execute jobs
-    job = nemo.agents.jobs.execute.create(spec={"agent": "calculator", "input": "What is 2+2?"})
-    job = nemo.agents.jobs.execute.get(job["name"])
-    results = nemo.agents.jobs.execute.list_results(job["name"])
-    run = nemo.agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
+    job = agents.jobs.execute.create(spec={"agent": "calculator", "input": "What is 2+2?"})
+    job = agents.jobs.execute.get(job["name"])
+    results = agents.jobs.execute.list_results(job["name"])
+    run = agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
 
-An async namespace is mounted as ``client.agents`` on ``AsyncNeMoHelix``.
+Async jobs use ``AsyncNemoClient`` with ``AsyncAgentsResource``.
+
+An async namespace is mounted as ``client.agents`` on ``AsyncNemoClient``.
 It currently exposes ``jobs`` only — agent CRUD, deployments, and ``invoke``
 remain sync-only.
 """
@@ -70,9 +79,9 @@ from nemo_agents_plugin.entities import (
     AgentEnvironmentInline,
     ComputeSpecInline,
     EnvironmentSpecInline,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.agents.client import AgentsClient, AsyncAgentsClient
 from nemo_helix_plugin.agents.types import (
     AgentJobRequest,
@@ -84,7 +93,7 @@ from nemo_helix_plugin.agents.types import (
     InvokeAgentRequest,
     JsonMap,
 )
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
@@ -132,33 +141,44 @@ def _contains_default_model_placeholder(value: object) -> bool:
     return False
 
 
-def _agents_client_from_platform(platform: NeMoHelix) -> AgentsClient:
-    client = client_from_platform(platform, AgentsClient)
-    if client.workspace is None:
-        return client.with_workspace(_DEFAULT_WORKSPACE)
-    return client
+def _agents_client_from_client(client: NemoClient) -> AgentsClient:
+    if not isinstance(client, NemoClient):
+        raise TypeError(
+            "AgentsResource requires a nemo_helix_plugin.client.client.NemoClient. "
+            "Legacy nemo_helix.NeMoHelix SDK clients are not supported; migrate by "
+            "constructing NemoClient(base_url=..., workspace=...) and passing that client."
+        )
+    agents_client = AgentsClient.from_client(client)
+    if agents_client.workspace is None:
+        return agents_client.with_workspace(_DEFAULT_WORKSPACE)
+    return agents_client
 
 
-def _async_agents_client_from_platform(platform: AsyncNeMoHelix) -> AsyncAgentsClient:
-    async_client = client_from_platform(platform, AsyncAgentsClient)
-    if async_client.workspace is None:
-        return async_client.with_workspace(_DEFAULT_WORKSPACE)
-    return async_client
+def _async_agents_client_from_client(async_client: AsyncNemoClient) -> AsyncAgentsClient:
+    if not isinstance(async_client, AsyncNemoClient):
+        raise TypeError(
+            "AsyncAgentsResource requires a nemo_helix_plugin.client.client.AsyncNemoClient. "
+            "Legacy nemo_helix.AsyncNeMoHelix SDK clients are not supported; migrate by "
+            "constructing AsyncNemoClient(base_url=..., workspace=...) and passing that client."
+        )
+    async_agents_client = AsyncAgentsClient.from_client(async_client)
+    if async_agents_client.workspace is None:
+        return async_agents_client.with_workspace(_DEFAULT_WORKSPACE)
+    return async_agents_client
 
 
 class AgentsResource:
     """SDK namespace for ``nemo.agents.*``."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
+    def __init__(self, client: NemoClient) -> None:
         """
         Args:
-            platform: The generated ``NeMoHelix`` client. The Agents resource
-                adapts it to the typed ``AgentsClient`` while sharing the same
-                base URL, default workspace, auth headers, timeout, retry policy,
-                and underlying HTTP transport.
+            client: The platform ``NemoClient``. The Agents resource builds a
+                typed ``AgentsClient`` that shares the same base URL, default
+                workspace, auth headers, timeout, retry policy, and underlying
+                HTTP transport.
         """
-        self._platform = platform
-        self._client = _agents_client_from_platform(platform)
+        self._client = _agents_client_from_client(client)
         self._deployments: _DeploymentResource | None = None
         self._environments: _EnvironmentResource | None = None
         self._environment_specs: _EnvironmentSpecResource | None = None
@@ -357,10 +377,10 @@ class _DeploymentResource:
             agent: Name of the agent to deploy.
             name: Deployment name (auto-generated if omitted).
             deployment_mode: Runtime backend — ``"subprocess"`` (default),
-                ``"docker"``, or ``"k8s"``. Container modes run the agent as a
+                ``"docker"``, ``"k8s"``, or ``"openshell"``. Container modes run the agent as a
                 durable container through the deployments plugin and require a
                 configured executor.
-            image: Container image for ``docker``/``k8s`` modes. Falls back to
+            image: Container image for container modes. Falls back to
                 ``agents.deployments.default_image`` when omitted. Rejected in
                 ``subprocess`` mode.
             use_image_entrypoint: For ``docker``/``k8s`` modes, preserve the
@@ -377,8 +397,8 @@ class _DeploymentResource:
             The created deployment as a dict.
         """
         if image and deployment_mode == "subprocess":
-            raise ValueError("image requires deployment_mode='docker' or 'k8s'.")
-        if use_image_entrypoint and deployment_mode == "subprocess":
+            raise ValueError("image requires deployment_mode='docker', 'k8s', or 'openshell'.")
+        if use_image_entrypoint and not supports_image_entrypoint(deployment_mode):
             raise ValueError("use_image_entrypoint requires deployment_mode='docker' or 'k8s'.")
         if isinstance(environment, Mapping):
             environment_body: str | AgentEnvironmentInline | None = AgentEnvironmentInline.model_validate(environment)
@@ -737,9 +757,8 @@ class AsyncAgentsResource:
     remain sync-only on :class:`AgentsResource`.
     """
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
-        self._platform = platform
-        self._client = _async_agents_client_from_platform(platform)
+    def __init__(self, async_client: AsyncNemoClient) -> None:
+        self._client = _async_agents_client_from_client(async_client)
         self._jobs: _AsyncJobsResource | None = None
 
     @property
@@ -750,7 +769,7 @@ class AsyncAgentsResource:
         return self._jobs
 
 
-agents_sdk_resources = NemoPluginSDKResources(
+agents_sdk_resources = NemoPluginSDKResources[NemoClient, AgentsResource, AsyncNemoClient, AsyncAgentsResource](
     sync_resource=AgentsResource,
     async_resource=AsyncAgentsResource,
 )

@@ -1,7 +1,7 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-title: "Train on SPECTER or triplet JSONL"
+title: "Train on SPECTER or Triplet JSONL"
 description: ""
 ---
 
@@ -35,15 +35,20 @@ nemo files upload /tmp/specter-embedding-dataset/ specter-embedding-dataset --wo
 nemo files list specter-embedding-dataset --workspace default
 ```
 
+This notebook uses the `default` workspace. If your current CLI context uses a different workspace, run `nemo config set --workspace default` first.
+
 ```python
 import json
 import os
 from pathlib import Path
 from datasets import load_dataset
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
 
-NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+client = NemoClient.from_config()
 
 DATASET_SIZE = int(os.environ.get("SPECTER_ROWS", "3000"))
 VALIDATION_SPLIT = 0.05
@@ -74,24 +79,25 @@ for name, dataset in [("training", splits["train"]), ("validation", splits["test
 
 ```python
 try:
-    client.files.filesets.create(
-        workspace="default",
-        name=DATASET_NAME,
-        purpose="dataset",
-        description="SPECTER triplets as query/pos_doc/neg_doc JSONL",
-    )
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            purpose="dataset",
+            description="SPECTER triplets as query/pos_doc/neg_doc JSONL",
+        ),
+    ).data()
     print("Created fileset", DATASET_NAME)
 except ConflictError:
     print("Fileset exists", DATASET_NAME)
 
-client.files.upload(
-    local_path=f"{DATASET_PATH}/",
-    remote_path="",
-    fileset=DATASET_NAME,
-    workspace="default",
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(
+    lpath=f"{DATASET_PATH}/",
+    rpath=f"default/{DATASET_NAME}/",
+    recursive=True,
 )
 print("Uploaded:")
-print(json.dumps([f.model_dump() for f in client.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_NAME).data().data], indent=2))
 print("dataset.training =", f"default/{DATASET_NAME}")
 print("Set that on the Automodel job in the embedding tutorial. model remains default/nemotron-3-embed-1b.")
 

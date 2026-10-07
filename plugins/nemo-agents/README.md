@@ -6,6 +6,9 @@
 A NeMo Helix plugin for building, registering, deploying, and invoking agents
 as first-class managed resources.
 
+See [MIGRATION.md](MIGRATION.md) for SDK migration notes, including the
+`AgentsResource` move from the legacy `NeMoHelix` SDK object to `NemoClient`.
+
 The plugin supports two agent flows:
 
 - **Platform-backed agents** use the Platform-managed `nemo-agents-spec-v1`
@@ -46,18 +49,21 @@ executes it through the selected harness.
 ### Harness installation matrix
 
 The base Agents plugin installs Fabric, Relay support, and the Claude, Codex,
-DeepAgents, and Hermes adapter implementations. It does not install the
+DeepAgents, Hermes, and Remote Agent adapter implementations. It does not install the
 third-party harness packages. Choose an extra when the harness should share the
 Platform environment:
 
 | Harness selection | `nemo-helix` package expression | Plugin expression (source or local wheel) | Harness packages installed |
 |---|---|---|---|
 | Adapters only | `nemo-helix[nemo-agents-plugin]` | `nemo-agents-plugin` | None |
+| Remote Agent | `nemo-helix[nemo-agents-plugin]` | `nemo-agents-plugin` | None; connects to an independently deployed service |
 | Claude Code | `nemo-helix[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` | Claude Agent SDK and NeMo Relay CLI |
 | Codex | `nemo-helix[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` | OpenAI Codex and NeMo Relay CLI |
 | DeepAgents | `nemo-helix[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` | LangChain Deep Agents |
 | All installable harnesses | `nemo-helix[nemo-agents-plugin-claude,nemo-agents-plugin-codex,nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[all]` | Claude Code, Codex, and DeepAgents |
 | Hermes | `nemo-helix[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
+
+Remote Agent requires no harness extra. See the [Remote Agent example](examples/nemo-agent-config/README.md#remote-agent) for endpoint configuration and limitations.
 
 Install the Agents plugin and one harness with its namespaced Platform extra.
 For example, install DeepAgents with:
@@ -546,7 +552,7 @@ The image installs only `default_harness`; other entries under `harnesses` are
 configuration alternatives and are not available in the immutable image.
 Claude, Codex, and DeepAgents use their corresponding `nemo-helix` extras.
 Hermes uses the adapter-only Platform extra and installs the pinned Hermes
-source plus matching Fabric adapter in an isolated Python 3.12 environment.
+source plus matching Fabric adapter in an isolated Python 3.14 environment.
 Every image runs as a non-root `agent` user and serves the packaged agent on
 port `8000`.
 

@@ -14,6 +14,7 @@ from nemo_helix_plugin.agents.types import (
     AgentJobRequest,
     CreateAgentRequest,
     CreateDeploymentRequest,
+    CreateSampleAgentRequest,
     CreateSessionRequest,
     InvokeAgentRequest,
 )
@@ -145,6 +146,33 @@ def test_stream_deployment_logs_parses_sse() -> None:
 
     assert len(parsed) == 1
     assert parsed[0].message == "ready"
+
+
+def test_create_sample_agent_parses_progress_stream() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url == f"{BASE}/apis/agents/v2/sample-agent"
+        assert _read_json(request) == {"model": "default/my-model"}
+        return httpx.Response(
+            201,
+            headers={"content-type": "application/x-ndjson"},
+            content=(
+                b'{"kind":"progress","component":"workspace","status":"created","workspace":"sample-123"}\n'
+                b'{"kind":"done","result":{"status":"created","workspace":"sample-123",'
+                b'"studio_url":"/studio/workspaces/sample-123/dashboard","agent":"email-security-triage",'
+                b'"deployment":"dep-123","deployment_status":"pending"}}\n'
+            ),
+        )
+
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = AgentsClient(base_url=BASE, workspace="default", http_client=http_client)
+
+    with client.create_sample_agent(body=CreateSampleAgentRequest(model="default/my-model")).stream() as frames:
+        events = list(frames)
+
+    assert events[0].component == "workspace"
+    assert events[-1].result is not None
+    assert events[-1].result.workspace == "sample-123"
 
 
 def test_download_agent_job_result_reads_bytes() -> None:

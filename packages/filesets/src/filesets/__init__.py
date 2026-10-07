@@ -4,7 +4,7 @@
 """Extended filesets module with FilesetFileSystem support.
 
 This module provides high-level file operations (upload, download, etc.) and
-fsspec integration for NeMo Helix filesets via the sdk.files.fsspec property.
+fsspec integration for NeMo Helix filesets via ``FilesResource.fsspec``.
 
 Located at: nemo_helix/filesets/ (after vendoring)
 

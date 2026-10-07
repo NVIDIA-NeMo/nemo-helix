@@ -95,27 +95,22 @@ config = RunConfig(limit_samples=100, parallelism=8)
 ### 2. Run it — two dataset-driven modes
 
 The same `metric`, `dataset`, and `config` run in two places. What changes is the **caller** — a
-bare SDK evaluator for local iteration, or the platform's `client.evaluator` resource for durable
+bare SDK evaluator for local iteration, or the platform's `Evaluator` resource for durable
 execution.
 
 | Mode | Caller | Call | Best for |
 |------|--------|------|----------|
 | **Local SDK** | `Evaluator()` (`nemo_evaluator_sdk`) | `await evaluator.run(metrics=[metric], dataset=dataset, config=config)` | Fast in-process iteration with no Helix services. |
-| **Remote job** | `client.evaluator` | `evaluator.submit(metric=metric, dataset=dataset, config=config)` | Durable, monitored platform jobs for production and regressions. |
+| **Remote job** | `Evaluator.from_client(client)` | `evaluator.submit(metric=metric, dataset=dataset, config=config)` | Durable, monitored platform jobs for production and regressions. |
 
-The platform caller is mounted on a `NeMoHelix` client:
+The platform caller is built from a `NemoClient`:
 
 ```python
-import os
-
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-evaluator: Evaluator = client.evaluator
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
 
 # Production evaluation as a durable platform job.
 job = evaluator.submit(metric=metric, dataset=dataset, config=config)
@@ -130,20 +125,20 @@ result = job.get_result()
 that do not require running nemo-helix.
 - Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate` job for durable runs with inline
 tasks or stored tasksets. A locally validated `GymAgentTaskRunner` can also be submitted with
-`client.evaluator.submit(tasks=TasksetRef(...), target=runner)`; other runner targets use an
+`evaluator.submit(tasks=TasksetRef(...), target=runner)`; other runner targets use an
 agent-evaluate spec.
 
 </Note>
 
 ### What the platform adds
 
-When you move from the local SDK to the platform caller (`client.evaluator`), the definition stays
+When you move from the local SDK to the platform caller (`Evaluator.from_client(client)`), the definition stays
 the same and execution gains platform capabilities:
 
-| Capability | Local SDK | Platform (`client.evaluator`) |
+| Capability | Local SDK | Platform (`Evaluator.from_client(client)`) |
 |------------|-----------|-------------------------------|
 | **Execution** | Local in-process run | Durable platform jobs |
-| **Inference** | Direct model or agent endpoint calls | The same, and can route through the NeMo Helix [Inference Gateway](/documentation/models-and-inference) and platform-managed endpoints |
+| **Inference** | Direct model or agent endpoint calls | The same, and can route through NeMo Helix [Inference Gateway](/documentation/models-and-inference) and platform-managed endpoints |
 | **Datasets** | Inline rows and local files | Inline rows, local paths resolved at submission time, and NeMo Helix [Filesets](/documentation/get-started/core-concepts/manage-files) |
 | **Results** | Returned in memory | Platform artifact storage with typed result download |
 | **Authentication** | Local environment variables | Local env vars for local runs; NeMo Helix [Secrets](/documentation/get-started/core-concepts/manage-secrets) for remote jobs |

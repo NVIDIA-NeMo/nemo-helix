@@ -37,28 +37,26 @@ Once created, a project cannot be renamed.
 <Tab title="Python SDK">
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.projects.types import CreateProjectRequest
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
-project = client.projects.create(
+project = client.projects.create_project(
     workspace="ml-team",
-    name="llama-finetune-v2",
-    description="Fine-tuning experiment for customer support",
-)
+    body=CreateProjectRequest(
+        name="llama-finetune-v2",
+        description="Fine-tuning experiment for customer support",
+    ),
+).data()
 ```
 
 </Tab>
 <Tab title="CLI">
 
 ```bash
-nemo projects create \
+nemo projects create llama-finetune-v2 \
     --workspace ml-team \
-    --name llama-finetune-v2 \
     --description "Fine-tuning experiment for customer support"
 ```
 
@@ -74,16 +72,11 @@ To list projects in a workspace, call the list endpoint. The response includes p
 <Tab title="Python SDK">
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
-response = client.projects.list(workspace="ml-team")
-for project in response.data:
+for project in client.projects.list_projects(workspace="ml-team").items():
     print(f"{project.name}: {project.description}")
 ```
 
@@ -106,15 +99,11 @@ To retrieve a specific project by its `name`:
 <Tab title="Python SDK">
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
-project = client.projects.retrieve("llama-finetune-v2", workspace="ml-team")
+project = client.projects.get_project(name="llama-finetune-v2", workspace="ml-team").data()
 ```
 
 </Tab>
@@ -136,19 +125,18 @@ To update a project, only the `description` field can be modified. The `name` ca
 <Tab title="Python SDK">
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.projects.types import UpdateProjectRequest
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
-project = client.projects.update(
-    "llama-finetune-v2",
+project = client.projects.update_project(
+    name="llama-finetune-v2",
     workspace="ml-team",
-    description="Updated: Fine-tuning experiment for customer support chatbot",
-)
+    body=UpdateProjectRequest(
+        description="Updated: Fine-tuning experiment for customer support chatbot"
+    ),
+).data()
 ```
 
 </Tab>
@@ -172,15 +160,11 @@ To delete a project:
 <Tab title="Python SDK">
 
 ```python
-import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
-client.projects.delete("llama-finetune-v2", workspace="ml-team")
+client.projects.delete_project(name="llama-finetune-v2", workspace="ml-team").data()
 ```
 
 </Tab>

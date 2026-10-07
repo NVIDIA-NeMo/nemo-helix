@@ -21,7 +21,12 @@ from nemo_evaluator.api.schemas import (
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evaluator.api.task_definitions.provenance import TaskProvenance
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
-from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentEvalTaskInput, ResolvedTask
+from nemo_evaluator.jobs.agent_spec import (
+    AgentEvalSpec,
+    AgentEvalTaskInput,
+    GymAgentSource,
+    ResolvedTask,
+)
 from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evaluator.jobs.kinds.types import LoadedTask, SubmitContext
@@ -34,9 +39,9 @@ from nemo_evaluator.task_refs import (
     snapshot_task,
     validate_execution_support,
 )
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities import EntityBase
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from pydantic import ValidationError
 
 _EntityT = TypeVar("_EntityT", bound=EntityBase)
@@ -58,8 +63,8 @@ def _provenance(task: ResolvedTask) -> TaskProvenance:
     return task.spec.provenance
 
 
-def _async_platform() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(base_url="http://platform.test", workspace="default")
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://platform.test", workspace="default")
 
 
 def _task(name: str, *, workspace: str = "default", metric: str = "default/m") -> TaskEntity:
@@ -92,7 +97,7 @@ async def test_harbor_suite_submission_rejects_missing_members(entity_store):
     with pytest.raises(ValueError, match="not found"):
         await load_tasks(
             TasksetRef("default/suite"),
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
@@ -146,7 +151,7 @@ async def test_direct_alias_duplicates_fail_without_entity_client():
     with pytest.raises(ValueError, match="Duplicate task identity"):
         await load_tasks(
             [TaskRef("checkout"), TaskRef("default/checkout#blessed")],
-            SubmitContext(workspace="default", entity_client=None, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=None, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
@@ -253,12 +258,14 @@ async def test_submission_rejects_incompatible_suite_member_and_deleted_task(ent
     with pytest.raises(ValueError, match="evaluator tasks cannot run on a harbor target"):
         loaded = await load_tasks(
             TasksetRef("suite"),
-            SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS),
         )
         snapshots = [
             await snapshot_task(
                 item,
-                SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+                SubmitContext(
+                    workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS
+                ),
             )
             for item in loaded
         ]
@@ -267,12 +274,14 @@ async def test_submission_rejects_incompatible_suite_member_and_deleted_task(ent
     with pytest.raises(ValueError, match="not found"):
         loaded = await load_tasks(
             TasksetRef("suite"),
-            SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS),
         )
         snapshots = [
             await snapshot_task(
                 item,
-                SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+                SubmitContext(
+                    workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS
+                ),
             )
             for item in loaded
         ]
@@ -342,7 +351,7 @@ async def test_resolves_taskset_members_to_inline_task_inputs(entity_store) -> N
 
     tasks = await load_tasks(
         TasksetRef("default/geo"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
 
     assert [KIND_ADAPTERS[t.kind].runtime_id(t) for t in tasks] == ["capital-of-france", "capital-of-japan"]
@@ -369,7 +378,7 @@ async def test_grader_only_reference_survives_taskset_expansion(entity_store) ->
 
     tasks = await load_tasks(
         TasksetRef("default/geo"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
 
     assert _loaded_evaluator(tasks[0]).reference == {"expected": "Paris", "held_out_tests": ["test_capital.py"]}
@@ -393,7 +402,7 @@ async def test_expansion_returns_the_pinned_reference_not_the_current_one(entity
 
     tasks = await load_tasks(
         TasksetRef("default/geo"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
 
     assert _loaded_evaluator(tasks[0]).reference == {"expected": "Paris"}, (
@@ -406,7 +415,7 @@ async def test_bare_member_ref_resolves_against_taskset_workspace(entity_store) 
 
     tasks = await load_tasks(
         TasksetRef("team/ts"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
 
     assert [KIND_ADAPTERS[t.kind].runtime_id(t) for t in tasks] == ["t1"]
@@ -417,7 +426,7 @@ async def test_unknown_taskset_raises_clear_error(entity_store) -> None:
         await load_tasks(
             TasksetRef("default/missing"),
             SubmitContext(
-                workspace="default", entity_client=await _store(entity_store), async_sdk=None, adapters=KIND_ADAPTERS
+                workspace="default", entity_client=await _store(entity_store), async_client=None, adapters=KIND_ADAPTERS
             ),
         )
 
@@ -446,7 +455,7 @@ async def test_offline_taskset_translates_resolution_errors(entity_store, missin
     }[missing]
     with pytest.raises(ValueError, match=message) as caught:
         await load_tasks(
-            ref, SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS)
+            ref, SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS)
         )
     assert f"Taskset reference '{ref.root}'" in str(caught.value)
     expected_cause = RevisionNotFoundError if missing.endswith("revision") else NemoEntityNotFoundError
@@ -458,7 +467,7 @@ async def test_missing_member_task_raises_clear_error(entity_store) -> None:
     with pytest.raises(ValueError, match=r"Task 'default/gone#\w+' referenced by taskset 'default/geo'"):
         await load_tasks(
             TasksetRef("default/geo"),
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
@@ -467,7 +476,7 @@ async def test_empty_taskset_raises_clear_error(entity_store) -> None:
     with pytest.raises(ValueError, match="has no member tasks"):
         await load_tasks(
             TasksetRef("default/empty"),
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
@@ -482,7 +491,7 @@ async def test_duplicate_expanded_task_ids_rejected(entity_store) -> None:
     with pytest.raises(ValueError, match="more than one task named 'dup'"):
         await load_tasks(
             TasksetRef("default/geo"),
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
@@ -490,14 +499,14 @@ async def test_taskset_ref_requires_entity_client(entity_store) -> None:
     with pytest.raises(ValueError, match="requires a platform connection"):
         await load_tasks(
             TasksetRef("default/geo"),
-            SubmitContext(workspace="default", entity_client=None, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=None, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
 async def test_canonicalize_agent_eval_tasks_passes_inline_list_through(entity_store) -> None:
     inline = [AgentEvalTaskInput(id="t", intent="x", metrics=[])]
     result = await load_tasks(
-        inline, SubmitContext(workspace="default", entity_client=None, async_sdk=None, adapters=KIND_ADAPTERS)
+        inline, SubmitContext(workspace="default", entity_client=None, async_client=None, adapters=KIND_ADAPTERS)
     )
     assert result[0].inline is inline[0]
 
@@ -506,7 +515,7 @@ async def test_canonicalize_agent_eval_tasks_expands_a_taskset_ref(entity_store)
     client = await _store(entity_store, _task("only"), _taskset("geo", ["default/only"]))
     result = await load_tasks(
         TasksetRef("default/geo"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
     assert all(t.kind == "evaluator" for t in result)
     assert [KIND_ADAPTERS[t.kind].runtime_id(t) for t in result] == ["only"]
@@ -533,7 +542,7 @@ async def test_expansion_uses_the_pinned_revision_not_current_content(entity_sto
 
     tasks = await load_tasks(
         TasksetRef("default/geo"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
 
     assert _loaded_evaluator(tasks[0]).intent == "Do capital-of-france.", "expansion must return the pinned content"
@@ -569,7 +578,7 @@ async def test_a_tag_pinned_member_stores_the_tagged_revision_not_the_head(entit
 
     tasks = await load_tasks(
         TasksetRef("default/geo"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
     assert _loaded_evaluator(tasks[0]).intent == "Do capital-of-france."
 
@@ -590,7 +599,7 @@ async def test_bare_taskset_ref_expands_the_current_revision(entity_store) -> No
 
     tasks = await load_tasks(
         TasksetRef("default/geo"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
 
     assert [KIND_ADAPTERS[t.kind].runtime_id(t) for t in tasks] == ["a", "b"], (
@@ -612,7 +621,7 @@ async def test_digest_pinned_taskset_ref_expands_the_pinned_membership(entity_st
 
     tasks = await load_tasks(
         TasksetRef(f"default/geo#{pinned}"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
 
     assert [KIND_ADAPTERS[t.kind].runtime_id(t) for t in tasks] == ["a"], (
@@ -630,7 +639,7 @@ async def test_tag_pinned_taskset_ref_resolves_through_the_tag(entity_store) -> 
 
     tasks = await load_tasks(
         TasksetRef("default/geo#blessed"),
-        SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+        SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
     )
 
     assert [KIND_ADAPTERS[t.kind].runtime_id(t) for t in tasks] == ["a"], "'blessed' still names revision 1"
@@ -643,11 +652,11 @@ async def test_pinned_taskset_ref_survives_a_replace(entity_store) -> None:
     ref = TasksetRef(f"default/geo#{head_digest(taskset)}")
 
     before = await load_tasks(
-        ref, SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS)
+        ref, SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS)
     )
     await _republish_with(client, taskset, ["default/b"])
     after = await load_tasks(
-        ref, SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS)
+        ref, SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS)
     )
 
     assert (
@@ -665,13 +674,13 @@ async def test_unresolvable_taskset_fragment_raises_a_clear_error(entity_store) 
     with pytest.raises(ValueError, match="names a revision that does not resolve"):
         await load_tasks(
             TasksetRef(f"default/geo#{'c' * 64}"),
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
 
     with pytest.raises(ValueError, match="names a revision that does not resolve"):
         await load_tasks(
             TasksetRef("default/geo#nonesuch"),
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
@@ -693,7 +702,7 @@ async def test_expansion_fails_loudly_when_a_pin_no_longer_resolves(entity_store
     with pytest.raises(ValueError, match="no longer resolves"):
         await load_tasks(
             TasksetRef("default/geo"),
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
@@ -720,11 +729,12 @@ async def test_expansion_rejects_a_task_whose_runner_the_target_cannot_run(entit
     with pytest.raises(UnsupportedTaskKindError, match="harbor"):
         loaded = await load_tasks(
             TasksetRef("default/mixed"),
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
         snapshots = [
             await snapshot_task(
-                item, SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS)
+                item,
+                SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
             )
             for item in loaded
         ]
@@ -752,12 +762,14 @@ async def test_incompatible_target_error_names_requested_target(entity_store):
     with pytest.raises(UnsupportedTaskKindError, match="fabric target"):
         loaded = await load_tasks(
             [TaskRef("checkout")],
-            SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS),
         )
         snapshots = [
             await snapshot_task(
                 item,
-                SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+                SubmitContext(
+                    workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS
+                ),
             )
             for item in loaded
         ]
@@ -786,7 +798,9 @@ def _direct_target(kind):
                 config={"metadata": {"name": "test"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
             )
         ),
-        "gym": lambda: GymRunnerTarget(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml"),
+        "gym": lambda: GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="simple.yaml"), resources_server="mcqa"
+        ),
         "offline": lambda: None,
     }[kind]()
 
@@ -917,8 +931,9 @@ async def test_direct_evaluator_references_resolve_and_compile(kind, entity_stor
             config=GymRuntimeConfig(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml")
         )
 
-        async def collect(input_path, output_path, work_dir):
+        async def collect(input_path, output_path, work_dir, resolved_env):
             """Return fake Gym rollouts in reverse order to test attribution by task index."""
+            assert resolved_env == {}
             rows = [json.loads(line) for line in input_path.read_text().splitlines()]
             assert [row["_ng_task_index"] for row in rows] == [0, 1, 2]
             assert all(row["responses_create_params"] == {} for row in rows)
@@ -998,12 +1013,14 @@ async def test_gym_content_rejected_before_environment_resolution(source, field,
         "taskset": TasksetRef("suite"),
     }
     resolve_environment = AsyncMock()
-    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate._resolve_gym_environment", resolve_environment)
+    monkeypatch.setattr("nemo_evaluator.jobs.gym_submission.resolve_gym_environment", resolve_environment)
     with pytest.raises(ValueError, match="task 'invalid'.*gym_row.*gym_row_extras"):
         await AgentEvalJob.to_spec(
             AgentEvalInputSpec(
                 tasks=sources[source],
-                target=GymRunnerTarget(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml"),
+                target=GymRunnerTarget(
+                    source=GymAgentSource(component="simple_agent", config="simple.yaml"), resources_server="mcqa"
+                ),
             ),
             workspace="default",
             entity_client=entity_store,
@@ -1019,7 +1036,7 @@ async def test_direct_evaluator_refs_reject_cross_workspace_id_collision(entity_
     with pytest.raises(ValueError, match="task ids must be unique"):
         await load_tasks(
             [TaskRef("default/same"), TaskRef("other/same")],
-            SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS),
         )
 
 
@@ -1052,18 +1069,23 @@ async def test_direct_reference_failures_for_every_evaluator_target(kind, failur
         if kind == "offline":
             resolved = await load_tasks(
                 refs,
-                SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+                SubmitContext(
+                    workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS
+                ),
             )
             assert all(t.kind == "harbor" for t in resolved)
             return
     with pytest.raises(ValueError, match=match):
         loaded = await load_tasks(
-            refs, SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS)
+            refs,
+            SubmitContext(workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS),
         )
         snapshots = [
             await snapshot_task(
                 item,
-                SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+                SubmitContext(
+                    workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS
+                ),
             )
             for item in loaded
         ]

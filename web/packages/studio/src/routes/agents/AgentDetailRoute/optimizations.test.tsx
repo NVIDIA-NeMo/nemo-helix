@@ -12,8 +12,9 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { mockOptimizeJobs } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
-import { getAgentDetailRoute } from '@studio/routes/utils';
-import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { getAgentDetailRoute, getAgentOptimizeRoute } from '@studio/routes/utils';
+import { LG_SELECTOR_TIMEOUT, LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -89,6 +90,16 @@ describe('AgentDetailRoute optimizations tab', () => {
     fireEvent.click(optimize);
 
     expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
+  });
+
+  it('shows the studies table for a create view while the in-tab flow is flagged off', async () => {
+    renderDetail('?tab=optimizations&view=strategy');
+
+    expect(
+      await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /Parameter sweep/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('New optimization')).not.toBeInTheDocument();
   });
 
   it('scopes the list server-side with a spec.agent filter', async () => {
@@ -241,5 +252,50 @@ describe('AgentDetailRoute optimizations tab', () => {
     await user.click(within(emptyState).getByRole('button', { name: 'Optimize' }));
 
     expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
+  });
+
+  describe('arriving with ?action=optimize', () => {
+    const renderArrivingToOptimize = () =>
+      renderRoute(undefined, {
+        history: getAgentOptimizeRoute(workspace, agentName),
+        routes: [
+          {
+            path: ROUTES.workspace.agentDetail,
+            element: (
+              <>
+                <AgentDetailRoute />
+                <LocationDisplay />
+              </>
+            ),
+          },
+        ],
+      });
+
+    it('opens the Optimize modal on the Optimizations tab', async () => {
+      renderArrivingToOptimize();
+
+      expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Optimizations' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+    });
+
+    it('does not open it for an agent that does not exist', async () => {
+      server.use(
+        http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents/:name`, () =>
+          HttpResponse.json({ detail: 'Not found' }, { status: 404 })
+        )
+      );
+      renderArrivingToOptimize();
+
+      // The param is stripped only once the agent query settles, so this is the effect's verdict.
+      await waitFor(() =>
+        expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent).toBe(
+          `${getAgentDetailRoute(workspace, agentName)}?tab=optimizations`
+        )
+      );
+      expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
+    });
   });
 });

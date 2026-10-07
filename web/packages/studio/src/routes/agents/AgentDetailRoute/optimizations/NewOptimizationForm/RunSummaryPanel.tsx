@@ -1,0 +1,107 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
+import { Badge, Banner, Card, Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  formatRange,
+  type OptimizationBudget,
+  type OptimizationIntent,
+  type SearchParameter,
+} from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
+import { type FC } from 'react';
+
+const Stat: FC<{ value: string; label: string }> = ({ value, label }) => (
+  <Stack gap="density-xxs">
+    <Text kind="body/bold/lg">{value}</Text>
+    <Text kind="body/regular/xs" color="secondary">
+      {label}
+    </Text>
+  </Stack>
+);
+
+export interface RunSummaryPanelProps {
+  intent: OptimizationIntent;
+  budget: OptimizationBudget;
+  searchSpace: SearchParameter[];
+  rows?: number;
+  blockingReason?: string;
+  submitError?: string;
+  isSubmitting: boolean;
+  onRun: () => void;
+}
+
+/**
+ * What this run will actually do, and the button that starts it.
+ *
+ * Restates the form's answers as consequences rather than settings — how many agent runs, how
+ * long, what stays untouched — because that is the question a user has right before committing.
+ * The estimate is trials × test cases, which is exactly the number of agent invocations the study
+ * will make; it is not a cost figure and does not pretend to be one.
+ */
+export const RunSummaryPanel: FC<RunSummaryPanelProps> = ({
+  budget,
+  searchSpace,
+  rows,
+  blockingReason,
+  submitError,
+  isSubmitting,
+  onRun,
+}) => {
+  const agentRuns = rows === undefined ? undefined : budget.trials * rows;
+
+  return (
+    <Card className="h-fit self-start">
+      <Stack gap="density-md" className="w-full">
+        <Text kind="label/bold/xs" color="secondary">
+          THIS RUN WILL SWEEP
+        </Text>
+        <Flex gap="density-sm" wrap="wrap">
+          {searchSpace.map((parameter) => (
+            <Badge key={parameter.path} color="gray" kind="outline">
+              {parameter.label} {formatRange(parameter)}
+            </Badge>
+          ))}
+        </Flex>
+
+        <Divider />
+
+        <Flex gap="density-xl" wrap="wrap">
+          <Stat value={agentRuns === undefined ? '—' : String(agentRuns)} label="agent runs" />
+          <Stat value={`~${budget.estimatedMinutes} min`} label="runtime" />
+          <Stat value={String(budget.trials)} label="trials" />
+        </Flex>
+        <Text kind="body/regular/xs" color="secondary">
+          {rows === undefined
+            ? "Agent runs are unknown until the evaluation's rows are counted."
+            : `${budget.trials} trials × ${rows} rows.`}{' '}
+          Trials run against the deployed agent — nothing is overwritten until you promote one.
+        </Text>
+
+        <Divider />
+
+        {blockingReason && (
+          <Banner kind="inline" status="warning">
+            {blockingReason}
+          </Banner>
+        )}
+
+        {submitError && (
+          <Banner kind="inline" status="error">
+            {submitError}
+          </Banner>
+        )}
+
+        <LoadingButton
+          color="brand"
+          className="w-full"
+          loading={isSubmitting}
+          disabled={!!blockingReason || isSubmitting}
+          onClick={onRun}
+        >
+          Run optimization
+        </LoadingButton>
+      </Stack>
+    </Card>
+  );
+};

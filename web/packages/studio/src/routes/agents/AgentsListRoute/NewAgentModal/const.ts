@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DeploymentModeAvailabilityMode } from '@studio/api/agents/useDeploymentModes';
 import { z } from 'zod';
 
 export const AGENT_CONFIG_FILENAME = 'agent.yaml';
@@ -36,12 +37,21 @@ export const IGNORED_FILENAMES = new Set(['.DS_Store', 'Thumbs.db']);
 
 export const IGNORED_EXTENSIONS = ['.pyc', '.pyo', '.pyd', '.so', '.dylib', '.dll'];
 
+export const agentNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Name is required')
+  .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Use lowercase letters, numbers, and hyphens');
+
 export const uploadAgentFormSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, 'Name is required')
-    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Use lowercase letters, numbers, and hyphens'),
+  name: agentNameSchema,
   repoUrl: z.string().trim().default(''),
   secretKey: z.string().default(''),
+  deploy: z.boolean().default(true),
+  deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode).default('subprocess'),
 });
+
+export const UPLOAD_AGENT_FORM_DEFAULTS = {
+  name: '',
+  ...uploadAgentFormSchema.omit({ name: true }).parse({}),
+};

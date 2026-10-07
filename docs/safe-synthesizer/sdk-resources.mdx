@@ -11,25 +11,23 @@ The `nemo_safe_synthesizer_plugin.sdk` module provides NeMo Helix-specific helpe
 
 ## SafeSynthesizerResource
 
-`SafeSynthesizerResource` is the entry point mounted on a `NeMoHelix` client:
+`SafeSynthesizerResource` is the entry point for working with NeMo Safe Synthesizer on NeMo Helix. Build it from a `NemoClient` instance:
 
 ```python
-import os
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_safe_synthesizer_plugin.sdk.resources import SafeSynthesizerResource
 
-from nemo_helix import NeMoHelix
-
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-safe_synthesizer = client.safe_synthesizer
+client = NemoClient.from_config()
+safe_synthesizer = SafeSynthesizerResource(client)
 ```
 
-An async variant with the same namespace is available as `AsyncNeMoHelix.safe_synthesizer`.
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
+An `AsyncSafeSynthesizerResource` with the same surface is available for `AsyncNemoClient`.
 
 ## SafeSynthesizerJobsResource
 
-`client.safe_synthesizer.jobs` calls the plugin API for NeMo Safe Synthesizer jobs.
+`safe_synthesizer.jobs` calls the plugin API for NeMo Safe Synthesizer jobs.
 
 | Method | Description |
 |--------|-------------|
@@ -46,11 +44,13 @@ The async resource exposes the same methods as `async def` methods.
 `SafeSynthesizerJobBuilder` assembles a job spec, uploads local datasets to Files, creates the job, and returns a `SafeSynthesizerJob` wrapper.
 
 ```python
+import time
+
 import pandas as pd
 
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
-df = pd.DataFrame({"text": ["sample record"]})
+df = pd.DataFrame({"text": [f"sample record {i}" for i in range(200)]})
 
 job = (
     SafeSynthesizerJobBuilder(client, workspace="default")
@@ -58,7 +58,7 @@ job = (
     .with_classify_model_provider("default/nvidia-build")
     .with_replace_pii()
     .synthesize()
-    .create_job(name="safe-synth-job", project="default-project")
+    .create_job(name=f"safe-synth-job-{int(time.time())}")
 )
 ```
 
@@ -70,7 +70,7 @@ job = (
 | `with_generate(config=None, **kwargs)` | Sets generation parameters and enables synthesis. |
 | `synthesize()` | Enables synthesis. |
 | `with_evaluate(config=None, **kwargs)` | Sets evaluation parameters. |
-| `with_differential_privacy(config=None, **kwargs)` | Sets DP-SGD parameters. |
+| `with_differential_privacy(config=None, **kwargs)` | Sets DP-SGD parameters. Pass `dp_enabled=True` to enable DP-SGD. |
 | `with_time_series(config=None, **kwargs)` | Sets time-series parameters. |
 | `with_replace_pii(config=None, **kwargs)` | Enables PII replacement. |
 | `with_classify_model_provider(provider_name)` | Sets the Inference Gateway provider used for PII column classification. Pair with `with_replace_pii()`. |

@@ -27,6 +27,7 @@ import hashlib
 import logging
 import posixpath
 import shlex
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nemo_deployments_plugin.backends.base import (
@@ -64,12 +65,12 @@ from nemo_deployments_plugin.entities import ConfigFile, Container, DeploymentCo
 from nemo_deployments_plugin.secrets import SecretResolutionError, resolve_deployment_config_secrets
 from nemo_deployments_plugin.types import DeploymentStatus, Endpoint
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 if TYPE_CHECKING:
     import grpc
+    from openshell._proto import datamodel_pb2 as dm  # ty: ignore[unresolved-import]
     from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
     from openshell._proto import openshell_pb2_grpc as pb_grpc  # ty: ignore[unresolved-import]
 
@@ -77,16 +78,23 @@ logger = logging.getLogger(__name__)
 
 _OPENSHELL_INSTALL_HINT = (
     "The 'openshell' package is required for OpenShellDeploymentBackend. "
-    'Install it with: uv pip install "openshell>=0.0.92" "grpcio>=1.78.0" "protobuf>=6.31.1"'
+    'Install it with: uv pip install "openshell>=0.1.2" "grpcio>=1.78.0" "protobuf>=6.31.1"'
 )
 
 _SERVE_LOG = "/tmp/nemo-serve.log"
 # Marker the serve launcher writes so read_status (stateless across reconcile polls)
-# does not relaunch the workload on a later poll. Lives in a policy read-write path.
-# Holds the launch time as epoch seconds, which is the only clock the probe has for
-# deciding whether a missing pidfile is a slow start or a launcher that never ran.
-_LAUNCH_MARKER = "/tmp/nemo-serve.launched"
-_SERVE_PIDFILE = "/tmp/nemo-serve.pid"
+# does not relaunch the workload on a later poll. Holds the launch time as epoch
+# seconds, which is the only clock the probe has for deciding whether a missing
+# pidfile is a slow start or a launcher that never ran.
+# The marker and pidfile describe the current boot, so they live on /dev/shm, a tmpfs
+# the sandbox gets fresh on every start: a stopped-then-started sandbox keeps /tmp,
+# and a surviving marker would suppress the relaunch while its pidfile named a dead
+# (or reused) pid. Both paths are in the policy's read-write set.
+_LAUNCH_MARKER = "/dev/shm/nemo-serve.launched"
+_SERVE_PIDFILE = "/dev/shm/nemo-serve.pid"
+# Written once this boot's workload has passed its readiness probe. Exposure outlives a
+# stop/start, so an exposed port alone does not prove the current workload is ready.
+_READY_MARKER = "/dev/shm/nemo-serve.ready"
 
 # Token the config-delivery script prints on stdout only after mkdir+cat+chmod all
 # succeed (guarded by set -e). Requiring it in the drained output makes delivery
@@ -165,11 +173,12 @@ def _ensure_openshell() -> None:
         return
     try:
         import grpc
+        from openshell._proto import datamodel_pb2 as dm  # ty: ignore[unresolved-import]
         from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
         from openshell._proto import openshell_pb2_grpc as pb_grpc  # ty: ignore[unresolved-import]
     except ImportError as exc:
         raise MissingBackendDependencyError(_OPENSHELL_INSTALL_HINT) from exc
-    globals().update(grpc=grpc, pb=pb, pb_grpc=pb_grpc)
+    globals().update(grpc=grpc, dm=dm, pb=pb, pb_grpc=pb_grpc)
 
 
 def _phase_to_status(phase: int) -> DeploymentStatus:
@@ -182,8 +191,33 @@ def _phase_to_status(phase: int) -> DeploymentStatus:
             pb.SANDBOX_PHASE_ERROR: "FAILED",
             pb.SANDBOX_PHASE_DELETING: "DELETING",
             pb.SANDBOX_PHASE_UNKNOWN: "UNKNOWN",
+            pb.SANDBOX_PHASE_STARTING: "STARTING",
+            # A stop is an operator taking the sandbox offline while keeping its state, not a
+            # workload failure: report drift so drift recovery (or the operator) brings it back.
+            pb.SANDBOX_PHASE_STOPPING: "LOST",
+            pb.SANDBOX_PHASE_STOPPED: "LOST",
+            # The main process exited successfully; matches the docker backend's exit-code-0 mapping.
+            pb.SANDBOX_PHASE_COMPLETED: "SUCCEEDED",
         }
     return _PHASE_TO_STATUS.get(phase, "UNKNOWN")
+
+
+def _serve_launch_script(serve_command: list[str], workdir: str) -> str:
+    """Return the shell script that starts *serve_command* detached in *workdir*.
+
+    The inner shell records its own pid and then execs, so the pidfile holds the
+    workload's pid whether or not setsid forks. The marker is written synchronously
+    so a poll racing the background start does not relaunch, and holds the launch
+    time so the probe can age out a pidfile that never appears. A workdir of ``~``
+    is the sandbox identity's home. A workdir the identity cannot enter fails the
+    launch before the marker is written.
+    """
+    inner = f"echo $$ >{_SERVE_PIDFILE}; exec {shlex.join(serve_command)} >{_SERVE_LOG} 2>&1"
+    launch = f"setsid /bin/sh -c {shlex.quote(inner)} </dev/null >/dev/null 2>&1 & date +%s >{_LAUNCH_MARKER}"
+    if workdir:
+        target = "" if workdir == "~" else f" {shlex.quote(workdir)}"
+        launch = f"cd{target} || exit 1; {launch}"
+    return launch
 
 
 class OpenShellDeploymentBackend(DeploymentBackend):
@@ -192,7 +226,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
     def init(self) -> None:
         _ensure_openshell()
         self._executor_config = OpenShellExecutorConfig.model_validate(self._config)
-        self._entities = NemoEntitiesClient(client_from_platform(self._sdk, AsyncEntitiesClient))
+        self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self._nemo_client))
         # Build the policy once (fail fast on a bad path/shape). The gateway default
         # policy would not permit the agent's own exec paths, so we always apply one.
         self._policy = self._build_executor_policy()
@@ -284,6 +318,9 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         )
         return grpc.secure_channel(target, credentials)
 
+    def _workspace_scope(self) -> Any:
+        return dm.WorkspaceSelector(workspace=self._executor_config.workspace)
+
     def shutdown(self) -> None:
         channel = getattr(self, "_channel", None)
         if channel is not None:
@@ -303,20 +340,23 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         auth_context: AuthContext | None = None,
     ) -> BackendStatusUpdate:
         openshell_cfg = OpenShellDeploymentConfig.model_validate(backend_config.get("openshell") or {})
-        sandbox_nm = _sandbox_name(workspace, name)
+        sandbox_name = _sandbox_name(workspace, name)
 
-        existing = await self._try_get_sandbox(sandbox_nm)
+        existing = await self._try_get_sandbox(sandbox_name)
         if existing is not None:
             if _sandbox_matches(existing, workspace, name):
+                # Drift recovery lands here: restart a stopped sandbox in place, keeping its state.
+                if existing.status.phase == pb.SANDBOX_PHASE_STOPPED:
+                    return await self._start_stopped_sandbox(sandbox_name)
                 return await self.read_status(workspace=workspace, name=name)
             return BackendStatusUpdate(
                 status="FAILED",
-                status_message=f"Sandbox name collision: {sandbox_nm} exists with different labels",
+                status_message=f"Sandbox name collision: {sandbox_name} exists with different labels",
             )
 
         try:
             config = await self._load_deployment_config(workspace, config_name)
-            config = await resolve_deployment_config_secrets(self._sdk, config)
+            config = await resolve_deployment_config_secrets(self._nemo_client, config)
         except NemoEntityNotFoundError:
             return BackendStatusUpdate(
                 status="FAILED",
@@ -387,9 +427,14 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         }
 
         policy = self._build_deployment_policy(openshell_cfg.policy_path)
-        template = pb.SandboxTemplate(image=container.image, environment=env, labels=all_labels)
+        # Identity labels go on the sandbox record only. The driver copies template labels
+        # onto the workload container/pod, where the docker and k8s backends' orphan sweeps
+        # would claim them as their own deployments and delete them.
+        template = pb.SandboxTemplate(image=container.image, environment=env)
         spec = pb.SandboxSpec(template=template, environment=env, policy=policy)
-        request = pb.CreateSandboxRequest(spec=spec, name=sandbox_nm, labels=all_labels)
+        request = pb.CreateSandboxRequest(
+            workspace_scope=self._workspace_scope(), spec=spec, name=sandbox_name, labels=all_labels
+        )
 
         try:
             await self._unary(self._stub.CreateSandbox, request)
@@ -404,20 +449,22 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         # poll cycles, so a slow sandbox never blocks the serial reconcile loop.
         return BackendStatusUpdate(
             status="STARTING",
-            status_message=f"Sandbox {sandbox_nm} created; awaiting READY",
+            status_message=f"Sandbox {sandbox_name} created; awaiting READY",
         )
 
     async def read_status(self, *, workspace: str, name: str) -> BackendStatusUpdate:
-        sandbox_nm = _sandbox_name(workspace, name)
+        sandbox_name = _sandbox_name(workspace, name)
         try:
-            response = await self._unary(self._stub.GetSandbox, pb.GetSandboxRequest(name=sandbox_nm))
+            response = await self._unary(
+                self._stub.GetSandbox, pb.GetSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name)
+            )
         except grpc.RpcError as exc:
             if _rpc_code(exc) == grpc.StatusCode.NOT_FOUND:
-                return BackendStatusUpdate(status="LOST", status_message=f"Sandbox {sandbox_nm} not found")
+                return BackendStatusUpdate(status="LOST", status_message=f"Sandbox {sandbox_name} not found")
             return BackendStatusUpdate(
                 status="UNKNOWN",
                 status_message=f"GetSandbox error: {_rpc_detail(exc)}",
-                error_details={"error": _rpc_detail(exc), "sandbox": sandbox_nm},
+                error_details={"error": _rpc_detail(exc), "sandbox": sandbox_name},
             )
 
         sandbox = response.sandbox
@@ -431,7 +478,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         # Sandbox READY: drive provisioning (launch the serve command, expose ports) on
         # the reconciler's poll cycles rather than blocking create.
         try:
-            return await self._advance_provisioning(sandbox, sandbox_nm, workspace)
+            return await self._advance_provisioning(sandbox, sandbox_name, workspace)
         except grpc.RpcError as exc:
             # A transient gateway error mid-provisioning (e.g. the serve-marker probe) must not
             # escape raw into the reconciler; report UNKNOWN and let the next poll retry. The
@@ -440,35 +487,45 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             return BackendStatusUpdate(
                 status="UNKNOWN",
                 status_message=f"Provisioning RPC error: {_rpc_detail(exc)}",
-                error_details={"error": _rpc_detail(exc), "sandbox": sandbox_nm},
+                error_details={"error": _rpc_detail(exc), "sandbox": sandbox_name},
             )
 
     async def delete_deployment(self, workspace: str, name: str) -> BackendStatusUpdate:
-        sandbox_nm = _sandbox_name(workspace, name)
+        sandbox_name = _sandbox_name(workspace, name)
         try:
-            await self._unary(self._stub.DeleteSandbox, pb.DeleteSandboxRequest(name=sandbox_nm))
+            await self._unary(
+                self._stub.DeleteSandbox,
+                pb.DeleteSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name),
+            )
         except grpc.RpcError as exc:
             if _rpc_code(exc) == grpc.StatusCode.NOT_FOUND:
                 return BackendStatusUpdate(
                     status="SUCCEEDED",
-                    status_message=f"Sandbox {sandbox_nm} already gone",
+                    status_message=f"Sandbox {sandbox_name} already gone",
                 )
             return BackendStatusUpdate(
                 status="FAILED",
                 status_message=f"DeleteSandbox failed: {_rpc_detail(exc)}",
             )
-        return BackendStatusUpdate(status="SUCCEEDED", status_message=f"Sandbox {sandbox_nm} deleted")
+        return BackendStatusUpdate(status="SUCCEEDED", status_message=f"Sandbox {sandbox_name} deleted")
 
     async def list_managed_deployment_names(self) -> list[str]:
-        request = pb.ListSandboxesRequest(label_selector=managed_by_label_selector())
         try:
-            response = await self._unary(self._stub.ListSandboxes, request)
+            sandboxes = await self._list_all(
+                self._stub.ListSandboxes,
+                lambda token: pb.ListSandboxesRequest(
+                    workspace_scope=self._workspace_scope(),
+                    label_selector=managed_by_label_selector(),
+                    page_token=token,
+                ),
+                "sandboxes",
+            )
         except grpc.RpcError:
             logger.warning("Failed to list managed sandboxes", exc_info=True)
             return []
 
         seen: set[str] = set()
-        for sandbox in response.sandboxes:
+        for sandbox in sandboxes:
             sandbox_labels = dict(sandbox.metadata.labels)
             if sandbox_labels.get(MANAGED_BY_KEY) != MANAGED_BY_LABEL:
                 continue
@@ -484,23 +541,21 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         ``GetSandboxLogs`` cannot see ``_SERVE_LOG``: it is fed by the supervisor's
         tracing layer, not by the workload's stdout.
         """
-        sandbox_nm = _sandbox_name(workspace, name)
+        sandbox_name = _sandbox_name(workspace, name)
         try:
-            sandbox = await self._unary(self._stub.GetSandbox, pb.GetSandboxRequest(name=sandbox_nm))
-            sandbox_id = sandbox.sandbox.metadata.id or sandbox_nm
             exit_code, output = await self._exec_detached(
-                sandbox_id, ["/bin/sh", "-lc", f"tail -n {int(tail)} {_SERVE_LOG}"]
+                sandbox_name, ["/bin/sh", "-lc", f"tail -n {int(tail)} {_SERVE_LOG}"]
             )
             if exit_code == 0:
                 lines = output.splitlines()
                 return LogResult(lines=lines, truncated=len(lines) >= tail)
             response = await self._unary(
                 self._stub.GetSandboxLogs,
-                pb.GetSandboxLogsRequest(sandbox_id=sandbox_id, lines=tail),
+                pb.GetSandboxLogsRequest(workspace_scope=self._workspace_scope(), sandbox=sandbox_name, lines=tail),
             )
         except grpc.RpcError as exc:
             if _rpc_code(exc) == grpc.StatusCode.NOT_FOUND:
-                return LogResult(lines=[f"Sandbox {sandbox_nm} not found"])
+                return LogResult(lines=[f"Sandbox {sandbox_name} not found"])
             return LogResult(lines=[f"Failed to fetch logs: {_rpc_detail(exc)}"])
         lines = [_format_log_line(line) for line in response.logs]
         return LogResult(lines=lines, truncated=response.buffer_total > len(lines))
@@ -548,7 +603,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
     async def _unary(self, method: Any, request: Any) -> Any:
         return await asyncio.to_thread(method, request, timeout=self._executor_config.request_timeout_seconds)
 
-    async def _advance_provisioning(self, sandbox: Any, sandbox_nm: str, workspace: str) -> BackendStatusUpdate:
+    async def _advance_provisioning(self, sandbox: Any, sandbox_name: str, workspace: str) -> BackendStatusUpdate:
         """Advance a READY sandbox toward a serving deployment, idempotently.
 
         Called from read_status on each poll once the sandbox is READY: launch the
@@ -557,13 +612,13 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         On a provisioning failure the sandbox is deleted so it does not leak behind a
         terminal FAILED deployment.
         """
-        sandbox_id = sandbox.metadata.id or sandbox_nm
 
-        # Fast path: ports already exposed on a prior poll -> the deployment is serving,
-        # as long as the workload is alive. An exposed service proves routing, not health.
-        endpoints = await self._list_endpoints(sandbox_nm)
-        if endpoints:
-            failure = await self._serve_failure(sandbox_id)
+        # Fast path: this boot's workload passed readiness and its ports are exposed -> the
+        # deployment is serving, as long as the workload is alive. An exposed service proves
+        # routing, not health, and survives a sandbox stop/start that the workload does not.
+        endpoints = await self._list_endpoints(sandbox_name)
+        if endpoints and await self._marker_exists(sandbox_name, _READY_MARKER):
+            failure = await self._serve_failure(sandbox_name)
             if failure is not None:
                 return failure
             return BackendStatusUpdate(status="READY", status_message="Sandbox serving", endpoints=endpoints)
@@ -581,114 +636,111 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         # does not relaunch it (read_status keeps no state across calls). Config files are
         # delivered inside this once-only guard, immediately before launch, so the serve
         # process finds them on disk and they are written exactly once per deployment.
-        if not await self._serve_launched(sandbox_id):
-            failure = await self._deliver_config_files(sandbox_id, config.config_files)
+        if not await self._marker_exists(sandbox_name, _LAUNCH_MARKER):
+            failure = await self._deliver_config_files(sandbox_name, config.config_files)
             if failure is not None:
-                await self._delete_sandbox_best_effort(sandbox_nm)
+                await self._delete_sandbox_best_effort(sandbox_name)
                 return failure
-            failure = await self._launch_serve(sandbox_id, list(container.command) + list(container.args))
+            failure = await self._launch_serve(sandbox_name, list(container.command) + list(container.args))
             if failure is not None:
-                await self._delete_sandbox_best_effort(sandbox_nm)
+                await self._delete_sandbox_best_effort(sandbox_name)
                 return failure
             return BackendStatusUpdate(status="STARTING", status_message="Serve command launched")
 
         # Never expose a port to a workload that is not demonstrably running. The launch
         # marker only proves the launcher shell accepted the `&`, so a live pid is what
         # stops a launch that started nothing from advancing to READY.
-        state = await self._serve_state(sandbox_id)
+        state = await self._serve_state(sandbox_name)
         if state == "dead":
-            return await self._serve_dead_update(sandbox_id)
+            return await self._serve_dead_update(sandbox_name)
         if state == "pending":
             return BackendStatusUpdate(status="STARTING", status_message="Serve launched; awaiting serve pid")
 
         # A live pid has bound its pidfile, not necessarily its socket. Do not expose
         # (which reads as READY) until the workload actually accepts a connection, so a
         # caller trusting READY does not 502 against a process still starting up.
-        pending = await self._readiness_pending(sandbox_id, container)
+        pending = await self._readiness_pending(sandbox_name, container)
         if pending is not None:
             return pending
 
+        await self._exec_detached(sandbox_name, ["/bin/sh", "-c", f"touch {_READY_MARKER}"])
+
+        # Ports exposed before a sandbox restart stay exposed; reuse them.
+        if endpoints:
+            return BackendStatusUpdate(status="READY", status_message="Sandbox serving", endpoints=endpoints)
+
         # Serve launched but ports not yet exposed: expose them.
         try:
-            endpoints = await self._expose_ports(sandbox_nm, container)
+            endpoints = await self._expose_ports(sandbox_name, container)
         except grpc.RpcError as exc:
-            await self._delete_sandbox_best_effort(sandbox_nm)
+            await self._delete_sandbox_best_effort(sandbox_name)
             return BackendStatusUpdate(status="FAILED", status_message=f"ExposeService failed: {_rpc_detail(exc)}")
         if not endpoints:
             return BackendStatusUpdate(status="STARTING", status_message="Serve launched; awaiting endpoints")
         return BackendStatusUpdate(status="READY", status_message="Sandbox serving", endpoints=endpoints)
 
-    async def _serve_launched(self, sandbox_id: str) -> bool:
-        """Whether the serve command has already been launched (marker file present)."""
-        exit_code, _ = await self._exec_detached(sandbox_id, ["/bin/sh", "-lc", f"test -f {_LAUNCH_MARKER}"])
+    async def _marker_exists(self, sandbox_name: str, marker: str) -> bool:
+        """Whether this boot has written *marker* (a per-boot file under /dev/shm)."""
+        exit_code, _ = await self._exec_detached(sandbox_name, ["/bin/sh", "-lc", f"test -f {marker}"])
         return exit_code == 0
 
-    async def _serve_state(self, sandbox_id: str) -> Literal["alive", "dead", "pending"]:
+    async def _serve_state(self, sandbox_name: str) -> Literal["alive", "dead", "pending"]:
         """Whether the serve process is running, known dead, or not yet accounted for.
 
         Only a probe that positively proves death reports ``dead``, so a flaky exec RPC
         or an unreadable marker never flaps a healthy deployment. Everything undecided is
         ``pending``, which callers treat as "not yet safe to expose".
         """
-        exit_code, _ = await self._exec_detached(sandbox_id, ["/bin/sh", "-lc", _LIVENESS_PROBE])
+        exit_code, _ = await self._exec_detached(sandbox_name, ["/bin/sh", "-lc", _LIVENESS_PROBE])
         if exit_code == _SERVE_DEAD_EXIT:
             return "dead"
         if exit_code in (None, 0):
             return "alive"
         return "pending"
 
-    async def _serve_dead_update(self, sandbox_id: str) -> BackendStatusUpdate:
+    async def _serve_dead_update(self, sandbox_name: str) -> BackendStatusUpdate:
         """A FAILED update carrying the workload's own last output.
 
         The sandbox is kept (unlike the provisioning-failure paths) so its log stays
         readable through ``get_logs``.
         """
-        tail = await self._serve_log_tail(sandbox_id)
+        tail = await self._serve_log_tail(sandbox_name)
         message = "Serve process exited; deployment is not serving"
         if tail:
             message = f"{message}. Last output: {tail}"
         return BackendStatusUpdate(status="FAILED", status_message=message)
 
-    async def _serve_failure(self, sandbox_id: str) -> BackendStatusUpdate | None:
+    async def _serve_failure(self, sandbox_name: str) -> BackendStatusUpdate | None:
         """A FAILED update when the serve process is known dead, else None.
 
         Used where the deployment is already serving, so only positive evidence of death
         demotes it; a pending probe leaves it alone.
         """
-        if await self._serve_state(sandbox_id) != "dead":
+        if await self._serve_state(sandbox_name) != "dead":
             return None
-        return await self._serve_dead_update(sandbox_id)
+        return await self._serve_dead_update(sandbox_name)
 
-    async def _serve_log_tail(self, sandbox_id: str, lines: int = _LOG_TAIL_LINES) -> str:
+    async def _serve_log_tail(self, sandbox_name: str, lines: int = _LOG_TAIL_LINES) -> str:
         """Last lines of the workload log, or "" when it cannot be read."""
         try:
             exit_code, output = await self._exec_detached(
-                sandbox_id, ["/bin/sh", "-lc", f"tail -n {int(lines)} {_SERVE_LOG}"]
+                sandbox_name, ["/bin/sh", "-lc", f"tail -n {int(lines)} {_SERVE_LOG}"]
             )
         except grpc.RpcError:
-            logger.warning("Failed to read the serve log for sandbox %s", sandbox_id, exc_info=True)
+            logger.warning("Failed to read the serve log for sandbox %s", sandbox_name, exc_info=True)
             return ""
         return output.strip() if exit_code in (None, 0) else ""
 
-    async def _launch_serve(self, sandbox_id: str, serve_command: list[str]) -> BackendStatusUpdate | None:
+    async def _launch_serve(self, sandbox_name: str, serve_command: list[str]) -> BackendStatusUpdate | None:
         """Launch the detached serve command, writing the launch marker on success.
 
         Returns None on success, or a FAILED update if the launcher itself failed (bad
         workdir/shell or a non-zero launcher exit). The backgrounded serve process is
         not supervised, so this catches launch-time failures, not later serve crashes.
         """
-        serve = shlex.join(serve_command)
-        # The inner shell records its own pid and then execs, so the pidfile holds the
-        # workload's pid whether or not setsid forks. The marker is written synchronously
-        # so a poll racing the background start does not relaunch, and holds the launch
-        # time so the probe can age out a pidfile that never appears.
-        inner = f"echo $$ >{_SERVE_PIDFILE}; exec {serve} >{_SERVE_LOG} 2>&1"
-        launch = f"setsid /bin/sh -c {shlex.quote(inner)} </dev/null >/dev/null 2>&1 & date +%s >{_LAUNCH_MARKER}"
-        workdir = self._executor_config.serve_workdir
-        if workdir:
-            launch = f"cd {shlex.quote(workdir)} && {launch}"
+        launch = _serve_launch_script(serve_command, self._executor_config.serve_workdir)
         try:
-            exit_code, output = await self._exec_detached(sandbox_id, ["/bin/sh", "-lc", launch])
+            exit_code, output = await self._exec_detached(sandbox_name, ["/bin/sh", "-lc", launch])
         except grpc.RpcError as exc:
             return BackendStatusUpdate(
                 status="FAILED", status_message=f"Failed to launch serve command: {_rpc_detail(exc)}"
@@ -701,20 +753,33 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             return BackendStatusUpdate(status="FAILED", status_message=message)
         return None
 
-    async def _delete_sandbox_best_effort(self, sandbox_nm: str) -> None:
+    async def _start_stopped_sandbox(self, sandbox_name: str) -> BackendStatusUpdate:
+        request = pb.StartSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name)
+        try:
+            await self._unary(self._stub.StartSandbox, request)
+        except grpc.RpcError as exc:
+            return BackendStatusUpdate(status="LOST", status_message=f"StartSandbox failed: {_rpc_detail(exc)}")
+        return BackendStatusUpdate(status="STARTING", status_message=f"Sandbox {sandbox_name} was stopped; restarting")
+
+    async def _delete_sandbox_best_effort(self, sandbox_name: str) -> None:
         """Best-effort DeleteSandbox to avoid leaking a partially-provisioned sandbox.
 
         Swallows all errors (including a NOT_FOUND, which makes this idempotent) so a
         cleanup failure never masks the original provisioning failure.
         """
         try:
-            await self._unary(self._stub.DeleteSandbox, pb.DeleteSandboxRequest(name=sandbox_nm))
+            await self._unary(
+                self._stub.DeleteSandbox,
+                pb.DeleteSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name),
+            )
         except Exception:
-            logger.warning("Failed to clean up sandbox %s after provisioning failure", sandbox_nm, exc_info=True)
+            logger.warning("Failed to clean up sandbox %s after provisioning failure", sandbox_name, exc_info=True)
 
-    async def _try_get_sandbox(self, sandbox_nm: str) -> Any | None:
+    async def _try_get_sandbox(self, sandbox_name: str) -> Any | None:
         try:
-            response = await self._unary(self._stub.GetSandbox, pb.GetSandboxRequest(name=sandbox_nm))
+            response = await self._unary(
+                self._stub.GetSandbox, pb.GetSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name)
+            )
         except grpc.RpcError as exc:
             if _rpc_code(exc) == grpc.StatusCode.NOT_FOUND:
                 return None
@@ -722,7 +787,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         return response.sandbox
 
     async def _exec_detached(
-        self, sandbox_id: str, command: list[str], *, timeout: int | None = None, stdin: bytes | None = None
+        self, sandbox_name: str, command: list[str], *, timeout: int | None = None, stdin: bytes | None = None
     ) -> tuple[int | None, str]:
         """Run *command* to completion, returning (exit_code, stdout+stderr merged);
         ``exit_code`` is None when the stream carried no exit event.
@@ -737,7 +802,12 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         (single-line-only, size-capped) sandbox environment.
         """
         timeout = timeout if timeout is not None else self._executor_config.request_timeout_seconds
-        request = pb.ExecSandboxRequest(sandbox_id=sandbox_id, command=command, timeout_seconds=timeout)
+        request = pb.ExecSandboxRequest(
+            workspace_scope=self._workspace_scope(),
+            sandbox=sandbox_name,
+            command=command,
+        )
+        request.execution_timeout.seconds = timeout
         if stdin is not None:
             request.stdin = stdin
 
@@ -756,7 +826,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         return await asyncio.to_thread(_drain)
 
     async def _deliver_config_files(
-        self, sandbox_id: str, config_files: list[ConfigFile]
+        self, sandbox_name: str, config_files: list[ConfigFile]
     ) -> BackendStatusUpdate | None:
         """Write each declared config file into the sandbox before serve launch.
 
@@ -766,10 +836,10 @@ class OpenShellDeploymentBackend(DeploymentBackend):
 
         Delivery runs through ``ExecSandbox`` as the sandbox user (the RPC pins
         ``run_as_user`` to the non-root sandbox user), so it can only write paths that
-        user owns -- ``/home/sandbox``, ``/sandbox``, ``/tmp`` -- and not ``/workspace``,
-        which the packaged agent image chowns to its own ``agent`` user even though the
-        sandbox policy lists it read-write. A path that user cannot write to fails here
-        with the shell's own error. When OpenShell grows a native file-transfer RPC, swap
+        user can write -- ``/home/sandbox``, ``/sandbox``, ``/tmp`` -- and not existing
+        ``/workspace`` contents, which the packaged agent image owns as its ``agent``
+        user even though the sandbox policy lists the tree read-write. A path that user
+        cannot write to fails here with the shell's own error. When OpenShell grows a native file-transfer RPC, swap
         the ``cat`` for it; callers only ever emit a first-class ``ConfigFile(path,
         content)`` and never learn how the bytes arrived.
         """
@@ -778,14 +848,14 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             script = _delivery_script(path, config_file.mode)
             try:
                 exit_code, output = await self._exec_detached(
-                    sandbox_id, ["/bin/sh", "-c", script], stdin=config_file.content.encode("utf-8")
+                    sandbox_name, ["/bin/sh", "-c", script], stdin=config_file.content.encode("utf-8")
                 )
             except grpc.RpcError as exc:
                 return BackendStatusUpdate(
                     status="FAILED", status_message=f"Failed to write config file {path}: {_rpc_detail(exc)}"
                 )
-            # A definitively non-zero exit is a failure (e.g. a /workspace write denied by the
-            # sandbox user's permissions); surface the shell's own error with the path.
+            # A definitively non-zero exit is a failure (e.g. a write denied by the sandbox
+            # user's permissions); surface the shell's own error with the path.
             if exit_code not in (None, 0):
                 detail = output.strip()
                 message = f"Failed to write config file {path} (exit {exit_code})"
@@ -802,7 +872,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 )
         return None
 
-    async def _readiness_pending(self, sandbox_id: str, container: Container) -> BackendStatusUpdate | None:
+    async def _readiness_pending(self, sandbox_name: str, container: Container) -> BackendStatusUpdate | None:
         """A STARTING update while the workload is not yet reachable, else None.
 
         Probed from inside the sandbox against loopback, so readiness does not depend on
@@ -816,7 +886,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         if probe_command is None:
             return None
         command, description, exec_timeout = probe_command
-        exit_code, _ = await self._exec_detached(sandbox_id, command, timeout=exec_timeout)
+        exit_code, _ = await self._exec_detached(sandbox_name, command, timeout=exec_timeout)
         # Readiness fails closed (liveness fails open): the gate admits only positive
         # proof of reachability, so a flaky probe never exposes an unready workload.
         #   - exit 0        -> reachable; expose the port and read READY
@@ -829,22 +899,40 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             return None
         return BackendStatusUpdate(status="STARTING", status_message=f"Awaiting readiness: {description}")
 
-    async def _list_endpoints(self, sandbox_nm: str) -> list[Endpoint]:
+    async def _list_endpoints(self, sandbox_name: str) -> list[Endpoint]:
         """Return the sandbox's currently exposed services as endpoints."""
         try:
-            response = await self._unary(self._stub.ListServices, pb.ListServicesRequest(sandbox=sandbox_nm))
+            services = await self._list_all(
+                self._stub.ListServices,
+                lambda token: pb.ListServicesRequest(
+                    workspace_scope=self._workspace_scope(), sandbox=sandbox_name, page_token=token
+                ),
+                "services",
+            )
         except grpc.RpcError:
-            logger.warning("Failed to list services for sandbox %s", sandbox_nm, exc_info=True)
+            logger.warning("Failed to list services for sandbox %s", sandbox_name, exc_info=True)
             return []
-        return [Endpoint(name=svc.endpoint.service_name, url=svc.url, protocol="http") for svc in response.services]
+        return [Endpoint(name=svc.endpoint.name, url=svc.url, protocol="http") for svc in services]
 
-    async def _expose_ports(self, sandbox_nm: str, container: Container) -> list[Endpoint]:
+    async def _list_all(self, method: Any, make_request: Callable[[str], Any], field: str) -> list[Any]:
+        """Collect *field* across every page of a paginated list RPC."""
+        items: list[Any] = []
+        token = ""
+        while True:
+            response = await self._unary(method, make_request(token))
+            items.extend(getattr(response, field))
+            token = response.next_page_token
+            if not token:
+                return items
+
+    async def _expose_ports(self, sandbox_name: str, container: Container) -> list[Endpoint]:
         endpoints: list[Endpoint] = []
         for port in container.ports:
             service = _service_name(port)
             request = pb.ExposeServiceRequest(
-                sandbox=sandbox_nm,
-                service=service,
+                workspace_scope=self._workspace_scope(),
+                sandbox=sandbox_name,
+                name=service,
                 target_port=port.container_port,
             )
             response = await self._unary(self._stub.ExposeService, request)

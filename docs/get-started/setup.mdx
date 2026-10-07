@@ -15,7 +15,7 @@ Install NeMo Helix and start working with AI agents.
 - Python 3.12-3.14
 - An API key from one of: [NVIDIA Build](https://build.nvidia.com), [OpenAI](https://platform.openai.com/api-keys), [Anthropic](https://console.anthropic.com/settings/keys), [Google Gemini](https://aistudio.google.com/apikey), or a local [Ollama](https://ollama.com) instance (no key needed)
 - 16 GB available disk space and 8 GB RAM
-- [Docker](https://docs.docker.com/get-docker/) for Helix's default local operating mode (`nemo setup --start-services` or `nemo services run`); remote-deployment, CLI-only, and non-Docker configurations do not require it
+- [Docker](https://docs.docker.com/get-docker/) for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`), because the deployments service defaults to the Docker executor. Remote-deployment, CLI-only, and configs that omit or reconfigure deployments do not require it. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors) for when jobs and agents use subprocess instead.
 - For the PyPI install: [uv](https://docs.astral.sh/uv/) `>=0.10.10`, or `pip` in a Python environment
 - For the source checkout install: [Git](https://git-scm.com/), GNU Make, a C compiler, and [Flox](https://flox.dev/docs/install-flox/install) (recommended). A system-toolchain alternative is documented below.
 
@@ -35,6 +35,8 @@ One command, `nemo` available everywhere, nothing to activate.
 
 ```bash
 uv tool install "nemo-helix[all]"
+uv tool update-shell
+# Then restart the shell
 ```
 
 </Tab>
@@ -117,7 +119,7 @@ Choose the remote option and enter the deployment's base URL. Setup verifies the
 
 This connects the local CLI to an existing deployment; it does not install the platform on a remote host.
 
-To configure remote access without rerunning setup, or to keep separate local and remote targets, follow [Connect the CLI to Deployments](/documentation/reference/cli-reference/connect-to-deployments).
+The CLI and Python SDK then use this deployment for every command and tutorial. To configure remote access without rerunning setup, or to keep separate local and remote targets, follow [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ### Auth and OIDC source installs
 
@@ -133,8 +135,7 @@ nemo services run
 You can set `platform.seed_on_startup: true` in platform config instead. If services are already running, wait for readiness and run the seed task manually from the repository root:
 
 ```bash
-# Set NHX_BASE_URL first if services are not on http://localhost:8080.
-curl -sf http://localhost:8080/health/ready
+curl -sf "${NHX_BASE_URL:-http://localhost:8080}/health/ready"
 uv run python -m nhx.platform_seed
 ```
 
@@ -156,7 +157,7 @@ link printed at the end of setup to explore its dataset and evaluation config.
 
 ### Coding agent skills
 
-If you accepted **Install skills** during setup and use Cursor, Claude Code, or Codex, your coding agent now has NeMo skills. Ask it to:
+If you accepted **Install skills** during setup, your coding agent now has NeMo skills. Ask it to:
 
 - "Help me optimize my agent" — invokes the `nemo-agents-optimize` skill which analyzes deployed agents, compares models, suggests improvements
 - "Help me secure my agent" — invokes the `nemo-agents-secure` skill which runs audit scans, adds guardrails, flags vulnerabilities
@@ -189,6 +190,18 @@ nemo setup --auto --start-services
 
 **Priority order:** `NEMO_DEFAULT_INFERENCE_KEY` > `NVIDIA_API_KEY` > `OPENAI_API_KEY` > `ANTHROPIC_API_KEY` > `GEMINI_API_KEY`
 
+If your key is valid only against a non-default endpoint, set `NEMO_DEFAULT_INFERENCE_BASE_URL` with `NEMO_DEFAULT_INFERENCE_KEY`, or pass `--inference-base-url`:
+
+```bash
+export NEMO_DEFAULT_INFERENCE_KEY=nvapi-...
+export NEMO_DEFAULT_INFERENCE_BASE_URL=https://inference-api.nvidia.com/v1
+nemo setup --auto --start-services
+
+# Equivalent flag form
+export NVIDIA_API_KEY=nvapi-...
+nemo setup --auto --start-services --inference-base-url https://inference-api.nvidia.com/v1
+```
+
 ### Flags
 
 | Flag | Default | Description |
@@ -197,6 +210,7 @@ nemo setup --auto --start-services
 | `--workspace`, `-w` | `default` | Target workspace |
 | `--start-services` / `--no-start-services` | prompt (interactive) or skip (auto) | Start local Helix services |
 | `--install-skills` / `--no-install-skills` | prompt (interactive) or skip (auto) | Install NeMo skills for detected coding agents |
+| `--inference-base-url` | provider default | Provider base URL to use in `--auto` mode; equivalent to `NEMO_DEFAULT_INFERENCE_BASE_URL` |
 
 Override the default and fast models with `NEMO_DEFAULT_MODEL` and
 `NEMO_FAST_MODEL`. If the fast override is omitted, it reuses the default.
@@ -210,6 +224,7 @@ nemo setup --auto --start-services
 
 ### Examples
 
+{/* @nemo-docs: allow-nhx-base-url */}
 ```bash
 # Full automation: services and skills
 export NVIDIA_API_KEY=nvapi-...
@@ -219,7 +234,7 @@ nemo setup --auto --start-services --install-skills
 export OPENAI_API_KEY=sk-...
 nemo setup --auto
 
-# Connect to an authenticated remote platform without prompts
+# Connect to an authenticated remote platform without prompts or a saved CLI context
 export NHX_BASE_URL=https://nhx.example.com
 export NHX_ACCESS_TOKEN=...
 export OPENAI_API_KEY=sk-...
@@ -238,35 +253,34 @@ nemo setup --no-install-skills
 | List available models | `nemo models list` |
 | Open the Studio UI | [http://localhost:8080/studio/](http://localhost:8080/studio/) |
 | Browse docs from the CLI | `nemo docs --list` |
+| Understand Docker vs subprocess locally | [Local Docker and Executors](/documentation/get-started/local-docker-and-executors) |
 | Evaluate a model | [Run LLM-as-a-Judge Evaluation](/documentation/evaluate-models/tutorials/run-llm-as-a-judge-evaluation) |
 | Generate synthetic data | [Data Designer Tutorials](/documentation/design-synthetic-data/tutorials) |
 | Optimize an agent | [Optimize Agents](/documentation/agents/optimize-agents) |
 
 ## Python SDK
 
-The `nemo-helix` package includes a Python SDK. After running `nemo setup`, the simplest initialization uses your CLI context:
+The `nemo-helix` package includes a Python SDK. After running `nemo setup`, the simplest initialization reads your CLI context with `NemoClient.from_config()`:
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 ```
 
-For scripts or CI where you want explicit control:
+The client uses the deployment, default workspace, and credentials from your current CLI context, so it follows `nemo config use-context` the same way the CLI does. In CI jobs or containers without a CLI configuration file, set `NHX_BASE_URL` and, for authenticated deployments, `NHX_ACCESS_TOKEN`; `from_config()` reads them. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
-```python
-import os
-from nemo_helix import NeMoHelix
-
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-```
-
-An asynchronous client is also available. See the [SDK reference](/documentation/reference/python-sdk) for details.
+An asynchronous client, `AsyncNemoClient`, is also available with `AsyncNemoClient.from_config()`. See the [SDK reference](/documentation/reference/python-sdk) for details.
 
 ## Troubleshooting
+
+### Docker daemon not available
+
+Default local startup fails closed when the resolved run starts the deployments service or controller with a Docker-backed `default_executor` and the Docker daemon is unreachable. Install and start Docker, then retry `nemo setup --start-services` or `nemo services run`.
+
+If Intake is selected and `NHX_INTAKE_CLICKHOUSE_URL` is unset, Intake also provisions a local ClickHouse container and needs Docker. Set `NHX_INTAKE_CLICKHOUSE_URL` to an external ClickHouse to skip that path.
+
+For the subprocess-vs-Docker matrix and escape hatches (`--config`, omit deployments), see [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
 
 ### Platform won't start
 

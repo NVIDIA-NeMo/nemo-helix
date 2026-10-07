@@ -140,6 +140,39 @@ def test_config_builders_apply_the_connect_cap(_discover, tmp_path: Path) -> Non
 
 
 # ---------------------------------------------------------------------------
+# transport ownership
+# ---------------------------------------------------------------------------
+
+
+@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
+def test_sync_builders_close_the_transport_they_built(_discover, tmp_path: Path) -> None:
+    """Nobody else holds the httpx client a builder creates, so close() must release its pool."""
+    for client in (
+        build_nemo_client(config_path=_api_key_config(tmp_path)),
+        build_direct_nemo_client(base_url="http://localhost:8080"),
+    ):
+        transport = client._http
+
+        client.close()
+
+        assert transport.is_closed
+
+
+@pytest.mark.asyncio
+@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
+async def test_async_builders_close_the_transport_they_built(_discover, tmp_path: Path) -> None:
+    for client in (
+        build_async_nemo_client(config_path=_api_key_config(tmp_path)),
+        build_direct_async_nemo_client(base_url="http://localhost:8080"),
+    ):
+        transport = client._http
+
+        await client.close()
+
+        assert transport.is_closed
+
+
+# ---------------------------------------------------------------------------
 # retry, TLS, headers
 # ---------------------------------------------------------------------------
 
