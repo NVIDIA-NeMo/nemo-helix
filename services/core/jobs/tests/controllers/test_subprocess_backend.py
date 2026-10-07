@@ -417,17 +417,23 @@ def test_build_command_leaves_console_script_unchanged_without_virtual_env() -> 
 
 def test_build_command_does_not_resolve_a_path_bearing_command_against_virtual_env_bin(tmp_path) -> None:
     # Only a bare script name is resolved against venv/bin; a command carrying a path
-    # separator is left to the normal lookup rather than joined under bin/.
-    (tmp_path / "venv" / "bin").mkdir(parents=True)
+    # separator is left to the normal lookup rather than joined under bin/. The bin/
+    # entry below is executable, so without the separator guard the relative command
+    # would be rewritten to it — this asserts it is not.
+    venv_script = tmp_path / "venv" / "bin" / "nemo-helix"
+    venv_script.parent.mkdir(parents=True)
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
     executor = SubprocessExecutionProvider(
         provider="subprocess",
         profile="default",
-        command=["/usr/bin/env", "nemo-helix"],
+        command=["./nemo-helix", "run", "task"],
     )
 
     assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
-        "/usr/bin/env",
-        "nemo-helix",
+        "./nemo-helix",
+        "run",
+        "task",
     ]
 
 
