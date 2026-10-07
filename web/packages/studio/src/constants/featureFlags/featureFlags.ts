@@ -76,6 +76,9 @@ export const flagDefinitions = {
   evalsEnabled: previewFlag('VITE_FF_EVALS_ENABLED', true),
   experiment: previewFlag('VITE_FF_EXPERIMENT', true),
   filesetDetailsEnabled: previewFlag('VITE_FF_FILESET_DETAILS_ENABLED'),
+  // Gates the localStorage override layer (see featureFlags/overrides.ts). Read
+  // only from the build env, never from an override, so it cannot self-enable.
+  flagOverridesEnabled: booleanFlag('VITE_FF_FLAG_OVERRIDES_ENABLED', false),
   guardrailsEnabled: previewFlag('VITE_FF_GUARDRAILS_ENABLED'),
   inferenceProviderEnabled: previewFlag('VITE_FF_INFERENCE_PROVIDER_ENABLED', true),
   intakeEnabled: previewFlag('VITE_FF_INTAKE_ENABLED', true),

@@ -155,6 +155,11 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="false",
     ),
     EnvMapping(
+        marker="STUDIO_UI_VITE_FF_FLAG_OVERRIDES_ENABLED",
+        config_path="studio.feature_flags.flag_overrides_enabled",
+        default="false",
+    ),
+    EnvMapping(
         marker="STUDIO_UI_VITE_FF_GUARDRAILS_ENABLED",
         config_path="studio.feature_flags.guardrails_enabled",
         default="false",

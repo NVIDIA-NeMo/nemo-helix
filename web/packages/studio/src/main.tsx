@@ -5,8 +5,13 @@ import '@studio/index.css';
 
 import { logger } from '@nemo/common/src/utils/logger';
 import { App } from '@studio/App';
+import { initFlagOverrideTooling } from '@studio/constants/featureFlags';
 import { UI_THEME } from '@studio/util/localStorage';
 import ReactDOM from 'react-dom/client';
+
+// Publishes `window.__flags` and the localStorage manifest the flag-override
+// Chrome extension reads. No-op unless the deployment enables overrides.
+initFlagOverrideTooling();
 
 // OpenTelemetry patches fetch/XHR globally, so this must settle before React
 // renders and issues the first requests.
