@@ -211,6 +211,13 @@ class WarGameSpec(BaseModel):
     models: WarGameModels | None = None
     source_run: str | None = None
 
+    @model_validator(mode="after")
+    def _validate_only_requires_replay(self) -> WarGameSpec:
+        # A sanity check replays recorded attacks; without a hitlog the run would fall through to a live attack.
+        if self.validate_only and not (self.replay_hitlog_fileset or "").strip():
+            raise ValueError("validate_only requires 'replay_hitlog_fileset' (the recorded attacks to replay)")
+        return self
+
 
 class SynthBenignSpec(BaseModel):
     """Inputs for the benign-suite synthesis phase (the shape ``run()``/``compile()`` see)."""
@@ -221,6 +228,14 @@ class SynthBenignSpec(BaseModel):
     interview: str = "interactive"
     run_name: str | None = None
     source_run: str | None = None
+
+    @field_validator("manifest_id")
+    @classmethod
+    def _manifest_id_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("manifest_id must be a non-empty manifest name")
+        return stripped
 
 
 class WarGameJobRequest(BaseModel):
