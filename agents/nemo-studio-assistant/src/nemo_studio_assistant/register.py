@@ -17,13 +17,13 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from nemo_helix_ext.client.bootstrap import build_direct_nemo_client, build_nemo_client
-from nemo_helix_plugin.auditor.client import AuditorClient
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.client.response import NemoBinaryResponse, NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.data_designer.client import DataDesignerClient
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.garak.client import GarakClient
 from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest, GuardrailCheckRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
@@ -191,10 +191,10 @@ _RESOURCES: dict[str, _Resource] = {
         },
         aliases={"fileset": "name", "remote_path": "path"},
     ),
-    "audit.targets": _crud(AuditorClient, "audit_target"),
-    "audit.configs": _crud(AuditorClient, "audit_config"),
+    "audit.targets": _crud(GarakClient, "audit_target"),
+    "audit.configs": _crud(GarakClient, "audit_config"),
     "audit.jobs": _Resource(
-        AuditorClient, {"list": "list_audit_jobs", "retrieve": "get_audit_job", "create": "submit_audit"}
+        GarakClient, {"list": "list_audit_jobs", "retrieve": "get_audit_job", "create": "submit_audit"}
     ),
     "evaluation.metrics": _Resource(
         EvaluatorClient,
@@ -1309,8 +1309,8 @@ def check_status(service: str, job_name: str, workspace: str | None = None) -> s
                 .data()
             )
             return json.dumps(_serialize(status), indent=2, default=str)
-        if service == "auditor":
-            job = AuditorClient.from_client(client).get_audit_job(workspace=workspace, name=job_name).data()
+        if service == "garak":
+            job = GarakClient.from_client(client).get_audit_job(workspace=workspace, name=job_name).data()
             return json.dumps(_serialize(job), indent=2, default=str)
         if service == "evaluator":
             status = EvaluatorClient.from_client(client).get_evaluate_job_status(workspace=workspace, name=job_name)

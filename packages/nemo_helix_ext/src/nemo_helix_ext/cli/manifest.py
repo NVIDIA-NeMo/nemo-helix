@@ -37,7 +37,7 @@ TOP_LEVEL_COMMAND_ORDER: dict[PanelName, tuple[str, ...]] = {
         "agents",
         "data-designer",
         "guardrail",
-        "auditor",
+        "garak",
         "anonymizer",
         "evaluator",
         "customization",

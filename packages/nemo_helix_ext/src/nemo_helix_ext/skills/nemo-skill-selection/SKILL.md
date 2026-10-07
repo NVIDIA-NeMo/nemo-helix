@@ -203,14 +203,14 @@ Plugin-owned skills:
   nemo-customizer   fine-tuning of chat/SFT/RL models (not the retrieval recipe)
   nemo-analyst      analyze agent telemetry and file recurring problems as Insights
   guardrails        content-safety middleware via virtual models
-  auditor           red-team vulnerability scanning (garak)
+  garak           red-team vulnerability scanning (garak)
   nemo-data-designer-plugin  synthetic dataset generation (tabular `create`; retrieval SDG is the retrieval recipe)
   anonymizer        PII handling for datasets
 
 Which one fits what you're trying to do?
 ```
 
-For things outside this catalog (for example, "show me how Switchyard routes between models"), point at the relevant repo skill (`nemo-evaluator`, `nemo-auditor`, etc.) or tell the user no skill claims that intent yet. Do not invent a path.
+For things outside this catalog (for example, "show me how Switchyard routes between models"), point at the relevant repo skill (`nemo-evaluator`, `nemo-garak`, etc.) or tell the user no skill claims that intent yet. Do not invent a path.
 
 If the pre-flight finds no platform but the user insists they have installed one: ask them to report
 the output of `lsof -iTCP:<port> -sTCP:LISTEN` (the port from `NHX_URL`, usually `8080`) and the redacted scan below from the shell where they ran

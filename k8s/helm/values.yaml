@@ -598,8 +598,8 @@ baseHelixConfig: |
       type: local
       path: /vol/files
 
-  # -- auditor is the configuration specific to the Auditor service
-  auditor: {}
+  # -- garak is the configuration specific to the Garak service
+  garak: {}
 
   # -- data_designer is the configuration specific to the Data Designer service
   data_designer:

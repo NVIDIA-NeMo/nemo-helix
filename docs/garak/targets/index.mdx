@@ -1,0 +1,141 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Manage Audit Targets"
+description: ""
+---
+<a id="garak-targets"></a>
+
+An `AuditTarget` identifies the model under test. It pairs a garak generator class (`type`) with a model identifier (`model`) and a generator-specific options dict (`options`). Targets are persisted in NeMo Helix entity store and referenced by name from `client.garak.run(...)`.
+
+## What an AuditTarget Holds
+
+| Field | Description |
+|-------|-------------|
+| `type` | A fully-qualified [garak generator class](https://reference.garak.ai/en/latest/generators.html), such as `nim.NVOpenAIChat`, `openai.OpenAIGenerator`, `rest.RestGenerator`, or `test.Blank`. |
+| `model` | The provider's model identifier passed through to garak (for example, `nvidia/nemotron-3.5-lightning-30b-a3b`). |
+| `options` | A nested dict whose top-level key is the generator namespace (`nim`, `openai`, `rest`, ...). Contents are passed through to garak unchanged, with one exception: the [`nhx_uri_spec`](/documentation/vulnerability-scanning/targets/inference-gateway) sentinel is resolved to a concrete `uri` at run time. |
+| `description` | Optional free-form description shown in listings. |
+
+See [Target Schema](/documentation/vulnerability-scanning/targets/schema) for the full field reference.
+
+## Common Target Types
+
+### NIM via Inference Gateway
+
+Audit a NIM (or any OpenAI-compatible chat endpoint) routed through a NeMo Helix provider:
+
+```python
+# List providers registered in your deployment and pick one.
+providers = client.inference.providers.list(workspace="default")
+for provider in providers.data:
+    print(provider.name, provider.host_url)
+```
+
+Use a `provider` name from this output in the target below. The model identifier format depends on the provider — check the provider's API documentation or served-model list if unsure.
+
+```python
+target = client.garak.targets.create(
+    workspace="default",
+    name="nemotron-3.5-lightning-30b",
+    type="nim.NVOpenAIChat",
+    model="nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    options={
+        "nim": {
+            "max_tokens": 1024,
+            "nhx_uri_spec": {
+                "inference_gateway": {
+                    "workspace": "default",
+                    "provider": "nvidia-inference-api",
+                },
+            },
+        },
+    },
+)
+```
+
+The `nhx_uri_spec` block resolves to a concrete `uri` at run time. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details.
+
+### OpenAI-compatible Endpoint
+
+For a vanilla OpenAI-compatible endpoint routed through a provider:
+
+```python
+target = client.garak.targets.create(
+    workspace="default",
+    name="gpt-4o-audit",
+    type="openai.OpenAIGenerator",
+    model="gpt-4o",
+    options={
+        "openai": {
+            "max_tokens": 1024,
+            "seed": 42,
+            "nhx_uri_spec": {
+                "inference_gateway": {
+                    "workspace": "default",
+                    "provider": "openai-provider",
+                },
+            },
+        },
+    },
+)
+```
+
+### Blank Target (Smoke Test)
+
+`test.Blank` returns the empty string for every request — useful for verifying that an audit configuration is well-formed without making network calls:
+
+```python
+target = client.garak.targets.create(
+    workspace="default",
+    name="smoke",
+    type="test.Blank",
+    model="ignored",
+)
+```
+
+`test.Blank` ignores `model`, but the field is still required by the schema.
+
+## List Targets
+
+```python
+listing = client.garak.targets.list(workspace="default")
+for entry in listing["data"]:
+    print(entry["name"], entry["type"], entry["model"])
+```
+
+`list()` returns the standard envelope (`data`, `pagination`, `sort`); pass `page`, `page_size`, and `sort` keyword arguments for pagination.
+
+## Retrieve a Target
+
+```python
+target = client.garak.targets.get(workspace="default", name="nemotron-3.5-lightning-30b")
+```
+
+## Update a Target
+
+`update()` replaces every field — pass the fields you want to keep alongside the ones you are changing.
+
+```python
+updated = client.garak.targets.update(
+    workspace="default",
+    name="nemotron-3.5-lightning-30b",
+    type="nim.NVOpenAIChat",
+    model="nvidia/meta/llama-3.3-70b-instruct",
+    options={
+        "nim": {
+            "max_tokens": 2048,
+            "nhx_uri_spec": {
+                "inference_gateway": {"workspace": "default", "provider": "nvidia-inference-api"},
+            },
+        },
+    },
+)
+```
+
+## Delete a Target
+
+```python
+client.garak.targets.delete(workspace="default", name="nemotron-3.5-lightning-30b")
+```

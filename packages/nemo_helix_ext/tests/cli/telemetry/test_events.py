@@ -44,9 +44,9 @@ class TestOnboardingStepEvent:
 
 class TestJobRunEvent:
     def test_token_defaults_are_minus_one(self):
-        e = JobRunEvent(job_type="auditor.audit", task_status=TaskStatusEnum.ERROR, duration_sec=10.0)
+        e = JobRunEvent(job_type="garak.audit", task_status=TaskStatusEnum.ERROR, duration_sec=10.0)
         d = e.model_dump(by_alias=True, mode="json")
-        assert d["jobType"] == "auditor.audit"
+        assert d["jobType"] == "garak.audit"
         assert d["inputTokens"] == -1
         assert d["outputTokens"] == -1
         assert d["model"] == "undefined"

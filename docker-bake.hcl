@@ -320,10 +320,10 @@ function "get_platforms" {
 
 # Semantic groups for parallel CI builds
 
-# Auditor images
-group "docker-auditor" {
+# Garak images
+group "docker-garak" {
   targets = [
-    "nhx-auditor-tasks-docker",
+    "nhx-garak-tasks-docker",
   ]
 }
 
@@ -336,7 +336,7 @@ group "all-multi-platform" {
 group "docker-multi-platform" {
   targets = [
     "docker-cpu",
-    "nhx-auditor-tasks-docker",
+    "nhx-garak-tasks-docker",
   ]
 }
 
@@ -364,7 +364,7 @@ group "docker" {
   targets = [
     "docker-cpu",
     "docker-gpu",
-    "docker-auditor",
+    "docker-garak",
   ]
 }
 
@@ -1270,21 +1270,21 @@ target "nhx-guardrails-callout-mock-llm" {
   platforms  = get_platforms()
 }
 
-# Auditor
-target "nhx-auditor-tasks-docker" {
+# Garak
+target "nhx-garak-tasks-docker" {
   target  = "release"
   context = "."
   contexts = {
     root-lib-source-artifacts = "target:root-lib-source-artifacts"
     root-busybox              = "target:root-busybox"
   }
-  dockerfile = "docker/Dockerfile.nhx-auditor-tasks"
+  dockerfile = "docker/Dockerfile.nhx-garak-tasks"
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nhx-auditor-tasks")
-  cache-from = maybe_registry_cache_from("nhx-auditor-tasks")
-  tags       = sha_and_maybe_latest_tags("nhx-auditor-tasks")
+  cache-to   = maybe_registry_cache_to("nhx-garak-tasks")
+  cache-from = maybe_registry_cache_from("nhx-garak-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-garak-tasks")
   output     = image_output()
   platforms  = get_platforms()
 }

@@ -75,13 +75,13 @@ jobs:
         ttl_seconds_before_active: 60
         ttl_seconds_active: 3600
         ttl_seconds_after_finished: 300
-    # Auditor jobs always run as Docker containers (nhx-auditor-tasks image). Using a
-    # dedicated profile "auditor" avoids the cpu→subprocess translation that the
-    # subprocess/default entry above enables for profile "default". The `auditor:`
+    # Garak jobs always run as Docker containers (nhx-garak-tasks image). Using a
+    # dedicated profile "garak" avoids the cpu→subprocess translation that the
+    # subprocess/default entry above enables for profile "default". The `garak:`
     # plugin config block below points AuditJob at this profile instead of the
     # (locally subprocess-diverted) default.
     - provider: cpu
-      profile: auditor
+      profile: garak
       backend: docker
       config:
         launcher_tool_path: ./services/core/jobs/jobs-launcher/jobs-launcher
@@ -133,12 +133,12 @@ safe_synthesizer: {}
 data_designer:
   job_executor_profile: gpu
 
-# Audit jobs need real Docker containers (nhx-auditor-tasks image with garak). cpu/default is
-# diverted to the subprocess backend above for local dev, so point auditor jobs at the
-# dedicated cpu/auditor Docker profile registered under jobs.executors instead. Not needed
+# Audit jobs need real Docker containers (nhx-garak-tasks image with garak). cpu/default is
+# diverted to the subprocess backend above for local dev, so point garak jobs at the
+# dedicated cpu/garak Docker profile registered under jobs.executors instead. Not needed
 # on Kubernetes/CI, where cpu/default already resolves to a real container backend.
-auditor:
-  job_executor_profile: auditor
+garak:
+  job_executor_profile: garak
 
 deployments:
   executors:

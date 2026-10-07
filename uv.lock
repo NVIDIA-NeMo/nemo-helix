@@ -29,13 +29,13 @@ members = [
     "nemo-agent-optimization-plugin",
     "nemo-agents-plugin",
     "nemo-anonymizer-plugin",
-    "nemo-auditor-plugin",
     "nemo-automodel-plugin",
     "nemo-customizer-plugin",
     "nemo-data-designer-plugin",
     "nemo-deployments-plugin",
     "nemo-evaluator-plugin",
     "nemo-evaluator-sdk",
+    "nemo-garak-plugin",
     "nemo-guardrails-plugin",
     "nemo-helix",
     "nemo-helix-ext",
@@ -4362,45 +4362,6 @@ requires-dist = [
 provides-extras = ["test"]
 
 [[package]]
-name = "nemo-auditor-plugin"
-version = "0.0.0"
-source = { editable = "plugins/nemo-auditor" }
-dependencies = [
-    { name = "garak-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-helix", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "pytest-asyncio", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "ruff", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "garak-api", editable = "packages/garak_api" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "nemo-helix", editable = "packages/nemo_helix" },
-    { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "pydantic", specifier = ">=2.10.6" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "typer", specifier = ">=0.20.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "pytest-asyncio", specifier = ">=0.25.3" },
-    { name = "ruff", specifier = ">=0.11.8" },
-]
-
-[[package]]
 name = "nemo-automodel-plugin"
 version = "0.0.0"
 source = { editable = "plugins/nemo-automodel" }
@@ -4883,6 +4844,45 @@ streaming = [
 ]
 
 [[package]]
+name = "nemo-garak-plugin"
+version = "0.0.0"
+source = { editable = "plugins/nemo-garak" }
+dependencies = [
+    { name = "garak-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-helix", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pytest-asyncio", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "ruff", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "garak-api", editable = "packages/garak_api" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "nemo-helix", editable = "packages/nemo_helix" },
+    { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "pydantic", specifier = ">=2.10.6" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "typer", specifier = ">=0.20.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "pytest-asyncio", specifier = ">=0.25.3" },
+    { name = "ruff", specifier = ">=0.11.8" },
+]
+
+[[package]]
 name = "nemo-guardrails-plugin"
 version = "0.0.0"
 source = { editable = "plugins/nemo-guardrails" }
@@ -4986,7 +4986,6 @@ all = [
     { name = "nemo-agent-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-agents-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-anonymizer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-deployments-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-evaluator-sdk", extra = ["harbor"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric", extra = ["relay", "streaming"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4996,6 +4995,7 @@ all = [
     { name = "nemo-fabric-adapters-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-relay", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-safe-synthesizer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5050,13 +5050,6 @@ all = [
     { name = "uvicorn", extra = ["standard"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "wasmtime", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "yara-python", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-auditor-service = [
-    { name = "aiohttp", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "requests", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "xdg-base-dirs", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 auth-service = [
     { name = "fastapi", extra = ["standard"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5161,6 +5154,13 @@ filesets = [
     { name = "anyio", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "fsspec", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+garak-service = [
+    { name = "aiohttp", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "requests", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "xdg-base-dirs", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 guardrails-service = [
     { name = "alembic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5378,14 +5378,6 @@ nemo-anonymizer-plugin = [
     { name = "pandas", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-nemo-auditor-plugin = [
-    { name = "garak-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
 nemo-automodel-plugin = [
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-automodel", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5443,6 +5435,14 @@ nemo-evaluator-sdk = [
     { name = "ragas", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "rouge-score", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "sacrebleu", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+nemo-garak-plugin = [
+    { name = "garak-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 nemo-guardrails-plugin = [
     { name = "langchain", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5583,7 +5583,7 @@ nhx-customization-common = [
     { name = "tenacity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 platform-seed-service = [
-    { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-auth", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-guardrails", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5715,7 +5715,6 @@ services = [
     { name = "nemo-agent-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-agents-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-anonymizer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-deployments-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-evaluator-sdk", extra = ["harbor"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric", extra = ["relay", "streaming"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5725,6 +5724,7 @@ services = [
     { name = "nemo-fabric-adapters-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-relay", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-safe-synthesizer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5806,9 +5806,9 @@ requires-dist = [
     { name = "aiofiles", marker = "extra == 'nhx-common'", specifier = ">=24.1.0" },
     { name = "aiofiles", marker = "extra == 'services'", specifier = ">=24.1.0" },
     { name = "aiohttp", marker = "extra == 'all'", specifier = ">=3.14.1" },
-    { name = "aiohttp", marker = "extra == 'auditor-service'", specifier = ">=3.14.1" },
     { name = "aiohttp", marker = "extra == 'core-service'", specifier = ">=3.14.1" },
     { name = "aiohttp", marker = "extra == 'files-service'", specifier = ">=3.14.1" },
+    { name = "aiohttp", marker = "extra == 'garak-service'", specifier = ">=3.14.1" },
     { name = "aiohttp", marker = "extra == 'services'", specifier = ">=3.14.1" },
     { name = "aiohttp", extras = ["speedups"], marker = "extra == 'all'", specifier = ">=3.14.1" },
     { name = "aiohttp", extras = ["speedups"], marker = "extra == 'core-service'", specifier = ">=3.14.1" },
@@ -5961,7 +5961,7 @@ requires-dist = [
     { name = "fsspec", marker = "extra == 'plugins'", specifier = ">=2024.10.0" },
     { name = "fsspec", marker = "extra == 'services'", specifier = ">=2024.10.0" },
     { name = "garak-api", marker = "extra == 'all'", editable = "packages/garak_api" },
-    { name = "garak-api", marker = "extra == 'nemo-auditor-plugin'", editable = "packages/garak_api" },
+    { name = "garak-api", marker = "extra == 'nemo-garak-plugin'", editable = "packages/garak_api" },
     { name = "garak-api", marker = "extra == 'plugins'", editable = "packages/garak_api" },
     { name = "garak-api", marker = "extra == 'services'", editable = "packages/garak_api" },
     { name = "greenlet", marker = "extra == 'all'", specifier = ">=3.0.0" },
@@ -5979,11 +5979,11 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.2" },
-    { name = "httpx", marker = "extra == 'auditor-service'", specifier = ">=0.28.1,<1.0.0" },
     { name = "httpx", marker = "extra == 'auth-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'automodel-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'core-service'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'core-service'", specifier = ">=0.27.0" },
+    { name = "httpx", marker = "extra == 'garak-service'", specifier = ">=0.28.1,<1.0.0" },
     { name = "httpx", marker = "extra == 'guardrails-service'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'harbor'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'jobs-service'", specifier = ">=0.23.0,<1" },
@@ -5992,10 +5992,10 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-anonymizer-plugin'", specifier = ">=0.27" },
-    { name = "httpx", marker = "extra == 'nemo-auditor-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-data-designer-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.27.0,<1" },
+    { name = "httpx", marker = "extra == 'nemo-garak-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-insights-plugin'" },
     { name = "httpx", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.27.2" },
@@ -6107,9 +6107,6 @@ requires-dist = [
     { name = "nemo-anonymizer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.4.0" },
     { name = "nemo-anonymizer", marker = "extra == 'plugins'", specifier = "==0.4.0" },
     { name = "nemo-anonymizer", marker = "extra == 'services'", specifier = "==0.4.0" },
-    { name = "nemo-auditor-plugin", marker = "extra == 'all'", editable = "plugins/nemo-auditor" },
-    { name = "nemo-auditor-plugin", marker = "extra == 'platform-seed-service'", editable = "plugins/nemo-auditor" },
-    { name = "nemo-auditor-plugin", marker = "extra == 'services'", editable = "plugins/nemo-auditor" },
     { name = "nemo-deployments-plugin", marker = "extra == 'all'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin-claude'", editable = "plugins/nemo-deployments" },
@@ -6173,6 +6170,9 @@ requires-dist = [
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-garak-plugin", marker = "extra == 'all'", editable = "plugins/nemo-garak" },
+    { name = "nemo-garak-plugin", marker = "extra == 'platform-seed-service'", editable = "plugins/nemo-garak" },
+    { name = "nemo-garak-plugin", marker = "extra == 'services'", editable = "plugins/nemo-garak" },
     { name = "nemo-helix-ext", editable = "packages/nemo_helix_ext" },
     { name = "nemo-helix-ext", marker = "extra == 'nhx-common'", editable = "packages/nemo_helix_ext" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
@@ -6191,12 +6191,12 @@ requires-dist = [
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-agents-plugin-codex'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-agents-plugin-deepagents'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-anonymizer-plugin'", editable = "packages/nemo_helix_plugin" },
-    { name = "nemo-helix-plugin", marker = "extra == 'nemo-auditor-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-automodel-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-customizer-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-data-designer-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-deployments-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-evaluator-plugin'", editable = "packages/nemo_helix_plugin" },
+    { name = "nemo-helix-plugin", marker = "extra == 'nemo-garak-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-guardrails-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-helix-ext'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-insights-plugin'", editable = "packages/nemo_helix_plugin" },
@@ -6439,12 +6439,12 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'jobs-service'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'models-service'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-agent-optimization-plugin'", specifier = ">=2.12.0" },
-    { name = "pydantic", marker = "extra == 'nemo-auditor-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-automodel-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-customizer-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.10.6" },
+    { name = "pydantic", marker = "extra == 'nemo-garak-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-helix-ext'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-insights-plugin'", specifier = ">=2.12.0" },
@@ -6520,11 +6520,11 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0.0" },
     { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0.3" },
-    { name = "pyyaml", marker = "extra == 'auditor-service'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'auth-service'", specifier = ">=6.0.0" },
     { name = "pyyaml", marker = "extra == 'core-service'", specifier = ">=6.0.0" },
     { name = "pyyaml", marker = "extra == 'core-service'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'files-service'", specifier = ">=6.0.2" },
+    { name = "pyyaml", marker = "extra == 'garak-service'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'inference-gateway-service'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'jobs-service'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'models-service'", specifier = ">=6.0.2" },
@@ -6533,8 +6533,8 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'nemo-anonymizer-plugin'", specifier = ">=6.0.2" },
-    { name = "pyyaml", marker = "extra == 'nemo-auditor-plugin'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'nemo-garak-plugin'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-helix-ext'", specifier = ">=6.0.0" },
     { name = "pyyaml", marker = "extra == 'nemo-helix-plugin'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-insights-plugin'", specifier = ">=6.0.3" },
@@ -6549,7 +6549,7 @@ requires-dist = [
     { name = "ragas", marker = "extra == 'harbor'", specifier = "==0.4.3" },
     { name = "ragas", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.4.3" },
     { name = "requests", marker = "extra == 'all'", specifier = ">=2.31.0" },
-    { name = "requests", marker = "extra == 'auditor-service'", specifier = ">=2.32.3,<3.0.0" },
+    { name = "requests", marker = "extra == 'garak-service'", specifier = ">=2.32.3,<3.0.0" },
     { name = "requests", marker = "extra == 'guardrails-service'", specifier = ">=2.31.0" },
     { name = "requests", marker = "extra == 'nemo-helix-ext'", specifier = ">=2.31.0" },
     { name = "requests", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=2.31.0" },
@@ -6600,10 +6600,10 @@ requires-dist = [
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.20.0" },
     { name = "typer", marker = "extra == 'nemo-agent-optimization-plugin'", specifier = ">=0.20.0" },
-    { name = "typer", marker = "extra == 'nemo-auditor-plugin'", specifier = ">=0.20.0" },
     { name = "typer", marker = "extra == 'nemo-automodel-plugin'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'nemo-customizer-plugin'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'nemo-evaluator-plugin'", specifier = ">=0.20.0" },
+    { name = "typer", marker = "extra == 'nemo-garak-plugin'", specifier = ">=0.20.0" },
     { name = "typer", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.20.0" },
     { name = "typer", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.20.0,<0.26" },
     { name = "typer", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.20.0" },
@@ -6659,12 +6659,12 @@ requires-dist = [
     { name = "wasmtime", marker = "extra == 'auth-service'", specifier = ">=20.0.0" },
     { name = "wasmtime", marker = "extra == 'core-service'", specifier = ">=20.0.0" },
     { name = "wasmtime", marker = "extra == 'services'", specifier = ">=20.0.0" },
-    { name = "xdg-base-dirs", marker = "extra == 'auditor-service'", specifier = ">=6.0.1" },
+    { name = "xdg-base-dirs", marker = "extra == 'garak-service'", specifier = ">=6.0.1" },
     { name = "yara-python", marker = "extra == 'all'", specifier = "==4.5.1" },
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.1" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.1" },
 ]
-provides-extras = ["all", "auditor-service", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
+provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
 
 [[package]]
 name = "nemo-helix-ext"
@@ -7385,12 +7385,12 @@ dependencies = [
 agents-deepagents-e2e-services = [
     { name = "nemo-agents-plugin", extra = ["deepagents"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-anonymizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-automodel-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-customizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-deployments-plugin", extra = ["docker", "k8s", "openshell"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-evaluator-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-guardrails-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix", extra = ["services"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7418,12 +7418,12 @@ agents-deepagents-e2e-services = [
 core-services = [
     { name = "nemo-agents-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-anonymizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-automodel-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-customizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-deployments-plugin", extra = ["docker", "k8s"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-evaluator-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-guardrails-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix", extra = ["services"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7524,12 +7524,12 @@ dev = [
 enabled-plugins = [
     { name = "nemo-agents-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-anonymizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-automodel-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-customizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-deployments-plugin", extra = ["docker", "k8s"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-evaluator-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-guardrails-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-insights-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7541,12 +7541,12 @@ enabled-plugins = [
 functional-services = [
     { name = "nemo-agents-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-anonymizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-automodel-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-customizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-deployments-plugin", extra = ["docker", "k8s", "openshell"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-evaluator-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-guardrails-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix", extra = ["services"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7643,13 +7643,13 @@ agents-deepagents-e2e-services = [
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-agents-plugin", extras = ["deepagents"], editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
-    { name = "nemo-auditor-plugin", editable = "plugins/nemo-auditor" },
     { name = "nemo-automodel-plugin", editable = "plugins/nemo-automodel" },
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
     { name = "nemo-deployments-plugin", extras = ["docker", "k8s"], editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", extras = ["openshell"], editable = "plugins/nemo-deployments" },
     { name = "nemo-evaluator-plugin", editable = "plugins/nemo-evaluator" },
+    { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
@@ -7678,12 +7678,12 @@ agents-deepagents-e2e-services = [
 core-services = [
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
-    { name = "nemo-auditor-plugin", editable = "plugins/nemo-auditor" },
     { name = "nemo-automodel-plugin", editable = "plugins/nemo-automodel" },
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
     { name = "nemo-deployments-plugin", extras = ["docker", "k8s"], editable = "plugins/nemo-deployments" },
     { name = "nemo-evaluator-plugin", editable = "plugins/nemo-evaluator" },
+    { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
@@ -7787,12 +7787,12 @@ dev = [
 enabled-plugins = [
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
-    { name = "nemo-auditor-plugin", editable = "plugins/nemo-auditor" },
     { name = "nemo-automodel-plugin", editable = "plugins/nemo-automodel" },
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
     { name = "nemo-deployments-plugin", extras = ["docker", "k8s"], editable = "plugins/nemo-deployments" },
     { name = "nemo-evaluator-plugin", editable = "plugins/nemo-evaluator" },
+    { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
     { name = "nemo-insights-plugin", editable = "plugins/nemo-insights" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
@@ -7804,13 +7804,13 @@ enabled-plugins = [
 functional-services = [
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
-    { name = "nemo-auditor-plugin", editable = "plugins/nemo-auditor" },
     { name = "nemo-automodel-plugin", editable = "plugins/nemo-automodel" },
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
     { name = "nemo-deployments-plugin", extras = ["docker", "k8s"], editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", extras = ["openshell"], editable = "plugins/nemo-deployments" },
     { name = "nemo-evaluator-plugin", editable = "plugins/nemo-evaluator" },
+    { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
@@ -8730,7 +8730,7 @@ name = "nhx-platform-seed"
 version = "0.0.1"
 source = { editable = "services/platform-seed" }
 dependencies = [
-    { name = "nemo-auditor-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-auth", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-guardrails", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -8745,7 +8745,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "nemo-auditor-plugin", editable = "plugins/nemo-auditor" },
+    { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nhx-auth", editable = "services/core/auth" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-guardrails", editable = "services/guardrails" },

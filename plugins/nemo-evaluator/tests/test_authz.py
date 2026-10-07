@@ -23,7 +23,7 @@ def test_evaluator_authz_derivation_has_no_problems() -> None:
         "evaluator.hello.read",
     } <= set(contrib.permissions)
 
-    # Pin the two hand-written routes (mirrors the auditor test's healthz spot-check).
+    # Pin the two hand-written routes (mirrors the garak test's healthz spot-check).
     assert contrib.endpoints["/apis/evaluator/v1/healthz"]["get"].permissions == []
     assert contrib.endpoints["/apis/evaluator/v1/hello/{name}"]["get"].permissions == ["evaluator.hello.read"]
 

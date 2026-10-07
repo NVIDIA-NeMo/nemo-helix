@@ -15,7 +15,7 @@
     #   nhx-files
 -e ./packages/garak_api ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
-    #   nemo-auditor-plugin
+    #   nemo-garak-plugin
     #   nemo-helix
     #   nemohelix
 -e ./packages/nemo_evaluator_sdk ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -28,7 +28,7 @@
     #   nemo-agent-optimization-plugin
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
-    #   nemo-auditor-plugin
+    #   nemo-garak-plugin
     #   nemo-guardrails-plugin
     #   nemo-insights-plugin
     #   nemo-optimization-plugin
@@ -47,7 +47,7 @@
     #   nemo-agent-optimization-plugin
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
-    #   nemo-auditor-plugin
+    #   nemo-garak-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
     #   nemo-data-designer-plugin
@@ -128,7 +128,7 @@
     #   nemo-agents-plugin
     #   nemo-helix
 -e ./plugins/nemo-anonymizer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
--e ./plugins/nemo-auditor ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+-e ./plugins/nemo-garak ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-helix
     #   nhx-platform-seed
@@ -1267,7 +1267,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-agents-plugin
     #   nemo-anonymizer
     #   nemo-anonymizer-plugin
-    #   nemo-auditor-plugin
+    #   nemo-garak-plugin
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
     #   nemo-evaluator-sdk
@@ -3014,7 +3014,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   mlflow-skinny
     #   nemo-agent-optimization-plugin
     #   nemo-anonymizer
-    #   nemo-auditor-plugin
+    #   nemo-garak-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
     #   nemo-deployments-plugin
@@ -3281,7 +3281,7 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   mlx-lm
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
-    #   nemo-auditor-plugin
+    #   nemo-garak-plugin
     #   nemo-deployments-plugin
     #   nemo-helix
     #   nemo-helix-ext
@@ -4018,7 +4018,7 @@ typer==0.25.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   harbor
     #   instructor
     #   nemo-agent-optimization-plugin
-    #   nemo-auditor-plugin
+    #   nemo-garak-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
     #   nemo-evaluator-plugin

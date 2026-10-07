@@ -12,7 +12,7 @@ Two decorators ride on every hand-written handler and they are orthogonal:
 
 Decorator order: `@router.<method>` is the **outermost** (top) decorator; `@scope.read`/`.write` and `@path_rule` sit under it, and their relative order does not matter (both only stamp attributes on the function and return it unchanged).
 
-Permission ids follow the grammar `<service>.<resource>.<action>`, and `<service>` MUST equal `NemoService.name` — that namespace fence is fail-closed, so a mis-namespaced id takes the whole plugin down. Always reference a `PermissionSet` member (e.g. `WidgetPerms.CREATE`), never a bare string — a string is a `TypeError` at import.
+Permission ids follow the grammar `<service>.<resource>.<action>`, and `<service>` MUST equal `NemoService.name` — that namespace fence is fail-closed, so a mis-namespaced id takes the whole plugin down. (A renamed service keeping legacy ids sets `permission_namespace` to the legacy segment; new plugins never need it.) Always reference a `PermissionSet` member (e.g. `WidgetPerms.CREATE`), never a bare string — a string is a `TypeError` at import.
 
 **Contents:**
 - [Hand-written CRUD router](#hand-written-crud-router) — `_perms.py` + `authz.py` + `@scope` / `@path_rule` per route

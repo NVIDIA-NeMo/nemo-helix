@@ -175,7 +175,7 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
 
     assert error is None
     assert {skill["name"] for skill in skills} == {
-        "auditor",
+        "garak",
         "benchmark-execution",
         "entities",
         "evaluator",
@@ -224,7 +224,7 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
     skills, error = _list_skills_with_errors(backend, skill_sources[0])
     assert error is None
     assert {skill["name"] for skill in skills} == {
-        "auditor",
+        "garak",
         "benchmark-execution",
         "entities",
         "evaluator",
@@ -1402,7 +1402,7 @@ _JOB_STATUS = {
     [
         ("evaluator", "/apis/evaluator/v2/workspaces/default/evaluate/jobs/job-1/status", _JOB_STATUS),
         ("data_designer", "/apis/data-designer/v2/workspaces/default/jobs/create/job-1/status", _JOB_STATUS),
-        ("auditor", "/apis/auditor/v2/workspaces/default/jobs/audit/job-1", {"name": "job-1", "status": "completed"}),
+        ("garak", "/apis/garak/v2/workspaces/default/jobs/audit/job-1", {"name": "job-1", "status": "completed"}),
         ("customization.automodel", "/apis/jobs/v2/workspaces/default/jobs/job-1/status", _JOB_STATUS),
     ],
 )

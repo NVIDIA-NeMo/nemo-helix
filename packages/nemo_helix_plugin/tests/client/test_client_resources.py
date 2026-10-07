@@ -63,12 +63,12 @@ def test_inference_resources_transport_matches_flavour(client_factory, transport
 def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
     from nemo_helix_plugin.agent_hardener.client import AgentHardenerClient
     from nemo_helix_plugin.agents.client import AgentsClient
-    from nemo_helix_plugin.auditor.client import AuditorClient
     from nemo_helix_plugin.auth.access_keys.client import AccessKeysClient
     from nemo_helix_plugin.auth.client import AuthenticationClient
     from nemo_helix_plugin.data_designer.client import DataDesignerClient
     from nemo_helix_plugin.evaluator.client import EvaluatorClient
     from nemo_helix_plugin.files.client import FilesClient
+    from nemo_helix_plugin.garak.client import GarakClient
     from nemo_helix_plugin.guardrail.client import GuardrailClient
     from nemo_helix_plugin.iam.client import IAMClient
     from nemo_helix_plugin.jobs.client import JobsClient
@@ -88,7 +88,7 @@ def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
         ("access_keys", AccessKeysClient),
         ("iam", IAMClient),
         ("agents", AgentsClient),
-        ("auditor", AuditorClient),
+        ("garak", GarakClient),
         ("guardrail", GuardrailClient),
         ("evaluator", EvaluatorClient),
         ("projects", ProjectsClient),
@@ -105,12 +105,12 @@ def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
 def test_convenience_properties_return_async_clients_for_async_client() -> None:
     from nemo_helix_plugin.agent_hardener.client import AsyncAgentHardenerClient
     from nemo_helix_plugin.agents.client import AsyncAgentsClient
-    from nemo_helix_plugin.auditor.client import AsyncAuditorClient
     from nemo_helix_plugin.auth.access_keys.client import AsyncAccessKeysClient
     from nemo_helix_plugin.auth.client import AsyncAuthenticationClient
     from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient
     from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient
     from nemo_helix_plugin.files.client import AsyncFilesClient
+    from nemo_helix_plugin.garak.client import AsyncGarakClient
     from nemo_helix_plugin.guardrail.client import AsyncGuardrailClient
     from nemo_helix_plugin.iam.client import AsyncIAMClient
     from nemo_helix_plugin.jobs.client import AsyncJobsClient
@@ -130,7 +130,7 @@ def test_convenience_properties_return_async_clients_for_async_client() -> None:
         ("access_keys", AsyncAccessKeysClient),
         ("iam", AsyncIAMClient),
         ("agents", AsyncAgentsClient),
-        ("auditor", AsyncAuditorClient),
+        ("garak", AsyncGarakClient),
         ("guardrail", AsyncGuardrailClient),
         ("evaluator", AsyncEvaluatorClient),
         ("projects", AsyncProjectsClient),

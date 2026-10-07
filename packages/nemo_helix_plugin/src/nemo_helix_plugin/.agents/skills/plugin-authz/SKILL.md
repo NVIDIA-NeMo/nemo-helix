@@ -48,7 +48,7 @@ async def get_item(workspace: str, name: str) -> Item: ...
 
 ## Permission ids — `PermissionSet` + `perm()`
 
-Id grammar is `<service>.<resource>.<action>`, joined from parts. The `<service>` (first segment) MUST equal `NemoService.name` — that namespace fence is enforced, or the whole plugin fails closed. Segments split on dots only; hyphens are fine *within* a segment, so a hyphenated name like `my-plugin` yields `my-plugin.widgets.create` — three segments (`my-plugin` / `widgets` / `create`), not four.
+Id grammar is `<service>.<resource>.<action>`, joined from parts. The `<service>` (first segment) MUST equal `NemoService.name` — that namespace fence is enforced, or the whole plugin fails closed. The one exception is a renamed service that must keep its legacy permission ids: set `NemoService.permission_namespace` to the legacy first segment and the fence checks that instead. Leave it `None` for every new plugin. Segments split on dots only; hyphens are fine *within* a segment, so a hyphenated name like `my-plugin` yields `my-plugin.widgets.create` — three segments (`my-plugin` / `widgets` / `create`), not four.
 
 ```python
 class ItemPerms(PermissionSet, namespace="myplugin.items"):

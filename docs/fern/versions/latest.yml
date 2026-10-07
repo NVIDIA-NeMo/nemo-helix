@@ -348,29 +348,29 @@ navigation:
           - page: Observability
             path: ../../guardrails/observability.mdx
       - section: Vulnerability Scanning
-        path: ../../auditor/index.mdx
+        path: ../../garak/index.mdx
         contents:
           - section: Tutorials
-            path: ../../auditor/tutorials/index.mdx
+            path: ../../garak/tutorials/index.mdx
             contents:
               - page: Run an Audit Locally
-                path: ../../auditor/tutorials/run-audit-locally.mdx
+                path: ../../garak/tutorials/run-audit-locally.mdx
           - page: SDK Resources
-            path: ../../auditor/sdk-resources.mdx
+            path: ../../garak/sdk-resources.mdx
           - section: Configurations
-            path: ../../auditor/configs/index.mdx
+            path: ../../garak/configs/index.mdx
             contents:
               - page: Selecting Probes
-                path: ../../auditor/configs/probes.mdx
+                path: ../../garak/configs/probes.mdx
               - page: Schema
-                path: ../../auditor/configs/schema.mdx
+                path: ../../garak/configs/schema.mdx
           - section: Targets
-            path: ../../auditor/targets/index.mdx
+            path: ../../garak/targets/index.mdx
             contents:
               - page: Inference Gateway
-                path: ../../auditor/targets/inference-gateway.mdx
+                path: ../../garak/targets/inference-gateway.mdx
               - page: Schema
-                path: ../../auditor/targets/schema.mdx
+                path: ../../garak/targets/schema.mdx
       - section: Studio
         path: ../../studio/index.mdx
         contents:

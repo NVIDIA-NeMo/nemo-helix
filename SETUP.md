@@ -228,7 +228,7 @@ The platform is running. Don't leave the user with "you're good to go" — offer
 | User says… | Goal | Follow-up skill |
 | --- | --- | --- |
 | "Optimize my agent", "my agent is too slow / using too many tokens" | Cost / latency optimization via routing or skill tuning | `nemo-agents-optimize` |
-| "Secure my agent", "my agent is producing dangerous output" | Content safety / red-team / leak audit | `nemo-agents-secure`, `nemo-guardrails`, `nemo-auditor` |
+| "Secure my agent", "my agent is producing dangerous output" | Content safety / red-team / leak audit | `nemo-agents-secure`, `nemo-guardrails`, `nemo-garak` |
 | "Can my agent use multiple models?", "split traffic across N backends" | Multi-backend routing via Switchyard | (inline; see `inference` skill) |
 | "Evaluate my model / agent on \<benchmark\>" | Eval against a dataset / harness | `nemo-evaluator`, `evaluator-plugin` |
 | "Generate synthetic data", "I have sensitive data and need…" | Data generation / anonymization / safe synthesis | `data-designer`, `nemo-anonymizer`, `nemo-safe-synthesizer` |
@@ -255,7 +255,7 @@ Plugin-provided (appear once the plugin is installed):
 - **`nemo-agents-optimize`** — optimize a deployed agent (routing splits, skill tuning, prompt tuning, evals against newer models). From `plugins/nemo-agents`.
 - **`nemo-agents-secure`** — audit a deployed agent for missing guardrails, PII exposure, leaked secrets/keys. From `plugins/nemo-agents`.
 - **`nemo-guardrails`** — guardrail config CRUD, content-safety rails, the `nemo-guardrails` middleware. From `plugins/nemo-guardrails`.
-- **`nemo-auditor`** — vulnerability scanning, audit configs/targets/jobs, red-team probes. From `plugins/nemo-auditor`.
+- **`nemo-garak`** — vulnerability scanning, audit configs/targets/jobs, red-team probes. From `plugins/nemo-garak`.
 - **`nemo-evaluator`** / **`evaluator-plugin`** — metrics, sync/async evaluations, llm-judge, benchmark jobs. From `plugins/nemo-evaluator`.
 - **`data-designer`** — synthetic dataset generation pipelines. From `plugins/nemo-data-designer`.
 - **`nemo-entities`**, **`nemo-files`**, **`nemo-secrets`**, **`nemo-auth`**, **`nemo-inference-gateway`** — CLI references for the matching services.

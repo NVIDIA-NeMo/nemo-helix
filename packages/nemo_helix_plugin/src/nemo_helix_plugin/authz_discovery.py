@@ -332,13 +332,14 @@ def _derive_service_contribution(service: NemoService) -> tuple[AuthzContributio
 
     # Pass 2: validate the catalog. A malformed permission id would 500 the bundle's
     # ``validate_static_authz_data`` if it reached the wire; a permission whose first segment
-    # isn't the service's own name is namespace squatting (it would silently widen the
+    # isn't the service's own namespace (its name, or the declared legacy
+    # ``permission_namespace``) is namespace squatting (it would silently widen the
     # Viewer/Editor role grants for another service's namespace). Either is a fail-closed
     # error: deny every route and contribute no permissions, so nothing malformed or
     # cross-namespace can reach the merged policy.
     # Role-granted permissions are registered in the catalog above, so the ownership fence below
     # covers them too: a plugin cannot grant a role a permission outside its own namespace.
-    owner = service.name
+    owner = service.permission_namespace or service.name
     malformed = sorted(pid for pid in catalog if not is_valid_permission_id(pid))
     out_of_namespace = sorted(p.id for p in catalog.values() if p.service != owner)
     if malformed:

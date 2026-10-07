@@ -1,0 +1,84 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Configuration Schema"
+description: ""
+---
+<a id="garak-configs-schema"></a>
+
+This page lists every field on `AuditConfig` and its four sub-models. Defaults match the pydantic definitions in `nemo_garak.entities`; NeMo Helix entity store validates writes against these schemas.
+
+## `AuditConfig`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | _required_ | Unique configuration name within the workspace. |
+| `workspace` | `str` | _required_ | Workspace the configuration is persisted in. |
+| `description` | `str \\| None` | `None` | Free-form description shown in listings. |
+| `system` | `AuditSystemData` | _defaults_ | Garak runtime knobs — see below. |
+| `run` | `AuditRunData` | _defaults_ | Per-probe generation settings — see below. |
+| `plugins` | `AuditPluginsData` | _defaults_ | Probe and detector selection — see below. |
+| `reporting` | `AuditReportData` | _defaults_ | Report file layout — see below. |
+
+The entity store also adds the standard `NemoEntity` fields on retrieval: `id`, `entity_type` (`"auditor_audit_config"`), `created_at`, `updated_at`, and `project`.
+
+## `AuditSystemData`
+
+Controls garak's process-level behavior.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `verbose` | `int` (0–1) | `0` | Garak verbosity level. `0` for normal output, `1` for verbose. |
+| `narrow_output` | `bool` | `False` | When `True`, garak narrows its terminal output. Useful for log scraping. |
+| `parallel_requests` | `bool` | `False` | Enable parallel request dispatch to the target. |
+| `parallel_attempts` | `bool \\| int` | `False` | Enable parallel attempts, or set an explicit attempt count. Higher values speed up audits but increase target load. |
+| `lite` | `bool` | `True` | Run only fast probe variants. Recommended for iterative development. Set to `False` to include slower, more thorough probes. |
+| `show_z` | `bool` | `False` | Show garak's z-score column in reports. |
+| `enable_experimental` | `bool` | `False` | Allow probes marked experimental to run. |
+
+`AuditSystemData` rejects unknown fields (`model_config = ConfigDict(extra="forbid")`).
+
+## `AuditRunData`
+
+Controls how each probe is executed.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `seed` | `int \\| None` | `None` | Random seed for reproducible runs. |
+| `deprefix` | `bool` | `True` | Strip prompt prefixes from responses before detection. |
+| `eval_threshold` | `float` (0–1) | `0.5` | Detector score threshold above which a response is flagged as a hit. |
+| `generations` | `int` (≥1) | `5` | Generations per probe. Lower for fast iteration; raise for statistical confidence. |
+| `probe_tags` | `str \\| None` | `None` | Comma-separated tag filter (`"owasp:llm06,payload:hallucination"`). Intersects with `plugins.probe_spec`. See [Selecting Probes](/documentation/vulnerability-scanning/configurations/selecting-probes). |
+| `user_agent` | `str` | `"garak/{version} (LLM vulnerability scanner https://garak.ai)"` | HTTP `User-Agent` garak sends. The `{version}` placeholder is substituted at runtime. |
+
+## `AuditPluginsData`
+
+Controls probe, detector, generator, buff, and harness selection.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model_type` | `str \\| None` | `None` | Garak generator type override. Normally set on the target instead. |
+| `model_name` | `str \\| None` | `None` | Garak model name override. Normally set on the target instead. |
+| `probe_spec` | `str` | `"all"` | Comma-separated probe selection. See [Selecting Probes](/documentation/vulnerability-scanning/configurations/selecting-probes). |
+| `detector_spec` | `str` | `"auto"` | Detector selection — `"auto"` lets each probe pick its detectors. |
+| `extended_detectors` | `bool` | `False` | Enable garak's extended detector set. |
+| `buff_spec` | `str \\| None` | `None` | Comma-separated buff selection (prompt mutations applied before sending). |
+| `buffs_include_original_prompt` | `bool` | `False` | When buffs are active, also send the original prompt. |
+| `buff_max` | `str \\| None` | `None` | Maximum number of buffed variants per prompt. |
+| `detectors` | `dict[str, ModuleConfig]` | `{}` | Per-detector configuration overrides. |
+| `generators` | `dict[str, ModuleConfig]` | `{}` | Per-generator configuration overrides. Normally set on the target instead. |
+| `buffs` | `dict[str, ModuleConfig]` | `{}` | Per-buff configuration overrides. |
+| `harnesses` | `dict[str, ModuleConfig]` | `{}` | Per-harness configuration overrides. |
+| `probes` | `dict[str, ModuleConfig]` | `{}` | Per-probe configuration overrides. |
+
+## `AuditReportData`
+
+Controls where reports land and how they are summarized.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `report_prefix` | `str` | `"run1"` | Filename prefix for the produced reports. `report_prefix="quick-scan"` yields `quick-scan.report.jsonl`, `quick-scan.report.html`, and `quick-scan.hitlog.jsonl`. |
+| `taxonomy` | `str \\| None` | `None` | Optional taxonomy label included in the report. |
+| `report_dir` | `str` | `"garak_runs"` | Sub-directory of `$XDG_DATA_HOME/garak/` where garak writes its raw output. The plugin then copies the produced files into the local results sink. |
+| `show_100_pass_modules` | `bool` | `True` | Include 100%-pass modules in the report summary. Set to `False` to hide them for a tighter "failures only" view. |

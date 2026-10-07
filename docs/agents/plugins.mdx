@@ -43,7 +43,7 @@ nemo services run
 | Guardrails | Add safety checks to model endpoints |
 | Data Designer | Optional synthetic-data workflows |
 | Evaluator | Optional model and agent evaluation workflows |
-| Auditor | Red-teaming against deployed agents |
+| Garak | Red-teaming against deployed agents |
 | Anonymizer | PII handling for training data |
 | Insights | Analyze agent telemetry and persist actionable insights |
 
@@ -74,7 +74,7 @@ The skills that drive the agent lifecycle are:
 | `agents-secure` | Selects a deployed agent, checks guardrail coverage, and scans recent telemetry for sensitive data. See [Add Guardrails to an Agent](/documentation/agents/add-guardrails) and [Scan Trace Data](/documentation/agents/scan-trace-data). |
 
 Plugin-owned skills cover customization, guardrails, evaluations, optimization, data
-designer, anonymizer, and auditor. They are installed with their plugin and
+designer, anonymizer, and garak. They are installed with their plugin and
 appear in `nemo skills list` once the platform restarts.
 
 Manage packaged skills with the CLI:
