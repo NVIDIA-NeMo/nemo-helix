@@ -1,56 +1,32 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Helix rename HOW-TO
+# Plugin rename tools
 
-## Reusable package and plugin renames
+## Reusable plugin renames
 
-`rename_packages.py` accepts a JSON profile with a required `package` section and
+`rename_plugins.py` accepts a JSON profile with a required `plugin` section and
 an optional `library` section. Use `library` for a companion SDK; omit it for a
-plugin with no separate library. The existing Platform-to-Helix scripts below
-remain a separate workflow. The new tool needs Git and Python 3.10 or newer and
-uses only the Python standard library.
+plugin with no separate library. The tool needs Git and Python 3.10 or newer and
+uses only the Python standard library. The existing Platform-to-Helix scripts
+below remain a separate workflow.
 
-The Evals profile implements these mappings:
-
-| Surface | Before | After |
-| --- | --- | --- |
-| Product | NeMo Evaluator | NeMo Helix Evals |
-| Plugin distribution | nemo-evaluator-plugin | nemo-evals-plugin |
-| Plugin directory | plugins/nemo-evaluator | plugins/nemo-evals |
-| Implementation module | nemo_evaluator | nemo_evals |
-| CLI and service | evaluator | evals |
-| API prefix | /apis/evaluator/ | /apis/evals/ |
-| Typed client module | nemo_helix_plugin.evaluator | nemo_helix_plugin.evals |
-| Typed client property | client.evaluator | client.evals |
-| Library distribution | nemo-evaluator-sdk | nhx-evals-sdk |
-| Library module and directory | nemo_evaluator_sdk | nhx_evals_sdk |
-
-Permission namespaces (`evaluator.*`), authorization scope, entity type names,
-stored task-kind discriminators and the three job source tags stay unchanged.
-The profile explicitly pins row-evaluation's source to `nemo-evaluator`, since
-otherwise changing the implementation module would change the derived source.
-
-Preview, apply, and verify from the repository root:
+Preview, apply, and verify a plugin rename from the repository root:
 
 ```bash
-tools/rename/rename-to-nemo-evals.sh --dry-run
-tools/rename/rename-to-nemo-evals.sh
-tools/rename/rename-to-nemo-evals.sh --verify
+uv run --frozen --no-sync python tools/rename/rename_plugins.py \
+  --profile /path/to/profile.json --dry-run
+uv run --frozen --no-sync python tools/rename/rename_plugins.py \
+  --profile /path/to/profile.json
+uv run --frozen --no-sync python tools/rename/rename_plugins.py \
+  --profile /path/to/profile.json --verify
 ```
 
 All invocations accept `--repo-dir /path/to/checkout`. Apply requires a clean
 worktree unless `--allow-dirty` is explicitly supplied. Inspect existing changes
 before using that option. Re-running apply resumes a partial rename; it does not
-stage files or commit. The wrapper resolves its profile relative to itself, so
-it can target a different checkout without copying the scripts there.
-
-For another plugin, create a profile and invoke:
-
-```bash
-uv run --frozen --no-sync python tools/rename/rename_packages.py \
-  --profile /path/to/profile.json --dry-run
-```
+stage files or commit. A plugin-specific shell wrapper can resolve its profile
+relative to itself and pass the remaining arguments to `rename_plugins.py`.
 
 Minimal profile, without a companion library:
 
@@ -58,7 +34,7 @@ Minimal profile, without a companion library:
 {
   "name": "Example plugin rename",
   "exclude": ["tools/rename/**", "tests/tools/rename/**"],
-  "package": {
+  "plugin": {
     "replacements": {
       "old_plugin": "new_plugin",
       "plugins/old-plugin": "plugins/new-plugin"
@@ -71,10 +47,25 @@ Minimal profile, without a companion library:
 }
 ```
 
+To rename a companion library, add a `library` section using the same structure:
+
+```json
+"library": {
+  "replacements": {
+    "old_plugin_sdk": "new_sdk",
+    "old-plugin-sdk": "new-sdk"
+  },
+  "paths": {
+    "packages/old_plugin_sdk/src/old_plugin_sdk": "packages/new_sdk/src/new_sdk",
+    "packages/old_plugin_sdk": "packages/new_sdk"
+  }
+}
+```
+
 Each section supports:
 
 - `replacements`: literal content mappings, applied together with longest matches
-  first. Library and package mappings share this pass, preventing a shorter
+  first. Library and plugin mappings share this pass, preventing a shorter
   plugin module name from swallowing its SDK name.
 - `paths`: repository-relative file or directory prefix mappings. The longest
   matching prefix wins. Include nested module directories explicitly; content
@@ -97,22 +88,28 @@ idempotent: `--verify` fails when another application would change any selected
 file or path, and succeeds once the configured transformations are exhausted.
 It does not prove runtime compatibility or detect names absent from the profile.
 
-After applying Evals, review the diff, regenerate lockfiles with `uv`, run
-`make update-sdk`, and validate library imports, packaging, plugin discovery,
-CLI, API routes and authorization. Generated files receive mechanical edits;
-they still need regeneration from their authoritative sources. Review service
-configuration, UI consumers and external integration references as well.
+Before applying a rename, decide which identifiers should change: product names,
+plugin distributions, modules, CLI groups, API prefixes, configuration names and
+typed clients. Treat permission namespaces, entity type names, persisted job
+sources and task-kind discriminators as separate compatibility decisions. A job
+source derived from a module name may need an explicit override if that module
+is renamed while existing jobs must retain their source.
 
-Include this limitation in the eventual MR description: existing cloudpickle
-metric bundles and compiled job specifications may reference the removed Python
-module names. This rename supplies no compatibility aliases or data migrations
-for those artifacts.
+After applying a rename, review the diff, regenerate lockfiles with `uv`, run
+`make update-sdk` when API or SDK surfaces change, and validate library imports,
+packaging, plugin discovery, CLI, API routes and authorization. Generated files
+receive mechanical edits; regenerate them from their authoritative sources.
+Review service configuration, UI consumers and external integrations as well.
 
-Run the new tool's isolated integration tests without bootstrapping the platform:
+Document compatibility limitations in the rename's MR: serialized metric bundles
+and compiled job specifications may reference removed Python modules. The generic
+tool does not supply compatibility aliases or data migrations for those artifacts.
+
+Run the tool's isolated integration tests without bootstrapping the platform:
 
 ```bash
 uv run --frozen --no-sync python -m unittest discover \
-  -s tests/tools/rename -p test_package_rename.py -v
+  -s tests/tools/rename -p test_plugin_rename.py -v
 ```
 
 ## Platform-to-Helix workflow

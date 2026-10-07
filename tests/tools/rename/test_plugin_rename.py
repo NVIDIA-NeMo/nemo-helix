@@ -13,11 +13,11 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-SCRIPT = ROOT / "tools/rename/rename_packages.py"
+SCRIPT = ROOT / "tools/rename/rename_plugins.py"
 EVALS = ROOT / "tools/rename/evals.json"
 
 
-class PackageRenameTests(unittest.TestCase):
+class PluginRenameTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -30,7 +30,7 @@ class PackageRenameTests(unittest.TestCase):
                 {
                     "name": "Example rename",
                     "exclude": [],
-                    "package": {
+                    "plugin": {
                         "replacements": {"old_plugin": "new_plugin"},
                         "paths": {"plugins/old_plugin": "plugins/new_plugin"},
                     },
@@ -60,7 +60,7 @@ class PackageRenameTests(unittest.TestCase):
             check=False,
         )
 
-    def test_package_without_library_and_repeat_apply(self) -> None:
+    def test_plugin_without_library_and_repeat_apply(self) -> None:
         self.write("plugins/old_plugin/code.py", "import old_plugin\n")
         first = self.run_rename("--allow-dirty")
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -94,7 +94,7 @@ class PackageRenameTests(unittest.TestCase):
 
     def test_two_sources_cannot_share_destination(self) -> None:
         data = json.loads(self.profile.read_text())
-        data["package"]["paths"]["plugins/other"] = "plugins/new_plugin"
+        data["plugin"]["paths"]["plugins/other"] = "plugins/new_plugin"
         self.profile.write_text(json.dumps(data))
         original = self.write("plugins/old_plugin/code.py", "old_plugin")
         self.write("plugins/other/code.py", "old_plugin")
@@ -105,7 +105,7 @@ class PackageRenameTests(unittest.TestCase):
 
     def test_unsafe_profile_path_rejected(self) -> None:
         data = json.loads(self.profile.read_text())
-        data["package"]["paths"]["plugins/old_plugin"] = "../escape"
+        data["plugin"]["paths"]["plugins/old_plugin"] = "../escape"
         self.profile.write_text(json.dumps(data))
         self.assertEqual(self.run_rename("--dry-run").returncode, 1)
 

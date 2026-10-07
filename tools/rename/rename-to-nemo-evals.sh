@@ -5,4 +5,4 @@
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONDONTWRITEBYTECODE=1
-exec python3 "$script_dir/rename_packages.py" --profile "$script_dir/evals.json" "$@"
+exec python3 "$script_dir/rename_plugins.py" --profile "$script_dir/evals.json" "$@"

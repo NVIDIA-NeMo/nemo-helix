@@ -6,7 +6,7 @@
     "MR compatibility note: old cloudpickle metric bundles and compiled jobs may reference removed Python modules; this rename provides no compatibility aliases or data migration.",
     "Review the diff, regenerate lockfiles with uv, run make update-sdk, and test SDK imports, plugin discovery, CLI, API routes and unchanged authorization before publishing. Verification checks only configured rules."
   ],
-  "package": {
+  "plugin": {
     "replacements": {
       "NeMo Evaluator Plugin": "NeMo Helix Evals Plugin",
       "NeMo Evaluator": "NeMo Helix Evals",

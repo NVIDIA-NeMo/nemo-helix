@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Preview, apply, or verify a package rename described by a JSON profile."""
+"""Preview, apply, or verify a plugin rename described by a JSON profile."""
 
 from __future__ import annotations
 
@@ -45,8 +45,8 @@ class Profile:
         replacements: dict[str, str] = {}
         paths: dict[str, str] = {}
         rules: list[Rule] = []
-        # Library is optional; plugins with no companion library need only package.
-        for section in (data["package"], data.get("library", {})):
+        # Library is optional; plugins with no companion library need only plugin.
+        for section in (data["plugin"], data.get("library", {})):
             for key, destination in (("replacements", replacements), ("paths", paths)):
                 for old, new in section.get(key, {}).items():
                     if not old or not new or old == new:
@@ -184,7 +184,7 @@ def main() -> int:
                 parent.rmdir()
             except OSError:
                 pass
-        print("Rename applied. Run the same invocation with --verify, then review and validate the changed packages.")
+        print("Rename applied. Run the same invocation with --verify, then review and validate the changed plugins.")
         return 0
     except (OSError, ValueError, KeyError, re.error) as error:
         print(str(error), file=sys.stderr)
