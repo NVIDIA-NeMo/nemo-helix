@@ -18,7 +18,7 @@ import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 import { fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { useNavigate } from 'react-router';
 
 const agentName = 'react-agent';
@@ -78,7 +78,7 @@ const mockPreviouslyPackagedAgent = () => {
         workspace,
         description: '',
         created_at: '2026-04-20T10:00:00Z',
-        config: {},
+        config: { models: { default: { model: 'nvidia/test-model' } } },
         config_format: 'nemo-agents-spec-v1',
       })
     ),
@@ -129,6 +129,47 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByRole('button', { name: 'Deploy' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Evaluation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open traces' })).not.toBeInTheDocument();
+  });
+
+  it('offers Upload instead of Deploy for an agent registered from traces (empty config)', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${agentsUrl}/:name`, () =>
+        HttpResponse.json({
+          name: agentName,
+          workspace,
+          description: '',
+          created_at: '2026-04-20T10:00:00Z',
+          config: {},
+        })
+      )
+    );
+    server.use(
+      http.get('*/apis/agents/v2/workspaces/:workspace/deployments', () =>
+        HttpResponse.json({ data: [], total: 0 })
+      )
+    );
+    renderDetail();
+
+    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
+
+    expect(await screen.findByText(/does not have a configuration/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deploy this Agent' })).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: 'Upload' })[0]!);
+
+    expect(await screen.findByDisplayValue(`${agentName}-v2`)).toBeInTheDocument();
+  });
+
+  it('does not offer Upload while the agent is still loading', async () => {
+    server.use(http.get(`${agentsUrl}/:name`, () => delay('infinite')));
+    renderDetail();
+
+    const deploy = await screen.findByRole('button', { name: 'Deploy' });
+
+    expect(deploy).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
   });
 
   it('switches to the chat tab', async () => {

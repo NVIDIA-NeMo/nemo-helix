@@ -27,19 +27,16 @@ Model field
 
 ## Prerequisites
 
+- The `curl` examples default to a local platform at `http://localhost:8080`. If your CLI context points at a remote deployment, export its URL as `NHX_BASE_URL` first, and for an authenticated deployment add `-H "Authorization: Bearer $(nemo auth token)"`. For details, refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
+
 Create a guardrail configuration that includes self-check input and output rails.
 
 ```python
-
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest, GuardrailCheckRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 config_data = {
     "prompts": [
@@ -71,6 +68,8 @@ except ConflictError:
 
 ```
 
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
 ## Check an Existing Configuration
 
 Reference a stored configuration by name.
@@ -93,7 +92,7 @@ nemo guardrail check \
 <Tab title="curl">
 
 ```bash
-curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/guardrails/v2/workspaces/default/checks" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -151,7 +150,7 @@ The checks endpoint supports the same `guardrails.options.log` diagnostics as
 guardrailed inference. Use these fields to debug scenarios where a check blocks or passes unexpectedly. For field descriptions, see [Log Options](/documentation/guardrail-models/core-concepts/running-inference#log-options).
 
 ```bash
-curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/guardrails/v2/workspaces/default/checks" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -193,7 +192,7 @@ nemo guardrail check \
 <Tab title="curl">
 
 ```bash
-curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/guardrails/v2/workspaces/default/checks" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",

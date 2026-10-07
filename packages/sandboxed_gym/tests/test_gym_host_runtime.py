@@ -639,6 +639,22 @@ def test_an_operators_own_uv_offline_setting_is_not_overwritten(tmp_path, monkey
     assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "0"
 
 
+def test_search_root_puts_the_image_gym_checkout_after_the_package(tmp_path, monkeypatch):
+    package = tmp_path / "pkg"
+    image = tmp_path / "gym"
+    package.mkdir()
+    image.mkdir()
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(image))
+    monkeypatch.setenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "/operator/root")
+
+    runtime._prepend_environment_search_root(str(package))
+
+    assert runtime.os.environ[runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY] == os.pathsep.join(
+        (str(package), str(image.resolve()), "/operator/root")
+    )
+
+
 def test_bootstrap_composes_a_wheels_package_like_native_v1(tmp_path, monkeypatch):
     # wheels-v1 and native-v1 are the same environment; only dependency install differs.
     package = _load_composition_package(
@@ -691,6 +707,7 @@ def test_bootstrap_composes_a_wheels_package_like_native_v1(tmp_path, monkeypatc
     monkeypatch.setenv(runtime.ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "true")
     monkeypatch.setenv("NHX_WORK_PATH", str(tmp_path / "work"))
     monkeypatch.setenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "/operator/root")
+    monkeypatch.setattr(runtime, "_image_gym_search_root", lambda: None)
 
     runtime.bootstrap_gym_host()
 

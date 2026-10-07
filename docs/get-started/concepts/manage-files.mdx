@@ -87,15 +87,12 @@ nemo files filesets list --workspace my-workspace
 All Python SDK examples that follow assume this client initialization:
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL") or "http://localhost:8080",
-    workspace="default",
-)
+client = NemoClient.from_config()
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 ### Creating Filesets
 
@@ -560,7 +557,7 @@ nemo files filesets create my-nemotron-personas-dataset-en_us \
 "type": "ngc",
 "org": "nvidia",
 "team": "nemotron-personas",
-"resource": "nemotron-personas-dataset-en_us",
+"target": "nemotron-personas-dataset-en_us",
 "version": "0.0.2",
 "api_key_secret": "my-ngc-api-key"
 }'
@@ -570,7 +567,6 @@ nemo files filesets create my-nemotron-personas-dataset-en_us \
 <Tab title="Python SDK">
 
 ```python
-import os
 from pydantic import SecretStr
 
 from nemo_helix_plugin.client.client import NemoClient
@@ -578,10 +574,9 @@ from nemo_helix_plugin.files.storage_config import NGCStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
+
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Create a secret to store your NGC API key
 secret = client.secrets.create_secret(
@@ -643,10 +638,9 @@ from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
+
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Create a secret to store your HuggingFace token (needed for gated and private repos)
 secret = client.secrets.create_secret(
@@ -760,6 +754,8 @@ from pydantic import SecretStr
 from nemo_helix_plugin.files.storage_config import S3StorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Create secrets to store your S3 credentials
 access_key = client.secrets.create_secret(

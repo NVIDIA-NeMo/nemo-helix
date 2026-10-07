@@ -79,12 +79,14 @@ Open the finished run and select the **Harden** panel.
 </Tab>
 <Tab title="REST API">
 
-Applying takes two calls. First compose the subset you chose, which returns the
+Applying takes two calls. These `curl` examples default to a local platform at `http://localhost:8080`. If your CLI context points at a remote deployment, export its URL as `NHX_BASE_URL` first, and for an authenticated deployment add `-H "Authorization: Bearer $(nemo auth token)"`. For details, refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
+
+First compose the subset you chose, which returns the
 workflow and policy for exactly those defenses:
 
 ```bash
 curl -X POST \
-  $NHX_BASE_URL/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/compose-defense \
+  "${NHX_BASE_URL:-http://localhost:8080}/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/compose-defense" \
   -H "Content-Type: application/json" \
   -d '{
     "mitigations": { ... },
@@ -100,7 +102,7 @@ Then write the composed guardrails onto the agent:
 
 ```bash
 curl -X POST \
-  $NHX_BASE_URL/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/apply-mitigation \
+  "${NHX_BASE_URL:-http://localhost:8080}/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/apply-mitigation" \
   -H "Content-Type: application/json" \
   -d '{"guardrails_toml": "<the guardrails_toml from compose-defense>"}'
 ```

@@ -204,13 +204,13 @@ def load_config_builder() -> dd.DataDesignerConfigBuilder:
 Preview the dataset:
 
 ```bash
-nemo data-designer preview product_reviews.py --workspace default
+nemo data-designer preview product_reviews.py
 ```
 
 Generate a larger dataset:
 
 ```bash
-nemo data-designer create product_reviews.py --workspace default --num-records 30
+nemo data-designer create product_reviews.py --num-records 30
 ```
 
 ### SDK Execution
@@ -218,12 +218,10 @@ nemo data-designer create product_reviews.py --workspace default --num-records 3
 The `DataDesignerResource` is your SDK interface for Data Designer execution on NeMo Helix. You can access it from an existing SDK instance:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
-base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NemoClient(base_url=base_url, workspace="default")
+client = NemoClient.from_config()
 
 data_designer = DataDesignerResource(client)
 ```

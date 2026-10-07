@@ -172,7 +172,7 @@ Pin `--hub-version` so the vendored release is reproducible.
 | `--dataset-size` / `--validation-fraction` | Row cap (`-1` = all); split in `[0, 1)` (`0` = train only) |
 | `--wheels-dir` | Existing `*.whl` files instead of download (directory must be non-empty) |
 | `--validate-only <dir>` | Check package layout |
-| `--upload` | Create both FileSets (`NHX_BASE_URL` required). Default names: `<slug>-env` and `<slug>-env-dataset` |
+| `--upload` | Create both FileSets. Requires `NHX_BASE_URL`; the converter does not read your CLI context. Default names: `<slug>-env` and `<slug>-env-dataset` |
 
 <Note>
 `pi-to-gym-conversion` vendors wheels for `x86_64` today. On an `arm64` cluster, build the closure yourself with the `pip download` command above and pass it via `--wheels-dir`.

@@ -8,8 +8,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from nemo_evaluator_sdk.execution.backends.local.backend import LocalBackend
-from nemo_evaluator_sdk.values import Model, RunConfig, RunConfigOnline, RunConfigOnlineModel
+from nemo_evaluator_sdk.execution.backends.local.backend import LocalBackend, _prepare_rows
+from nemo_evaluator_sdk.values import FieldMapping, Model, RunConfig, RunConfigOnline, RunConfigOnlineModel
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
 from pytest_mock import MockerFixture
@@ -227,3 +227,67 @@ class TestLocalBackendEvaluateBenchmark:
         sdk_kwargs = mock_sdk.await_args.kwargs
         assert sdk_kwargs["preprocess_hooks"] == (explicit_preprocess,)
         assert sdk_kwargs["postprocess_hooks"] == (explicit_postprocess,)
+
+
+class TestPrepareRowsUnresolvedMapping:
+    """An unresolved mapping must be visible, and must never leave a same-named column in its place."""
+
+    _MAPPING = FieldMapping(reference="messages[role=assistant].content")
+
+    @staticmethod
+    def _rows(*, with_assistant: tuple[int, ...] = ()) -> list[dict]:
+        """Rows that each carry their own `reference` column, the case that used to hide a miss."""
+        rows = []
+        for index in range(3):
+            messages = [{"role": "user", "content": f"q{index}"}]
+            if index in with_assistant:
+                messages.append({"role": "assistant", "content": f"answer{index}"})
+            rows.append({"messages": messages, "reference": "FROM THE FILE"})
+        return rows
+
+    def _prepare(self, mocker: MockerFixture, rows: list[dict]) -> list[dict]:
+        mocker.patch(
+            "nemo_evaluator_sdk.execution.backends.local.backend.prepare_dataset_rows",
+            return_value=rows,
+        )
+        return _prepare_rows(dataset=[], params=RunConfig(), field_mapping=self._MAPPING)
+
+    def test_an_unresolved_mapping_leaves_the_field_unset(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The mapping owns the field: a miss clears it rather than yielding to the file's column.
+
+        Without this the file's `reference` survives and is scored, which is a wrong answer rather
+        than a missing one. A diagnostic asking `"reference" in mapped` cannot see that, so the
+        warning is checked against the raw rows instead.
+        """
+        with caplog.at_level("WARNING"):
+            mapped = self._prepare(mocker, self._rows())
+
+        assert all("reference" not in row for row in mapped)
+        assert "resolved nothing on 3 of 3 rows" in caplog.text
+
+    def test_the_warning_names_the_mapped_path_not_just_the_field(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Naming only `reference` is ambiguous when the dataset also has a column by that name."""
+        with caplog.at_level("WARNING"):
+            self._prepare(mocker, self._rows())
+
+        assert "messages[role=assistant].content" in caplog.text
+
+    def test_a_partial_miss_is_reported(self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture) -> None:
+        """Rows resolving unevenly is the common case for a predicate, and the silent one before."""
+        with caplog.at_level("WARNING"):
+            mapped = self._prepare(mocker, self._rows(with_assistant=(1,)))
+
+        assert mapped[1]["reference"] == "answer1"
+        assert "reference" not in mapped[0]
+        assert "resolved nothing on 2 of 3 rows (first at index 0)" in caplog.text
+
+    def test_no_warning_when_every_row_resolves(self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level("WARNING"):
+            mapped = self._prepare(mocker, self._rows(with_assistant=(0, 1, 2)))
+
+        assert [row["reference"] for row in mapped] == ["answer0", "answer1", "answer2"]
+        assert "resolved nothing" not in caplog.text

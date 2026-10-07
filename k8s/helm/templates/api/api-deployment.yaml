@@ -11,7 +11,7 @@ kind: Deployment
 metadata:
   name: {{ include "nhx-api.api-servicename" . }}
   labels:
-    app.kubernetes.io/component: nhx-api
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
     {{- include "nemo-helix.labels" . | nindent 4 }}
   annotations:
     {{- with .Values.api.annotations }}
@@ -23,7 +23,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app.kubernetes.io/component: nhx-api
+      app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
       {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   template:
     metadata:
@@ -34,7 +34,7 @@ spec:
         {{- include "nemo-helix.podAnnotations" . | nindent 8 }}
         checksum/clickhouse-credentials: {{ include "nemo-common.clickhouse.credentialsChecksum" . }}
       labels:
-        app.kubernetes.io/component: nhx-api
+        app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
         {{- include "nemo-helix.labels" . | nindent 8 }}
         {{- with .Values.api.podLabels }}
         {{- toYaml . | nindent 8 }}

@@ -58,7 +58,7 @@ def _log_query_params(params: dict[str, object]) -> JobLogsQueryParams | None:
 
 
 class SafeSynthesizerJobsResource:
-    """Sync SDK namespace mounted as ``client.safe_synthesizer.jobs``."""
+    """Sync client for Safe Synthesizer jobs, exposed as ``SafeSynthesizerResource.jobs``."""
 
     def __init__(self, client: NemoClient) -> None:
         self._client = client
@@ -113,14 +113,14 @@ class SafeSynthesizerJobsResource:
 
 
 class SafeSynthesizerResource:
-    """Sync SDK namespace mounted as ``client.safe_synthesizer``."""
+    """Sync client for the Safe Synthesizer plugin service."""
 
     def __init__(self, client: NemoClient) -> None:
         self.jobs = SafeSynthesizerJobsResource(client)
 
 
 class AsyncSafeSynthesizerJobsResource:
-    """Async SDK namespace mounted as ``client.safe_synthesizer.jobs``."""
+    """Async client for Safe Synthesizer jobs, exposed as ``AsyncSafeSynthesizerResource.jobs``."""
 
     def __init__(self, client: AsyncNemoClient) -> None:
         self._client = client
@@ -180,7 +180,7 @@ class AsyncSafeSynthesizerJobsResource:
 
 
 class AsyncSafeSynthesizerResource:
-    """Async SDK namespace mounted as ``client.safe_synthesizer``."""
+    """Async client for the Safe Synthesizer plugin service."""
 
     def __init__(self, client: AsyncNemoClient) -> None:
         self.jobs = AsyncSafeSynthesizerJobsResource(client)

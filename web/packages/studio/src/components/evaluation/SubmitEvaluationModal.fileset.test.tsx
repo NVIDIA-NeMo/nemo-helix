@@ -9,16 +9,18 @@ import {
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import {
+  filesDownloadFile,
   filesUploadFile,
   getFilesListFilesetFilesQueryKey,
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
-import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
+import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
+import { PARQUET, parquetFile } from '@studio/tests/util/parquetFixtures';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -38,13 +40,16 @@ vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>()),
   filesCreateFileset: vi.fn(),
+  filesDownloadFile: vi.fn(),
   filesUploadFile: vi.fn(),
   filesDeleteFileset: vi.fn(),
 }));
 
-vi.mock('@studio/api/datasets/useDatasetFileContent', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@studio/api/datasets/useDatasetFileContent')>()),
-  useDatasetFileContent: vi.fn(),
+vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => ({
+  useFetchFileAsArrayBuffer:
+    () =>
+    async ({ workspace, datasetName, path }: DownloadFileAsArrayBufferArgs) =>
+      (await filesDownloadFile(workspace, datasetName, path)).arrayBuffer(),
 }));
 
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
@@ -53,7 +58,6 @@ vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOrigi
 }));
 
 const AGENT = 'my-agent';
-const ROWS = '{"prompt": "hi", "expected": "hi"}\n{"prompt": "yo", "expected": "yo"}\n';
 
 const EVAL_CONFIG = `prompt_template: "{{ item.prompt }}"
 metrics:
@@ -104,17 +108,6 @@ const mockListApis = () => {
   );
 };
 
-const mockFileContent = (result: { data?: string; error?: Error }) => {
-  vi.mocked(useDatasetFileContent).mockImplementation(
-    ({ enabled }) =>
-      ({
-        data: enabled ? result.data : undefined,
-        error: enabled ? (result.error ?? null) : null,
-        isFetching: false,
-      }) as never
-  );
-};
-
 const openDatasetStep = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
   await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -152,7 +145,7 @@ const renderModal = () =>
 
 beforeEach(() => {
   mockListApis();
-  mockFileContent({ data: ROWS });
+  vi.mocked(filesDownloadFile).mockResolvedValue(parquetFile(PARQUET.twoRows));
   vi.mocked(evaluatorCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
   vi.mocked(createExperiment).mockResolvedValue({
     id: 'grp_new',
@@ -183,11 +176,54 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
 
     await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
     const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
-    expect(spec.spec).toMatchObject({ dataset: expect.stringMatching(/#dataset\.jsonl$/) });
+    expect(spec.spec).toMatchObject({ dataset: expect.stringMatching(/#dataset\.parquet$/) });
     const datasetUpload = vi
       .mocked(filesUploadFile)
-      .mock.calls.find(([, , name]) => name === 'dataset.jsonl');
-    expect(await (datasetUpload?.[3] as File).text()).toBe(ROWS);
+      .mock.calls.find(([, , name]) => name === 'dataset.parquet');
+    expect(new Uint8Array(await (datasetUpload?.[3] as File).arrayBuffer())).toEqual(
+      new Uint8Array(await parquetFile(PARQUET.twoRows).arrayBuffer())
+    );
+  });
+
+  it('reads every Parquet batch from the source fileset in place when asked', async () => {
+    server.use(
+      http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({
+          data: ['output/part-0.parquet', 'output/part-1.parquet'].map((path) => ({
+            file_ref: `${DEFAULT_WORKSPACE}/generated#${path}`,
+            file_url: `/${path}`,
+            path,
+            size: 10,
+          })),
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
+    await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
+    await user.click(await screen.findByRole('option', { name: 'generated' }));
+    await user.click(await screen.findByRole('combobox', { name: 'File' }));
+    await user.click(await screen.findByRole('option', { name: 'All 2 Parquet files in output/' }));
+    await user.upload(
+      screen.getByLabelText('Select Evaluator Config'),
+      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    expect(spec.spec).toMatchObject({
+      dataset: `${DEFAULT_WORKSPACE}/generated#output/*.parquet`,
+    });
+    expect(vi.mocked(filesUploadFile).mock.calls.map(([, , name]) => name)).not.toContain(
+      'dataset.parquet'
+    );
   });
 
   it('forgets the fileset file after switching back to upload', async () => {
@@ -224,15 +260,100 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
     );
   });
 
-  it('shows why a fileset file could not be read', async () => {
-    mockFileContent({ error: new Error('File is too large to edit in the browser.') });
+  it('shows why a fileset file could not be downloaded', async () => {
+    vi.mocked(filesDownloadFile).mockRejectedValue(new Error('Unable to find base file.'));
     const user = userEvent.setup();
     renderModal();
 
     await openDatasetStep(user);
     await pickFilesetFile(user);
 
-    expect(await screen.findByText('File is too large to edit in the browser.')).toBeVisible();
+    expect(await screen.findByText('Unable to find base file.')).toBeVisible();
+  });
+
+  it('shows why a fileset file is not a usable dataset', async () => {
+    vi.mocked(filesDownloadFile).mockResolvedValue(parquetFile(PARQUET.empty));
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await pickFilesetFile(user);
+
+    expect(await screen.findByText('File contains no data')).toBeVisible();
+  });
+});
+
+describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
+  it('stores an uploaded Parquet file as-is and points the config at it', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await user.upload(screen.getByLabelText('Add Dataset'), parquetFile(PARQUET.twoRows));
+    await user.upload(
+      screen.getByLabelText('Select Evaluator Config'),
+      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    expect(spec.spec).toMatchObject({ dataset: expect.stringMatching(/#dataset\.parquet$/) });
+    expect(filesUploadFile).toHaveBeenCalledWith(
+      DEFAULT_WORKSPACE,
+      expect.any(String),
+      'dataset.parquet',
+      expect.any(File),
+      expect.anything()
+    );
+  });
+
+  it('stores several uploaded Parquet files as parts of one dataset', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await user.upload(screen.getByLabelText('Add Dataset'), [
+      parquetFile(PARQUET.twoRows, 'a.parquet'),
+      parquetFile(PARQUET.twoRows, 'b.parquet'),
+    ]);
+    await user.upload(
+      screen.getByLabelText('Select Evaluator Config'),
+      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    expect(spec.spec).toMatchObject({ dataset: expect.stringMatching(/#dataset\/\*\.parquet$/) });
+    expect(
+      vi
+        .mocked(filesUploadFile)
+        .mock.calls.map(([, , name, file]) => [name, (file as File).name])
+        .filter(([name]) => name.startsWith('dataset'))
+    ).toEqual([
+      ['dataset/part-0.parquet', 'a.parquet'],
+      ['dataset/part-1.parquet', 'b.parquet'],
+    ]);
+  });
+
+  it('refuses to combine Parquet with another format', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.upload(screen.getByLabelText('Add Dataset'), [
+      parquetFile(PARQUET.twoRows, 'a.parquet'),
+      new File(['prompt,expected\nhi,hi\n'], 'b.csv'),
+    ]);
+
+    expect(await screen.findByText('Only Parquet files can be added together.')).toBeVisible();
   });
 
   it('keeps Submit from sending a fileset dataset that was never picked', async () => {

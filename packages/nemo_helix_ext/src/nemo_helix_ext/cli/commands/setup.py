@@ -80,7 +80,7 @@ from nemo_helix_ext.ui.prompts import (
     prompt_confirm,
     prompt_multiselect,
     prompt_password,
-    prompt_select,
+    prompt_search_select,
     prompt_text,
     provider_name_validator,
 )
@@ -2249,17 +2249,25 @@ def _select_model_pair(
     if suggested is None:
         console.print(f"  {WARN} None of the discovered models served a test request; choose a model explicitly.")
 
-    default_model = prompt_select(
+    default_model = prompt_search_select(
         "Choose your default model (used for quality-critical agent work):",
         choices=display_models,
         default=suggested.default if suggested else None,
-        hint="Press Enter to accept the default." if suggested else "Choose a model you can access.",
+        hint="Press Enter to accept the default, or type to search."
+        if suggested
+        else "Type to search models you can access.",
     )
-    fast = prompt_select(
+    fast_default = suggested.fast if suggested else default_model
+    fast_hint = (
+        "Press Enter to reuse the default model, or type to search."
+        if fast_default == default_model
+        else "Press Enter to accept the suggested fast model, or type to search."
+    )
+    fast = prompt_search_select(
         "Choose your fast model (used for latency-sensitive agent work):",
         choices=display_models,
-        default=suggested.fast if suggested else default_model,
-        hint="Press Enter to reuse the default model.",
+        default=fast_default,
+        hint=fast_hint,
     )
     return ModelPair(default=default_model, fast=fast)
 
@@ -2288,14 +2296,16 @@ def _check_ollama_running(host_url: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
+def _auto_setup(clients: SetupClients, workspace: str, inference_base_url: str | None = None) -> str | None:
     """Register a provider from environment variables and return its name."""
+    override_base_url = inference_base_url.strip() if inference_base_url else ""
     for key_var, url_var in _AUTO_ENV_VARS:
         api_key = os.environ.get(key_var)
         if not api_key:
             continue
 
-        base_url = os.environ.get(url_var, "").strip() if url_var else ""
+        base_url = override_base_url or (os.environ.get(url_var, "").strip() if url_var else "")
+        env_provider = next((p for p in KNOWN_PROVIDERS if p.env_var == key_var and p.requires_api_key), None)
         if base_url:
             known = _resolve_provider_for_url(base_url)
             if known:
@@ -2304,18 +2314,16 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
                 hostname = urlparse(base_url).hostname or "custom"
                 provider_name = hostname.replace(".", "-")
             host_url = base_url
-            auth_header_format = known.auth_header_format if known else None
-            default_extra_headers = known.default_extra_headers if known else None
+            auth_provider = known or env_provider
+            auth_header_format = auth_provider.auth_header_format if auth_provider else None
+            default_extra_headers = auth_provider.default_extra_headers if auth_provider else None
         else:
-            for p in KNOWN_PROVIDERS:
-                if p.env_var == key_var and p.requires_api_key:
-                    provider_name = p.name
-                    host_url = p.host_url
-                    auth_header_format = p.auth_header_format
-                    default_extra_headers = p.default_extra_headers
-                    break
-            else:
+            if env_provider is None:
                 continue
+            provider_name = env_provider.name
+            host_url = env_provider.host_url
+            auth_header_format = env_provider.auth_header_format
+            default_extra_headers = env_provider.default_extra_headers
 
         key_result = _validate_api_key(
             provider_name,
@@ -2463,6 +2471,13 @@ def setup_command(
             help=f"Seconds to wait for platform readiness (default: {_SERVICE_STARTUP_TIMEOUT_SECONDS})",
         ),
     ] = None,
+    inference_base_url: Annotated[
+        str | None,
+        typer.Option(
+            "--inference-base-url",
+            help=("Base URL for the provider registered by --auto. Equivalent to NEMO_DEFAULT_INFERENCE_BASE_URL."),
+        ),
+    ] = None,
 ) -> None:
     """Set up NeMo Helix: connect or start services, configure a provider, install skills.
 
@@ -2486,15 +2501,17 @@ def setup_command(
     (CI, piped input), pass --auto to use environment variables instead.
 
     Use --auto for non-interactive setup from environment variables
-    (NEMO_DEFAULT_INFERENCE_KEY, NVIDIA_API_KEY, OPENAI_API_KEY,
-    ANTHROPIC_API_KEY, GEMINI_API_KEY).
-    Override the selected pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
+    (NEMO_DEFAULT_INFERENCE_KEY with optional NEMO_DEFAULT_INFERENCE_BASE_URL,
+    NVIDIA_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
+    Override the provider URL with --inference-base-url. Override the selected
+    pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
 
     Examples:
       nemo setup
       nemo setup --auto
       nemo setup --auto --start-services --install-skills
       nemo setup --auto --start-services --ready-timeout 360
+      nemo setup --auto --start-services --inference-base-url https://inference-api.nvidia.com/v1
       NHX_BASE_URL=https://nhx.example.com NHX_ACCESS_TOKEN=... nemo setup --auto --no-start-services
       nemo setup --workspace my-workspace
       nemo setup --no-install-skills
@@ -2604,6 +2621,7 @@ def setup_command(
                 skills_from=skills_from_list,
                 skills_path=skills_path,
                 certificate_authority=certificate_authority,
+                inference_base_url=inference_base_url,
             )
         else:
             _run_interactive_mode(
@@ -2644,10 +2662,11 @@ def _run_auto_mode(
     skills_from: list[str] | None = None,
     skills_path: Path | None = None,
     certificate_authority: str | None = None,
+    inference_base_url: str | None = None,
 ) -> None:
     """Non-interactive provider registration from environment variables."""
     console.print("[bold]Auto-detecting provider from environment...[/bold]\n")
-    provider_name = _auto_setup(clients, workspace)
+    provider_name = _auto_setup(clients, workspace, inference_base_url=inference_base_url)
     if provider_name is None:
         console.print(f"{CROSS} No provider credentials found in environment.")
         env_var_names = ", ".join(key for key, _ in _AUTO_ENV_VARS)

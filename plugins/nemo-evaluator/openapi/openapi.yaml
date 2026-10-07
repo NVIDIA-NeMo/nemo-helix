@@ -4302,54 +4302,54 @@ components:
           description: Binding for the canonical 'input' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
         output:
           title: Output
           description: Binding for the canonical 'output' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
         context:
           title: Context
           description: Binding for the canonical 'context' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
         reference:
           title: Reference
           description: Binding for the canonical 'reference' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
         trajectory:
           title: Trajectory
           description: Binding for the canonical 'trajectory' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
         messages:
           title: Messages
           description: Binding for the canonical 'messages' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
         tool_calls:
           title: Tool Calls
           description: Binding for the canonical 'tool_calls' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
         tools:
           title: Tools
           description: Binding for the canonical 'tools' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
         custom:
           additionalProperties:
             type: string
             minLength: 1
-            pattern: ^[^\[\]]*$
+            pattern: ^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$
           type: object
           title: Custom
           description: Additional evaluator field bindings keyed by canonical field

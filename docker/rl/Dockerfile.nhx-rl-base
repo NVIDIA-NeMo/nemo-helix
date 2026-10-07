@@ -310,7 +310,7 @@ sync_venv() {
         uv sync ${UV_SYNC_MODE} --inexact --no-install-project --directory /opt/nemo-rl "$@" "${SKIP[@]}"
     if [[ " $* " == *" --extra nemo_gym "* ]]; then
         uv pip install --directory /tmp --python "${venv}/bin/python" \
-            "nemo-sandboxed-gym[server,opensandbox,ray]==0.1.0a1" \
+            "nemo-sandboxed-gym[server,opensandbox,ray]==${NEMO_SANDBOXED_GYM_VERSION}" \
             "opensandbox>=0.1.9"
     fi
     # --python selects the venv. --directory keeps uv from reading the git pins in pyproject.toml.

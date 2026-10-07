@@ -13,20 +13,17 @@ The `anonymizer.config` module (from the [NVIDIA NeMo Anonymizer library](https:
 
 The `AnonymizerResource` is the entry point for working with Anonymizer on NeMo Helix. It wraps the streaming preview endpoint and job submission for the plugin service.
 
-A `AnonymizerResource` is accessed directly from a `NemoClient` instance:
+A `AnonymizerResource` is built from a `NemoClient` instance:
 
 ```python
-import os
+from nemo_anonymizer_plugin.sdk.resources import AnonymizerResource
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-anonymizer = client.anonymizer  # AnonymizerResource
+client = NemoClient.from_config()
+anonymizer = AnonymizerResource(client)
 ```
 
-An `AsyncAnonymizerResource` with the same surface is available via `AsyncNemoClient.anonymizer`.
+An `AsyncAnonymizerResource` with the same surface is available for `AsyncNemoClient`.
 
 | Method                                                   | Description                                                                                                              |
 |----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
@@ -60,7 +57,7 @@ Both `preview` and `run` call the plugin service, so they require `model_configs
 
 {/* @nemo-docs: skip-python-type-check */}
 ```python
-job = client.anonymizer.run(run_request)
+job = anonymizer.run(run_request)
 job.wait_until_done()
 results = job.download_artifacts()
 dataset = results.load_dataset()
@@ -82,7 +79,7 @@ The async variant (`AsyncAnonymizerJobResource`) exposes the same surface with `
 `download_artifacts` returns an `AnonymizerJobResults` object that loads parquet / JSON artifacts into memory:
 
 ```python
-job = client.anonymizer.get_job_resource("anonymizer-run-2026-05-12-abc123")
+job = anonymizer.get_job_resource("anonymizer-run-2026-05-12-abc123")
 results = job.download_artifacts()
 dataset = results.load_dataset()
 ```

@@ -47,15 +47,17 @@ Requires an interactive terminal (TTY). In non-interactive contexts
 (CI, piped input), pass --auto to use environment variables instead.
 
 Use --auto for non-interactive setup from environment variables
-(NEMO_DEFAULT_INFERENCE_KEY, NVIDIA_API_KEY, OPENAI_API_KEY,
-ANTHROPIC_API_KEY, GEMINI_API_KEY).
-Override the selected pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
+(NEMO_DEFAULT_INFERENCE_KEY with optional NEMO_DEFAULT_INFERENCE_BASE_URL,
+NVIDIA_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
+Override the provider URL with --inference-base-url. Override the selected
+pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
 
 Examples:
   nemo setup
   nemo setup --auto
   nemo setup --auto --start-services --install-skills
   nemo setup --auto --start-services --ready-timeout 360
+  nemo setup --auto --start-services --inference-base-url https://inference-api.nvidia.com/v1
   NHX_BASE_URL=https://nhx.example.com NHX_ACCESS_TOKEN=... nemo setup --auto --no-start-services
   nemo setup --workspace my-workspace
   nemo setup --no-install-skills

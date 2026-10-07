@@ -503,8 +503,10 @@ nemo-safe-synthesizer-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-switchyard = [
   "httpx>=0.27.0,<1",
+  "nemo-agent-optimization-plugin",
   "nemo-helix-plugin",
   "nemo-switchyard==0.3.0",
+  "pyyaml>=6.0.2",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -739,6 +741,7 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "agent-optimization.run-strategy" = "nemo_agent_optimization_plugin.jobs.run_strategy:RunStrategyJob"
 "evaluator.retrieve-eval" = "nemo_evaluator.jobs.retrieve_eval:RetrieveEvalJob"
 "agent-optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
+"agent-optimization.switchyard" = "nemo_switchyard.jobs.optimize:SwitchyardOptimizeJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.logging_provider"]

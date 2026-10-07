@@ -6,6 +6,9 @@
 A NeMo Helix plugin for building, registering, deploying, and invoking agents
 as first-class managed resources.
 
+See [MIGRATION.md](MIGRATION.md) for SDK migration notes, including the
+`AgentsResource` move from the legacy `NeMoHelix` SDK object to `NemoClient`.
+
 The plugin supports two agent flows:
 
 - **Platform-backed agents** use the Platform-managed `nemo-agents-spec-v1`

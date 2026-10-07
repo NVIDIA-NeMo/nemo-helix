@@ -5,29 +5,30 @@
 title: ""
 description: ""
 ---
+The CLI and Python SDK connect to the deployment in your current CLI context. To connect to a local or remote deployment, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+
 <Tabs>
 
 <Tab title="CLI">
 
 ```bash
-# Configure CLI (if not already done)
-nemo config set --base-url "$NHX_BASE_URL" --workspace default
+# Confirm the deployment and workspace in the current context
+nemo config view
 ```
 
 </Tab>
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 ```
 
 </Tab>
 
 </Tabs>
+
+<Note>
+These examples use the `default` workspace. If your current CLI context uses a different workspace, run `nemo config set --workspace default` first. To check, run `nemo config view`.
+</Note>

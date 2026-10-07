@@ -17,6 +17,7 @@ so egress verification can still ask the sandbox what policy it actually applied
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from datetime import timedelta
@@ -243,8 +244,9 @@ class OpenSandboxDriver:
             return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=sandbox)
         except BaseException as exc:
             try:
-                removed = await self.destroy_sandboxes_matching(
-                    {_SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
+                removed = await asyncio.wait_for(
+                    self.destroy_sandboxes_matching({_SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}),
+                    timeout=30,
                 )
                 if removed:
                     LOGGER.warning(

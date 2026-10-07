@@ -10,23 +10,24 @@ The following reference provides detailed documentation for the synchronous and 
 ## Synchronous Client
 
 Use `NemoClient` from regular Python code when you want blocking API calls.
-The typed client talks directly to the NeMo Helix HTTP API. You construct it
-with a base URL (and typically the active CLI context, workspace, and
-authentication settings from `nemo auth login` via `from_config`).
+The typed client talks directly to the NeMo Helix HTTP API. In most code, build
+it with `from_config()`, which reads the base URL, default workspace, and
+credentials from your current CLI context. To configure contexts, see
+[Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url="http://localhost:8080",
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 for workspace in client.workspaces.list_workspaces().items():
     print(workspace.name)
 ```
 
 ### Constructor
+
+To connect without reading the CLI configuration, pass the connection settings
+directly:
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
@@ -53,7 +54,7 @@ The `NemoClient` constructor accepts the following options.
 
 | Mode | Example | Behavior |
 | --- | --- | --- |
-| CLI context | `NemoClient.from_config()` | Reads the active CLI context (base URL, workspace, auth) configured by `nemo setup` / `nemo auth login`. |
+| CLI context (recommended) | `NemoClient.from_config()` | Reads the active CLI context (base URL, workspace, auth) configured by `nemo setup` / `nemo auth login`. `NHX_*` environment variables such as `NHX_BASE_URL` and `NHX_ACCESS_TOKEN` override the saved values. |
 | Named context | `NemoClient.from_config(context="dev")` | Reads a specific CLI context instead of the active one. |
 | Explicit config path | `NemoClient.from_config(config_path="/path/to/config.yaml")` | Reads a specific CLI config file. |
 | Direct API | `NemoClient(base_url="http://localhost:8080")` | Uses the given URL, workspace, and any explicit auth without reading a config file. |
@@ -75,7 +76,7 @@ import asyncio
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
 async def main() -> None:
-    client = AsyncNemoClient(base_url="http://localhost:8080", workspace="default")
+    client = AsyncNemoClient.from_config()
     async for workspace in client.workspaces.list_workspaces().items():
         print(workspace.name)
 
@@ -94,20 +95,9 @@ client = AsyncNemoClient(
 ```
 
 `AsyncNemoClient` accepts the same connection and authentication parameters as
-`NemoClient`, and also provides `AsyncNemoClient.from_config()`. Pass a custom
-`httpx.AsyncClient` through `http_client` only when you need to control the
-underlying transport directly.
-
-```python
-import os
-
-from nemo_helix_plugin.client.client import AsyncNemoClient
-
-client = AsyncNemoClient(
-    base_url=os.environ["NHX_BASE_URL"],
-    workspace="default",
-)
-```
+`NemoClient`, and `AsyncNemoClient.from_config()` accepts the same arguments as
+`NemoClient.from_config()`. Pass a custom `httpx.AsyncClient` through
+`http_client` only when you need to control the underlying transport directly.
 
 ### Errors
 

@@ -47,6 +47,10 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS harbor
 # rather than inherit somebody else's index:
 #   --build-arg HARBOR_EXTRA_INDEX_URL=https://<index>/simple
 ARG HARBOR_EXTRA_INDEX_URL=""
+# sandbox-k8s is not on public PyPI, so it needs HARBOR_EXTRA_INDEX_URL. Only the
+# sandbox_k8s runtime uses it; SANDBOX_K8S=false builds an image without it for
+# the harbor_opensandbox runtime. Remove this switch when sandbox_k8s is retired.
+ARG SANDBOX_K8S=true
 
 COPY plugins/_temporary-scaled-evals/src/scaled_evals/data/harbor_runner_qualifications.json \
      /opt/harbor/qualification-catalog.json
@@ -61,18 +65,23 @@ RUN set -eu; \
     test -s /opt/harbor/selectable-versions.txt; \
     python -c 'import urllib.request; urllib.request.urlretrieve("https://bootstrap.pypa.io/pip/pip.pyz", "/opt/harbor/pip.pyz")'
 
+# Each selectable Harbor version installs from its own requirements file, so
+# versions can carry different extras. Versions that pin the OpenSandbox SDK
+# also check that Harbor's OpenSandbox environment imports.
+COPY plugins/_temporary-scaled-evals/harbor-runners /opt/harbor/requirements
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eu; \
-    sandbox_k8s_version="$(cat /opt/harbor/sandbox-k8s-version.txt)"; \
     for version in $(cat /opt/harbor/selectable-versions.txt); do \
         runner="/opt/harbor/${version}"; \
         uv venv "${runner}/.venv"; \
-        VIRTUAL_ENV="${runner}/.venv" uv pip install \
-            "harbor==${version}" "sandbox-k8s[harbor]==${sandbox_k8s_version}" \
+        VIRTUAL_ENV="${runner}/.venv" uv pip install -r "/opt/harbor/requirements/${version}.txt" \
             ${HARBOR_EXTRA_INDEX_URL:+--extra-index-url "$HARBOR_EXTRA_INDEX_URL"}; \
         "${runner}/.venv/bin/python" -c \
-            'import importlib.metadata as m, sys; assert m.version("harbor") == sys.argv[1]; assert m.version("sandbox-k8s") == sys.argv[2]' \
-            "${version}" "${sandbox_k8s_version}"; \
+            'import importlib.metadata as m, sys; assert m.version("harbor") == sys.argv[1]' "${version}"; \
+        if grep -q '^opensandbox==' "/opt/harbor/requirements/${version}.txt"; then \
+            "${runner}/.venv/bin/python" -c 'import harbor.environments.opensandbox, opensandbox'; \
+        fi; \
     done
 
 # Upstream sandbox-k8s lacks emptyDir mounts for /solution, /tests, /logs and
@@ -80,8 +89,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # patched adapter the standalone image uses, in place, located via importlib.
 COPY plugins/_temporary-scaled-evals/harbor-patches/sandbox_k8s_harbor.py /tmp/sandbox_k8s_harbor.py
 COPY plugins/_temporary-scaled-evals/harbor-patches/patch_sandbox_k8s_root.py /tmp/patch_sandbox_k8s_root.py
-RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eu; [ "${SANDBOX_K8S}" = "true" ] || exit 0; \
+    sandbox_k8s_version="$(cat /opt/harbor/sandbox-k8s-version.txt)"; \
+    for version in $(cat /opt/harbor/selectable-versions.txt); do \
         runner="/opt/harbor/${version}"; \
+        VIRTUAL_ENV="${runner}/.venv" uv pip install "sandbox-k8s[harbor]==${sandbox_k8s_version}" \
+            ${HARBOR_EXTRA_INDEX_URL:+--extra-index-url "$HARBOR_EXTRA_INDEX_URL"}; \
+        "${runner}/.venv/bin/python" -c \
+            'import importlib.metadata as m, sys; assert m.version("harbor") == sys.argv[1]; assert m.version("sandbox-k8s") == sys.argv[2]' \
+            "${version}" "${sandbox_k8s_version}"; \
         harbor_py="$("${runner}/.venv/bin/python" -c 'import importlib.util; print(importlib.util.find_spec("sandbox_k8s.harbor").origin)')"; \
         cp /tmp/sandbox_k8s_harbor.py "$harbor_py"; \
         "${runner}/.venv/bin/python" /tmp/patch_sandbox_k8s_root.py "$(dirname "$harbor_py")"; \
@@ -101,6 +118,18 @@ RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
         if [ -n "$pi_py" ]; then \
             "${runner}/.venv/bin/python" /tmp/patch_pi_extra_env.py "$pi_py"; \
         fi; \
+    done
+
+# The harbor_opensandbox runtime's Harbor environment takes its egress policy
+# from nhx_sandbox, so every runner venv that carries the OpenSandbox SDK gets it.
+# Not editable: only /opt/harbor is copied into the final image.
+COPY packages/nhx_sandbox /tmp/nhx_sandbox
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
+        runner="/opt/harbor/${version}"; \
+        grep -q '^opensandbox==' "/opt/harbor/requirements/${version}.txt" || continue; \
+        VIRTUAL_ENV="${runner}/.venv" uv pip install /tmp/nhx_sandbox; \
+        "${runner}/.venv/bin/python" -c 'import nhx_sandbox.egress, nhx_sandbox.opensandbox_policy'; \
     done
 
 # Harbor resolves jobs_dir relative to its own root, so point it at the path the

@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Optional overrides for the optimizer agent, in the same nemo-agents-spec-v1 form as
+# src/prompt_master_plugin/agent.yaml.  Only the fields given here replace the bundled ones.
+# `model` is a model ID from `nemo models list`, served through the Inference Gateway.
+models:
+  default:
+    provider: nvidia
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    temperature: 0.0
+runtime:
+  timeout_seconds: 600

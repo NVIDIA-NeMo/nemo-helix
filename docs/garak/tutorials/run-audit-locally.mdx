@@ -61,7 +61,9 @@ print(garak.plugin_status())
 # {'plugin': 'garak', 'status': 'ok', ...}
 ```
 
-If `plugin_status()` raises a connection error, the platform is not running or `NHX_BASE_URL` is misconfigured. Refer back to [Setup](/documentation/get-started).
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
+If `plugin_status()` raises a connection error, the platform is not running or your current CLI context points at the wrong deployment. Run `nemo config view` to check the context, and refer back to [Setup](/documentation/get-started) or [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ---
 

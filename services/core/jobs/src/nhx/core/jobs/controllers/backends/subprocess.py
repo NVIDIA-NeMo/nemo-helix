@@ -486,16 +486,32 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         return env, task_id, work_dir, log_path, persistent_dir
 
     @staticmethod
+    def _resolve_in_bin(name: str, bin_dir: Path) -> str | None:
+        candidate = bin_dir / name
+        if os.access(candidate, os.X_OK):
+            return str(candidate)
+        return None
+
+    @staticmethod
     def _build_command(executor_config: SubprocessExecutionProvider, virtual_env: str | None) -> list[str]:
         command = executor_config.command
         if not command:
             raise ValueError(_ERR_COMMAND_REQUIRED)
+        # The platform venv's bin directory holds both its interpreter and its console
+        # scripts, but is not guaranteed to be on the inherited PATH on source/host
+        # deploys. Prefer VIRTUAL_ENV when set, else fall back to the controller's own
+        # interpreter dir -- which IS the venv bin even when launched directly (e.g.
+        # `.venv/bin/nemo-helix` with no activation, where VIRTUAL_ENV is unset).
+        bin_dir = Path(virtual_env) / "bin" if virtual_env else Path(sys.executable).parent
         if command[0] in {"python", "python3"}:
-            if virtual_env:
-                venv_python = Path(virtual_env) / "bin" / "python"
-                if os.access(venv_python, os.X_OK):
-                    return [str(venv_python), *command[1:]]
-            return [sys.executable, *command[1:]]
+            venv_python = SubprocessJobBackend._resolve_in_bin("python", bin_dir)
+            return [venv_python or sys.executable, *command[1:]]
+        # Resolve a bare console-script name against the venv bin before falling back to
+        # a bare PATH lookup; a command carrying a path separator is left untouched.
+        if os.sep not in command[0] and (os.altsep is None or os.altsep not in command[0]):
+            venv_script = SubprocessJobBackend._resolve_in_bin(command[0], bin_dir)
+            if venv_script is not None:
+                return [venv_script, *command[1:]]
         return command
 
     def _start_log_capture(

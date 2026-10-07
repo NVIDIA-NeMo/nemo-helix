@@ -153,6 +153,92 @@ def _keep_pkg_resources_setuptools(overrides: list[str]) -> list[str]:
     return clamped
 
 
+def locked_package_versions(rl_root: Path) -> dict[str, str]:
+    """Every version ``uv.lock`` resolved for the image.
+
+    A library locked once is pinned to that version. A library locked more than once uses
+    the version recorded on the nemo-gym dependency edge. Packages the lock does not give
+    a single version for are left out, so the constraint file stays solvable.
+    """
+    lock = rl_root / "uv.lock"
+    if not lock.is_file():
+        raise ValueError(f"{rl_root} has no uv.lock; expected a NeMo-RL checkout")
+    packages = tomllib.loads(lock.read_text(encoding="utf-8")).get("package", [])
+    nemo_gym = next((pkg for pkg in packages if pkg.get("name") == "nemo-gym"), None)
+    if nemo_gym is None:
+        raise ValueError(f"{lock} has no nemo-gym package")
+
+    by_name: dict[str, set[str]] = {}
+    for pkg in packages:
+        name = pkg.get("name")
+        version = pkg.get("version")
+        if isinstance(name, str) and isinstance(version, str):
+            by_name.setdefault(name, set()).add(version)
+
+    gym_edge: dict[str, set[str]] = {}
+    for dep in nemo_gym.get("dependencies", []):
+        name = dep.get("name")
+        version = dep.get("version")
+        if isinstance(name, str) and isinstance(version, str):
+            gym_edge.setdefault(name, set()).add(version)
+
+    pins: dict[str, str] = {}
+    for name, versions in by_name.items():
+        if len(versions) == 1:
+            pins[name] = next(iter(versions))
+            continue
+        chosen = gym_edge.get(name, set())
+        if len(chosen) == 1:
+            pins[name] = next(iter(chosen))
+    return pins
+
+
+def lock_requirement_lines(
+    pins: dict[str, str],
+    overrides: list[str],
+    dependencies: dict[str, set[str]] | None = None,
+    *,
+    expand_dependencies_of: list[str] | None = None,
+) -> list[str]:
+    """``name==version`` constraints for the lock.
+
+    A version override that excludes the locked release replaces it. A floor that still
+    contains the locked release keeps the pin. A URL override replaces the distribution.
+    ``expand_dependencies_of`` also drops direct dependencies of those overrides.
+    Other overrides do not unpin their dependencies.
+    """
+    by_canonical = {canonicalize_name(name): version for name, version in pins.items()}
+    skipped: set[str] = set()
+    for item in overrides:
+        requirement = Requirement(item)
+        name = canonicalize_name(requirement.name)
+        locked = by_canonical.get(name)
+        if locked is None:
+            continue
+        if requirement.url or (requirement.specifier and Version(locked) not in requirement.specifier):
+            skipped.add(name)
+    if dependencies and expand_dependencies_of:
+        for item in expand_dependencies_of:
+            requirement = Requirement(item)
+            name = canonicalize_name(requirement.name)
+            if name in skipped:
+                skipped.update(dependencies.get(name, ()))
+    return [f"{name}=={version}" for name, version in sorted(pins.items()) if canonicalize_name(name) not in skipped]
+
+
+def align_requirement_to_lock(requirement_line: str, pins: dict[str, str]) -> str:
+    """Use the locked version when a direct requirement excludes it."""
+    requirement = Requirement(requirement_line)
+    locked = next(
+        (version for name, version in pins.items() if canonicalize_name(name) == canonicalize_name(requirement.name)),
+        None,
+    )
+    if locked is None or not requirement.specifier or Version(locked) in requirement.specifier:
+        return requirement_line
+    extras = f"[{','.join(requirement.extras)}]" if requirement.extras else ""
+    return f"{requirement.name}{extras}=={locked}"
+
+
 def _compile_pinned_requirements(
     work_dir: Path,
     packages: list[str],
@@ -162,8 +248,12 @@ def _compile_pinned_requirements(
 ) -> Path:
     """Pin ``packages`` before download so ``pip download --no-deps`` cannot vendor duplicates."""
     work_dir.mkdir(parents=True, exist_ok=True)
+    requirement_lines = list(packages)
+    if nemo_rl_root is not None:
+        pins = locked_package_versions(nemo_rl_root)
+        requirement_lines = [align_requirement_to_lock(line, pins) for line in requirement_lines]
     requirements_in = work_dir / "requirements.in"
-    requirements_in.write_text("\n".join(packages) + "\n", encoding="utf-8")
+    requirements_in.write_text("\n".join(requirement_lines) + "\n", encoding="utf-8")
     pinned = work_dir / "requirements.txt"
     # --no-config ignores this repo's [tool.uv]. The Gym host applies the NeMo-RL
     # checkout's override-dependencies and constraint-dependencies, passed explicitly.
@@ -183,6 +273,7 @@ def _compile_pinned_requirements(
     ]
     if nemo_rl_root is not None:
         overrides, constraints = rl_dependency_policy(nemo_rl_root)
+        constraints.extend(lock_requirement_lines(locked_package_versions(nemo_rl_root), overrides))
         override = work_dir / "override.txt"
         constraint = work_dir / "constraint.txt"
         override.write_text("\n".join(overrides) + "\n", encoding="utf-8")
@@ -329,31 +420,8 @@ GYM_SUBMODULE_PATH = "3rdparty/Gym-workspace/Gym"
 
 
 def _lock_pin(nemo_rl_root: Path, distribution: str) -> str | None:
-    """Read a distribution's pinned version out of NeMo-RL's ``uv.lock``.
-
-    Gym stamps ``ray``/``openai`` into every sub-venv from what the training image has
-    installed, and the image resolves those from this lock -- not from Gym's own, which pins
-    different versions.
-    """
-    lock = nemo_rl_root / "uv.lock"
-    if not lock.is_file():
-        raise ValueError(f"{nemo_rl_root} has no uv.lock; expected a NeMo-RL checkout")
-    packages = tomllib.loads(lock.read_text(encoding="utf-8")).get("package", [])
-    # uv.lock can carry more than one openai (sglang pins another). The version on
-    # the nemo-gym package is the one Gym stamps into every per-server venv.
-    nemo_gym = next((pkg for pkg in packages if pkg.get("name") == "nemo-gym"), None)
-    if nemo_gym is not None:
-        pinned = {
-            dep["version"]
-            for dep in nemo_gym.get("dependencies", [])
-            if dep.get("name") == distribution and "version" in dep
-        }
-        if len(pinned) == 1:
-            return pinned.pop()
-    versions = {pkg["version"] for pkg in packages if pkg.get("name") == distribution and "version" in pkg}
-    if len(versions) != 1:
-        return None
-    return versions.pop()
+    """Version Gym stamps into every server venv, from the image lock."""
+    return locked_package_versions(nemo_rl_root).get(distribution)
 
 
 def _resolve_image_pins(spec: ConvertEnvironmentSpec) -> tuple[Path | None, str | None, str | None]:

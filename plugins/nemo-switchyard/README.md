@@ -100,6 +100,49 @@ Judge calls are sent directly to the configured model provider with provider
 credentials from the Inference Gateway model cache. Caller authorization
 headers are never forwarded.
 
+## Optimization strategy
+
+The plugin also ships the `switchyard` strategy for `nemo agents optimize`.
+Given a platform agent, a list of acceptable models and a list of routing
+strategies, the job creates one VirtualModel per (model pair × routing
+strategy) and saves a copy of the agent's `nemo-agents-spec-v1` config per
+combination, pointed at that VirtualModel, to the job's results. The stored
+agent is never modified and no VirtualModel is deleted.
+
+`models` is ordered from most capable to most efficient: every pair `(i < j)`
+routes with `models[i]` as the capable/strong model and `models[j]` as the
+efficient/weak one. VirtualModels are named
+`<agent>-<routing-strategy>-<pair-index>` in the submission workspace. An
+existing VirtualModel with that name is reused only when its models and
+middleware config already match the request; otherwise the run fails and asks
+you to delete it (or change the agent or model list) before re-running.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `agent` | required | Platform agent to route, `name` or `workspace/name`. |
+| `models` | required | At least two model entity refs, most capable first. |
+| `routing_strategies` | `["random_routing"]` | Any of `random_routing`, `stage_router`, `llm_classifier`. |
+| `strong_probability` | `0.5` | `random_routing`: share of requests sent to the capable model. |
+| `confidence_threshold` | `0.5` | `stage_router` confidence threshold. |
+| `base_threshold` | `0.5` | `llm_classifier` capability threshold. |
+| `judge_model` | capable model of the pair | `llm_classifier` judge. |
+
+```bash
+uv run nemo agents optimize run-strategy --strategy switchyard --agent my-agent \
+  --spec '{"models": ["default/model-a", "default/model-b"], "routing_strategies": ["random_routing", "stage_router"]}'
+
+# The results download as a tarball holding one agent-<virtual-model>.yaml per combination
+# plus switchyard-result.json, which maps each VirtualModel to its models and middleware config.
+uv run nemo jobs results download switchyard --job <job-name> -o switchyard.tar.gz
+mkdir -p switchyard-results && tar -xzf switchyard.tar.gz -C switchyard-results --strip-components=1
+uv run nemo agents create --name my-agent-random-routing-1 \
+  --agent-config ./switchyard-results/agent-my-agent-random-routing-1.yaml
+```
+
+Each rewritten config points its `models.default` and harness model blocks at
+`<workspace>/<virtual-model>` with no `base_url`, so the platform binds the
+Inference Gateway URL and credential when the agent runs.
+
 ## Verification
 
 ```bash
