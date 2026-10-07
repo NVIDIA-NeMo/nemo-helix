@@ -8,8 +8,7 @@ import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customize
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import type { AnnotatedFilesetFile } from '@studio/hooks/useCustomizationDatasetValidation';
 import type { GymEnvironmentManifest } from '@studio/hooks/useGymEnvironmentManifest';
-import type { CustomizationBackend, CustomizationJob } from '@studio/util/customizationBackend';
-import { getFinetuningType } from '@studio/util/customizations';
+import type { CustomizationBackend } from '@studio/util/customizationBackend';
 import {
   CUSTOMIZER_SCHEMA_LABELS,
   type CustomizerSchemaDetection,
@@ -283,7 +282,7 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
       errors: formatIssues(parsed.error.issues).map((error) => error.replace(/^spec\./, '')),
     };
   }
-  const spec = parsed.data.spec as Job;
+  const { spec } = parsed.data;
   const unknown = unknownPaths(job, spec);
   if (unknown.length > 0) {
     return {
@@ -292,8 +291,7 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
     };
   }
 
-  const asJob = { spec } as unknown as CustomizationJob;
-  const values = jobToFormFields(asJob);
+  const values = jobToFormFields({ spec, backend });
   const method = resolveTrainingType(
     values.backend,
     values.automodel.training.training_type,
@@ -310,6 +308,7 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
   }
 
   const output = record(job.output);
+  const finetuningType = record(spec.training).finetuning_type;
   values.outputName =
     (typeof output.name === 'string' && output.name) ||
     (typeof job.name === 'string' && job.name) ||
@@ -330,7 +329,7 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
     summary: {
       method,
       backend,
-      finetuningType: getFinetuningType(asJob),
+      finetuningType: typeof finetuningType === 'string' ? finetuningType : '',
       outputName: values.outputName,
       baseModel: getEntityReference(inputs.model),
       dataset: inputs.dataset.fileset,
