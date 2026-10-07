@@ -368,18 +368,18 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 client = NemoClient.from_config()
-WORKSPACE = client.resolve_workspace()
+workspace = client.resolve_workspace()
 
 result = NemoJobScheduler().submit_remote(
     RunStrategyJob,
     {
         "strategy": "legacy",
         "optimize_config": "optimize-chatonly.yaml",
-        "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
-        "workspace": WORKSPACE,
+        "optimize_config_fileset": f"{workspace}/hermes-optimize-chatonly",
+        "workspace": workspace,
     },
     base_url=client.base_url,
-    workspace=WORKSPACE,
+    workspace=workspace,
 )
 print(result)
 ```
@@ -427,18 +427,18 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 client = NemoClient.from_config()
-WORKSPACE = client.resolve_workspace()
+workspace = client.resolve_workspace()
 
 result = NemoJobScheduler().submit_remote(
     RunStrategyJob,
     {
         "strategy": "legacy",
         "optimize_config": "optimize-mcp.yaml",
-        "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
-        "workspace": WORKSPACE,
+        "optimize_config_fileset": f"{workspace}/hermes-optimize-mcp",
+        "workspace": workspace,
     },
     base_url=client.base_url,
-    workspace=WORKSPACE,
+    workspace=workspace,
 )
 print(result)
 ```
