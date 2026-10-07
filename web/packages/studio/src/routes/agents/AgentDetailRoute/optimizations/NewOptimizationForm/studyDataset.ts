@@ -28,19 +28,9 @@ export interface StudyRow {
   answer: string;
 }
 
-/** Fields a template-less dataset row may carry its prompt under, most specific first. */
-const PROMPT_FIELDS = ['instruction', 'question', 'prompt', 'input'] as const;
-
-/** Fields a dataset row may carry its expected answer under, most specific first. */
-const ANSWER_FIELDS = [
-  'answer',
-  'expected_answer',
-  'expected',
-  'expected_output',
-  'reference',
-  'label',
-  'ideal',
-] as const;
+/** The evaluator's canonical field for the expected answer: the row column of that name, or the
+ *  column `field_mapping.reference` binds to it. */
+const REFERENCE_FIELD = 'reference';
 
 /** `workspace/fileset#path`, the dataset ref Studio bakes into a dataset-driven config. */
 const DATASET_REF = /^([\w\-.]+)\/([\w\-.]+)#(.+)$/;
@@ -49,17 +39,6 @@ const asText = (value: unknown): string | undefined => {
   if (value === undefined || value === null) return undefined;
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return text.trim() ? text : undefined;
-};
-
-const firstField = (
-  record: Record<string, unknown>,
-  fields: readonly string[]
-): string | undefined => {
-  for (const field of fields) {
-    const text = asText(record[field]);
-    if (text !== undefined) return text;
-  }
-  return undefined;
 };
 
 const lookup = (record: Record<string, unknown>, path: string): unknown =>
@@ -143,57 +122,62 @@ const requireAnswer = (answer: string | undefined, missing: string): string => {
   return answer;
 };
 
+/** A task's reference is its whole ground truth; a single entry is the answer itself. */
+const taskAnswer = (reference: Record<string, unknown>): string | undefined => {
+  const values = Object.values(reference);
+  if (values.length === 0) return undefined;
+  return asText(values.length === 1 ? values[0] : reference);
+};
+
 const taskRows = (spec: PersistedEvalSpec): StudyRow[] =>
   spec.tasks.map(({ id, inputs, intent, reference = {} }) => ({
     id,
     question: inputs?.instruction || intent,
     answer: requireAnswer(
-      firstField(reference, ANSWER_FIELDS) ??
-        (Object.keys(reference).length > 0 ? asText(reference) : undefined),
+      taskAnswer(reference),
       `Task ${id} has no reference answer to score trials against.`
     ),
   }));
 
 const datasetRows = (spec: DatasetEvalSpec, records: Record<string, unknown>[]): StudyRow[] => {
+  if (spec.prompt_template === undefined) {
+    throw new Error('The evaluation has no prompt template, so the study has no prompt to send.');
+  }
   const template = agentInputTemplate(spec.prompt_template);
-  if (spec.prompt_template !== undefined && template === undefined) {
+  if (template === undefined) {
     throw new Error(
       "The evaluation's prompt template has no prompt or user message the study can send."
     );
   }
+  const referencePath = asRecord(spec.field_mapping)?.[REFERENCE_FIELD];
+  const referenceColumn = typeof referencePath === 'string' ? referencePath : REFERENCE_FIELD;
 
   return records.map((raw, index) => {
     const record = applyFieldMapping(raw, spec.field_mapping);
     const id = asText(record.id) ?? String(index);
-    let question: string | undefined;
-    if (template === undefined) {
-      question = firstField(record, PROMPT_FIELDS);
-    } else {
-      try {
-        question = renderPromptTemplate(template, record);
-      } catch (error) {
-        if (!(error instanceof UnsupportedTemplateError)) throw error;
-        throw new Error(
-          `Could not render the evaluation's prompt template for dataset row ${id}: ` +
-            `${error.message} is not supported here.`
-        );
-      }
-    }
-    if (!question?.trim()) {
+    let question: string;
+    try {
+      question = renderPromptTemplate(template, record);
+    } catch (error) {
+      if (!(error instanceof UnsupportedTemplateError)) throw error;
       throw new Error(
-        template === undefined
-          ? `Dataset row ${id} has no prompt: the evaluation has no prompt template, and the row ` +
-              `carries none of ${PROMPT_FIELDS.join(', ')}.`
-          : `Dataset row ${id} has no prompt: the evaluation's prompt template renders empty for it.`
+        `Could not render the evaluation's prompt template for dataset row ${id}: ` +
+          `${error.message} is not supported here.`
+      );
+    }
+    if (!question.trim()) {
+      throw new Error(
+        `Dataset row ${id} has no prompt: the evaluation's prompt template renders empty for it.`
       );
     }
     return {
       id,
       question,
       answer: requireAnswer(
-        firstField(record, ANSWER_FIELDS),
-        `Dataset row ${id} has no expected answer to score trials against: it carries none of ` +
-          `${ANSWER_FIELDS.join(', ')}.`
+        asText(record[REFERENCE_FIELD]),
+        `Dataset row ${id} has no expected answer to score trials against: the evaluation reads ` +
+          `it from "${referenceColumn}", which the row does not carry. Set ` +
+          `field_mapping.reference to the dataset's answer column.`
       ),
     };
   });

@@ -35,7 +35,7 @@ describe('studyRowsFromSpec', () => {
 
   it('renders simple prompt templates over inline dataset rows', async () => {
     const spec: DatasetEvalSpec = {
-      dataset: [{ id: 7, user_message: 'Capital of France?', expected_answer: 'Paris' }],
+      dataset: [{ id: 7, user_message: 'Capital of France?', reference: 'Paris' }],
       prompt_template: 'Q: {{ item.user_message }}',
       metrics: [],
     };
@@ -50,6 +50,7 @@ describe('studyRowsFromSpec', () => {
       dataset: 'ws/data#dataset.jsonl',
       prompt_template:
         '{{ item.user_message }}{% for e in item.emails %}\n{{ loop.index }}. {{ e.subject }}{% endfor %}',
+      field_mapping: { reference: 'expected_answer' },
       metrics: [],
     };
     const readDataset = vi
@@ -82,15 +83,13 @@ describe('studyRowsFromSpec', () => {
     ]);
   });
 
-  it('uses the row prompt when the evaluation has no template', async () => {
+  it('rejects a dataset evaluation with no prompt template', async () => {
     const spec: DatasetEvalSpec = {
-      dataset: [{ prompt: 'hi', expected: 'hello' }],
+      dataset: [{ prompt: 'hi', reference: 'hello' }],
       metrics: [],
     };
 
-    await expect(studyRowsFromSpec(spec, noDataset)).resolves.toEqual([
-      { id: '0', question: 'hi', answer: 'hello' },
-    ]);
+    await expect(studyRowsFromSpec(spec, noDataset)).rejects.toThrow(/has no prompt template/);
   });
 
   it('names the row and the construct when the template cannot be rendered', async () => {
@@ -113,21 +112,34 @@ describe('studyRowsFromSpec', () => {
     );
   });
 
-  it('rejects a dataset row with no expected answer for the judge', async () => {
+  it('rejects a dataset row without the reference column, rather than guessing one', async () => {
     const spec: DatasetEvalSpec = {
-      dataset: [{ id: 3, prompt: 'hi', gold: 'hello' }],
+      dataset: [{ id: 3, prompt: 'hi', expected_answer: 'hello' }],
+      prompt_template: '{{ item.prompt }}',
       metrics: [],
     };
 
     await expect(studyRowsFromSpec(spec, noDataset)).rejects.toThrow(
-      /Dataset row 3 has no expected answer/
+      /Dataset row 3 has no expected answer .* from "reference"/
     );
+  });
+
+  it('names the mapped reference column when a row lacks it', async () => {
+    const spec: DatasetEvalSpec = {
+      dataset: [{ id: 3, prompt: 'hi' }],
+      prompt_template: '{{ item.prompt }}',
+      field_mapping: { reference: 'gold' },
+      metrics: [],
+    };
+
+    await expect(studyRowsFromSpec(spec, noDataset)).rejects.toThrow(/from "gold"/);
   });
 
   it('reads a referenced CSV dataset, as the evaluator does', async () => {
     const spec: DatasetEvalSpec = {
       dataset: 'ws/data#smaller_test.csv',
       prompt_template: 'Subject: {{ item.subject }}',
+      field_mapping: { reference: 'label' },
       metrics: [],
     };
     const readDataset = vi.fn().mockResolvedValue('subject,label\n"Quota, urgent",phishing\n');
