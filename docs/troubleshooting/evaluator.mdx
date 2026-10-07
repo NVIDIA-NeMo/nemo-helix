@@ -194,6 +194,10 @@ curl -X 'POST' \
 <Tab title="Python">
 
 ```python
+import requests
+
+EVALUATOR_BASE_URL = "http://localhost:8080"
+
 data = {
     "namespace": "my-organization",
     "target": "<my-target-namespace/my-target-name>",
