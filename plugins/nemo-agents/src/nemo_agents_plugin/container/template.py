@@ -138,11 +138,13 @@ PINNED_HERMES_COMMIT = "dccb84b92401234db294667ec203d3ac3dc1b87f"
 
 # Pi harness (nvidia.fabric.pi) is a Node/npm adapter: the image installs Node + the
 # npm adapter + Pi SDK peers additively, alongside the Python/Rust Fabric stack.
-# Pi 0.84.x requires Node >= 22.19.0.
+# Pi 0.86.x requires Node >= 22.19.0.
 PINNED_NODE_MAJOR = "22"
 PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.4.0"
 # The adapter declares the Pi SDK as OPTIONAL peers, so they are installed explicitly.
-PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@^0.84.2 @earendil-works/pi-coding-agent@^0.84.2"
+# Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.4.0 requires
+# ^0.86.0) so the explicitly-installed SDK matches what the adapter was built against.
+PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@^0.86.0 @earendil-works/pi-coding-agent@^0.86.0"
 # NeMo Relay 0.9 CLI must be on PATH for Relay-enabled Pi telemetry (ATIF/OTEL/OpenInference).
 PI_RELAY_CLI_SPEC = "nemo-relay-cli-bin>=0.9.0,<0.10.0"
 # The Relay Pi extension is shipped only in the NeMo-Relay source tree (not the

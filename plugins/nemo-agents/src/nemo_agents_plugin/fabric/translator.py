@@ -57,6 +57,9 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
     }
     _validate_untranslated_shared_fields(config)
 
+    runtime_payload = config.runtime.model_dump(exclude_none=True)
+    _default_relay_runtime_artifacts(runtime_payload, config, harness)
+
     fabric_config = fabric.FabricConfig(
         metadata=fabric.MetadataConfig(name=config.name, description=config.description or None),
         harness=fabric.HarnessConfig(
@@ -66,7 +69,7 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
         ),
         models={key: fabric.ModelConfig(**payload) for key, payload in model_payloads.items()},
         instructions=_instructions_config(config),
-        runtime=fabric.RuntimeConfig(**config.runtime.model_dump(exclude_none=True)),
+        runtime=fabric.RuntimeConfig(**runtime_payload),
         environment=_environment_config(config, runtime_env),
         skills=_skills_config(config),
         mcp=_mcp_config(config),
@@ -244,6 +247,24 @@ def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig
         output_dir=telemetry.output_dir,
         observability=_relay_observability_config(config, model),
     )
+
+
+def _default_relay_runtime_artifacts(
+    runtime_payload: dict[str, Any], config: AgentConfig, harness: HarnessConfig
+) -> None:
+    """Default ``runtime.artifacts`` for a Relay-enabled Pi harness when unset.
+
+    Fabric creates the runtime-owned Relay config under ``runtime.artifacts``, so a
+    Relay-enabled Pi agent needs it set or Pi startup fails. Default it to
+    ``./artifacts/pi`` while preserving an explicitly configured value; a no-op for
+    other harnesses and for telemetry-disabled Pi agents.
+    """
+    telemetry = config.telemetry
+    if not telemetry.enabled or (telemetry.provider or "relay") != "relay":
+        return
+    if _adapter_id_for_harness(harness) != HARNESS_ADAPTER_IDS["pi"]:
+        return
+    runtime_payload.setdefault("artifacts", "./artifacts/pi")
 
 
 def _default_relay_extension_path(fabric_config: Any) -> None:

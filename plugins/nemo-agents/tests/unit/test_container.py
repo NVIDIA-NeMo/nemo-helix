@@ -617,7 +617,8 @@ class TestRenderFabricDockerfile:
         assert f"setup_{PINNED_NODE_MAJOR}.x" in result
         assert "apt-get install -y --no-install-recommends nodejs" in result
         assert PI_ADAPTER_NPM_SPEC in result
-        assert "@earendil-works/pi-coding-agent@" in result
+        assert "@earendil-works/pi-coding-agent@^0.86.0" in result
+        assert "@earendil-works/pi-ai@^0.86.0" in result
         # Relay 0.9 CLI for telemetry and git for the agent's own GitHub work.
         assert "nemo-relay-cli-bin" in result
         assert "ca-certificates curl git" in result

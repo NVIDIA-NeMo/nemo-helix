@@ -73,6 +73,7 @@ class EnvironmentConfig(BaseModel):
 class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    artifacts: str | None = None
     timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     max_turns: int | None = Field(default=None, gt=0, le=(1 << 32) - 1)
 

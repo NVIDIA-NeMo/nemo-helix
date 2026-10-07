@@ -483,6 +483,42 @@ class TestTranslateAgentConfig:
         with pytest.raises(FabricTranslationError, match="no models.default is configured"):
             translate_agent_config(config)
 
+    def test_relay_defaults_pi_runtime_artifacts_when_unset(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # Fabric creates the runtime-owned Relay config under runtime.artifacts, so a
+        # Relay-enabled Pi agent must have it set or Pi startup fails.
+        assert fabric_config.runtime.artifacts == "./artifacts/pi"
+
+    def test_relay_preserves_explicit_pi_runtime_artifacts(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        payload["runtime"] = {"artifacts": "./custom/artifacts"}
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # An explicitly configured runtime.artifacts is never overwritten.
+        assert fabric_config.runtime.artifacts == "./custom/artifacts"
+
+    def test_relay_runtime_artifacts_default_only_applies_to_pi(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # A non-Pi Relay harness (hermes here) does not get the Pi artifacts default.
+        assert fabric_config.runtime.artifacts is None
+
     def test_relay_telemetry_uses_latest_fabric_shape(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())
         payload["telemetry"]["enabled"] = True
