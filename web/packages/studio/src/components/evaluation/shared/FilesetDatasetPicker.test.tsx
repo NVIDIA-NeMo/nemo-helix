@@ -133,42 +133,59 @@ describe('FilesetDatasetPicker', () => {
     expect(await screen.findByText('File is too large to edit in the browser.')).toBeVisible();
   });
 
-  it('offers every Parquet batch beside the picked file as a glob', async () => {
-    mockFilesets(['out/batch_00000.parquet', 'out/batch_00001.parquet']);
-    const user = userEvent.setup();
-    render(<PickerHarness />);
-
-    await chooseFileset(user, 'generated');
-    await chooseFile(user, 'out/batch_00000.parquet');
-    await user.click(
-      screen.getByRole('checkbox', { name: 'Evaluate all 2 Parquet files in out/' })
-    );
-
-    expect(screen.getByTestId('form-batch-glob')).toHaveTextContent('out/*.parquet');
-  });
-
-  it('drops the batch glob when another file is picked', async () => {
+  it('offers a folder of Parquet batches as the first file option', async () => {
     mockFilesets(['out/batch_00000.parquet', 'out/batch_00001.parquet', 'rows.jsonl']);
     const user = userEvent.setup();
     render(<PickerHarness />);
 
     await chooseFileset(user, 'generated');
-    await chooseFile(user, 'out/batch_00000.parquet');
-    await user.click(screen.getByRole('checkbox', { name: /Evaluate all 2 Parquet files/ }));
-    await chooseFile(user, 'rows.jsonl');
+    await user.click(await screen.findByRole('combobox', { name: 'File' }));
 
-    expect(screen.getByTestId('form-batch-glob')).toBeEmptyDOMElement();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    const options = await screen.findAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([
+      'All 2 Parquet files in out/',
+      'out/batch_00000.parquet',
+      'out/batch_00001.parquet',
+      'rows.jsonl',
+    ]);
   });
 
-  it('does not offer batches for a lone Parquet file', async () => {
+  it('writes the glob and the first batch when the folder option is picked', async () => {
+    mockFilesets(['out/batch_00001.parquet', 'out/batch_00000.parquet']);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'All 2 Parquet files in out/');
+
+    expect(screen.getByTestId('form-batch-glob')).toHaveTextContent('out/*.parquet');
+    expect(screen.getByTestId('form-file')).toHaveTextContent('out/batch_00000.parquet');
+    expect(screen.getByRole('combobox', { name: 'File' })).toHaveTextContent(
+      'All 2 Parquet files in out/'
+    );
+  });
+
+  it('drops the glob when a single file is picked instead', async () => {
+    mockFilesets(['out/batch_00000.parquet', 'out/batch_00001.parquet']);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'All 2 Parquet files in out/');
+    await chooseFile(user, 'out/batch_00001.parquet');
+
+    expect(screen.getByTestId('form-batch-glob')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('form-file')).toHaveTextContent('out/batch_00001.parquet');
+  });
+
+  it('does not offer a folder option for a lone Parquet file', async () => {
     mockFilesets(['out/batch_00000.parquet']);
     const user = userEvent.setup();
     render(<PickerHarness />);
 
     await chooseFileset(user, 'generated');
-    await chooseFile(user, 'out/batch_00000.parquet');
+    await user.click(await screen.findByRole('combobox', { name: 'File' }));
 
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(await screen.findAllByRole('option')).toHaveLength(1);
   });
 });

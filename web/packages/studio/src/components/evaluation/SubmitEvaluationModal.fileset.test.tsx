@@ -195,10 +195,11 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
-    await pickFilesetFile(user);
-    await user.click(
-      await screen.findByRole('checkbox', { name: 'Evaluate all 2 Parquet files in output/' })
-    );
+    await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
+    await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
+    await user.click(await screen.findByRole('option', { name: 'generated' }));
+    await user.click(await screen.findByRole('combobox', { name: 'File' }));
+    await user.click(await screen.findByRole('option', { name: 'All 2 Parquet files in output/' }));
     await user.upload(
       screen.getByLabelText('Select Evaluator Config'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })

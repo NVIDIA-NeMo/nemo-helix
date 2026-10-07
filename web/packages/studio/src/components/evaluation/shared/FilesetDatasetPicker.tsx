@@ -3,8 +3,8 @@
 
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
-import { Checkbox, FormField, Select, Stack, Text } from '@nvidia/foundations-react-core';
-import { parquetBatchGlob } from '@studio/components/evaluation/shared/parquetBatchGlob';
+import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
+import { parquetBatchGroups } from '@studio/components/evaluation/shared/parquetBatchGroups';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
 import { type ReactElement } from 'react';
 import {
@@ -29,8 +29,8 @@ interface FilesetDatasetPickerProps<T extends FieldValues> {
   filesetName: Path<T>;
   /** Form field holding the chosen file's path within that fileset. */
   fileName: Path<T>;
-  /** Form field holding a glob over every Parquet batch beside the chosen file, or '' to read
-   *  only that file. */
+  /** Form field holding a glob over a folder of Parquet batches when that option is chosen, or ''
+   *  for a single file. ``fileName`` then holds the folder's first batch, which is validated. */
   batchGlobName: Path<T>;
   disabled?: boolean;
   /** The chosen file's content is still being read. */
@@ -62,11 +62,27 @@ export function FilesetDatasetPicker<T extends FieldValues>({
   });
 
   const filesetPaths = (filesQuery.data?.data ?? []).map((file) => file.path);
-  const batches = fileField.value ? parquetBatchGlob(fileField.value, filesetPaths) : null;
+  const batchGroups = parquetBatchGroups(filesetPaths);
 
-  const fileItems = (filesQuery.data?.data ?? [])
-    .filter((file) => DATASET_FORMATS.includes(formatFromFileName(file.path)))
-    .map((file) => ({ value: file.path, children: file.path }));
+  const fileItems = [
+    ...batchGroups.map((group) => ({
+      value: group.glob,
+      children: `All ${group.count} Parquet files in ${group.dir || 'the fileset root'}`,
+    })),
+    ...filesetPaths
+      .filter((path) => DATASET_FORMATS.includes(formatFromFileName(path)))
+      .map((path) => ({ value: path, children: path })),
+  ];
+
+  const pickItem = (value: string) => {
+    const group = batchGroups.find((candidate) => candidate.glob === value);
+    if (!group) {
+      pickFile(value);
+      return;
+    }
+    fileField.onChange(group.firstPath);
+    batchGlobField.onChange(group.glob);
+  };
 
   const noDatasetFiles = !!fileset && !filesQuery.isLoading && fileItems.length === 0;
   const placeholder = filesQuery.isLoading || loading ? 'Loading files...' : 'Select a file';
@@ -86,9 +102,9 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         slotHelp={
           noDatasetFiles
             ? 'This fileset has no JSONL, JSON, CSV, or Parquet files.'
-            : batches
-              ? 'JSONL, JSON, CSV, or Parquet.'
-              : 'JSONL, JSON, CSV, or Parquet. If the output is split across several files, only the file you pick is evaluated.'
+            : batchGlobField.value
+              ? 'Read from this fileset rather than copied into the run, so later changes to these files also change re-runs.'
+              : 'JSONL, JSON, CSV, or Parquet.'
         }
         slotError={error}
         status={error ? 'error' : undefined}
@@ -96,27 +112,11 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         <Select
           disabled={disabled || !fileset}
           items={fileItems}
-          value={fileField.value}
-          onValueChange={pickFile}
+          value={batchGlobField.value || fileField.value}
+          onValueChange={pickItem}
           placeholder={placeholder}
         />
       </FormField>
-      {batches ? (
-        <Stack gap="density-xs">
-          <Checkbox
-            checked={batchGlobField.value === batches.glob}
-            onCheckedChange={(checked) =>
-              batchGlobField.onChange(checked === true ? batches.glob : '')
-            }
-            disabled={disabled}
-            slotLabel={`Evaluate all ${batches.count} Parquet files in ${batches.dir || 'the fileset root'}`}
-          />
-          <Text className="text-secondary" kind="body/regular/xs">
-            They are read from this fileset rather than copied into the run, so later changes to
-            these files also change re-runs.
-          </Text>
-        </Stack>
-      ) : null}
     </Stack>
   );
 }
