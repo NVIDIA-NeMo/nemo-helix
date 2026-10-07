@@ -247,7 +247,7 @@ User environments therefore *do* add startup time, and cannot be prebaked. Two t
   into wheels, and fails rather than emitting an incomplete closure. The image harness
   pins `verifiers` by version so uv can select that vendored wheel instead of following
   a Git URL. `native-v1` vendors nothing and always needs egress.
-- Platform bootstrap for all three formats lives in
+- NeMo Helix bootstrap for all three formats lives in
   `nhx.rl.tasks.environment.bootstrap.bootstrap_environment_package` (validators +
   offline wheel install). The Gym host / RL image entrypoint should call that —
   not upstream NeMo-RL format APIs.

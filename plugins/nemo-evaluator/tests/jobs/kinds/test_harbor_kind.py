@@ -4,7 +4,7 @@
 from nemo_evaluator.api.schemas import HarborTaskDefinition, TaskRef
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity
-from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget, HarborRunnerTarget, ResolvedTask
+from nemo_evaluator.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget, HarborRunnerTarget, ResolvedTask
 from nemo_evaluator.jobs.kinds.harbor import HarborTaskAdapter
 from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext
@@ -45,7 +45,7 @@ async def test_harbor_adapter_snapshot_and_offline_preparation(entity_store, tmp
     assert adapter.runtime_id(loaded[0]) == "native/task"
     assert adapter.accepts_target(None, [snapshot])
     assert adapter.accepts_target(HarborRunnerTarget(), [snapshot])
-    assert not adapter.accepts_target(FabricRunnerTarget(config={}), [snapshot])
+    assert not adapter.accepts_target(FabricRunnerTarget(source=FabricConfigSource(config={})), [snapshot])
     trials = [
         AgentEvalTrial(
             id="trial",

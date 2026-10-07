@@ -198,7 +198,7 @@ class IntakeService(Service[IntakeConfig]):
         cfg = self.service_config or IntakeConfig()
         settings = ClickHouseSettings.from_config(cfg)
         # The denormalizer needs a service-principal entity client (no request context).
-        self._denormalizer_entity_client = self.dependency_provider.get_entity_client(as_service=self.name)
+        self._denormalizer_entity_client = self.dependency_provider.get_service_entity_client(self.name)
         if self._denormalizer_entity_client is None:
             logger.warning("Entity client unavailable; evaluation denormalizer not started")
         if should_provision_local_clickhouse(cfg.clickhouse_config):

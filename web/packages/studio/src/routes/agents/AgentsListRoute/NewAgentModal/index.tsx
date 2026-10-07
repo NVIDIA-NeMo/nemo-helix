@@ -3,9 +3,14 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledCheckbox';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import {
+  getAgentsListDeploymentsQueryKey,
+  useAgentsCreateDeployment,
+} from '@nemo/sdk/generated/agents/agent-deployments';
 import {
   getAgentsListAgentsQueryKey,
   useAgentsCreateAgent,
@@ -27,13 +32,26 @@ import {
   UploadTrigger,
 } from '@nvidia/foundations-react-core';
 import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
+import { buildThenDeployNavigation } from '@studio/api/agents/buildThenDeploy';
 import { useCreateAgentFromGitHub } from '@studio/api/agents/useCreateAgentFromGitHub';
 import { useCreateAgentFromUpload } from '@studio/api/agents/useCreateAgentFromUpload';
+import {
+  type DeploymentMode,
+  IMAGE_DEPLOYMENT_MODES,
+  useDeploymentModes,
+} from '@studio/api/agents/useDeploymentModes';
+import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { DeploymentModeSelect } from '@studio/components/DeploymentModeSelect';
+import { ImageBuildFirstNotice } from '@studio/components/ImageBuildFirstNotice';
+import {
+  AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
+  PLATFORM_BASE_URL,
+} from '@studio/constants/environment';
 import { agentIntegrationPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
 import {
   AGENT_CONFIG_FILENAME,
+  UPLOAD_AGENT_FORM_DEFAULTS,
   uploadAgentFormSchema,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import {
@@ -70,6 +88,7 @@ import {
   type DragEventHandler,
   type FC,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -77,7 +96,16 @@ import {
 import { type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 
-export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace }) => {
+const OFFERED_ON_CREATE: readonly DeploymentMode[] = AGENT_CONTAINER_DEPLOYMENTS_ENABLED
+  ? ['subprocess', ...IMAGE_DEPLOYMENT_MODES]
+  : ['subprocess'];
+
+export const NewAgentModal: FC<NewAgentModalProps> = ({
+  open,
+  onClose,
+  workspace,
+  initialName,
+}) => {
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -95,12 +123,41 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
+  // Set on submit, so an agent created from traces, which has no config to run, is never deployed.
+  const deployAfterCreate = useRef<{ mode: DeploymentMode; buildImage: boolean } | null>(null);
+
+  // Toasts live on the hook, not on mutate(): navigating to the new agent unmounts this modal.
+  const { mutate: deployAgent } = useAgentsCreateDeployment({
+    mutation: {
+      onSuccess: (deployment) => {
+        toast.success(`Deploying agent "${deployment.agent}"`);
+        void queryClient.invalidateQueries({
+          queryKey: getAgentsListDeploymentsQueryKey(workspace),
+        });
+      },
+      onError: (error, { data }) => {
+        toast.error(
+          `Agent "${data.agent}" was created, but deploying it failed: ${getErrorMessage(error) || 'unknown error'}`
+        );
+      },
+    },
+  });
 
   const onAgentCreated = (agent: Agent) => {
     toast.success(`Agent "${agent.name}" created`);
     void queryClient.invalidateQueries({ queryKey: getAgentsListAgentsQueryKey(workspace) });
+    const deployment = deployAfterCreate.current;
     resetAndClose();
-    if (agent.name) navigate(getAgentDetailRoute(workspace, agent.name));
+    if (!agent.name) return;
+    if (deployment?.buildImage) {
+      // The build outlives this modal, so the agent's page runs it and deploys the tag.
+      navigate(...buildThenDeployNavigation(workspace, agent.name, { mode: deployment.mode }));
+      return;
+    }
+    if (deployment) {
+      deployAgent({ workspace, data: { agent: agent.name, deployment_mode: deployment.mode } });
+    }
+    navigate(getAgentDetailRoute(workspace, agent.name));
   };
 
   const {
@@ -131,12 +188,31 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     formState: { errors },
   } = useForm({
     resolver: zodResolver(uploadAgentFormSchema),
-    defaultValues: { name: '', repoUrl: '', secretKey: '' },
+    defaultValues: { ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' },
     disabled: isPending,
     mode: 'onChange',
   });
 
   const tracedAgents = useTraceAgentNames(workspace, open && tab === 'imported-traces');
+
+  // A new agent has no image yet, so a mode that needs one is offered only if the platform can build it.
+  const deploymentModeState = useDeploymentModes(workspace, { enabled: open });
+  const imageBuildsUnsupported = useImageBuildsUnsupported();
+  const deploymentModes = useMemo<readonly DeploymentMode[]>(
+    () =>
+      deploymentModeState.status === 'ready'
+        ? OFFERED_ON_CREATE.filter(
+            (mode) =>
+              deploymentModeState.withoutImage.includes(mode) ||
+              (deploymentModeState.enabled.includes(mode) && !imageBuildsUnsupported)
+          )
+        : [],
+    [deploymentModeState, imageBuildsUnsupported]
+  );
+  const modeNeedsImageBuild = (mode: DeploymentMode) =>
+    deploymentModeState.status === 'ready' && !deploymentModeState.withoutImage.includes(mode);
+  const isModesLoading = deploymentModeState.status === 'loading';
+  const canDeployOnCreate = deploymentModes.length > 0;
 
   const {
     mutateAsync: createTracedAgent,
@@ -155,6 +231,15 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const watchedName = useWatch({ control, name: 'name' });
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
+  const watchedDeploy = useWatch({ control, name: 'deploy' });
+  const watchedDeploymentMode = useWatch({ control, name: 'deploymentMode' });
+
+  useEffect(() => {
+    const firstMode = deploymentModes.at(0);
+    if (firstMode && !deploymentModes.includes(watchedDeploymentMode)) {
+      setValue('deploymentMode', firstMode);
+    }
+  }, [deploymentModes, watchedDeploymentMode, setValue]);
 
   // A repository is only a source once it parses; a half-typed URL must not enable submit.
   const parsedRepo = useMemo((): { source?: GitHubAgentSource; problem?: string } => {
@@ -176,7 +261,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     resetMutation();
     resetRepoMutation();
     resetTracedMutation();
-    resetForm({ name: '', repoUrl: '', secretKey: '' });
+    resetForm({ ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' });
+    deployAfterCreate.current = null;
     setEntries([]);
     setSourceLabel('');
     setSelectionError(undefined);
@@ -229,7 +315,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     try {
       const config = parseAgentConfig((await configEntry?.file.text()) ?? '');
       if (superseded()) return;
-      setValue('name', agentNameFromConfig(config) ?? '', { shouldValidate: true });
+      setValue('name', initialName ?? agentNameFromConfig(config) ?? '', {
+        shouldValidate: true,
+      });
     } catch (error) {
       if (superseded()) return;
       setEntries([]);
@@ -300,6 +388,13 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   // Keyed on the active tab: the fileset has one source, and it is the one the user can see.
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
+    deployAfterCreate.current =
+      formData.deploy && canDeployOnCreate
+        ? {
+            mode: formData.deploymentMode,
+            buildImage: modeNeedsImageBuild(formData.deploymentMode),
+          }
+        : null;
     try {
       if (onGitHubTab) {
         if (!repoSource) return;
@@ -324,6 +419,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   // real agent; deploying or chatting with it still needs a config.
   const createFromTraces = async () => {
     if (!tracedAgent) return;
+    deployAfterCreate.current = null;
     await createTracedAgent({ workspace, data: { name: tracedAgent, config: {} } }).catch(() => {
       // Rendered through errorText.
     });
@@ -343,16 +439,36 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         : undefined;
 
   const busy = isPending || isCreatingTraced;
+  const awaitingDeployModes = Boolean(watchedDeploy) && isModesLoading;
+
+  const deployFields =
+    canDeployOnCreate || isModesLoading ? (
+      <Stack gap="density-md">
+        <ControlledCheckbox
+          useControllerProps={{ control, name: 'deploy' }}
+          slotLabel="Deploy after creating"
+        />
+        {watchedDeploy && deploymentModes.length > 1 ? (
+          <DeploymentModeSelect
+            useControllerProps={{ control, name: 'deploymentMode' }}
+            modes={deploymentModes}
+            loading={isModesLoading}
+          />
+        ) : null}
+        {watchedDeploy && modeNeedsImageBuild(watchedDeploymentMode) ? (
+          <ImageBuildFirstNotice mode={watchedDeploymentMode} />
+        ) : null}
+      </Stack>
+    ) : null;
 
   return (
     <>
       <FormModal
         open={open}
         onClose={resetAndClose}
-        className="w-[720px] max-w-[90vw]"
-        title="Instrument an agent with NeMo Helix"
-        instruction="Integrated agents allow users to evaluate, optimize, and deploy agents."
-        submitButtonText={replaceOrphan ? 'Replace and create' : 'Create'}
+        className="w-[800px] max-w-[90vw]"
+        title="Register an agent with NeMo Helix"
+        submitButtonText={replaceOrphan ? 'Replace and register' : 'Register'}
         onSubmit={(event) => {
           // The traced-agent choice is not part of the upload form, so it submits on its own
           // rather than through a resolver that would reject the empty name field.
@@ -366,7 +482,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         disabled={busy}
         loading={busy}
         submitDisabled={
-          onGitHubTab ? !repoSource : onTracesTab ? !tracedAgent : entries.length === 0
+          onGitHubTab
+            ? !repoSource || awaitingDeployModes
+            : onTracesTab
+              ? !tracedAgent
+              : entries.length === 0 || awaitingDeployModes
         }
         errorText={onCreateTab ? errorMessage : undefined}
         slotFooterRight={
@@ -378,10 +498,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         }
       >
         <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
-          <TabsList aria-label="Ways to instrument an agent">
-            <TabsTrigger value="upload">Upload agent</TabsTrigger>
-            <TabsTrigger value="github">GitHub repository</TabsTrigger>
-            <TabsTrigger value="imported-traces">Create from traces</TabsTrigger>
+          <TabsList aria-label="Ways to register an agent">
+            <TabsTrigger value="upload">Register with code upload</TabsTrigger>
+            <TabsTrigger value="github">Register from GitHub</TabsTrigger>
+            <TabsTrigger value="imported-traces">Register from traces</TabsTrigger>
             <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
           </TabsList>
 
@@ -430,6 +550,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 label="Name"
                 formFieldProps={{ slotError: errors.name?.message }}
               />
+              {deployFields}
             </Stack>
           </TabsContent>
 
@@ -467,6 +588,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 label="Name"
                 formFieldProps={{ slotError: errors.name?.message }}
               />
+              {deployFields}
             </Stack>
           </TabsContent>
 

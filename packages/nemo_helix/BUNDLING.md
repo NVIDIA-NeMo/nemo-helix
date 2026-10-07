@@ -132,7 +132,3 @@ To publish a bundled package independently:
 4. Run `make vendor` to regenerate the dependency groups
 
 The wheel gets thinner, the dependency metadata stays correct, and `pip install nemo-helix[all]` (and `[services]`) continues to work.
-
-## Generated `nemo_helix` module
-
-The `nemo-helix-sdk` bundle entry ships the generated `nemo_helix` module from `sdk/python/nemo-helix` only because runtime packages still import it. The wheel takes no scripts, entry points, or extras from that package's pyproject. Remove the entry together with the `sdk/python/nemo-helix` directory.

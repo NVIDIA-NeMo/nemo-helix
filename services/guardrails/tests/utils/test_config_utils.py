@@ -4,7 +4,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_helix_plugin.models.client import ModelsClient
 from nhx.guardrails.app.utils.config_utils import (
     _load_and_execute_py_config,
     configure_rails_config,
@@ -163,21 +162,21 @@ class TestEnrichConfigWithData:
 
 class TestConfigureRailsConfig:
     @pytest.fixture
-    def mock_platform_sdk(self):
+    def mock_platform_client(self):
         with (
-            patch("nhx.guardrails.app.utils.model_routing.get_platform_sdk") as get_sdk,
-            patch("nhx.guardrails.app.utils.model_routing.client_from_platform") as make_client,
+            patch("nhx.guardrails.app.utils.model_routing.get_nemo_client") as get_client,
+            patch("nhx.guardrails.app.utils.model_routing.ModelsClient.from_client") as from_client,
         ):
-            sdk = MagicMock()
+            client = MagicMock()
             models = MagicMock()
             models.get_openai_route_base_url.return_value = (
                 "http://localhost:8000/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
             )
-            get_sdk.return_value = sdk
-            make_client.return_value = models
-            yield sdk, models, make_client
+            get_client.return_value = client
+            from_client.return_value = models
+            yield client, models, from_client
 
-    def test_resolves_model_entity_references(self, mock_platform_sdk):
+    def test_resolves_model_entity_references(self, mock_platform_client):
         """Test that configure_rails_config resolves Model Entity references."""
         rails_config = RailsConfig(
             models=[
@@ -189,8 +188,8 @@ class TestConfigureRailsConfig:
 
         result = configure_rails_config(rails_config, model)
 
-        sdk, models, make_client = mock_platform_sdk
-        make_client.assert_called_once_with(sdk, ModelsClient)
+        client, models, from_client = mock_platform_client
+        from_client.assert_called_once_with(client)
         models.get_openai_route_base_url.assert_called_once_with(workspace="default")
         main_model = result.models[0]
         assert (
@@ -198,7 +197,7 @@ class TestConfigureRailsConfig:
             == "http://localhost:8000/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
         )
 
-    def test_resolves_multiple_model_entity_references(self, mock_platform_sdk):
+    def test_resolves_multiple_model_entity_references(self, mock_platform_client):
         """Test that configure_rails_config resolves all Model Entity references."""
         rails_config = RailsConfig(
             models=[
@@ -220,7 +219,7 @@ class TestConfigureRailsConfig:
             == "http://localhost:8000/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
         )
 
-    def test_preserves_explicit_base_url(self, mock_platform_sdk):
+    def test_preserves_explicit_base_url(self, mock_platform_client):
         """Test that configure_rails_config preserves explicit base_url."""
         rails_config = RailsConfig(
             models=[
@@ -239,7 +238,7 @@ class TestConfigureRailsConfig:
 
         assert result.models[0].parameters["base_url"] == "http://custom-endpoint/v1"
 
-    def test_skips_non_model_entity_references(self, mock_platform_sdk):
+    def test_skips_non_model_entity_references(self, mock_platform_client):
         """Test that configure_rails_config skips non-Model Entity references."""
         rails_config = RailsConfig(
             models=[

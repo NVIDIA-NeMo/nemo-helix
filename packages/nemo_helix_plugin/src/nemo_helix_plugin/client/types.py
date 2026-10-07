@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass, replace
-from typing import Any, ClassVar, Generic, ParamSpec, Protocol, TypeVar
+from types import MappingProxyType
+from typing import Any, ClassVar, Final, Generic, ParamSpec, Protocol, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
 from typing_extensions import TypedDict
@@ -83,6 +84,12 @@ class OffsetPaginationMetadata(TypedDict):
     total_pages: int
     total_results: int
 
+
+# Pydantic validation context the typed clients pass when parsing a response
+# body. Entities use it to restore store-managed metadata (id, created_at, ...)
+# that request validation must never accept from a caller.
+RESPONSE_VALIDATION_CONTEXT_KEY: Final = "nemo_helix_response"
+RESPONSE_VALIDATION_CONTEXT: Final = MappingProxyType({RESPONSE_VALIDATION_CONTEXT_KEY: True})
 
 _OFFSET_PAGINATION_METADATA_ADAPTER = TypeAdapter(OffsetPaginationMetadata)
 
@@ -265,7 +272,7 @@ class ConflictResolver(Protocol):
 # Unknown parameters in an endpoint signature trigger a ``TypeError``
 # at decoration time.
 BLESSED_CLIENT_PARAMS: dict[str, type] = {
-    # Declared but not yet acted on by the client — see AIRCORE-866.
+    # Declared but not yet acted on by the client.
     "exist_ok": bool,
 }
 

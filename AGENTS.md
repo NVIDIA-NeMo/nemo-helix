@@ -45,6 +45,7 @@ If you are inside a sandboxed coding-agent environment (macOS sandbox, CI contai
 
 - Each skill calls out the sandbox capabilities it needs. Read those first.
 - If a step requires capabilities you do not have, stop and tell the user what is missing. Do not improvise around the sandbox by skipping verification.
+- The macOS sandbox denies listening sockets, so `nemo services run` and `nemo setup --start-services` cannot host the platform from inside it (the CLI reports `Not permitted to listen on ...`). Do not retry on other ports. Ask the user how the platform should be hosted; see the "Starting the platform from a sandboxed agent" section of `nemo-skill-selection`.
 - `uv` is known to crash under the macOS sandbox today (`system_configuration::dynamic_store` panic). Install is CLI-only for this and other reasons.
 
 ## What this repo is
@@ -120,7 +121,7 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 ### Python Style notes
 
 - Always prefer concrete type hints over string based ones. DO NOT import these types under TYPE_CHECKING. Instead prefer to import the types a regular import when possible.
-- Keep NeMo Helix SDK and typed client naming distinct. Variables holding generated `NeMoHelix` or `AsyncNeMoHelix` instances should be named `sdk` or `async_sdk`. Variables holding `nemo_helix_plugin` typed clients should be named `client`, `async_client`, or service-specific names such as `files_client`, `jobs_client`, or `models_client`. Do not name typed clients `sdk`, and do not merge generated SDKs and typed clients into one public type; adapt at the boundary with `client_from_platform`.
+- Use `nemo_helix_plugin` typed clients (`NemoClient`, `AsyncNemoClient`, and service clients built with `XClient.from_client(client)`) in service, plugin, package, and test code. Do not import the generated `nemo_helix` SDK outside `sdk/` and its bridge modules (`nemo_helix_plugin/client/adapter.py`, `nemo_helix_plugin/secrets/compat.py`, `nemo_helix_plugin/discovery*`, `nemo_helix_plugin/sdk.py`). Name variables holding typed clients `client`, `async_client`, or service-specific names such as `files_client`, `jobs_client`, or `models_client`, never `sdk`.
 
 ### Python Package Management
 
@@ -144,7 +145,7 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 
 ### SDK
 
-The published `nemo-helix` wheel is defined by `packages/nemo_helix/pyproject.toml`, which bundles the `nemo` CLI (`packages/nemo_helix_ext`), the typed clients (`packages/nemo_helix_plugin`), runtime packages, plugins, and services from source at build time (see `packages/nemo_helix/BUNDLING.md`). The generated `nemo_helix` module under `sdk/python/nemo-helix` is legacy and scheduled for deletion; it is bundled only while runtime packages still import it.
+The published `nemo-helix` wheel is defined by `packages/nemo_helix/pyproject.toml`, which bundles the `nemo` CLI (`packages/nemo_helix_ext`), the typed clients (`packages/nemo_helix_plugin`), runtime packages, plugins, and services from source at build time (see `packages/nemo_helix/BUNDLING.md`). The legacy generated `nemo_helix` module was deleted; all platform code uses the typed `NemoClient`/`AsyncNemoClient` stack in `nemo_helix_plugin`.
 
 The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platform's HTTP API routes. It is regenerated locally from the FastAPI service code (no cloud credentials required).
 
@@ -167,7 +168,7 @@ Run it whenever you modify:
 
 #### Changing SDK types
 
-The generated `nemo_helix` package is not regenerated or extended. If a previously generated type or client needs to change, do not edit it in `sdk/python/nemo-helix`: use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
+The generated `nemo_helix` package is no longer present. If a previously generated type or client changes, use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
 
 #### Testing Python Code
 

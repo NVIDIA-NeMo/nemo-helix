@@ -206,9 +206,14 @@ class InstanceStillRunningError(Exception):
 class PortConflict:
     """Structured port conflict for terminal rendering by CLI callers."""
 
-    kind: Literal["foreign", "nemo_instance"]
+    kind: Literal["foreign", "nemo_instance", "not_permitted"]
     port: int
     scope: str | None = None
+    host: str | None = None
+
+
+_BIND_NOT_PERMITTED_ERRNOS = frozenset({errno.EPERM, errno.EACCES})
+_PRIVILEGED_PORT_CEILING = 1024
 
 
 def _normalize_bind_host(host: str) -> str:
@@ -234,25 +239,32 @@ def _instance_owns_listener(
     return desc.config.port == port and _normalize_bind_host(desc.config.host) == _normalize_bind_host(host)
 
 
-def is_port_bindable(host: str, port: int) -> bool:
-    """Return True if *host*:*port* can be bound on at least one address family.
+def port_bind_error(host: str, port: int) -> OSError | None:
+    """Return None if *host*:*port* can be bound on at least one address family, else the bind error.
 
     Uses ``getaddrinfo`` so IPv4 and IPv6 hosts (for example ``::``) are probed
-    with the correct socket family instead of always using ``AF_INET``.
+    with the correct socket family instead of always using ``AF_INET``. When
+    every family fails, a permission error wins over other errors so callers
+    can tell a denied bind apart from an occupied port.
     """
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE)
-    except OSError:
-        return False
+    except OSError as err:
+        return err
     if not infos:
-        return False
+        return OSError(errno.EADDRNOTAVAIL, f"no address for {host}")
+    errors: list[OSError] = []
     for family, socktype, proto, _, sockaddr in infos:
-        with contextlib.suppress(OSError):
+        try:
             with socket.socket(family, socktype, proto) as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(sockaddr)  # noqa: S104  # nosec B104
-            return True
-    return False
+        except OSError as err:
+            errors.append(err)
+            continue
+        return None
+    denied = [err for err in errors if err.errno in _BIND_NOT_PERMITTED_ERRNOS]
+    return (denied or errors)[0]
 
 
 def check_port_available_for_start(
@@ -264,12 +276,17 @@ def check_port_available_for_start(
 ) -> PortConflict | None:
     """Return conflict info when *port* cannot be bound, else None.
 
-    Classifies conflicts as ``nemo_instance`` only when a live instance for
-    *scope* is recorded on the same host and port. Otherwise reports ``foreign``.
-    Does not log or print — callers render to the terminal.
+    Reports ``not_permitted`` when the OS denies the bind (EPERM/EACCES), which
+    is not a port conflict at all. Classifies conflicts as ``nemo_instance``
+    only when a live instance for *scope* is recorded on the same host and port.
+    Otherwise reports ``foreign``. Does not log or print; callers render to the
+    terminal.
     """
-    if is_port_bindable(host, port):
+    err = port_bind_error(host, port)
+    if err is None:
         return None
+    if err.errno in _BIND_NOT_PERMITTED_ERRNOS:
+        return PortConflict(kind="not_permitted", port=port, host=host)
     if _instance_owns_listener(scope, host, port, base_dir=base_dir):
         return PortConflict(kind="nemo_instance", port=port, scope=scope)
     return PortConflict(kind="foreign", port=port)
@@ -278,8 +295,23 @@ def check_port_available_for_start(
 def format_port_conflict(err: PortConflict) -> list[str]:
     """Return actionable message lines for terminal display.
 
-    Message text depends on ``err.kind`` (foreign process vs NeMo instance).
+    Message text depends on ``err.kind`` (foreign process, NeMo instance, or denied bind).
     """
+    if err.kind == "not_permitted":
+        address = f"{err.host}:{err.port}" if err.host else f"port {err.port}"
+        if err.port < _PRIVILEGED_PORT_CEILING:
+            return [
+                f"Not permitted to listen on {address} (EPERM/EACCES).",
+                f"Ports below {_PRIVILEGED_PORT_CEILING} need elevated privileges. Choose a higher port:",
+                f"nemo services run --port {SUGGESTED_ALT_PORT}",
+            ]
+        return [
+            f"Not permitted to listen on {address} (EPERM/EACCES). This is not a port conflict.",
+            "The OS denied this process a listening socket, which usually means it runs inside a",
+            "sandbox (for example a coding agent's shell). Another port will fail the same way.",
+            "Start the platform from a shell or service manager outside the sandbox.",
+            "Coding agents: stop and ask the user how they want to host the platform.",
+        ]
     if err.kind == "nemo_instance":
         owner = f" '{err.scope}'" if err.scope else ""
         return [

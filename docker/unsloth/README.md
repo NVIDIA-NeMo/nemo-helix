@@ -11,7 +11,7 @@ steps and a dedicated GPU image for training.
 | `nhx-customizer-tasks` | `docker/Dockerfile.nhx-customizer-tasks` | Shared CPU steps (`file_io`, `model_entity`) |
 | `nhx-unsloth-training` | `docker/Dockerfile.nhx-unsloth-training` | NGC PyTorch base + Unsloth ML stack + platform glue. ENTRYPOINT is `/opt/venv/bin/python`. |
 
-Bake file: **`docker-bake.hcl`** at the Platform repo root (`context = "."`). Run all commands from the Platform repo root.
+Bake file: **`docker-bake.hcl`** at the NeMo Helix repo root (`context = "."`). Run all commands from the NeMo Helix repo root.
 
 Tags use the same bake variables as automodel (`IMAGE_REGISTRY`, `BAKE_TAG`; defaults in `docker-bake.hcl`):
 
@@ -20,10 +20,10 @@ Tags use the same bake variables as automodel (`IMAGE_REGISTRY`, `BAKE_TAG`; def
 
 ---
 
-## Build & push (from Platform repo root)
+## Build & push (from NeMo Helix repo root)
 
 ```bash
-cd /path/to/Platform
+cd /path/to/nemo-helix
 
 # --- Option A: local build (loads into the local daemon, no registry needed) ---
 docker buildx bake \
@@ -73,7 +73,7 @@ The build pulls the NGC PyTorch base, then:
 1d. Flash Attention 2 — **not currently installed** (commented TODO in the
     Dockerfile). Unsloth does not depend on it; without it you may see
     `FA2 = False` / `Xformers = None` on newer CUDA stacks.
-2. Editable install of the platform glue: `nemo-helix-sdk`,
+2. Editable install of the platform glue:
    `nemo-helix-plugin`, `nhx-common`, `nhx-unsloth`.
 
 We considered using the official `unsloth/unsloth` image as a base. We
@@ -116,7 +116,7 @@ node, a CI cluster runner, or a customer's air-gapped lab.
 
 ### 1. Build the image
 
-From the Platform repo root, on a machine with Docker buildx.
+From the NeMo Helix repo root, on a machine with Docker buildx.
 
 Pick **one** of the following depending on where the GPU host will pull from:
 

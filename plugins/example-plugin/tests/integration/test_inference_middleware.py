@@ -23,7 +23,7 @@ import uuid
 import pytest
 from nemo_example_plugin.middleware import ExampleInferenceMiddleware
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig
-from nemo_helix.types.inference.middleware_call_param import MiddlewareCallParam
+from nemo_helix_plugin.inference_middleware_models import MiddlewareCall
 from nhx.core.inference_gateway.testing.harness import IGWPluginHarness
 from nhx.testing.mock_chat_completions import (
     ChatCompletion,
@@ -42,15 +42,15 @@ def _build_middleware_call(
     *,
     blocked_keywords: list[str],
     block_message: str = "Blocked.",
-) -> MiddlewareCallParam:
-    return {
-        "name": EXAMPLE_PLUGIN_NAME,
-        "config_type": EXAMPLE_PLUGIN_CONFIG_TYPE,
-        "config": {
+) -> MiddlewareCall:
+    return MiddlewareCall(
+        name=EXAMPLE_PLUGIN_NAME,
+        config_type=EXAMPLE_PLUGIN_CONFIG_TYPE,
+        config={
             "blocked_keywords": blocked_keywords,
             "block_message": block_message,
         },
-    }
+    )
 
 
 class TestRequestMiddleware:

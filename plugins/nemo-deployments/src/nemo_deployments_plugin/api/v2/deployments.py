@@ -73,7 +73,7 @@ def _parse_deployment_config_ref(ref: str, default_workspace: str) -> tuple[str,
 
 @router.post("/deployments", response_model=Deployment, status_code=201, tags=["Deployments"])
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentPerms.CREATE])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.CREATE])
 async def create_deployment(
     workspace: str,
     body: CreateDeploymentRequest,
@@ -123,7 +123,7 @@ async def create_deployment(
 
 @router.get("/deployments", response_model=DeploymentPage, tags=["Deployments"])
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentPerms.LIST])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.LIST])
 async def list_deployments(
     workspace: str,
     page: int = Query(default=1, ge=1),
@@ -160,7 +160,7 @@ async def list_deployments(
 
 @router.get("/deployments/{name}", response_model=Deployment, tags=["Deployments"])
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentPerms.READ])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.READ])
 async def get_deployment(
     workspace: str,
     name: str,
@@ -177,7 +177,7 @@ async def get_deployment(
 
 @router.delete("/deployments/{name}", status_code=204, tags=["Deployments"])
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeploymentPerms.DELETE])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.DELETE])
 async def delete_deployment(
     workspace: str,
     name: str,

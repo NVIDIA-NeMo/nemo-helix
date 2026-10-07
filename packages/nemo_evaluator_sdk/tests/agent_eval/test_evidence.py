@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
-import importlib
 import json
 import os
 import time
@@ -484,17 +483,6 @@ async def test_trace_handle_exposes_typed_tool_evidence_and_retains_modeled_fiel
     assert "future_root_field" not in dumped
     assert "future_step_field" not in dumped["steps"][0]
     assert "future_result_field" not in dumped["steps"][1]["observation"]["results"][0]
-
-
-def test_observation_models_are_exported_from_source_and_vendored_values_packages() -> None:
-    from nemo_evaluator_sdk.values import Observation as SourceObservation
-    from nemo_evaluator_sdk.values import ObservationResult as SourceObservationResult
-
-    vendored_values = importlib.import_module("nemo_helix.beta.evaluator.values")
-    VendoredObservation = vendored_values.Observation
-    VendoredObservationResult = vendored_values.ObservationResult
-    assert SourceObservation.__name__ == VendoredObservation.__name__ == "Observation"
-    assert SourceObservationResult.__name__ == VendoredObservationResult.__name__ == "ObservationResult"
 
 
 @pytest.mark.asyncio

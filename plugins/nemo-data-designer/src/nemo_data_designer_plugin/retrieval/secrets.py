@@ -15,7 +15,7 @@ import logging
 
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
 from data_designer_nemo.secret_resolver import parse_secret_reference
-from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 async def resolve_hf_token(
-    async_client: AsyncHelixClient,
+    async_client: AsyncNemoClient,
     hf_token_secret: str | None,
     workspace: str,
 ) -> str | None:
@@ -32,7 +32,7 @@ async def resolve_hf_token(
         return None
     secret_workspace, name = parse_secret_reference(hf_token_secret, workspace)
     try:
-        secrets = client_from_platform(async_client, AsyncSecretsClient)
+        secrets = AsyncSecretsClient.from_client(async_client)
         response = (await secrets.access_secret(name=name, workspace=secret_workspace)).data()
     except NotFoundError as exc:
         raise NDDInvalidConfigError(f"Could not find secret {name!r} in workspace {secret_workspace!r}") from exc

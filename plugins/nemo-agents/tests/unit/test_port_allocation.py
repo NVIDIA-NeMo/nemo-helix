@@ -69,8 +69,9 @@ def test_is_port_free_returns_false_for_occupied_port() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("127.0.0.1", 0))
+        s.listen()
         occupied_port = s.getsockname()[1]
-        # While s is still bound, the port should not be free.
+        # While s is listening, as a deployed server would be, the port should not be free.
         assert not InMemoryRunnerBackend._is_port_free(occupied_port)
 
 

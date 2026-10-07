@@ -12,11 +12,14 @@ import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
-import { getAgentDetailRoute } from '@studio/routes/utils';
+import { getAgentDetailRoute, getAgentRunEvaluationRoute } from '@studio/routes/utils';
+import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
-import { waitFor } from '@testing-library/react';
+import { fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
+import { useNavigate } from 'react-router';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
@@ -26,6 +29,41 @@ const renderDetail = () =>
     history: getAgentDetailRoute(workspace, agentName),
     routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
   });
+
+const PREVIOUS_PAGE = '/previous-page';
+
+const GoBack = () => {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      Go back
+    </button>
+  );
+};
+
+/**
+ * Arrives by link from another page, with the location on screen and a way back, so a test can
+ * tell whether the one-shot param was replaced in history rather than pushed over.
+ */
+const renderArrivingAt = (path: string) =>
+  renderRoute(undefined, {
+    history: [PREVIOUS_PAGE, path],
+    routes: [
+      { path: PREVIOUS_PAGE, element: <LocationDisplay /> },
+      {
+        path: ROUTES.workspace.agentDetail,
+        element: (
+          <>
+            <AgentDetailRoute />
+            <LocationDisplay />
+            <GoBack />
+          </>
+        ),
+      },
+    ],
+  });
+
+const currentLocation = () => screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent;
 
 const BUILT_IMAGE = 'nemo-agents/default/react-agent:1.0';
 const agentsUrl = '*/apis/agents/v2/workspaces/:workspace/agents';
@@ -40,7 +78,7 @@ const mockPreviouslyPackagedAgent = () => {
         workspace,
         description: '',
         created_at: '2026-04-20T10:00:00Z',
-        config: {},
+        config: { models: { default: { model: 'nvidia/test-model' } } },
         config_format: 'nemo-agents-spec-v1',
       })
     ),
@@ -91,6 +129,47 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByRole('button', { name: 'Deploy' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Evaluation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open traces' })).not.toBeInTheDocument();
+  });
+
+  it('offers Upload instead of Deploy for an agent registered from traces (empty config)', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${agentsUrl}/:name`, () =>
+        HttpResponse.json({
+          name: agentName,
+          workspace,
+          description: '',
+          created_at: '2026-04-20T10:00:00Z',
+          config: {},
+        })
+      )
+    );
+    server.use(
+      http.get('*/apis/agents/v2/workspaces/:workspace/deployments', () =>
+        HttpResponse.json({ data: [], total: 0 })
+      )
+    );
+    renderDetail();
+
+    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
+
+    expect(await screen.findByText(/does not have a configuration/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deploy this Agent' })).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: 'Upload' })[0]!);
+
+    expect(await screen.findByDisplayValue(`${agentName}-v2`)).toBeInTheDocument();
+  });
+
+  it('does not offer Upload while the agent is still loading', async () => {
+    server.use(http.get(`${agentsUrl}/:name`, () => delay('infinite')));
+    renderDetail();
+
+    const deploy = await screen.findByRole('button', { name: 'Deploy' });
+
+    expect(deploy).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
   });
 
   it('switches to the chat tab', async () => {
@@ -153,7 +232,7 @@ describe('AgentDetailRoute', () => {
     expect(screen.getByText('••••••••')).toBeInTheDocument();
   });
 
-  it('clamps a long header description to one line and exposes the full text as a tooltip', async () => {
+  it("shows the agent's description in the overview Details panel, not the page header", async () => {
     const description = 'A long agent description that would otherwise bloat the header row.';
     server.use(
       http.get(
@@ -172,7 +251,60 @@ describe('AgentDetailRoute', () => {
     renderDetail();
 
     const descriptionEl = await screen.findByText(description);
-    expect(descriptionEl).toHaveClass('line-clamp-1');
-    expect(descriptionEl).toHaveAttribute('title', description);
+    expect(descriptionEl).toBeInTheDocument();
+    // The header carries the name and status only - no description, no model.
+    expect(
+      within(screen.getByTestId('nv-page-header-heading')).queryByText(description)
+    ).not.toBeInTheDocument();
+  });
+
+  describe('arriving with ?action=run-evaluation', () => {
+    it('opens the Run Evaluation modal on the Evaluations tab', async () => {
+      renderArrivingAt(getAgentRunEvaluationRoute(workspace, agentName));
+
+      expect(
+        await screen.findByRole('dialog', { name: 'Run Agent Evaluation' })
+      ).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Evaluations' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+    });
+
+    it('replaces the param in history so reload and Back do not reopen the modal', async () => {
+      renderArrivingAt(getAgentRunEvaluationRoute(workspace, agentName));
+
+      await screen.findByRole('dialog', { name: 'Run Agent Evaluation' });
+      await waitFor(() =>
+        expect(currentLocation()).toBe(
+          `${getAgentDetailRoute(workspace, agentName)}?tab=evaluations`
+        )
+      );
+
+      // Pushed rather than replaced, Back would land on the entry still carrying the action.
+      // fireEvent, not userEvent: the open modal makes the page behind it inert to real input.
+      fireEvent.click(screen.getByRole('button', { name: 'Go back', hidden: true }));
+      await waitFor(() => expect(currentLocation()).toBe(PREVIOUS_PAGE));
+    });
+
+    it('lands on the tab without the modal when the agent cannot be evaluated', async () => {
+      server.use(
+        http.get(`${agentsUrl}/:name`, () =>
+          HttpResponse.json({ name: agentName, workspace, created_at: '2026-04-20T10:00:00Z' })
+        )
+      );
+      renderArrivingAt(getAgentRunEvaluationRoute(workspace, agentName));
+
+      await waitFor(() =>
+        expect(currentLocation()).toBe(
+          `${getAgentDetailRoute(workspace, agentName)}?tab=evaluations`
+        )
+      );
+      expect(screen.getByRole('tab', { name: 'Evaluations' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 });

@@ -38,9 +38,9 @@ describe('CodeDisplay', () => {
 
     expect(screen.getByTestId('code-display')).toHaveClass('my-density-md');
     expect(screen.getByTestId('nv-code-snippet-code')).toHaveClass(
-      '[&&]:bg-gray-050',
-      '[&&]:py-density-xs',
-      'dark:[&&]:bg-gray-900'
+      '!bg-gray-050',
+      '!py-density-xs',
+      'dark:!bg-gray-900'
     );
   });
 });

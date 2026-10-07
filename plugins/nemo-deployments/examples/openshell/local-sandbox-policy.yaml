@@ -21,8 +21,9 @@
 #   network_policies.igw          egress is restricted to the NeMo Inference
 #                                 Gateway ONLY (host.docker.internal:8080 on the
 #                                 docker driver); everything else is blocked. The
-#                                 connecting binary is the venv/uv python, so it
-#                                 must be listed here (not curl).
+#                                 connecting binary is the resolved uv python (not
+#                                 the venv symlink, not curl); `*` in a binary
+#                                 path stays within one path component.
 
 version: 1
 
@@ -45,5 +46,4 @@ network_policies:
       - { host: host.docker.internal, port: 8080, protocol: rest, enforcement: enforce, access: full }
     binaries:
       - { path: /usr/bin/curl }
-      - { path: /opt/uv/python/cpython-3.13.7-linux-aarch64-gnu/bin/python3.13 }
-      - { path: /workspace/.venv/bin/python3.13 }
+      - { path: "/opt/uv/python/*/bin/python3*" }

@@ -127,6 +127,7 @@ def test_run_invokes_runner(base_dir: Path):
     with (
         patch.dict("sys.modules", {"nhx.platform_runner.run": mock_module}),
         patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
         patch(f"{_PROCESS_MODULE}.get_create_time", return_value=1000.0),
     ):
         result = runner.invoke(
@@ -186,6 +187,7 @@ def test_run_writes_descriptor(base_dir: Path):
     with (
         patch.dict("sys.modules", {"nhx.platform_runner.run": mock_module}),
         patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
         patch(f"{_PROCESS_MODULE}.get_create_time", return_value=1000.0),
     ):
         result = runner.invoke(
@@ -207,6 +209,7 @@ def test_run_records_background_mode_when_launched_by_start(base_dir: Path):
     with (
         patch.dict("sys.modules", {"nhx.platform_runner.run": mock_module}),
         patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
         patch(f"{_PROCESS_MODULE}.get_create_time", return_value=1000.0),
         patch.dict(os.environ, {"_NHX_LAUNCH_MODE": "background"}),
     ):
@@ -779,6 +782,7 @@ class TestServicesRestart:
         try:
             with (
                 patch(f"{_CLI_MODULE}._require_services_extra"),
+                patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
                 patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[os.getpid()])),
                 patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc) as mock_start,
                 patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=True),
@@ -822,6 +826,7 @@ class TestServicesRestart:
         try:
             with (
                 patch(f"{_CLI_MODULE}._require_services_extra"),
+                patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
                 patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[os.getpid()])),
                 patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc) as mock_start,
                 patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=True),
@@ -1206,6 +1211,7 @@ def test_default_host_is_loopback(base_dir: Path):
     with (
         patch.dict("sys.modules", {"nhx.platform_runner.run": mock_module}),
         patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
         patch(f"{_PROCESS_MODULE}.get_create_time", return_value=1000.0),
     ):
         result = runner.invoke(
@@ -1225,6 +1231,7 @@ def test_bind_all_warning(base_dir: Path):
     with (
         patch.dict("sys.modules", {"nhx.platform_runner.run": mock_module}),
         patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
         patch(f"{_PROCESS_MODULE}.get_create_time", return_value=1000.0),
     ):
         result = runner.invoke(

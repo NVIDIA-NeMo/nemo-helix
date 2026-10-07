@@ -3,17 +3,33 @@
 
 """Unit tests for the AuthClient class."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.exceptions import InvalidPermissionFormatError
 from nhx.common.auth.models import Principal
+from nhx.common.client_factory import get_nemo_client_on_behalf_of
 from nhx.common.config import AuthConfig
-from nhx.common.sdk_factory import get_sdk_on_behalf_of
+from nhx.common.config.base import OIDCConfig, TokenSigningConfig
+
+
+def _write_private_key(path: Path) -> None:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    path.write_bytes(
+        private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
 
 
 @pytest.fixture
@@ -109,6 +125,83 @@ class TestHasPermissionsFormatValidation:
         assert body["scopes"] == ["platform:read", "models:read"]
 
     @pytest.mark.asyncio
+    async def test_authorize_request_uses_service_bearer_for_pdp_in_token_exchange_mode(
+        self, auth_config, principal, tmp_path: Path
+    ):
+        mock_http_client = httpx.AsyncClient()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"allowed": True}}
+        mock_response.raise_for_status = MagicMock()
+        workload_private_key_file = tmp_path / "workload-private.pem"
+        _write_private_key(workload_private_key_file)
+        exchange_config = auth_config.model_copy(
+            update={
+                "token_signing": TokenSigningConfig(
+                    key_id="test-workload",
+                    private_key_file=str(workload_private_key_file),
+                ),
+                "oidc": OIDCConfig(workload_token_exchange_enabled=True),
+            }
+        )
+
+        with (
+            patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post,
+            patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+                new=AsyncMock(return_value="pdp-service-token"),
+            ),
+        ):
+            mock_post.return_value = mock_response
+            auth_client = AuthClient(
+                principal=principal,
+                config=exchange_config,
+                http_client=mock_http_client,
+                service_name="models",
+            )
+            out = await auth_client.authorize_request("GET", "/apis/models/v2/workspaces/ws/models")
+
+        assert out.allowed is True
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers == {"X-NHX-Internal": "true", "Authorization": "Bearer pdp-service-token"}
+
+    @pytest.mark.asyncio
+    async def test_authorize_request_rejects_service_bearer_for_remote_cleartext_pdp(
+        self, auth_config, principal, tmp_path: Path
+    ):
+        mock_http_client = httpx.AsyncClient()
+        workload_private_key_file = tmp_path / "workload-private.pem"
+        _write_private_key(workload_private_key_file)
+        exchange_config = auth_config.model_copy(
+            update={
+                "policy_decision_point_base_url": "http://pdp.example.test",
+                "token_signing": TokenSigningConfig(
+                    key_id="test-workload",
+                    private_key_file=str(workload_private_key_file),
+                ),
+                "oidc": OIDCConfig(workload_token_exchange_enabled=True),
+            }
+        )
+
+        with (
+            patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post,
+            patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+                new=AsyncMock(return_value="pdp-service-token"),
+            ) as get_token,
+            pytest.raises(ValueError, match="PDP service workload token.*cleartext remote endpoint"),
+        ):
+            auth_client = AuthClient(
+                principal=principal,
+                config=exchange_config,
+                http_client=mock_http_client,
+                service_name="models",
+            )
+            await auth_client.authorize_request("GET", "/apis/models/v2/workspaces/ws/models")
+
+        get_token.assert_not_called()
+        mock_post.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_rejects_scope_syntax_in_permissions(self, auth_config, principal):
         auth_client = AuthClient(principal=principal, config=auth_config)
         with pytest.raises(InvalidPermissionFormatError, match="dots"):
@@ -133,6 +226,27 @@ class TestHasPermissionsFormatValidation:
         assert out.allowed is True
         body = mock_post.call_args[1]["json"]["input"]
         assert body["scopes"] == ["openid", "profile.read", "employee.profile.read"]
+
+    @pytest.mark.asyncio
+    async def test_authorize_request_allows_dotted_provider_scopes(self, auth_config, principal):
+        """External IdP scopes may be dotted and should be passed through to the PDP."""
+        mock_http_client = httpx.AsyncClient()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"allowed": True}}
+        mock_response.raise_for_status = MagicMock()
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+            out = await auth_client.authorize_request(
+                "GET",
+                "/x",
+                scopes=["secrets.read", "app.default"],
+                http_client=mock_http_client,
+            )
+
+        assert out.allowed is True
+        body = mock_post.call_args[1]["json"]["input"]
+        assert body["scopes"] == ["secrets.read", "app.default"]
 
 
 class TestHasPermissionsPdpPayloadWithDelegation:
@@ -483,33 +597,29 @@ class TestOnBehalfOfHasPermissions:
             assert request_json["input"]["permissions"] == ["secrets.read", "secrets.write"]
 
 
-class TestGetSdkOnBehalfOf:
-    """Tests for the get_sdk_on_behalf_of SDK factory helper."""
+class TestGetNemoClientOnBehalfOf:
+    """Tests for the get_nemo_client_on_behalf_of typed client helper."""
 
-    def test_adds_on_behalf_of_header_to_sync_sdk(self):
-        """Test that get_sdk_on_behalf_of adds the on-behalf-of header to a sync SDK."""
-        base_sdk = NeMoHelix(
+    def test_adds_on_behalf_of_header_to_sync_client(self):
+        base = NemoClient(
             base_url="http://testserver",
             default_headers={"X-NHX-Principal-Id": "service:my-service"},
         )
 
-        delegated_sdk = get_sdk_on_behalf_of(base_sdk, "user@example.com")
+        delegated = get_nemo_client_on_behalf_of(base, "user@example.com")
 
-        # Verify the SDK is a new instance with on-behalf-of configured
-        assert delegated_sdk is not base_sdk
-        # Verify default headers include the on-behalf-of header
-        assert "X-NHX-Principal-On-Behalf-Of" in delegated_sdk.default_headers
-        assert delegated_sdk.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
+        assert delegated is not base
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
+        assert delegated._http is base._http
 
-    def test_get_sdk_on_behalf_of_with_principal_includes_email_and_groups(self):
-        """Test that Principal delegation includes delegated email and groups headers."""
-        base_sdk = NeMoHelix(
+    def test_with_principal_includes_email_and_groups(self):
+        base = AsyncNemoClient(
             base_url="http://testserver",
             default_headers={"X-NHX-Principal-Id": "service:my-service"},
         )
 
-        delegated_sdk = get_sdk_on_behalf_of(
-            base_sdk,
+        delegated = get_nemo_client_on_behalf_of(
+            base,
             Principal(
                 id="user@example.com",
                 account_id="account-user",
@@ -519,36 +629,28 @@ class TestGetSdkOnBehalfOf:
             ),
         )
 
-        assert delegated_sdk.default_headers["X-NHX-Principal-Id"] == "service:my-service"
-        assert delegated_sdk.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
-        assert delegated_sdk.default_headers["X-NHX-Principal-On-Behalf-Of-Email"] == "user@example.com"
-        assert delegated_sdk.default_headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "workspace-editors,ml-team"
-        assert delegated_sdk.default_headers["X-NHX-Subject-Account-Id"] == "account-user"
-        assert delegated_sdk.default_headers["X-NHX-Subject-Aliases"] == "legacy-user,user@example.com"
+        assert delegated.default_headers["X-NHX-Principal-Id"] == "service:my-service"
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of-Email"] == "user@example.com"
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "workspace-editors,ml-team"
+        assert delegated.default_headers["X-NHX-Subject-Account-Id"] == "account-user"
+        assert delegated.default_headers["X-NHX-Subject-Aliases"] == "legacy-user,user@example.com"
 
-    def test_preserves_original_sdk(self):
-        """Test that get_sdk_on_behalf_of doesn't modify the original SDK."""
-        base_sdk = NeMoHelix(
+    def test_preserves_original_client(self):
+        base = NemoClient(
             base_url="http://testserver",
             default_headers={"X-NHX-Principal-Id": "service:my-service"},
         )
+        original_headers = dict(base.default_headers)
 
-        # Get original headers count
-        original_headers = dict(base_sdk.default_headers)
+        delegated = get_nemo_client_on_behalf_of(base, "user@example.com")
 
-        # Create delegated SDK
-        delegated_sdk = get_sdk_on_behalf_of(base_sdk, "user@example.com")
-
-        # Verify original SDK is unchanged
-        assert base_sdk.default_headers == original_headers
-        assert "X-NHX-Principal-On-Behalf-Of" not in base_sdk.default_headers
-
-        # Verify delegated SDK has the new header
-        assert "X-NHX-Principal-On-Behalf-Of" in delegated_sdk.default_headers
+        assert base.default_headers == original_headers
+        assert "X-NHX-Principal-On-Behalf-Of" not in base.default_headers
+        assert "X-NHX-Principal-On-Behalf-Of" in delegated.default_headers
 
     def test_preserves_original_headers(self):
-        """Test that get_sdk_on_behalf_of preserves all original headers."""
-        base_sdk = NeMoHelix(
+        base = NemoClient(
             base_url="http://testserver",
             default_headers={
                 "X-NHX-Principal-Id": "service:my-service",
@@ -557,28 +659,53 @@ class TestGetSdkOnBehalfOf:
             },
         )
 
-        delegated_sdk = get_sdk_on_behalf_of(base_sdk, "user@example.com")
+        delegated = get_nemo_client_on_behalf_of(base, "user@example.com")
 
-        # Verify all original headers are preserved
-        assert delegated_sdk.default_headers["X-NHX-Principal-Id"] == "service:my-service"
-        assert delegated_sdk.default_headers["X-Custom-Header"] == "custom-value"
-        assert delegated_sdk.default_headers["Authorization"] == "Bearer token123"
-        # And the new header is added
-        assert delegated_sdk.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
+        assert delegated.default_headers["X-NHX-Principal-Id"] == "service:my-service"
+        assert delegated.default_headers["X-Custom-Header"] == "custom-value"
+        assert delegated.default_headers["Authorization"] == "Bearer token123"
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
 
-    def test_can_chain_delegations(self):
-        """Test that get_sdk_on_behalf_of can be used multiple times."""
-        base_sdk = NeMoHelix(
+    def test_replaces_stale_delegated_identity_headers(self):
+        base = NemoClient(
+            base_url="http://testserver",
+            default_headers={
+                "X-NHX-Principal-Id": "service:my-service",
+                "X-NHX-Principal-On-Behalf-Of": "old@example.com",
+                "x-nhx-principal-on-behalf-of-email": "old@example.com",
+                "X-NHX-Principal-On-Behalf-Of-Groups": "old-group",
+                "X-NHX-Subject-Account-Id": "old-account",
+            },
+        )
+
+        delegated = get_nemo_client_on_behalf_of(base, "new@example.com")
+
+        assert delegated.default_headers == {
+            "X-NHX-Principal-Id": "service:my-service",
+            "X-NHX-Principal-On-Behalf-Of": "new@example.com",
+        }
+
+    def test_keeps_typed_client_class(self):
+        base = AsyncSecretsClient(
             base_url="http://testserver",
             default_headers={"X-NHX-Principal-Id": "service:my-service"},
         )
 
-        delegated_sdk1 = get_sdk_on_behalf_of(base_sdk, "user1@example.com")
-        delegated_sdk2 = get_sdk_on_behalf_of(base_sdk, "user2@example.com")
+        delegated = get_nemo_client_on_behalf_of(base, "user@example.com")
 
-        # Verify each delegation is independent and preserves original headers
-        assert delegated_sdk1.default_headers["X-NHX-Principal-Id"] == "service:my-service"
-        assert delegated_sdk1.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user1@example.com"
-        assert delegated_sdk2.default_headers["X-NHX-Principal-Id"] == "service:my-service"
-        assert delegated_sdk2.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user2@example.com"
-        assert delegated_sdk1 is not delegated_sdk2
+        assert isinstance(delegated, AsyncSecretsClient)
+
+    def test_can_chain_delegations(self):
+        base = NemoClient(
+            base_url="http://testserver",
+            default_headers={"X-NHX-Principal-Id": "service:my-service"},
+        )
+
+        delegated1 = get_nemo_client_on_behalf_of(base, "user1@example.com")
+        delegated2 = get_nemo_client_on_behalf_of(base, "user2@example.com")
+
+        assert delegated1.default_headers["X-NHX-Principal-Id"] == "service:my-service"
+        assert delegated1.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user1@example.com"
+        assert delegated2.default_headers["X-NHX-Principal-Id"] == "service:my-service"
+        assert delegated2.default_headers["X-NHX-Principal-On-Behalf-Of"] == "user2@example.com"
+        assert delegated1 is not delegated2

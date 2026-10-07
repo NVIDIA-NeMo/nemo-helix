@@ -180,13 +180,12 @@ result = await entity_client.list(Widget, workspace="-")
 For controllers and background tasks where FastAPI's `Depends()` is not available:
 
 ```python
-from nhx.common.sdk_factory import get_async_platform_sdk
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
-from nhx.common.entities.client import EntityClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
 
-sdk = get_async_platform_sdk(as_service="my-plugin", internal=True)
-entity_client = EntityClient(client_from_platform(sdk, AsyncEntitiesClient))
+client = get_async_nemo_client(as_service="my-plugin", internal=True)
+entity_client = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 ```
 
 `internal=True` adds headers that suppress the access log flood from controller polling every few seconds. Always use `internal=True` for background/controller clients.

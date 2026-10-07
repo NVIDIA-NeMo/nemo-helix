@@ -15,7 +15,6 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from nemo_deployments_plugin.auth_proxy import is_auth_proxy_container
 from nemo_deployments_plugin.backends.base import (
     BackendStatusUpdate,
     DeploymentBackend,
@@ -104,7 +103,6 @@ from nemo_helix_plugin.auth.workload_identity import (
     workload_identity_env,
 )
 from nemo_helix_plugin.capabilities import docker_from_env_kwargs, probe_docker
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import (
@@ -211,7 +209,7 @@ class DockerDeploymentBackend(DeploymentBackend):
         self._docker = docker
         self._docker_errors = docker_errors
         self._executor_config = DockerExecutorConfig.model_validate(self._config)
-        self._entities = NemoEntitiesClient(client_from_platform(self._sdk, AsyncEntitiesClient))
+        self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self._nemo_client))
         self._workload_delegations = WorkloadDelegationStore(self._entities)
         self._gpu_pool = get_shared_gpu_pool()
         docker_host = self._executor_config.docker_host
@@ -298,7 +296,7 @@ class DockerDeploymentBackend(DeploymentBackend):
 
         try:
             config = await self._load_deployment_config(workspace, config_name)
-            config = await resolve_deployment_config_secrets(self._sdk, config)
+            config = await resolve_deployment_config_secrets(self._nemo_client, config)
             plan = build_docker_plan(config)
         except DeploymentConfigError as exc:
             return BackendStatusUpdate(status="FAILED", status_message=str(exc))
@@ -485,15 +483,14 @@ class DockerDeploymentBackend(DeploymentBackend):
             sidecar_identity: tuple[str, str] | None = None
             sidecar_labels = {**base_labels, CONTAINER_ROLE_LABEL: sidecar.name}
             try:
-                if not is_auth_proxy_container(sidecar):
-                    sidecar_identity = await self._prepare_workload_identity_for_container(
-                        workspace=workspace,
-                        deployment_name=name,
-                        config=config,
-                        role=sidecar.name,
-                        base_labels=sidecar_labels,
-                        auth_context=auth_context,
-                    )
+                sidecar_identity = await self._prepare_workload_identity_for_container(
+                    workspace=workspace,
+                    deployment_name=name,
+                    config=config,
+                    role=sidecar.name,
+                    base_labels=sidecar_labels,
+                    auth_context=auth_context,
+                )
                 if sidecar_identity is not None:
                     sidecar_labels = self._workload_identity_volume_labels(
                         base_labels=base_labels,

@@ -14,6 +14,11 @@ pytestmark = [pytest.mark.auth_idp]
 ZITADEL_DIR = Path("contrib/auth/zitadel")
 HELM_DIR = ZITADEL_DIR / "helm"
 ZITADEL_SCRIPT_TIMEOUT_SECONDS = 30
+ENVOY_SERVICE_URL_TEMPLATE = (
+    '{{ include "nemo-helix-zitadel.serviceUrl" '
+    '(dict "root" . "serviceName" "nemo-helix-envoy" '
+    '"namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}'
+)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -269,6 +274,49 @@ def test_zitadel_values_use_introspection_for_opaque_tokens() -> None:
     assert oidc["resolve_opaque_tokens_via_userinfo"] is False
     assert oidc["userinfo_endpoint"] == '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oidc/v1/userinfo'
     assert "__ZITADEL_PROJECT_ID__" in oidc["default_scopes"]
+
+
+def test_zitadel_values_route_internal_bearer_clients_through_tls_envoy() -> None:
+    values = _load_yaml(HELM_DIR / "values.yaml")
+    nemo_values = values["nemo-helix"]
+
+    platform_config = nemo_values["platformConfig"]["platform"]
+    assert platform_config["base_url"] == ENVOY_SERVICE_URL_TEMPLATE
+
+    controller = nemo_values["core"]["controller"]
+    assert controller["env"] == {"NHX_CLIENT_SSL_CERT_FILE": "/etc/nhx/workload-token-ca/ca.crt"}
+    assert "NHX_PLATFORM_URL" not in controller["env"]
+    assert "NHX_AUTH_URL" not in controller["env"]
+    assert controller["extraVolumes"] == [
+        {
+            "name": "workload-token-signing-key",
+            "secret": {"secretName": "nemo-workload-token-signing-key"},
+        },
+        {
+            "name": "workload-token-tls-ca",
+            "secret": {
+                "secretName": "nemo-helix-envoy-tls",
+                "items": [{"key": "ca.crt", "path": "ca.crt"}],
+            },
+        },
+    ]
+    assert controller["extraVolumeMounts"] == [
+        {
+            "name": "workload-token-signing-key",
+            "mountPath": "/etc/nhx/workload-token",
+            "readOnly": True,
+        },
+        {
+            "name": "workload-token-tls-ca",
+            "mountPath": "/etc/nhx/workload-token-ca",
+            "readOnly": True,
+        },
+    ]
+
+    seed_job = nemo_values["platformSeedJob"]
+    assert seed_job["extraEnv"] == [{"name": "NHX_CLIENT_SSL_CERT_FILE", "value": "/etc/nhx/workload-token-ca/ca.crt"}]
+    assert seed_job["extraVolumes"] == controller["extraVolumes"]
+    assert seed_job["extraVolumeMounts"] == controller["extraVolumeMounts"]
 
 
 def test_zitadel_values_keep_nemo_groups_claim_provider_neutral() -> None:

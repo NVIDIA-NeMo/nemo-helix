@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource
 from nemo_evaluator.harbor import archive
-from nemo_evaluator_sdk.agent_eval.runtimes import harbor_archive
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor import archive as harbor_archive
 
 pytest.importorskip("harbor")
 

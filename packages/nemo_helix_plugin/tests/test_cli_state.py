@@ -8,7 +8,12 @@ from typing import cast
 
 import pytest
 import typer
-from nemo_helix_plugin.cli_state import resolve_cli_workspace, resolve_local_cli_sdks
+from nemo_helix_plugin.cli_state import (
+    cli_state,
+    resolve_cli_workspace,
+    resolve_local_cli_sdks,
+    resolve_output_format,
+)
 
 
 def _typer_context_with_obj(obj: object | None) -> typer.Context:
@@ -107,3 +112,44 @@ class TestResolveCliWorkspace:
         """
         monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
         assert resolve_cli_workspace(_typer_context_with_obj(_WorkspaceState(None))) == "env-ws"
+
+
+class _FormatState:
+    """Stand-in for ``CLIContext`` whose resolved preference is fixed."""
+
+    def __init__(self, resolved: str) -> None:
+        self._resolved = resolved
+        self.calls = 0
+
+    def get_output_format(self) -> str:
+        self.calls += 1
+        return self._resolved
+
+
+class TestCliState:
+    def test_returns_the_context_obj(self) -> None:
+        state = _FormatState("json")
+        assert cli_state(_typer_context_with_obj(state)) is state
+
+    def test_raises_outside_the_cli(self) -> None:
+        with pytest.raises(RuntimeError, match="run the command through `nemo`"):
+            cli_state(_typer_context_with_obj(None))
+
+
+class TestResolveOutputFormat:
+    def test_explicit_wins_without_consulting_state(self) -> None:
+        state = _FormatState("yaml")
+        assert resolve_output_format(_typer_context_with_obj(state), "csv") == "csv"
+        assert state.calls == 0
+
+    def test_delegates_to_state_when_flag_omitted(self) -> None:
+        """Agent mode, the global flag, preferences, and the non-TTY rule all live in the state."""
+        assert resolve_output_format(_typer_context_with_obj(_FormatState("markdown"))) == "markdown"
+
+    def test_without_state_uses_table_on_a_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        assert resolve_output_format(_typer_context_with_obj(None)) == "table"
+
+    def test_without_state_uses_json_when_piped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        assert resolve_output_format(_typer_context_with_obj(None)) == "json"

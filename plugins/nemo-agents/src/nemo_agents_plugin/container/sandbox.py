@@ -76,3 +76,16 @@ def render_user_setup(profile: SandboxImageProfile) -> str:
         useradd += f" --shell {shell} {name}"
         parts.append(f"{groupadd} && \\\n    {useradd}")
     return " && \\\n    ".join(parts)
+
+
+def render_workdir_setup(profile: SandboxImageProfile, workdir: str) -> str:
+    """Return a shell command granting the profile's group write on *workdir*, or ``""``.
+
+    Applies to the directory itself only, so the venv and other contents keep the
+    ownership the image gave them.
+    """
+    if profile.workdir_group is None:
+        return ""
+    group = _validate(profile.workdir_group, _NAME_RE, "group name")
+    path = _validate(workdir, _PATH_RE, "workdir")
+    return f"chgrp {group} {path} && chmod g+w {path}"

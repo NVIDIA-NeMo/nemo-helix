@@ -3,65 +3,54 @@
 
 """Insights scheduling and AnalysisRun CLI."""
 
-import asyncio
-import json
-import os
-from collections.abc import AsyncIterator, Callable, Coroutine
-from contextlib import asynccontextmanager
+from collections.abc import Callable
 from datetime import datetime
 from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Any, ClassVar, TypeVar
+from typing import Any, ClassVar
 
-import httpx
+import click
 import typer
-from nemo_helix_plugin.cli import NemoCLI
-from nemo_helix_plugin.cli_options import WORKSPACE_FLAGS, workspace_help
-from nemo_helix_plugin.cli_state import resolve_cli_workspace
-from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.cli import NemoCLI, create_typer_app
+from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_error_handling import handle_errors
+from nemo_helix_plugin.cli_options import (
+    WORKSPACE_FLAGS,
+    AllPagesOption,
+    EntityOutputFormatOption,
+    ListOutputFormat,
+    ListOutputFormatOption,
+    NoTruncateOption,
+    OutputColumnsOption,
+    workspace_help,
+)
+from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output
+from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_helix_plugin.cli_state import CLIState, cli_state, resolve_cli_workspace, resolve_output_format
+from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.nooa_model_client import configured_fast_model, configured_model_refs
-from nemo_insights_plugin.contracts.profile import (
-    DEFAULT_BASE_URL,
-)
-from nemo_insights_plugin.platform_client import make_client
+from nemo_insights_plugin.client import InsightsClient
+from nemo_insights_plugin.schema import AnalysisRunResponse, EnableAnalysisConfigRequest
+from nemo_insights_plugin.sdk_resources.analysis_configs import _list_params as _config_list_params
 from nemo_insights_plugin.sdk_resources.analysis_runs import (
     DEFAULT_POLL_INTERVAL,
     DEFAULT_WAIT_TIMEOUT,
     AnalysisRunNotSubmittedError,
     AnalysisRunTimeoutError,
+    _build_create_body,
+    poll_until_terminal,
 )
+from nemo_insights_plugin.sdk_resources.analysis_runs import _list_params as _run_list_params
 
-
-def _one_line_error(exc: BaseException) -> str:
-    """Collapse expected CLI failures to one readable terminal line."""
-    message = " ".join(str(exc).splitlines()).strip() or type(exc).__name__
-    if isinstance(exc, httpx.HTTPStatusError):
-        # The default message names the status and URL but not the reason the
-        # service gave, which is the only part a caller can act on.
-        detail = " ".join(exc.response.text.splitlines()).strip()
-        if detail:
-            message = f"{message}: {detail}"
-    return message
-
-
-_T = TypeVar("_T")
-
-
-def _run_command(coro: Coroutine[Any, Any, _T]) -> _T:
-    """Run one analysis-run command, turning expected failures into exit 1."""
-    try:
-        return asyncio.run(coro)
-    except (
-        ValueError,
-        AnalysisRunNotSubmittedError,
-        AnalysisRunTimeoutError,
-        NemoClientError,
-        httpx.HTTPError,
-    ) as exc:
-        typer.echo(f"Error: {_one_line_error(exc)}", err=True)
-        raise typer.Exit(1) from None
+_RUN_COLUMNS = [Column("name"), Column("agent"), Column("evaluation_id"), Column("created_at")]
+_CONFIG_COLUMNS = [
+    Column("agent"),
+    Column("enabled"),
+    Column("default_model"),
+    Column("fast_model"),
+    Column("updated_at"),
+]
 
 
 class InsightsCLI(NemoCLI):
@@ -71,21 +60,20 @@ class InsightsCLI(NemoCLI):
     description: ClassVar[str] = "Analyze agent telemetry and act on insights."
 
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help=self.description, no_args_is_help=True)
+        app = create_typer_app(help=self.description)
 
         @app.callback()
         def _root() -> None:
             """Force subcommand dispatch even when only one verb is registered."""
 
-        analysis_app = typer.Typer(
-            help="Manage periodic agent analysis opt-in state.",
-            no_args_is_help=True,
-        )
+        analysis_app = create_typer_app(help="Manage periodic agent analysis opt-in state.")
         app.add_typer(analysis_app, name="analysis")
 
         @analysis_app.command("enable")
+        @collect_warnings
+        @handle_errors
         def enable_analysis(
-            typer_ctx: typer.Context,
+            ctx: typer.Context,
             agent: str = typer.Option(
                 ...,
                 "--agent",
@@ -95,12 +83,6 @@ class InsightsCLI(NemoCLI):
                 None,
                 *WORKSPACE_FLAGS,
                 help=workspace_help("Workspace the agent belongs to."),
-            ),
-            base_url: str = typer.Option(
-                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
-                "--base-url",
-                help="Base URL of the running NHX instance.",
-                envvar="NHX_BASE_URL",
             ),
             default_model: str | None = typer.Option(
                 None,
@@ -112,25 +94,27 @@ class InsightsCLI(NemoCLI):
                 "--fast-model",
                 help="Model Entity ref for context summarization. Default: the configured fast model.",
             ),
+            output_format: EntityOutputFormatOption = None,
         ) -> None:
             """Enable periodic analysis for an agent."""
-            workspace = resolve_cli_workspace(typer_ctx, workspace)
-            typer.echo(
-                _run_command(
-                    _analysis_config_command(
-                        action="enable",
-                        agent=agent,
-                        workspace=workspace,
-                        base_url=base_url,
-                        default_model=default_model,
-                        fast_model=fast_model,
-                    )
-                )
-            )
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            default_model, fast_model = _resolve_model_refs(default_model, fast_model)
+            kwargs = {
+                "workspace": resolve_cli_workspace(ctx, workspace),
+                "agent": agent,
+                "body": EnableAnalysisConfigRequest(default_model=default_model, fast_model=fast_model),
+            }
+            if handle_code_generation(InsightsClient, "enable_analysis_config", kwargs, resolved_output_format, state):
+                return
+            response = state.typed_client(InsightsClient).enable_analysis_config(**kwargs)
+            format_output(response, output_format=resolved_output_format)
 
         @analysis_app.command("disable")
+        @collect_warnings
+        @handle_errors
         def disable_analysis(
-            typer_ctx: typer.Context,
+            ctx: typer.Context,
             agent: str = typer.Option(
                 ...,
                 "--agent",
@@ -141,29 +125,22 @@ class InsightsCLI(NemoCLI):
                 *WORKSPACE_FLAGS,
                 help=workspace_help("Workspace the agent belongs to."),
             ),
-            base_url: str = typer.Option(
-                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
-                "--base-url",
-                help="Base URL of the running NHX instance.",
-                envvar="NHX_BASE_URL",
-            ),
+            output_format: EntityOutputFormatOption = None,
         ) -> None:
             """Disable periodic analysis for an agent."""
-            workspace = resolve_cli_workspace(typer_ctx, workspace)
-            typer.echo(
-                _run_command(
-                    _analysis_config_command(
-                        action="disable",
-                        agent=agent,
-                        workspace=workspace,
-                        base_url=base_url,
-                    )
-                )
-            )
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            kwargs = {"workspace": resolve_cli_workspace(ctx, workspace), "agent": agent}
+            if handle_code_generation(InsightsClient, "disable_analysis_config", kwargs, resolved_output_format, state):
+                return
+            response = state.typed_client(InsightsClient).disable_analysis_config(**kwargs)
+            format_output(response, output_format=resolved_output_format)
 
         @analysis_app.command("status")
+        @collect_warnings
+        @handle_errors
         def analysis_status(
-            typer_ctx: typer.Context,
+            ctx: typer.Context,
             agent: str | None = typer.Option(
                 None,
                 "--agent",
@@ -174,35 +151,58 @@ class InsightsCLI(NemoCLI):
                 *WORKSPACE_FLAGS,
                 help=workspace_help("Workspace to inspect."),
             ),
-            base_url: str = typer.Option(
-                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
-                "--base-url",
-                help="Base URL of the running NHX instance.",
-                envvar="NHX_BASE_URL",
-            ),
+            page: int = typer.Option(1, "--page", help="Page number (1-indexed). Ignored with --agent."),
+            page_size: int = typer.Option(100, "--page-size", help="Items per page. Ignored with --agent."),
+            all_pages: AllPagesOption = False,
+            output_format: ListOutputFormatOption = None,
+            no_truncate: NoTruncateOption = None,
+            columns: OutputColumnsOption = None,
         ) -> None:
             """Show periodic analysis opt-in state."""
-            workspace = resolve_cli_workspace(typer_ctx, workspace)
-            typer.echo(
-                _run_command(
-                    _analysis_config_command(
-                        action="status",
-                        agent=agent,
-                        workspace=workspace,
-                        base_url=base_url,
-                    )
-                )
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            workspace = resolve_cli_workspace(ctx, workspace)
+            if agent:
+                kwargs: dict[str, Any] = {"workspace": workspace, "agent": agent}
+                if handle_code_generation(InsightsClient, "get_analysis_config", kwargs, resolved_output_format, state):
+                    return
+                response = state.typed_client(InsightsClient).get_analysis_config(**kwargs)
+                format_output(response, output_format=resolved_output_format)
+                return
+
+            check_output_columns_with_format(columns, resolved_output_format)
+            kwargs = {
+                "workspace": workspace,
+                "query_params": _config_list_params(page=page, page_size=page_size, sort="-created_at", enabled=None),
+            }
+            if handle_code_generation(
+                InsightsClient,
+                "list_analysis_configs",
+                kwargs,
+                resolved_output_format,
+                state,
+                result="all-pages" if all_pages else "list",
+            ):
+                return
+            response = state.typed_client(InsightsClient).list_analysis_configs(**kwargs)
+            _print_list(
+                state,
+                collect_offset_pages(response, all_pages=all_pages),
+                output_format=resolved_output_format,
+                columns=columns,
+                default_columns=_CONFIG_COLUMNS,
+                no_truncate=no_truncate,
+                all_pages=all_pages,
             )
 
-        runs_app = typer.Typer(
-            help="Submit and inspect on-demand analysis runs.",
-            no_args_is_help=True,
-        )
+        runs_app = create_typer_app(help="Submit and inspect on-demand analysis runs.")
         app.add_typer(runs_app, name="analysis-runs")
 
         @runs_app.command("create")
+        @collect_warnings
+        @handle_errors
         def create_analysis_run(
-            typer_ctx: typer.Context,
+            ctx: typer.Context,
             agent: str = typer.Option(
                 ...,
                 "--agent",
@@ -212,12 +212,6 @@ class InsightsCLI(NemoCLI):
                 None,
                 *WORKSPACE_FLAGS,
                 help=workspace_help("Workspace the agent belongs to."),
-            ),
-            base_url: str = typer.Option(
-                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
-                "--base-url",
-                help="Base URL of the running NHX instance.",
-                envvar="NHX_BASE_URL",
             ),
             default_model: str | None = typer.Option(
                 None,
@@ -264,36 +258,52 @@ class InsightsCLI(NemoCLI):
                 "--poll-interval",
                 help="Seconds between --wait polls.",
             ),
+            output_format: EntityOutputFormatOption = None,
         ) -> None:
             """Submit an analysis run for an agent.
 
             The run is backed by an agents.execute job that shares its name.
             With --wait, exits non-zero if that job does not complete.
             """
-            workspace = resolve_cli_workspace(typer_ctx, workspace)
-            payload, completed = _run_command(
-                _create_analysis_run(
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            _reject_wait_with_code(wait, resolved_output_format)
+            workspace = resolve_cli_workspace(ctx, workspace)
+            resolved_default, resolved_fast = _resolve_model_refs(default_model, fast_model)
+            kwargs = {
+                "workspace": workspace,
+                "body": _build_create_body(
                     agent=agent,
-                    workspace=workspace,
-                    base_url=base_url,
-                    default_model=default_model,
-                    fast_model=fast_model,
-                    ethos=ethos,
-                    since=since,
+                    default_model=resolved_default,
+                    fast_model=resolved_fast,
+                    ethos=_read_ethos_file(ethos),
+                    since=_parse_since(since),
                     evaluation_id=evaluation_id,
                     timeout_seconds=timeout_seconds,
-                    wait=wait,
-                    poll_timeout=poll_timeout,
-                    poll_interval=poll_interval,
-                )
+                ),
+            }
+            if handle_code_generation(InsightsClient, "create_analysis_run", kwargs, resolved_output_format, state):
+                return
+            client = state.typed_client(InsightsClient)
+            response = client.create_analysis_run(**kwargs).data()
+            if not wait:
+                format_output(response, output_format=resolved_output_format)
+                return
+            typer.echo(f"Created analysis run '{response.run.name}'.", err=True)
+            _print_waited_run(
+                client,
+                workspace=workspace,
+                name=response.run.name,
+                poll_timeout=poll_timeout,
+                poll_interval=poll_interval,
+                output_format=resolved_output_format,
             )
-            typer.echo(payload)
-            if not completed:
-                raise typer.Exit(1)
 
         @runs_app.command("list")
+        @collect_warnings
+        @handle_errors
         def list_analysis_runs(
-            typer_ctx: typer.Context,
+            ctx: typer.Context,
             agent: str | None = typer.Option(
                 None,
                 "--agent",
@@ -304,12 +314,6 @@ class InsightsCLI(NemoCLI):
                 *WORKSPACE_FLAGS,
                 help=workspace_help("Workspace to inspect."),
             ),
-            base_url: str = typer.Option(
-                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
-                "--base-url",
-                help="Base URL of the running NHX instance.",
-                envvar="NHX_BASE_URL",
-            ),
             page: int = typer.Option(1, "--page", help="Page number (1-indexed)."),
             page_size: int = typer.Option(20, "--page-size", help="Items per page."),
             sort: str = typer.Option(
@@ -317,36 +321,49 @@ class InsightsCLI(NemoCLI):
                 "--sort",
                 help="Sort field; prefix with '-' for descending.",
             ),
+            all_pages: AllPagesOption = False,
+            output_format: ListOutputFormatOption = None,
+            no_truncate: NoTruncateOption = None,
+            columns: OutputColumnsOption = None,
         ) -> None:
             """List analysis runs. Job state is not joined — read one run to get it."""
-            workspace = resolve_cli_workspace(typer_ctx, workspace)
-            typer.echo(
-                _run_command(
-                    _list_analysis_runs(
-                        agent=agent,
-                        workspace=workspace,
-                        base_url=base_url,
-                        page=page,
-                        page_size=page_size,
-                        sort=sort,
-                    )
-                )
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            check_output_columns_with_format(columns, resolved_output_format)
+            kwargs = {
+                "workspace": resolve_cli_workspace(ctx, workspace),
+                "query_params": _run_list_params(page=page, page_size=page_size, sort=sort, agent=agent),
+            }
+            if handle_code_generation(
+                InsightsClient,
+                "list_analysis_runs",
+                kwargs,
+                resolved_output_format,
+                state,
+                result="all-pages" if all_pages else "list",
+            ):
+                return
+            response = state.typed_client(InsightsClient).list_analysis_runs(**kwargs)
+            _print_list(
+                state,
+                collect_offset_pages(response, all_pages=all_pages),
+                output_format=resolved_output_format,
+                columns=columns,
+                default_columns=_RUN_COLUMNS,
+                no_truncate=no_truncate,
+                all_pages=all_pages,
             )
 
         @runs_app.command("get")
+        @collect_warnings
+        @handle_errors
         def get_analysis_run(
-            typer_ctx: typer.Context,
+            ctx: typer.Context,
             name: str = typer.Argument(..., help="Name of the analysis run."),
             workspace: str | None = typer.Option(
                 None,
                 *WORKSPACE_FLAGS,
                 help=workspace_help("Workspace the run belongs to."),
-            ),
-            base_url: str = typer.Option(
-                os.environ.get("NHX_BASE_URL", DEFAULT_BASE_URL),
-                "--base-url",
-                help="Base URL of the running NHX instance.",
-                envvar="NHX_BASE_URL",
             ),
             wait: bool = typer.Option(
                 False,
@@ -363,84 +380,96 @@ class InsightsCLI(NemoCLI):
                 "--poll-interval",
                 help="Seconds between --wait polls.",
             ),
+            output_format: EntityOutputFormatOption = None,
         ) -> None:
             """Get one analysis run, joined with the live state of its backing job.
 
             A null job means submission never landed: no job exists under the
             run's name, and the run can be resubmitted.
             """
-            workspace = resolve_cli_workspace(typer_ctx, workspace)
-            payload, completed = _run_command(
-                _get_analysis_run(
-                    name=name,
-                    workspace=workspace,
-                    base_url=base_url,
-                    wait=wait,
-                    poll_timeout=poll_timeout,
-                    poll_interval=poll_interval,
-                )
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            _reject_wait_with_code(wait, resolved_output_format)
+            workspace = resolve_cli_workspace(ctx, workspace)
+            kwargs = {"workspace": workspace, "name": name}
+            if handle_code_generation(InsightsClient, "get_analysis_run", kwargs, resolved_output_format, state):
+                return
+            client = state.typed_client(InsightsClient)
+            if not wait:
+                format_output(client.get_analysis_run(**kwargs), output_format=resolved_output_format)
+                return
+            _print_waited_run(
+                client,
+                workspace=workspace,
+                name=name,
+                poll_timeout=poll_timeout,
+                poll_interval=poll_interval,
+                output_format=resolved_output_format,
             )
-            typer.echo(payload)
-            if not completed:
-                raise typer.Exit(1)
 
         for entry_point in sorted(entry_points(group="nemo.insights.commands"), key=lambda item: item.name):
             app.add_typer(entry_point.load()(), name=entry_point.name)
         return app
 
 
-async def _analysis_config_command(
+def _print_list(
+    state: CLIState,
+    result: Any,
     *,
-    action: str,
-    agent: str | None,
+    output_format: ListOutputFormat,
+    columns: str | None,
+    default_columns: list[Column],
+    no_truncate: bool | None,
+    all_pages: bool,
+) -> None:
+    """Render one page (or all pages) of a list command, then warn if more pages remain."""
+    output_columns: str | list[Column] = default_columns
+    if columns is not None and columns.strip() != "default":
+        output_columns = columns
+    format_output(
+        result,
+        is_list=True,
+        output_format=output_format,
+        output_columns=output_columns,
+        no_truncate=state.get_no_truncate(no_truncate),
+        timestamp_format=state.get_timestamp_format(),
+    )
+    if not all_pages:
+        warn_if_more_pages(result, PaginationType.PAGE_NUMBER)
+
+
+def _reject_wait_with_code(wait: bool, output_format: ListOutputFormat) -> None:
+    """``-f code`` prints one client call; it cannot express the --wait poll loop."""
+    if wait and output_format == "code":
+        raise click.UsageError("--wait cannot be combined with --output-format code.")
+
+
+def _print_waited_run(
+    client: InsightsClient,
+    *,
     workspace: str,
-    base_url: str,
-    default_model: str | None = None,
-    fast_model: str | None = None,
-) -> str:
-    """Run one analysis-config CLI action and return JSON for stdout."""
-    model_refs = None
-    if action == "enable":
-        if agent is None:
-            raise ValueError("agent is required for enable")
-        model_refs = _resolve_model_refs(default_model, fast_model)
-
-    client = make_client(base_url)
+    name: str,
+    poll_timeout: float,
+    poll_interval: float,
+    output_format: ListOutputFormat,
+) -> None:
+    """Poll one run to a terminal job state, print it, and exit non-zero unless it completed."""
     try:
-        if action == "enable":
-            assert agent is not None
-            assert model_refs is not None
-            result = await client.insights.analysis_configs.enable(
-                workspace=workspace,
-                agent=agent,
-                default_model=model_refs[0],
-                fast_model=model_refs[1],
-            )
-            return _json(result.model_dump(mode="json"))
-        if action == "disable":
-            if agent is None:
-                raise ValueError("agent is required for disable")
-            result = await client.insights.analysis_configs.disable(workspace=workspace, agent=agent)
-            return _json(result.model_dump(mode="json"))
-        if action == "status":
-            if agent:
-                result = await client.insights.analysis_configs.get(workspace=workspace, agent=agent)
-                return _json(result.model_dump(mode="json"))
-            page = await client.insights.analysis_configs.list_configs(workspace=workspace, page_size=100)
-            return _json(page.model_dump(mode="json"))
-        raise ValueError(f"Unknown analysis config action: {action}")
-    finally:
-        await client.close()
+        response = poll_until_terminal(
+            lambda: client.get_analysis_run(workspace=workspace, name=name).data(),
+            timeout=poll_timeout,
+            poll_interval=poll_interval,
+            on_status=_status_reporter(),
+        )
+    except (AnalysisRunNotSubmittedError, AnalysisRunTimeoutError) as exc:
+        raise click.ClickException(str(exc)) from None
+    format_output(response, output_format=output_format)
+    if not _completed(response):
+        raise typer.Exit(1)
 
 
-@asynccontextmanager
-async def _client(base_url: str) -> AsyncIterator[AsyncNemoClient]:
-    """Open a platform client for one CLI command and always close it."""
-    client = make_client(base_url)
-    try:
-        yield client
-    finally:
-        await client.close()
+def _completed(response: AnalysisRunResponse) -> bool:
+    return response.job_status == HelixJobStatus.COMPLETED.value
 
 
 def _parse_since(since: str | None) -> datetime | None:
@@ -450,7 +479,7 @@ def _parse_since(since: str | None) -> datetime | None:
     try:
         return datetime.fromisoformat(since)
     except ValueError:
-        raise ValueError(f"--since must be an ISO-8601 timestamp, got {since!r}") from None
+        raise click.BadParameter(f"must be an ISO-8601 timestamp, got {since!r}", param_hint="'--since'") from None
 
 
 def _read_ethos_file(ethos: Path | None) -> str | None:
@@ -465,9 +494,9 @@ def _read_ethos_file(ethos: Path | None) -> str | None:
     try:
         content = ethos.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ValueError(f"--ethos could not be read: {exc}") from None
+        raise click.BadParameter(f"could not be read: {exc}", param_hint="'--ethos'") from None
     if not content.strip():
-        raise ValueError(f"--ethos is empty: {ethos}")
+        raise click.BadParameter(f"is empty: {ethos}", param_hint="'--ethos'")
     return content
 
 
@@ -484,126 +513,14 @@ def _resolve_model_refs(default_model: str | None, fast_model: str | None) -> tu
     try:
         configured = configured_model_refs()
     except ValueError as exc:
-        raise ValueError(f"{exc} Or pass --default-model and --fast-model.") from exc
+        raise click.ClickException(f"{exc} Or pass --default-model and --fast-model.") from None
     return default_model or configured.default, fast_model or configured.fast
 
 
 def _status_reporter() -> Callable[[str | None], None]:
-    """Report each job-status change on stderr, keeping stdout pure JSON."""
+    """Report each job-status change on stderr, keeping stdout for the command's output."""
 
     def report(status: str | None) -> None:
         typer.echo(f"  status: {status}", err=True)
 
     return report
-
-
-async def _create_analysis_run(
-    *,
-    agent: str,
-    workspace: str,
-    base_url: str,
-    default_model: str | None,
-    fast_model: str | None,
-    ethos: Path | None,
-    since: str | None,
-    evaluation_id: str | None,
-    timeout_seconds: float | None,
-    wait: bool,
-    poll_timeout: float,
-    poll_interval: float,
-) -> tuple[str, bool]:
-    """Submit a run and return its JSON plus whether it completed.
-
-    Without ``--wait`` there is nothing to have failed yet, so the run counts
-    as completed for exit-code purposes.
-    """
-    parsed_since = _parse_since(since)
-    ethos_content = _read_ethos_file(ethos)
-    resolved_default, resolved_fast = _resolve_model_refs(default_model, fast_model)
-    async with _client(base_url) as client:
-        response = await client.insights.analysis_runs.create(
-            workspace=workspace,
-            agent=agent,
-            default_model=resolved_default,
-            fast_model=resolved_fast,
-            ethos=ethos_content,
-            since=parsed_since,
-            evaluation_id=evaluation_id,
-            timeout_seconds=timeout_seconds,
-        )
-        if not wait:
-            return _json(response.model_dump(mode="json")), True
-        typer.echo(f"Created analysis run '{response.run.name}'.", err=True)
-        return await _wait_for_run(
-            client,
-            workspace=workspace,
-            name=response.run.name,
-            poll_timeout=poll_timeout,
-            poll_interval=poll_interval,
-        )
-
-
-async def _list_analysis_runs(
-    *,
-    agent: str | None,
-    workspace: str,
-    base_url: str,
-    page: int,
-    page_size: int,
-    sort: str,
-) -> str:
-    async with _client(base_url) as client:
-        result = await client.insights.analysis_runs.list_runs(
-            workspace=workspace,
-            agent=agent,
-            page=page,
-            page_size=page_size,
-            sort=sort,
-        )
-    return _json(result.model_dump(mode="json"))
-
-
-async def _get_analysis_run(
-    *,
-    name: str,
-    workspace: str,
-    base_url: str,
-    wait: bool,
-    poll_timeout: float,
-    poll_interval: float,
-) -> tuple[str, bool]:
-    async with _client(base_url) as client:
-        if wait:
-            return await _wait_for_run(
-                client,
-                workspace=workspace,
-                name=name,
-                poll_timeout=poll_timeout,
-                poll_interval=poll_interval,
-            )
-        response = await client.insights.analysis_runs.get(workspace=workspace, name=name)
-    return _json(response.model_dump(mode="json")), True
-
-
-async def _wait_for_run(
-    client: AsyncNemoClient,
-    *,
-    workspace: str,
-    name: str,
-    poll_timeout: float,
-    poll_interval: float,
-) -> tuple[str, bool]:
-    """Poll one run to a terminal job state, reporting status changes on stderr."""
-    response = await client.insights.analysis_runs.wait(
-        workspace=workspace,
-        name=name,
-        timeout=poll_timeout,
-        poll_interval=poll_interval,
-        on_status=_status_reporter(),
-    )
-    return _json(response.model_dump(mode="json")), response.job_status == HelixJobStatus.COMPLETED.value
-
-
-def _json(payload: object) -> str:
-    """Serialize a CLI payload with stable indentation."""
-    return json.dumps(payload, indent=2)

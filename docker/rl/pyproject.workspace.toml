@@ -17,7 +17,7 @@ required-version = ">=0.9.14,<0.10.0"
 members = [
   "packages/nhx_build_tools",
   "packages/filesets",
-  "sdk/python/nemo-helix",
+
   "packages/nemo_helix_plugin",
   "packages/nemo_helix_ext",
   "packages/sandboxed_gym",
@@ -29,7 +29,7 @@ members = [
 [tool.uv.sources]
 nhx-build-tools = { workspace = true }
 filesets = { workspace = true }
-nemo-helix-sdk = { workspace = true }
+
 nemo-helix-plugin = { workspace = true }
 nemo-helix-ext = { workspace = true }
 nemo-sandboxed-gym = { workspace = true }

@@ -12,14 +12,14 @@ Example::
 
     # my_plugin/cli.py
     import typer
-    from nemo_helix_plugin.cli import NemoCLI
+    from nemo_helix_plugin.cli import NemoCLI, create_typer_app
 
     class MyCLI(NemoCLI):
         name = "my-plugin"
         description = "My plugin commands."
 
         def get_cli(self) -> typer.Typer:
-            app = typer.Typer(help=self.description)
+            app = create_typer_app(help=self.description)
 
             @app.command()
             def run(model: str) -> None:
@@ -36,13 +36,50 @@ Example::
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import ClassVar, Literal
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import typer
 from nemo_helix_plugin._base import _NamedPlugin
-from nemo_helix_plugin.cli_renderer import CLIRenderer
-from nemo_helix_plugin.function import NemoFunction
-from nemo_helix_plugin.job import NemoJob
+
+if TYPE_CHECKING:
+    # Deferred to keep CLI startup fast: these are used ONLY in type annotations
+    # (`type[NemoFunction]`, `-> type[CLIRenderer] | None`), never at runtime, and
+    # `from __future__ import annotations` makes those annotations strings. Importing
+    # them eagerly pulled nemo_helix_plugin.job -> client -> fastapi/pydantic into every
+    # `nemo` invocation (including `--help`).
+    from nemo_helix_plugin.cli_renderer import CLIRenderer
+    from nemo_helix_plugin.function import NemoFunction
+    from nemo_helix_plugin.job import NemoJob
+
+# Help flags every ``nemo`` command answers to.
+HELP_OPTION_NAMES = ("--help", "-h")
+
+
+def context_settings_with_help(context_settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return *context_settings* with ``help_option_names`` defaulting to ``--help``/``-h``."""
+    settings = dict(context_settings or {})
+    settings.setdefault("help_option_names", list(HELP_OPTION_NAMES))
+    return settings
+
+
+def create_typer_app(**kwargs: Any) -> typer.Typer:
+    """Create a command group with the ``nemo`` CLI's defaults.
+
+    Use it for every group a plugin builds so they all behave alike: a bare
+    group prints its help, ``-h`` works, and shell completion is left to the
+    root ``nemo`` app. Keyword arguments pass through to :class:`typer.Typer`
+    and override these defaults.
+
+    Under ``nemo``, the host also renders the group's help and errors in the
+    NeMo style; a plugin app run on its own gets Typer's default rendering.
+    """
+    kwargs.setdefault("no_args_is_help", True)
+    # Shell completion is owned by the root ``nemo`` app; command groups (including
+    # plugin-hosted roots mounted by the lazy loader) must not advertise it again.
+    kwargs.setdefault("add_completion", False)
+    kwargs["context_settings"] = context_settings_with_help(kwargs.get("context_settings"))
+    return typer.Typer(**kwargs)
 
 
 class NemoCLI(_NamedPlugin):

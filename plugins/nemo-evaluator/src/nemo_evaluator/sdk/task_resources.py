@@ -22,7 +22,7 @@ from nemo_evaluator.entities import MAX_NAME_LENGTH, NAME_PATTERN
 from nemo_evaluator.sdk.query_params import list_params, project_params, revision_selector
 from nemo_evaluator.sdk.task_preparation import TaskPublicationError, prepare_task, prepare_task_async
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundlePackager
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_helix_plugin.evaluator.types import CreateTaskRequest, ReplaceTaskRequest

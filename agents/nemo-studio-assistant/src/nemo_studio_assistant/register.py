@@ -3,21 +3,44 @@
 
 """NeMo Studio Assistant tool implementations exposed through MCP."""
 
+import inspect
 import json
 import os
 import re
+import types
+import typing
 import uuid
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
 import httpx
-from nemo_helix import NeMoHelix
+from nemo_helix_ext.client.bootstrap import build_direct_nemo_client, build_nemo_client
+from nemo_helix_plugin.auditor.client import AuditorClient
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.response import NemoBinaryResponse, NemoPaginatedResponse, NemoResponse
+from nemo_helix_plugin.data_designer.client import DataDesignerClient
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest, GuardrailCheckRequest
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.projects.client import ProjectsClient
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from pydantic import BaseModel, Field
 
 DEFAULT_WORKSPACE = "default"
 STUDIO_CALLBACK_PATH = "/studio/api/assistant/mcp/{session_id}"
 STUDIO_CALLBACK_TIMEOUT_SECONDS = 3600.0
-_READ_ONLY_SDK_ACTIONS = frozenset({"check", "get", "get_logs", "get_status", "list", "read", "retrieve", "search"})
+_READ_ONLY_ACTIONS = frozenset({"check", "get", "get_logs", "get_status", "list", "read", "retrieve", "search"})
 _API_ERROR_LIMIT = 3
 _GUARDRAIL_CHECK_FAILURE_LIMIT = 3
 _REFUSAL_LIKE_PROBE_RE = re.compile(
@@ -28,15 +51,15 @@ _REFUSAL_LIKE_PROBE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_clients: dict[str, NeMoHelix] = {}
+_clients: dict[str, NemoClient] = {}
 _api_error_streaks: dict[str, int] = {}
 _guardrail_check_failures: dict[str, int] = {}
 _preflighted_guardrail_models: set[tuple[str, str, str]] = set()
 _guardrail_deployment_results: dict[tuple[str, str], str | None] = {}
 
 
-class SDKPathError(ValueError):
-    """An invalid public SDK resource or action selected by the agent."""
+class ApiPathError(ValueError):
+    """An unknown API resource or action selected by the agent."""
 
 
 class ModelPreflightError(RuntimeError):
@@ -51,70 +74,311 @@ def _active_workspace() -> str:
     return os.environ.get("NHX_WORKSPACE") or DEFAULT_WORKSPACE
 
 
-def _get_client(workspace: str) -> NeMoHelix:
+def _get_client(workspace: str) -> NemoClient:
     request_workspace = workspace.strip()
     if not request_workspace:
         raise ValueError("workspace is required")
     if request_workspace not in _clients:
         base_url = os.environ.get("NHX_BASE_URL") or os.environ.get("NEMO_BASE_URL")
-        kwargs: dict[str, Any] = {"workspace": request_workspace}
         if base_url:
-            kwargs["base_url"] = base_url
-        _clients[request_workspace] = NeMoHelix(**kwargs)
+            _clients[request_workspace] = build_direct_nemo_client(base_url=base_url, workspace=request_workspace)
+        else:
+            _clients[request_workspace] = build_nemo_client(workspace=request_workspace)
     return _clients[request_workspace]
 
 
 def _serialize(obj: Any) -> Any:
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):
         return {key: _serialize(value) for key, value in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [_serialize(item) for item in obj]
     if isinstance(obj, BaseModel):
-        return obj.model_dump()
+        return obj.model_dump(mode="json")
     return str(obj)
 
 
-def _public_members(value: Any) -> list[str]:
-    return sorted(name for name in dir(value) if not name.startswith("_"))
+@dataclass(frozen=True)
+class _Resource:
+    """A dot-separated API resource path served by one typed client.
+
+    ``actions`` maps the action names the agent may use to the client method
+    that performs them. ``aliases`` renames agent-facing parameter names to the
+    endpoint's own (for example ``fileset`` to ``name``).
+    """
+
+    client_cls: type[NemoClient]
+    actions: Mapping[str, str]
+    aliases: Mapping[str, str] = types.MappingProxyType({})
 
 
-def _resolve_resource(client: NeMoHelix, resource_path: str) -> Any:
-    current = client
-    for part in resource_path.split("."):
+_CRUD_PARTS = ("list", "retrieve", "create", "update", "delete")
+
+
+def _crud(client_cls: type[NemoClient], noun: str, *, get: str | None = None, update: str | None = None) -> _Resource:
+    """A list/retrieve/create/update/delete resource whose client methods follow ``<verb>_<noun>``."""
+    methods = {
+        "list": f"list_{noun}s",
+        "retrieve": get or f"get_{noun}",
+        "create": f"create_{noun}",
+        "update": update or f"update_{noun}",
+        "delete": f"delete_{noun}",
+    }
+    return _Resource(client_cls, {action: methods[action] for action in _CRUD_PARTS})
+
+
+_RESOURCES: dict[str, _Resource] = {
+    "workspaces": _crud(WorkspacesClient, "workspace"),
+    "workspaces.members": _Resource(
+        WorkspacesClient,
+        {
+            "list": "list_workspace_members",
+            "create": "create_workspace_member",
+            "update": "update_workspace_member",
+            "delete": "delete_workspace_member",
+        },
+    ),
+    "projects": _crud(ProjectsClient, "project"),
+    "models": _crud(ModelsClient, "model"),
+    "inference.providers": _crud(ModelsClient, "provider", update="upsert_provider"),
+    "inference.deployments": _Resource(
+        ModelsClient,
+        {
+            "list": "list_deployments",
+            "retrieve": "get_deployment",
+            "create": "create_deployment",
+            "delete": "delete_deployment",
+        },
+    ),
+    "inference.deployment_configs": _Resource(
+        ModelsClient,
+        {
+            "list": "list_deployment_configs",
+            "retrieve": "get_deployment_config",
+            "create": "create_deployment_config",
+            "delete": "delete_deployment_config",
+        },
+    ),
+    "inference.virtual_models": _Resource(
+        VirtualModelsClient,
+        {**_crud(VirtualModelsClient, "virtual_model").actions, "patch": "update_virtual_model"},
+    ),
+    "inference.gateway.model": _Resource(InferenceGatewayClient, {"get": "model_get", "post": "model_post"}),
+    "inference.gateway.openai.v1.models": _Resource(
+        InferenceGatewayClient, {"list": "list_openai_models", "retrieve": "get_openai_model"}
+    ),
+    "guardrail.configs": _crud(GuardrailClient, "guardrail_config"),
+    "guardrail": _Resource(GuardrailClient, {"check": "check_guardrail"}),
+    "secrets": _Resource(
+        SecretsClient,
+        {
+            "list": "list_secrets",
+            "retrieve": "get_secret",
+            "create": "create_secret",
+            "update": "update_secret",
+            "delete": "delete_secret",
+        },
+    ),
+    "files.filesets": _crud(FilesClient, "fileset"),
+    "files": _Resource(
+        FilesClient,
+        {
+            "list": "list_files",
+            "upload_content": "upload_file",
+            "download_content": "download_file",
+            "delete": "delete_file",
+        },
+        aliases={"fileset": "name", "remote_path": "path"},
+    ),
+    "audit.targets": _crud(AuditorClient, "audit_target"),
+    "audit.configs": _crud(AuditorClient, "audit_config"),
+    "audit.jobs": _Resource(
+        AuditorClient, {"list": "list_audit_jobs", "retrieve": "get_audit_job", "create": "submit_audit"}
+    ),
+    "evaluation.metrics": _Resource(
+        EvaluatorClient,
+        {"list": "list_metrics", "retrieve": "get_metric", "create": "create_metric", "delete": "delete_metric"},
+    ),
+    "evaluation.metric_jobs": _Resource(
+        EvaluatorClient,
+        {
+            "list": "list_evaluate_jobs",
+            "retrieve": "get_evaluate_job",
+            "get_status": "get_evaluate_job_status",
+            "create": "submit_evaluate_job",
+            "cancel": "cancel_evaluate_job",
+            "delete": "delete_evaluate_job",
+        },
+    ),
+    "jobs": _Resource(
+        JobsClient,
+        {
+            "list": "list_jobs",
+            "retrieve": "get_job",
+            "get_status": "get_job_status",
+            "get_logs": "list_job_logs",
+            "cancel": "cancel_job",
+            "delete": "delete_job",
+        },
+    ),
+}
+
+
+def _members_at(resource_path: str) -> list[str]:
+    """Names reachable one level below *resource_path*: its actions and its child resources."""
+    prefix = f"{resource_path}." if resource_path else ""
+    members = {key.removeprefix(prefix).split(".", 1)[0] for key in _RESOURCES if key.startswith(prefix)}
+    if resource_path in _RESOURCES:
+        members |= set(_RESOURCES[resource_path].actions)
+    return sorted(members)
+
+
+def _resolve_resource(resource_path: str) -> _Resource:
+    if resource_path in _RESOURCES:
+        return _RESOURCES[resource_path]
+    parts = resource_path.split(".")
+    for depth, part in enumerate(parts):
         if not part or part.startswith("_"):
-            raise SDKPathError(f"Invalid SDK resource path: {resource_path!r}")
-        if not hasattr(current, part):
-            available = ", ".join(_public_members(current)) or "none"
-            raise SDKPathError(
-                f"Invalid SDK resource {resource_path!r}: {part!r} does not exist. "
+            raise ApiPathError(f"Invalid API resource path: {resource_path!r}")
+        parent = ".".join(parts[:depth])
+        if part not in _members_at(parent):
+            available = ", ".join(_members_at(parent)) or "none"
+            raise ApiPathError(
+                f"Invalid API resource {resource_path!r}: {part!r} does not exist. "
                 f"Available members at this level: {available}."
             )
-        current = getattr(current, part)
-    return current
+    available = ", ".join(_members_at(resource_path)) or "none"
+    raise ApiPathError(f"Invalid API resource {resource_path!r}: it has no actions. Available members: {available}.")
 
 
-def _resolve_sdk_method(resource: Any, resource_path: str, action: str) -> Any:
+def _resolve_api_method(resource: _Resource, resource_path: str, action: str) -> str:
     if not action or action.startswith("_"):
-        raise SDKPathError(f"Invalid SDK action: {action!r}")
-    if not hasattr(resource, action) or not callable(method := getattr(resource, action)):
-        available = ", ".join(_public_members(resource)) or "none"
+        raise ApiPathError(f"Invalid API action: {action!r}")
+    if action not in resource.actions:
+        available = ", ".join(_members_at(resource_path)) or "none"
         guardrail_hint = (
             " Guardrail config CRUD uses resource='guardrail.configs'; resource='guardrail' is only for action='check'."
             if resource_path == "guardrail"
             else ""
         )
-        raise SDKPathError(
-            f"Invalid SDK action {action!r} for resource {resource_path!r}. "
+        raise ApiPathError(
+            f"Invalid API action {action!r} for resource {resource_path!r}. "
             f"Available members: {available}.{guardrail_hint}"
         )
-    return method
+    return resource.actions[action]
 
 
-def _call_sdk_method(resource: Any, resource_path: str, action: str, params: dict[str, Any] | None = None) -> Any:
-    method = _resolve_sdk_method(resource, resource_path, action)
-    return method(**params) if params else method()
+def _query_param_keys(annotation: Any) -> tuple[set[str], bool]:
+    """Keys of the query TypedDicts in *annotation*, and whether a free-form mapping is also accepted."""
+    keys: set[str] = set()
+    open_ended = False
+    pending = [annotation]
+    while pending:
+        candidate = pending.pop()
+        if typing.get_origin(candidate) in (typing.Union, types.UnionType):
+            pending.extend(typing.get_args(candidate))
+        elif typing.is_typeddict(candidate):
+            keys |= set(typing.get_type_hints(candidate))
+        elif typing.get_origin(candidate) is dict:
+            open_ended = True
+    return keys, open_ended
+
+
+_NON_PATH_PARAMS = frozenset({"workspace", "body", "content", "query_params", "exist_ok"})
+
+
+def _build_call_kwargs(
+    client_cls: type[NemoClient],
+    method_name: str,
+    params: dict[str, Any] | None,
+    workspace: str,
+    aliases: Mapping[str, str] = types.MappingProxyType({}),
+) -> dict[str, Any]:
+    """Map the agent's flat ``params`` onto the keyword arguments of a typed client method.
+
+    Path parameters are taken by name, keys the endpoint declares as query
+    parameters (or an explicit ``query_params`` object) go to the query string,
+    and everything left is validated as the request body (or taken from an
+    explicit ``body`` object).
+    """
+    descriptor = inspect.getattr_static(client_cls, method_name)
+    endpoint = getattr(descriptor, "endpoint", None)
+    if endpoint is not None:
+        signature = inspect.signature(endpoint)
+        hints = typing.get_type_hints(endpoint)
+    else:
+        # Hand-written client method (no ``method()`` endpoint wrapper): introspect
+        # it directly, dropping the leading ``self`` parameter.
+        signature = inspect.signature(descriptor).replace(
+            parameters=[p for p in inspect.signature(descriptor).parameters.values() if p.name != "self"]
+        )
+        hints = typing.get_type_hints(descriptor)
+    remaining = {aliases.get(key, key): value for key, value in (params or {}).items() if key != "workspace"}
+    kwargs: dict[str, Any] = {}
+    if "workspace" in signature.parameters:
+        kwargs["workspace"] = workspace
+
+    for name, parameter in signature.parameters.items():
+        if name in _NON_PATH_PARAMS:
+            continue
+        if name in remaining:
+            kwargs[name] = remaining.pop(name)
+        elif parameter.default is inspect.Parameter.empty:
+            raise ValueError(f"missing required parameter {name!r}")
+
+    if "exist_ok" in signature.parameters and "exist_ok" in remaining:
+        kwargs["exist_ok"] = bool(remaining.pop("exist_ok"))
+
+    if "content" in signature.parameters:
+        if "content" not in remaining:
+            raise ValueError("missing required parameter 'content'")
+        content = remaining.pop("content")
+        kwargs["content"] = content.encode("utf-8") if isinstance(content, str) else content
+
+    if "query_params" in signature.parameters:
+        explicit_query = remaining.pop("query_params", None)
+        if explicit_query is not None and not isinstance(explicit_query, dict):
+            raise ValueError("query_params must be a JSON object")
+        query = dict(explicit_query or {})
+        known_keys, open_ended = _query_param_keys(hints.get("query_params"))
+        for key in list(remaining):
+            if key in known_keys or (open_ended and "body" not in signature.parameters):
+                query[key] = remaining.pop(key)
+        if query:
+            kwargs["query_params"] = query
+
+    if "body" in signature.parameters:
+        explicit_body = remaining.get("body")
+        payload = remaining.pop("body") if isinstance(explicit_body, dict) else remaining
+        kwargs["body"] = hints["body"].model_validate(payload)
+    elif remaining:
+        raise ValueError(f"unexpected parameter(s) for {method_name}: {', '.join(sorted(remaining))}")
+    return kwargs
+
+
+def _unwrap_response(response: object) -> Any:
+    """Reduce a typed client response to plain data: the body, one page of items, or decoded text."""
+    if isinstance(response, NemoPaginatedResponse):
+        page = response.page()
+        return {"data": page.items, "pagination": page.metadata}
+    if isinstance(response, NemoBinaryResponse):
+        return response.read().decode("utf-8", errors="replace")
+    if isinstance(response, NemoResponse):
+        return response.data()
+    raise TypeError(f"unsupported response type {type(response).__name__}")
+
+
+def _call_api_method(
+    client: NemoClient,
+    resource: _Resource,
+    method_name: str,
+    workspace: str,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    kwargs = _build_call_kwargs(resource.client_cls, method_name, params, workspace, resource.aliases)
+    typed_client = resource.client_cls.from_client(client)
+    return _unwrap_response(getattr(typed_client, method_name)(**kwargs))
 
 
 def _api_error_key(workspace: str, studio_session_id: str | None) -> str:
@@ -127,7 +391,7 @@ def _record_api_error(key: str, exc: Exception) -> str:
     if count >= _API_ERROR_LIMIT:
         return (
             f"Error circuit breaker: {count} consecutive nemo_api calls failed. "
-            "Stop retrying or guessing SDK paths and parameters; report this failure to the user. "
+            "Stop retrying or guessing API paths and parameters; report this failure to the user. "
             f"Last error: {exc}"
         )
     return f"Error: {type(exc).__name__}: {exc}"
@@ -179,7 +443,7 @@ def _guardrail_model_route(model: Any, workspace: str) -> tuple[str, str]:
 
 
 def _preflight_guardrail_model(
-    client: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     params: dict[str, Any] | None,
     error_key: str,
@@ -191,16 +455,18 @@ def _preflight_guardrail_model(
     if cache_key in _preflighted_guardrail_models:
         return
     try:
-        client.inference.gateway.model.post(
+        InferenceGatewayClient.from_client(client).model_post(
             workspace=workspace,
             name=model_name,
             trailing_uri="v1/chat/completions",
-            body={
-                "model": qualified_model,
-                "messages": [{"role": "user", "content": "Reply with OK."}],
-                "max_tokens": 1,
-                "temperature": 0,
-            },
+            body=JsonBody(
+                {
+                    "model": qualified_model,
+                    "messages": [{"role": "user", "content": "Reply with OK."}],
+                    "max_tokens": 1,
+                    "temperature": 0,
+                }
+            ),
         )
     except Exception as exc:
         raise ModelPreflightError(
@@ -210,13 +476,12 @@ def _preflight_guardrail_model(
     _preflighted_guardrail_models.add(cache_key)
 
 
-def _optional_retrieve(method: Any, name: str, workspace: str) -> Any | None:
+def _optional_retrieve(retrieve: Callable[[], NemoResponse[Any]]) -> Any | None:
+    """Return the retrieved entity, or ``None`` when the platform reports it does not exist."""
     try:
-        return method(name, workspace=workspace)
-    except Exception as exc:
-        if getattr(exc, "status_code", None) == 404:
-            return None
-        raise
+        return retrieve().data()
+    except NotFoundError:
+        return None
 
 
 def _guardrail_config_data(policy: str) -> dict[str, Any]:
@@ -304,7 +569,7 @@ def _report_workflow_activity(
 
 
 def _guardrail_check(
-    client: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     backend_model: str,
@@ -312,13 +577,19 @@ def _guardrail_check(
     message: str,
     expected_status: str,
 ) -> dict[str, Any]:
-    result = client.guardrail.check(
-        workspace=workspace,
-        model=backend_model,
-        messages=[{"role": "user", "content": message}],
-        guardrails={"config_id": f"{workspace}/{config_name}"},
-        max_tokens=50,
-        temperature=0,
+    result = (
+        GuardrailClient.from_client(client)
+        .check_guardrail(
+            workspace=workspace,
+            body=GuardrailCheckRequest(
+                model=backend_model,
+                messages=[{"role": "user", "content": message}],
+                guardrails={"config_id": f"{workspace}/{config_name}"},
+                max_tokens=50,
+                temperature=0,
+            ),
+        )
+        .data()
     )
     serialized = _serialize(result)
     status = serialized.get("status") if isinstance(serialized, dict) else None
@@ -329,14 +600,10 @@ def _guardrail_check(
     return serialized
 
 
-def _routable_virtual_model(client: NeMoHelix, workspace: str, virtual_model_name: str) -> bool:
+def _routable_virtual_model(client: NemoClient, workspace: str, virtual_model_name: str) -> bool:
     expected = f"{workspace}/{virtual_model_name}"
-    models = client.inference.gateway.openai.v1.models.list(workspace=workspace)
-    for model in models:
-        value = _serialize(model)
-        if isinstance(value, dict) and value.get("id") == expected:
-            return True
-    return False
+    models = InferenceGatewayClient.from_client(client).list_openai_models(workspace=workspace).data()
+    return any(model.id == expected for model in models.data)
 
 
 def _validate_guardrail_probe_messages(blocked_message: str, allowed_message: str) -> None:
@@ -593,10 +860,10 @@ def deploy_guardrail(
         config_description = (
             description.strip() if description and description.strip() else f"Input guardrail: {values['policy']}"
         )
+        guardrail_client = GuardrailClient.from_client(client)
+        virtual_models_client = VirtualModelsClient.from_client(client)
         existing_config = _optional_retrieve(
-            client.guardrail.configs.retrieve,
-            values["config_name"],
-            requested_workspace,
+            lambda: guardrail_client.get_guardrail_config(workspace=requested_workspace, name=values["config_name"])
         )
         if existing_config is not None and not _matches_fields(existing_config, {"data": config_data}):
             raise GuardrailWorkflowError(
@@ -604,9 +871,9 @@ def deploy_guardrail(
             )
 
         existing_virtual_model = _optional_retrieve(
-            client.inference.virtual_models.retrieve,
-            values["virtual_model_name"],
-            requested_workspace,
+            lambda: virtual_models_client.get_virtual_model(
+                workspace=requested_workspace, name=values["virtual_model_name"]
+            )
         )
         if existing_virtual_model is not None and not _matches_fields(existing_virtual_model, virtual_model_data):
             raise GuardrailWorkflowError(
@@ -638,11 +905,13 @@ def deploy_guardrail(
                 )
 
         if existing_config is None:
-            client.guardrail.configs.create(
+            guardrail_client.create_guardrail_config(
                 workspace=requested_workspace,
-                name=values["config_name"],
-                description=config_description,
-                data=config_data,
+                body=CreateGuardrailConfigRequest(
+                    name=values["config_name"],
+                    description=config_description,
+                    data=config_data,
+                ),
             )
         config_ready = True
         _report_workflow_activity(
@@ -685,14 +954,15 @@ def deploy_guardrail(
         )
 
         if existing_virtual_model is None:
-            client.inference.virtual_models.create(
+            virtual_models_client.create_virtual_model(
                 workspace=requested_workspace,
-                name=values["virtual_model_name"],
-                **virtual_model_data,
+                body=CreateVirtualModelRequest.model_validate(
+                    {"name": values["virtual_model_name"], **virtual_model_data}
+                ),
             )
-        created_virtual_model = client.inference.virtual_models.retrieve(
-            values["virtual_model_name"], workspace=requested_workspace
-        )
+        created_virtual_model = virtual_models_client.get_virtual_model(
+            workspace=requested_workspace, name=values["virtual_model_name"]
+        ).data()
         if not _matches_fields(created_virtual_model, virtual_model_data):
             raise GuardrailWorkflowError("VirtualModel readback did not match the approved deployment")
         virtual_model_created = True
@@ -780,17 +1050,19 @@ def nemo_api(
     studio_session_id: str | None = None,
     workspace: str | None = None,
 ) -> str:
-    """Call a NeMo Helix SDK method; writes require explicit Studio approval.
+    """Call a NeMo Helix API operation; writes require explicit Studio approval.
 
-    ``resource`` is a dot-separated SDK path such as ``workspaces``,
-    ``inference.providers``, ``files.filesets``, ``evaluation.metric_jobs``,
-    ``guardrail.configs``, ``secrets``, ``models`` or ``datasets``. Use
+    ``resource`` is a dot-separated API path such as ``workspaces``,
+    ``inference.providers``, ``files.filesets``, ``evaluation.metrics``,
+    ``guardrail.configs``, ``secrets`` or ``models``. Use
     ``resource='guardrail.configs'`` for guardrail config CRUD and
     ``resource='guardrail', action='check'`` only for standalone checks. ``action`` is the
-    SDK method name. ``params`` is an optional JSON object or JSON object string
-    containing keyword arguments. Pass the active request workspace for every operation.
-    Pass the Studio session id from the user context for create, update, delete,
-    submit, upload, cancel, or other mutating actions.
+    operation name (``list``, ``retrieve``, ``create``, ``update``, ``delete`` or a
+    resource-specific action). ``params`` is an optional JSON object or JSON object string
+    containing the operation's fields: path parameters such as ``name``, query parameters
+    such as ``page_size``, and the request body fields. Pass the active request workspace
+    for every operation. Pass the Studio session id from the user context for create, update,
+    delete, submit, upload, cancel, or other mutating actions.
     """
     parsed_params: dict[str, Any] | None = None
     is_guardrail_check = _is_guardrail_check(resource, action)
@@ -810,11 +1082,11 @@ def nemo_api(
             return f"Clarification required: {message}"
         normalized_action = action.strip().lower()
         client = _get_client(workspace)
-        sdk_resource = _resolve_resource(client, resource)
-        _resolve_sdk_method(sdk_resource, resource, normalized_action)
+        api_resource = _resolve_resource(resource)
+        method_name = _resolve_api_method(api_resource, resource, normalized_action)
         if is_guardrail_check:
             _preflight_guardrail_model(client, workspace, parsed_params, error_key)
-        if normalized_action not in _READ_ONLY_SDK_ACTIONS:
+        if normalized_action not in _READ_ONLY_ACTIONS:
             approved_input = _request_mutation_approval(
                 studio_session_id,
                 tool_name="nemo_api",
@@ -839,11 +1111,11 @@ def nemo_api(
                 parsed_params = _parse_nemo_api_params(params)
             normalized_action = action.strip().lower()
             is_guardrail_check = _is_guardrail_check(resource, action)
-            sdk_resource = _resolve_resource(client, resource)
-            _resolve_sdk_method(sdk_resource, resource, normalized_action)
+            api_resource = _resolve_resource(resource)
+            method_name = _resolve_api_method(api_resource, resource, normalized_action)
             if is_guardrail_check:
                 _preflight_guardrail_model(client, workspace, parsed_params, error_key)
-        result = _call_sdk_method(sdk_resource, resource, normalized_action, parsed_params)
+        result = _call_api_method(client, api_resource, method_name, workspace, parsed_params)
         if is_guardrail_check:
             serialized_result = _serialize(result)
             status = serialized_result.get("status") if isinstance(serialized_result, dict) else None
@@ -1029,32 +1301,23 @@ def check_status(service: str, job_name: str, workspace: str | None = None) -> s
         if workspace is None or not workspace.strip():
             return "Clarification required: which workspace should this status check use?"
         client = _get_client(workspace)
-        if service == "evaluator":
-            result = _resolve_resource(client, service).get_job_resource(job_name).get_job_status()
-            return json.dumps(_serialize(result), indent=2, default=str)
+        workspace = workspace.strip()
         if service == "data_designer":
-            result = _resolve_resource(client, service).get_job_resource(job_name).get_job_status()
-            return json.dumps(_serialize(result), indent=2, default=str)
+            status = (
+                DataDesignerClient.from_client(client)
+                .get_job_status(workspace=workspace, job_collection="create", name=job_name)
+                .data()
+            )
+            return json.dumps(_serialize(status), indent=2, default=str)
         if service == "auditor":
-            result = _resolve_resource(client, service).get_job(job_name)
-            return json.dumps(_serialize(result), indent=2, default=str)
-        if service.startswith("customization."):
-            jobs = _resolve_resource(client, f"{service}.jobs")
-            result = jobs.get_job_resource(job_name).get_status()
-            return json.dumps(_serialize(result), indent=2, default=str)
+            job = AuditorClient.from_client(client).get_audit_job(workspace=workspace, name=job_name).data()
+            return json.dumps(_serialize(job), indent=2, default=str)
+        if service == "evaluator":
+            status = EvaluatorClient.from_client(client).get_evaluate_job_status(workspace=workspace, name=job_name)
+            return json.dumps(_serialize(status.data()), indent=2, default=str)
 
-        svc = getattr(client, service)
-        last_error: Exception | None = None
-        for sub_resource in ("metric_jobs", "benchmark_jobs", "jobs"):
-            resource = getattr(svc, sub_resource, None)
-            if resource is None or not hasattr(resource, "get_status"):
-                continue
-            try:
-                return json.dumps(_serialize(resource.get_status(name=job_name)), indent=2, default=str)
-            except Exception as exc:
-                last_error = exc
-        if last_error is not None:
-            return f"Error: {type(last_error).__name__}: {last_error}"
-        return f"Error: no status method found for service '{service}'"
+        # Any other service (customization, ...) runs as a platform job.
+        status = JobsClient.from_client(client).get_job_status(workspace=workspace, name=job_name).data()
+        return json.dumps(_serialize(status), indent=2, default=str)
     except Exception as exc:
         return f"Error: {type(exc).__name__}: {exc}"

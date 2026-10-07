@@ -46,13 +46,13 @@ import shlex
 import sys
 import tempfile
 import time
-from collections.abc import Callable
-from contextlib import closing
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from pkgutil import resolve_name
-from typing import Any, ClassVar, Literal, Optional, TypeVar, cast
+from typing import Any, ClassVar, Optional, TypeVar, cast
 
 import click
 import httpx
@@ -62,13 +62,13 @@ from nemo_agents_plugin.cli_context import (
     DEFAULT_BASE_URL as _DEFAULT_BASE_URL,
 )
 from nemo_agents_plugin.cli_context import (
-    BaseUrlOption,
-)
-from nemo_agents_plugin.cli_context import (
     resolve_base_url as _resolve_base_url,
 )
 from nemo_agents_plugin.cli_context import (
     resolve_context_headers as _resolve_context_headers,
+)
+from nemo_agents_plugin.cli_context import (
+    shared_cli_client,
 )
 from nemo_agents_plugin.deployment_routing import is_deployment_routable
 from nemo_agents_plugin.entities import (
@@ -84,14 +84,13 @@ from nemo_agents_plugin.entities import (
     AgentSession,
     SessionStatus,
     ethos_fileset_name,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.leaderboard.cli import register_leaderboard_commands
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
 from nemo_agents_plugin.usage.cli import register_usage_commands
 from nemo_helix_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
-from nemo_helix_ext.cli.core.api import is_tty
-from nemo_helix_ext.cli.core.formatters import Column, format_output
 from nemo_helix_ext.cli.core.help_formatter import NhxGroup
 from nemo_helix_ext.ui.prompts import is_interactive
 from nemo_helix_plugin.agents.client import AgentsClient
@@ -108,11 +107,23 @@ from nemo_helix_plugin.agents.types import (
     ListSessionsQueryParams,
 )
 from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_codegen import handle_code_generation
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
-from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_options import (
+    AllPagesOption,
+    EntityOutputFormat,
+    EntityOutputFormatOption,
+    ListOutputFormat,
+    ListOutputFormatOption,
+    NoTruncateOption,
+    OutputColumnsOption,
+    WorkspaceOption,
+)
+from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output, is_tty
+from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_pages, warn_if_more_pages
 from nemo_helix_plugin.cli_progress import request_progress
-from nemo_helix_plugin.cli_state import resolve_cli_workspace
-from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
+from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import (
     NemoClientError,
@@ -125,13 +136,12 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from typer.main import get_command as _typer_get_command
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_WORKSPACE = "default"
-_LIST_OUTPUT_FORMAT = Literal["table", "json", "yaml", "csv", "markdown", "raw"]
 _DEPLOYMENT_RESOLUTION_PAGE_SIZE = 100
 _T = TypeVar("_T")
 
@@ -343,7 +353,6 @@ def _register_local_commands(app: typer.Typer) -> None:
             help="Name of a specific deployment to invoke (platform required).",
         ),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         timeout: float = typer.Option(
             300,
             "--timeout",
@@ -359,7 +368,7 @@ def _register_local_commands(app: typer.Typer) -> None:
     ) -> None:
         """Invoke an agent — locally (with --agent-config) or via the platform (with --agent or --agent-deployment)."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if agent_config:
             _local_invoke(agent_config, input, input_file, workspace=workspace, base_url=base_url)
         elif agent or agent_deployment:
@@ -948,7 +957,6 @@ def _register_platform_commands(app: typer.Typer) -> None:
             help="Name for a new session; valid only with --agent-deployment.",
         ),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         timeout: float = typer.Option(
             300,
             "--timeout",
@@ -975,7 +983,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             raise typer.Exit(code=2)
 
         _platform_session_chat(
-            base_url=_resolve_base_url(base_url),
+            base_url=_resolve_base_url(),
             workspace=workspace,
             agent_deployment=agent_deployment,
             session=session,
@@ -992,6 +1000,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
     app.add_typer(sessions_app, rich_help_panel="Deployed agent interaction (requires running cluster)")
 
     @sessions_app.command(name="list")
+    @collect_warnings
     def sessions_list(
         ctx: typer.Context,
         agent_deployment: Optional[str] = typer.Option(
@@ -1001,31 +1010,23 @@ def _register_platform_commands(app: typer.Typer) -> None:
             help="Limit results to sessions bound to this deployment.",
         ),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
-        output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
-            None,
-            "--format",
-            "--output-format",
-            "-o",
-            "-f",
-            help="Output format for the list of sessions.",
-            rich_help_panel="Output Options",
-        ),
-        no_truncate: Optional[bool] = typer.Option(
-            None,
-            "--no-truncate",
-            help="Don't truncate long values in table/markdown/csv output.",
-            rich_help_panel="Output Options",
-        ),
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+        all_pages: AllPagesOption = False,
     ) -> None:
         """List persisted sessions, newest first."""
         workspace = resolve_cli_workspace(ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
         query_params: ListSessionsQueryParams | None = None
         if agent_deployment is not None:
             if not agent_deployment.strip():
                 typer.echo("Error: --agent-deployment must not be empty.", err=True)
+                raise typer.Exit(code=2)
+            if resolve_output_format(ctx, output_format) == "code":
+                # The filter needs the deployment's ID, which only an API call can resolve.
+                typer.echo("Error: --agent-deployment cannot be combined with --output-format code.", err=True)
                 raise typer.Exit(code=2)
             deployment = _run_sdk(
                 "GET agent API",
@@ -1034,16 +1035,16 @@ def _register_platform_commands(app: typer.Typer) -> None:
             deployment_id = _require_deployment_id(deployment, agent_deployment)
             query_params = {"filter[deployment_id]": deployment_id}
 
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_page(client.list_sessions(workspace=workspace, query_params=query_params)),
-        )
-        _print_list_response(
+        _print_list(
             ctx,
-            resp,
+            client,
+            "list_sessions",
+            {"workspace": workspace, "query_params": query_params},
             default_columns=_SESSION_LIST_COLUMNS,
             output_format=output_format,
             no_truncate=no_truncate,
+            columns=columns,
+            all_pages=all_pages,
         )
 
     @sessions_app.command(name="get")
@@ -1051,29 +1052,24 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Session name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
+        output_format: EntityOutputFormatOption = None,
     ) -> None:
         """Get a persisted session by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_response(client.get_session(workspace=workspace, name=name)),
-        )
-        typer.echo(json.dumps(resp, indent=2))
+        _print_entity(typer_ctx, client, "get_session", {"workspace": workspace, "name": name}, output_format)
 
     @sessions_app.command(name="close")
     def sessions_close(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Session name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Close a session and release its deployed runtime."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if not yes:
             typer.confirm(f"Close session '{name}'? It cannot be resumed after it is closed.", abort=True)
         client = _agents_client(base_url, workspace)
@@ -1098,11 +1094,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
         ),
         description: str = typer.Option("", "--description"),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Register an agent on the platform."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         config_dict, config_format = _validate_agent_config_for_create(agent_config, name=name)
         resp = _create_agent_from_validated_config(
             name=name,
@@ -1116,40 +1111,29 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer.echo(json.dumps(resp, indent=2))
 
     @app.command(name="list", rich_help_panel="Agent Resources (requires running cluster)")
+    @collect_warnings
     def list_agents(
         ctx: typer.Context,
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
-        output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
-            None,
-            "--format",
-            "--output-format",
-            "-o",
-            "-f",
-            help="Output format for the list of agents.",
-            rich_help_panel="Output Options",
-        ),
-        no_truncate: Optional[bool] = typer.Option(
-            None,
-            "--no-truncate",
-            help="Don't truncate long values in table/markdown/csv output.",
-            rich_help_panel="Output Options",
-        ),
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+        all_pages: AllPagesOption = False,
     ) -> None:
         """List agents on the platform."""
         workspace = resolve_cli_workspace(ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_page(client.list_agents(workspace=workspace)),
-        )
-        _print_list_response(
+        _print_list(
             ctx,
-            resp,
+            client,
+            "list_agents",
+            {"workspace": workspace},
             default_columns=_AGENT_LIST_COLUMNS,
             output_format=output_format,
             no_truncate=no_truncate,
+            columns=columns,
+            all_pages=all_pages,
         )
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
@@ -1157,29 +1141,24 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
+        output_format: EntityOutputFormatOption = None,
     ) -> None:
         """Get an agent by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_response(client.get_agent(workspace=workspace, name=name)),
-        )
-        typer.echo(json.dumps(resp, indent=2))
+        _print_entity(typer_ctx, client, "get_agent", {"workspace": workspace, "name": name}, output_format)
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
     def delete(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete an agent from the platform."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if not yes:
             typer.confirm(f"Delete agent '{name}'?", abort=True)
         _delete_agent_entity(agent_name=name, workspace=workspace, base_url=base_url)
@@ -1193,13 +1172,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
         mode: str = typer.Option(
             "subprocess",
             "--mode",
-            help="Runtime backend: subprocess (default), docker, or k8s.",
+            help="Runtime backend: subprocess (default), docker, k8s, or openshell.",
         ),
         image: Optional[str] = typer.Option(
             None,
             "--image",
             "-i",
-            help="Container image for docker/k8s modes (falls back to deployments.default_image).",
+            help="Container image for docker/k8s/openshell modes (falls back to deployments.default_image).",
         ),
         use_image_entrypoint: bool = typer.Option(
             False,
@@ -1238,7 +1217,6 @@ def _register_platform_commands(app: typer.Typer) -> None:
             help="Maximum seconds to wait for a terminal status (only with --wait).",
         ),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Deploy an agent on the platform.
 
@@ -1249,9 +1227,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
         scripted pipelines that prefer to poll separately via ``nemo agents
         deployments wait``.
 
-        Container modes (``--mode docker|k8s``) compile to the nemo-deployments
+        Container modes (``--mode docker|k8s|openshell``) compile to the nemo-deployments
         plugin. Requires a configured deployments executor (``deployments.executors``
-        / ``agents.deployments.docker_executor`` or ``k8s_executor``). Container
+        / ``agents.deployments.docker_executor``, ``k8s_executor``, or ``openshell_executor``). Container
         endpoint gateway routing and the full k8s runtime contract (in-cluster
         inference gateway, wheel staging) are still evolving — docker mode is the
         supported local path today.
@@ -1262,13 +1240,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
             typer.echo(f"Invalid --mode {mode!r}; expected {', '.join(valid_modes)}.", err=True)
             raise typer.Exit(code=2)
         if image and mode == "subprocess":
-            typer.echo("--image requires --mode docker or k8s.", err=True)
+            typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
-        if use_image_entrypoint and mode == "subprocess":
-            typer.echo("--use-image-entrypoint requires --mode docker or k8s.", err=True)
+        if use_image_entrypoint and not supports_image_entrypoint(mode):
+            typer.echo(_USE_IMAGE_ENTRYPOINT_MODE_ERROR, err=True)
             raise typer.Exit(code=2)
 
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if environment is not None and not environment.strip():
             typer.echo("--environment must not be empty.", err=True)
             raise typer.Exit(code=2)
@@ -1328,14 +1306,18 @@ def _register_platform_commands(app: typer.Typer) -> None:
             None,
             "--mode",
             help=(
-                "Runtime backend: subprocess, docker, or k8s. Auto-detected from the existing deployment when omitted."
+                "Runtime backend: subprocess, docker, k8s, or openshell. "
+                "Auto-detected from the existing deployment when omitted."
             ),
         ),
         image: Optional[str] = typer.Option(
             None,
             "--image",
             "-i",
-            help="Container image for docker/k8s modes. Auto-detected from the existing deployment when omitted.",
+            help=(
+                "Container image for docker/k8s/openshell modes. "
+                "Auto-detected from the existing deployment when omitted."
+            ),
         ),
         use_image_entrypoint: Optional[bool] = typer.Option(
             None,
@@ -1374,7 +1356,6 @@ def _register_platform_commands(app: typer.Typer) -> None:
         ),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Redeploy an agent from a new config, in one command.
 
@@ -1388,7 +1369,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         Deploy Agents docs for the full contract.
         """
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
 
         # 1. Fail-fast: validate the new config client-side, before any teardown.
         #    A bad config aborts here with zero side effects.
@@ -1445,10 +1426,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
             typer.echo(f"Invalid --mode {resolved_mode!r}; expected {', '.join(valid_modes)}.", err=True)
             raise typer.Exit(code=2)
         if resolved_image and resolved_mode == "subprocess":
-            typer.echo("--image requires --mode docker or k8s.", err=True)
+            typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
-        if resolved_use_entrypoint and resolved_mode == "subprocess":
-            typer.echo("--use-image-entrypoint requires --mode docker or k8s.", err=True)
+        if resolved_use_entrypoint and not supports_image_entrypoint(resolved_mode):
+            typer.echo(_USE_IMAGE_ENTRYPOINT_MODE_ERROR, err=True)
             raise typer.Exit(code=2)
         if resolved_environment is not None and not str(resolved_environment).strip():
             resolved_environment = None
@@ -1575,7 +1556,6 @@ def _register_platform_commands(app: typer.Typer) -> None:
             help="Print only the absolute log file path and exit (useful for scripting).",
         ),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Show logs for an agent deployment.
 
@@ -1601,7 +1581,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             raise typer.Exit(code=1)
 
         if agent and not name:
-            base_url = _resolve_base_url(base_url)
+            base_url = _resolve_base_url()
             client = _agents_client(base_url, workspace)
             candidates = [
                 d
@@ -1648,12 +1628,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
             None, "--agent", "--all", "-a", help="Remove all deployments for this agent."
         ),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Stop and remove a deployment (or all deployments for an agent)."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
         if name:
             if not yes:
@@ -1689,42 +1668,30 @@ def _register_platform_commands(app: typer.Typer) -> None:
     app.add_typer(deps_app, rich_help_panel="Agent Resources (requires running cluster)")
 
     @deps_app.command(name="list")
+    @collect_warnings
     def deployments_list(
         ctx: typer.Context,
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
-        output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
-            None,
-            "--format",
-            "--output-format",
-            "-o",
-            "-f",
-            help="Output format for the list of deployments.",
-            rich_help_panel="Output Options",
-        ),
-        no_truncate: Optional[bool] = typer.Option(
-            None,
-            "--no-truncate",
-            help="Don't truncate long values in table/markdown/csv output.",
-            rich_help_panel="Output Options",
-        ),
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+        all_pages: AllPagesOption = False,
     ) -> None:
         """List deployments."""
         workspace = resolve_cli_workspace(ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_page(client.list_deployments(workspace=workspace)),
-        )
-        if _resolve_list_output_format(ctx, output_format) in _TABULAR_LIST_FORMATS:
-            _project_deployment_display_endpoints(resp)
-        _print_list_response(
+        _print_list(
             ctx,
-            resp,
+            client,
+            "list_deployments",
+            {"workspace": workspace},
             default_columns=_DEPLOYMENT_LIST_COLUMNS,
             output_format=output_format,
             no_truncate=no_truncate,
+            columns=columns,
+            all_pages=all_pages,
+            project_display_rows=_project_deployment_display_endpoints,
         )
 
     @deps_app.command(name="get")
@@ -1732,29 +1699,24 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Deployment name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
+        output_format: EntityOutputFormatOption = None,
     ) -> None:
         """Get a deployment by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_response(client.get_deployment(workspace=workspace, name=name)),
-        )
-        typer.echo(json.dumps(resp, indent=2))
+        _print_entity(typer_ctx, client, "get_deployment", {"workspace": workspace, "name": name}, output_format)
 
     @deps_app.command(name="delete")
     def deployments_delete(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Deployment name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete a deployment by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if not yes:
             typer.confirm(f"Delete deployment '{name}'?", abort=True)
         client = _agents_client(base_url, workspace)
@@ -1777,7 +1739,6 @@ def _register_platform_commands(app: typer.Typer) -> None:
         timeout: int = typer.Option(300, "--timeout", "-t", help="Maximum seconds to wait."),
         interval: float = typer.Option(2.0, "--interval", help="Poll interval in seconds."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Wait for a deployment to reach 'running' or 'failed' status.
 
@@ -1788,7 +1749,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         latest active deployment for that agent automatically.
         """
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if not name and not agent:
             typer.echo("Error: provide a deployment name or --agent.", err=True)
             raise typer.Exit(code=1)
@@ -1886,11 +1847,10 @@ def _register_environment_commands(app: typer.Typer) -> None:
         ),
         spec: Optional[str] = typer.Option(None, "--spec", help="Inline EnvironmentSpec body as a JSON object string."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Create an environment spec from a file or inline JSON."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         body = _spec_body_from_inputs(name=name, spec_file=spec_file, spec_json=spec)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -1905,40 +1865,29 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer.echo(json.dumps(resp, indent=2))
 
     @espec_app.command(name="list")
+    @collect_warnings
     def environment_spec_list(
         ctx: typer.Context,
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
-        output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
-            None,
-            "--format",
-            "--output-format",
-            "-o",
-            "-f",
-            help="Output format.",
-            rich_help_panel="Output Options",
-        ),
-        no_truncate: Optional[bool] = typer.Option(
-            None,
-            "--no-truncate",
-            help="Don't truncate long values.",
-            rich_help_panel="Output Options",
-        ),
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+        all_pages: AllPagesOption = False,
     ) -> None:
         """List environment specs."""
         workspace = resolve_cli_workspace(ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_page(client.list_environment_specs(workspace=workspace)),
-        )
-        _print_list_response(
+        _print_list(
             ctx,
-            resp,
+            client,
+            "list_environment_specs",
+            {"workspace": workspace},
             default_columns=_ENVIRONMENT_SPEC_LIST_COLUMNS,
             output_format=output_format,
             no_truncate=no_truncate,
+            columns=columns,
+            all_pages=all_pages,
         )
 
     @espec_app.command(name="get")
@@ -1946,29 +1895,24 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment-spec name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
+        output_format: EntityOutputFormatOption = None,
     ) -> None:
         """Get an environment spec by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_response(client.get_environment_spec(workspace=workspace, name=name)),
-        )
-        typer.echo(json.dumps(resp, indent=2))
+        _print_entity(typer_ctx, client, "get_environment_spec", {"workspace": workspace, "name": name}, output_format)
 
     @espec_app.command(name="delete")
     def environment_spec_delete(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment-spec name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete an environment spec by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if not yes:
             typer.confirm(f"Delete environment-spec '{name}'?", abort=True)
         client = _agents_client(base_url, workspace)
@@ -1999,7 +1943,6 @@ def _register_environment_commands(app: typer.Typer) -> None:
             None, "--spec", help="Inline AgentEnvironment body as a JSON object string."
         ),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Create an AgentEnvironment.
 
@@ -2008,7 +1951,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
         matching keys from a file/inline body.
         """
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         body = _spec_body_from_inputs(name=name, spec_file=spec_file, spec_json=spec)
         if environment_spec is not None:
             body["environment_spec"] = environment_spec
@@ -2027,40 +1970,29 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer.echo(json.dumps(resp, indent=2))
 
     @env_app.command(name="list")
+    @collect_warnings
     def environment_list(
         ctx: typer.Context,
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
-        output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
-            None,
-            "--format",
-            "--output-format",
-            "-o",
-            "-f",
-            help="Output format.",
-            rich_help_panel="Output Options",
-        ),
-        no_truncate: Optional[bool] = typer.Option(
-            None,
-            "--no-truncate",
-            help="Don't truncate long values.",
-            rich_help_panel="Output Options",
-        ),
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+        all_pages: AllPagesOption = False,
     ) -> None:
         """List environments."""
         workspace = resolve_cli_workspace(ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_page(client.list_environments(workspace=workspace)),
-        )
-        _print_list_response(
+        _print_list(
             ctx,
-            resp,
+            client,
+            "list_environments",
+            {"workspace": workspace},
             default_columns=_ENVIRONMENT_LIST_COLUMNS,
             output_format=output_format,
             no_truncate=no_truncate,
+            columns=columns,
+            all_pages=all_pages,
         )
 
     @env_app.command(name="get")
@@ -2068,29 +2000,24 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
+        output_format: EntityOutputFormatOption = None,
     ) -> None:
         """Get an environment by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_response(client.get_environment(workspace=workspace, name=name)),
-        )
-        typer.echo(json.dumps(resp, indent=2))
+        _print_entity(typer_ctx, client, "get_environment", {"workspace": workspace, "name": name}, output_format)
 
     @env_app.command(name="delete")
     def environment_delete(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete an environment by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if not yes:
             typer.confirm(f"Delete environment '{name}'?", abort=True)
         client = _agents_client(base_url, workspace)
@@ -2113,11 +2040,10 @@ def _register_environment_commands(app: typer.Typer) -> None:
         ),
         spec: Optional[str] = typer.Option(None, "--spec", help="Inline ComputeSpec body as a JSON object string."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Create a compute spec from a file or inline JSON."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         body = _spec_body_from_inputs(name=name, spec_file=spec_file, spec_json=spec)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
@@ -2132,40 +2058,29 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer.echo(json.dumps(resp, indent=2))
 
     @cspec_app.command(name="list")
+    @collect_warnings
     def compute_spec_list(
         ctx: typer.Context,
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
-        output_format: Optional[_LIST_OUTPUT_FORMAT] = typer.Option(
-            None,
-            "--format",
-            "--output-format",
-            "-o",
-            "-f",
-            help="Output format.",
-            rich_help_panel="Output Options",
-        ),
-        no_truncate: Optional[bool] = typer.Option(
-            None,
-            "--no-truncate",
-            help="Don't truncate long values.",
-            rich_help_panel="Output Options",
-        ),
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+        all_pages: AllPagesOption = False,
     ) -> None:
         """List compute specs."""
         workspace = resolve_cli_workspace(ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_page(client.list_compute_specs(workspace=workspace)),
-        )
-        _print_list_response(
+        _print_list(
             ctx,
-            resp,
+            client,
+            "list_compute_specs",
+            {"workspace": workspace},
             default_columns=_COMPUTE_SPEC_LIST_COLUMNS,
             output_format=output_format,
             no_truncate=no_truncate,
+            columns=columns,
+            all_pages=all_pages,
         )
 
     @cspec_app.command(name="get")
@@ -2173,29 +2088,24 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Compute-spec name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
+        output_format: EntityOutputFormatOption = None,
     ) -> None:
         """Get a compute spec by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "GET agent API",
-            lambda: _json_from_response(client.get_compute_spec(workspace=workspace, name=name)),
-        )
-        typer.echo(json.dumps(resp, indent=2))
+        _print_entity(typer_ctx, client, "get_compute_spec", {"workspace": workspace, "name": name}, output_format)
 
     @cspec_app.command(name="delete")
     def compute_spec_delete(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Compute-spec name."),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     ) -> None:
         """Delete a compute spec by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
-        base_url = _resolve_base_url(base_url)
+        base_url = _resolve_base_url()
         if not yes:
             typer.confirm(f"Delete compute-spec '{name}'?", abort=True)
         client = _agents_client(base_url, workspace)
@@ -2241,17 +2151,18 @@ def _deployment_address(dep: dict[str, Any]) -> str:
 
 def _project_deployment_display_endpoints(response: Any) -> None:
     """Copy a display URL onto in-memory list rows. Does not persist the entity."""
-    if not isinstance(response, dict):
-        return
-    items = response.get("data")
+    items = response.get("data") if isinstance(response, dict) else getattr(response, "data", None)
     if not isinstance(items, list):
         return
     for item in items:
-        if not isinstance(item, dict):
-            continue
-        address = _deployment_address(item)
-        if address:
-            item["endpoint"] = address
+        if isinstance(item, dict):
+            address = _deployment_address(item)
+            if address:
+                item["endpoint"] = address
+        elif isinstance(item, BaseModel):
+            address = _deployment_address(item.model_dump(mode="json"))
+            if address:
+                item.endpoint = address
 
 
 def _wait_for_deployment(
@@ -2576,7 +2487,7 @@ def _platform_session_chat(
         )
         typer.echo(
             f"Session '{created_session.name}' created. Resume with:\n"
-            f"  nemo agents chat --session {created_session.name} --workspace {workspace} --base-url {base_url}"
+            f"  nemo --base-url {base_url} agents chat --session {created_session.name} --workspace {workspace}"
         )
         _run_resolved_session_chat(
             base_url=base_url,
@@ -2605,6 +2516,24 @@ def _platform_session_chat(
         input=input,
         timeout=timeout,
     )
+
+
+class _HttpxStreamingResponse:
+    """Adapt an already-sent streaming ``httpx.Response`` to the chat TUI's ``StreamingResponse``."""
+
+    def __init__(self, response: httpx.Response) -> None:
+        self._response = response
+
+    @property
+    def http_response(self) -> httpx.Response:
+        return self._response
+
+    @contextmanager
+    def stream(self) -> Iterator[Iterator[bytes]]:
+        try:
+            yield self._response.iter_bytes()
+        finally:
+            self._response.close()
 
 
 def _run_resolved_session_chat(
@@ -2648,7 +2577,7 @@ def _run_resolved_session_chat(
                     response.read()
                     response.close()
                     raise
-                return cast(StreamingResponse, closing(response))
+                return _HttpxStreamingResponse(response)
 
             run_chat_tui(
                 send_turn=send_turn,
@@ -2844,26 +2773,74 @@ def _deployment_map(deployment: ClientAgentDeployment) -> dict[str, Any]:
     return deployment.model_dump(mode="json")
 
 
-def _print_list_response(
+def _print_list(
     ctx: typer.Context,
-    response: Any,
+    client: AgentsClient,
+    method: str,
+    kwargs: dict[str, Any],
     *,
     default_columns: list[Column],
-    output_format: _LIST_OUTPUT_FORMAT | None,
+    output_format: ListOutputFormat | None,
     no_truncate: bool | None,
+    columns: str | None,
+    all_pages: bool,
+    project_display_rows: Callable[[Any], None] | None = None,
 ) -> None:
-    """Print a list response with table output by default and JSON opt-in."""
+    """Run one ``AgentsClient`` list *method* and render it like every other ``nemo`` list command.
+
+    *project_display_rows*, when given, rewrites the collected rows in memory before
+    table, markdown, or CSV rendering; JSON and YAML output keep the server's rows.
+    """
+    resolved_output_format = resolve_output_format(ctx, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
+    if resolved_output_format == "code":
+        handle_code_generation(
+            AgentsClient,
+            method,
+            kwargs,
+            resolved_output_format,
+            cli_state(ctx),
+            result="all-pages" if all_pages else "list",
+        )
+        return
+    result = _run_sdk(
+        "GET agent API",
+        lambda: collect_offset_pages(getattr(client, method)(**kwargs), all_pages=all_pages),
+    )
+    if project_display_rows is not None and resolved_output_format in _TABULAR_LIST_FORMATS:
+        project_display_rows(result)
     format_output(
-        response,
+        result,
         is_list=True,
-        output_format=_resolve_list_output_format(ctx, output_format),
-        output_columns=default_columns,
+        output_format=resolved_output_format,
+        output_columns=columns if columns is not None and columns.strip() != "default" else default_columns,
         no_truncate=_resolve_no_truncate(ctx, no_truncate),
         timestamp_format=_resolve_timestamp_format(ctx),
     )
+    if not all_pages:
+        warn_if_more_pages(result, PaginationType.PAGE_NUMBER)
+
+
+def _print_entity(
+    ctx: typer.Context,
+    client: AgentsClient,
+    method: str,
+    kwargs: dict[str, Any],
+    output_format: EntityOutputFormat | None,
+) -> None:
+    """Run one ``AgentsClient`` read *method* and print the server's response in the requested format."""
+    resolved_output_format = resolve_output_format(ctx, output_format)
+    if resolved_output_format == "code":
+        handle_code_generation(AgentsClient, method, kwargs, resolved_output_format, cli_state(ctx))
+        return
+    resp = _run_sdk("GET agent API", lambda: _json_from_response(getattr(client, method)(**kwargs)))
+    format_output(resp, output_format=resolved_output_format)
 
 
 def _agents_client(base_url: str, workspace: str) -> AgentsClient:
+    shared = shared_cli_client(AgentsClient, timeout=30)
+    if shared is not None:
+        return shared
     return AgentsClient(
         base_url=base_url,
         workspace=workspace,
@@ -2887,20 +2864,6 @@ def _json_from_http_response(response: httpx.Response) -> Any:
     if response.status_code == 204 or not response.content:
         return None
     return response.json()
-
-
-def _resolve_list_output_format(ctx: typer.Context, output_format: _LIST_OUTPUT_FORMAT | None) -> str:
-    """Resolve command-level format, then global CLI preference, then table."""
-    if output_format is not None:
-        return output_format
-
-    state = ctx.obj
-    if state is not None and hasattr(state, "get_output_format"):
-        try:
-            return state.get_output_format(apply_non_tty_default=False)
-        except Exception:
-            logger.debug("Failed to resolve global output format for agents list", exc_info=True)
-    return "table"
 
 
 def _resolve_no_truncate(ctx: typer.Context, no_truncate: bool | None) -> bool | None:
@@ -2930,6 +2893,9 @@ def _resolve_timestamp_format(ctx: typer.Context) -> str | None:
 
 def _platform_sdk(base_url: str) -> NemoClient:
     """Return an auth-aware platform client for fileset upload/delete."""
+    shared = shared_cli_client(NemoClient)
+    if shared is not None:
+        return shared
     headers = _resolve_context_headers()
     if headers:
         return NemoClient(base_url=base_url, default_headers=headers)
@@ -3037,14 +3003,14 @@ def _collect_text_agent_artifacts(
 
 def _clear_existing_ethos_artifacts(
     *,
-    sdk: SyncHelixClient,
+    client: NemoClient,
     fileset: str,
     workspace: str,
 ) -> None:
     """Remove the previous executable snapshot while preserving durable Ethos."""
 
     preserved = {ETHOS_FILENAME}
-    files_client = client_from_platform(sdk, FilesClient)
+    files_client = FilesClient.from_client(client)
 
     try:
         existing = files_client.list_files(name=fileset, workspace=workspace).data().data
@@ -3064,6 +3030,11 @@ def _clear_existing_ethos_artifacts(
 
 _LIVE_DEPLOYMENT_STATUSES = frozenset({"pending", "starting", "running"})
 """Deployment statuses that represent a live deployment worth undeploying."""
+
+_USE_IMAGE_ENTRYPOINT_MODE_ERROR = (
+    "--use-image-entrypoint requires --mode docker or k8s. The openshell sandbox does not run "
+    "the image ENTRYPOINT/CMD, so --mode openshell needs the platform-injected serve command."
+)
 
 
 def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, workspace: str) -> None:
@@ -3240,7 +3211,7 @@ def _upload_ethos_fileset(
         # fileset. The durable Ethos contract survives even when it is absent
         # from this executable snapshot.
         _clear_existing_ethos_artifacts(
-            sdk=sdk,
+            client=sdk,
             fileset=fileset,
             workspace=workspace,
         )

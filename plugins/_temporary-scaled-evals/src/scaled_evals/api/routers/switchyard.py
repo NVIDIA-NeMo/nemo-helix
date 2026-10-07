@@ -12,7 +12,7 @@ from typing import Annotated, BinaryIO, Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.build import cloud_build
 from scaled_evals.api.build.buildkit import BuildError
@@ -249,7 +249,7 @@ def _submit_cloud_build_switchyard(
     """Submit the Switchyard image to Cloud Build without waiting for completion."""
 
     object_key = f"switchyard-contexts/{body.source_ref}/{metadata.context_hash}.tar.gz"
-    s3.upload_context_archive(archive_path, object_key)
+    artifacts.upload_context_archive(archive_path, object_key)
     target_ref = _switchyard_cloud_build_image_ref(body.source_ref, metadata.context_hash)
     substitutions = {
         f"{_SWITCHYARD_SUBSTITUTION_PREFIX}PURPOSE": "publish",
@@ -643,27 +643,22 @@ def _publish_switchyard(
             except BuildError as exc:
                 raise _http_error(502, "invalid_switchyard_image_identity", str(exc)) from exc
         elif settings.cloud_build_enabled:
-            builder = "cloudbuild"
-            try:
-                record_principal(db, current)
-                build = _submit_cloud_build_switchyard(
-                    archive_path,
-                    body,
-                    metadata,
-                    owner_id=current.owner_id,
-                )
-            except Exception as exc:  # noqa: BLE001 - expose concise builder failure as API error
-                raise _http_error(502, "switchyard_publish_failed", str(exc)) from exc
-            return SwitchyardPublishJobResponse(
-                build_id=str(build["id"]),
-                status=_cloud_build_job_status(build),
+            # Cloud Build reads the context from a GCS storageSource, but Switchyard contexts now
+            # upload to the Files service, not GCS — so a Cloud Build publish would build against
+            # an object that was never written. Refuse it (mirrors the finalize hard-gate); use
+            # the image-builder service instead. (Full Cloud Build removal is a separate follow-up.)
+            raise _http_error(
+                503,
+                "cloud_build_unsupported",
+                "Google Cloud Build Switchyard publish is no longer supported: build contexts are "
+                "stored in the Files service, which Cloud Build cannot read as a build source. "
+                "Configure IMAGE_BUILDER_SERVICE_URL instead.",
             )
         else:
             raise _http_error(
                 503,
                 "build_disabled",
-                "Switchyard publish requires a managed builder: set "
-                "IMAGE_BUILDER_SERVICE_URL or enable CLOUD_BUILD_ENABLED (GKE)",
+                "Switchyard publish requires a managed builder: set IMAGE_BUILDER_SERVICE_URL.",
             )
 
     context_archive_sha256 = str(data.get("context_archive_sha256") or metadata.context_archive_sha256)

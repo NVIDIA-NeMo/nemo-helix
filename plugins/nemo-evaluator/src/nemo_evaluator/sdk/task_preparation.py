@@ -14,7 +14,7 @@ from nemo_evaluator.api.schemas import (
 from nemo_evaluator.harbor.publication import publish_harbor_task_archive, publish_harbor_task_archive_async
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundlePackager, bundle_metric
 from nemo_evaluator.shared.metric_bundles.defaults import resolve_default_metric_bundle_packager
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import (
     HARBOR_DATASET_PATH_KEY,
     HARBOR_TASK_DIR_KEY,
     HarborAgentEvalTask,

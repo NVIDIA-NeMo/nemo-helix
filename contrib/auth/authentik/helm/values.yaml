@@ -138,8 +138,24 @@ nemo-helix:
         - entities
         - deployments
       env:
-        NHX_PLATFORM_URL: "https://nemo-helix-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
-        NHX_AUTH_URL: "https://nemo-helix-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
+        NHX_CLIENT_SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
+      extraVolumes:
+        - name: workload-token-signing-key
+          secret:
+            secretName: *workloadTokenSigningKeySecretName
+        - name: workload-token-tls-ca
+          secret:
+            secretName: *workloadTokenTlsSecretName
+            items:
+              - key: ca.crt
+                path: ca.crt
+      extraVolumeMounts:
+        - name: workload-token-signing-key
+          mountPath: *workloadTokenSigningKeyMountPath
+          readOnly: true
+        - name: workload-token-tls-ca
+          mountPath: *workloadTokenTlsCaBundleMountPath
+          readOnly: true
     storage:
       accessModes:
         - ReadWriteOnce
@@ -168,6 +184,27 @@ nemo-helix:
     extraVolumeMounts:
       - name: workload-token-signing-key
         mountPath: *workloadTokenSigningKeyMountPath
+        readOnly: true
+  platformSeedJob:
+    extraEnv:
+      - name: NHX_CLIENT_SSL_CERT_FILE
+        value: *workloadTokenTlsCaBundleFile
+    extraVolumes:
+      - name: workload-token-signing-key
+        secret:
+          secretName: *workloadTokenSigningKeySecretName
+      - name: workload-token-tls-ca
+        secret:
+          secretName: *workloadTokenTlsSecretName
+          items:
+            - key: ca.crt
+              path: ca.crt
+    extraVolumeMounts:
+      - name: workload-token-signing-key
+        mountPath: *workloadTokenSigningKeyMountPath
+        readOnly: true
+      - name: workload-token-tls-ca
+        mountPath: *workloadTokenTlsCaBundleMountPath
         readOnly: true
   authentikEnvoy:
     serviceName: &authentikServiceName authentik-server
@@ -213,6 +250,8 @@ nemo-helix:
       upstreamIdle: "4s"
     configOverride: '{{ include "nemo-helix-authentik.envoyConfig" . }}'
   platformConfig:
+    platform:
+      base_url: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}'
     auth:
       enabled: true
       allow_unsigned_jwt: false

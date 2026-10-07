@@ -12,7 +12,7 @@ from evaluation.intake_client import build_basic_auth_intake_client, build_rewri
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
 
-async def test_rewrites_sdk_prefix_and_attaches_basic_auth() -> None:
+async def test_rewrites_client_prefix_and_attaches_basic_auth() -> None:
     seen: dict[str, str | None] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:

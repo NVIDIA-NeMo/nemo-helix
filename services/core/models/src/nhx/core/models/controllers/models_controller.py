@@ -8,13 +8,12 @@ from logging import getLogger
 from typing import Optional
 
 import httpx
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import ModelDeployment, ModelDeploymentConfig, ModelDeploymentStatus, ModelEntity
+from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.controller import Controller, HeartbeatMixin
 from nhx.common.entities.utils import parse_entity_ref
-from nhx.common.sdk_factory import get_async_platform_sdk
 from nhx.core.models.app import parse_model_name_revision
 from nhx.core.models.config import config as models_config
 from nhx.core.models.controllers.backends.backends import ServiceBackend
@@ -62,32 +61,30 @@ class ModelsController(HeartbeatMixin, Controller):
         self._current_task: asyncio.Task | None = None
 
         # Use service principal for controller - runs in background thread without user context
-        self._models_sdk = get_async_platform_sdk(
+        self._client = get_async_nemo_client(
             as_service="models",
             internal=True,
-            http_client=httpx.AsyncClient(
-                timeout=_CONTROLLER_HTTP_TIMEOUT,
-                limits=_CONTROLLER_HTTP_LIMITS,
-                follow_redirects=True,
-            ),
+            timeout=_CONTROLLER_HTTP_TIMEOUT,
+            limits=_CONTROLLER_HTTP_LIMITS,
+            follow_redirects=True,
         )
-        self._models_client = client_from_platform(self._models_sdk, AsyncModelsClient)
+        self._models_client = AsyncModelsClient.from_client(self._client)
         self._service_backends = backend_registry.list_backends()
 
         # Shared by both reconcilers; re-read at the start of each phase that
         # writes entities so neither phase works from state the other has changed.
-        self._entity_cache = ModelEntityCache(models_sdk=self._models_sdk, emit_heartbeat=self.emit_heartbeat)
+        self._entity_cache = ModelEntityCache(client=self._client, emit_heartbeat=self.emit_heartbeat)
 
         # Initialize reconcilers
         self._deployment_reconciler = ModelDeploymentReconciler(
-            models_sdk=self._models_sdk,
+            client=self._client,
             backend_registry=backend_registry,
             controller_config=models_config.controller,
             entity_cache=self._entity_cache,
             emit_heartbeat=self.emit_heartbeat,
         )
         self._provider_reconciler = ModelProviderReconciler(
-            models_sdk=self._models_sdk,
+            client=self._client,
             controller_config=models_config.controller,
             entity_cache=self._entity_cache,
             emit_heartbeat=self.emit_heartbeat,
@@ -104,7 +101,7 @@ class ModelsController(HeartbeatMixin, Controller):
         """
         if self._loop is not None and not self._loop.is_closed():
             try:
-                self._loop.run_until_complete(self._models_sdk.close())
+                self._loop.run_until_complete(self._client.close())
             except Exception as e:
                 logger.warning(f"Error closing event loop: {e}")
             finally:
@@ -262,7 +259,7 @@ class ModelsController(HeartbeatMixin, Controller):
                 logger.debug(f"Successfully retrieved model entity from Models API: {workspace}/{model_name}")
                 return model_entity
 
-            # SDK query succeeded but returned None/empty - this shouldn't happen normally
+            # Query succeeded but returned None/empty - this shouldn't happen normally
             logger.warning(
                 f"Models API query succeeded but returned empty result for model: {workspace}/{full_model_name}"
             )
@@ -295,7 +292,7 @@ class ModelsController(HeartbeatMixin, Controller):
 
             try:
                 logger.debug(f"Querying ModelDeployments with status: {status} across all workspaces")
-                # SDK returns AsyncPaginator - iterate through all pages
+                # The paginated response yields every page through items()
                 resp = await self._models_client.list_deployments(
                     workspace="-",  # Cross-workspace query
                     query_params={

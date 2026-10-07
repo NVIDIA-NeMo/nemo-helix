@@ -39,10 +39,13 @@ from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBu
 from nemo_evaluator.tasks.evaluate import main as evaluate_task_main
 from nemo_evaluator.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_evaluator_sdk.enums import AgentFormat
+from nemo_evaluator_sdk.execution.backends.local.backend import LocalBackend
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.f1 import F1Metric
 from nemo_evaluator_sdk.metrics.llm_judge import LLMJudgeMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nemo_evaluator_sdk.resolver_protocols import MissingSecretError
+from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values import (
     Agent,
     AggregatedMetricResult,
@@ -375,7 +378,7 @@ def test_evaluate_job_fails_when_no_row_scored(tmp_path: Path, mocker: MockerFix
     evaluator.run_sync.return_value = EvaluationResult(
         row_scores=[nan_row, nan_row], aggregate_scores=AggregatedMetricResult(scores=[])
     )
-    mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     persist = mocker.patch("nemo_evaluator.jobs.evaluate.persist_evaluate_result")
     publish = mocker.patch.object(EvaluateJob, "_publish_result")
     report = mocker.patch("nemo_evaluator.jobs.evaluate.report_run_outcome")
@@ -444,7 +447,7 @@ def test_cli_evaluate_uses_flat_submit_without_local_run() -> None:
     assert result.exit_code == 0
     output = result.output
     assert "--spec" in output
-    assert "--base-url" in output
+    assert "--base-url" not in output
     assert "--profile" in output
     assert "Run locally, in-process." not in result.output
     assert "explain" in output
@@ -1129,6 +1132,20 @@ class TestEvaluateJobCompile:
         assert config["dataset"] == dataset.root
 
 
+def _assert_job_secret_resolver(backend: LocalBackend) -> None:
+    """In a job, a workspace ref never falls back to a bare env var, which may hold another consumer's secret."""
+    resolver = backend.secret_resolver
+    assert isinstance(resolver, LocalSecretResolver)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delenv("DEFAULT_OPENAI_API_KEY", raising=False)
+        mp.setenv("OPENAI_API_KEY", "target-key")
+        mp.setenv("NVIDIA_BUILD_API_KEY", "metric-key")
+        with pytest.raises(MissingSecretError):
+            resolver.env_var_for(SecretRef("default/openai-api-key"))
+        # A bare ref's own names are still searched.
+        assert resolver.env_var_for(SecretRef("nvidia-build-api-key")) == "NVIDIA_BUILD_API_KEY"
+
+
 class TestEvaluateJobRun:
     """Coverage for the local evaluator job runner."""
 
@@ -1171,7 +1188,7 @@ class TestEvaluateJobRun:
         result_payload = result.model_dump(mode="json")
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = result
-        evaluator_cls = mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+        evaluator_cls = mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
         config = {
             **_exact_match_spec(),
             **spec_overrides,
@@ -1190,7 +1207,8 @@ class TestEvaluateJobRun:
         }
         assert "result" not in run_result
         _assert_saved_result_artifact(run_result, ctx, result_payload)
-        evaluator_cls.assert_called_once_with()
+        evaluator_cls.assert_called_once()
+        _assert_job_secret_resolver(evaluator_cls.call_args.args[0])
         call_kwargs = evaluator.run_sync.call_args.kwargs
         assert [type(metric) for metric in call_kwargs["metrics"]] == [ExactMatchMetric]
         assert call_kwargs["dataset"] == expected_spec.dataset
@@ -1203,7 +1221,7 @@ class TestEvaluateJobRun:
         result_payload = result.model_dump(mode="json")
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = result
-        evaluator_cls = mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+        evaluator_cls = mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
         config = {
             **_exact_match_spec(),
             "metrics": [
@@ -1223,7 +1241,8 @@ class TestEvaluateJobRun:
         }
         assert "result" not in run_result
         _assert_saved_result_artifact(run_result, ctx, result_payload)
-        evaluator_cls.assert_called_once_with()
+        evaluator_cls.assert_called_once()
+        _assert_job_secret_resolver(evaluator_cls.call_args.args[0])
         call_kwargs = evaluator.run_sync.call_args.kwargs
         assert [metric.type.value for metric in call_kwargs["metrics"]] == ["exact-match", "f1"]
         assert call_kwargs["dataset"] == expected_spec.dataset
@@ -1238,7 +1257,7 @@ class TestEvaluateJobRun:
         result_payload = result.model_dump(mode="json")
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = result
-        mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+        mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
         downloaded_path = tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl"
         download_dataset = mocker.patch(
             "nemo_evaluator.jobs.evaluate.download_dataset",
@@ -1288,7 +1307,7 @@ class TestEvaluateJobRun:
         result_payload = result.model_dump(mode="json")
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = result
-        mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+        mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
         downloaded_path = tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl"
         download_dataset = mocker.patch("nemo_evaluator.jobs.evaluate.download_dataset", create=True)
         download_dataset_sync = mocker.patch(
@@ -1321,7 +1340,7 @@ class TestEvaluateJobRun:
         """The sync job entrypoint uses the typed client declared by the job."""
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = _empty_evaluation_result()
-        mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+        mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
         download_dataset_sync = mocker.patch(
             "nemo_evaluator.jobs.evaluate.download_dataset_sync",
             return_value=tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl",
@@ -1341,7 +1360,7 @@ class TestEvaluateJobRun:
         result_payload = result.model_dump(mode="json")
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = result
-        mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+        mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
         downloaded_path = tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl"
         download_dataset = mocker.patch(
             "nemo_evaluator.jobs.evaluate.download_dataset",

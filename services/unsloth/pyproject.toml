@@ -10,7 +10,6 @@ dependencies = [
     "nhx-common",
     "nhx-customization-common",
     "nemo-helix-plugin",
-    "nemo-helix-sdk",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.6.1",
     "httpx>=0.27.0",
@@ -56,7 +55,6 @@ packages = ["src/nhx"]
 nhx-common = { workspace = true }
 nhx-customization-common = { workspace = true }
 nemo-helix-plugin = { workspace = true }
-nemo-helix-sdk = { workspace = true }
 
 
 [dependency-groups]

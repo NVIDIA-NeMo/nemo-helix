@@ -1021,7 +1021,7 @@ async def test_registry_begin_rotation_rejects_non_active_key(record: AccessKeyE
 
 @pytest.mark.asyncio
 async def test_registry_begin_rotation_caps_grace_deadline_at_natural_expiry() -> None:
-    # Natural expiry always takes precedence over rotation grace (AIRCORE-985): a key
+    # Natural expiry always takes precedence over rotation grace: a key
     # expiring sooner than the configured grace period must not have its reported
     # deadline pushed out past that natural expiry.
     soon_expiring = _record().model_copy(update={"expires_at": datetime.now(tz=UTC) + timedelta(minutes=10)})

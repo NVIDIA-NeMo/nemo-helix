@@ -101,6 +101,30 @@ def test_authorization_header_endpoint_rejects_remote_cleartext_http() -> None:
         )
 
 
+def test_authorization_header_endpoint_rejects_remote_cleartext_service_route() -> None:
+    endpoint = HelixEndpoint(
+        connect_base_url="https://platform.example.com",
+        socket_path=None,
+        transport="tcp",
+        service_endpoints={
+            "entities": parse_platform_endpoint("http://entities.example.com"),
+        },
+    )
+
+    with pytest.raises(ValueError, match="cleartext remote service endpoint 'entities'"):
+        require_authorization_header_endpoint(endpoint, purpose="test call")
+
+
+def test_authorization_header_endpoint_ignores_backend_config_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://clickhouse.example.internal:8123")
+    config = HelixConfig(base_url="https://platform.example.com")
+
+    endpoint = resolve_platform_endpoint(config)
+
+    assert "intake-clickhouse" not in endpoint.service_endpoints
+    require_authorization_header_endpoint(endpoint, purpose="test call")
+
+
 def test_resolve_service_endpoint_uses_service_specific_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NHX_SECRETS_URL", "unix:///tmp/secrets.sock")
     config = HelixConfig(base_url="http://platform:8080")
@@ -178,6 +202,18 @@ def test_resolve_platform_endpoint_carries_service_routes(
     assert endpoint.service_endpoints["jobs"].connect_base_url == "http://jobs-service:8080"
 
 
+def test_resolve_platform_endpoint_uses_explicit_base_url() -> None:
+    config = HelixConfig(
+        base_url="http://platform:8080",
+        service_discovery={"entities": "http://entities-service:8080"},
+    )
+
+    endpoint = resolve_platform_endpoint(config, base_url="https://override.example.test")
+
+    assert endpoint.connect_base_url == "https://override.example.test"
+    assert set(endpoint.service_endpoints) == {"entities"}
+
+
 def test_resolve_platform_endpoint_rejects_malformed_service_route() -> None:
     config = HelixConfig(  # type: ignore[abstract]
         base_url="http://platform:8080",
@@ -246,6 +282,20 @@ def test_platform_endpoint_routes_service_discovery_with_underscore_configured_n
     assert str(routed.url) == "http://my-service:8080/apis/my-service/v2/workspaces/default/items"
 
 
+def test_platform_endpoint_routes_declared_multiword_service_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = HelixConfig(
+        base_url="http://platform:8080",
+        service_discovery={"inference-gateway": "http://inference-gateway-config:8080"},
+    )
+    monkeypatch.setenv("NHX_INFERENCE_GATEWAY_URL", "https://inference-gateway-env:9443")
+
+    endpoint = resolve_platform_endpoint(config)
+    routed = endpoint.route_request_url("http://platform:8080/apis/inference-gateway/v1/chat/completions")
+
+    assert routed.endpoint.connect_base_url == "https://inference-gateway-env:9443"
+    assert str(routed.url) == "https://inference-gateway-env:9443/apis/inference-gateway/v1/chat/completions"
+
+
 def test_platform_endpoint_uses_env_override(
     monkeypatch: pytest.MonkeyPatch,
     platform_config_with_service_discovery: HelixConfig,
@@ -273,6 +323,19 @@ def test_platform_endpoint_routes_env_only_service_url(monkeypatch: pytest.Monke
     assert str(routed.url) == "http://entities-env:9090/apis/entities/v2/workspaces/default?limit=1"
 
 
+def test_platform_endpoint_routes_env_only_multiword_service_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = HelixConfig(base_url="http://platform:8080")  # type: ignore[abstract]
+    monkeypatch.setenv("NHX_INFERENCE_GATEWAY_URL", "https://inference-gateway-env:9443")
+
+    endpoint = resolve_platform_endpoint(config)
+    routed = endpoint.route_request_url("http://platform:8080/apis/inference-gateway/v1/chat/completions")
+
+    assert "inference-gateway" in endpoint.service_endpoints
+    assert "inference-gateway" not in config.service_discovery
+    assert routed.endpoint.connect_base_url == "https://inference-gateway-env:9443"
+    assert str(routed.url) == "https://inference-gateway-env:9443/apis/inference-gateway/v1/chat/completions"
+
+
 @pytest.mark.parametrize("service_url", ["not-a-url", "http://", "unix://relative.sock"])
 def test_platform_endpoint_skips_invalid_env_only_service_url(
     monkeypatch: pytest.MonkeyPatch,
@@ -295,6 +358,18 @@ def test_platform_endpoint_skips_invalid_unrelated_service_url_env_var(monkeypat
     endpoint = resolve_platform_endpoint(config)
 
     assert "not-a-service" not in endpoint.service_endpoints
+
+
+def test_platform_endpoint_ignores_backend_config_url_as_env_only_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = HelixConfig(base_url="http://platform:8080")  # type: ignore[abstract]
+    monkeypatch.setenv("NHX_INTAKE_CLICKHOUSE_URL", "http://clickhouse.example.internal:8123")
+
+    endpoint = resolve_platform_endpoint(config)
+    routed = endpoint.route_request_url("http://platform:8080/apis/intake/v2/workspaces/default/spans")
+
+    assert "intake-clickhouse" not in endpoint.service_endpoints
+    assert routed.endpoint.connect_base_url == "http://platform:8080"
+    assert routed.url.host == "platform"
 
 
 def test_platform_endpoint_keeps_configured_local_service_on_local_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -342,6 +417,7 @@ def test_platform_endpoint_ignores_unrelated_service_url_env_var(monkeypatch: py
     endpoint = resolve_platform_endpoint(config)
     routed = endpoint.route_request_url("http://platform:8080/apis/entities/v2/workspaces/default")
 
+    assert "not-a-service" not in endpoint.service_endpoints
     assert routed.endpoint.connect_base_url == "http://platform:8080"
     assert routed.url.host == "platform"
 
@@ -441,13 +517,27 @@ def test_sync_http_client_passes_explicit_timeout() -> None:
     client.assert_called_once_with(follow_redirects=True, timeout=2.0)
 
 
+def test_sync_http_client_uses_client_ca_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cert_file = tmp_path / "ca.pem"
+    cert_file.write_text("certificate", encoding="utf-8")
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(cert_file))
+    endpoint = parse_platform_endpoint("https://platform.example.test")
+
+    with patch("nhx.common.platform_endpoint.httpx.Client") as client:
+        endpoint.sync_http_client(timeout=2.0)
+
+    client.assert_called_once_with(follow_redirects=True, timeout=2.0, verify=str(cert_file))
+
+
 def test_sync_sdk_http_client_uses_sdk_default_for_tcp() -> None:
     endpoint = parse_platform_endpoint("http://127.0.0.1:8080")
 
     with patch("nhx.common.platform_endpoint.ImmutableDefaultHttpxClient") as client:
         endpoint.sync_sdk_http_client()
 
-    client.assert_called_once_with()
+    kwargs = client.call_args.kwargs
+    assert "event_hooks" in kwargs
+    assert len(kwargs["event_hooks"]["request"]) == 1
 
 
 def test_sync_sdk_http_client_passes_explicit_timeout() -> None:
@@ -456,7 +546,24 @@ def test_sync_sdk_http_client_passes_explicit_timeout() -> None:
     with patch("nhx.common.platform_endpoint.ImmutableDefaultHttpxClient") as client:
         endpoint.sync_sdk_http_client(timeout=2.0)
 
-    client.assert_called_once_with(timeout=2.0)
+    kwargs = client.call_args.kwargs
+    assert kwargs["timeout"] == 2.0
+    assert len(kwargs["event_hooks"]["request"]) == 1
+
+
+def test_sync_sdk_http_client_uses_client_ca_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cert_file = tmp_path / "ca.pem"
+    cert_file.write_text("certificate", encoding="utf-8")
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(cert_file))
+    endpoint = parse_platform_endpoint("https://platform.example.test")
+
+    with patch("nhx.common.platform_endpoint.ImmutableDefaultHttpxClient") as client:
+        endpoint.sync_sdk_http_client(timeout=2.0)
+
+    kwargs = client.call_args.kwargs
+    assert kwargs["timeout"] == 2.0
+    assert kwargs["verify"] == str(cert_file)
+    assert len(kwargs["event_hooks"]["request"]) == 1
 
 
 def test_sync_sdk_http_client_can_disable_redirects() -> None:
@@ -465,7 +572,9 @@ def test_sync_sdk_http_client_can_disable_redirects() -> None:
     with patch("nhx.common.platform_endpoint.ImmutableDefaultHttpxClient") as client:
         endpoint.sync_sdk_http_client(follow_redirects=False)
 
-    client.assert_called_once_with(follow_redirects=False)
+    kwargs = client.call_args.kwargs
+    assert kwargs["follow_redirects"] is False
+    assert len(kwargs["event_hooks"]["request"]) == 1
 
 
 def test_uds_sync_http_client_keeps_transport_and_omits_unset_timeout() -> None:
@@ -685,6 +794,7 @@ def test_routing_transports_pass_custom_ca_to_tcp_transport(monkeypatch: pytest.
     cert_file = tmp_path / "ca.pem"
     cert_file.write_text("certificate", encoding="utf-8")
     monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(cert_file))
+    limits = httpx.Limits(max_connections=3)
     sync_kwargs: list[dict[str, object]] = []
     async_kwargs: list[dict[str, object]] = []
 
@@ -712,11 +822,11 @@ def test_routing_transports_pass_custom_ca_to_tcp_transport(monkeypatch: pytest.
         patch("nhx.common.platform_endpoint.httpx.HTTPTransport", FakeHTTPTransport),
         patch("nhx.common.platform_endpoint.httpx.AsyncHTTPTransport", FakeAsyncHTTPTransport),
     ):
-        _SyncHelixEndpointRoutingTransport(endpoint=endpoint)
-        _AsyncHelixEndpointRoutingTransport(endpoint=endpoint)
+        _SyncHelixEndpointRoutingTransport(endpoint=endpoint, limits=limits)
+        _AsyncHelixEndpointRoutingTransport(endpoint=endpoint, limits=limits)
 
-    assert sync_kwargs[0] == {"verify": str(cert_file)}
-    assert async_kwargs[0] == {"verify": str(cert_file)}
+    assert sync_kwargs[0] == {"verify": str(cert_file), "limits": limits}
+    assert async_kwargs[0] == {"verify": str(cert_file), "limits": limits}
 
 
 def test_async_http_client_omits_unset_timeout() -> None:
@@ -737,13 +847,27 @@ def test_async_http_client_passes_explicit_timeout() -> None:
     client.assert_called_once_with(follow_redirects=True, timeout=2.0)
 
 
+def test_async_http_client_uses_client_ca_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cert_file = tmp_path / "ca.pem"
+    cert_file.write_text("certificate", encoding="utf-8")
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(cert_file))
+    endpoint = parse_platform_endpoint("https://platform.example.test")
+
+    with patch("nhx.common.platform_endpoint.httpx.AsyncClient") as client:
+        endpoint.async_http_client(timeout=2.0)
+
+    client.assert_called_once_with(follow_redirects=True, timeout=2.0, verify=str(cert_file))
+
+
 def test_async_sdk_http_client_uses_sdk_default_for_tcp() -> None:
     endpoint = parse_platform_endpoint("http://127.0.0.1:8080")
 
     with patch("nhx.common.platform_endpoint.ImmutableDefaultAsyncHttpxClient") as client:
         endpoint.async_sdk_http_client()
 
-    client.assert_called_once_with()
+    kwargs = client.call_args.kwargs
+    assert "event_hooks" in kwargs
+    assert len(kwargs["event_hooks"]["request"]) == 1
 
 
 def test_async_sdk_http_client_passes_explicit_timeout() -> None:
@@ -752,7 +876,36 @@ def test_async_sdk_http_client_passes_explicit_timeout() -> None:
     with patch("nhx.common.platform_endpoint.ImmutableDefaultAsyncHttpxClient") as client:
         endpoint.async_sdk_http_client(timeout=2.0)
 
-    client.assert_called_once_with(timeout=2.0)
+    kwargs = client.call_args.kwargs
+    assert kwargs["timeout"] == 2.0
+    assert len(kwargs["event_hooks"]["request"]) == 1
+
+
+def test_async_sdk_http_client_uses_client_ca_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cert_file = tmp_path / "ca.pem"
+    cert_file.write_text("certificate", encoding="utf-8")
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(cert_file))
+    endpoint = parse_platform_endpoint("https://platform.example.test")
+
+    with patch("nhx.common.platform_endpoint.ImmutableDefaultAsyncHttpxClient") as client:
+        endpoint.async_sdk_http_client(timeout=2.0)
+
+    kwargs = client.call_args.kwargs
+    assert kwargs["timeout"] == 2.0
+    assert kwargs["verify"] == str(cert_file)
+    assert len(kwargs["event_hooks"]["request"]) == 1
+
+
+def test_async_sdk_http_client_passes_explicit_limits() -> None:
+    endpoint = parse_platform_endpoint("http://127.0.0.1:8080")
+    limits = httpx.Limits(max_connections=3)
+
+    with patch("nhx.common.platform_endpoint.ImmutableDefaultAsyncHttpxClient") as client:
+        endpoint.async_sdk_http_client(limits=limits)
+
+    kwargs = client.call_args.kwargs
+    assert kwargs["limits"] is limits
+    assert len(kwargs["event_hooks"]["request"]) == 1
 
 
 def test_async_sdk_http_client_can_disable_redirects() -> None:
@@ -761,7 +914,9 @@ def test_async_sdk_http_client_can_disable_redirects() -> None:
     with patch("nhx.common.platform_endpoint.ImmutableDefaultAsyncHttpxClient") as client:
         endpoint.async_sdk_http_client(follow_redirects=False)
 
-    client.assert_called_once_with(follow_redirects=False)
+    kwargs = client.call_args.kwargs
+    assert kwargs["follow_redirects"] is False
+    assert len(kwargs["event_hooks"]["request"]) == 1
 
 
 def test_uds_async_http_client_keeps_transport_and_omits_unset_timeout() -> None:

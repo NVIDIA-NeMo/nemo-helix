@@ -249,7 +249,7 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
                 password=NEMO_JOBS_IMAGE_REGISTRY_PASSWORD,
                 registry=NEMO_JOBS_IMAGE_REGISTRY,
             )
-        self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nhx_sdk)
+        self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
 
     def shutdown(self) -> None:
         self._container_run_threadpool.shutdown(wait=True)
@@ -895,8 +895,8 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
         # Set auth context env var for job containers to make authenticated API calls
         if step.auth_context and not workload_identity_enabled:
-            sdk_auth_context = step.auth_context
-            auth_context = AuthContext.model_validate(sdk_auth_context.model_dump(mode="python", exclude_none=True))
+            step_auth_context = step.auth_context
+            auth_context = AuthContext.model_validate(step_auth_context.model_dump(mode="python", exclude_none=True))
             principal = auth_context.to_principal()
             env_var_dict = principal.get_env_var()
             for name, value in env_var_dict.items():

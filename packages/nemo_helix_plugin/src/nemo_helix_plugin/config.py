@@ -340,8 +340,36 @@ def get_platform_config_class() -> Type[NemoHelixConfig]:
 # Platform configuration types
 # ---------------------------------------------------------------------------
 
-# Regex for env vars that set per-service URLs (e.g. NHX_FILES_URL).
-_PLATFORM_SERVICE_URL_ENV_PATTERN = re.compile(r"^NHX_([A-Z0-9]+)_URL$")
+PLATFORM_SERVICE_NAMES: frozenset[str] = frozenset(
+    {
+        "auth",
+        "customization",
+        "entities",
+        "files",
+        "guardrails",
+        "hello-world",
+        "inference-gateway",
+        "intake",
+        "jobs",
+        "models",
+        "safe-synthesizer",
+        "secrets",
+        "studio",
+    }
+)
+_PLATFORM_SERVICE_URL_ENV_PATTERN = re.compile(r"^NHX_([A-Z0-9_]+)_URL$")
+
+
+def platform_service_name_from_url_env_var(env_name: str) -> str | None:
+    """Return the platform service name configured by ``env_name``, if any."""
+    match = _PLATFORM_SERVICE_URL_ENV_PATTERN.match(env_name)
+    if match is None:
+        return None
+    service_name = match.group(1).lower().replace("_", "-")
+    if service_name not in PLATFORM_SERVICE_NAMES:
+        return None
+    return service_name
+
 
 # Addresses that refer to localhost/loopback interfaces
 LOOPBACK_ADDRESSES = ("localhost", "0.0.0.0", "::1", "127.0.0.1")
@@ -477,9 +505,9 @@ class NemoHelixConfig(ServiceConfig):
     """Platform-wide configuration settings. It inherits from ServiceConfig and provides Platform-centric settings, which may
     be used by other microservices to interact with other Platform services.
 
-    Environment variables NHX_<SERVICE>_URL (e.g. NHX_FILES_URL) are read and merged into
-    service_discovery with the service name lowercased; NHX_BASE_URL sets base_url and is not added to
-    service_discovery.
+    Known platform service URL environment variables (e.g. NHX_FILES_URL and
+    NHX_INFERENCE_GATEWAY_URL) are read and merged into service_discovery.
+    NHX_BASE_URL sets base_url and is not added to service_discovery.
     """
 
     model_config = SettingsConfigDict(
@@ -532,8 +560,9 @@ class NemoHelixConfig(ServiceConfig):
         default_factory=dict,
         description=(
             "Map of service names to their URLs. Used to discover services by name (e.g. 'files': 'http://files-service:8080'). "
-            "Environment variables NHX_<SERVICE>_URL (e.g. NHX_FILES_URL) are read and merged "
-            "into this map with the service name lowercased; NHX_BASE_URL is not added here (it sets base_url)."
+            "Known platform service URL environment variables (e.g. NHX_FILES_URL and "
+            "NHX_INFERENCE_GATEWAY_URL) are read and merged into this map; NHX_BASE_URL is "
+            "not added here (it sets base_url)."
         ),
     )
 
@@ -650,13 +679,10 @@ class NemoHelixConfig(ServiceConfig):
         for key, value in environ.items():
             if not value:
                 continue
-            match = _PLATFORM_SERVICE_URL_ENV_PATTERN.match(key)
-            if not match:
+            service_name = platform_service_name_from_url_env_var(key)
+            if service_name is None:
                 continue
-            service_name = match.group(1)
-            if service_name == "BASE":
-                continue
-            sd[service_name.lower()] = value
+            sd[service_name] = value
         values["service_discovery"] = sd
         return values
 
@@ -689,11 +715,10 @@ class NemoHelixConfig(ServiceConfig):
             if not validate_docker_available():
                 # Deprecated convenience: Runtime is topology, not capability.
                 # Capability probes (nemo_helix_plugin.capabilities) own Docker
-                # availability. Soft-downgrade remains for one release; AIRCORE-972
-                # removes or shrinks Runtime.NONE as a Docker-absence signal.
+                # availability. The soft-downgrade remains for one release before
+                # Runtime.NONE is removed or shrunk as a Docker-absence signal.
                 logger.warning(
-                    "Docker is not available, setting runtime to NONE "
-                    "(deprecated: prefer capability probes; see AIRCORE-972)"
+                    "Docker is not available, setting runtime to NONE (deprecated: prefer capability probes)"
                 )
                 self.runtime = Runtime.NONE
         return self
@@ -768,6 +793,7 @@ __all__ = [
     "ImagePullSecret",
     "NemoConfig",
     "NemoHelixConfig",
+    "PLATFORM_SERVICE_NAMES",
     "HelixConfig",
     "Runtime",
     "ServiceConfig",
@@ -783,6 +809,7 @@ __all__ = [
     "get_service_config_prefix",
     "internal_field",
     "nhx_user_data_dir",
+    "platform_service_name_from_url_env_var",
     "register_platform_config_class",
     "set_nemo_config_override",
 ]

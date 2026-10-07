@@ -12,19 +12,28 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from nemo_evaluator.api.schemas import AgentRef
 from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import (
+    GymAgentSource,
+    GymRunnerTarget,
+    RegisteredAgentSource,
+)
 from nemo_evaluator.jobs.gym_sandbox import (
+    ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY,
     CollectionTimeoutError,
     SandboxPlan,
     SandboxUnavailableError,
+    SessionBackedGymRunner,
     collect_within,
     credential_shaped_env_vars,
     gym_global_config,
+    has_staged_environment,
     require_fileset_environment_sandboxed,
     require_fileset_sandbox_storage_identity,
     resolve_sandbox_plan,
@@ -45,7 +54,10 @@ def target(**overrides: Any) -> GymRunnerTarget:
         "resources_server": "mcqa",
     }
     fields.update(overrides)
-    return GymRunnerTarget(**fields)
+    source = GymAgentSource(
+        component=fields.pop("agent"), config=fields.pop("agent_config"), instance=fields.pop("agent_ref_name", None)
+    )
+    return GymRunnerTarget(source=source, **fields)
 
 
 def capable_config(**overrides: Any) -> EvaluatorConfig:
@@ -170,7 +182,7 @@ def test_custom_environment_omits_agent_config_when_the_package_supplies_the_age
 
 
 def test_agent_config_is_required_without_an_environment_package() -> None:
-    with pytest.raises(ValueError, match="agent_config field is required"):
+    with pytest.raises(ValueError, match="source.config` is required"):
         target(agent_config=None)
 
 
@@ -669,11 +681,66 @@ def test_a_resolved_env_secret_reaches_the_host(monkeypatch: pytest.MonkeyPatch)
     assert payload["host_env"]["OPENAI_API_KEY"] == "sk-resolved"
 
 
-def test_an_unresolved_env_secret_is_named_rather_than_silently_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("ref", "workspace"), [("ws/openai", "ws"), ("openai", "team")])
+def test_an_unresolved_env_secret_is_named_rather_than_silently_missing(
+    monkeypatch: pytest.MonkeyPatch, ref: str, workspace: str
+) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    with pytest.raises(SandboxUnavailableError, match="OPENAI_API_KEY"):
+    with pytest.raises(SandboxUnavailableError, match=f"nemo secrets get openai --workspace {workspace}"):
+        serve_config(target(env_secrets={"OPENAI_API_KEY": ref}), capable_plan(), job_id="job-1", workspace="team")
+
+
+def test_an_empty_injected_secret_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    with pytest.raises(SandboxUnavailableError, match="nemo secrets get openai --workspace ws"):
         serve_config(target(env_secrets={"OPENAI_API_KEY": "ws/openai"}), capable_plan(), job_id="job-1")
+
+
+@pytest.mark.asyncio
+async def test_session_runner_records_target_provenance_before_and_after_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sandboxed_gym
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
+
+    monkeypatch.setenv("OPENAI_API_KEY", "injected")
+    runner = SessionBackedGymRunner(
+        target=target(env_secrets={"OPENAI_API_KEY": "ws/openai"}, concurrency=10, num_repeats=3),
+        plan=capable_plan(),
+        job_id="job-1",
+    )
+    expected = {"env_secrets": {"OPENAI_API_KEY": "ws/openai"}, "resources_server": "mcqa", "agent": "simple_agent"}
+    for key, value in expected.items():
+        assert runner.runner_info().config[key] == value
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples):
+            return []
+
+    class Orchestrator:
+        def start(self, config):
+            return Session()
+
+    async def collect(self, tasks, config):
+        return []
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
+    assert await runner.run_tasks([]) == []
+    for key, value in expected.items():
+        assert runner.runner_info().config[key] == value
+    assert runner.runner_info().config["rollout_url"] == "http://host"
+    assert runner.runner_info().config["num_repeats"] == 3
+    assert runner.runner_info().config["rollout_chunk_size"] == 2
+    assert runner.runner_info().config["rollout_max_in_flight"] == 5
+    assert runner.runner_info().config["rollout_timeout_s"] > 0
 
 
 def test_the_host_env_reaches_the_built_spec() -> None:
@@ -713,3 +780,35 @@ def test_no_plan_in_the_environment_means_gym_runs_colocated(monkeypatch: pytest
     monkeypatch.delenv(GYM_SANDBOX_PLAN_ENVVAR, raising=False)
 
     assert sandbox_plan_from_environment() is None
+
+
+def _registered_target(**overrides: Any) -> GymRunnerTarget:
+    fields: dict[str, Any] = {
+        "source": RegisteredAgentSource(agent=AgentRef(root="dev/calc")),
+        "resources_server": "mcqa",
+        "resolved_config": {"harness": {"adapter_id": "x"}},
+    }
+    fields.update(overrides)
+    return GymRunnerTarget(**fields)
+
+
+def test_a_registered_agent_is_a_staged_environment_even_without_a_fileset() -> None:
+    """The staging step writes its package into the environment tree, so the host must mount that tree."""
+    assert has_staged_environment(_registered_target())
+    assert not has_staged_environment(target())
+    payload = serve_config(_registered_target(), capable_plan(), job_id="job-9")
+    assert payload["environment_path"] == "/job/environment"
+    assert payload["sandbox"]["environment_sub_path"].startswith("jobs/default/job-9/")
+    with pytest.raises(SandboxUnavailableError, match="sandboxed execution"):
+        resolve_sandbox_plan(capable_config(sandboxed_gym_default=False), _registered_target())
+
+
+def test_the_generated_instance_and_config_drive_the_host_composition() -> None:
+    config = gym_global_config(_registered_target())
+    generated = "responses_api_agents/nemo_registered_agent/configs/registered_calc.yaml"
+    assert config["config_paths"][0] == generated
+    assert config["registered_calc"]["responses_api_agents"]["nemo_registered_agent"] == {
+        "resources_server": {"name": "mcqa"}
+    }
+    selection = config[ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY]
+    assert (selection["agent_instance"], selection["agent_config"]) == ("registered_calc", generated)

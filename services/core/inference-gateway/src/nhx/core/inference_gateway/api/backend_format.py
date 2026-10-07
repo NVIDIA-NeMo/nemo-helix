@@ -20,7 +20,7 @@ def resolve_backend_format(model_entity_info: object, virtual_model: object | No
 
     The inputs are intentionally duck-typed because the call sites may hold
     different model classes depending on context: cached ``ModelEntityInfo``,
-    generated SDK VirtualModel objects, plugin VirtualModel objects, or plain
+    cached VirtualModel objects, or plain
     dictionaries in tests. Only ``workspace``, ``name``, ``backend_format``,
     and ``models``/``model`` fields are read.
     """

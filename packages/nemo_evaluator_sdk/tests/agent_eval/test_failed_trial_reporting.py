@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""AALGO-648: a run whose trials failed must not read as a run that scored zero."""
+"""A run whose trials failed must not read as a run that scored zero."""
 
 from __future__ import annotations
 

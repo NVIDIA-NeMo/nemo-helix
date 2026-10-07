@@ -130,10 +130,10 @@ def test_contract_connect_services_returns_client_from_selected_mode(
     handle = ContractHandle(mode_case.mode)
 
     with patch("nemo_helix_ext.local.services.ensure_services", return_value=handle):
-        client = services.connect_services(cfg, api_key="test-key")
+        client = services.connect_services(cfg, auth="test-key")
 
-    assert client == ("client", mode_case.mode, {"api_key": "test-key"})
-    assert handle.calls == [("client", {"api_key": "test-key"})]
+    assert client == ("client", mode_case.mode, {"auth": "test-key"})
+    assert handle.calls == [("client", {"auth": "test-key"})]
 
 
 @pytest.mark.asyncio

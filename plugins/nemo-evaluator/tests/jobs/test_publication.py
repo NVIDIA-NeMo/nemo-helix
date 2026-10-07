@@ -23,8 +23,12 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
+    FabricConfigSource,
     FabricRunnerTarget,
+    GymAgentSource,
     GymRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborImportedAgentSource,
     HarborRunnerTarget,
     ModelTarget,
     ResolvedTask,
@@ -296,13 +300,15 @@ def _publish(client: _FakeClient | None, *, required: bool = True, agent_name: s
     [
         (AgentTarget(agent=NemoAgentToolkitAgent(name="my-agent", url="http://agent")), ("my-agent", None)),
         (ModelTarget(model=Model(name="gpt-4o", url="http://model")), (None, "gpt-4o")),
-        (HarborRunnerTarget(agent_name="oracle", agent_model_name="m"), ("oracle", "m")),
-        (HarborRunnerTarget(agent_name="oracle", agent_import_path="pkg:Agent"), ("pkg:Agent", None)),
+        (HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model_name="m")), ("oracle", "m")),
+        (HarborRunnerTarget(source=HarborImportedAgentSource(import_path="pkg:Agent")), ("pkg:Agent", None)),
         (
-            GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
+            GymRunnerTarget(
+                source=GymAgentSource(component="simple_agent", config="conf/agent.yaml"), resources_server="mcqa"
+            ),
             ("simple_agent", None),
         ),
-        (FabricRunnerTarget(config={}, model="p/m"), (None, "p/m")),
+        (FabricRunnerTarget(source=FabricConfigSource(config={}, model="p/m")), (None, "p/m")),
         (None, (None, None)),
     ],
 )
@@ -352,7 +358,9 @@ def test_agent_name_derived_from_agent_target_needs_no_override() -> None:
 
 def test_agent_name_derived_from_gym_target_needs_no_override() -> None:
     spec = _input_spec(
-        GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
+        GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="conf/agent.yaml"), resources_server="mcqa"
+        ),
         PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-1")),
     )
     assert spec.publication is not None
@@ -365,7 +373,7 @@ def test_agent_name_derived_from_gym_target_needs_no_override() -> None:
     "target",
     [
         ModelTarget(model=Model(name="gpt-4o", url="http://model")),
-        FabricRunnerTarget(config={}),
+        FabricRunnerTarget(source=FabricConfigSource(config={})),
         None,
     ],
 )
@@ -385,7 +393,11 @@ def test_blank_identity_fields_are_rejected() -> None:
 
 @pytest.mark.parametrize(
     "target",
-    [ModelTarget(model=Model(name="gpt-4o", url="http://model")), FabricRunnerTarget(config={}), None],
+    [
+        ModelTarget(model=Model(name="gpt-4o", url="http://model")),
+        FabricRunnerTarget(source=FabricConfigSource(config={})),
+        None,
+    ],
 )
 def test_explicit_agent_name_satisfies_undeducible_targets(target: Target | None) -> None:
     spec = _input_spec(
@@ -600,7 +612,7 @@ def _job_context(tmp_path: Path, *, job_id: str | None = None) -> JobContext:
 def _job_spec(*, required: bool = True) -> AgentEvalSpec:
     return AgentEvalSpec(
         tasks=[ResolvedTask(id="task-1", spec=ResolvedEvaluatorTaskDefinition(kind="evaluator", intent="Answer."))],
-        target=FabricRunnerTarget(config={}, model="p/m"),
+        target=FabricRunnerTarget(source=FabricConfigSource(config={}, model="p/m")),
         publication=PublicationSpec(
             intake=IntakePublicationSpec(evaluation_id="eval-1", agent_name="a", required=required)
         ),
@@ -613,7 +625,7 @@ def test_job_does_not_publish_without_a_publication_spec(tmp_path: Path, mocker:
 
     spec = AgentEvalSpec(
         tasks=[ResolvedTask(id="task-1", spec=ResolvedEvaluatorTaskDefinition(kind="evaluator", intent="Answer."))],
-        target=FabricRunnerTarget(config={}),
+        target=FabricRunnerTarget(source=FabricConfigSource(config={})),
     )
     result = AsyncAgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), async_client=client)
 
@@ -738,7 +750,7 @@ def _evaluate_spec(*, required: bool = True, **intake: Any) -> EvaluateSpec:
 
 
 def test_evaluate_job_does_not_publish_without_a_publication_spec(tmp_path: Path, mocker: MockerFixture) -> None:
-    mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=_FakeRowEvaluator())
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
     client = _FakeClient()
 
     spec = EvaluateSpec(metrics=[_INLINE_METRIC], dataset=[{"question": "2+2?"}])
@@ -752,7 +764,7 @@ def test_evaluate_job_persists_the_run_identity_it_published_under(tmp_path: Pat
     # `EvaluationResult` carries no timings, so without this artifact a re-publish would have to mint
     # a new `started_at` — a different span `start_time` for the same session, which writes a second
     # trajectory rather than replacing the first.
-    mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=_FakeRowEvaluator())
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
     client = _FakeClient()
     ctx = _job_context(tmp_path, job_id="job-1")
 
@@ -772,7 +784,7 @@ def test_evaluate_job_persists_the_run_identity_it_published_under(tmp_path: Pat
 
 def test_evaluate_job_publishes_rows_through_the_real_sync_bridge(tmp_path: Path, mocker: MockerFixture) -> None:
     evaluator = _FakeRowEvaluator()
-    mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     client = _FakeClient()
 
     result = AsyncEvaluateJob().run(
@@ -802,7 +814,7 @@ def test_evaluate_job_publishes_rows_through_the_real_sync_bridge(tmp_path: Path
 
 
 def test_evaluate_job_uses_the_configured_test_case_id_column(tmp_path: Path, mocker: MockerFixture) -> None:
-    mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=_FakeRowEvaluator())
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
     client = _FakeClient()
 
     AsyncEvaluateJob().run(
@@ -818,7 +830,7 @@ def test_evaluate_job_uses_the_configured_test_case_id_column(tmp_path: Path, mo
 def test_evaluate_job_without_a_job_id_cannot_publish(tmp_path: Path, mocker: MockerFixture) -> None:
     # A row result carries no run id of its own, so without a job id there is nothing stable to key
     # sessions on.
-    mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=_FakeRowEvaluator())
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
     client = _FakeClient()
 
     result = AsyncEvaluateJob().run(
@@ -833,7 +845,7 @@ def test_evaluate_job_without_a_job_id_cannot_publish(tmp_path: Path, mocker: Mo
 
 
 def test_evaluate_job_reports_a_bad_test_case_id_column(tmp_path: Path, mocker: MockerFixture) -> None:
-    mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=_FakeRowEvaluator())
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
     client = _FakeClient()
 
     result = AsyncEvaluateJob().run(

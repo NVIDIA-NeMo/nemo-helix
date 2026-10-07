@@ -92,7 +92,7 @@ nemo services run
 ```python
 # src/nemo_my_plugin/cli.py
 import typer
-from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI, create_typer_app
 
 
 class MyCLI(NemoCLI):
@@ -100,7 +100,7 @@ class MyCLI(NemoCLI):
     description = "My plugin commands."
 
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help="My plugin commands.")
+        app = create_typer_app(help="My plugin commands.")
 
         @app.command()
         def greet(name: str = typer.Option("world", help="Name to greet.")) -> None:
@@ -109,6 +109,11 @@ class MyCLI(NemoCLI):
 
         return app
 ```
+
+For commands that call the platform, take the typed client from `cli_state(ctx)` and use the shared
+options and output helpers in `nemo_helix_plugin` (`--workspace`, `--output-format`, `-f code`); see
+`plugins/example-plugin/src/nemo_example_plugin/cli.py`. Never add a per-command `--base-url`: the
+platform comes from the global `nemo --base-url` / `--context`.
 
 ```bash
 nemo my-plugin greet --name Alice
@@ -141,23 +146,22 @@ class ProcessJob(NemoJob):
         return {"status": "done", "result": cfg.input.upper()}
 
     @classmethod
-    async def compile(cls, *, workspace, spec, entity_client, job_name, sdk, profile=None, options=None):
+    async def compile(cls, *, workspace, spec, entity_client, job_name, async_sdk, profile=None, options=None):
         # Build a HelixJobSpec here — see JOB.md (Compilation) for details.
         ...
 ```
 
-The platform auto-generates three CLI verbs per job:
+The platform auto-generates a submit command and an `explain` helper:
 
 ```bash
-nemo my-plugin process run --spec '{"input": "hello"}'
-# { "status": "done", "result": "HELLO" }
-
 nemo my-plugin process submit --profile default --spec '{"input": "hello"}'
 # Posts the job to the plugin service; the cluster runs it.
 
 nemo my-plugin process explain
 # Prints the job's schemas and submit route.
 ```
+
+If `ProcessJob` sets `generate_legacy_verbs = False`, the generated submit command is `nemo my-plugin process --spec ...` instead.
 
 Mount the routes from your service:
 

@@ -10,7 +10,7 @@ from typing import ClassVar, List, Optional, Set
 import aiohttp
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.service import RouterConfig, Service
 from starlette import status
 from starlette.responses import JSONResponse
@@ -88,18 +88,18 @@ class InferenceGatewayService(Service):
         from nhx.core.inference_gateway.api.model_cache import (
             ModelCache,
             debug_model_provider_getter,
-            model_entity_getter_from_sdk,
-            model_provider_getter_from_sdk,
+            model_entity_getter_from_client,
+            model_provider_getter_from_client,
             refresh_model_cache,
             refresh_model_cache_task,
         )
         from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
         from nhx.core.inference_gateway.config import config as inference_gateway_config
 
-        sdk = self.dependency_provider.get_sdk_client(as_service="inference-gateway")
+        client = self.dependency_provider.get_service_nemo_client("inference-gateway")
 
-        def plugin_sdk_factory(plugin_name: str) -> AsyncNeMoHelix:
-            return self.dependency_provider.get_sdk_client(as_service=plugin_name)
+        def plugin_client_factory(plugin_name: str) -> AsyncNemoClient:
+            return self.dependency_provider.get_service_nemo_client(plugin_name)
 
         # Initialize caches
         model_cache = set_global_model_cache(ModelCache(secret_value_ttl=inference_gateway_config.secrets_ttl_sec))
@@ -107,7 +107,7 @@ class InferenceGatewayService(Service):
 
         # Discover and load inference middleware plugins
         middleware_registry = set_global_middleware_registry(
-            await load_middleware_plugins(model_cache, virtual_model_cache, plugin_sdk_factory=plugin_sdk_factory)
+            await load_middleware_plugins(model_cache, virtual_model_cache, plugin_client_factory=plugin_client_factory)
         )
         self._middleware_registry = middleware_registry
 
@@ -115,16 +115,16 @@ class InferenceGatewayService(Service):
             await refresh_model_cache(
                 model_cache=model_cache,
                 model_provider_getter=debug_model_provider_getter(debug_model_providers),
-                model_entity_getter=model_entity_getter_from_sdk(sdk),
-                secrets_sdk=sdk,
+                model_entity_getter=model_entity_getter_from_client(client),
+                client=client,
                 virtual_model_cache=virtual_model_cache,
                 middleware_registry=middleware_registry,
             )
             logger.debug("Initialized model provider cache with debug providers")
         else:
-            # Use the SDK to refresh the model_providers
-            model_provider_getter = model_provider_getter_from_sdk(sdk)
-            model_entity_getter = model_entity_getter_from_sdk(sdk)
+            # Use the platform client to refresh the model_providers
+            model_provider_getter = model_provider_getter_from_client(client)
+            model_entity_getter = model_entity_getter_from_client(client)
 
             # Start background refresh task if configured — refreshes both caches each cycle
             if sleep_duration_s := inference_gateway_config.refresh_model_cache_interval_sec:
@@ -133,7 +133,7 @@ class InferenceGatewayService(Service):
                         refresh_model_cache_task(
                             model_cache=model_cache,
                             model_provider_getter=model_provider_getter,
-                            secrets_sdk=sdk,
+                            client=client,
                             model_entity_getter=model_entity_getter,
                             sleep_duration_s=sleep_duration_s,
                             virtual_model_cache=virtual_model_cache,

@@ -193,7 +193,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
 
   return (
     <Stack gap="density-lg">
-      <Stack gap="density-xxs">
+      <Stack gap="density-lg">
         <Flex align="center" justify="between" className="w-full">
           <Text kind="title/md">Quickstart</Text>
           <Button

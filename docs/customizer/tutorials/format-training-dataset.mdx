@@ -278,15 +278,15 @@ You can retrieve a Model Entity to check if it's a chat model by examining the `
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
 # Get a specific model
-model = client.models.retrieve(name="llama-3-2-1b", workspace="default")
+model = client.models.get_model(name="llama-3-2-1b", workspace="default").data()
 
 print(f"Model: {model.name}")
 if model.spec:
@@ -307,11 +307,11 @@ Before running inference, ensure your model is deployed. See [about](/documentat
 </Note>
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
-base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-workspace="default",
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace="default",
 )
 
 # Use Inference Gateway with OpenAI-compatible client
@@ -359,9 +359,9 @@ Before running inference, ensure your model is deployed. See [about](/documentat
 </Note>
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )

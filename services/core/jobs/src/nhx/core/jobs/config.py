@@ -74,7 +74,7 @@ platform_runtime = get_platform_config().runtime
 # Capability-filtered at merge time (probe_docker). In local standalone the
 # controller may further prune this list in place after backend registration.
 # Split topologies (API vs controller pods) advertise this merge result from the
-# API process — do not gate on controller-only process state (AIRCORE-971).
+# API process — do not gate on controller-only process state.
 profiles = merge_executor_profiles(
     config.executors,
     get_default_executor_profiles_for_runtime(

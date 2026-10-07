@@ -74,7 +74,7 @@ def _upload_ethos_snapshot(agent_root: Path, *, existing_paths: Sequence[str] = 
 
     with (
         patch("nemo_agents_plugin.cli._platform_sdk", return_value=sdk),
-        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
+        patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", _capture_upload),
     ):
         _upload_ethos_fileset(
@@ -206,11 +206,12 @@ def test_list_404_prints_request_context_and_hint() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["list", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["list"])
 
     assert result.exit_code == 1
     assert "Error: GET agent API failed: HTTP 404 Not Found" in result.stderr
-    assert "Request: GET http://test/apis/agents/v2/workspaces/default/agents" in result.stderr
+    # Without a CLI state the localhost default applies; long URLs are elided mid-way.
+    assert "Request: GET http://localhost:8080/" in result.stderr
     assert "Target: agents API route /apis/agents/v2/workspaces/default/agents" in result.stderr
     assert "route may not be deployed" in result.stderr
 
@@ -244,24 +245,20 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     assert isinstance(command, click.Group)
     for job_name in {job_cls.name for job_cls in jobs.values()}:
         job_command = command.commands[job_name]
-        assert not isinstance(job_command, click.Group)
+        # Non-legacy jobs submit from the group callback and keep only `explain` as a subcommand.
+        assert isinstance(job_command, click.Group)
+        assert set(job_command.commands) == {"explain"}
         for legacy_verb in ("run", "submit"):
             legacy_result = CliRunner().invoke(app, [job_name, legacy_verb])
             assert legacy_result.exit_code == 2
-            assert "Got unexpected extra argument" in legacy_result.output
-
-    for job_cls in jobs.values():
-        job_command = command.commands[job_cls.name]
-        if isinstance(job_command, click.Group):
-            assert "run" not in job_command.commands
-            assert "submit" not in job_command.commands
+            assert f"No such command '{legacy_verb}'" in legacy_result.output
 
 
 @pytest.mark.parametrize("placeholder", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL"])
 def test_create_resolves_default_model_placeholder(tmp_path, placeholder: str) -> None:
     """`nemo agents create` resolves NEMO_DEFAULT_MODEL before POST.
 
-    Regression for AIRCORE-613: the agents service has no user context at
+    Regression test: the agents service has no user context at
     deploy time, so an unresolved literal would be persisted on the Agent.
     Covers both braced ``${VAR}`` and bare ``$VAR`` forms supported by
     ``expand_env_vars``.
@@ -282,9 +279,7 @@ def test_create_resolves_default_model_placeholder(tmp_path, placeholder: str) -
         _install_mock_transport(handler),
         patch("nemo_agents_plugin.utils.get_default_model", return_value="nvidia-nemotron-3-super-v3"),
     ):
-        result = CliRunner().invoke(
-            app, ["create", "--name", "calc", "--agent-config", str(config), "--base-url", "http://test"]
-        )
+        result = CliRunner().invoke(app, ["create", "--name", "calc", "--agent-config", str(config)])
 
     assert result.exit_code == 0, result.stderr
     sent = _json.loads(captured["body"])
@@ -341,7 +336,7 @@ def test_create_validates_platform_agent_config_before_post(tmp_path) -> None:
     ):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "fabric-agent", "--agent-config", str(config), "--base-url", "http://test"],
+            ["create", "--name", "fabric-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 0, result.stderr
@@ -355,7 +350,7 @@ def test_create_validates_platform_agent_config_before_post(tmp_path) -> None:
         agent_name="fabric-agent",
         workspace="default",
         agent_root=tmp_path,
-        base_url="http://test",
+        base_url="http://localhost:8080",
     )
 
 
@@ -409,13 +404,13 @@ def test_create_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest
         _install_mock_transport(handler),
         patch("nemo_agents_plugin.fabric.validation.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", fake_upload),
-        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
+        patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
         patch("nemo_agents_plugin.cli._platform_sdk") as mock_sdk,
     ):
         mock_sdk.return_value = SimpleNamespace(base_url="http://test", files=files)
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "fabric-agent", "--agent-config", str(config), "--base-url", "http://test"],
+            ["create", "--name", "fabric-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 0, result.stderr
@@ -517,7 +512,7 @@ def test_upload_ethos_fileset_preserves_remote_ethos_over_local(tmp_path: Path) 
 
     with (
         patch("nemo_agents_plugin.cli._platform_sdk", return_value=sdk),
-        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
+        patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", _capture_upload),
     ):
         _upload_ethos_fileset(
@@ -619,7 +614,7 @@ def test_create_fabric_rolls_back_agent_when_fileset_upload_fails(tmp_path) -> N
     ):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "fabric-agent", "--agent-config", str(config), "--base-url", "http://test"],
+            ["create", "--name", "fabric-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 1
@@ -673,7 +668,7 @@ def test_create_fabric_reports_rollback_failure(tmp_path) -> None:
     ):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "fabric-agent", "--agent-config", str(config), "--base-url", "http://test"],
+            ["create", "--name", "fabric-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 1
@@ -695,9 +690,7 @@ def test_create_nat_does_not_upload_ethos_fileset(tmp_path) -> None:
         patch("nemo_agents_plugin.cli._upload_ethos_fileset") as mock_upload,
         patch("nemo_agents_plugin.utils.get_default_model", return_value="nvidia-nemotron-3-super-v3"),
     ):
-        result = CliRunner().invoke(
-            app, ["create", "--name", "calc", "--agent-config", str(config), "--base-url", "http://test"]
-        )
+        result = CliRunner().invoke(app, ["create", "--name", "calc", "--agent-config", str(config)])
 
     assert result.exit_code == 0, result.stderr
     mock_upload.assert_not_called()
@@ -714,7 +707,7 @@ def test_create_rejects_unsupported_config_format(tmp_path) -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["create", "--name", "custom-agent", "--agent-config", str(config), "--base-url", "http://test"],
+            ["create", "--name", "custom-agent", "--agent-config", str(config)],
         )
 
     assert result.exit_code == 1
@@ -724,7 +717,7 @@ def test_create_rejects_unsupported_config_format(tmp_path) -> None:
 @pytest.mark.parametrize("placeholder", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL"])
 def test_create_aborts_when_default_model_missing(tmp_path, placeholder: str) -> None:
     """If no default model is selected, refuse to POST a config with an unresolved
-    NEMO_DEFAULT_MODEL placeholder (braced or bare). Regression for AIRCORE-613."""
+    NEMO_DEFAULT_MODEL placeholder (braced or bare). Regression test."""
     config = tmp_path / "agent.yml"
     config.write_text(f"llms:\n  llm:\n    _type: openai\n    model_name: {placeholder}\n")
 
@@ -736,9 +729,7 @@ def test_create_aborts_when_default_model_missing(tmp_path, placeholder: str) ->
         _install_mock_transport(handler),
         patch("nemo_agents_plugin.utils.get_default_model", return_value=None),
     ):
-        result = CliRunner().invoke(
-            app, ["create", "--name", "calc", "--agent-config", str(config), "--base-url", "http://test"]
-        )
+        result = CliRunner().invoke(app, ["create", "--name", "calc", "--agent-config", str(config)])
 
     assert result.exit_code == 1
     assert "${NEMO_DEFAULT_MODEL}" in result.stderr
@@ -756,7 +747,7 @@ def test_invoke_with_custom_timeout() -> None:
     with _install_mock_transport(handler, on_create=lambda kw: captured_timeout.append(kw.get("timeout"))):
         result = CliRunner().invoke(
             app,
-            ["invoke", "--agent", "calc", "--input", "hi", "--base-url", "http://test", "--timeout", "42"],
+            ["invoke", "--agent", "calc", "--input", "hi", "--timeout", "42"],
         )
 
     assert result.exit_code == 0, result.stderr
@@ -771,9 +762,7 @@ def test_invoke_timeout_error_message() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(
-            app, ["invoke", "--agent", "calc", "--input", "hi", "--base-url", "http://test", "--timeout", "5"]
-        )
+        result = CliRunner().invoke(app, ["invoke", "--agent", "calc", "--input", "hi", "--timeout", "5"])
 
     assert result.exit_code == 1
     assert "timed out" in result.stderr.lower()
@@ -887,7 +876,7 @@ def test_local_invoke_fabric_config_exits_nonzero_on_failed_result(tmp_path: Pat
 def test_platform_invoke_writes_clean_json_to_stdout() -> None:
     """`nemo agents invoke --agent` returns JSON on stdout with no spinner bleed.
 
-    AIRCORE-574: the spinner must render only on stderr so consumers can pipe
+    The spinner must render only on stderr so consumers can pipe
     stdout to `jq`. CliRunner's non-TTY stderr auto-disables the spinner, so
     here we just verify the response JSON is intact on stdout.
     """
@@ -898,7 +887,7 @@ def test_platform_invoke_writes_clean_json_to_stdout() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["invoke", "--agent", "calc", "--input", "ping", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["invoke", "--agent", "calc", "--input", "ping"])
 
     assert result.exit_code == 0, result.stderr
     parsed = _json.loads(result.stdout)
@@ -916,7 +905,7 @@ def test_platform_invoke_accepts_no_progress_flag() -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["invoke", "--agent", "calc", "--input", "ping", "--no-progress", "--base-url", "http://test"],
+            ["invoke", "--agent", "calc", "--input", "ping", "--no-progress"],
         )
 
     assert result.exit_code == 0, result.stderr
@@ -929,11 +918,12 @@ def test_list_connection_error_prints_request_context_and_hint() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["list", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["list"])
 
     assert result.exit_code == 1
     assert "Error: GET agent API failed: connection refused" in result.stderr
-    assert "Request: GET http://test/apis/agents/v2/workspaces/default/agents" in result.stderr
+    # Without a CLI state the localhost default applies; long URLs are elided mid-way.
+    assert "Request: GET http://localhost:8080/" in result.stderr
     assert "Target: agents API route /apis/agents/v2/workspaces/default/agents" in result.stderr
     assert "nemo config view" in result.stderr
 
@@ -961,8 +951,6 @@ def test_deploy_forwards_environment_ref() -> None:
                 "--environment",
                 "default/env1",
                 "--no-wait",
-                "--base-url",
-                "http://test",
             ],
         )
 
@@ -995,8 +983,6 @@ def test_deploy_forwards_image_entrypoint_mode() -> None:
                 "hand-built-agent:latest",
                 "--use-image-entrypoint",
                 "--no-wait",
-                "--base-url",
-                "http://test",
             ],
         )
 
@@ -1022,12 +1008,58 @@ def test_deploy_rejects_image_entrypoint_for_subprocess() -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "a1", "--use-image-entrypoint", "--no-wait", "--base-url", "http://test"],
+            ["deploy", "--agent", "a1", "--use-image-entrypoint", "--no-wait"],
         )
 
     assert result.exit_code == 2
     assert "--use-image-entrypoint requires --mode docker or k8s." in result.stderr
     assert not called
+
+
+def test_deploy_rejects_image_entrypoint_for_openshell() -> None:
+    called = False
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(201, json={"name": "d1", "status": "pending"})
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            app,
+            [
+                "deploy",
+                "--agent",
+                "a1",
+                "--mode",
+                "openshell",
+                "--use-image-entrypoint",
+                "--no-wait",
+            ],
+        )
+
+    assert result.exit_code == 2
+    assert "--mode openshell needs the platform-injected serve command" in result.stderr
+    assert not called
+
+
+def test_deploy_accepts_openshell_mode() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"name": "d1", "status": "pending"})
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            app,
+            ["deploy", "--agent", "a1", "--mode", "openshell", "--no-wait"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured["body"]["deployment_mode"] == "openshell"
 
 
 def test_deploy_rejects_empty_environment() -> None:
@@ -1042,7 +1074,7 @@ def test_deploy_rejects_empty_environment() -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "a1", "--environment", "   ", "--no-wait", "--base-url", "http://test"],
+            ["deploy", "--agent", "a1", "--environment", "   ", "--no-wait"],
         )
 
     assert result.exit_code == 2
@@ -1064,7 +1096,7 @@ def test_environment_spec_create_from_file(tmp_path: Path) -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["environment-specs", "create", "ben", "--spec-file", str(spec), "--base-url", "http://test"],
+            ["environment-specs", "create", "ben", "--spec-file", str(spec)],
         )
 
     assert result.exit_code == 0, result.stderr
@@ -1088,7 +1120,7 @@ def test_environment_spec_create_from_inline_json() -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["environment-specs", "create", "prod", "--spec", '{"provider": "local"}', "--base-url", "http://test"],
+            ["environment-specs", "create", "prod", "--spec", '{"provider": "local"}'],
         )
 
     assert result.exit_code == 0, result.stderr
@@ -1110,7 +1142,7 @@ def test_environment_spec_create_reports_validation_errors_without_traceback() -
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["environment-specs", "create", "bad", "--spec", '{"env":{"PORT":1}}', "--base-url", "http://test"],
+            ["environment-specs", "create", "bad", "--spec", '{"env":{"PORT":1}}'],
         )
 
     assert result.exit_code == 2
@@ -1126,7 +1158,7 @@ def test_environment_spec_create_rejects_both_sources(tmp_path: Path) -> None:
     app = AgentsCLI().get_cli()
     result = CliRunner().invoke(
         app,
-        ["environment-specs", "create", "x", "--spec-file", str(spec), "--spec", "{}", "--base-url", "http://test"],
+        ["environment-specs", "create", "x", "--spec-file", str(spec), "--spec", "{}"],
     )
     assert result.exit_code == 2
     assert "only one of --spec-file or --spec" in result.stderr
@@ -1152,8 +1184,6 @@ def test_environment_create_with_ref_flags() -> None:
                 "default/ben",
                 "--compute-spec",
                 "default/big",
-                "--base-url",
-                "http://test",
             ],
         )
 
@@ -1199,11 +1229,9 @@ def test_compute_spec_create_and_list() -> None:
                 "big",
                 "--spec",
                 '{"resources": {"limits": {"cpu": "2"}}}',
-                "--base-url",
-                "http://test",
             ],
         )
-        listing = CliRunner().invoke(app, ["compute-specs", "list", "--format", "json", "--base-url", "http://test"])
+        listing = CliRunner().invoke(app, ["compute-specs", "list", "--output-format", "json"])
 
     assert create.exit_code == 0, create.stderr
     assert listing.exit_code == 0, listing.stderr
@@ -1219,7 +1247,7 @@ def test_environment_delete_confirmation() -> None:
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["environments", "delete", "env1", "--yes", "--base-url", "http://test"])
+        result = CliRunner().invoke(app, ["environments", "delete", "env1", "--yes"])
 
     assert result.exit_code == 0, result.stderr
     assert "Environment 'env1' deleted." in result.stdout
@@ -1247,8 +1275,6 @@ def test_environment_spec_create_routes_through_typed_client() -> None:
                 '{"env": {"LOG_LEVEL": "debug"}}',
                 "--workspace",
                 "team-a",
-                "--base-url",
-                "http://test",
             ],
         )
 
@@ -1274,8 +1300,6 @@ def test_compute_spec_create_via_typed_client_translates_http_error() -> None:
                 "big",
                 "--spec",
                 '{"resources": {"limits": {"cpu": "2"}}}',
-                "--base-url",
-                "http://test",
             ],
         )
 
@@ -1307,8 +1331,6 @@ def test_environment_spec_create_via_typed_client_sends_auth_header() -> None:
                 "ben",
                 "--spec",
                 '{"provider": "local"}',
-                "--base-url",
-                "http://test",
             ],
         )
 

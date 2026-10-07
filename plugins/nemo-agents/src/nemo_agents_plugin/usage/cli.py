@@ -20,9 +20,9 @@ from typing import Optional
 
 import typer
 from nemo_agents_plugin.cli_context import (
-    BaseUrlOption,
     resolve_base_url,
     resolve_context_headers,
+    shared_cli_client,
 )
 from nemo_agents_plugin.usage import compute, render
 from nemo_agents_plugin.usage import parser as parser_module
@@ -78,7 +78,6 @@ def register_usage_commands(app: typer.Typer) -> None:
             "public number — leave unset and compute_units stays null.",
         ),
         workspace: WorkspaceOption = None,
-        base_url: BaseUrlOption = None,
     ) -> None:
         """Show a usage report for *ref*."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
@@ -86,7 +85,6 @@ def register_usage_commands(app: typer.Typer) -> None:
             ref,
             total_params=total_params,
             workspace=workspace,
-            base_url=base_url,
         )
 
 
@@ -100,14 +98,12 @@ def _show(
     *,
     total_params: float | None,
     workspace: str,
-    base_url: str | None,
 ) -> None:
     try:
         report = _resolve_and_score(
             ref,
             total_params=total_params,
             workspace=workspace,
-            base_url=base_url,
         )
     except (parser_module.UsageParseError, UsageSourceError, FilesetRefError, FilesetDownloadError) as exc:
         typer.echo(f"Error: {exc}", err=True)
@@ -120,7 +116,6 @@ def _resolve_and_score(
     *,
     total_params: float | None,
     workspace: str,
-    base_url: str | None,
 ) -> UsageReport | BatchUsageReport:
     """End-to-end pipeline: source → parse → (rewrite if fileset) → score.
 
@@ -150,8 +145,8 @@ def _resolve_and_score(
 
     # Only fileset refs contact the platform, so resolve/announce the target
     # (and attach auth) here rather than for purely-local reads above.
-    sdk = _build_sdk(base_url=resolve_base_url(base_url))
-    with fileset_path(FilesetRef(ref), sdk=sdk, workspace=workspace) as path:
+    client = _build_sdk(base_url=resolve_base_url())
+    with fileset_path(FilesetRef(ref), client=client, workspace=workspace) as path:
         report = parser_module.parse_path(path)
         report = _rewrite_source_dirs(report, original_ref=ref, staged_root=path)
     return _score_report(report, total_params=total_params)
@@ -199,15 +194,14 @@ def _rewrite_task_source(
 def _build_sdk(*, base_url: str) -> NemoClient:
     """Construct a typed platform client for fileset downloads.
 
-    *base_url* is the value already resolved by ``resolve_base_url`` (flag /
-    ``NEMO_BASE_URL`` > shared CLI config / ``NHX_BASE_URL`` > localhost), so
-    don't re-read the env here — that would invert precedence.
-
-    Attaches the CLI auth token from the shared context (the same
-    ``Authorization: Bearer`` header the rest of the CLI sends) so fileset
-    downloads succeed against a secured cluster.  Falls back to an
-    unauthenticated client when no token is configured.
+    Under ``nemo`` this is the CLI's shared client, so fileset downloads use
+    the same base URL, auth, and token refresh as every other command.
+    Outside ``nemo`` (no CLI state), *base_url* — the value already resolved
+    by ``resolve_base_url`` — is used with any auth header the context offers.
     """
+    shared = shared_cli_client(NemoClient)
+    if shared is not None:
+        return shared
     headers = resolve_context_headers()
     if headers:
         return NemoClient(base_url=base_url, default_headers=headers)

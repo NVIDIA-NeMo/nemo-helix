@@ -12,21 +12,28 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generator, Mapping, Protocol, TypeVar
+from typing import Callable, Coroutine, Generator, Mapping, Protocol, TypeVar
 
 import httpx
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_helix import AsyncNeMoHelix, NeMoHelix, NotGiven, not_given
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.projects.client import ProjectsClient
+from nemo_helix_plugin.projects.types import CreateProjectRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.common import platform_client_context
 from nhx.common.auth import Principal
 from nhx.common.config.base import AuthConfig, Configuration, DatabaseConfig, HelixConfig, ServiceConfig
 from nhx.common.entities.client import EntityClient
 from nhx.common.service import Service
-from nhx.common.service.dependencies import get_entity_client, get_sdk_client, get_sync_sdk_client
+from nhx.common.service.dependencies import (
+    get_entity_client,
+    get_nemo_client,
+    get_sync_nemo_client,
+)
 from nhx.core.entities.config import EntitiesConfig
 from nhx.core.entities.service import EntitiesService
 from nhx.core.inference_gateway.config import InferenceGatewayConfig
@@ -34,9 +41,11 @@ from nhx.core.inference_gateway.service import InferenceGatewayService
 from nhx.platform_runner.loader import order_services_by_dependencies
 from nhx.platform_runner.server import create_app
 from nhx.testing.access_log import AccessLog, AccessLogMiddleware
+from nhx.testing.asyncio_debug import bounded_event_loop_teardown
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
+_IN_PROCESS_PLATFORM_BASE_URL = "http://127.0.0.1"
 
 
 @dataclass
@@ -47,17 +56,17 @@ class ClientContext:
     client_type upfront, which is useful when a test needs multiple client types.
     """
 
-    sdk: NeMoHelix
-    """Synchronous NeMoHelix SDK client."""
-
-    async_sdk: AsyncNeMoHelix
-    """Asynchronous NeMoHelix SDK client."""
-
     client: NemoClient
-    """Synchronous typed platform client."""
+    """Synchronous typed platform client routed through the in-process TestClient.
+
+    Derive service clients with ``FilesClient.from_client(ctx.client)``.
+    """
 
     async_client: AsyncNemoClient
-    """Asynchronous typed platform client."""
+    """Asynchronous typed platform client routed through the in-process ASGI transport.
+
+    Derive service clients with ``AsyncFilesClient.from_client(ctx.async_client)``.
+    """
 
     entity_client: EntityClient
     """EntityClient for direct entity operations."""
@@ -69,13 +78,21 @@ class ClientContext:
     """Captured requests when access_log=True was passed to create_test_client."""
 
 
-ClientT = TypeVar(
-    "ClientT", TestClient, NemoClient, AsyncNemoClient, AsyncNeMoHelix, NeMoHelix, EntityClient, ClientContext
-)
+ClientT = TypeVar("ClientT", TestClient, NemoClient, AsyncNemoClient, EntityClient, ClientContext)
 
 
-class SDKTestClientAdapter(httpx.Client):
-    """Expose Starlette's TestClient through the httpx.Client interface expected by the SDK."""
+class TestClientHttpAdapter(httpx.Client):
+    """Expose Starlette's TestClient through the ``httpx.Client`` interface.
+
+    Pass it as ``http_client`` to a sync :class:`NemoClient` (or any typed
+    service client) to route requests through the in-process app::
+
+        client = FilesClient(base_url=str(test_client.base_url), http_client=TestClientHttpAdapter(test_client))
+
+    or use :func:`nemo_client_for_test_client`.
+    """
+
+    __test__ = False
 
     def __init__(self, test_client: TestClient) -> None:
         self._test_client = test_client
@@ -108,6 +125,147 @@ class SDKTestClientAdapter(httpx.Client):
             content=response.content,
             request=request,
         )
+
+
+SyncClientT = TypeVar("SyncClientT", bound=NemoClient)
+AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
+
+MockHandler = Callable[[httpx.Request], httpx.Response]
+AsyncMockHandler = MockHandler | Callable[[httpx.Request], Coroutine[None, None, httpx.Response]]
+
+_MOCK_BASE_URL = "http://nemo.test"
+
+
+def nemo_client_for_test_client(
+    test_client: TestClient,
+    client_cls: type[SyncClientT],
+    *,
+    workspace: str | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> SyncClientT:
+    """Build a sync typed client that sends requests through *test_client*.
+
+    Args:
+        test_client: The in-process FastAPI ``TestClient``. Its default headers
+            (e.g. principal headers) are sent with every request.
+        client_cls: Typed client class to build, e.g. ``FilesClient`` or ``NemoClient``.
+        workspace: Default workspace used to fill ``{workspace}`` path params.
+        headers: Extra default headers for the client.
+    """
+    return client_cls(
+        base_url=str(test_client.base_url),
+        workspace=workspace,
+        default_headers=headers,
+        http_client=TestClientHttpAdapter(test_client),
+        owns_http_client=True,
+    )
+
+
+def async_nemo_client_for_app(
+    app: FastAPI,
+    client_cls: type[AsyncClientT],
+    *,
+    base_url: str = _IN_PROCESS_PLATFORM_BASE_URL,
+    workspace: str | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> AsyncClientT:
+    """Build an async typed client that sends requests to *app* over an ASGI transport.
+
+    The client owns its HTTP transport; close it with ``await client.close()``
+    or ``async with``. The app's lifespan is not run.
+    """
+    http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=base_url)
+    return client_cls(
+        base_url=base_url,
+        workspace=workspace,
+        default_headers=headers,
+        http_client=http_client,
+        owns_http_client=True,
+    )
+
+
+def mock_nemo_client(
+    handler: MockHandler,
+    client_cls: type[SyncClientT],
+    *,
+    base_url: str = _MOCK_BASE_URL,
+    workspace: str | None = "default",
+    headers: Mapping[str, str] | None = None,
+) -> SyncClientT:
+    """Build a sync typed client whose requests are answered by *handler*.
+
+    *handler* receives each ``httpx.Request`` and returns an ``httpx.Response``;
+    record requests in a list to assert on method, URL, headers, and body::
+
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, json={...})
+
+        files = mock_nemo_client(handler, FilesClient)
+    """
+    return client_cls(
+        base_url=base_url,
+        workspace=workspace,
+        default_headers=headers,
+        http_client=httpx.Client(transport=httpx.MockTransport(handler), base_url=base_url),
+        owns_http_client=True,
+    )
+
+
+def mock_async_nemo_client(
+    handler: AsyncMockHandler,
+    client_cls: type[AsyncClientT],
+    *,
+    base_url: str = _MOCK_BASE_URL,
+    workspace: str | None = "default",
+    headers: Mapping[str, str] | None = None,
+) -> AsyncClientT:
+    """Async counterpart of :func:`mock_nemo_client`. *handler* may be sync or async."""
+    return client_cls(
+        base_url=base_url,
+        workspace=workspace,
+        default_headers=headers,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url=base_url),
+        owns_http_client=True,
+    )
+
+
+def _current_request_headers() -> dict[str, str]:
+    headers = platform_client_context.forwardable_otel_headers(include_internal=True)
+    headers.update(platform_client_context.current_principal_auth_headers())
+    return headers
+
+
+def request_scoped_nemo_client_overrides(
+    async_client: AsyncNemoClient,
+    sync_client: NemoClient | None = None,
+) -> dict[Callable, Callable]:
+    """FastAPI dependency overrides that hand out request-scoped typed clients.
+
+    The returned overrides bind ``get_nemo_client`` (and ``get_sync_nemo_client``
+    when *sync_client* is given) to copies of the supplied clients carrying the
+    current request's principal and trace headers, the same way
+    ``DependencyProvider`` scopes clients in production. Use it for a bare
+    ``FastAPI`` app under test::
+
+        app.dependency_overrides.update(request_scoped_nemo_client_overrides(async_client))
+    """
+
+    def _request_scoped_async_client() -> AsyncNemoClient:
+        headers = _current_request_headers()
+        return async_client.with_headers(headers) if headers else async_client
+
+    overrides: dict[Callable, Callable] = {get_nemo_client: _request_scoped_async_client}
+    if sync_client is not None:
+
+        def _request_scoped_sync_client() -> NemoClient:
+            headers = _current_request_headers()
+            return sync_client.with_headers(headers) if headers else sync_client
+
+        overrides[get_sync_nemo_client] = _request_scoped_sync_client
+    return overrides
 
 
 # Default test user for auth-enabled tests
@@ -149,8 +307,7 @@ def _default_service_configs(tmp_dir: Path) -> dict[type[object], ServiceConfig]
                 },
             },
         ),
-        # HelixConfig with testserver URL so get_service_url() works in tests
-        HelixConfig: HelixConfig(base_url="http://testserver"),
+        HelixConfig: HelixConfig(base_url=_IN_PROCESS_PLATFORM_BASE_URL),
     }
 
 
@@ -186,53 +343,6 @@ def _create_svc(
     return svc
 
 
-def _install_asgi_files_resource(sdk: NeMoHelix) -> None:
-    """Route sync SDK file uploads through the in-process test app."""
-    from filesets.resources import FilesResource
-    from nemo_helix_plugin.client.adapter import client_from_platform
-    from nemo_helix_plugin.files.client import FilesClient
-
-    files_client = client_from_platform(sdk, FilesClient)
-    sdk.__dict__["files"] = FilesResource(
-        sdk,
-        files_client=files_client,
-    )
-    original_copy: Callable[..., NeMoHelix] = sdk.copy
-
-    def copy_with_asgi_files(
-        *,
-        workspace: str | None = None,
-        base_url: str | httpx.URL | None = None,
-        inference_base_url: str | httpx.URL | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
-        http_client: httpx.Client | None = None,
-        max_retries: int | NotGiven = not_given,
-        default_headers: Mapping[str, str] | None = None,
-        set_default_headers: Mapping[str, str] | None = None,
-        default_query: Mapping[str, object] | None = None,
-        set_default_query: Mapping[str, object] | None = None,
-        _extra_kwargs: Mapping[str, object] | None = None,
-    ) -> NeMoHelix:
-        clone = original_copy(
-            workspace=workspace,
-            base_url=base_url,
-            inference_base_url=inference_base_url,
-            timeout=timeout,
-            http_client=http_client,
-            max_retries=max_retries,
-            default_headers=default_headers,
-            set_default_headers=set_default_headers,
-            default_query=default_query,
-            set_default_query=set_default_query,
-            _extra_kwargs={} if _extra_kwargs is None else _extra_kwargs,
-        )
-        _install_asgi_files_resource(clone)
-        return clone
-
-    sdk.__dict__["copy"] = copy_with_asgi_files
-    sdk.__dict__["with_options"] = copy_with_asgi_files
-
-
 _DEFAULT_WORKSPACES = ["default"]
 _DEFAULT_PROJECTS = ["default/test-project"]
 
@@ -260,7 +370,7 @@ def create_test_client(
     Args:
         *service_types: One or more Service classes to test
         client_type: The client type to yield. One of TestClient, NemoClient, AsyncNemoClient,
-                     AsyncNeMoHelix, NeMoHelix, EntityClient, or ClientContext. Defaults to NeMoHelix.
+                     EntityClient, or ClientContext. Defaults to NemoClient.
         dependency_overrides: Custom dependency overrides dict. If get_entity_client
                       is not in dependency_overrides, an EntityClient will be created.
         service_configs: Optional map of service class → config. Overrides defaults
@@ -268,7 +378,7 @@ def create_test_client(
         tmp_dir: Optional temp directory path.
         workspaces: List of workspace names to create. Defaults to ["default"].
                    Pass an empty list to skip workspace creation.
-        workspace: Optional default workspace to set on the NeMoHelix client.
+        workspace: Optional default workspace set on every yielded platform client.
         projects: List of projects to create in format "workspace/project_name".
                  Defaults to ["default/test-project"]. If a workspace is referenced
                  but not in the workspaces list, it will be added automatically.
@@ -302,9 +412,10 @@ def create_test_client(
                    to real backends. Use add_mock_provider() from utils to add providers.
                    Default: True.
 
-    Example (single service):
-        with create_test_client(FilesService) as sdk:
-            secret = sdk.secrets.create(workspace="default", name="test", value="value")
+    Example (typed client):
+        with create_test_client(SecretsService, client_type=NemoClient) as client:
+            secrets = SecretsClient.from_client(client)
+            secrets.create_secret(workspace="default", body=CreateSecretRequest(name="test", value="value"))
 
     Example (TestClient):
         with create_test_client(FilesService, client_type=TestClient) as client:
@@ -320,13 +431,13 @@ def create_test_client(
             await client.create(entity_in_ns1)
 
     Example (with custom projects):
-        with create_test_client(projects=["default/my-project", "ns1/other-project"]) as sdk:
+        with create_test_client(projects=["default/my-project", "ns1/other-project"], client_type=NemoClient) as client:
             # "my-project" in "default" and "other-project" in "ns1" are available
             # "ns1" workspace is auto-created since it's referenced in projects
-            sdk.models.create(workspace="default", project="my-project", ...)
+            ModelsClient.from_client(client).create_model(workspace="default", body=...)
 
     Example (with auth enabled):
-        with create_test_client(FilesService, auth_enabled=True) as sdk:
+        with create_test_client(FilesService, auth_enabled=True, client_type=NemoClient) as client:
             # Authorization middleware is active
             # Requests without auth headers will be rejected
             ...
@@ -334,8 +445,8 @@ def create_test_client(
     Example (ClientContext for multiple client types):
         with create_test_client(FilesService, client_type=ClientContext) as ctx:
             # Access any client type
-            ctx.sdk.files.list(workspace="default")  # sync SDK
-            await ctx.async_sdk.files.list(workspace="default")  # async SDK
+            FilesClient.from_client(ctx.client).list_filesets(workspace="default")  # sync typed
+            await AsyncFilesClient.from_client(ctx.async_client).list_filesets(workspace="default")  # async typed
             ctx.test_client.get("/health")  # raw HTTP
 
     Example (with access_log for request verification):
@@ -352,7 +463,7 @@ def create_test_client(
             for req in entity_requests:
                 assert req.principal_id == "test@example.com"
     """
-    selected_client_type: type[object] = client_type or NeMoHelix
+    selected_client_type: type[object] = client_type or NemoClient
     with ExitStack() as stack:
         # Create temp directory if not provided
         # Use ignore_cleanup_errors=True because fire-and-forget background tasks
@@ -364,6 +475,10 @@ def create_test_client(
         configs = _default_service_configs(tmp_dir)
         if service_configs:
             configs.update(service_configs)
+        platform_config = configs.get(HelixConfig)
+        if not isinstance(platform_config, HelixConfig):
+            raise TypeError("create_test_client requires a HelixConfig platform config")
+        platform_base_url = platform_config.base_url
 
         # If auth is enabled, set up auth configs and add AuthService
         if auth_enabled:
@@ -373,7 +488,7 @@ def create_test_client(
 
             # Only add auth configs if not already provided by user.
             # PDP base is the platform root; get_pdp_url() appends /apis/auth/v2/authz/{entrypoint}.
-            pdp_base = "http://testserver"
+            pdp_base = platform_base_url
             if SharedAuthConfig not in configs:
                 configs[SharedAuthConfig] = SharedAuthConfig(
                     enabled=True,
@@ -455,7 +570,7 @@ def create_test_client(
 
         transport = httpx.ASGITransport(app=_pending_asgi_app)
         pdp_timeout = Configuration.get_service_config(AuthConfig).policy_decision_point_request_timeout_seconds
-        async_http_client = httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=pdp_timeout)
+        async_http_client = httpx.AsyncClient(transport=transport, base_url=platform_base_url, timeout=pdp_timeout)
 
         # Both auth callouts target this in-process ASGI app in tests.
         app = create_app(
@@ -478,42 +593,26 @@ def create_test_client(
             # Store on app.state so tests can access it via test_client.app.state.access_log
             app.state.access_log = access_log_instance
 
-        from nhx.common.sdk_factory import get_async_platform_sdk
-
-        async_sdk = get_async_platform_sdk(
-            base_url="http://testserver",
-            http_client=async_http_client,
-        ).copy(workspace=workspace)
-        async_client = AsyncNemoClient(base_url="http://testserver", http_client=async_http_client, workspace=workspace)
+        async_client = AsyncNemoClient(base_url=platform_base_url, http_client=async_http_client, workspace=workspace)
 
         # Create the EntityClient (used for DI and optionally yielded)
-        entity_client = EntityClient(client_from_platform(async_sdk, AsyncEntitiesClient))
+        entity_client = EntityClient(AsyncEntitiesClient.from_client(async_client))
 
-        # Inject ASGI-transport clients into each service's DependencyProvider.
-        # This is critical for services that call dependency_provider.get_sdk_client()
-        # directly (e.g., in on_startup for background tasks like auth policy refresh).
+        # Inject ASGI-transport clients into each service's DependencyProvider so
+        # every typed client it builds (request-scoped, service-principal, entity)
+        # routes through the in-process app, including clients created during
+        # on_startup for background tasks like auth policy refresh.
         # See architecture/docs/http-client-injection.md for details.
         for svc in services_to_start:
             svc.dependency_provider._http_client = async_http_client
-            svc.dependency_provider._sdk_client = async_sdk
 
         # Merge dependency overrides
         all_overrides = {}
         if dependency_overrides:
             all_overrides.update(dependency_overrides)
 
-        # Override get_sdk_client to return a request-scoped SDK with current auth headers.
-        # This mirrors what DependencyProvider.get_request_scoped_sdk() does in production.
-        if get_sdk_client not in all_overrides:
-            from nhx.common.sdk_factory import get_request_scoped_sdk
-
-            def _get_request_scoped_test_sdk() -> AsyncNeMoHelix:
-                return get_request_scoped_sdk(async_sdk)
-
-            all_overrides[get_sdk_client] = _get_request_scoped_test_sdk
-
         # Override get_entity_client to create a fresh EntityClient using
-        # build_downstream_service_headers, matching DependencyProvider._get_entity_sdk_on_behalf_of()
+        # build_downstream_service_headers, matching DependencyProvider.get_entity_client()
         # in production. The current service is taken from AppContext (set by
         # create_app_context_dependency on each sub-router) so merged multi-service
         # apps get service:<name> and on-behalf-of the same as real deployments;
@@ -526,37 +625,18 @@ def create_test_client(
                 app_ctx = get_app_ctx()
                 service_name = app_ctx.service_name if app_ctx is not None and app_ctx.service_name else "platform"
                 headers = build_downstream_service_headers(service_name)
-                sdk = async_sdk.with_options(set_default_headers=headers)
-                return EntityClient(client_from_platform(sdk, AsyncEntitiesClient))
+                return EntityClient(AsyncEntitiesClient.from_client(async_client.with_headers(headers)))
 
             all_overrides[get_entity_client] = _get_entity_client_on_behalf_of
 
         if all_overrides:
             app.dependency_overrides.update(all_overrides)
 
-        with TestClient(app) as client:
-            # Use max_retries=0 to avoid retry delays on 409 Conflict errors
-            sdk_http_client = SDKTestClientAdapter(client)
-            sdk = NeMoHelix(
-                workspace=workspace,
-                base_url="http://testserver",
-                http_client=sdk_http_client,
-                max_retries=0,
-            )
-            _install_asgi_files_resource(sdk)
-            sync_client = NemoClient(base_url="http://testserver", http_client=sdk_http_client, workspace=workspace)
-
+        with bounded_event_loop_teardown(), TestClient(app, base_url=platform_base_url) as client:
+            sync_http_client = TestClientHttpAdapter(client)
+            sync_client = NemoClient(base_url=platform_base_url, http_client=sync_http_client, workspace=workspace)
             for svc in services_to_start:
-                svc.dependency_provider._sync_http_client = sdk_http_client
-                svc.dependency_provider._sync_sdk_client = sdk
-
-            if get_sync_sdk_client not in all_overrides:
-                from nhx.common.sdk_factory import get_request_scoped_sync_sdk
-
-                def _get_request_scoped_sync_test_sdk() -> NeMoHelix:
-                    return get_request_scoped_sync_sdk(sdk)
-
-                app.dependency_overrides[get_sync_sdk_client] = _get_request_scoped_sync_test_sdk
+                svc.dependency_provider._sync_http_client = sync_http_client
 
             # Trigger middleware stack build with a health check (which skips auth).
             client.get("/health")
@@ -596,14 +676,10 @@ def create_test_client(
                     from nhx.core.auth.app.seeding import run_seeding
 
                     # Use service principal so entity store accepts role binding creation
-                    headers: dict[str, str] = {
-                        key: value
-                        for key, value in dict(async_sdk.default_headers or {}).items()
-                        if isinstance(value, str)
-                    }
-                    headers.update(Principal(id="service:auth", authz_aliases=["service:auth"]).get_headers())
-                    seeding_sdk = async_sdk.with_options(set_default_headers=headers)
-                    seeding_entity_client = EntityClient(client_from_platform(seeding_sdk, AsyncEntitiesClient))
+                    seeding_client = async_client.with_headers(
+                        Principal(id="service:auth", authz_aliases=["service:auth"]).get_headers()
+                    )
+                    seeding_entity_client = EntityClient(AsyncEntitiesClient.from_client(seeding_client))
 
                     async def _run() -> None:
                         success = await run_seeding(seeding_entity_client)
@@ -645,20 +721,14 @@ def create_test_client(
                         headers=auth_headers,
                     )
             else:
-                # No auth - use SDK directly
-                from nemo_helix_plugin.client.errors import ConflictError
-
+                workspaces_client = WorkspacesClient.from_client(sync_client)
                 for ws_id in workspaces_to_create:
                     try:
-                        client_from_platform(sdk, WorkspacesClient).create_workspace(
-                            body=CreateWorkspaceRequest(name=ws_id)
-                        ).data()
+                        workspaces_client.create_workspace(body=CreateWorkspaceRequest(name=ws_id))
                     except ConflictError:
                         logger.warning(f"Workspace '{ws_id}' already exists (created by service startup)")
-                from nemo_helix_plugin.projects.client import ProjectsClient
-                from nemo_helix_plugin.projects.types import CreateProjectRequest
 
-                projects_client = client_from_platform(sdk, ProjectsClient)
+                projects_client = ProjectsClient.from_client(sync_client)
                 for ws_id, proj_name in parsed_projects:
                     try:
                         projects_client.create_project(workspace=ws_id, body=CreateProjectRequest(name=proj_name))
@@ -671,14 +741,10 @@ def create_test_client(
                 yield sync_client  # ty: ignore[invalid-yield]
             elif selected_client_type is AsyncNemoClient:
                 yield async_client  # ty: ignore[invalid-yield]
-            elif selected_client_type is AsyncNeMoHelix:
-                yield async_sdk  # ty: ignore[invalid-yield]
             elif selected_client_type is EntityClient:
                 yield entity_client  # ty: ignore[invalid-yield]
             elif selected_client_type is ClientContext:
                 yield ClientContext(
-                    sdk=sdk,
-                    async_sdk=async_sdk,
                     client=sync_client,
                     async_client=async_client,
                     entity_client=entity_client,
@@ -686,6 +752,6 @@ def create_test_client(
                     access_log=access_log_instance,
                 )
             else:
-                yield sdk  # ty: ignore[invalid-yield]
+                raise TypeError(f"Unsupported client_type: {selected_client_type!r}")
 
         app.dependency_overrides.clear()

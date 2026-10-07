@@ -259,7 +259,7 @@ def test_provider_discovery_timeout_custom_override():
 
 
 def test_provider_discovery_max_retries_default():
-    """Provider discovery disables SDK retries by default."""
+    """Provider discovery disables client retries by default."""
     controller_config = ControllerConfig()
     assert controller_config.provider_discovery_max_retries == 0
 

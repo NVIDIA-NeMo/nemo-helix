@@ -5,6 +5,9 @@
 title: "Seeding with External Datasets"
 description: ""
 ---
+{/* @nemo-nb: process */}
+{/* @nemo-nb: skip-test */}
+
 <a id="data-designer-tutorials-seeding"></a>
 
 This tutorial demonstrates how to use external datasets as seed data for synthetic data generation in Data Designer.
@@ -63,8 +66,9 @@ Upload the symptom-to-diagnosis dataset to a Files API Fileset:
 import os
 import tempfile
 import urllib.request
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
 WORKSPACE = "default"
@@ -72,22 +76,19 @@ FILESET_NAME = "seed-data"
 FILE_PATH = "symptom_to_diagnosis.csv"
 
 base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-sdk = NeMoHelix(base_url=base_url, workspace=WORKSPACE)
 client = NemoClient(base_url=base_url, workspace=WORKSPACE)
+files_client = FilesClient.from_client(client)
 
 # Create fileset
-sdk.files.filesets.create(name=FILESET_NAME)
+files_client.create_fileset(body=CreateFilesetRequest(name=FILESET_NAME))
 
 # Download and upload seed data
 with tempfile.NamedTemporaryFile(suffix=".csv") as tmpfile:
     url = "https://raw.githubusercontent.com/NVIDIA/GenerativeAIExamples/refs/heads/main/nemo/NeMo-Data-Designer/data/gretelai_symptom_to_diagnosis.csv"
     urllib.request.urlretrieve(url, tmpfile.name)
 
-    sdk.files.upload(
-        fileset=FILESET_NAME,
-        local_path=tmpfile.name,
-        remote_path=FILE_PATH,
-    )
+    with open(tmpfile.name, "rb") as fh:
+        files_client.upload_file(name=FILESET_NAME, path=FILE_PATH, content=fh.read())
 ```
 
 ### Step 2: Build Configuration

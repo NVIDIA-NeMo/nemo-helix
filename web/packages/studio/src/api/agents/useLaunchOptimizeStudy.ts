@@ -11,7 +11,8 @@ import {
 } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { rollbackFileset } from '@studio/api/agents/agentSpecFileset';
-import { type FilesetEntry, uploadFilesetEntries } from '@studio/api/files/uploadFilesetEntries';
+import type { FilesetEntry } from '@studio/api/files/types';
+import { uploadFilesetEntries } from '@studio/api/files/uploadFilesetEntries';
 import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
 
 export interface LaunchOptimizeStudyParams {

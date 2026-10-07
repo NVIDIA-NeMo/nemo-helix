@@ -42,26 +42,56 @@ Confirm the CLI is installed. If `.venv/bin/nemo` is missing, route to `nemo-set
 
 ## What you do
 
-1. **Check platform up-status first; gate everything else on it.** Use a two-step probe — `lsof` for ground truth, then `curl` for a functional check. If either fails, report "platform down," suggest `nemo-setup`, and stop. Do not run the other three commands.
+1. **Check platform up-status first; gate everything else on it.** Start by resolving which platform the active CLI context points at. `nemo setup` can connect to a remote cluster, so do not assume `localhost:8080`:
 
 ```bash
-# Ground truth: anything listening on :8080?
-lsof -iTCP:8080 -sTCP:LISTEN >/dev/null 2>&1 || { echo "PLATFORM_DOWN (nothing on :8080)"; exit 1; }
+# Honors NHX_BASE_URL and NHX_CURRENT_CONTEXT. Resolves to http://localhost:8080 when there is no config
+# file at the default path; the except branch covers NHX_CONFIG_FILE naming a missing file.
+NHX_URL=$(.venv/bin/python -c '
+from nemo_helix_ext.config.config import get_context
+try:
+    print(str(get_context().cluster.base_url).rstrip("/"))
+except FileNotFoundError:
+    print("http://localhost:8080")
+') || { echo "CONFIG_ERROR (see error above)"; exit 1; }
+echo "Platform: $NHX_URL"
+```
+
+If this prints `CONFIG_ERROR`, the active context cannot be resolved. Report the error and stop. Do not probe localhost or suggest `nemo-setup`; suggest `nemo config view --all-contexts` and `nemo config use-context <name>`.
+
+**Remote platform** (host is not `localhost`, `127.0.0.1`, or `::1`): skip `lsof`. Probe the URL directly. Hosted deployments may only expose `/cluster-info` on ingress:
+
+```bash
+for path in /health/ready /cluster-info; do
+  code=$(curl -sS --connect-timeout 2 --max-time 5 "$NHX_URL$path" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "no-response")
+  [ "$code" = "200" ] && { echo "PLATFORM_UP (remote, $path HTTP 200)"; break; }
+  echo "$path returned $code"
+done
+```
+
+If neither path returns `200`, report "remote platform unreachable" with the URL and codes, then stop. Do not suggest `nemo-setup`: the user already configured this remote. Suggest checking network/VPN access and `nemo config view`.
+
+**Local platform:** use a two-step probe — `lsof` for ground truth, then `curl` for a functional check. If either fails, report "platform down," suggest `nemo-setup`, and stop. Do not run the other commands.
+
+```bash
+# Ground truth: anything listening on the configured port?
+LOCAL_PORT=$(python3 -c 'import sys; from urllib.parse import urlsplit; print(urlsplit(sys.argv[1]).port or 8080)' "$NHX_URL")
+lsof -iTCP:"$LOCAL_PORT" -sTCP:LISTEN >/dev/null 2>&1 || { echo "PLATFORM_DOWN (nothing on :$LOCAL_PORT)"; exit 1; }
 
 # Functional check: platform readiness endpoint answers?
-HTTP=$(curl -sS --connect-timeout 2 --max-time 5 http://localhost:8080/health/ready -o /dev/null -w "%{http_code}" 2>/dev/null || echo "no-response")
+HTTP=$(curl -sS --connect-timeout 2 --max-time 5 "$NHX_URL/health/ready" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "no-response")
 case "$HTTP" in
   200) echo "PLATFORM_UP (HTTP $HTTP)" ;;
   *)   echo "PLATFORM_WEDGED (listener present, /health/ready returned $HTTP)"; exit 1 ;;
 esac
 ```
 
-Do NOT use `nemo services status` or `nemo services ls` for this check. Both report stale "running" state from a held instance lock after the underlying process has died. `lsof` is ground truth.
+Do NOT use `nemo services status` or `nemo services ls` for this check. Both report stale "running" state from a held instance lock after the underlying process has died. `lsof` is ground truth for a local platform.
 
-Only if both probes pass, run the remaining commands to capture the other dashboard rows:
+Only if the platform is up, run the remaining commands to capture the other dashboard rows. The CLI commands use the active context automatically. A hosted platform may return `404` for `/status`; if so, omit the Services and Controllers rows instead of reporting them as failed:
 
 ```bash
-curl -fsS --connect-timeout 2 --max-time 5 http://localhost:8080/status
+curl -fsS --connect-timeout 2 --max-time 5 "$NHX_URL/status"
 .venv/bin/nemo agents deployments list 2>/dev/null
 .venv/bin/nemo inference providers list
 .venv/bin/nemo models list | head -10
@@ -74,7 +104,7 @@ The `/status` response is JSON; parse `services.ready`, `services.not_ready`, `c
 ```
 NeMo Helix status
 
-Platform:    running
+Platform:    running (<NHX_URL>)
 Services:    <ready_count> ready, <not_ready_count> not ready
 Controllers: healthy
 Agents:      <count>
@@ -110,9 +140,9 @@ Status is itself a verification: the commands together prove the platform is rea
 
 | Symptom | Cause | Recovery |
 |---|---|---|
-| `PLATFORM_DOWN` from probe | Nothing bound to :8080 | Route to `nemo-setup`; do not run the other three commands |
+| `PLATFORM_DOWN` from probe | Nothing bound to the configured local port (`$LOCAL_PORT`) | Route to `nemo-setup`; do not run the other three commands |
 | `PLATFORM_WEDGED` from probe | Listener exists, but `/health/ready` is not returning 200 — likely a crashed, partially-started, or not-ready platform | Tail `.venv/bin/nemo services logs -n 100` and surface the error. Common cause is a stale instance lock; the user can clear it with `nemo services stop --force` then re-run `nemo services run`. |
-| `.venv/bin/nemo services ls` shows stopped rows with `-` for PID/address | Stopped instance directory on disk (logs may remain) | Run `.venv/bin/nemo services ls --all` for the full list. Remove with `.venv/bin/nemo services prune` or `.venv/bin/nemo services rm <scope>`. Cross-check liveness with `lsof -iTCP:8080 -sTCP:LISTEN`. |
+| `.venv/bin/nemo services ls` shows stopped rows with `-` for PID/address | Stopped instance directory on disk (logs may remain) | Run `.venv/bin/nemo services ls --all` for the full list. Remove with `.venv/bin/nemo services prune` or `.venv/bin/nemo services rm <scope>`. Cross-check liveness with `lsof -iTCP:"$LOCAL_PORT" -sTCP:LISTEN`. |
 | `agents deployments list` returns "no such command" | Agents plugin not installed | Note in the summary: "Agents: plugin not installed"; do not fail the dashboard |
 | `inference providers list` empty | Provider not registered | Route to `nemo-setup` Step 4 (configure) |
 | `models list` empty for more than 60s after setup | Model discovery still running | Re-run after 30s; report the wait time |
@@ -122,6 +152,6 @@ Status is itself a verification: the commands together prove the platform is rea
 
 - **Read-only means read-only.** Never run `create`, `delete`, `stop`, or any state-changing command from this skill, even if the dashboard suggests something is broken. Route to setup or teardown for state changes.
 - **`agents deployments list` requires the agents plugin.** If it returns "no such command", the user has not installed the agents plugin yet; note that explicitly rather than failing silently.
-- **`.venv/bin/nemo services ls` defaults to running instances only.** Use `.venv/bin/nemo services ls --all` to see stopped instance directories that still have logs on disk. Remove them with `.venv/bin/nemo services prune` or `.venv/bin/nemo services rm <scope>`. For liveness, cross-check against `lsof -iTCP:8080 -sTCP:LISTEN`.
+- **`.venv/bin/nemo services ls` defaults to running instances only.** Use `.venv/bin/nemo services ls --all` to see stopped instance directories that still have logs on disk. Remove them with `.venv/bin/nemo services prune` or `.venv/bin/nemo services rm <scope>`. For liveness, cross-check against `lsof -iTCP:"$LOCAL_PORT" -sTCP:LISTEN`.
 - **Status is a snapshot.** A model still discovering will show as missing. Re-run after 30 seconds if the user just finished setup.
 - **Use `.venv/bin/nemo`, not bare `nemo`.** Bash sessions do not carry venv activation across calls.

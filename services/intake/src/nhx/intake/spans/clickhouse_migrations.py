@@ -166,6 +166,7 @@ def _create_evaluator_results_schema(client, settings: ClickHouseMigrationSettin
                 'BOOLEAN' = 3,
                 'TEXT' = 4
             ),
+            status Enum8('SCORED' = 1, 'FAILED' = 2) DEFAULT 'SCORED',
             comment Nullable(String),
             created_by Nullable(String),
             created_at DateTime64(3),
@@ -174,6 +175,13 @@ def _create_evaluator_results_schema(client, settings: ClickHouseMigrationSettin
         ENGINE = ReplacingMergeTree(ingested_at)
         ORDER BY (workspace, session_id, span_id, name, evaluator_result_id)
         """
+    )
+
+
+def _add_evaluator_results_status(client, settings: ClickHouseMigrationSettings) -> None:
+    table = _table(settings, "evaluator_results")
+    client.command(
+        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS status Enum8('SCORED' = 1, 'FAILED' = 2) DEFAULT 'SCORED'"
     )
 
 
@@ -379,6 +387,10 @@ _MIGRATIONS: list[tuple[str, Callable[..., None]]] = [
     # map. Rebuild backfills them from ``spans``, which shares trace_index's retention window, so
     # no retained history is lost. A separate revision because 0007 already shipped.
     ("ch_trace_index_0008_agent", _create_trace_index_schema),
+    # A failed evaluator attempt used to be representable only as a missing row, which rollups read
+    # as an implicit zero. ``status`` makes it an explicit, countable row; existing rows default to
+    # SCORED, and fresh installs get the column from the CREATE above.
+    ("ch_evaluator_results_0003_status", _add_evaluator_results_status),
 ]
 CURRENT_SCHEMA_VERSION = _MIGRATIONS[-1][0]
 

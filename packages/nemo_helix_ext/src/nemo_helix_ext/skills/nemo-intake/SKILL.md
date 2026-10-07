@@ -21,10 +21,13 @@ credentials, when required, to send a supported format to that endpoint.
 
 ## Requirements
 
-Set the target to the local or remote NeMo Helix origin:
+Set the target to the local or remote NeMo Helix origin. Only default to the
+local platform when `NHX_BASE_URL` is unset — never overwrite a remote the user
+has already configured:
 
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080
+: "${NHX_BASE_URL:=http://127.0.0.1:8080}"
+export NHX_BASE_URL
 export WORKSPACE=default
 
 nhx_authority=${NHX_BASE_URL#*://}
@@ -113,7 +116,7 @@ Read its reference for timestamp handling and evidence coverage.
 
 Every live provider fetch requires an explicit `--project`, `--since`, and `--until`. The scripts write
 spans first, then provider evaluations and human annotations, verify the imported span IDs, and are
-safe to replay. They use the existing SDK client factory, including the active CLI context and OAuth
+safe to replay. They use the typed Intake client built from the active CLI context, including OAuth
 token refresh; explicit `--nhx-base-url`, `--workspace`, and `NHX_ACCESS_TOKEN` overrides still
 work. Use `--dry-run` to inspect the direct JSON projection without writing Intake.
 

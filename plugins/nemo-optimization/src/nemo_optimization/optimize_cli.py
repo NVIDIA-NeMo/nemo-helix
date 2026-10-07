@@ -24,9 +24,9 @@ from typing import Annotated, Any, Optional
 
 import typer
 from nemo_agents_plugin.cli_context import (
-    BaseUrlOption,
     resolve_base_url,
     resolve_context_headers,
+    shared_cli_client,
 )
 from nemo_agents_plugin.jobs.fileset_io import split_fileset_ref, upload_to_fileset
 from nemo_helix_plugin.cli_options import workspace_help
@@ -93,7 +93,6 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
             bool,
             typer.Option("--dry-run", help="Run preflight and print the result without uploading."),
         ] = False,
-        base_url: BaseUrlOption = None,
     ) -> None:
         workspace = resolve_cli_workspace(typer_ctx, workspace)
 
@@ -110,7 +109,7 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
             typer.echo(f"Preflight passed. Would upload {source}/ to fileset {ws}/{name}.")
             return
 
-        sdk = _platform_sdk(resolve_base_url(base_url))
+        sdk = _platform_sdk(resolve_base_url())
         if check_models:
             _preflight_models(config, workspace=workspace, agent=agent, sdk=sdk)
         if dry_run:
@@ -154,6 +153,9 @@ def _preflight_models(config: dict[str, Any], *, workspace: str, agent: str | No
 
 def _platform_sdk(base_url: str) -> NemoClient:
     """An auth-aware platform client for the fileset upload."""
+    shared = shared_cli_client(NemoClient)
+    if shared is not None:
+        return shared
     headers = resolve_context_headers()
     if headers:
         return NemoClient(base_url=base_url, default_headers=headers)

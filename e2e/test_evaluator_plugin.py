@@ -25,7 +25,7 @@ import httpx
 import pytest
 from nemo_evaluator.api.schemas import MetricInline, MetricRef
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import GymAgentSource, GymRunnerTarget
 from nemo_evaluator.jobs.evaluate import EvaluateInputSpec
 from nemo_evaluator.sdk.job_resources import EvaluatorJobResource
 from nemo_evaluator.sdk.resources import Evaluator
@@ -52,7 +52,7 @@ from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from nemo_helix_plugin.evaluator.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
 from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.inference_middleware import BackendFormat
@@ -808,8 +808,9 @@ def test_gym_agent_evaluate_job_completes(
     task_dicts = _gym_task_payloads(2)  # keep the run cheap; this is a wiring test
 
     target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="mcqa",
         num_repeats=1,
         concurrency=2,
@@ -837,7 +838,7 @@ def test_gym_agent_evaluate_job_completes(
         # Extract the trials.jsonl file from the archive.
         extract_dir = tmp_path / "agent-eval-results"
         with tarfile.open(archive_path) as archive:
-            archive.extractall(extract_dir)  # noqa: S202 - trusted first-party job artifact, not user input
+            archive.extractall(extract_dir, filter="data")
         trials_files = list(extract_dir.rglob("trials.jsonl"))
         assert trials_files, f"trials.jsonl missing under {extract_dir}"
 
@@ -853,6 +854,187 @@ def test_gym_agent_evaluate_job_completes(
         _cleanup_evaluator_job(evaluator_client, job_name)
 
 
+def _greeting_wheels_v1_package(root: Path) -> dict[str, bytes]:
+    """A wheels-v1 environment: one custom resources server whose only extra dependency is a vendored wheel.
+
+    The wheel is generated here (a pure-Python module), so the test needs no package index at all.
+    """
+    import io
+    import zipfile
+
+    package_name = "greeting_extra"
+    wheel = io.BytesIO()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            f"{package_name}/__init__.py", "def normalize(text: str) -> str:\n    return text.casefold().strip()\n"
+        )
+        archive.writestr(
+            f"{package_name}-1.0.dist-info/METADATA", f"Metadata-Version: 2.1\nName: {package_name}\nVersion: 1.0\n"
+        )
+        archive.writestr(
+            f"{package_name}-1.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: e2e\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr(f"{package_name}-1.0.dist-info/RECORD", "")
+    app = (
+        "from greeting_extra import normalize\n"
+        "from nemo_gym.base_resources_server import (\n"
+        "    BaseResourcesServerConfig, BaseVerifyRequest, BaseVerifyResponse, SimpleResourcesServer,\n"
+        ")\n\n"
+        "class GreetingConfig(BaseResourcesServerConfig):\n    pass\n\n"
+        "class GreetingVerifyRequest(BaseVerifyRequest):\n    expected_greeting: str\n\n"
+        "class GreetingVerifyResponse(BaseVerifyResponse):\n    expected_greeting: str\n    observed_text: str\n\n"
+        "def _assistant_text(response):\n"
+        "    parts = []\n"
+        "    for item in response.output:\n"
+        "        if getattr(item, 'type', None) != 'message':\n            continue\n"
+        "        for content in getattr(item, 'content', []):\n"
+        "            if getattr(content, 'type', None) == 'output_text':\n                parts.append(content.text)\n"
+        "    return ''.join(parts)\n\n"
+        "class GreetingVerifier(SimpleResourcesServer):\n"
+        "    config: GreetingConfig\n\n"
+        "    async def verify(self, body: GreetingVerifyRequest) -> GreetingVerifyResponse:\n"
+        "        observed = _assistant_text(body.response)\n"
+        "        reward = float(normalize(body.expected_greeting) in normalize(observed))\n"
+        "        return GreetingVerifyResponse(**body.model_dump(), reward=reward, observed_text=observed)\n\n"
+        "if __name__ == '__main__':\n    GreetingVerifier.run_webserver()\n"
+    )
+    config = (
+        "greeting_verifier:\n  resources_servers:\n    greeting_verifier:\n      entrypoint: app.py\n"
+        "      domain: instruction_following\n      verified: false\n"
+        "      description: e2e greeting verifier\n      value: Verify the expected greeting\n"
+    )
+    manifest = (
+        "format: wheels-v1\nconfig_paths:\n  - resources_servers/greeting_verifier/configs/greeting_verifier.yaml\n"
+        "metadata:\n  name: e2e-greeting\n"
+    )
+    files = {
+        "nemo-environment.yaml": manifest.encode(),
+        "resources_servers/greeting_verifier/app.py": app.encode(),
+        "resources_servers/greeting_verifier/requirements.txt": b"greeting-extra==1.0\n",
+        "resources_servers/greeting_verifier/configs/greeting_verifier.yaml": config.encode(),
+        f"wheels/{package_name}-1.0-py3-none-any.whl": wheel.getvalue(),
+    }
+    for relative, content in files.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    return files
+
+
+def _greeting_task_payloads(greeting: str, count: int) -> list[dict[str, object]]:
+    bundled_reward = bundle_metric(GymRewardMetric(), CloudpickleMetricBundlePackager()).model_dump(mode="json")
+    rows_path = Path(os.environ.get("TMPDIR", "/tmp")) / f"greeting-rows-{short_unique_name('e2e')}.jsonl"
+    rows_path.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "responses_create_params": {
+                        "input": [
+                            {
+                                "role": "user",
+                                "content": f"Reply with exactly this greeting and nothing else: {greeting}",
+                            }
+                        ]
+                    },
+                    "expected_greeting": greeting,
+                }
+            )
+            + "\n"
+            for _ in range(count)
+        ),
+        encoding="utf-8",
+    )
+    return [
+        {
+            "id": task.id,
+            "intent": task.intent,
+            "inputs": task.inputs or {},
+            "reference": task.reference or {},
+            "metrics": [bundled_reward],
+            "metadata": [{"key": key, "value": value} for key, value in (task.metadata or {}).items()],
+        }
+        for task in discover_gym_tasks(rows_path)
+    ]
+
+
+@pytest.mark.gym_e2e
+@pytest.mark.gym_sandbox_e2e
+@pytest.mark.skipif(
+    os.environ.get("NHX_E2E_SANDBOXED_GYM") != "1",
+    reason="needs a sandbox-capable deployment (sandboxed_gym_default + OpenSandbox); set NHX_E2E_SANDBOXED_GYM=1",
+)
+def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
+    client: NemoClient,
+    evaluator_client: NemoClient,
+    evaluator_workspace: str,
+    tmp_path: Path,
+) -> None:
+    """A wheels-v1 FileSet vendors only what its server adds; Gym and Gym's dependencies come from the image.
+
+    The job must complete and score with the package's one vendored wheel and no package index. Run it
+    against a deployment whose sandbox egress allows only the policy endpoint to prove the strict case.
+    Set NHX_E2E_GYM_POLICY_ROUTE and NHX_E2E_GYM_POLICY_MODEL to use a real model instead of the mock.
+    """
+    greeting = "hello there"
+    fileset_name = short_unique_name("gym-greeting-env")
+    files = FilesClient.from_client(evaluator_client)
+    files.create_fileset(
+        body=CreateFilesetRequest(name=fileset_name, purpose=FilesetPurpose.ENVIRONMENT),
+        workspace=evaluator_workspace,
+    )
+    for relative, content in _greeting_wheels_v1_package(tmp_path / "package").items():
+        files.upload_file(content=content, path=relative, name=fileset_name, workspace=evaluator_workspace)
+
+    policy_route = os.environ.get("NHX_E2E_GYM_POLICY_ROUTE")
+    policy_model = os.environ.get("NHX_E2E_GYM_POLICY_MODEL")
+    if not policy_route or not policy_model:
+        policy_model = short_unique_name("gym-greeting")
+        _create_ready_mock_model(
+            client, workspace=evaluator_workspace, name=policy_model, mock_response_body=_chat_completion(greeting)
+        )
+        policy_route = _internal_model_route(evaluator_workspace, policy_model)
+
+    target = GymRunnerTarget(
+        source=GymAgentSource(
+            component="simple_agent",
+            config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        ),
+        resources_server="greeting_verifier",
+        environment=FilesetRef(root=f"{evaluator_workspace}/{fileset_name}"),
+        num_repeats=1,
+        concurrency=2,
+        hydra_params={
+            "policy_base_url": policy_route,
+            "policy_api_key": "not-used",
+            "policy_model_name": policy_model,
+        },
+    )
+    job_name = _submit_agent_eval_job(
+        evaluator_client,
+        evaluator_workspace,
+        {"tasks": _greeting_task_payloads(greeting, 2), "target": target.model_dump(mode="json")},
+    )
+    try:
+        job = wait_for_platform_job(evaluator_client, job_name, evaluator_workspace, timeout=900)
+        assert job.status.lower() == "completed", f"job {job_name!r} ended {job.status!r}"
+        archive_path = tmp_path / "agent-eval-results.tar.gz"
+        archive = JobsClient.from_client(evaluator_client).download_job_result(
+            name="agent-eval-results", job=job_name, workspace=evaluator_workspace
+        )
+        archive_path.write_bytes(archive.read())
+        extract_dir = tmp_path / "agent-eval-results"
+        with tarfile.open(archive_path) as archive:
+            archive.extractall(extract_dir, filter="data")
+        trials_files = list(extract_dir.rglob("trials.jsonl"))
+        assert trials_files, f"trials.jsonl missing under {extract_dir}"
+        trials = [json.loads(line) for line in trials_files[0].read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert [trial.get("status") for trial in trials] == ["completed", "completed"]
+        assert [float(trial["metadata"]["reward"]) for trial in trials] == [1.0, 1.0]
+    finally:
+        _cleanup_evaluator_job(evaluator_client, job_name)
+
+
 @pytest.mark.gym_e2e
 def test_gym_agent_evaluate_job_invalid_config_fails(
     evaluator_client: NemoClient,
@@ -860,8 +1042,9 @@ def test_gym_agent_evaluate_job_invalid_config_fails(
 ) -> None:
     """Rejects an invalid Gym selection before starting its environment servers."""
     target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="missing-e2e-resources-server",
         num_repeats=1,
         concurrency=1,

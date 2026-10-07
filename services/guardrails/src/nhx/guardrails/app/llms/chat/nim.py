@@ -50,9 +50,9 @@ from nhx.guardrails.app.llms.utils import (
 )
 from nhx.guardrails.app.utils.context_utils import (
     get_main_model_from_context,
-    get_request_default_headers_from_context,
     set_x_model_response_headers_into_context,
 )
+from nhx.guardrails.app.utils.platform_request_headers import headers_for_model_endpoint
 from pydantic import SecretStr
 from pydantic_core import PydanticUndefined
 
@@ -221,6 +221,9 @@ class ChatNIM(FlexibleChatModelBase, BaseRequest):
         """Return type of chat model."""
         return "nimchat"
 
+    def _outbound_headers(self) -> dict[str, str]:
+        return headers_for_model_endpoint(self.endpoint_url)
+
     def _stream(
         self,
         messages: List[BaseMessage],
@@ -237,7 +240,7 @@ class ChatNIM(FlexibleChatModelBase, BaseRequest):
         # make sure to pop "stream" from params
         params.pop("stream", None)
 
-        custom_extra_headers = get_request_default_headers_from_context()
+        custom_extra_headers = self._outbound_headers()
 
         try:
             model = params.pop("model")
@@ -309,7 +312,7 @@ class ChatNIM(FlexibleChatModelBase, BaseRequest):
         message_dicts, params = self._create_message_dicts(messages, stop)
         params = {**params, **kwargs}
 
-        custom_extra_headers = get_request_default_headers_from_context()
+        custom_extra_headers = self._outbound_headers()
 
         try:
             model = params.pop("model")
@@ -365,7 +368,7 @@ class ChatNIM(FlexibleChatModelBase, BaseRequest):
         # make sure to pop "stream" from params
         params.pop("stream", None)
 
-        custom_extra_headers = get_request_default_headers_from_context()
+        custom_extra_headers = self._outbound_headers()
 
         try:
             model = params.pop("model")
@@ -430,7 +433,7 @@ class ChatNIM(FlexibleChatModelBase, BaseRequest):
         message_dicts, params = self._create_message_dicts(messages, stop)
         params = {**params, **kwargs}
 
-        custom_extra_headers = get_request_default_headers_from_context()
+        custom_extra_headers = self._outbound_headers()
 
         try:
             model = params.pop("model")

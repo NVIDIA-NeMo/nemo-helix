@@ -133,7 +133,7 @@ class TestDeleteConfirmation:
             _install_mock_transport(handler),
             patch(f"{_PATCH_PREFIX}._platform_sdk") as mock_sdk,
         ):
-            result = runner.invoke(app, ["delete", "my-agent", "--yes", "--base-url", "http://test"])
+            result = runner.invoke(app, ["delete", "my-agent", "--yes"])
 
         assert result.exit_code == 0, result.output
         assert methods == ["DELETE"]

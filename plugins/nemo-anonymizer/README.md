@@ -8,7 +8,7 @@ A NeMo Helix plugin that wraps the
 to detect and replace/rewrite PII in tabular text data.
 
 The plugin exposes an `anonymizer` service, CLI commands under
-`nemo anonymizer`, an SDK accessor on `NeMoHelix.anonymizer`, a streaming
+`nemo anonymizer`, an `anonymizer` resource on the platform client, a streaming
 preview API, and an `anonymizer.run` job that executes on the
 `nhx-tasks` container image.
 

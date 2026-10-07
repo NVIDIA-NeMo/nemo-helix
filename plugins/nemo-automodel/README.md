@@ -19,7 +19,7 @@ Verbs are mounted directly on the contributor (no `jobs` subgroup):
 nemo customization automodel explain
 nemo customization automodel submit path/to/job.json
 nemo customization automodel submit path/to/job.json -w acme-corp
-nemo customization automodel submit path/to/job.json --cluster my-cluster
+nemo --context my-context customization automodel submit path/to/job.json
 ```
 
 Other customization backends may still use `nemo customization <backend> jobs submit ...`.

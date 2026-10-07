@@ -21,7 +21,12 @@ from nemo_evaluator.api.schemas import (
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evaluator.api.task_definitions.provenance import TaskProvenance
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
-from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentEvalTaskInput, ResolvedTask
+from nemo_evaluator.jobs.agent_spec import (
+    AgentEvalSpec,
+    AgentEvalTaskInput,
+    GymAgentSource,
+    ResolvedTask,
+)
 from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evaluator.jobs.kinds.types import LoadedTask, SubmitContext
@@ -738,7 +743,7 @@ async def test_expansion_rejects_a_task_whose_runner_the_target_cannot_run(entit
 
 async def test_incompatible_target_error_names_requested_target(entity_store):
     """Verify rejecting a stored Harbor task for a Fabric run identifies the requested target in the error."""
-    from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget
+    from nemo_evaluator.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget
 
     task = TaskEntity(
         name="checkout",
@@ -768,11 +773,19 @@ async def test_incompatible_target_error_names_requested_target(entity_store):
             )
             for item in loaded
         ]
-        validate_execution_support(snapshots, target=FabricRunnerTarget(config={}), adapters=KIND_ADAPTERS)
+        validate_execution_support(
+            snapshots, target=FabricRunnerTarget(source=FabricConfigSource(config={})), adapters=KIND_ADAPTERS
+        )
 
 
 def _direct_target(kind):
-    from nemo_evaluator.jobs.agent_spec import AgentTarget, FabricRunnerTarget, GymRunnerTarget, ModelTarget
+    from nemo_evaluator.jobs.agent_spec import (
+        AgentTarget,
+        FabricConfigSource,
+        FabricRunnerTarget,
+        GymRunnerTarget,
+        ModelTarget,
+    )
     from nemo_evaluator_sdk.values import GenericAgent, Model
 
     return {
@@ -781,9 +794,13 @@ def _direct_target(kind):
             agent=GenericAgent(name="test", url="http://localhost/agent", body={}, response_path="$.output")
         ),
         "fabric": lambda: FabricRunnerTarget(
-            config={"metadata": {"name": "test"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
+            source=FabricConfigSource(
+                config={"metadata": {"name": "test"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
+            )
         ),
-        "gym": lambda: GymRunnerTarget(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml"),
+        "gym": lambda: GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="simple.yaml"), resources_server="mcqa"
+        ),
         "offline": lambda: None,
     }[kind]()
 
@@ -914,8 +931,9 @@ async def test_direct_evaluator_references_resolve_and_compile(kind, entity_stor
             config=GymRuntimeConfig(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml")
         )
 
-        async def collect(input_path, output_path, work_dir):
+        async def collect(input_path, output_path, work_dir, resolved_env):
             """Return fake Gym rollouts in reverse order to test attribution by task index."""
+            assert resolved_env == {}
             rows = [json.loads(line) for line in input_path.read_text().splitlines()]
             assert [row["_ng_task_index"] for row in rows] == [0, 1, 2]
             assert all(row["responses_create_params"] == {} for row in rows)
@@ -995,12 +1013,14 @@ async def test_gym_content_rejected_before_environment_resolution(source, field,
         "taskset": TasksetRef("suite"),
     }
     resolve_environment = AsyncMock()
-    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate._resolve_gym_environment", resolve_environment)
+    monkeypatch.setattr("nemo_evaluator.jobs.gym_submission.resolve_gym_environment", resolve_environment)
     with pytest.raises(ValueError, match="task 'invalid'.*gym_row.*gym_row_extras"):
         await AgentEvalJob.to_spec(
             AgentEvalInputSpec(
                 tasks=sources[source],
-                target=GymRunnerTarget(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml"),
+                target=GymRunnerTarget(
+                    source=GymAgentSource(component="simple_agent", config="simple.yaml"), resources_server="mcqa"
+                ),
             ),
             workspace="default",
             entity_client=entity_store,

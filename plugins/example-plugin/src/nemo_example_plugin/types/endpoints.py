@@ -13,13 +13,16 @@ from abc import abstractmethod
 from typing import NotRequired, TypedDict
 
 from nemo_example_plugin.entities import ExampleItem
+from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig
 from nemo_example_plugin.types.payloads import (
     BlobUploadResponse,
     CountRequest,
     CreateExampleItemRequest,
+    CreateExampleMiddlewareConfigRequest,
     HelloResponse,
     Tick,
     UpdateExampleItemRequest,
+    UpdateExampleMiddlewareConfigRequest,
 )
 from nemo_helix_plugin.client.endpoint import delete, get, patch, post, put
 from nemo_helix_plugin.client.types import BinaryContent, Paginated, PreparedRequest, Stream
@@ -82,3 +85,46 @@ def upload_blob(*, name: str, content: bytes) -> BlobUploadResponse: ...
 @get("/apis/example/blob/{name}")
 @abstractmethod
 def download_blob(*, name: str) -> BinaryContent: ...
+
+
+# --- Middleware configs ------------------------------------------------------
+
+_MIDDLEWARE_CONFIGS = "/apis/example/v2/workspaces/{workspace}/middleware-configs"
+
+
+@post(_MIDDLEWARE_CONFIGS)
+@abstractmethod
+def create_middleware_config(
+    *, workspace: str | None = None, body: CreateExampleMiddlewareConfigRequest
+) -> ExampleMiddlewareConfig: ...
+
+
+class ListMiddlewareConfigsQueryParams(TypedDict, total=False):
+    page: NotRequired[int]
+    page_size: NotRequired[int]
+    sort: NotRequired[str]
+
+
+# The route returns a plain JSON list (no pagination envelope), so this is not ``Paginated``.
+@get(_MIDDLEWARE_CONFIGS)
+@abstractmethod
+def list_middleware_configs(
+    *, workspace: str | None = None, query_params: ListMiddlewareConfigsQueryParams | None = None
+) -> list[ExampleMiddlewareConfig]: ...
+
+
+@get(f"{_MIDDLEWARE_CONFIGS}/{{name}}")
+@abstractmethod
+def get_middleware_config(*, workspace: str | None = None, name: str) -> ExampleMiddlewareConfig: ...
+
+
+@patch(f"{_MIDDLEWARE_CONFIGS}/{{name}}")
+@abstractmethod
+def update_middleware_config(
+    *, workspace: str | None = None, name: str, body: UpdateExampleMiddlewareConfigRequest
+) -> ExampleMiddlewareConfig: ...
+
+
+@delete(f"{_MIDDLEWARE_CONFIGS}/{{name}}")
+@abstractmethod
+def delete_middleware_config(*, workspace: str | None = None, name: str) -> None: ...

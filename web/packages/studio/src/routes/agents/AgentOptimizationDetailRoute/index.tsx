@@ -16,13 +16,18 @@ import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDat
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { fetchStudyResults } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
+import { DeployTrialModal } from '@studio/routes/agents/AgentOptimizationDetailRoute/DeployTrialModal';
+import { StudyInProgress } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyInProgress';
+import {
+  fetchStudyResults,
+  type Trial,
+} from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import { StudyStatTiles } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyStatTiles';
 import { getAgentOptimizationsTabRoute, getAgentsListRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery } from '@tanstack/react-query';
 import { ScrollText } from 'lucide-react';
-import { type FC, useEffect } from 'react';
+import { type FC, useCallback, useEffect, useState } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_STATUSES = new Set<HelixJobStatus>(['completed', 'error', 'cancelled']);
@@ -32,6 +37,10 @@ const QUEUED_STATUSES = new Set<HelixJobStatus>(['created', 'pending']);
 export const AgentOptimizationDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { optimizeJobName: jobName } = useRequiredPathParams([ROUTE_PARAMS.optimizeJobName]);
+  const jobKey = `${workspace}/${jobName}`;
+  const [deployTarget, setDeployTarget] = useState<{ jobKey: string; trial: Trial } | null>(null);
+  const deployTrial = deployTarget?.jobKey === jobKey ? deployTarget.trial : null;
+  const onDeploy = useCallback((trial: Trial) => setDeployTarget({ jobKey, trial }), [jobKey]);
 
   const {
     data: job,
@@ -131,6 +140,9 @@ export const AgentOptimizationDetailRoute: FC = () => {
             <Flex align="center" gap="3" wrap="wrap">
               <Text kind="title/md">{jobName}</Text>
               <StatusBadge status={job.status} />
+              {!isTerminal && (
+                <Spinner size="small" aria-label={isQueued ? 'Study queued' : 'Study running'} />
+              )}
               <Flex align="center" gap="2" wrap="wrap">
                 {job.updated_at && isTerminal && (
                   <Text kind="body/regular/sm" className="text-secondary">
@@ -155,21 +167,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
             </Panel>
           </>
         ) : !isTerminal ? (
-          <Flex
-            direction="col"
-            align="center"
-            justify="center"
-            gap="3"
-            className="min-h-[200px] w-full"
-            data-testid="study-in-progress"
-          >
-            <Spinner size="medium" aria-label={isQueued ? 'Study queued' : 'Study running'} />
-            <Text kind="body/regular/md" className="text-secondary" role="status">
-              {isQueued
-                ? 'Waiting for the study to start. Trials appear once it finishes.'
-                : 'Trials appear once the study finishes.'}
-            </Text>
-          </Flex>
+          <StudyInProgress workspace={workspace} job={job} isQueued={isQueued} />
         ) : isResultsError ? (
           <ErrorMessage
             header="Could not load trials"
@@ -187,7 +185,13 @@ export const AgentOptimizationDetailRoute: FC = () => {
         ) : (
           <>
             <StudyStatTiles results={results} />
-            <TrialsDataView results={results} />
+            <TrialsDataView results={results} onDeploy={onDeploy} />
+            <DeployTrialModal
+              workspace={workspace}
+              job={job}
+              trial={deployTrial}
+              onClose={() => setDeployTarget(null)}
+            />
           </>
         )}
       </Stack>

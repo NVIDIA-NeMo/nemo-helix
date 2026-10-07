@@ -68,33 +68,50 @@ def default_display_name(name: str) -> str:
 
 
 def split_front_matter(content: str) -> tuple[dict[str, object], str]:
-    """Split optional YAML front matter from Markdown content."""
-    if not content.startswith("---\n"):
-        return {}, content
+    """Split required, nonempty YAML front matter from Markdown content."""
+    lines = content.split("\n")
+    if lines[0] != "---":
+        raise ValueError("Markdown front matter must start with '---' on the first line")
 
     try:
-        front_matter, overview = content[4:].split("\n---\n", maxsplit=1)
+        end = lines.index("---", 1)
     except ValueError as error:
         raise ValueError("Markdown front matter must end with '---'") from error
 
-    metadata = yaml.safe_load(front_matter) or {}
-    if not isinstance(metadata, dict):
-        raise ValueError("Markdown front matter must be a mapping")
+    front_matter = "\n".join(lines[1:end])
+    overview = "\n".join(lines[end + 1 :])
+    metadata = yaml.safe_load(front_matter)
+    if not isinstance(metadata, dict) or not metadata:
+        raise ValueError("Markdown front matter must be a nonempty mapping")
     return metadata, overview
 
 
 def load_asset(path: Path, asset_type: Literal["container", "chart"]) -> Asset:
     """Load one asset and apply its metadata defaults."""
-    metadata, overview = split_front_matter(path.read_text(encoding="utf-8"))
+    try:
+        metadata, overview = split_front_matter(path.read_text(encoding="utf-8"))
+    except (ValueError, yaml.YAMLError) as error:
+        raise ValueError(f"{path}: {error}") from error
+
+    for field in ("display_name", "description", "logo"):
+        if field in metadata:
+            value = metadata[field]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{path}: {field} must be a nonblank string")
+
     name = path.stem
-    display_name = str(metadata.get("display_name") or default_display_name(name))
+    display_name = str(metadata.get("display_name", default_display_name(name)))
     default_description = (
         f"Deploy {display_name} to Kubernetes" if asset_type == "chart" else f"{display_name} is part of the NeMo Helix"
     )
-    description = str(metadata.get("description") or default_description)
+    description = str(metadata.get("description", default_description))
     labels = metadata.get("labels", DEFAULT_LABELS)
-    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
-        raise ValueError(f"labels must be a list of strings: {path}")
+    if (
+        not isinstance(labels, list)
+        or not labels
+        or not all(isinstance(label, str) and label.strip() for label in labels)
+    ):
+        raise ValueError(f"{path}: labels must be a nonempty list of nonblank strings")
     labels = [str(label) for label in labels]
 
     return Asset(
@@ -104,7 +121,7 @@ def load_asset(path: Path, asset_type: Literal["container", "chart"]) -> Asset:
         display_name=display_name,
         description=description,
         labels=labels,
-        logo=str(metadata.get("logo") or DEFAULT_LOGO),
+        logo=str(metadata.get("logo", DEFAULT_LOGO)),
     )
 
 
@@ -200,10 +217,14 @@ def main(
     """Synchronize Markdown metadata with NGC.
 
     The parent directory selects the asset type and the filename selects its
-    NGC name. Optional YAML front matter can override display_name,
-    description, labels, and logo.
+    NGC name. Every file must start with a nonempty YAML front matter block. Fields
+    display_name, description, labels, and logo are optional overrides.
     """
-    assets = discover_assets(assets_dir)
+    try:
+        assets = discover_assets(assets_dir)
+    except ValueError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
     if not assets:
         raise typer.BadParameter(f"no Markdown assets found in {assets_dir}")
 

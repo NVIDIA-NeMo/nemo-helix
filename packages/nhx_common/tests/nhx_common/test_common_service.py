@@ -17,7 +17,6 @@ import httpx
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client as plugin_get_nemo_client
 from nhx.common.config import HelixConfig
@@ -304,8 +303,8 @@ class TestDependencyProvider:
     def test_init(self):
         """Test DependencyProvider initialization."""
         provider = DependencyProvider()
-        assert provider._sdk_client is None
         assert provider._http_client is None
+        assert provider._sync_http_client is None
 
     def test_nemo_client_dependency_is_exported_with_exact_plugin_identity(self):
         assert get_nemo_client is plugin_get_nemo_client
@@ -323,19 +322,19 @@ class TestDependencyProvider:
         assert "get_sync_nemo_client" in service_exports
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("first_client", ["sdk", "nemo"], ids=["sdk-first", "nemo-first"])
-    async def test_sdk_and_nemo_clients_share_provider_transport_regardless_of_order(self, first_client: str):
+    @pytest.mark.parametrize("first_client", ["service", "request"], ids=["service-first", "request-first"])
+    async def test_service_and_request_clients_share_provider_transport_regardless_of_order(self, first_client: str):
         provider = DependencyProvider()
 
-        if first_client == "sdk":
-            sdk = provider.get_request_scoped_sdk()
-            nemo = provider.get_request_scoped_nemo_client()
+        if first_client == "service":
+            service_client = provider.get_service_nemo_client("entities")
+            request_client = provider.get_request_scoped_nemo_client()
         else:
-            nemo = provider.get_request_scoped_nemo_client()
-            sdk = provider.get_request_scoped_sdk()
+            request_client = provider.get_request_scoped_nemo_client()
+            service_client = provider.get_service_nemo_client("entities")
 
-        assert sdk._client is provider.get_http_client()
-        assert nemo._http is provider.get_http_client()
+        assert service_client._http is provider.get_http_client()
+        assert request_client._http is provider.get_http_client()
 
         await provider.close()
 
@@ -345,7 +344,7 @@ class TestDependencyProvider:
         provider._http_client = transport
 
         with patch(
-            "nhx.common.sdk_factory.get_principal_auth_headers",
+            "nhx.common.platform_client_context.current_principal_auth_headers",
             return_value={
                 "X-NHX-Principal-Id": "user-one@example.com",
                 "X-NHX-Principal-On-Behalf-Of": "delegate-one@example.com",
@@ -354,7 +353,7 @@ class TestDependencyProvider:
             with scoped_otel_headers({"traceparent": "00-trace-one-span-one-01"}):
                 first = provider.get_request_scoped_nemo_client()
         with patch(
-            "nhx.common.sdk_factory.get_principal_auth_headers",
+            "nhx.common.platform_client_context.current_principal_auth_headers",
             return_value={"X-NHX-Principal-Id": "user-two@example.com"},
         ):
             with scoped_otel_headers({"traceparent": "00-trace-two-span-two-01"}):
@@ -370,27 +369,25 @@ class TestDependencyProvider:
         assert second._default_headers["traceparent"] == "00-trace-two-span-two-01"
 
     @pytest.mark.asyncio
-    async def test_close_closes_shared_sdk_and_nemo_transport_exactly_once(self):
+    async def test_close_closes_shared_transport_exactly_once(self):
         provider = DependencyProvider()
         transport = CloseCountingAsyncClient()
         provider._http_client = transport
-        sdk = provider.get_sdk_client()
-        nemo = provider.get_request_scoped_nemo_client()
+        service_client = provider.get_service_nemo_client("entities")
+        request_client = provider.get_request_scoped_nemo_client()
 
+        await service_client.close()
+        await request_client.close()
         await provider.close()
         await provider.close()
 
-        assert sdk._client is transport
-        assert nemo._http is transport
+        assert service_client._http is transport
+        assert request_client._http is transport
         assert transport.close_count == 1
         assert provider._http_client is None
-        assert provider._sdk_client is None
 
     @pytest.mark.asyncio
-    async def test_concurrent_first_dependency_resolution_creates_one_transport_and_sdk(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        from nhx.common import sdk_factory
+    async def test_concurrent_first_dependency_resolution_creates_one_transport(self, monkeypatch: pytest.MonkeyPatch):
         from nhx.common.service import base as service_base
 
         provider = DependencyProvider()
@@ -400,10 +397,11 @@ class TestDependencyProvider:
         created: list[CloseCountingAsyncClient] = []
         created_lock = Lock()
 
-        def resolve_dependency(index: int) -> AsyncNeMoHelix | AsyncNemoClient:
+        def resolve_dependency(index: int) -> AsyncNemoClient:
             resolution_ready.wait(timeout=5)
-            factory = provider.get_request_scoped_sdk if index % 2 == 0 else provider.get_request_scoped_nemo_client
-            return factory()
+            if index % 2 == 0:
+                return provider.get_service_nemo_client("entities")
+            return provider.get_request_scoped_nemo_client()
 
         def create_transport() -> CloseCountingAsyncClient:
             transport = CloseCountingAsyncClient()
@@ -414,29 +412,22 @@ class TestDependencyProvider:
             return transport
 
         endpoint = SimpleNamespace(async_sdk_http_client=lambda: create_transport())
-        monkeypatch.setattr(service_base, "resolve_platform_endpoint", lambda: endpoint)
+        runtime_context = SimpleNamespace(endpoint=endpoint)
+        monkeypatch.setattr(service_base, "build_platform_runtime_context", lambda *, platform_config: runtime_context)
 
-        with patch.object(
-            sdk_factory, "get_async_platform_sdk", wraps=sdk_factory.get_async_platform_sdk
-        ) as sdk_factory_call:
-            with ThreadPoolExecutor(max_workers=12) as executor:
-                futures = [executor.submit(resolve_dependency, index) for index in range(12)]
-                resolution_ready.wait(timeout=5)
-                assert factory_started.wait(timeout=5)
-                time.sleep(0.05)
-                release_factory.set()
-                clients = [future.result(timeout=5) for future in futures]
-
-        assert sdk_factory_call.call_count == 1
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [executor.submit(resolve_dependency, index) for index in range(12)]
+            resolution_ready.wait(timeout=5)
+            assert factory_started.wait(timeout=5)
+            time.sleep(0.05)
+            release_factory.set()
+            clients = [future.result(timeout=5) for future in futures]
 
         transport = provider.get_http_client()
-        sdk_clients = [client for client in clients if isinstance(client, AsyncNeMoHelix)]
-        nemo_clients = [client for client in clients if isinstance(client, AsyncNemoClient)]
 
         assert created == [transport]
-        assert len({id(client) for client in sdk_clients}) == 1
-        assert all(client._client is transport for client in sdk_clients)
-        assert all(client._http is transport for client in nemo_clients)
+        assert len({id(client) for client in clients}) == len(clients)
+        assert all(client._http is transport for client in clients)
 
         await provider.close()
         assert created[0].close_count == 1
@@ -470,16 +461,29 @@ class TestDependencyProvider:
         await provider.close()
 
     @pytest.mark.asyncio
-    async def test_service_principal_sdk_shares_provider_transport(self):
+    async def test_service_principal_clients_are_fresh_and_share_provider_transport(self):
         provider = DependencyProvider()
-        cached_sdk = provider.get_sdk_client()
-        service_sdk = provider.get_sdk_client(as_service="entities")
+        first = provider.get_service_nemo_client("entities")
+        second = provider.get_service_nemo_client("entities")
 
-        assert service_sdk is not cached_sdk
-        assert service_sdk._client is provider.get_http_client()
-        assert cached_sdk._client is provider.get_http_client()
+        assert first is not second
+        assert first._http is provider.get_http_client()
+        assert second._http is provider.get_http_client()
+        assert first.default_headers["X-NHX-Principal-Id"] == "service:entities"
+        assert first.default_headers["X-NHX-Internal"] == "true"
 
         await provider.close()
+
+    def test_service_sync_client_uses_provider_sync_transport(self):
+        provider = DependencyProvider()
+        transport = httpx.Client()
+        provider._sync_http_client = transport
+
+        client = provider.get_service_sync_nemo_client("jobs", on_behalf_of=None)
+
+        assert client._http is transport
+        assert client.default_headers["X-NHX-Principal-Id"] == "service:jobs"
+        transport.close()
 
     @pytest.mark.asyncio
     async def test_close_without_clients(self):

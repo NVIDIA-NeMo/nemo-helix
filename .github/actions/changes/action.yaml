@@ -19,6 +19,9 @@ outputs:
   fabric:
     description: "'true' if the Fabric agent-eval runtime, its tests, or its dependency extra changed"
     value: ${{ steps.filter.outputs.fabric }}
+  harbor-integration:
+    description: "'true' if the Harbor runtime, its tests/fixtures, or its dependency extra changed"
+    value: ${{ steps.filter.outputs.harbor-integration }}
   evaluator-sdk-closure:
     description: "'true' if anything that can change the agent_eval import closure changed"
     value: ${{ steps.filter.outputs.evaluator-sdk-closure }}
@@ -115,6 +118,24 @@ runs:
             - 'packages/nemo_evaluator_sdk/pyproject.toml'
             - '.github/workflows/ci.yaml'
             - '.github/actions/changes/action.yaml'
+          harbor-integration:
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/harbor/**'
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/revisions.py'
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/sdk/**'
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/jobs/**'
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/api/**'
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/task_refs.py'
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/task_identity.py'
+            - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/**'
+            - 'packages/nemo_evaluator_sdk/tests/agent_eval/test_harbor_*.py'
+            - 'packages/nemo_evaluator_sdk/pyproject.toml'
+            - 'plugins/nemo-evaluator/tests/integration/test_harbor_*.py'
+            - 'plugins/nemo-evaluator/tests/integration/conftest.py'
+            - 'plugins/nemo-evaluator/examples/harbor_taskset/**'
+            - 'plugins/nemo-evaluator/src/nemo_evaluator/examples/harbor_test_agent.py'
+            - 'plugins/nemo-evaluator/pyproject.toml'
+            - '.github/workflows/ci.yaml'
+            - '.github/actions/changes/action.yaml'
           evaluator-integration:
             # What the evaluator integration suite actually drives. The harness starts a real
             # platform (`nemo services run --service-group all`), so a change to a service it calls
@@ -148,7 +169,7 @@ runs:
             - '.github/workflows/ci.yaml'  # the job definition itself
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
-            # Paths that can change what `import ...harbor_runtime` loads or how the smoke job runs.
+            # Paths that can change what `import ...harbor.runtime` loads or how the smoke job runs.
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/**'  # package-wide import closure
             - 'packages/nemo_evaluator_sdk/tests/test_lazy_public_api.py'  # smoke test file
             - 'packages/nemo_evaluator_sdk/pyproject.toml'  # declared [project] dependencies
@@ -159,17 +180,20 @@ runs:
             - 'plugins/_temporary-scaled-evals/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
+            # test_files_backend.py imports these from outside the plugin tree.
+            - 'packages/filesets/src/filesets/resources.py'
+            - 'packages/nhx_testing/src/nhx/testing/**'
+            - 'services/core/files/src/nhx/core/files/service.py'
+            - 'services/core/secrets/src/nhx/core/secrets/service.py'
           e2e:
             - 'e2e/**'
           docs:
             - 'docs/**'
-            - 'sdk/python/nemo-helix/src/**'
           tools:
             - 'tools/**'
             - 'packages/nemo_helix_ext/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_common/**'
-            - 'sdk/python/nemo-helix/src/nemo_helix/**'
           web-studio:
             - 'web/**'
             - '.nvmrc'
@@ -198,7 +222,6 @@ runs:
             - 'packages/**'
             - 'services/**'
             - 'plugins/**'
-            - 'sdk/python/nemo-helix/**'
           k8s-smoke:
             - 'e2e/k8s/scripts/**'
             - 'e2e/k8s/values/**'
@@ -212,7 +235,6 @@ runs:
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
             - 'packages/nemo_helix_plugin/**'
-            - 'sdk/python/nemo-helix/src/nemo_helix/**'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'

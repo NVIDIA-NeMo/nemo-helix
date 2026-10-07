@@ -116,28 +116,28 @@ def _docker_workload_delegation(*, expires_in_seconds: int) -> WorkloadDelegatio
     return delegation.model_copy(update={"expires_at": expires_at})
 
 
-def test_init_raises_missing_dependency_when_docker_daemon_unavailable(mock_sdk: MagicMock) -> None:
+def test_init_raises_missing_dependency_when_docker_daemon_unavailable(mock_client: MagicMock) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", side_effect=DockerException("Error while fetching server API version")),
     ):
         with pytest.raises(MissingBackendDependencyError, match="Docker daemon is unavailable"):
-            DockerDeploymentBackend(mock_sdk, {"docker_timeout": 5, "pull_images": False})
+            DockerDeploymentBackend(mock_client, {"docker_timeout": 5, "pull_images": False})
 
 
-def test_init_raises_missing_dependency_when_docker_ping_fails(mock_sdk: MagicMock) -> None:
+def test_init_raises_missing_dependency_when_docker_ping_fails(mock_client: MagicMock) -> None:
     client = MagicMock()
     client.ping.side_effect = RequestsConnectionError("Connection refused")
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=client),
     ):
         with pytest.raises(MissingBackendDependencyError, match="Docker daemon is unavailable"):
-            DockerDeploymentBackend(mock_sdk, {"docker_timeout": 5, "pull_images": False})
+            DockerDeploymentBackend(mock_client, {"docker_timeout": 5, "pull_images": False})
 
 
 @pytest.mark.asyncio
@@ -165,18 +165,18 @@ async def test_create_deployment_starts_container(
 
 @pytest.mark.asyncio
 async def test_create_deployment_mounts_executor_additional_volumes(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {
                 "docker_timeout": 60,
                 "pull_images": False,
@@ -300,7 +300,7 @@ async def test_create_deployment_uses_workload_identity_token_ttl(
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_does_not_mount_workload_identity_on_auth_proxy_sidecar(
+async def test_create_deployment_mounts_workload_identity_on_auth_proxy_sidecar(
     docker_backend: DockerDeploymentBackend,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
@@ -337,16 +337,14 @@ async def test_create_deployment_does_not_mount_workload_identity_on_auth_proxy_
         )
 
     assert update.status == "STARTING"
-    assert workload_store.register.await_count == 1
-    assert mock_docker_client.volumes.create.call_count == 1
+    assert workload_store.register.await_count == 2
+    assert mock_docker_client.volumes.create.call_count == 2
     sidecar_kwargs = mock_docker_client.containers.create.call_args_list[1].kwargs
     assert sidecar_kwargs["labels"][CONTAINER_ROLE_LABEL] == "auth-proxy"
-    assert DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL not in sidecar_kwargs["labels"]
-    assert DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL not in sidecar_kwargs["labels"]
-    assert WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR not in sidecar_kwargs["environment"]
-    assert all(
-        binding["bind"] != WORKLOAD_IDENTITY_VOLUME_PATH for binding in sidecar_kwargs.get("volumes", {}).values()
-    )
+    assert sidecar_kwargs["labels"][DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    assert DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL in sidecar_kwargs["labels"]
+    assert sidecar_kwargs["environment"][WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    assert any(binding["bind"] == WORKLOAD_IDENTITY_VOLUME_PATH for binding in sidecar_kwargs["volumes"].values())
 
 
 @pytest.mark.asyncio
@@ -723,18 +721,18 @@ async def test_refresh_workload_identity_delegation_skips_stale_conflict(
 
 @pytest.mark.asyncio
 async def test_create_deployment_uses_executor_default_network(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "network": "nhx-e2e-test-network"},
         )
         backend._client = mock_docker_client
@@ -758,18 +756,18 @@ async def test_create_deployment_uses_executor_default_network(
 
 @pytest.mark.asyncio
 async def test_create_deployment_backend_config_network_overrides_executor_default(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "network": "executor-network"},
         )
         backend._client = mock_docker_client
@@ -793,20 +791,20 @@ async def test_create_deployment_backend_config_network_overrides_executor_defau
 
 @pytest.mark.asyncio
 async def test_create_deployment_network_endpoint_mode_reports_container_url(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
     free_host_ports: None,
 ) -> None:
     del free_host_ports
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {
                 "docker_timeout": 60,
                 "pull_images": False,
@@ -887,7 +885,7 @@ async def test_create_deployment_delivers_config_files_before_start(
 
     The server command reads its config at startup, so delivery after ``start``
     would race the process. Asserting the ordering is the point: dropping the
-    delivery entirely used to be silent (AIRCORE-999), and delivering it late
+    delivery entirely used to be silent, and delivering it late
     fails the same way.
     """
     mock_entities.get.return_value = config_files_config()
@@ -1173,7 +1171,7 @@ async def test_create_lora_group_fails_when_init_nonzero(
 
 @pytest.mark.asyncio
 async def test_create_falls_back_to_local_image_when_pull_fails(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
@@ -1185,13 +1183,13 @@ async def test_create_falls_back_to_local_image_when_pull_fails(
     from unittest.mock import patch
 
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         # pull_images enabled so the pull path runs
-        backend = DockerDeploymentBackend(mock_sdk, {"docker_timeout": 60, "pull_images": True})
+        backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": True})
         backend._client = mock_docker_client
 
     mock_entities.get.return_value = sample_config()
@@ -1215,7 +1213,7 @@ async def test_create_falls_back_to_local_image_when_pull_fails(
 
 @pytest.mark.asyncio
 async def test_create_fails_when_pull_fails_and_no_local_image(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
@@ -1223,12 +1221,12 @@ async def test_create_fails_when_pull_fails_and_no_local_image(
     from unittest.mock import patch
 
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
-        backend = DockerDeploymentBackend(mock_sdk, {"docker_timeout": 60, "pull_images": True})
+        backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": True})
         backend._client = mock_docker_client
 
     mock_entities.get.return_value = sample_config()
@@ -1282,18 +1280,18 @@ async def test_delete_removes_whole_group(
 
 @pytest.mark.asyncio
 async def test_delete_scoped_deployment_does_not_remove_foreign_primary(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 
@@ -1340,18 +1338,18 @@ async def test_delete_default_scoped_deployment_does_not_remove_foreign_primary(
 
 @pytest.mark.asyncio
 async def test_create_lora_group_does_not_remove_foreign_stale_init_container(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 
@@ -1550,18 +1548,18 @@ async def test_read_status_starting_when_running_port_not_bound(
 
 @pytest.mark.asyncio
 async def test_read_status_network_endpoint_mode_probes_container_url(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {
                 "docker_timeout": 60,
                 "pull_images": False,
@@ -1884,7 +1882,7 @@ async def test_read_status_treats_zero_on_failure_backoff_as_unlimited(
     ],
 )
 async def test_read_status_treats_foreign_container_as_missing(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
     restart_policy: RestartPolicy,
@@ -1893,13 +1891,13 @@ async def test_read_status_treats_foreign_container_as_missing(
 ) -> None:
     gpu_pool = MagicMock()
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=gpu_pool),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 
@@ -2027,18 +2025,18 @@ async def test_create_never_job_returns_succeeded_when_container_exits_immediate
 
 @pytest.mark.asyncio
 async def test_create_never_job_uses_configured_oneshot_observe_timeout(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 600, "oneshot_observe_timeout_seconds": 7, "pull_images": False},
         )
         backend._client = mock_docker_client
@@ -2294,18 +2292,18 @@ async def test_default_list_managed_deployment_names_ignores_foreign_scoped_reso
 
 @pytest.mark.asyncio
 async def test_list_managed_deployment_names_scopes_docker_query(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 
@@ -2334,18 +2332,18 @@ async def test_list_managed_deployment_names_scopes_docker_query(
 
 @pytest.mark.asyncio
 async def test_get_logs_treats_foreign_container_as_missing(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"docker_timeout": 60, "pull_images": False, "resource_scope": "e2e-abc123"},
         )
 

@@ -12,6 +12,7 @@ import {
   formToUnslothCreate,
   getInitialFormValuesFromState,
   jobToFormFields,
+  templateToFormFields,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
 import {
@@ -555,4 +556,43 @@ describe('getInitialFormValuesFromState', () => {
       expect(getInitialFormValuesFromState(state)).toBeUndefined();
     }
   );
+});
+
+describe('templateToFormFields', () => {
+  it('replays a saved config the same way a cloned job does', () => {
+    // The stored config is a job spec, so a saved template and a clone must agree.
+    const fromJob = jobToFormFields(customizationJob1);
+    const fromTemplate = templateToFormFields({
+      backend: 'automodel',
+      config: customizationJob1.spec as never,
+      description: customizationJob1.description,
+    });
+
+    expect(fromTemplate?.backend).toBe(fromJob.backend);
+    expect(fromTemplate?.automodel).toEqual(fromJob.automodel);
+  });
+
+  it('refuses a template naming a backend the form has no arm for', () => {
+    // jobToFormFields would otherwise fall back to a default, wrong-backend form.
+    expect(
+      templateToFormFields({ backend: 'something-else', config: {} as never, description: '' })
+    ).toBeNull();
+  });
+
+  it('replays on the persisted backend, not the shape of the config', () => {
+    // `parallelism` is optional on automodel input and shape inference keys on it, so a
+    // template created through the API without it would otherwise be refused.
+    const withoutParallelism = { ...(customizationJob1.spec as object) } as {
+      parallelism?: unknown;
+    };
+    delete withoutParallelism.parallelism;
+
+    expect(
+      templateToFormFields({
+        backend: 'automodel',
+        config: withoutParallelism as never,
+        description: '',
+      })?.backend
+    ).toBe('automodel');
+  });
 });

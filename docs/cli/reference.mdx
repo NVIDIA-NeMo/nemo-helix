@@ -3993,16 +3993,16 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `cancel`: Cancel a platform job.
+* `cancel`: Cancel a platform job by name or ID.
 * `create`: Create a new platform job.
-* `delete`: Delete a platform job.
+* `delete`: Delete a platform job by name or ID.
 * `get-logs`: Get paginated logs for a platform job.
 * `get-status`: Get the status of a platform job.
 * `list`: List platform jobs with filtering and pagination.
 * `list-execution-profiles`: Get all currently configured execution profiles.
-* `pause`: Pause a platform job.
-* `resume`: Resume a paused platform job.
-* `get`: Get a platform job by name.
+* `pause`: Pause a platform job by name or ID.
+* `resume`: Resume a paused platform job by name or ID.
+* `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
 * `watch`: Watch a platform job until it reaches a terminal status.
 * `tail`: Print the newest lines from a platform job log.
@@ -4012,7 +4012,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 
 #### nemo jobs cancel
 
-Cancel a platform job.
+Cancel a platform job by name or ID.
 
 **Usage:**
 
@@ -4022,7 +4022,7 @@ nemo jobs cancel [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4095,7 +4095,7 @@ nemo jobs create [OPTIONS] [NAME]
 
 #### nemo jobs delete
 
-Delete a platform job.
+Delete a platform job by name or ID.
 
 **Usage:**
 
@@ -4105,7 +4105,7 @@ nemo jobs delete [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4248,7 +4248,7 @@ nemo jobs list-execution-profiles [OPTIONS]
 
 #### nemo jobs pause
 
-Pause a platform job.
+Pause a platform job by name or ID.
 
 **Usage:**
 
@@ -4258,7 +4258,7 @@ nemo jobs pause [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4274,7 +4274,7 @@ nemo jobs pause [OPTIONS] NAME
 
 #### nemo jobs resume
 
-Resume a paused platform job.
+Resume a paused platform job by name or ID.
 
 **Usage:**
 
@@ -4284,7 +4284,7 @@ nemo jobs resume [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4300,7 +4300,7 @@ nemo jobs resume [OPTIONS] NAME
 
 #### nemo jobs get
 
-Get a platform job by name.
+Get a platform job by name or ID.
 
 **Usage:**
 
@@ -4310,7 +4310,7 @@ nemo jobs get [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -5917,8 +5917,6 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 **Help:**
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
 
 **Commands:**
@@ -5983,7 +5981,6 @@ nemo agents create [OPTIONS]
 * `--agent-config, -c <FILE>`: Path to an agent YAML config file.
 * `--description`: [default: ]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6002,7 +5999,6 @@ nemo agents list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6010,8 +6006,13 @@ nemo agents list [OPTIONS]
 
 **Output Options:**
 
-* `--format, --output-format, -o, -f <CHOICE>`: Output format for the list of agents. [possible values: table, json, yaml, csv, markdown, raw]
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo agents get
 
@@ -6030,11 +6031,14 @@ nemo agents get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 #### nemo agents delete
 
@@ -6053,7 +6057,6 @@ nemo agents delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
 **Help:**
@@ -6071,9 +6074,9 @@ outcome of runtime startup instead of merely the API call.  Use
 scripted pipelines that prefer to poll separately via ``nemo agents
 deployments wait``.
 
-Container modes (``--mode docker|k8s``) compile to the nemo-deployments
+Container modes (``--mode docker|k8s|openshell``) compile to the nemo-deployments
 plugin. Requires a configured deployments executor (``deployments.executors``
-/ ``agents.deployments.docker_executor`` or ``k8s_executor``). Container
+/ ``agents.deployments.docker_executor``, ``k8s_executor``, or ``openshell_executor``). Container
 endpoint gateway routing and the full k8s runtime contract (in-cluster
 inference gateway, wheel staging) are still evolving — docker mode is the
 supported local path today.
@@ -6088,14 +6091,13 @@ nemo agents deploy [OPTIONS]
 
 * `--agent, -a`: Name of the agent to deploy.
 * `--name, -n`: Deployment name (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess (default), docker, or k8s. [default: subprocess]
-* `--image, -i`: Container image for docker/k8s modes (falls back to deployments.default_image).
+* `--mode`: Runtime backend: subprocess (default), docker, k8s, or openshell. [default: subprocess]
+* `--image, -i`: Container image for docker/k8s/openshell modes (falls back to deployments.default_image).
 * `--use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass --no-wait for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6126,15 +6128,14 @@ nemo agents redeploy [OPTIONS]
 * `--agent-config, -c <FILE>`: Path to the new agent YAML config file to redeploy from.
 * `--description`: Agent description (as on create). [default: ]
 * `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess, docker, or k8s. Auto-detected from the existing deployment when omitted.
-* `--image, -i`: Container image for docker/k8s modes. Auto-detected from the existing deployment when omitted.
+* `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Auto-detected from the existing deployment when omitted.
+* `--image, -i`: Container image for docker/k8s/openshell modes. Auto-detected from the existing deployment when omitted.
 * `--use-image-entrypoint, --no-use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command. Auto-detected from the existing deployment when omitted.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref. Auto-detected from the existing deployment when omitted; pass an empty string to deploy with no environment.
 * `--wait, --no-wait`: Wait for the new deployment to reach a terminal status (running or failed) before returning. Exits 0 only on running; exits 1 on failure or timeout. Pass --no-wait to return the pending deployment immediately as JSON.
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
 * `--yes, -y`: Skip confirmation prompt.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6173,7 +6174,6 @@ nemo agents logs [OPTIONS] [NAME]
 * `--tail, -n <INTEGER>`: Print only the last N lines before exiting (or before following). Default: print full log.
 * `--path`: Print only the absolute log file path and exit (useful for scripting).
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6197,7 +6197,6 @@ nemo agents undeploy [OPTIONS] [NAME]
 
 * `--agent, --all, -a`: Remove all deployments for this agent.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
 **Help:**
@@ -6238,7 +6237,6 @@ nemo agents deployments list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6246,8 +6244,13 @@ nemo agents deployments list [OPTIONS]
 
 **Output Options:**
 
-* `--format, --output-format, -o, -f <CHOICE>`: Output format for the list of deployments. [possible values: table, json, yaml, csv, markdown, raw]
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo agents deployments get
 
@@ -6266,11 +6269,14 @@ nemo agents deployments get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo agents deployments delete
 
@@ -6289,7 +6295,6 @@ nemo agents deployments delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
 **Help:**
@@ -6322,7 +6327,6 @@ nemo agents deployments wait [OPTIONS] [NAME]
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait. [default: 300]
 * `--interval <FLOAT>`: Poll interval in seconds. [default: 2.0]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6368,7 +6372,6 @@ nemo agents environment-specs create [OPTIONS] NAME
 * `--spec-file, -f <PATH>`: Path to a JSON/YAML EnvironmentSpec body (without 'name').
 * `--spec`: Inline EnvironmentSpec body as a JSON object string.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6387,7 +6390,6 @@ nemo agents environment-specs list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6395,8 +6397,13 @@ nemo agents environment-specs list [OPTIONS]
 
 **Output Options:**
 
-* `--format, --output-format, -o, -f <CHOICE>`: Output format. [possible values: table, json, yaml, csv, markdown, raw]
-* `--no-truncate`: Don't truncate long values.
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo agents environment-specs get
 
@@ -6415,11 +6422,14 @@ nemo agents environment-specs get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo agents environment-specs delete
 
@@ -6438,7 +6448,6 @@ nemo agents environment-specs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
 **Help:**
@@ -6491,7 +6500,6 @@ nemo agents environments create [OPTIONS] NAME
 * `--spec-file, -f <PATH>`: Path to a JSON/YAML AgentEnvironment body (without 'name').
 * `--spec`: Inline AgentEnvironment body as a JSON object string.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6510,7 +6518,6 @@ nemo agents environments list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6518,8 +6525,13 @@ nemo agents environments list [OPTIONS]
 
 **Output Options:**
 
-* `--format, --output-format, -o, -f <CHOICE>`: Output format. [possible values: table, json, yaml, csv, markdown, raw]
-* `--no-truncate`: Don't truncate long values.
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo agents environments get
 
@@ -6538,11 +6550,14 @@ nemo agents environments get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo agents environments delete
 
@@ -6561,7 +6576,6 @@ nemo agents environments delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
 **Help:**
@@ -6608,7 +6622,6 @@ nemo agents compute-specs create [OPTIONS] NAME
 * `--spec-file, -f <PATH>`: Path to a JSON/YAML ComputeSpec body (without 'name').
 * `--spec`: Inline ComputeSpec body as a JSON object string.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6627,7 +6640,6 @@ nemo agents compute-specs list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6635,8 +6647,13 @@ nemo agents compute-specs list [OPTIONS]
 
 **Output Options:**
 
-* `--format, --output-format, -o, -f <CHOICE>`: Output format. [possible values: table, json, yaml, csv, markdown, raw]
-* `--no-truncate`: Don't truncate long values.
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo agents compute-specs get
 
@@ -6655,11 +6672,14 @@ nemo agents compute-specs get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo agents compute-specs delete
 
@@ -6678,7 +6698,6 @@ nemo agents compute-specs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
 **Help:**
@@ -6702,7 +6721,6 @@ nemo agents chat [OPTIONS]
 * `--session, -s`: Name of an existing persisted session to resume.
 * `--session-name`: Name for a new session; valid only with --agent-deployment.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--timeout, -t <FLOAT RANGE>`: Request timeout in seconds for each streamed agent turn. [default: 300] [env: NEMO_AGENTS_INVOKE_TIMEOUT=]
 
 **Help:**
@@ -6743,7 +6761,6 @@ nemo agents sessions list [OPTIONS]
 
 * `--agent-deployment, -d`: Limit results to sessions bound to this deployment.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -6751,8 +6768,13 @@ nemo agents sessions list [OPTIONS]
 
 **Output Options:**
 
-* `--format, --output-format, -o, -f <CHOICE>`: Output format for the list of sessions. [possible values: table, json, yaml, csv, markdown, raw]
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo agents sessions get
 
@@ -6771,11 +6793,14 @@ nemo agents sessions get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo agents sessions close
 
@@ -6794,7 +6819,6 @@ nemo agents sessions close [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--yes, -y`: Skip confirmation prompt.
 
 **Help:**
@@ -6832,8 +6856,6 @@ nemo agents analyze [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AnalyzeBatchConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -6858,7 +6880,6 @@ nemo agents analyze explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -6895,8 +6916,6 @@ nemo agents evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the EvaluateAgentSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -6921,7 +6940,6 @@ nemo agents evaluate explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -6963,8 +6981,6 @@ nemo agents evaluate-suite [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the EvaluateSuiteSubmitConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -6989,7 +7005,6 @@ nemo agents evaluate-suite explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -7030,8 +7045,6 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the ExecuteAgentJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -7056,7 +7069,6 @@ nemo agents execute explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -7103,8 +7115,6 @@ nemo agents optimize-skills [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the OptimizeSkillsConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -7129,7 +7139,6 @@ nemo agents optimize-skills explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -7175,8 +7184,6 @@ nemo agents package-agent [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the PackageAgentInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -7199,7 +7206,6 @@ nemo agents package-agent explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -7223,7 +7229,6 @@ nemo agents invoke [OPTIONS]
 * `--agent, -a`: Name of a platform-deployed agent to invoke (platform required).
 * `--agent-deployment, -d`: Name of a specific deployment to invoke (platform required).
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 * `--timeout, -t <FLOAT>`: Request timeout in seconds for platform invocation. [default: 300] [env: NEMO_AGENTS_INVOKE_TIMEOUT=]
 * `--no-progress`: Suppress the stderr spinner while waiting for the response.
 
@@ -7342,7 +7347,6 @@ nemo agents usage show [OPTIONS] <PATH | FILESET_REF>
 
 * `--total-params <FLOAT>`: Model's total parameter count, in billions (e.g. 8.0 for Llama-3.1-8B, 70.0 for Llama-3.1-70B).  When set with non-null tokens, compute_units = total_tokens × total_params.  Closed-source models have no public number — leave unset and compute_units stays null.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -7420,7 +7424,7 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `list-strategies`: List the strategies `--strategy` accepts, one name per line.
+* `list-strategies`: List installed strategies and what each one optimizes.
 * `prepare-fileset`: Validate a NAT optimize bundle and upload it to a fileset...
 
 *Jobs:*
@@ -7429,17 +7433,18 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 
 ##### nemo agents optimize list-strategies
 
-List the strategies `--strategy` accepts, one name per line.
+List installed strategies and what each one optimizes.
 
-Only the platform is asked, because only the platform runs the job: a
-client venv without a strategy plugin still submits to a server that
-has it, and vice versa. Answering from this environment instead would
-describe a different machine, so an unreachable platform is an error
-rather than a cue to guess.
+Every name listed is a valid `--strategy`. Only the platform is asked,
+because only the platform runs the job: a client venv without a strategy
+plugin still submits to a server that has it, and vice versa. Answering
+from this environment instead would describe a different machine, so an
+unreachable platform is an error rather than a cue to guess.
 
-Stdout carries names and nothing else, so `for s in $(nemo agents optimize
-list-strategies)` is safe: an empty platform prints nothing there. The
-target is announced once on stderr by the shared base-URL resolver.
+Output follows every other `nemo` list command: a table on a terminal,
+JSON when piped, so a script reads the names with
+`-f json | jq -r '.[].name'`. The target is announced once on stderr by
+the shared base-URL resolver.
 
 **Usage:**
 
@@ -7447,13 +7452,15 @@ target is announced once on stderr by the shared base-URL resolver.
 nemo agents optimize list-strategies [OPTIONS]
 ```
 
-**Options:**
-
-* `--base-url`: Platform to ask. Defaults to the same target as every other `nemo` command. [env: NEMO_BASE_URL=]
-
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
 
 ##### nemo agents optimize prepare-fileset
 
@@ -7474,7 +7481,6 @@ nemo agents optimize prepare-fileset [OPTIONS]
 * `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.
 * `--check-models, --no-check-models`: Also resolve the config's models against the platform before uploading.
 * `--dry-run`: Run preflight and print the result without uploading.
-* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
 **Help:**
 
@@ -7512,8 +7518,6 @@ nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RunStrategySubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -7536,7 +7540,6 @@ nemo agents optimize run-strategy explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -7554,8 +7557,6 @@ nemo data-designer [OPTIONS] COMMAND [ARGS]...
 
 **Help:**
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
 
 **Commands:**
@@ -7661,8 +7662,6 @@ nemo data-designer preview [OPTIONS] [CONFIG_SOURCE]
 
 * `--num-records, -n <INTEGER RANGE>`: [default: 10]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--cluster`
-* `--base-url`
 * `--request-id`
 * `--non-interactive`: Display all records at once instead of browsing interactively. Ignored when --save-results is used.
 * `--save-results`: Save preview artifacts to disk (dataset.parquet, per-record HTML, analysis report) instead of displaying records in the terminal.
@@ -7944,8 +7943,6 @@ nemo data-designer retrieval-preview [OPTIONS]
 
 **Submission:**
 
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace path segment used in the submit URL. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--request-id`: Set the X-Request-ID header (echoed back in ctx.request_id).
 
@@ -7973,8 +7970,6 @@ nemo data-designer create [OPTIONS] [CONFIG_SOURCE] [COMMAND] [ARGS]...
 * `--num-records, -n <INTEGER RANGE>`: [default: 10]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--profile`
-* `--cluster`
-* `--base-url`
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`
 
@@ -7999,7 +7994,6 @@ nemo data-designer create explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -8059,8 +8053,6 @@ nemo data-designer retrieval-generate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalGenerateJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -8085,7 +8077,6 @@ nemo data-designer retrieval-generate explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -8147,8 +8138,6 @@ nemo data-designer retrieval-prepare [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalPrepareJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -8173,7 +8162,6 @@ nemo data-designer retrieval-prepare explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -8262,8 +8250,6 @@ nemo data-designer retrieval-run [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrievalRunJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -8288,7 +8274,6 @@ nemo data-designer retrieval-run explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -8591,8 +8576,6 @@ nemo auditor [OPTIONS] COMMAND [ARGS]...
 
 **Help:**
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
 
 **Commands:**
@@ -8655,14 +8638,17 @@ nemo auditor configs create [OPTIONS] NAME
 
 **Options:**
 
-* `--data-file, -f <FILE>`: JSON file with the config body (without name/workspace).
+* `--data-file <FILE>`: JSON file with the config body (without name/workspace).
 * `--data, -d`: Inline JSON body for the config.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor configs list
 
@@ -8675,11 +8661,20 @@ nemo auditor configs list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo auditor configs get
 
@@ -8696,11 +8691,14 @@ nemo auditor configs get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor configs update
 
@@ -8716,14 +8714,17 @@ nemo auditor configs update [OPTIONS] NAME
 
 **Options:**
 
-* `--data-file, -f <FILE>`: JSON file with the new config body.
+* `--data-file <FILE>`: JSON file with the new config body.
 * `--data, -d`: Inline JSON body.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor configs delete
 
@@ -8740,7 +8741,6 @@ nemo auditor configs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
@@ -8782,14 +8782,17 @@ nemo auditor targets create [OPTIONS] NAME
 
 **Options:**
 
-* `--data-file, -f <FILE>`: JSON file with the target body (without name/workspace).
+* `--data-file <FILE>`: JSON file with the target body (without name/workspace).
 * `--data, -d`: Inline JSON body for the target.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor targets list
 
@@ -8802,11 +8805,20 @@ nemo auditor targets list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo auditor targets get
 
@@ -8823,11 +8835,14 @@ nemo auditor targets get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor targets update
 
@@ -8843,14 +8858,17 @@ nemo auditor targets update [OPTIONS] NAME
 
 **Options:**
 
-* `--data-file, -f <FILE>`: JSON file with the new target body.
+* `--data-file <FILE>`: JSON file with the new target body.
 * `--data, -d`: Inline JSON body.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo auditor targets delete
 
@@ -8867,7 +8885,6 @@ nemo auditor targets delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
@@ -8881,25 +8898,6 @@ Run an auditor scan against a configured target.
 
 ```shell
 nemo auditor audit [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `submit`: Submit to a cluster.
-* `explain`: Show input/output schemas.
-
-##### nemo auditor audit submit
-
-Submit to a cluster.
-
-**Usage:**
-
-```shell
-nemo auditor audit submit [OPTIONS]
 ```
 
 **Help:**
@@ -8921,14 +8919,16 @@ nemo auditor audit submit [OPTIONS]
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AuditInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
 Some spec fields cannot be represented as CLI flags: `config`, `target`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
+
+**Commands:**
+
+* `explain`: Show input/output schemas.
 
 ##### nemo auditor audit explain
 
@@ -8943,7 +8943,6 @@ nemo auditor audit explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -8961,8 +8960,6 @@ nemo anonymizer [OPTIONS] COMMAND [ARGS]...
 
 **Help:**
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
 
 **Commands:**
@@ -9036,8 +9033,6 @@ nemo anonymizer preview [OPTIONS]
 
 **Submission:**
 
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace path segment used in the submit URL. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--request-id`: Set the X-Request-ID header (echoed back in ctx.request_id).
 
@@ -9088,8 +9083,6 @@ nemo anonymizer run [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AnonymizerRequest Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -9114,7 +9107,6 @@ nemo anonymizer run explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -9132,8 +9124,6 @@ nemo evaluator [OPTIONS] COMMAND [ARGS]...
 
 **Help:**
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
 
 **Commands:**
@@ -9212,8 +9202,6 @@ nemo evaluator agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AgentEvalInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -9238,7 +9226,6 @@ nemo evaluator agent-evaluate explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -9277,8 +9264,6 @@ nemo evaluator evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the EvaluateInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -9303,7 +9288,6 @@ nemo evaluator evaluate explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -9337,8 +9321,6 @@ nemo evaluator retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RetrieveEvalInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -9363,7 +9345,6 @@ nemo evaluator retrieve-eval explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -9382,13 +9363,9 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Override the platform API host.
-* `--cluster`: Name of a cluster in the CLI config.
 
 **Help:**
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
 
 **Resource Creation Options:**
@@ -9467,7 +9444,6 @@ nemo customization automodel explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -9538,8 +9514,6 @@ nemo customization automodel submit [OPTIONS] JOB_JSON
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
-* `--cluster`: Name of a cluster in the CLI config. Submits to that cluster's base URL.
-* `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NHX_BASE_URL`, then http://localhost:8080.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
 
@@ -9619,7 +9593,6 @@ nemo customization rl explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -9693,8 +9666,6 @@ nemo customization rl submit [OPTIONS] JOB_JSON
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
-* `--cluster`: Name of a cluster in the CLI config. Submits to that cluster's base URL.
-* `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NHX_BASE_URL`, then http://localhost:8080.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
 
@@ -9774,7 +9745,6 @@ nemo customization unsloth explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -9845,8 +9815,6 @@ nemo customization unsloth submit [OPTIONS] JOB_JSON
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
-* `--cluster`: Name of a cluster in the CLI config. Submits to that cluster's base URL.
-* `--base-url`: Override platform API host. If omitted: --cluster, then CLI context, then `$NHX_BASE_URL`, then http://localhost:8080.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
 
@@ -9995,8 +9963,6 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -10017,7 +9983,6 @@ nemo customization automodel.jobs explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -10085,8 +10050,6 @@ nemo customization rl.jobs submit [OPTIONS]
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the RlJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -10107,7 +10070,6 @@ nemo customization rl.jobs explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -10211,8 +10173,6 @@ nemo customization unsloth.jobs submit [OPTIONS]
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the UnslothJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -10233,7 +10193,6 @@ nemo customization unsloth.jobs explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 
@@ -10251,8 +10210,6 @@ nemo insights [OPTIONS] COMMAND [ARGS]...
 
 **Help:**
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
 
 **Commands:**
@@ -10294,13 +10251,16 @@ nemo insights analysis enable [OPTIONS]
 
 * `--agent`: Name of the agent to opt in to periodic analysis.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
 * `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo insights analysis disable
 
@@ -10316,11 +10276,14 @@ nemo insights analysis disable [OPTIONS]
 
 * `--agent`: Name of the agent to opt out of periodic analysis.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo insights analysis status
 
@@ -10336,11 +10299,22 @@ nemo insights analysis status [OPTIONS]
 
 * `--agent`: Optional agent name. Omit to list all analysis configs.
 * `--workspace, -w`: Workspace to inspect. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
+* `--page <INTEGER>`: Page number (1-indexed). Ignored with --agent. [default: 1]
+* `--page-size <INTEGER>`: Items per page. Ignored with --agent. [default: 100]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo insights analysis-runs
 
@@ -10379,7 +10353,6 @@ nemo insights analysis-runs create [OPTIONS]
 
 * `--agent`: Name of the agent whose telemetry should be analyzed.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
 * `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
 * `--since`: ISO-8601 lower bound enforced on the analyst's trace/span reads.
@@ -10393,6 +10366,10 @@ nemo insights analysis-runs create [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo insights analysis-runs list
 
@@ -10408,7 +10385,6 @@ nemo insights analysis-runs list [OPTIONS]
 
 * `--agent`: Only list runs that analyzed this agent.
 * `--workspace, -w`: Workspace to inspect. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 * `--page <INTEGER>`: Page number (1-indexed). [default: 1]
 * `--page-size <INTEGER>`: Items per page. [default: 20]
 * `--sort`: Sort field; prefix with '-' for descending. [default: -created_at]
@@ -10416,6 +10392,16 @@ nemo insights analysis-runs list [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo insights analysis-runs get
 
@@ -10437,7 +10423,6 @@ nemo insights analysis-runs get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Workspace the run belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 * `--wait`: Poll until the run's backing job reaches a terminal state.
 * `--poll-timeout <FLOAT>`: How long --wait polls before giving up. [default: 900.0]
 * `--poll-interval <FLOAT>`: Seconds between --wait polls. [default: 5.0]
@@ -10445,6 +10430,10 @@ nemo insights analysis-runs get [OPTIONS] NAME
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ### nemo safe-synthesizer
 
@@ -10458,8 +10447,6 @@ nemo safe-synthesizer [OPTIONS] COMMAND [ARGS]...
 
 **Help:**
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
 * `--help, -h`: Show this message and exit.
 
 **Commands:**
@@ -10571,8 +10558,6 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
 * `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
-* `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 Job Spec flags are generated from the SafeSynthesizerJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -10597,7 +10582,6 @@ nemo safe-synthesizer generate explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
-* `--cluster`: Accepted for forward compatibility.
 
 **Help:**
 

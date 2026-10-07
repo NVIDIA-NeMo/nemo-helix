@@ -273,7 +273,7 @@ def test_republishing_a_taskset_after_a_member_moves_cuts_a_revision(subprocess_
 
 def _harbor_input(client: Evaluator, digest: str = "a" * 64, *, config: dict | None = None) -> TaskInput:
     from nemo_evaluator.harbor.publication import publish_harbor_task_archive
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import private_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import private_directory
     from nemo_helix_plugin.files.client import FilesClient
 
     with private_directory() as parent:

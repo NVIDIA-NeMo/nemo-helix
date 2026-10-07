@@ -5,7 +5,7 @@
 title: "Gateway Integration"
 description: ""
 ---
-In production, a gateway (reverse proxy, ingress controller, or service mesh) often sits in front of the NeMo Helix. This page explains the recommended enforced gateway path for bearer-token authentication, what headers the gateway must set, and which paths skip authorization.
+In production, a gateway (reverse proxy, ingress controller, or service mesh) often sits in front of NeMo Helix. This page explains the recommended enforced gateway path for bearer-token authentication, what headers the gateway must set, and which paths skip authorization.
 
 For the security architecture, see [Security Model](/documentation/access-control/security-model).
 
@@ -86,7 +86,7 @@ http_filters:
         code: ServiceUnavailable
       http_service:
         server_uri:
-          uri: "http://nemo:8080"
+          uri: "https://nemo:8080"
           cluster: nemo
           timeout: 5s
         path_prefix: "/apis/auth/ext-authz"

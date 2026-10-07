@@ -155,10 +155,14 @@ async def test_find_available_port_returns_none_only_when_range_is_full(
 
 
 @pytest.mark.asyncio
-async def test_find_available_port_excludes_pending_assignments(mock_docker_client: MagicMock) -> None:
+async def test_find_available_port_excludes_pending_assignments(
+    mock_docker_client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_deployments_plugin.backends.docker import ports as ports_mod
     from nemo_deployments_plugin.backends.docker.ports import find_available_port
 
     mock_docker_client.containers.list.return_value = []
+    monkeypatch.setattr(ports_mod, "is_port_free", lambda port: True)
 
     first = await find_available_port(mock_docker_client, 9000, 9002)
     assert first == 9000

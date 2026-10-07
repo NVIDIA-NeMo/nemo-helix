@@ -3,11 +3,12 @@
 
 import json
 import logging
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nhx.common.entities.utils import parse_adapters_suffix
 from nhx.common.service.dependencies import get_nemo_client
 from nhx.core.inference_gateway.api.authz import (
@@ -39,60 +40,16 @@ from nhx.core.inference_gateway.api.validation import validate_entity_name, vali
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-class ParseOpenAIModelError(Exception):
-    """Exception raised when parsing an inference gateway OpenAI model identifier fails."""
-
-
-def parse_igw_openai_model(igw_openai_model: str) -> tuple[str, str]:
-    """Parse an inference gateway OpenAI model identifier into its components.
-
-    The model identifier format is: ``workspace/model_entity_name``.
-
-    Split is on the first ``/`` only, so the returned ``model_entity_name`` may itself contain
-    ``/`` — this is intentional for two cases:
-
-    - **LoRA composite ids**: ``{base}&adapters/{adapter_workspace}/{adapter_name}`` — the
-      ``ModelCache`` uses the same ``split("/", 1)`` rule so the returned tuple is a valid cache key.
-    - **Legacy backwards-compat**: old callers sometimes appended
-      ``/{served_model_name}``; since ``served_model_name`` is resolved from the cache, any extra
-      trailing segments are simply kept as part of ``model_entity_name`` and either hit or miss the
-      cache on their own merits.
-
-    Callers that assume the returned ``model_entity_name`` matches the entity-store
-    ``NAME_PATTERN`` (plain alphanumeric + ``-._+@``) must first handle the composite LoRA shape;
-    use :func:`validate_model_entity_name` for that.
-
-    Args:
-        igw_openai_model: Model identifier in format workspace/model_entity_name
-
-    Returns:
-        Tuple of (workspace, model_entity_name)
-
-    Raises:
-        ParseOpenAIModelError: If the model identifier doesn't contain at least 2 parts
-    """
-    parts = igw_openai_model.split("/", 1)
-    if len(parts) < 2:
-        raise ParseOpenAIModelError(
-            f"Failed to parse workspace and model_entity_name from '{igw_openai_model}'. "
-            f"Expected format: workspace/model_entity_name"
-        )
-    return parts[0], parts[1]
 
 
 def resolve_vm_for_model(
     virtual_model_cache: VirtualModelCache,
     workspace: str,
     model_name: str,
-) -> "SDKVirtualModel | None":
+) -> VirtualModel | None:
     """Resolve the VirtualModel a request should route through, LoRA-composite aware.
 
     A fine-tuned LoRA adapter is a *parented* entity whose composite model id has the

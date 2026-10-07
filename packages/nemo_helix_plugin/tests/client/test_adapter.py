@@ -7,43 +7,43 @@ from typing import assert_type
 
 import httpx
 import pytest
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import HelixClient, client_from_platform, platform_default_headers
-from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.adapter import (
+    AsyncHelixClient,
+    HelixClient,
+    SyncHelixClient,
+    client_from_platform,
+    platform_default_headers,
+)
+from nemo_helix_plugin.client.client import (
+    AsyncNemoClient,
+    NemoClient,
+    NemoClientRuntime,
+)
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.jobs import endpoints
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 
 
-def test_client_from_platform_preserves_stainless_retry_policy() -> None:
+def test_client_from_platform_preserves_retry_policy() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    platform = NeMoHelix(
-        base_url="http://test",
-        workspace="default",
-        max_retries=4,
-        http_client=http_client,
-    )
-
-    client = client_from_platform(platform, JobsClient)
-
-    assert_type(client, JobsClient)
-    assert client.retry is not None
-    assert client.retry == RetryPolicy(
+    retry = RetryPolicy(
         max_retries=4,
         retryable_status_codes=(408, 409, 429),
         retry_all_server_errors=True,
         respect_retry_decision_headers=True,
         respect_retry_after_headers=True,
     )
+    platform = NemoClient(base_url="http://test", workspace="default", retry=retry, http_client=http_client)
+
+    client = client_from_platform(platform, JobsClient)
+
+    assert_type(client, JobsClient)
+    assert client.retry == retry
 
 
 def test_client_from_platform_close_does_not_close_platform_transport() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    platform = NeMoHelix(
-        base_url="http://test",
-        workspace="default",
-        http_client=http_client,
-    )
+    platform = NemoClient(base_url="http://test", workspace="default", http_client=http_client)
 
     client = client_from_platform(platform, JobsClient)
     client.close()
@@ -52,88 +52,35 @@ def test_client_from_platform_close_does_not_close_platform_transport() -> None:
     http_client.close()
 
 
-def test_client_from_platform_uses_platform_prepare_url() -> None:
+def test_client_from_platform_returns_identity_for_same_class() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-
-    class RoutedHelix(NeMoHelix):
-        def _prepare_url(self, url: str) -> httpx.URL:
-            prepared = super()._prepare_url(url)
-            if prepared.path.startswith("/apis/jobs"):
-                return prepared.copy_with(scheme="http", host="127.0.0.1", port=8080)
-            return prepared
-
-    platform = RoutedHelix(
-        base_url="http://gateway",
-        workspace="default",
-        http_client=http_client,
-    )
-
-    client = client_from_platform(platform, JobsClient)
-
-    request = endpoints.list_steps(workspace="default", name="job-1")
-    assert client._resolve_path(request) == ("http://127.0.0.1:8080/apis/jobs/v2/workspaces/default/jobs/job-1/steps")
-
-
-def test_platform_jobs_property_uses_platform_prepare_url() -> None:
-    http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-
-    class RoutedHelix(NeMoHelix):
-        def _prepare_url(self, url: str) -> httpx.URL:
-            prepared = super()._prepare_url(url)
-            if prepared.path.startswith("/apis/jobs"):
-                return prepared.copy_with(scheme="http", host="127.0.0.1", port=8080)
-            return prepared
-
-    platform = RoutedHelix(
-        base_url="http://gateway",
-        workspace="default",
-        http_client=http_client,
-    )
-
-    request = endpoints.list_steps(workspace="default", name="job-1")
-
-    assert platform.jobs is platform.jobs
-    assert platform.jobs._resolve_path(request) == (
-        "http://127.0.0.1:8080/apis/jobs/v2/workspaces/default/jobs/job-1/steps"
-    )
+    base = NemoClient(base_url="http://test", workspace="ws", http_client=http_client)
+    assert client_from_platform(base, NemoClient) is base
 
 
 @pytest.mark.asyncio
 async def test_async_client_from_platform_uses_async_transport() -> None:
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+    platform = AsyncNemoClient(base_url="http://gateway", workspace="default", http_client=http_client)
 
-    platform = AsyncNeMoHelix(
-        base_url="http://gateway",
-        workspace="default",
-        http_client=http_client,
-    )
+    client = client_from_platform(platform, AsyncJobsClient)
 
-    try:
-        client = client_from_platform(platform, AsyncJobsClient)
-
-        assert_type(client, AsyncJobsClient)
-        assert isinstance(client, AsyncJobsClient)
-        assert client._client is http_client
-    finally:
-        await platform.close()
+    assert_type(client, AsyncJobsClient)
+    assert isinstance(client, AsyncJobsClient)
+    assert client._client is http_client
+    await client.aclose()
 
 
 @pytest.mark.asyncio
 async def test_async_client_from_platform_aclose_does_not_close_platform_transport() -> None:
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    platform = AsyncNeMoHelix(
-        base_url="http://gateway",
-        workspace="default",
-        http_client=http_client,
-    )
+    platform = AsyncNemoClient(base_url="http://gateway", workspace="default", http_client=http_client)
 
-    try:
-        client = client_from_platform(platform, AsyncJobsClient)
-        await client.aclose()
+    client = client_from_platform(platform, AsyncJobsClient)
+    await client.aclose()
 
-        assert not http_client.is_closed
-    finally:
-        await platform.close()
+    assert not http_client.is_closed
+    await platform.aclose()
 
 
 def test_from_client_preserves_url_resolver() -> None:
@@ -152,37 +99,20 @@ def test_from_client_preserves_url_resolver() -> None:
 
 
 def test_client_from_platform_propagates_timeout() -> None:
-    """``platform.with_options(timeout=...)`` must reach the typed client.
-
-    Both clients share one httpx client, whose own timeout ``with_options`` does
-    not touch — so the typed client has to carry the override itself or long
-    transfers silently run on the transport's original budget.
-    """
+    """``platform.with_options(timeout=...)`` must reach the typed client."""
     upload_timeout = httpx.Timeout(30.0, write=10 * 60, read=5 * 60)
     http_client = httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
         timeout=httpx.Timeout(60.0),
     )
-    platform = NeMoHelix(base_url="http://test", workspace="default", http_client=http_client)
+    platform = NemoClient(
+        base_url="http://test", workspace="default", timeout=httpx.Timeout(60.0), http_client=http_client
+    )
 
     scoped = platform.with_options(timeout=upload_timeout)
     client = client_from_platform(scoped, JobsClient)
 
     assert client._timeout == upload_timeout
-    # The shared transport is untouched, which is why the override is needed.
-    assert scoped._client.timeout == httpx.Timeout(60.0)
-
-
-def test_client_from_platform_carries_default_timeout() -> None:
-    http_client = httpx.Client(
-        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
-        timeout=httpx.Timeout(60.0),
-    )
-    platform = NeMoHelix(base_url="http://test", workspace="default", http_client=http_client)
-
-    client = client_from_platform(platform, JobsClient)
-
-    assert client._timeout == platform.timeout
 
 
 def test_client_from_platform_carries_disabled_timeout() -> None:
@@ -191,12 +121,11 @@ def test_client_from_platform_carries_disabled_timeout() -> None:
         transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
         timeout=httpx.Timeout(60.0),
     )
-    platform = NeMoHelix(base_url="http://test", workspace="default", http_client=http_client)
+    platform = NemoClient(base_url="http://test", workspace="default", http_client=http_client)
 
     client = client_from_platform(platform.with_options(timeout=None), JobsClient)
 
-    # Not the transport's 60s: httpx reads an all-None Timeout as "wait forever".
-    assert client._timeout == httpx.Timeout(None)
+    assert client._timeout is None
 
 
 def test_client_from_platform_accepts_a_typed_client_and_shares_its_transport() -> None:
@@ -221,19 +150,27 @@ async def test_client_from_platform_accepts_an_async_typed_client() -> None:
 
     assert isinstance(client, AsyncJobsClient)
     assert client._http is http_client
-    with pytest.raises(TypeError):
-        client_from_platform(base, JobsClient)
 
 
-def test_platform_client_protocol_matches_both_platform_handle_shapes() -> None:
+def test_platform_client_protocol_matches_typed_handle_shapes() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    generated = NeMoHelix(base_url="http://test", workspace="ws", http_client=http_client)
     typed = NemoClient(base_url="http://test", workspace="ws", http_client=http_client)
 
-    assert isinstance(generated, HelixClient)
     assert isinstance(typed, HelixClient)
+    assert isinstance(typed, SyncHelixClient)
+    assert not isinstance(typed, AsyncHelixClient)
     assert isinstance(AsyncNemoClient(base_url="http://test", http_client=httpx.AsyncClient()), HelixClient)
     assert not isinstance(object(), HelixClient)
+
+
+def test_client_from_platform_accepts_a_typed_client_runtime() -> None:
+    http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+    runtime = NemoClientRuntime()
+    platform = NemoClient(base_url="http://test", workspace="ws", http_client=http_client, client_runtime=runtime)
+
+    client = client_from_platform(platform, JobsClient)
+
+    assert client.nemo_client_runtime is runtime
 
 
 def test_platform_default_headers_reads_typed_client_headers() -> None:
@@ -247,24 +184,10 @@ def test_platform_default_headers_reads_typed_client_headers() -> None:
     assert client.default_headers == {"X-NHX-Internal": "true"}
 
 
-def test_platform_default_headers_reads_generated_sdk_custom_headers() -> None:
-    http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    platform = NeMoHelix(
-        base_url="http://test", default_headers={"X-NHX-Principal-Id": "service:agents"}, http_client=http_client
-    )
-
-    assert platform_default_headers(platform) == {"X-NHX-Principal-Id": "service:agents"}
-    assert platform_default_headers(AsyncNemoClient(base_url="http://test", http_client=httpx.AsyncClient())) == {}
-
-
 def test_client_from_platform_carries_authorization_header() -> None:
-    """A statically configured bearer reaches the typed client.
-
-    The CLI hands config-file credentials to the generated SDK as a default ``Authorization``
-    header, so dropping the headers here would silently produce an unauthenticated client.
-    """
+    """A statically configured bearer reaches the typed client."""
     http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    platform = NeMoHelix(
+    platform = NemoClient(
         base_url="http://test",
         workspace="default",
         default_headers={"Authorization": "Bearer static-token"},
@@ -273,7 +196,25 @@ def test_client_from_platform_carries_authorization_header() -> None:
 
     client = client_from_platform(platform, JobsClient)
 
-    assert client._default_headers["Authorization"] == "Bearer static-token"
+    assert client.default_headers["Authorization"] == "Bearer static-token"
+
+
+def test_client_from_platform_carries_runtime_without_synthesizing_trusted_identity_headers() -> None:
+    http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+    runtime = NemoClientRuntime()
+    base_client = NemoClient(
+        base_url="http://test",
+        workspace="default",
+        default_headers={"X-NHX-Internal": "true"},
+        http_client=http_client,
+        client_runtime=runtime,
+    )
+
+    client = client_from_platform(base_client, JobsClient)
+
+    assert client.nemo_client_runtime is runtime
+    assert client.default_headers == {"X-NHX-Internal": "true"}
+    assert "X-NHX-Principal-Id" not in client.default_headers
 
 
 def test_client_from_platform_shares_the_transport_so_token_refresh_survives() -> None:
@@ -294,7 +235,7 @@ def test_client_from_platform_shares_the_transport_so_token_refresh_survives() -
         transport=httpx.MockTransport(record),
         event_hooks={"request": [refresh]},
     )
-    platform = NeMoHelix(
+    platform = NemoClient(
         base_url="http://test",
         workspace="default",
         default_headers={"Authorization": "Bearer seeded"},

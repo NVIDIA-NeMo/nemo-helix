@@ -9,7 +9,6 @@ requires-python = ">=3.11,<3.15"
 dependencies = [
     "fastapi>=0.115",
     "httpx>=0.27",
-    "nemo-helix-sdk",
     "nemo-helix-plugin",
     "pydantic>=2.10.6",
     "pyyaml>=6.0",
@@ -19,7 +18,7 @@ version = "0.0.0"
 [project.optional-dependencies]
 docker = ["docker>=7.0"]
 k8s = ["kubernetes>=30.1.0"]
-openshell = ["grpcio>=1.78.0", "openshell>=0.0.92", "protobuf>=6.31.1"]
+openshell = ["grpcio>=1.78.0", "openshell>=0.1.2", "protobuf>=6.31.1"]
 
 [project.entry-points."nemo.services"]
 deployments = "nemo_deployments_plugin.service:DeploymentsService"
@@ -42,7 +41,6 @@ packages = ["src/nemo_deployments_plugin"]
 
 
 [tool.uv.sources]
-nemo-helix-sdk = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 
 

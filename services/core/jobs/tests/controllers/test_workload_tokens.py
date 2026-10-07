@@ -6,7 +6,7 @@ import json
 import tarfile
 
 import httpx
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.auth import AuthContext, Principal, WorkloadDelegationEntity, docker_delegation_name
 from nhx.common.entities import SYSTEM_WORKSPACE
 from nhx.core.jobs.controllers.backends.workload_tokens import (
@@ -76,8 +76,8 @@ def test_authenticated_workload_delegation_store_uses_sync_service_client() -> N
         )
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        sdk = NeMoHelix(
-            base_url="http://platform",
+        nemo_client = NemoClient(
+            base_url="http://127.0.0.1:8000",
             default_headers={
                 "Authorization": "Bearer controller-token",
                 "X-NHX-Principal-On-Behalf-Of": "alice@example.com",
@@ -87,14 +87,14 @@ def test_authenticated_workload_delegation_store_uses_sync_service_client() -> N
             http_client=http_client,
         )
 
-        saved = create_authenticated_workload_delegation_store(sdk).register(entity)
+        saved = create_authenticated_workload_delegation_store(nemo_client).register(entity)
 
     assert saved.id == "delegation-id"
     assert saved.auth_context.principal_id == "creator@example.com"
     assert len(requests) == 1
     request = requests[0]
     assert request.method == "POST"
-    assert str(request.url) == "http://platform/apis/entities/v2/workspaces/system/entities/workload_delegation"
+    assert str(request.url) == "http://127.0.0.1:8000/apis/entities/v2/workspaces/system/entities/workload_delegation"
     assert request.headers["Authorization"] == "Bearer controller-token"
     assert request.headers["X-NHX-Principal-Id"] == "service:jobs"
     assert request.headers["X-NHX-Actor-Aliases"] == "service:jobs"

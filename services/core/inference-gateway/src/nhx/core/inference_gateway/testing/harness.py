@@ -30,8 +30,6 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from fastapi.testclient import TestClient
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.discovery import discover_inference_middleware
 from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient, InferenceGatewayClient
@@ -107,15 +105,11 @@ class IGWPluginHarness:
     Construct via the :func:`igw_plugin_harness` pytest fixture.
     """
 
-    sdk: NeMoHelix
-    """Generated SDK handle kept for plugin test suites that adapt it with
-    ``client_from_platform``."""
-    async_sdk: AsyncNeMoHelix
-    """Generated async SDK handle the IGW cache refresh functions require."""
     client: NemoClient
     """Sync typed platform client the harness uses for its own entity CRUD
     and gateway calls."""
     async_client: AsyncNemoClient
+    """Async typed platform client the IGW cache refresh functions use."""
     test_client: TestClient
     entity_client: EntityClient
 
@@ -182,9 +176,7 @@ class IGWPluginHarness:
         mock_nim.expect_request(DEFAULT_MOCK_CHAT_PATH, method="POST").respond_with_handler(handler)
 
         return cls(
-            sdk=client_context.sdk,
-            async_sdk=client_context.async_sdk,
-            client=NemoClient(base_url="http://testserver", http_client=client_context.test_client),
+            client=client_context.client,
             async_client=client_context.async_client,
             test_client=client_context.test_client,
             entity_client=client_context.entity_client,
@@ -313,11 +305,10 @@ class IGWPluginHarness:
     # Plugin registration (context-managed)
     # ------------------------------------------------------------------
 
-    def _plugin_sdk(self, name: str) -> AsyncNeMoHelix:
-        headers = dict(self.async_sdk.default_headers)
-        headers.update(MARK_INTERNAL_REQUEST_HEADERS)
+    def _plugin_client(self, name: str) -> AsyncNemoClient:
+        headers = dict(MARK_INTERNAL_REQUEST_HEADERS)
         headers.update(build_downstream_service_headers(name))
-        return self.async_sdk.with_options(set_default_headers=headers)
+        return self.async_client.with_headers(headers)
 
     @contextmanager
     def use_plugin(
@@ -353,9 +344,7 @@ class IGWPluginHarness:
         original = self._registry.plugins.get(name)
 
         plugin._inject_cache(self._cache_accessor)
-        sdk = self._plugin_sdk(name)
-        plugin._inject_platform_sdk(sdk)
-        plugin._inject_platform_client(client_from_platform(sdk, AsyncNemoClient))
+        plugin._inject_platform_client(self._plugin_client(name))
         if call_lifecycle:
             asyncio.run(plugin.on_startup())
         self._registry.plugins[name] = plugin
@@ -399,9 +388,7 @@ class IGWPluginHarness:
         original = self._registry.plugins.get(name)
 
         plugin._inject_cache(self._cache_accessor)
-        sdk = self._plugin_sdk(name)
-        plugin._inject_platform_sdk(sdk)
-        plugin._inject_platform_client(client_from_platform(sdk, AsyncNemoClient))
+        plugin._inject_platform_client(self._plugin_client(name))
         if call_lifecycle:
             await plugin.on_startup()
         self._registry.plugins[name] = plugin
@@ -518,7 +505,7 @@ class IGWPluginHarness:
 
         When *api_key_secret_name* is set, this runs the full
         :func:`refresh_model_cache` so the secret value is resolved via
-        the secrets SDK (otherwise the proxy would 424). Without it, the
+        the secrets client (otherwise the proxy would 424). Without it, the
         method takes a fast path that updates the cache in place.
 
         Args:
@@ -583,7 +570,7 @@ class IGWPluginHarness:
         provider = models.get_provider(name=provider_name, workspace=workspace).data()
 
         if api_key_secret_name is not None:
-            # Full refresh resolves the secret via the secrets SDK.
+            # Full refresh resolves the secret via the secrets client.
             asyncio.run(self._refresh_model_cache())
         else:
             # Fast path: in-place cache update; skips secrets plumbing.
@@ -672,7 +659,7 @@ class IGWPluginHarness:
         """Refresh model + VM cache (sync). Model cache first because VM
         resolution depends on the served-model topology.
 
-        The model-cache refresh resolves provider secrets via the SDK;
+        The model-cache refresh resolves provider secrets via the typed client;
         call this instead of relying on :meth:`add_provider`'s fast path
         when ``api_key_secret_name`` is set.
         """
@@ -720,22 +707,22 @@ class IGWPluginHarness:
     async def _refresh_vm_cache(self) -> None:
         await refresh_virtual_model_cache(
             self._vm_cache,
-            self.async_sdk,
+            self.async_client,
             registry=self._registry,
         )
 
     async def _refresh_model_cache(self) -> None:
         # Local import keeps module load cheap; refresh_model_cache pulls
-        # in secrets SDK plumbing only needed when explicitly invoked.
+        # in secrets client plumbing only needed when explicitly invoked.
         from nhx.core.inference_gateway.api.model_cache import (
-            model_provider_getter_from_sdk,
+            model_provider_getter_from_client,
             refresh_model_cache,
         )
 
         await refresh_model_cache(
             model_cache=self._model_cache,
-            model_provider_getter=model_provider_getter_from_sdk(self.async_sdk),
-            secrets_sdk=self.async_sdk,
+            model_provider_getter=model_provider_getter_from_client(self.async_client),
+            client=self.async_client,
             virtual_model_cache=self._vm_cache,
             middleware_registry=self._registry,
         )
@@ -1000,7 +987,7 @@ class IGWPluginHarness:
         that scheduled them — the request loop. Drive your request from
         ``async def`` via :meth:`achat_completions` so the request and
         flush share a loop. Calling this after a sync
-        :meth:`chat_completions` doesn't work: the SDK's transient loop
+        :meth:`chat_completions` doesn't work: the client's transient loop
         is already torn down.
 
         Exceptions raised by post-response middleware are **not** raised
@@ -1109,7 +1096,7 @@ class IGWLoopbackHarness(IGWPluginHarness):
     .. warning::
 
         **Two-loop limitation.** This harness drives the FastAPI app
-        from two event loops: the TestClient's (for SDK requests via
+        from two event loops: the TestClient's (for client requests via
         ASGI transport) and uvicorn's (for plugin-originated HTTP
         hitting the loopback URL). Implications:
 

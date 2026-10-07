@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -36,6 +37,12 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStag
 from nemo_agents_plugin.runner.in_memory import InMemoryRunnerBackend, _resolve_nat_bin
 from nemo_helix_plugin.config import Configuration, nhx_user_data_dir
 from nemo_helix_plugin.files.storage_config import GithubStorageConfig
+
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
 
 STAGED_SHA = "1" * 40
 
@@ -602,8 +609,11 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
     with (
         patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
-        patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
-        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=_files_client_at(STAGED_SHA)),
+        patch("nemo_agents_plugin.runner.in_memory.get_async_nemo_client", MagicMock()),
+        patch(
+            "nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client",
+            return_value=_files_client_at(STAGED_SHA),
+        ),
         patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
     ):
         info = await backend.create_deployment("ws", "fabric-dep", config, port=49212, agent="fabric-agent")
@@ -634,8 +644,8 @@ async def test_create_deployment_cleans_base_dir_when_staging_fails(tmp_path: Pa
 
     with (
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
-        patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
-        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.get_async_nemo_client", MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client", return_value=MagicMock()),
     ):
         with pytest.raises(FabricArtifactStagingError, match="skills/review"):
             await backend.create_deployment("ws", "fabric-dep", config, port=0, agent="fabric-agent")
@@ -691,10 +701,10 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
         with (
             patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate),
             patch(
-                "nemo_agents_plugin.runner.in_memory.get_async_platform_sdk",
+                "nemo_agents_plugin.runner.in_memory.get_async_nemo_client",
                 return_value=MagicMock(),
             ),
-            patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=files_client),
+            patch("nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client", return_value=files_client),
             patch("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _download_fileset),
             patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
         ):
@@ -775,6 +785,7 @@ def platform_base_url(monkeypatch: pytest.MonkeyPatch) -> str:
     return "http://platform.test:8080"
 
 
+@requires_hermes_adapter
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("platform_base_url")
 async def test_fabric_deployment_wires_intake_telemetry_when_config_is_silent(tmp_path: Path) -> None:
@@ -791,6 +802,7 @@ async def test_fabric_deployment_wires_intake_telemetry_when_config_is_silent(tm
     }
 
 
+@requires_hermes_adapter
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("platform_base_url")
 async def test_fabric_deployment_omits_header_env(tmp_path: Path) -> None:
@@ -831,6 +843,7 @@ async def test_fabric_deployment_preserves_declared_atif_storage(tmp_path: Path)
     assert staged["telemetry"] == declared
 
 
+@requires_hermes_adapter
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("platform_base_url")
 async def test_fabric_deployment_does_not_mutate_the_caller_config(tmp_path: Path) -> None:

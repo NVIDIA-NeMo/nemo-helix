@@ -3,14 +3,11 @@
 
 """Contract tests for carrying scheduled-analysis models into Platform state."""
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
-from nemo_insights_plugin import cli
 from nemo_insights_plugin.entities import AnalysisConfig, AnalysisConfigStatus
 from nemo_insights_plugin.sdk_resources.analysis_configs import (
     _build_enable_body,
@@ -18,7 +15,6 @@ from nemo_insights_plugin.sdk_resources.analysis_configs import (
     _build_update_body,
 )
 from nemo_insights_plugin.service import InsightsService
-from typer.testing import CliRunner
 
 
 def _app(entity_client: AsyncMock) -> FastAPI:
@@ -117,118 +113,3 @@ def test_update_run_status_sdk_body_omits_unset_fields_and_keeps_explicit_null_t
         "last_attempted_at": None,
         "last_completed_at": None,
     }
-
-
-@pytest.mark.asyncio
-async def test_enable_cli_sends_locally_configured_models(monkeypatch: pytest.MonkeyPatch) -> None:
-    analysis_configs = SimpleNamespace(
-        enable=AsyncMock(
-            return_value=AnalysisConfig(
-                name="calculator-agent",
-                workspace="default",
-                agent="calculator-agent",
-                default_model="default/gpt-5",
-                fast_model="default/gpt-5-mini",
-            )
-        )
-    )
-    client = SimpleNamespace(
-        insights=SimpleNamespace(analysis_configs=analysis_configs),
-        close=AsyncMock(),
-    )
-    monkeypatch.setattr(cli, "make_client", lambda base_url: client)
-    monkeypatch.setattr(
-        cli,
-        "configured_model_refs",
-        lambda: SimpleNamespace(default="default/gpt-5", fast="default/gpt-5-mini"),
-    )
-
-    await cli._analysis_config_command(
-        action="enable",
-        agent="calculator-agent",
-        workspace="default",
-        base_url="http://localhost:8080",
-    )
-
-    analysis_configs.enable.assert_awaited_once_with(
-        workspace="default",
-        agent="calculator-agent",
-        default_model="default/gpt-5",
-        fast_model="default/gpt-5-mini",
-    )
-    client.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_enable_cli_checks_local_models_before_constructing_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    def missing_models():
-        raise ValueError("No default model is configured. Run `nemo setup` and select agent models.")
-
-    make_client = AsyncMock()
-    monkeypatch.setattr(cli, "configured_model_refs", missing_models)
-    monkeypatch.setattr(cli, "make_client", make_client)
-
-    with pytest.raises(ValueError, match="No default model is configured"):
-        await cli._analysis_config_command(
-            action="enable",
-            agent="calculator-agent",
-            workspace="default",
-            base_url="http://localhost:8080",
-        )
-
-    make_client.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_enable_uses_explicit_model_refs_without_reading_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    def missing_models():
-        raise ValueError("No default model is configured. Run `nemo setup` and select agent models.")
-
-    analysis_configs = SimpleNamespace(
-        enable=AsyncMock(
-            return_value=AnalysisConfig(
-                workspace="default",
-                agent="calculator-agent",
-                enabled=True,
-                default_model="default/big",
-                fast_model="default/small",
-            )
-        )
-    )
-    client = SimpleNamespace(insights=SimpleNamespace(analysis_configs=analysis_configs), close=AsyncMock())
-    monkeypatch.setattr(cli, "configured_model_refs", missing_models)
-    monkeypatch.setattr(cli, "make_client", lambda base_url: client)
-
-    await cli._analysis_config_command(
-        action="enable",
-        agent="calculator-agent",
-        workspace="default",
-        base_url="http://localhost:8080",
-        default_model="default/big",
-        fast_model="default/small",
-    )
-
-    analysis_configs.enable.assert_awaited_once_with(
-        workspace="default",
-        agent="calculator-agent",
-        default_model="default/big",
-        fast_model="default/small",
-    )
-
-
-def test_enable_cli_reports_missing_models_as_one_line_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def missing_models():
-        raise ValueError("No default model is configured. Run `nemo setup` and select agent models.")
-
-    make_client = AsyncMock()
-    monkeypatch.setattr(cli, "configured_model_refs", missing_models)
-    monkeypatch.setattr(cli, "make_client", make_client)
-
-    result = CliRunner().invoke(cli.InsightsCLI().get_cli(), ["analysis", "enable", "--agent", "calculator-agent"])
-
-    assert result.exit_code == 1
-    assert result.exception is None or isinstance(result.exception, SystemExit)
-    assert "Error: No default model is configured" in result.output
-    assert "--default-model and --fast-model" in result.output
-    assert "Traceback" not in result.output
-    make_client.assert_not_called()

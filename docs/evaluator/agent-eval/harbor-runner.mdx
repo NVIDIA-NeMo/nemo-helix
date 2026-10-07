@@ -137,7 +137,7 @@ Discover local task packages, publish each task, then create a taskset from the 
 ```python
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 from nemo_evaluator.sdk.resources import Evaluator
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
 
@@ -249,7 +249,7 @@ from pathlib import Path
 
 from nemo_evaluator.api.fields import TasksetRef
 from nemo_evaluator.sdk.resources import Evaluator
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
@@ -322,7 +322,7 @@ results = evaluator.agent_eval_results.list(job_id=job.name)
   an output does not reinterpret the primary value.
 - **Older trials:** Missing reward-key metadata is rejected. Re-import original results with the
   current SDK's `build_trials_from_job_dir(job_dir, tasks, reward_key="reward")` from
-  `nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime`, using SDK tasks with the original native
+  `nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime`, using SDK tasks with the original native
   IDs and the original reward key (`"reward"` is illustrative). This rebuilds metadata without
   rerunning Harbor. Keep or publish referenced evidence where the scoring worker can read it.
 
@@ -407,7 +407,7 @@ import asyncio
 from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
     HarborRuntimeConfig,
     discover_harbor_tasks,
@@ -486,7 +486,7 @@ execution profile, which must use the `subprocess` job executor.
 ```python
 from nemo_evaluator.api.fields import TasksetRef
 from nemo_evaluator.sdk.resources import Evaluator
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
 
 evaluator = Evaluator(client=EvaluatorClient(base_url="http://localhost:8080", workspace="default"))
@@ -503,11 +503,11 @@ job.wait_until_done()
 results = evaluator.agent_eval_results.list(job_id=job.name)
 ```
 
-Submission rejects local dataset/task selection overrides, offline runners, host-environment
-forwarding, and non-default settings that the job target cannot preserve, including named local
-runs, `force_rerun`, `quiet=False`, `agent_dir`, and timeout multipliers. A runner cannot carry
-Platform secrets: for an agent that needs credentials, submit a Harbor target with `env_secrets`
-through the CLI tab instead.
+Submission rejects local dataset/task selection overrides, offline runners, and non-default
+settings that the job target cannot preserve, including named local runs, `force_rerun`,
+`quiet=False`, `agent_dir`, and timeout multipliers. For an agent that needs credentials, set
+`env_secrets` on `HarborRuntimeConfig`; the platform resolves each reference at submission.
+Non-secret settings go in `env_vars`.
 
 The example prints the generated job name, waits for completion, and retrieves the stored results.
 
@@ -522,7 +522,7 @@ cat > harbor-eval.json <<'JSON'
   "tasks": "default/suite",
   "target": {
     "kind": "harbor",
-    "agent_name": "oracle",
+    "source": {"name": "oracle"},
     "reward_key": "reward"
   }
 }
@@ -586,12 +586,16 @@ completed
   as well for a loose local source tree. Overrides `agent_name`. Platform-submitted jobs do not
   currently accept `agent_dir`; see [Standalone and submitted custom agents](#standalone-and-submitted-custom-agents).
 - **`agent_model_name`** — the model slug handed to the agent.
+
+  On the platform's `HarborRunnerTarget` these three are one field, `source`, so a spec names exactly
+  one agent: `{"name": "oracle", "model_name": ...}` for a built-in agent or
+  `{"import_path": "my_agent_module:MyAgent", "model_name": ...}` for your own.
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
   Do not put secrets here. Harbor copies its config into the job directory's `config.json` and
   `lock.json` and into every trial's `config.json`, `lock.json`, `result.json` and agent run spec, and
   needs the real value to construct the agent, so there is no later point at which the value can be
-  taken back. Name credentials in `agent_env_from_host` instead;
+  taken back. Put credentials in `env_secrets` instead;
   a `${NAME}` template is fine here, since it carries no value.
 
   A credential-shaped value fails validation before the run starts — a credential-looking key
@@ -599,21 +603,44 @@ completed
   recognised issued-token shape (`nvapi-`, `sk-`, `hf_`, a PEM block, ...). Treat that as a backstop,
   not a guarantee: a secret under a key of your own naming, in a format the check does not know, will
   pass straight through. The rule is still that secrets do not belong in `agent_kwargs`.
-- **`agent_env_from_host`** — host environment variables to forward to the agent. Each becomes a
-  `${NAME}` template on Harbor's `AgentConfig.env`: Harbor resolves it from the host environment when
-  it creates the agent and persists only the template, so the value never reaches `config.json`.
-  Provenance records the names, never the values.
+- **`env_secrets`** — credentials for the agent, as `{ENV_NAME: secret-ref}`. The same config runs
+  standalone and on the platform:
+  - Standalone submission: 
+    - a workspace ref such as `my-workspace/openai-api-key` is read from
+    `MY_WORKSPACE_OPENAI_API_KEY`, falling back to `OPENAI_API_KEY`
+    - a bare ref `openai-api-key` reads `OPENAI_API_KEY`. When both are set, the workspace-prefixed variable wins.
+  - Platform submission:
+    - the platform resolves the provided secret reference (a bare ref in the job's workspace) into the
+    job's environment.
+  - The agent receives each entry through Harbor's agent env (`self.extra_env`, and the env of its
+    `environment.exec` calls). A custom agent should read it from there, not from `os.getenv`.
+  - Harbor scrubs a secret's value from trial files only under keys matching `KEY`, `SECRET`,
+    `TOKEN`, `PASSWORD`, `CREDENTIAL` or `AUTH`; other keys log a warning. A very short or common
+    secret value (for example `1`) is scrubbed everywhere it appears, which can corrupt JSON.
+- **`env_vars`** — non-secret settings for the agent, as literal values that reach only the agent.
+  Rejected: `${MY_ENV_VAR}` templates, credential-shaped values, and keys Harbor treats as secrets
+  (matching `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `CREDENTIAL` or `AUTH`, case-insensitively, such
+  as `MAX_TOKENS`), since Harbor would mask them in `config.json` and scrub their values from every
+  trial file.
+
+<Warning>
+
+Harbor's Docker task environments inherit the host environment. A task can read any variable you
+export, including `MY_WORKSPACE_*` secrets meant for the agent. Run untrusted task suites only with
+the variables they need exported.
+
+</Warning>
 
 The shared agent fields map onto Harbor's `AgentConfig`, which Harbor's agent factory unpacks into
 the agent's constructor. `agent_dir` is an SDK-only local import aid, not an `AgentConfig` field:
 
 ```text
-HarborRunnerTarget / HarborRuntimeConfig
+HarborRuntimeConfig  (on the platform, HarborRunnerTarget.source fills the three agent lines)
         │
         ├─ agent_import_path   → Harbor AgentConfig.import_path
         ├─ agent_model_name    → Harbor AgentConfig.model_name
         ├─ agent_kwargs        → Harbor AgentConfig.kwargs
-        └─ agent_env_from_host → Harbor AgentConfig.env   ({NAME: "${NAME}"}, resolved by Harbor)
+        └─ env_secrets/env_vars → Harbor AgentConfig.env ({NAME: "${<source var>}"} + literals)
                                        │
                                        ▼
                      Harbor AgentFactory constructs
@@ -626,7 +653,7 @@ Loose wrapper source through `agent_dir` is supported only by standalone `nemo-e
 It is not supported by submitted `nemo-evaluator` plugin jobs.
 
 For example, NeMo Fabric's
-[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.4.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
 is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
 its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`. For a
 complete, runnable version with a Nemotron model, see
@@ -638,16 +665,16 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.3.0",
+        "fabric_package": "nemo-fabric[codex]==0.4.0",
         "fabric_telemetry": "relay",
     },
 )
 ```
 
 The fields shared with platform submission appear on `HarborRunnerTarget`, the `target` of an
-`AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate`. Instead of
-`agent_env_from_host`, the platform target takes `env_secrets`, a mapping of environment variable name
-to NeMo Helix secret reference. The service resolves each reference into the job's environment at
+`AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate`, including `env_secrets`, a
+mapping of environment variable name to NeMo Helix secret reference, and `env_vars`. The service
+resolves each reference into the job's environment at
 compile time and the job hands Harbor a `${NAME}` template, so the credential appears on neither the
 spec, the run bundle, nor `config.json`. This installed NeMo Fabric adapter example needs no loose
 source directory:
@@ -656,10 +683,10 @@ source directory:
 {
   "target": {
     "kind": "harbor",
-    "agent_import_path": "nemo_fabric.integrations.harbor:FabricAgent",
+    "source": {"import_path": "nemo_fabric.integrations.harbor:FabricAgent"},
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.codex",
-      "fabric_package": "nemo-fabric[codex]==0.3.0"
+      "fabric_package": "nemo-fabric[codex]==0.4.0"
     },
     "env_secrets": {
       "OPENAI_API_KEY": "my-workspace/openai-key"
@@ -675,12 +702,11 @@ inside each task container, so neither an `agent_import_path` nor wrapper-source
 For a direct plugin job target:
 
 ```python
-from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
 from nemo_evaluator_sdk import SecretRef
 
 target = HarborRunnerTarget(
-    agent_name="codex",
-    agent_model_name="gpt-5.6-luna",
+    source=HarborBuiltinAgentSource(name="codex", model_name="gpt-5.6-luna"),
     agent_kwargs={"version": "0.153.0"},
     env_secrets={
         "OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key"),
@@ -691,6 +717,9 @@ target = HarborRunnerTarget(
 Replace the model and secret reference with values available to your account. The task image needs
 network access and the system tools Harbor's Codex adapter uses to install the CLI. The CLI version
 above is an explicit reproducibility pin, not a platform-wide default.
+
+For a complete runnable example, see the
+[Harbor taskset evaluation notebook](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-evaluator/examples/harbor_taskset/harbor_taskset_e2e.ipynb).
 
 ## How scoring works
 
@@ -834,9 +863,9 @@ The SDK stores the cache stamp in `jobs_dir/<job_name>/.nemo-eval-harbor-cache.j
   can serve A, but cached A cannot serve A and B.
 - **Scoring and scheduling settings** — `reward_key`, selected metrics, `quiet`, and
   `n_concurrent_trials` do not invalidate Harbor execution results.
-- **`agent_env_from_host`** — participates by name: adding or removing a forwarded variable invalidates,
-  but the value it resolves to at run time is never fingerprinted, so rotating a credential keeps the
-  cache valid.
+- **`env_secrets` and `env_vars`** — `env_secrets` participates by reference and `env_vars` by
+  value. Secret values are never fingerprinted, so rotating a credential keeps the cache valid.
+  Job dirs stamped by an SDK release before these fields existed re-run once.
 - **Installed agents** — when `agent_dir` is unset, the stamp covers the agent selection or import path,
   not the installed package contents. Change the import path, use `agent_dir`, or force a rerun after
   changing installed agent code.
@@ -847,7 +876,7 @@ The SDK stores the cache stamp in `jobs_dir/<job_name>/.nemo-eval-harbor-cache.j
 import asyncio
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, run_harbor_eval
 
 config = HarborRuntimeConfig(
     jobs_dir=Path("./harbor-jobs"),
@@ -869,7 +898,7 @@ steps above — discover, run, score — into a single call:
 import asyncio
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, run_harbor_eval
 
 result = asyncio.run(
     run_harbor_eval(

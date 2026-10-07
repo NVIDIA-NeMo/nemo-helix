@@ -17,9 +17,6 @@ from fastapi import HTTPException, Request
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from multidict import CIMultiDict, CIMultiDictProxy
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.inference_middleware import (
@@ -29,9 +26,10 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareError,
     InferenceResponse,
 )
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_model_entity_ref
+from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
 from nhx.core.inference_gateway.api.authz import enforce_model_ref_access
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
 from nhx.core.inference_gateway.api.errors import (
@@ -359,6 +357,29 @@ _DEPENDENCY_FAILURE_STATUS = http_status.HTTP_424_FAILED_DEPENDENCY  # 424 Faile
 # token in services/core/models/.../controllers/provider_reconciler.py in lockstep.
 _UPSTREAM_REJECTED_DETAIL_MARKER = "rejected the request"
 
+# Machine-readable upstream status token embedded in every wrapped-upstream-rejection
+# 424 detail, e.g. ``[nemo_upstream_status=401]``. The human-readable marker above tells
+# a consumer *that* the upstream rejected the request; this token tells them *which*
+# upstream status it was, so a consumer can distinguish a credential/authorization
+# rejection (401/403) from a missing-route (404) WITHOUT parsing the prose. This is the
+# second half of the CROSS-SERVICE contract: the models provider-reconciler parses this
+# token to route 401/403 to an auth-failure (non-READY) path and 404 to the
+# non-compliant (READY) path. Keep the ``PREFIX``/``SUFFIX`` and the regex the reconciler
+# uses (``_GATEWAY_UPSTREAM_STATUS_RE`` in
+# services/core/models/.../controllers/provider_reconciler.py) in lockstep.
+_UPSTREAM_STATUS_TOKEN_PREFIX = "[nemo_upstream_status="
+_UPSTREAM_STATUS_TOKEN_SUFFIX = "]"
+
+
+def _upstream_status_token(status_code: int) -> str:
+    """Return the machine-readable upstream-status token for *status_code*.
+
+    e.g. ``_upstream_status_token(401) == "[nemo_upstream_status=401]"``. Embedded in the
+    424 detail alongside the human-readable marker so a consumer can machine-match the
+    originating upstream status. See :data:`_UPSTREAM_STATUS_TOKEN_PREFIX`.
+    """
+    return f"{_UPSTREAM_STATUS_TOKEN_PREFIX}{status_code}{_UPSTREAM_STATUS_TOKEN_SUFFIX}"
+
 
 @dataclass(frozen=True)
 class UpstreamProviderContext:
@@ -446,9 +467,18 @@ def _dependency_failure_detail(
         "credentials have access to it, and your request parameters. If this provider sits behind a gateway "
         "or proxy, check its logs for the originating upstream status and message."
     )
+    # Machine-readable upstream-status token (cross-service contract; see
+    # _UPSTREAM_STATUS_TOKEN_PREFIX). Placed after the human guidance so it never disrupts
+    # the readable message, but is always present for a programmatic consumer to parse.
+    #
+    # ORDERING IS LOAD-BEARING: the token MUST precede the echoed ``error_body``. The consumer
+    # parses with re.search (first match wins), so keeping our token ahead of the untrusted
+    # upstream body guarantees a body that happens to contain a ``[nemo_upstream_status=...]``
+    # substring can't shadow the genuine status. Do not move the token after error_body.
+    status_token = _upstream_status_token(status_code)
     if error_body:
-        return f"{first} {guidance} Upstream response: {error_body}"
-    return f"{first} {guidance}"
+        return f"{first} {guidance} {status_token} Upstream response: {error_body}"
+    return f"{first} {guidance} {status_token}"
 
 
 async def proxy_request(
@@ -941,7 +971,7 @@ async def virtual_model_proxy(
     request: Request,
     workspace: str,
     vm_name: str,
-    virtual_model: "SDKVirtualModel",
+    virtual_model: VirtualModel,
     trailing_uri: str,
     json_body: dict[str, Any],
     http_client: ClientSession,
@@ -1011,8 +1041,8 @@ async def virtual_model_proxy(
             # Example: body ``myvm&adapters/a-ws/a-name`` + default ``base-ws/base`` ->
             # ``base-ws/base&adapters/a-ws/a-name``.
             _, adapter_workspace, adapter_name = adapter_parts
-            json_body["model"] = (
-                f"{virtual_model.default_model_entity}{ADAPTERS_INFIX}{adapter_workspace}/{adapter_name}"
+            json_body["model"] = format_adapter_composite(
+                virtual_model.default_model_entity, adapter_workspace, adapter_name
             )
         else:
             json_body["model"] = virtual_model.default_model_entity
@@ -1291,14 +1321,14 @@ async def virtual_model_proxy(
     return final_response
 
 
-async def retrieve_secret_value(workspace: str, secret_name: str, secrets_sdk: AsyncNeMoHelix) -> str:
+async def retrieve_secret_value(workspace: str, secret_name: str, client: AsyncNemoClient) -> str:
     """
     Retrieve a raw API key from the Platform Secrets service.
 
     Args:
         workspace: The workspace containing the secret
         secret_name: The name of the secret to retrieve
-        secrets_sdk: The async NeMoHelix SDK client configured for secrets service
+        client: The async platform client used to reach the secrets service
 
     Returns:
         The raw secret string (e.g., "sk-ant-...")
@@ -1308,7 +1338,7 @@ async def retrieve_secret_value(workspace: str, secret_name: str, secrets_sdk: A
     """
     try:
         logger.debug(f"Retrieving API key from secrets service: {workspace}/{secret_name}")
-        secrets = client_from_platform(secrets_sdk, AsyncSecretsClient)
+        secrets = AsyncSecretsClient.from_client(client)
         response = (await secrets.access_secret(name=secret_name, workspace=workspace)).data()
         api_key = response.value
 

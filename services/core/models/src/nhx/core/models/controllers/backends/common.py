@@ -16,7 +16,7 @@ LOG_MAX_CHARS = 2048
 class _DeploymentConfigLike(Protocol):
     """Structural type for the objects ``deployment_config_view`` accepts.
 
-    Both the SDK ``ModelDeploymentConfig`` and the create/update request models
+    Both the ``ModelDeploymentConfig`` and the create/update request models
     expose ``model_spec`` and ``executor_config`` groups; we read them
     defensively via ``getattr`` so partial/None groups don't raise.
     """

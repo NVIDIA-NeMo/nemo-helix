@@ -8,7 +8,7 @@ from typing import BinaryIO
 
 from filesets import parse_fileset_ref
 from nemo_evaluator.harbor.archive import run_blocking_archive_operation
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import CHUNK_BYTES
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import CHUNK_BYTES
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 
 

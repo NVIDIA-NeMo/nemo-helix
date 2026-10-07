@@ -1,13 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nemo_helix import AsyncNeMoHelix
 from nhx.common.entities import DEFAULT_WORKSPACE
-from nhx.common.entities.utils import get_random_bytes
 from nhx.common.jobs.file_manager import FilesetFileManager
 from nhx.common.jobs.schemas import FileStorageType
 
@@ -31,30 +28,6 @@ def mock_connection():
 
 
 @pytest.fixture
-def mock_nhx_sdk():
-    """Mock sync NeMoHelix SDK for jobs operations."""
-    m = MagicMock()
-
-    def _create(**kwargs):
-        return SimpleNamespace(id=f"jobresult-{get_random_bytes()}", **kwargs)
-
-    m.jobs.results.create.side_effect = _create
-    return m
-
-
-@pytest.fixture
-def mock_async_nhx_sdk():
-    """Mock async NeMoHelix SDK for jobs operations."""
-    m = AsyncMock(spec=AsyncNeMoHelix)
-
-    async def _create(**kwargs):
-        return SimpleNamespace(id=f"jobresult-{get_random_bytes()}", **kwargs)
-
-    m.jobs.results.create.side_effect = _create
-    return m
-
-
-@pytest.fixture
 def mock_fileset_fs():
     """Mock FilesetFileSystem for testing."""
     fs = MagicMock()
@@ -68,30 +41,6 @@ def mock_fileset_fs():
     fs._get_file = AsyncMock()
     fs._client = MagicMock()
     return fs
-
-
-@pytest.fixture
-def mock_sdk():
-    """Mock NeMoHelix SDK for legacy jobs tests."""
-
-    from nemo_helix import NeMoHelix
-
-    sdk = MagicMock(spec=NeMoHelix)
-    sdk.base_url = "http://localhost:8080"
-    sdk._custom_headers = None
-    sdk._client = MagicMock()
-    sdk.files = MagicMock()
-    sdk.files.upload_content = MagicMock()
-
-    # Mock list to return ListFilesResponse with empty data by default
-    mock_list_response = MagicMock()
-    mock_list_response.data = []
-    sdk.files.list = MagicMock(return_value=mock_list_response)
-
-    # Mock download_content to return bytes
-    sdk.files.download_content = MagicMock(return_value=b"test content")
-
-    return sdk
 
 
 @pytest.fixture

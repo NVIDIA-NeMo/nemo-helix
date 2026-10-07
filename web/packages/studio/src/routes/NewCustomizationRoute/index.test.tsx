@@ -28,7 +28,9 @@ const renderRoute = () => {
 describe('NewCustomizationRoute', () => {
   it('shows the start picker rather than the form', () => {
     renderRoute();
-    expect(screen.getByText('How do you want to start?')).toBeInTheDocument();
+    expect(
+      screen.getByRole('radiogroup', { name: 'How do you want to start?' })
+    ).toBeInTheDocument();
   });
 
   it('navigates to /new/scratch when "Build from scratch" is confirmed', async () => {

@@ -306,25 +306,20 @@ describe('useJobLogs', () => {
         { wrapper: createWrapper() }
       );
 
-      await act(async () => {
-        await tick();
-      });
-      expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 }));
 
       const nextWalk = deferred<HelixJobLogPage>();
       mockJobsPageJobLogs.mockReturnValueOnce(nextWalk.promise);
 
-      await act(async () => {
+      act(() => {
         void result.current.refetch();
-        await tick();
       });
-      expect(result.current.loadProgress).toBeNull();
+      await waitFor(() => expect(result.current.loadProgress).toBeNull());
 
-      await act(async () => {
+      act(() => {
         nextWalk.resolve(makePage([makeLog(0), makeLog(1), makeLog(2)], 3));
-        await tick();
       });
-      expect(result.current.loadProgress).toEqual({ loaded: 3, total: 3 });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 3, total: 3 }));
     });
 
     it("never carries a finished job's count into the next job", async () => {
@@ -343,10 +338,7 @@ describe('useJobLogs', () => {
         { wrapper: createWrapper(), initialProps: { name: JOB_NAME } }
       );
 
-      await act(async () => {
-        await tick();
-      });
-      expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 }));
 
       const nextJob = deferred<HelixJobLogPage>();
       mockJobsPageJobLogs.mockReturnValueOnce(nextJob.promise);
@@ -357,11 +349,10 @@ describe('useJobLogs', () => {
       expect(seen.length).toBeGreaterThan(0);
       expect(seen).toEqual(seen.map(() => null));
 
-      await act(async () => {
+      act(() => {
         nextJob.resolve(makePage([makeLog(0)], 1));
-        await tick();
       });
-      expect(result.current.loadProgress).toEqual({ loaded: 1, total: 1 });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 1, total: 1 }));
     });
 
     it('reports the same progress to every observer of the job', async () => {
@@ -385,12 +376,10 @@ describe('useJobLogs', () => {
         { wrapper: createWrapper() }
       );
 
-      await act(async () => {
-        await tick();
+      await waitFor(() => {
+        expect(result.current.viewer.loadProgress).toEqual({ loaded: 4, total: 4 });
+        expect(result.current.downloader.loadProgress).toEqual({ loaded: 4, total: 4 });
       });
-
-      expect(result.current.viewer.loadProgress).toEqual({ loaded: 4, total: 4 });
-      expect(result.current.downloader.loadProgress).toEqual(result.current.viewer.loadProgress);
     });
   });
 });

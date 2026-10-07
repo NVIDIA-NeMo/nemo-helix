@@ -25,4 +25,6 @@ export type NewAgentTab = 'imported-traces' | 'coding-agent-prompt' | 'upload' |
 
 export interface NewAgentModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
+  /** Prefills the name, and keeps it when an uploaded config names a different agent. */
+  initialName?: string;
 }

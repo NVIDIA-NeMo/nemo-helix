@@ -1467,6 +1467,181 @@ async def test_list_steps_with_status_filter(
 
 
 @pytest.mark.asyncio
+async def test_get_job_by_name(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """get_job resolves a job by its name."""
+    _, job_name, _, _, _, _ = await create_test_job_data(mock_store, "get-by-name-job")
+
+    job = await mock_dispatcher.get_job(job_name, DEFAULT_WORKSPACE)
+
+    assert job is not None
+    assert job.name == job_name
+
+
+@pytest.mark.asyncio
+async def test_get_job_by_id(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """get_job resolves a job by its ID (the value ``nemo jobs list`` leads with)."""
+    job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "get-by-id-job")
+    assert job_id != job_name
+
+    job = await mock_dispatcher.get_job(job_id, DEFAULT_WORKSPACE)
+
+    assert job is not None
+    assert job.id == job_id
+    assert job.name == job_name
+
+
+@pytest.mark.asyncio
+async def test_get_job_unknown_identifier_returns_none(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """get_job returns None when neither the name nor the ID matches."""
+    await create_test_job_data(mock_store, "present-job")
+
+    assert await mock_dispatcher.get_job("does-not-exist", DEFAULT_WORKSPACE) is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_job_by_id(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """cancel_job resolves a job by its ID, not just its name."""
+    job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "cancel-by-id")
+    assert job_id != job_name
+
+    result = await mock_dispatcher.cancel_job(job_id, DEFAULT_WORKSPACE)
+
+    assert result is not None
+    assert result.id == job_id
+
+
+@pytest.mark.asyncio
+async def test_pause_job_by_id(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """pause_job resolves a job by its ID, not just its name."""
+    job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "pause-by-id")
+    assert job_id != job_name
+
+    result = await mock_dispatcher.pause_job(job_id, DEFAULT_WORKSPACE)
+
+    assert result is not None
+    assert result.id == job_id
+
+
+@pytest.mark.asyncio
+async def test_resume_job_by_id(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """resume_job resolves a job by its ID, not just its name."""
+    job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "resume-by-id")
+    assert job_id != job_name
+
+    result = await mock_dispatcher.resume_job(job_id, DEFAULT_WORKSPACE)
+
+    assert result is not None
+    assert result.id == job_id
+
+
+@pytest.mark.asyncio
+async def test_rerun_job_by_id(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """rerun_job resolves a job by its ID (and locks on the resolved name)."""
+    job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "rerun-by-id")
+    assert job_id != job_name
+
+    # The seeded attempt is COMPLETED (terminal), so a rerun is allowed.
+    result = await mock_dispatcher.rerun_job(job_id, DEFAULT_WORKSPACE)
+
+    assert result is not None
+    assert result.id == job_id
+
+
+@pytest.mark.asyncio
+async def test_delete_job_by_id(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """delete_job resolves a job by its ID (and locks on the resolved name)."""
+    job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-by-id")
+    assert job_id != job_name
+
+    deleted = await mock_dispatcher.delete_job(job_id, DEFAULT_WORKSPACE)
+
+    assert deleted is True
+    await verify_job_data_exists(mock_store, job_id, should_exist=False)
+
+
+@pytest.mark.asyncio
+async def test_delete_job_locked_rejects_same_name_replacement(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient
+):
+    """The ID guard stops a stale id-based delete from hitting a same-name replacement.
+
+    Simulates the TOCTOU window: the original job (resolved by id) is gone and a
+    new job now holds the same name. _delete_job_locked, given the ORIGINAL id,
+    must refuse to delete the replacement.
+    """
+    original_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "racing-del-job")
+    await mock_dispatcher.delete_job(original_id, DEFAULT_WORKSPACE)
+    # A replacement job reuses the same name but has a different id.
+    replacement_id, _, _, _, _, _ = await create_test_job_data(mock_store, job_name)
+    assert replacement_id != original_id
+
+    deleted = await mock_dispatcher._delete_job_locked(job_name, DEFAULT_WORKSPACE, expected_id=original_id)
+
+    assert deleted is False
+    # The replacement must be untouched.
+    await verify_job_data_exists(mock_store, replacement_id, should_exist=True)
+
+
+@pytest.mark.asyncio
+async def test_rerun_job_locked_rejects_same_name_replacement(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """The ID guard stops a stale id-based rerun from hitting a same-name replacement."""
+    original_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "racing-rerun-job")
+    await mock_dispatcher.delete_job(original_id, DEFAULT_WORKSPACE)
+    replacement_id, _, _, _, _, _ = await create_test_job_data(mock_store, job_name)
+    assert replacement_id != original_id
+
+    result = await mock_dispatcher._rerun_job_locked(job_name, DEFAULT_WORKSPACE, expected_id=original_id)
+
+    assert result is None
+    # The replacement must not have gained a new attempt.
+    attempts = await mock_store.list(HelixJobAttempt, filter_obj={"job": replacement_id})
+    assert len(attempts.data) == 1
+
+
+@pytest.mark.asyncio
+async def test_mutation_methods_unknown_identifier(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """Mutation methods return the not-found sentinel for an unknown identifier."""
+    await create_test_job_data(mock_store, "present-for-mutations")
+
+    assert await mock_dispatcher.cancel_job("nope", DEFAULT_WORKSPACE) is None
+    assert await mock_dispatcher.pause_job("nope", DEFAULT_WORKSPACE) is None
+    assert await mock_dispatcher.resume_job("nope", DEFAULT_WORKSPACE) is None
+    assert await mock_dispatcher.rerun_job("nope", DEFAULT_WORKSPACE) is None
+    assert await mock_dispatcher.delete_job("nope", DEFAULT_WORKSPACE) is False
+
+
+@pytest.mark.asyncio
+async def test_get_job_by_id_does_not_cross_workspaces(
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The ID fallback is workspace-agnostic, so a foreign-workspace ID must not resolve."""
+    from unittest.mock import MagicMock
+
+    from nhx.testing import create_test_client
+
+    projects = ["default/test-project", "other-workspace/test-project"]
+    with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
+        mock_files = AsyncMock()
+        mock_fileset_obj = MagicMock()
+        mock_fileset_obj.name = "test-fileset-id"
+        mock_resp = MagicMock()
+        mock_resp.data.return_value = mock_fileset_obj
+        mock_files.create_fileset.return_value = mock_resp
+
+        dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+
+        # A job that lives in "other-workspace".
+        other_job = await dispatcher.create_job(sample_platform_job_request, "other-workspace")
+
+        # Looking it up by ID from "default" must not leak it.
+        assert await dispatcher.get_job(other_job.id, DEFAULT_WORKSPACE) is None
+        # But it resolves by ID from its own workspace.
+        resolved = await dispatcher.get_job(other_job.id, "other-workspace")
+        assert resolved is not None
+        assert resolved.id == other_job.id
+
+
+@pytest.mark.asyncio
 async def test_list_jobs_across_multiple_workspaces(
     sample_platform_job_request: CreateHelixJobRequest,
 ):
@@ -1706,7 +1881,7 @@ async def test_list_jobs_filter_status_not_eq_returns_complement(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$not/$eq on status (AIRCORE-324) returns jobs whose status is NOT the value."""
+    """$not/$eq on status returns jobs whose status is NOT the value."""
     await _make_job(mock_dispatcher, mock_store, "job-active", HelixJobStatus.ACTIVE)
     completed = await _make_job(mock_dispatcher, mock_store, "job-completed", HelixJobStatus.COMPLETED)
     error = await _make_job(mock_dispatcher, mock_store, "job-error", HelixJobStatus.ERROR)
@@ -1749,7 +1924,7 @@ async def test_list_jobs_filter_status_nin_returns_complement(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$nin on status (AIRCORE-324) returns jobs whose status is none of the values."""
+    """$nin on status returns jobs whose status is none of the values."""
     await _make_job(mock_dispatcher, mock_store, "job-active", HelixJobStatus.ACTIVE)
     completed = await _make_job(mock_dispatcher, mock_store, "job-completed", HelixJobStatus.COMPLETED)
     error = await _make_job(mock_dispatcher, mock_store, "job-error", HelixJobStatus.ERROR)
@@ -1770,7 +1945,7 @@ async def test_list_jobs_filter_or_status_with_non_status(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$or mixing status with a non-status field (AIRCORE-324) returns the union.
+    """$or mixing status with a non-status field returns the union.
 
     Matches jobs that are ACTIVE *or* whose name contains "special", regardless
     of the other condition.
@@ -1797,7 +1972,7 @@ async def test_list_jobs_filter_not_and_status_with_non_status(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$not wrapping a status+name subtree (AIRCORE-324) returns the negation.
+    """$not wrapping a status+name subtree returns the negation.
 
     NOT (status == active AND name ~ "eval") keeps every job except the one that
     is both ACTIVE and name-matches "eval".
@@ -1824,7 +1999,7 @@ async def test_list_jobs_filter_or_with_status_in_each_branch(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$or where each branch mixes status with a name term (AIRCORE-324).
+    """$or where each branch mixes status with a name term.
 
     (active AND name~foo) OR (completed AND name~bar) returns exactly the jobs
     matching either full branch.

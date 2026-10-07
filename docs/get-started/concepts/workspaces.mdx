@@ -5,6 +5,8 @@
 title: "Workspaces"
 description: ""
 ---
+{/* @nemo-nb: process */}
+
 <a id="workspaces"></a>
 
 Workspaces are the fundamental organizational and authorization boundary in NeMo Helix. All platform resources—models, datasets, customization jobs, evaluation results, and more—must belong to a workspace.
@@ -39,16 +41,20 @@ To restrict workspace creation, remove that wildcard `WorkspaceCreator` binding 
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-workspace = client.workspaces.create(
-    name="ml-team", description="Machine Learning Team workspace"
-)
+workspace = client.workspaces.create_workspace(
+    body=CreateWorkspaceRequest(
+        name="ml-team", description="Machine Learning Team workspace"
+    ),
+).data()
 ```
 
 </Tab>
@@ -102,15 +108,15 @@ To list workspaces, call the list endpoint. When authentication is enabled, only
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-response = client.workspaces.list()
-for workspace in response.data:
+for workspace in client.workspaces.list_workspaces().items():
     print(f"{workspace.name}: {workspace.description}")
 ```
 
@@ -134,14 +140,15 @@ To retrieve a specific workspace by its `name`:
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-workspace = client.workspaces.retrieve("ml-team")
+workspace = client.workspaces.get_workspace(name="ml-team").data()
 ```
 
 </Tab>
@@ -164,16 +171,21 @@ To update a workspace, only the `description` field can be modified. The `name` 
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import UpdateWorkspaceRequest
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-workspace = client.workspaces.update(
-    "ml-team", description="Updated: ML Team workspace for model development"
-)
+workspace = client.workspaces.update_workspace(
+    name="ml-team",
+    body=UpdateWorkspaceRequest(
+        description="Updated: ML Team workspace for model development"
+    ),
+).data()
 ```
 
 </Tab>
@@ -199,14 +211,15 @@ During cleanup, the workspace is no longer visible to users. If cleanup fails, t
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-client.workspaces.delete("ml-team")
+client.workspaces.delete_workspace(name="ml-team").data()
 ```
 
 </Tab>

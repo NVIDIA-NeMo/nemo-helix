@@ -20,6 +20,7 @@ from pydantic import (
 )
 
 from nemo_helix_ext.config.types import OutputFormat, TimestampFormat
+from nemo_helix_ext.config.urls import display_url
 
 DEFAULT_WORKSPACE = "default"
 DEFAULT_CONTEXT = "default"
@@ -110,6 +111,13 @@ class Cluster(BaseModel):
         description="Path to a PEM certificate authority bundle for TLS verification",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional cluster metadata")
+
+    @field_serializer("base_url", when_used="json")
+    def serialize_base_url(self, value: HttpUrl, info: SerializationInfo) -> str:
+        """Serialize the URL, keeping userinfo and query only when context requests secrets."""
+        if info.context and info.context.get("include_secrets"):
+            return str(value)
+        return display_url(str(value))
 
     @field_validator("name")
     @classmethod

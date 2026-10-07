@@ -101,25 +101,34 @@ that guardrail stops a given attack.
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.inference_middleware import BackendFormat
+from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModelInferenceConfig
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-guardrail_mw = {
-    "name": "nemo-guardrails",
-    "config_type": "guardrail_config",
-    "config_id": "default/<guardrail-config>",
-}
+guardrail_mw = MiddlewareCall(
+    name="nemo-guardrails",
+    config_type="guardrail_config",
+    config_id="default/<guardrail-config>",
+)
 
-client.inference.virtual_models.create(
-    name="guarded-agent-model",
-    workspace="default",
-    models=[{"model": "default/<main-model-entity>", "backend_format": "OPENAI_CHAT"}],
-    request_middleware=[guardrail_mw],
-    response_middleware=[guardrail_mw],
+client.inference.virtual_models.create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="guarded-agent-model",
+        models=[
+            VirtualModelInferenceConfig(
+                model="default/<main-model-entity>", backend_format=BackendFormat.OPENAI_CHAT
+            )
+        ],
+        request_middleware=[guardrail_mw],
+        response_middleware=[guardrail_mw],
+    )
 )
 ```
 

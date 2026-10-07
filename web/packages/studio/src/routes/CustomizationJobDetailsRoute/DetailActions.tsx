@@ -14,11 +14,12 @@ import { HelixJobStatus, type HelixJobResponse } from '@nemo/sdk/generated/platf
 import { Flex } from '@nvidia/foundations-react-core';
 import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizationJobStatus';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { SaveTemplateModal } from '@studio/routes/CustomizationJobDetailsRoute/SaveTemplateModal';
 import { getNewCustomizationFormRoute } from '@studio/routes/utils';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
 import { useQueryClient } from '@tanstack/react-query';
-import { Ban, Copy } from 'lucide-react';
-import { FC } from 'react';
+import { Ban, Bookmark, Copy } from 'lucide-react';
+import { FC, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 interface DetailActionsProps {
@@ -38,6 +39,7 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const workspace = useWorkspaceFromPath();
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   const cancelMutation = {
     onSuccess: () => {
@@ -96,6 +98,16 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
             onSelect: () =>
               navigate(getNewCustomizationFormRoute(workspace), { state: { cloneFromJob: job } }),
           },
+          // With Clone: both start a new job from this one.
+          ...(job
+            ? [
+                {
+                  label: 'Save as template',
+                  icon: <Bookmark />,
+                  onSelect: () => setSavingTemplate(true),
+                },
+              ]
+            : []),
           ...(isCancellable || isCancelling
             ? [
                 {
@@ -109,6 +121,17 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
             : []),
         ]}
       />
+
+      {/* Mounted only while open, or it reopens holding the last name typed into it. */}
+      {job && savingTemplate ? (
+        <SaveTemplateModal
+          open
+          onClose={() => setSavingTemplate(false)}
+          workspace={workspace}
+          job={job}
+          onSaved={(saved) => toast.success(`Saved “${saved}” as a template.`)}
+        />
+      ) : null}
     </Flex>
   );
 };

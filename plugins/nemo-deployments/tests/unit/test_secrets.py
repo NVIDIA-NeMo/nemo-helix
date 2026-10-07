@@ -73,7 +73,7 @@ async def test_resolve_deployment_config_secrets_keeps_stored_config_reference_o
         ngc_api_key_env_var="NGC_API_KEY",
     )
     with (
-        patch("nemo_deployments_plugin.secrets.client_from_platform", return_value=secrets),
+        patch("nemo_deployments_plugin.secrets.AsyncSecretsClient.from_client", return_value=secrets),
         patch("nemo_deployments_plugin.secrets.get_platform_config", return_value=platform),
     ):
         resolved = await resolve_deployment_config_secrets(MagicMock(), original)
@@ -99,7 +99,7 @@ async def test_resolve_deployment_config_secrets_uses_environment_fallback(
         ngc_api_key_env_var="NGC_API_KEY",
     )
     with (
-        patch("nemo_deployments_plugin.secrets.client_from_platform", return_value=secrets),
+        patch("nemo_deployments_plugin.secrets.AsyncSecretsClient.from_client", return_value=secrets),
         patch("nemo_deployments_plugin.secrets.get_platform_config", return_value=platform),
     ):
         resolved = await resolve_deployment_config_secrets(MagicMock(), config)
@@ -121,7 +121,7 @@ async def test_resolve_deployment_config_secrets_omits_unresolved_ngc_key(
         ngc_api_key_env_var="NGC_API_KEY",
     )
     with (
-        patch("nemo_deployments_plugin.secrets.client_from_platform", return_value=secrets),
+        patch("nemo_deployments_plugin.secrets.AsyncSecretsClient.from_client", return_value=secrets),
         patch("nemo_deployments_plugin.secrets.get_platform_config", return_value=platform),
     ):
         resolved = await resolve_deployment_config_secrets(MagicMock(), config)
@@ -144,7 +144,7 @@ async def test_secret_access_error_does_not_fall_back_to_process_environment(
     )
 
     with (
-        patch("nemo_deployments_plugin.secrets.client_from_platform", return_value=secrets),
+        patch("nemo_deployments_plugin.secrets.AsyncSecretsClient.from_client", return_value=secrets),
         patch("nemo_deployments_plugin.secrets.get_platform_config", return_value=platform),
         pytest.raises(SecretResolutionError, match="access failed"),
     ):
@@ -167,7 +167,7 @@ async def test_resolve_deployment_config_secrets_resolves_arbitrary_reference() 
     )
 
     with (
-        patch("nemo_deployments_plugin.secrets.client_from_platform", return_value=secrets),
+        patch("nemo_deployments_plugin.secrets.AsyncSecretsClient.from_client", return_value=secrets),
         patch("nemo_deployments_plugin.secrets.get_platform_config", return_value=platform),
     ):
         resolved = await resolve_deployment_config_secrets(MagicMock(), config)
@@ -192,7 +192,7 @@ async def test_resolve_deployment_config_secrets_missing_arbitrary_reference_rai
     )
 
     with (
-        patch("nemo_deployments_plugin.secrets.client_from_platform", return_value=secrets),
+        patch("nemo_deployments_plugin.secrets.AsyncSecretsClient.from_client", return_value=secrets),
         patch("nemo_deployments_plugin.secrets.get_platform_config", return_value=platform),
         pytest.raises(SecretResolutionError, match="could not be resolved"),
     ):
@@ -236,7 +236,7 @@ async def test_resolve_deployment_secret_env_collects_values_across_containers()
     )
 
     with (
-        patch("nemo_deployments_plugin.secrets.client_from_platform", return_value=secrets),
+        patch("nemo_deployments_plugin.secrets.AsyncSecretsClient.from_client", return_value=secrets),
         patch("nemo_deployments_plugin.secrets.get_platform_config", return_value=platform),
     ):
         secret_env = await resolve_deployment_secret_env(MagicMock(), config)
@@ -274,7 +274,7 @@ async def test_resolve_deployment_secret_env_omits_unresolved_ngc_key(
     )
 
     with (
-        patch("nemo_deployments_plugin.secrets.client_from_platform", return_value=secrets),
+        patch("nemo_deployments_plugin.secrets.AsyncSecretsClient.from_client", return_value=secrets),
         patch("nemo_deployments_plugin.secrets.get_platform_config", return_value=platform),
     ):
         secret_env = await resolve_deployment_secret_env(MagicMock(), config)

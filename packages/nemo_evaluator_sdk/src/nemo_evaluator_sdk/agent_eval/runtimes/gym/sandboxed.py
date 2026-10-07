@@ -134,7 +134,7 @@ def _host_error_message(rollout_url: str, error: object) -> str:
 class SandboxedGymRuntimeConfig(BaseModel):
     """Where to reach a running sandboxed Gym host, and how to read its rollouts."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     rollout_url: str = Field(description="The session's `/rollouts/run` URL, from its descriptor.")
     auth_token: str | None = Field(

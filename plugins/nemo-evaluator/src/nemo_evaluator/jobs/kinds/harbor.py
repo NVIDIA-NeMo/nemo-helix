@@ -13,7 +13,7 @@ from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget, ResolvedTask, Tar
 from nemo_evaluator.jobs.harbor_scoring import harbor_scoring_task
 from nemo_evaluator.jobs.kinds.types import LoadedTask, PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evaluator.jobs.metric_resolution import resolve_metrics_to_inline
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import saved_harbor_reward_key
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.scoring import saved_harbor_reward_key
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
 

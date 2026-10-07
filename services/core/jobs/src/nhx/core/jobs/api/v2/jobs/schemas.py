@@ -116,7 +116,7 @@ class HelixJobAttemptsListFilter(Filter):
 class HelixJobStepsListFilter(Filter):
     """Filter options for listing platform job steps."""
 
-    # job/source kept as str pending AIRCORE-388 (read as scalars by the in-memory dispatcher)
+    # job/source kept as str pending typed-filter support (read as scalars by the in-memory dispatcher)
     job: Optional[str] = Field(None, description="The ID of the job to filter steps by.")
     status: Optional[List[HelixJobStatus]] = Field(None, description="The list of statuses to filter steps by.")
     source: Optional[str] = Field(None, description="The source of the job steps.")

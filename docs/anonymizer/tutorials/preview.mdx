@@ -5,6 +5,9 @@
 title: "Preview a Config"
 description: ""
 ---
+{/* @nemo-nb: process */}
+{/* @nemo-nb: skip-test */}
+
 <a id="anonymizer-tutorials-preview"></a>
 
 This tutorial walks through the `anonymizer.preview` flow: defining a request, streaming a small anonymized sample, and inspecting the resulting frames.
@@ -62,7 +65,7 @@ config = AnonymizerConfig(
 model_configs = [
     ModelConfig(alias="gliner-pii-detector", provider=MODEL_PROVIDER, model="nvidia/gliner-pii"),
     ModelConfig(alias="gpt-oss-120b", provider=MODEL_PROVIDER, model="openai/gpt-oss-120b"),
-    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"),
+    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3.5-lightning-30b-a3b"),
 ]
 
 request = PreviewRequest(
@@ -94,9 +97,9 @@ Field reference:
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-sdk = NeMoHelix(
+sdk = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
@@ -126,10 +129,10 @@ nemo anonymizer preview \
 ```python
 import asyncio
 import os
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 async def run_preview():
-    async_sdk = AsyncNeMoHelix(
+    async_sdk = AsyncNemoClient(
         base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
         workspace=WORKSPACE,
     )

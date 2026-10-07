@@ -7,8 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.core.jobs.config import config
 
@@ -74,7 +73,7 @@ def _job_dict(job: Any) -> dict[str, Any]:
 
 
 def collect_job_diagnostics(
-    sdk: NeMoHelix,
+    nemo_client: NemoClient,
     step: JobDiagnosticTarget | None = None,
     *,
     workspace: str | None = None,
@@ -97,7 +96,7 @@ def collect_job_diagnostics(
         "step_name": step_ref.name,
     }
 
-    jobs = client_from_platform(sdk, JobsClient)
+    jobs = JobsClient.from_client(nemo_client)
 
     try:
         job = jobs.get_job(name=step_ref.job, workspace=step_ref.workspace).data()
@@ -145,7 +144,7 @@ def collect_job_diagnostics(
 
 
 def log_job_diagnostics_if_debug(
-    sdk: NeMoHelix,
+    nemo_client: NemoClient,
     step: JobDiagnosticTarget | None = None,
     *,
     logger: logging.Logger,
@@ -172,6 +171,6 @@ def log_job_diagnostics_if_debug(
             "workspace": step_ref.workspace,
             "job_name": step_ref.job,
             "step_name": step_ref.name,
-            "job_diagnostics": collect_job_diagnostics(sdk, step_ref, context=context),
+            "job_diagnostics": collect_job_diagnostics(nemo_client, step_ref, context=context),
         },
     )

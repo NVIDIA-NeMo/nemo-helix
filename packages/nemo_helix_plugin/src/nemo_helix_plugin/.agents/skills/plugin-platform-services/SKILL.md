@@ -3,44 +3,66 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-platform-services
-description: Calls NeMo Helix services (entity store, jobs, files, secrets, models, inference gateway, auth) from a plugin. Use when a plugin needs to submit jobs, access files, read secrets, look up models, call the inference gateway, check permissions, or route calls between services. Trigger keywords: jobs service, files service, secrets service, models service, inference gateway, auth client, NeMo SDK, platform SDK, service-to-service, inter-service call, add_job_routes, job_route_factory, NHX_BASE_URL.
+description: Calls NeMo Helix services (entity store, jobs, files, secrets, models, inference gateway, auth) from a plugin. Use when a plugin needs to submit jobs, access files, read secrets, look up models, call the inference gateway, check permissions, or route calls between services. Trigger keywords: jobs service, files service, secrets service, models service, inference gateway, auth client, typed client, NemoClient, platform client, service-to-service, inter-service call, add_job_routes, job_route_factory, NHX_BASE_URL.
 ---
 
-# Platform Services for Plugins
+# NeMo Helix Services for Plugins
 
-## SDK Access Patterns
+## Typed Client Access Patterns
+
+Every platform call goes through a typed client from `nemo_helix_plugin`: a base
+`AsyncNemoClient` / `NemoClient`, plus per-service clients derived from it with
+`<ServiceClient>.from_client(client)` (they share the base client's transport, auth and headers).
 
 **In request scope (FastAPI endpoint):**
 
 ```python
-from nhx.common.service.dependencies import get_sdk_client
-from nemo_helix import AsyncNeMoHelix
 from fastapi import Depends
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.dependencies import get_nemo_client
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.models.client import AsyncModelsClient
 
 @router.get("/items")
 async def list_items(
     workspace: str,
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
 ) -> ...:
-    models = await sdk.models.list(workspace=workspace)
-    filesets = await sdk.files.list(workspace=workspace)
+    models = await AsyncModelsClient.from_client(client).list_models(workspace=workspace)
+    filesets = await AsyncFilesClient.from_client(client).list_filesets(workspace=workspace)
+    async for model in models.items():
+        ...
 ```
 
-`get_sdk_client` propagates the current user's auth headers automatically. Never set `X-NHX-Principal-Id` manually in request-scope code.
+`get_nemo_client` hands out a request-scoped client that propagates the current user's auth headers automatically. Never set `X-NHX-Principal-Id` manually in request-scope code. Use `get_sync_nemo_client` for sync-only code paths.
 
 **In background/controller (no request context):**
 
 ```python
-from nhx.common.sdk_factory import get_async_platform_sdk
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 
-sdk = get_async_platform_sdk(as_service="my-plugin", internal=True)
+client = get_async_nemo_client(as_service="my-plugin", internal=True)
 ```
 
 `internal=True` adds headers that suppress the access log flood from controller polling.
 
+**Acting for a user from background code** (authorize as the entity owner, not the service principal):
+
+```python
+client = get_async_nemo_client(as_service="my-plugin", internal=True, on_behalf_of=owner_principal_id)
+```
+
+**Inside a task container** (authenticates as the service, delegated to the job creator from `NHX_PRINCIPAL`):
+
+```python
+from nemo_helix_plugin.client_provider import get_task_nemo_client
+
+client = get_task_nemo_client("my-plugin")
+```
+
 ## Key Env Vars
 
-`NHX_BASE_URL` is the single most important env var — it points the SDK at the running platform:
+`NHX_BASE_URL` is the single most important env var — it points platform clients at the running platform:
 
 ```bash
 NHX_BASE_URL=http://localhost:8080          # all services at /apis/* on this base
@@ -52,7 +74,7 @@ NHX_FILES_URL=http://files:8080
 NHX_SECRETS_URL=http://secrets:8080
 ```
 
-When a `NHX_<SERVICE>_URL` is set, the SDK factory routes that service's calls through that URL instead of the base URL.
+When a `NHX_<SERVICE>_URL` is set, the platform client provider routes that service's calls through that URL instead of the base URL.
 
 ## Entity Store (quick reference)
 
@@ -63,13 +85,11 @@ See `../plugin-entities/SKILL.md` for full CRUD patterns.
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 
 # Background/controller scope: build manually
-from nhx.common.sdk_factory import get_async_platform_sdk
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
-from nhx.common.entities.client import EntityClient
 
-sdk = get_async_platform_sdk(as_service="my-plugin", internal=True)
-entity_client = EntityClient(client_from_platform(sdk, AsyncEntitiesClient))
+client = get_async_nemo_client(as_service="my-plugin", internal=True)
+entity_client = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 ```
 
 ## Jobs Service
@@ -89,39 +109,47 @@ app.include_router(
 
 The `NemoJob` subclass declares `spec_schema` (Pydantic) and overrides `compile()` to produce a `HelixJobSpec`. See the `plugin-job` skill for the full pattern.
 
-**Manual SDK call** (when not using `add_job_routes`):
+**Manual typed-client call** (when not using `add_job_routes`):
 
 ```python
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+
+jobs_client = AsyncJobsClient.from_client(client)
 # ALWAYS pass source=service_name — without it, your jobs are invisible in list_jobs
-job = await sdk.jobs.create(
-    source="my-plugin",       # ← REQUIRED
-    spec=job_spec,
-    platform_spec=platform_spec,
+job = await jobs_client.create_job(
     workspace=workspace,
+    body=CreateHelixJobRequest(
+        source="my-plugin",       # ← REQUIRED
+        spec=job_spec,
+        platform_spec=platform_spec,
+    ),
 )
-status = await sdk.jobs.get_status(name=job.name, workspace=workspace)
-await sdk.jobs.cancel(name=job.name, workspace=workspace)
+status = await jobs_client.get_job_status(workspace=workspace, name=job.name)
+await jobs_client.cancel_job(workspace=workspace, name=job.name)
 ```
 
 ## Files Service
 
 ```python
-sdk: AsyncNeMoHelix = ...  # from get_sdk_client or get_async_platform_sdk
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
-# Create a fileset
-fileset = await sdk.files.create(workspace=workspace, name="my-outputs")
+files_client = AsyncFilesClient.from_client(client)  # client from get_nemo_client or get_async_nemo_client
+
+# Create a fileset (exist_ok returns the existing fileset on 409)
+fileset = await files_client.create_fileset(
+    workspace=workspace, body=CreateFilesetRequest(name="my-outputs"), exist_ok=True
+)
 
 # List filesets
-filesets = await sdk.files.list(workspace=workspace)
+async for fs in (await files_client.list_filesets(workspace=workspace)).items():
+    ...
 
-# Upload a file (raw HTTP — SDK doesn't wrap this)
-import httpx
+# Upload / download a file
 with open("result.json", "rb") as f:
-    httpx.put(
-        f"{base_url}/apis/files/v2/workspaces/{workspace}/filesets/my-outputs/-/result.json",
-        content=f.read(),
-    headers={"X-NHX-Principal-Id": "service:my-plugin"},  # background/controller scope only — use get_sdk_client() in request-scope FastAPI routes
-    )
+    await files_client.upload_file(workspace=workspace, name="my-outputs", path="result.json", content=f.read())
+data = await (await files_client.download_file(workspace=workspace, name="my-outputs", path="result.json")).read()
 ```
 
 Storage backend types: `local`, `s3`, `ngc`, `huggingface` — configured via `StorageConfig` from `nhx.common.files.storage_config`.
@@ -129,14 +157,19 @@ Storage backend types: `local`, `s3`, `ngc`, `huggingface` — configured via `S
 ## Secrets Service
 
 ```python
-sdk: AsyncNeMoHelix = ...
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+secrets_client = AsyncSecretsClient.from_client(client)
 
 # Create a secret
-await sdk.secrets.create("my-api-key", workspace=workspace, value="sk-...")
+await secrets_client.create_secret(
+    workspace=workspace, body=HelixSecretCreateRequest(name="my-api-key", value="sk-...")
+)
 
 # Access a secret value — POST to /access, NOT a simple GET
 # Returns HelixSecretAccessResponse — the value is in .data
-response = await sdk.secrets.access("my-api-key", workspace=workspace)
+response = await secrets_client.access_secret(workspace=workspace, name="my-api-key")
 secret_value = response.data
 
 # SecretRef format for storage configs
@@ -145,20 +178,25 @@ ref = SecretRef("workspace-name/my-secret")   # workspace/name
 ref = SecretRef("my-secret")                   # name only (uses request workspace)
 ```
 
-`sdk.secrets.access()` calls `POST /secrets/{name}/access` internally. This is intentional — access is audited. Do NOT try to read the value via a GET.
+`access_secret()` calls `POST /secrets/{name}/access`. This is intentional — access is audited. Do NOT try to read the value via a GET.
 
 ## Models Service
 
 ```python
-sdk: AsyncNeMoHelix = ...
+from nemo_helix_plugin.models.client import AsyncModelsClient
 
-# List available models
-models = await sdk.models.list(workspace=workspace)
+models_client = AsyncModelsClient.from_client(client)
+
+# List available models (paginated; .items() walks every page)
+async for model in (await models_client.list_models(workspace=workspace)).items():
+    ...
 
 # Get a specific model
-model = await sdk.models.retrieve(name="llama-3-8b", workspace=workspace)
+model = await models_client.get_model(workspace=workspace, name="llama-3-8b")
 # model.files_url — fileset URL for model weights
 ```
+
+Typed clients raise `nemo_helix_plugin.client.errors` exceptions: `NotFoundError`, `ConflictError`, … (all `NemoHTTPError`, with `.status_code` and `.detail`) and `NemoTransportError` for connection failures.
 
 ## Inference Gateway
 
@@ -237,7 +275,7 @@ See the **Jobs Service** section above — `add_job_routes(JobClass)` from `nemo
 ## Gotchas
 
 - **`source=service_name` required when creating jobs manually**: Without it, `list_jobs` for your service returns jobs from ALL services. Jobs become effectively invisible.
-- **`sdk.secrets.access()` not `.get()`**: The value endpoint is `POST /access`, not `GET /{name}`. `.get()` only returns metadata (no value).
-- **`internal=True` required for background/controller SDK calls**: Without it, every controller poll floods the entity store access log.
-- **Never set `X-NHX-Principal-Id` manually in request-scope code**: `get_sdk_client` propagates the current user's headers automatically. Manual headers will either be ignored or cause auth failures.
+- **`access_secret()` not `get_secret()`**: The value endpoint is `POST /access`, not `GET /{name}`. `get_secret()` only returns metadata (no value).
+- **`internal=True` required for background/controller clients**: Without it, every controller poll floods the entity store access log.
+- **Never set `X-NHX-Principal-Id` manually in request-scope code**: `get_nemo_client` propagates the current user's headers automatically. Manual headers will either be ignored or cause auth failures.
 - **`NHX_BASE_URL` defaults to `http://localhost:8080`**: In production this must be set to the actual cluster URL. Missing this env var is the most common cause of "connection refused" errors.

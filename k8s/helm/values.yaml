@@ -950,6 +950,10 @@ platformSeedJob:
   resources: {}
   # -- Extra environment variables for the platform-seed container (e.g. CONFIG_STORE_PATH, NHX_PLATFORM_SEED_*).
   extraEnv: []
+  # -- Extra volume mounts for the platform-seed container.
+  extraVolumeMounts: []
+  # -- Extra volumes for the platform-seed pod.
+  extraVolumes: []
   # -- Node selector for the platform seeding Job pod.
   nodeSelector: {}
   # -- Affinity for the platform seeding Job pod.
@@ -1097,6 +1101,10 @@ core:
       failureThreshold: 3
     # -- Additional environment variables to pass to containers. This is an object formatted like NAME: value or NAME: valueFrom: {object}.
     env: {}
+    # -- Additional volume mounts to add to the controller container.
+    extraVolumeMounts: []
+    # -- Additional volumes to add to the controller pod.
+    extraVolumes: []
     # -- Node selector configuration for the controller service.
     nodeSelector: {}
     # -- Affinity configuration for the controller service.

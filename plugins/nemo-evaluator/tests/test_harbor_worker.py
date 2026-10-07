@@ -22,7 +22,7 @@ from nemo_evaluator.jobs.metric_resolution import to_inline
 from nemo_evaluator.revisions import publish_revision
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRewardMetric
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRewardMetric
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
@@ -152,10 +152,10 @@ def test_worker_passes_verified_ordered_tasks_to_public_evaluator(
     async_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     headers = {"X-NHX-Principal-Id": "service:harbor-test", "Authorization": "Bearer test-token"}
     sdk = NemoClient(
-        http_client=sync_http, base_url="http://platform.test", workspace="default", default_headers=headers
+        http_client=sync_http, base_url="https://platform.test", workspace="default", default_headers=headers
     )
     async_sdk = AsyncNemoClient(
-        http_client=async_http, base_url="http://platform.test", workspace="default", default_headers=headers
+        http_client=async_http, base_url="https://platform.test", workspace="default", default_headers=headers
     )
     # Isolate onto a real async transport that records requests, as the worker normally does.
     monkeypatch.setattr("nemo_evaluator.jobs.utils.httpx", SimpleNamespace(AsyncClient=lambda **_: async_http))
@@ -239,7 +239,7 @@ def test_worker_executes_additional_metric_and_view(tmp_path, stored_packages, m
     with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
         client = NemoClient(
             http_client=transport,
-            base_url="http://platform.test",
+            base_url="https://platform.test",
             workspace="default",
             default_headers={"X-NHX-Principal-Id": "service:harbor-test", "Authorization": "Bearer test-token"},
         )

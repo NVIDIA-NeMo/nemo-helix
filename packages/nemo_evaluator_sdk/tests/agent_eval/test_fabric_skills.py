@@ -340,3 +340,83 @@ def test_install_skills_rollback_never_deletes_preexisting_seed_file(tmp_path: P
     assert not (workspace / CODEX_SKILLS_DIR / "good").exists()
     # ...but the pre-existing task-seeded file is untouched.
     assert (seeded / "seed.txt").read_text(encoding="utf-8") == "task data"
+
+
+class _Config:
+    """The slice of FabricConfig the relocation touches: ``skills.paths`` plus add/remove."""
+
+    def __init__(self, paths: list[str]) -> None:
+        self.paths = list(paths)
+
+    @property
+    def skills(self) -> object | None:
+        return None if not self.paths else type("Skills", (), {"paths": list(self.paths)})()
+
+    def add_skill_path(self, path: str | Path) -> None:
+        if str(path) not in self.paths:
+            self.paths.append(str(path))
+
+    def remove_skill_path(self, path: str | Path) -> None:
+        self.paths = [p for p in self.paths if p != str(path)]
+
+
+def test_workspace_rooted_skills_names_deepagents_only() -> None:
+    assert skills_module.workspace_rooted_skills("nvidia.fabric.langchain.deepagents")
+    assert skills_module.workspace_rooted_skills(" NVIDIA.Fabric.LangChain.DeepAgents ")
+    assert not skills_module.workspace_rooted_skills("nvidia.fabric.hermes")
+    assert not skills_module.workspace_rooted_skills("nvidia.fabric.codex")
+
+
+def test_relocate_copies_each_bundle_under_agents_skills_and_rewrites_the_config(tmp_path: Path) -> None:
+    base = tmp_path / "agent"
+    _make_bundle(base / "skills", "arithmetic")
+    absolute = _make_bundle(tmp_path / "elsewhere", "style", extra={"notes.md": "n"})
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config = _Config(["skills/arithmetic", str(absolute)])
+
+    locations = skills_module.relocate_skills_into_workspace(config, base_dir=base, workspace_dir=workspace)
+
+    assert locations == [".agents/skills/arithmetic", ".agents/skills/style"]
+    assert (workspace / ".agents/skills/arithmetic/SKILL.md").read_text() == _SKILL_MD
+    assert (workspace / ".agents/skills/style/notes.md").read_text() == "n"
+    assert config.paths == ["/.agents/skills"]
+
+
+def test_relocate_leaves_a_config_without_skills_alone(tmp_path: Path) -> None:
+    config = _Config([])
+    assert skills_module.relocate_skills_into_workspace(config, base_dir=tmp_path, workspace_dir=tmp_path) == []
+    assert config.paths == []
+
+
+def test_relocate_refuses_two_bundles_with_one_name(tmp_path: Path) -> None:
+    _make_bundle(tmp_path / "a/skills", "review")
+    _make_bundle(tmp_path / "b/skills", "review")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config = _Config([str(tmp_path / "a/skills/review"), str(tmp_path / "b/skills/review")])
+
+    with pytest.raises(SkillInjectionError, match="both stage as .agents/skills/review"):
+        skills_module.relocate_skills_into_workspace(config, base_dir=None, workspace_dir=workspace)
+
+
+def test_relocate_refuses_a_path_without_a_skill_doc(tmp_path: Path) -> None:
+    (tmp_path / "agent/skills/empty").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    config = _Config(["skills/empty"])
+
+    with pytest.raises(SkillInjectionError, match="has no SKILL.md"):
+        skills_module.relocate_skills_into_workspace(config, base_dir=tmp_path / "agent", workspace_dir=workspace)
+    assert config.paths == ["skills/empty"]  # nothing rewritten on failure
+
+
+def test_relocate_will_not_clobber_a_seeded_workspace_file(tmp_path: Path) -> None:
+    _make_bundle(tmp_path / "agent/skills", "review")
+    workspace = tmp_path / "ws"
+    (workspace / ".agents/skills/review").mkdir(parents=True)
+    (workspace / ".agents/skills/review/SKILL.md").write_text("task-seeded")
+    config = _Config(["skills/review"])
+
+    with pytest.raises(SkillInjectionError, match="reserved path"):
+        skills_module.relocate_skills_into_workspace(config, base_dir=tmp_path / "agent", workspace_dir=workspace)

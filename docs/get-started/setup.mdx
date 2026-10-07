@@ -15,6 +15,7 @@ Install NeMo Helix and start working with AI agents.
 - Python 3.12-3.14
 - An API key from one of: [NVIDIA Build](https://build.nvidia.com), [OpenAI](https://platform.openai.com/api-keys), [Anthropic](https://console.anthropic.com/settings/keys), [Google Gemini](https://aistudio.google.com/apikey), or a local [Ollama](https://ollama.com) instance (no key needed)
 - 16 GB available disk space and 8 GB RAM
+- [Docker](https://docs.docker.com/get-docker/) for Helix's default local operating mode (`nemo setup --start-services` or `nemo services run`); remote-deployment, CLI-only, and non-Docker configurations do not require it
 - For the PyPI install: [uv](https://docs.astral.sh/uv/) `>=0.10.10`, or `pip` in a Python environment
 - For the source checkout install: [Git](https://git-scm.com/), GNU Make, a C compiler, and [Flox](https://flox.dev/docs/install-flox/install) (recommended). A system-toolchain alternative is documented below.
 
@@ -34,6 +35,8 @@ One command, `nemo` available everywhere, nothing to activate.
 
 ```bash
 uv tool install "nemo-helix[all]"
+uv tool update-shell
+# Then restart the shell
 ```
 
 </Tab>
@@ -155,7 +158,7 @@ link printed at the end of setup to explore its dataset and evaluation config.
 
 ### Coding agent skills
 
-If you accepted **Install skills** during setup and use Cursor, Claude Code, or Codex, your coding agent now has NeMo skills. Ask it to:
+If you accepted **Install skills** during setup, your coding agent now has NeMo skills. Ask it to:
 
 - "Help me optimize my agent" — invokes the `nemo-agents-optimize` skill which analyzes deployed agents, compares models, suggests improvements
 - "Help me secure my agent" — invokes the `nemo-agents-secure` skill which runs audit scans, adds guardrails, flags vulnerabilities
@@ -235,7 +238,7 @@ nemo setup --no-install-skills
 | Chat with the default model | `nemo chat` |
 | Chat with another model | `nemo chat --model <model-name>` |
 | List available models | `nemo models list` |
-| Open the Studio UI | [http://localhost:8080](http://localhost:8080) |
+| Open the Studio UI | [http://localhost:8080/studio/](http://localhost:8080/studio/) |
 | Browse docs from the CLI | `nemo docs --list` |
 | Evaluate a model | [Run LLM-as-a-Judge Evaluation](/documentation/evaluate-models/tutorials/run-llm-as-a-judge-evaluation) |
 | Generate synthetic data | [Data Designer Tutorials](/documentation/design-synthetic-data/tutorials) |
@@ -243,27 +246,28 @@ nemo setup --no-install-skills
 
 ## Python SDK
 
-The `nemo-helix` package includes a Python SDK. After running `nemo setup`, the simplest initialization uses your CLI context:
+The `nemo-helix` package includes a Python SDK. After running `nemo setup`, the simplest initialization reads your CLI context with `NemoClient.from_config()`:
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 ```
 
 For scripts or CI where you want explicit control:
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```
 
-An asynchronous client is also available. See the [SDK reference](/documentation/reference/python-sdk) for details.
+An asynchronous client, `AsyncNemoClient`, is also available (construct it the same way, or with `AsyncNemoClient.from_config()`). See the [SDK reference](/documentation/reference/python-sdk) for details.
 
 ## Troubleshooting
 

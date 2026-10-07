@@ -4,7 +4,8 @@
 """Concise examples for the Evaluator plugin SDK surfaces.
 
 These functions are intentionally not called at import time. Copy the one that
-matches the feature being used and supply a configured NeMo Helix client.
+matches the feature being used and supply an object whose ``evaluator`` attribute is a
+``nemo_evaluator.sdk.Evaluator`` built from an ``EvaluatorClient``.
 """
 
 from __future__ import annotations
@@ -95,6 +96,7 @@ def build_agent_eval_spec(metric_bundle: Any) -> Any:
     from nemo_evaluator.jobs.agent_spec import (
         AgentEvalInputSpec,
         AgentEvalTaskInput,
+        FabricConfigSource,
         FabricRunnerTarget,
     )
 
@@ -108,10 +110,12 @@ def build_agent_eval_spec(metric_bundle: Any) -> Any:
             )
         ],
         target=FabricRunnerTarget(
-            config={
-                "metadata": {"name": "geography-smoke"},
-                "harness": {"adapter_id": "nvidia.fabric.codex"},
-            }
+            source=FabricConfigSource(
+                config={
+                    "metadata": {"name": "geography-smoke"},
+                    "harness": {"adapter_id": "nvidia.fabric.codex"},
+                }
+            )
         ),
         max_concurrent_tasks=2,
         labels={"benchmark": "geography-smoke"},
@@ -122,14 +126,15 @@ def build_gym_agent_eval_spec() -> Any:
     """Build a sandboxed Gym evaluation for a stored taskset and environment FileSet."""
     from nemo_evaluator.api.schemas import TasksetRef
     from nemo_evaluator.filesets import FilesetRef
-    from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymRunnerTarget
+    from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymAgentSource, GymRunnerTarget
 
     return AgentEvalInputSpec(
         tasks=TasksetRef("default/my-gym-taskset"),
         target=GymRunnerTarget(
             environment=FilesetRef(root="default/my-gym-environment"),
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="custom_greeting",
             num_repeats=1,
             concurrency=1,

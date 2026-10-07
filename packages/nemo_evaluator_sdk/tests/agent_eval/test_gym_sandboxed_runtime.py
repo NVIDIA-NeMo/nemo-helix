@@ -28,8 +28,20 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_evaluator_sdk.values.evidence import EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
+from pydantic import ValidationError
 
 ROLLOUT_URL = "http://gym-host.example/rollouts/run"
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [{"auth_token": {"token": "LEAKME"}}, {"headers": {"Authorization": {"token": "LEAKME"}}}],
+)
+def test_sandboxed_gym_validation_error_does_not_echo_credentials(invalid: dict[str, Any]) -> None:
+    """Malformed auth tokens and proxy headers stay out of validation error text."""
+    with pytest.raises(ValidationError) as excinfo:
+        SandboxedGymRuntimeConfig.model_validate({"rollout_url": ROLLOUT_URL, **invalid})
+    assert "LEAKME" not in str(excinfo.value)
 
 
 @pytest.fixture

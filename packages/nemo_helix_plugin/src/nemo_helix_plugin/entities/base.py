@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, ClassVar, Dict, Generic, List, Optional, Protocol, Set, Type, TypeVar, get_type_hints
+from typing import Any, ClassVar, Dict, Generic, List, Optional, Protocol, Self, Set, Type, TypeVar, get_type_hints
 
 from nemo_helix_plugin.client.errors import (
     ConflictError,
@@ -15,6 +15,7 @@ from nemo_helix_plugin.client.errors import (
     UnprocessableEntityError,
     raise_for_status,
 )
+from nemo_helix_plugin.client.types import RESPONSE_VALIDATION_CONTEXT_KEY
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient, EntitiesClient
 from nemo_helix_plugin.entities.types import (
     DeleteResponse,
@@ -26,7 +27,16 @@ from nemo_helix_plugin.entities.types import (
     ListEntitiesQueryParams,
 )
 from nemo_helix_plugin.filter_ops import FilterOperation
-from pydantic import BaseModel, Field, PrivateAttr, TypeAdapter, computed_field
+from pydantic import (
+    BaseModel,
+    Field,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
+    TypeAdapter,
+    ValidationInfo,
+    computed_field,
+    model_validator,
+)
 
 # Regex pattern for valid workspace names
 ID_PATTERN = r"^[\w\-\+.@:]+$"
@@ -91,6 +101,17 @@ class EntityTypeDefault(str):
         return re.sub(r"(?<!^)(?=[A-Z])", "_", objtype.__name__).lower()
 
 
+_OPTIONAL_DATETIME = TypeAdapter(Optional[datetime])
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    return _OPTIONAL_DATETIME.validate_python(value or None)
+
+
 class EntityBase(BaseModel):
     """Base class for all entities.
 
@@ -149,6 +170,35 @@ class EntityBase(BaseModel):
     _updated_by: str | None = PrivateAttr(default=None)
     _parent: str | None = PrivateAttr(default=None)
     _db_version: int = PrivateAttr(default=1)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _restore_store_metadata_from_response(
+        cls, data: Any, handler: ModelWrapValidatorHandler[Self], info: ValidationInfo
+    ) -> Self:
+        """Keep the store-managed metadata a typed client receives in a response.
+
+        The metadata lives in private attributes, which validation never fills,
+        so an entity parsed from a response would report ``id=""`` and
+        ``created_at=None``. The typed clients validate responses with
+        ``RESPONSE_VALIDATION_CONTEXT``; only then is the metadata restored, so
+        request bodies still cannot set it.
+        """
+        entity = handler(data)
+        if info.context and info.context.get(RESPONSE_VALIDATION_CONTEXT_KEY) and isinstance(data, Mapping):
+            entity._restore_store_metadata(data)
+        return entity
+
+    def _restore_store_metadata(self, data: Mapping[str, Any]) -> None:
+        self._id = _optional_str(data.get("id"))
+        self._parent = _optional_str(data.get("parent"))
+        self._created_by = _optional_str(data.get("created_by"))
+        self._updated_by = _optional_str(data.get("updated_by"))
+        self._created_at = _optional_datetime(data.get("created_at"))
+        self._updated_at = _optional_datetime(data.get("updated_at"))
+        db_version = data.get("db_version")
+        if isinstance(db_version, int):
+            self._db_version = db_version
 
     @computed_field
     @property
@@ -411,24 +461,10 @@ def _convert_sort_to_api_sort(sort: str) -> str:
     return sort
 
 
-def _merge_header_items(target: dict[str, str], headers: object) -> None:
-    if not isinstance(headers, Mapping):
-        return
-    for key, value in headers.items():
-        target[str(key).lower()] = str(value)
-
-
-def _client_headers(client: AsyncEntitiesClient | EntitiesClient) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    _merge_header_items(headers, client._client.headers)
-    _merge_header_items(headers, client._default_headers)
-    return headers
-
-
 def _convert_api_entity_to_model(
     entity: Entity,
     entity_type: EntityTypeLike,
-    sdk_headers: dict[str, str],
+    client: AsyncEntitiesClient | EntitiesClient,
 ) -> EntityT:
     """Convert an API entity to an EntityBase model."""
     entity_dict = entity.model_dump()
@@ -458,11 +494,8 @@ def _convert_api_entity_to_model(
                 setattr(result, field_name, raw_value)
 
     # Strip _auth_context unless the effective caller is a service principal.
-    # With on-behalf-of delegation the SDK authenticates as service:platform but
-    # the real caller is in X-NHX-Principal-On-Behalf-Of.
     if hasattr(result, "_auth_context"):
-        effective = sdk_headers.get("x-nhx-principal-on-behalf-of") or sdk_headers.get("x-nhx-principal-id", "")
-        if not effective.startswith("service:"):
+        if not client.can_read_stored_auth_context:
             setattr(result, "_auth_context", None)
 
     return result
@@ -540,7 +573,11 @@ class EntityClient:
 
     def _convert_api_entity_to_model(self, entity: Entity, entity_type: EntityTypeLike) -> EntityT:
         """Convert an API entity to an EntityBase model."""
-        return _convert_api_entity_to_model(entity, entity_type, _client_headers(self._client))
+        return _convert_api_entity_to_model(
+            entity,
+            entity_type,
+            self._client,
+        )
 
     async def list(
         self,
@@ -1071,7 +1108,11 @@ class SyncEntityClient:
 
     def _convert_api_entity_to_model(self, entity: Entity, entity_type: EntityTypeLike) -> EntityT:
         """Convert an API entity to an EntityBase model."""
-        return _convert_api_entity_to_model(entity, entity_type, _client_headers(self._client))
+        return _convert_api_entity_to_model(
+            entity,
+            entity_type,
+            self._client,
+        )
 
     def list(
         self,

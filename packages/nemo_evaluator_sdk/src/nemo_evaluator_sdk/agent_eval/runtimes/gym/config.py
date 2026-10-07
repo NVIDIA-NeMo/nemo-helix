@@ -191,7 +191,7 @@ class GymRuntimeConfig(BaseModel):
     supplied at submission instead, so this config means the same thing locally and job-side.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     agent: str = Field(description="Agent name to collect rollouts with, e.g. 'simple_agent'.")
     agent_config: str = Field(description="Repo-relative agent config passed to `gym env start` (--config).")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -62,6 +63,12 @@ from nemo_helix_plugin.job_usage import LocalJobUsageReporter
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.routes import add_job_routes
 from pydantic import ValidationError
+
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
 
 
 class _TypedFilesResponse:
@@ -234,7 +241,7 @@ async def test_to_spec_validates_and_canonicalizes_base_workdir() -> None:
     entity_client.get.return_value = _agent()
     sdk = _sdk_with_files()
 
-    with patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files):
+    with patch("nemo_agents_plugin.jobs.execute.AsyncFilesClient.from_client", return_value=sdk.files):
         spec = await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(agent="calc", input="hello", workdir=AgentWorkdir(base_workdir="source#project")),
             workspace="default",
@@ -309,7 +316,7 @@ async def test_to_spec_rejects_single_file_base_workdir() -> None:
 
     with pytest.raises(ValueError, match="non-empty directory"):
         sdk = _sdk_with_files(data=[])
-        with patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files):
+        with patch("nemo_agents_plugin.jobs.execute.AsyncFilesClient.from_client", return_value=sdk.files):
             await ExecuteAgentJob.to_spec(
                 ExecuteAgentJobConfig(
                     agent="calc",
@@ -1106,7 +1113,7 @@ def test_run_downloads_and_registers_input_workdir(ctx: JobContext) -> None:
         return FabricRuntimeResult(status="succeeded", response="done")
 
     with (
-        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
         patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download),
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
     ):
@@ -1152,7 +1159,7 @@ def test_run_clears_stale_input_workdir_before_materializing(ctx: JobContext) ->
         return FabricRuntimeResult(status="succeeded")
 
     with (
-        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
         patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download),
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
     ):
@@ -1201,7 +1208,7 @@ def test_run_failed_download_does_not_register_partial_result(ctx: JobContext) -
     sdk = MagicMock()
 
     with (
-        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
         patch(
             "nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref",
             side_effect=RuntimeError("download failed"),
@@ -1326,7 +1333,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     fake_jobs = SimpleNamespace(create_job=_create_job)
     with (
         patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=fake_jobs),
-        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.jobs.execute.AsyncFilesClient.from_client", return_value=sdk.files),
     ):
         response = TestClient(app).post(
             "/apis/agents/v2/workspaces/default/jobs/execute",
@@ -2050,6 +2057,7 @@ def test_an_unrecognized_telemetry_section_is_left_alone(monkeypatch: pytest.Mon
     assert config["telemetry"] == {"enabled": True, "not_a_real_field": 1}
 
 
+@requires_hermes_adapter
 def test_relay_support_is_read_from_the_adapter_descriptor(tmp_path: Path) -> None:
     """The bundled harnesses advertise relay with an ATIF output."""
     assert supports_intake_atif_export(_fabric_agent_config(), base_dir=tmp_path) is True
@@ -2084,6 +2092,7 @@ def test_an_adapter_without_the_atif_output_is_not_wired(
     assert "not its ATIF output" in caplog.text
 
 
+@requires_hermes_adapter
 def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2119,6 +2128,7 @@ def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
     assert "header_env" not in storage
 
 
+@requires_hermes_adapter
 def test_an_auth_disabled_platform_exports_straight_to_the_platform(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2204,6 +2214,7 @@ def test_a_telemetry_only_job_runs_untraced_rather_than_failing(
     assert "without credentials" in caplog.text
 
 
+@requires_hermes_adapter
 def test_a_telemetry_only_job_completes_when_the_proxy_cannot_start(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

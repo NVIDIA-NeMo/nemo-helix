@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the agent-evaluation job (AALGO-297)."""
+"""Unit tests for the agent-evaluation job."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -14,28 +15,33 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_evaluator.api.schemas import MetadataItem, MetricInline, TaskInputs, TasksetRef
+from nemo_evaluator.api.schemas import AgentRef, MetadataItem, MetricInline, TaskInputs, TasksetRef
 from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.agent_compiler import _environment
 from nemo_evaluator.jobs.agent_evaluate import (
     AGENT_BUNDLE_DIR,
     DEFAULT_RESULT_NAME,
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
     AsyncAgentEvalJob,
-    _resolve_gym_environment,
 )
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
+    FabricConfigSource,
     FabricRunnerTarget,
+    GymAgentSource,
     GymRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborImportedAgentSource,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
     ResolvedTask,
     Target,
 )
@@ -45,10 +51,12 @@ from nemo_evaluator.jobs.gym_sandbox import (
     SandboxUnavailableError,
     SessionBackedGymRunner,
 )
+from nemo_evaluator.jobs.gym_submission import resolve_gym_environment
 from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.publication import PublicationOutcome
 from nemo_evaluator.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evaluator.jobs.run_outcome import STATUS_DETAILS_KEY
+from nemo_evaluator.jobs.secret_env import JobEnvSecretSource
 from nemo_evaluator.metric_refs import MetricRef
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
@@ -63,7 +71,8 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
     SandboxedGymAgentTaskRunner,
     SandboxedGymRuntimeConfig,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import harbor_env_templates
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
@@ -138,7 +147,9 @@ def _task_spec() -> ResolvedTask:
 def _runner_target(model: str | None = None) -> FabricRunnerTarget:
     """A minimal agent-runner target, for tests about runners in general rather than a specific one."""
     return FabricRunnerTarget(
-        config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}, model=model
+        source=FabricConfigSource(
+            config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}, model=model
+        )
     )
 
 
@@ -162,7 +173,7 @@ def test_cli_agent_evaluate_uses_flat_submit_without_local_run() -> None:
     assert result.exit_code == 0
     output = result.output
     assert "--spec" in output
-    assert "--base-url" in output
+    assert "--base-url" not in output
     assert "--profile" in output
     assert "Run locally, in-process." not in result.output
     assert "explain" in output
@@ -273,8 +284,9 @@ async def test_arbitrary_inputs_round_trip_from_input_spec_to_runtime_task() -> 
             )
         ],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
         ),
     )
@@ -344,7 +356,9 @@ def _run_sandboxed_gym_job(ctx: JobContext, mocker: MockerFixture) -> Path:
     )
     spec = AgentEvalSpec(
         tasks=[task],
-        target=GymRunnerTarget(agent="simple_agent", agent_config="simple_agent.yaml", resources_server="mcqa"),
+        target=GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="simple_agent.yaml"), resources_server="mcqa"
+        ),
     )
     AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
     return ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
@@ -386,7 +400,7 @@ def _harbor_evidence_path(runtime: HarborAgentTaskRunner, task: AgentEvalTask, c
     ("runtime_cls", "target", "evidence_path"),
     [
         (FabricAgentRuntime, _runner_target("openai/gpt-5.4"), _fabric_evidence_path),
-        (HarborAgentTaskRunner, HarborRunnerTarget(agent_name="oracle"), _harbor_evidence_path),
+        (HarborAgentTaskRunner, HarborRunnerTarget(), _harbor_evidence_path),
     ],
     ids=["fabric", "harbor"],
 )
@@ -567,8 +581,10 @@ def _agent() -> Agent:
 def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path) -> None:
     ctx = _job_context(tmp_path)
     fabric_target = FabricRunnerTarget(
-        config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
-        model="openai/gpt-5.4",
+        source=FabricConfigSource(
+            config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
+            model="openai/gpt-5.4",
+        )
     )
     target, prompt_template, params = AgentEvalJob._resolve_target(fabric_target, ctx)
     assert isinstance(target, FabricAgentRuntime)
@@ -584,10 +600,10 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
     ctx = _job_context(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-resolved-by-the-service")
     harbor_target = HarborRunnerTarget(
-        agent_name="oracle",
-        agent_model_name="openai/gpt-5.4",
+        source=HarborBuiltinAgentSource(name="oracle", model_name="openai/gpt-5.4"),
         agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
         env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
+        env_vars={"FABRIC_LOG": "debug"},
         n_attempts=2,
         n_concurrent_trials=8,
         max_retries=1,
@@ -603,8 +619,13 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
         "fabric_adapter_id": "nvidia.fabric.codex",
         "fabric_harness_settings": {"max_turns": 3},
     }
-    # Only the name travels; the runtime hands Harbor a `${OPENAI_API_KEY}` template it expands itself.
-    assert target._config.agent_env_from_host == ["OPENAI_API_KEY"]
+    assert target._config.env_secrets == {"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")}
+    assert target._config.env_vars == {"FABRIC_LOG": "debug"}
+    # The service injected the secret under its key, so Harbor gets a `${OPENAI_API_KEY}` template.
+    assert isinstance(target._secret_resolver, JobEnvSecretSource)
+    assert harbor_env_templates(target._config.env_secrets, target._secret_resolver) == {
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}"
+    }
     assert target._config.n_attempts == 2
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
@@ -641,13 +662,15 @@ def test_resolve_target_resolves_none_to_no_target(tmp_path: Path) -> None:
 def test_resolve_target_builds_gym_runtime_from_runner_target(tmp_path: Path) -> None:
     ctx = _job_context(tmp_path)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="mcqa",
         num_repeats=2,
         concurrency=4,
         reward_key="score",
         hydra_params={"model": {"temperature": 0.7}},
+        env_secrets={"OPENAI_API_KEY": SecretRef("dev/openai-key")},
     )
     target, prompt_template, params = AgentEvalJob._resolve_target(gym_target, ctx)
     assert isinstance(target, GymAgentTaskRunner)
@@ -658,9 +681,24 @@ def test_resolve_target_builds_gym_runtime_from_runner_target(tmp_path: Path) ->
     # Overrides are nested data on both sides of the seam — the spec model and the runtime config
     # must agree on the shape, or the spec validates and the runtime rejects it.
     assert target._config.hydra_params == {"model": {"temperature": 0.7}}
+    assert target._config.env_secrets == {"OPENAI_API_KEY": SecretRef("dev/openai-key")}
+    assert isinstance(target._secret_resolver, JobEnvSecretSource)
     # A runner shapes its own request, so it contributes no prompt template or inference params.
     assert prompt_template is None
     assert params is None
+
+
+def test_colocated_gym_checks_injected_secret_before_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    gym_target = GymRunnerTarget(
+        source=GymAgentSource(component="simple_agent", config="a.yaml"),
+        resources_server="mcqa",
+        env_secrets={"OPENAI_API_KEY": SecretRef("ws/openai")},
+    )
+    runner, _, _ = AgentEvalJob._resolve_target(gym_target, _job_context(tmp_path))
+    assert isinstance(runner, GymAgentTaskRunner)
+    with pytest.raises(ValueError, match="nemo secrets get openai --workspace ws"):
+        asyncio.run(runner.run_tasks([]))
 
 
 def _sandbox_plan() -> SandboxPlan:
@@ -681,8 +719,9 @@ def test_resolve_target_passes_job_storage_to_sandboxed_gym(
 ) -> None:
     ctx = _job_context(tmp_path)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="custom",
         environment=FilesetRef(root="dev/custom-environment"),
     )
@@ -703,8 +742,9 @@ def test_resolve_target_rejects_unsandboxed_custom_environment(
 ) -> None:
     ctx = _job_context(tmp_path)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="custom",
         environment=FilesetRef(root="dev/custom-environment"),
     )
@@ -722,10 +762,12 @@ def test_resolve_target_rejects_unsandboxed_agent_ref_name(
     # would be dropped and the run would route to `agent` -- a plausible score for a different agent.
     ctx = _job_context(tmp_path)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent",
+            config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            instance="mcqa_simple_agent",
+        ),
         resources_server="mcqa",
-        agent_ref_name="mcqa_simple_agent",
     )
     monkeypatch.delenv(GYM_SANDBOX_PLAN_ENVVAR, raising=False)
 
@@ -739,20 +781,31 @@ def test_runner_target_is_accepted(tmp_path: Path) -> None:
 
 
 def test_harbor_runner_target_is_accepted() -> None:
-    spec = AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget(agent_name="oracle"))
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget())
     assert isinstance(spec.target, HarborRunnerTarget)
 
 
-def test_resolve_target_refuses_harbor_env_secret_missing_from_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(("ref", "workspace"), [("my-workspace/openai-key", "my-workspace"), ("openai-key", "dev")])
+def test_harbor_env_secret_missing_from_job_environment_names_the_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ref: str, workspace: str
 ) -> None:
-    """An unresolved `env_secrets` entry fails by name here, not inside a Docker trial as a bare auth error."""
+    """An unresolved `env_secrets` entry fails by name before Docker starts, not inside a trial as an auth error.
+
+    The runner raises when it builds the templates, at the start of each execution; target resolution
+    no longer checks. A bare ref points at the job's workspace.
+    """
     ctx = _job_context(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    harbor_target = HarborRunnerTarget(env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")})
+    harbor_target = HarborRunnerTarget(env_secrets={"OPENAI_API_KEY": SecretRef(root=ref)})
+    runner, _, _ = AgentEvalJob._resolve_target(harbor_target, ctx)
+    assert isinstance(runner, HarborAgentTaskRunner) and runner._config is not None
 
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        AgentEvalJob._resolve_target(harbor_target, ctx)
+    with pytest.raises(ValueError) as excinfo:
+        harbor_env_templates(runner._config.env_secrets, runner._secret_resolver)
+    assert str(excinfo.value) == (
+        f"env_secrets['OPENAI_API_KEY'] -> secret {ref!r} was not injected into this job's environment. "
+        f"Check the secret exists in workspace {workspace!r}: nemo secrets get openai-key --workspace {workspace}"
+    )
 
 
 def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:
@@ -766,17 +819,48 @@ def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:
         HarborRunnerTarget(agent_kwargs={"fabric_environment_env": {"OPENAI_API_KEY": "nvapi-not-a-real-key"}})
 
 
+def test_model_target_validation_error_does_not_echo_rejected_auth_header() -> None:
+    """The target wrapper must preserve credential redaction when its nested Model rejects auth."""
+    with pytest.raises(ValidationError, match="authentication headers") as excinfo:
+        ModelTarget.model_validate(
+            {
+                "model": {
+                    "url": "http://model.test",
+                    "name": "test",
+                    "default_headers": {"Authorization": "LEAKME"},
+                }
+            }
+        )
+    assert "LEAKME" not in str(excinfo.value)
+
+
+def test_gym_target_validation_error_does_not_echo_rejected_secret() -> None:
+    """Direct target validation must not print a credential rejected as an environment collision."""
+    with pytest.raises(ValidationError, match="env_vars and env_secrets") as excinfo:
+        GymRunnerTarget.model_validate(
+            {
+                "agent": "simple_agent",
+                "agent_config": "config.yaml",
+                "resources_server": "mcqa",
+                "env_secrets": {"KEY": "ws/key"},
+                "env_vars": {"KEY": "LEAKME"},
+            }
+        )
+    assert "LEAKME" not in str(excinfo.value)
+
+
 def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
     """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
     agent_kwargs: dict[str, JsonValue] = {
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.3.0",
+        "fabric_package": "nemo-fabric[codex]==0.4.0",
         "fabric_harness_settings": {"max_turns": 3, "tools": ["shell", None], "strict": True},
     }
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=HarborRunnerTarget(
-            agent_import_path="nemo_fabric.integrations.harbor:FabricAgent", agent_kwargs=agent_kwargs
+            source=HarborImportedAgentSource(import_path="nemo_fabric.integrations.harbor:FabricAgent"),
+            agent_kwargs=agent_kwargs,
         ),
     )
 
@@ -1053,6 +1137,23 @@ async def test_to_spec_resolves_inline_task_metrics_without_metric_refs() -> Non
     assert isinstance(_to_runtime_task(spec.tasks[0]).metrics[0], ExactMatchMetric)
 
 
+@pytest.mark.parametrize("task_id", ["", "   ", "\t\n"])
+async def test_to_spec_rejects_a_blank_inline_task_id(task_id: str) -> None:
+    """A blank id must fail at submit, before a job exists, rather than run as an unnamed task."""
+    input_spec = AgentEvalInputSpec(
+        tasks=[
+            AgentEvalTaskInput(
+                id=task_id, intent="Answer.", inputs=_task_inputs(instruction="Reply DONE."), metrics=[_inline_metric()]
+            )
+        ],
+        target=_runner_target("openai/gpt-5.4"),
+    )
+    with pytest.raises(ValueError, match="task id must not be empty"):
+        await AgentEvalJob.to_spec(
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
+        )
+
+
 async def test_to_spec_requires_entity_store_to_resolve_a_metric_reference() -> None:
     # A stored MetricRef can only be loaded with an entity store and Files service; without one,
     # to_spec must fail loudly rather than silently drop the metric.
@@ -1135,7 +1236,7 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
     """Compile the minimal Harbor submission every backend-guard test makes."""
     compiled = await AgentEvalJob.compile(
         workspace="default",
-        spec=AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget(agent_name="oracle")),
+        spec=AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget()),
         entity_client=object(),
         job_name=None,
         async_sdk=async_sdk,
@@ -1148,7 +1249,11 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
     ("target", "expected_kind", "expected_endpoint_name", "expected_image_name", "expected_entrypoint"),
     [
         (
-            FabricRunnerTarget(config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}),
+            FabricRunnerTarget(
+                source=FabricConfigSource(
+                    config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
+                )
+            ),
             "fabric",
             None,
             "nhx-tasks",
@@ -1156,8 +1261,9 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
         ),
         (
             GymRunnerTarget(
-                agent="simple_agent",
-                agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+                source=GymAgentSource(
+                    component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+                ),
                 resources_server="mcqa",
             ),
             "gym",
@@ -1229,8 +1335,9 @@ async def test_compile_gym_target_honors_configured_image_override(mocker: Mocke
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
         ),
     )
@@ -1251,8 +1358,9 @@ async def test_compile_gym_target_honors_configured_image_override(mocker: Mocke
 def _gym_environment_target() -> GymRunnerTarget:
     return GymRunnerTarget(
         environment=FilesetRef(root="dev/custom-gym"),
-        agent="custom_agent",
-        agent_config="responses_api_agents/custom_agent/configs/custom_agent.yaml",
+        source=GymAgentSource(
+            component="custom_agent", config="responses_api_agents/custom_agent/configs/custom_agent.yaml"
+        ),
         resources_server="custom_resources",
     )
 
@@ -1332,8 +1440,9 @@ async def test_compile_sandboxed_gym_uses_cpu_tasks_and_ignores_colocated_image_
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
         ),
     )
@@ -1428,6 +1537,30 @@ async def test_compile_rejects_fileset_environment_when_sandboxing_is_disabled(m
         await AgentEvalJob.compile(
             workspace="dev",
             spec=AgentEvalSpec(tasks=[_task_spec()], target=_gym_environment_target()),
+            entity_client=object(),
+            job_name=None,
+            async_sdk=_async_sdk(),
+        )
+
+
+async def test_compile_rejects_a_registered_gym_agent_when_sandboxing_is_disabled(mocker: MockerFixture) -> None:
+    """A registered agent stages an environment tree with no `target.environment`; compile must still check it."""
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
+    mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
+    mocker.patch(
+        "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
+        return_value="registry.example/nhx-gym-tasks:test",
+    )
+    target = GymRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef(root="dev/calc")),
+        resources_server="mcqa",
+        resolved_config={"harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"}},
+    )
+
+    with pytest.raises(HelixJobCompilationError, match="registered agent's Gym package require sandboxed execution"):
+        await AgentEvalJob.compile(
+            workspace="dev",
+            spec=AgentEvalSpec(tasks=[_task_spec()], target=target),
             entity_client=object(),
             job_name=None,
             async_sdk=_async_sdk(),
@@ -1556,15 +1689,16 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
     target = GymRunnerTarget(
         environment=FilesetRef(root="custom-gym"),
-        agent="custom_agent",
-        agent_config="responses_api_agents/custom_agent/configs/custom_agent.yaml",
+        source=GymAgentSource(
+            component="custom_agent", config="responses_api_agents/custom_agent/configs/custom_agent.yaml"
+        ),
         resources_server="custom_resources",
     )
 
-    resolved = await _resolve_gym_environment(
+    resolved = await resolve_gym_environment(
         target,
         workspace="dev",
         async_client=_async_sdk(),
@@ -1605,9 +1739,9 @@ async def test_resolve_gym_environment_accepts_native_v1(mocker: MockerFixture) 
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
-    resolved = await _resolve_gym_environment(
+    resolved = await resolve_gym_environment(
         _gym_environment_target(),
         workspace="dev",
         async_client=_async_sdk(),
@@ -1622,16 +1756,17 @@ async def test_resolve_gym_environment_rejects_wrong_purpose(mocker: MockerFixtu
     response.data.return_value = SimpleNamespace(purpose=FilesetPurpose.DATASET)
     files = mocker.Mock()
     files.get_fileset = mocker.AsyncMock(return_value=response)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
     target = GymRunnerTarget(
         environment=FilesetRef(root="dev/not-an-environment"),
-        agent="custom_agent",
-        agent_config="responses_api_agents/custom_agent/configs/custom_agent.yaml",
+        source=GymAgentSource(
+            component="custom_agent", config="responses_api_agents/custom_agent/configs/custom_agent.yaml"
+        ),
         resources_server="custom_resources",
     )
 
     with pytest.raises(ValueError, match="expected 'environment'"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             target,
             workspace="dev",
             async_client=_async_sdk(),
@@ -1649,10 +1784,10 @@ async def test_resolve_gym_environment_rejects_missing_manifest(mocker: MockerFi
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock()
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
     with pytest.raises(ValueError, match="has no nemo-environment.yaml at its root"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
             async_client=_async_sdk(),
@@ -1672,10 +1807,10 @@ async def test_resolve_gym_environment_rejects_manifest_listing_mismatch(mocker:
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
     with pytest.raises(ValueError, match="config_paths reference files that are not in the package"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
             async_client=_async_sdk(),
@@ -1804,6 +1939,71 @@ async def test_compile_non_harbor_target_does_not_resolve_execution_profiles(moc
     assert cast(dict[str, Any], HelixJobSpec.model_validate(compiled).steps[0].config)["target"]["kind"] == "fabric"
 
 
+async def test_compile_resolves_fabric_runner_env_secrets() -> None:
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(config={"harness": {"adapter_id": "nvidia.fabric.codex"}}),
+        env_secrets={"NVIDIA_API_KEY": SecretRef("my-workspace/nvidia-key")},
+    )
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
+    compiled = await AgentEvalJob.compile(
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+    )
+    step = HelixJobSpec.model_validate(compiled).steps[0]
+    secrets = {env.name: env.from_secret.name for env in step.environment or [] if env.from_secret}
+    assert secrets == {"NVIDIA_API_KEY": "my-workspace/nvidia-key"}
+    assert cast(dict[str, Any], step.config)["target"]["env_secrets"] == {"NVIDIA_API_KEY": "my-workspace/nvidia-key"}
+
+
+def test_fabric_worker_uses_the_job_env_secret_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(config={"harness": {"adapter_id": "nvidia.fabric.codex"}}),
+        env_secrets={"NVIDIA_API_KEY": SecretRef("my-workspace/nvidia-key")},
+    )
+    runtime, _, _ = AgentEvalJob._resolve_target(target, _job_context(tmp_path))
+    assert isinstance(runtime, FabricAgentRuntime)
+    assert runtime._env_secrets == target.env_secrets
+    assert isinstance(runtime._secret_resolver, JobEnvSecretSource)
+
+
+@pytest.mark.parametrize("registered", [False, True])
+@pytest.mark.parametrize(
+    "config,field",
+    [
+        ({"environment": {"env": {"KEY": "override"}}}, "KEY"),
+        ({"environment": "local"}, "config.environment"),
+        ({"environment": {"env": []}}, "config.environment.env"),
+    ],
+)
+def test_fabric_target_rejects_invalid_secret_environment_at_submit(
+    config: dict[str, Any], field: str, registered: bool
+) -> None:
+    with pytest.raises(ValidationError, match=field):
+        if registered:
+            FabricRunnerTarget(
+                source=RegisteredAgentSource(agent="ws/agent"),
+                resolved_config=config,
+                env_secrets={"KEY": SecretRef("ws/key")},
+            )
+        else:
+            FabricRunnerTarget(source=FabricConfigSource(config=config), env_secrets={"KEY": SecretRef("ws/key")})
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_fabric_target_validation_error_does_not_echo_rejected_secret(registered: bool) -> None:
+    """Reject credential collisions without printing either inline or resolved Fabric config values."""
+    config = {"environment": {"env": {"KEY": "LEAKME"}}}
+    target: dict[str, Any] = {"env_secrets": {"KEY": "ws/key"}}
+    if registered:
+        target["source"] = {"agent": "ws/agent"}
+        target["resolved_config"] = config
+    else:
+        target["source"] = {"config": config}
+    with pytest.raises(ValidationError, match="also provided by env_secrets") as excinfo:
+        FabricRunnerTarget.model_validate(target)
+    assert "LEAKME" not in str(excinfo.value)
+
+
 async def test_compile_injects_target_api_key_secret() -> None:
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
@@ -1845,6 +2045,45 @@ async def test_compile_rejects_reserved_secret_env_name() -> None:
         )
 
 
+@pytest.mark.parametrize("source", ["gym", "harbor", "fabric", "metric"])
+async def test_compile_rejects_sandbox_plan_secret_name_from_all_sources(source: str, mocker: MockerFixture) -> None:
+    name = GYM_SANDBOX_PLAN_ENVVAR
+    task = _task_spec()
+    if source == "gym":
+        _patch_execution_profiles(mocker, [])
+        target = GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="a.yaml"),
+            resources_server="mcqa",
+            env_secrets={name: SecretRef("ws/x")},
+        )
+    elif source == "harbor":
+        target = HarborRunnerTarget(env_secrets={name: SecretRef("ws/x")})
+    elif source == "fabric":
+        target = FabricRunnerTarget(source=FabricConfigSource(config={}), env_secrets={name: SecretRef("ws/x")})
+    else:
+        target = HarborRunnerTarget()
+        metric = task.spec.metrics[0].model_copy(update={"secrets": {name: SecretRef("ws/x")}})
+        task = task.model_copy(update={"spec": task.spec.model_copy(update={"metrics": [metric]})})
+    spec = AgentEvalSpec(tasks=[task], target=target)
+    with pytest.raises(ValueError, match="NEMO_EVALUATOR_GYM_SANDBOX_PLAN.*reserved"):
+        await AgentEvalJob.compile(
+            workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+        )
+
+
+def test_sandbox_plan_secret_name_is_rejected_before_plan_is_appended() -> None:
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="a.yaml"),
+            resources_server="mcqa",
+            env_secrets={GYM_SANDBOX_PLAN_ENVVAR: SecretRef("ws/x")},
+        ),
+    )
+    with pytest.raises(ValueError, match="NEMO_EVALUATOR_GYM_SANDBOX_PLAN.*reserved"):
+        _environment(spec, sandbox_plan=_sandbox_plan())
+
+
 # --- sync job entrypoint: the in-process run path, across target types -------
 
 
@@ -1856,10 +2095,11 @@ async def test_compile_rejects_reserved_secret_env_name() -> None:
         ),
         AgentTarget(agent=_agent(), params=RunConfigOnline()),
         _runner_target("openai/gpt-5.4"),
-        HarborRunnerTarget(agent_name="oracle"),
+        HarborRunnerTarget(),
         GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
         ),
     ],
@@ -1994,7 +2234,7 @@ class TestAgentEvalTask:
 
 
 async def test_trial_error_survives_the_job_spec_wire_contract() -> None:
-    """AALGO-428: ``AgentEvalTrial.error`` is public API, not just an SDK-internal field.
+    """``AgentEvalTrial.error`` is public API, not just an SDK-internal field.
 
     Precomputed trials are accepted straight off the wire by ``AgentEvalInputSpec.trials``, and
     ``AgentEvalTrial`` forbids extras — so a typed error has to survive JSON round-tripping through
@@ -2137,8 +2377,9 @@ async def test_compile_resolves_gym_runner_env_secrets(mocker: MockerFixture) ->
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
             env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared/cache"},
             env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
@@ -2168,7 +2409,7 @@ async def test_compile_resolves_harbor_runner_env_secrets(mocker: MockerFixture)
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=HarborRunnerTarget(
-            agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
+            source=HarborImportedAgentSource(import_path="nemo_fabric.integrations.harbor:FabricAgent"),
             agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex"},
             env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
         ),
@@ -2193,7 +2434,7 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
     from nemo_evaluator.api.schemas import MetadataItem
 
     resolver = AsyncMock(side_effect=lambda target, **kwargs: target)
-    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate._resolve_gym_environment", resolver)
+    monkeypatch.setattr("nemo_evaluator.jobs.gym_submission.resolve_gym_environment", resolver)
     request = AgentEvalInputSpec(
         tasks=[
             AgentEvalTaskInput(
@@ -2203,7 +2444,9 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
                 metadata=[MetadataItem(key="gym_row_extras", value={})],
             )
         ],
-        target=GymRunnerTarget(agent="simple_agent", agent_config="config.yaml", resources_server="mcqa"),
+        target=GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="config.yaml"), resources_server="mcqa"
+        ),
     )
     if valid:
         await AgentEvalJob.to_spec(
@@ -2224,7 +2467,7 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
         None,
         ModelTarget(model=Model(url="http://model.test", name="test")),
         AgentTarget(agent=_agent()),
-        FabricRunnerTarget(config={}),
+        FabricRunnerTarget(source=FabricConfigSource(config={})),
         HarborRunnerTarget(),
     ],
 )
@@ -2256,3 +2499,42 @@ async def test_non_gym_submission_never_prepares_gym(monkeypatch, target: Target
     )
     assert isinstance(result, AgentEvalSpec)
     assert result.target == target
+
+
+async def test_compile_registered_gym_agent_stages_its_package_before_evaluation(mocker: MockerFixture) -> None:
+    """A registered agent stages even with no environment FileSet: the package it runs from is built by that step."""
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
+    mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
+    mocker.patch(
+        "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
+        side_effect=lambda name: f"registry.example/{name}:test",
+    )
+    _enable_fileset_sandbox(mocker)
+    target = GymRunnerTarget(
+        source=RegisteredAgentSource(
+            agent=AgentRef(root="dev/calc"), files=FilesetRef(root="dev/agent-files-0123abcd4567")
+        ),
+        resources_server="mcqa",
+        resolved_config={
+            "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+            "skills": {"paths": ["skills/a"]},
+        },
+    )
+
+    compiled = await AgentEvalJob.compile(
+        workspace="dev",
+        spec=AgentEvalSpec(tasks=[_task_spec()], target=target),
+        entity_client=object(),
+        job_name=None,
+        async_sdk=_async_sdk(),
+    )
+
+    stage, evaluate = HelixJobSpec.model_validate(compiled).steps
+    assert (stage.name, evaluate.name) == ("stage-environment", "agent-evaluate")
+    config = cast(dict[str, Any], stage.config)
+    assert "environment" not in config and config["agent_files"] == "dev/agent-files-0123abcd4567"
+    package = config["gym_registered_agent"]
+    assert package["agent"] == "dev/calc" and package["resolved_config"] == target.resolved_config
+    assert package["requirements"][0].startswith("nemo-fabric[deepagents,relay]==")
+    assert "constraints" not in package  # the host image's pins ship with the plugin, not with the spec
+    assert package["requirements"] == [package["requirements"][0]]  # the extra alone; the host lock pins companions

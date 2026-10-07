@@ -3,6 +3,38 @@ info:
   title: agents (plugin)
   version: 0.0.0
 paths:
+  /apis/agents/v2/sample-agent:
+    post:
+      tags:
+      - Sample Agent
+      summary: Create Sample Agent
+      description: Stream provisioning progress; deployment readiness is checked separately.
+      operationId: create_sample_agent_apis_agents_v2_sample_agent_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSampleAgentRequest'
+        required: true
+      responses:
+        '201':
+          description: New sample agent provisioning stream.
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: '#/components/schemas/SampleAgentStreamEvent'
+        '200':
+          description: Existing sample agent resumed or already provisioned.
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: '#/components/schemas/SampleAgentStreamEvent'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/agents:
     post:
       tags:
@@ -292,6 +324,33 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/deployment-modes:
+    get:
+      tags:
+      - Agent Deployments
+      summary: List Deployment Modes
+      description: List every deployment mode and whether this platform can run it.
+      operationId: list_deployment_modes_apis_agents_v2_workspaces__workspace__deployment_modes_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentModeList'
         '422':
           description: Validation Error
           content:
@@ -3578,9 +3637,11 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
           description: Runtime backend for this deployment. 'subprocess' (default)
-            reads the loopback 'endpoint'; 'docker'/'k8s' read the projected 'endpoints'.
+            reads the loopback 'endpoint'; 'docker'/'k8s'/'openshell' read the projected
+            'endpoints'.
           default: subprocess
         endpoint:
           type: string
@@ -3597,7 +3658,7 @@ components:
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s modes. Empty for subprocess;
+          description: Container image for container modes. Empty for subprocess;
             falls back to AgentsConfig.deployments.default_image.
           default: ''
         use_image_entrypoint:
@@ -4468,13 +4529,15 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
-          description: 'Runtime backend: subprocess (default), docker, or k8s.'
+          description: 'Runtime backend: subprocess (default), docker, k8s, or openshell.'
           default: subprocess
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s modes. Ignored for subprocess.
+          description: Container image for docker/k8s/openshell modes. Ignored for
+            subprocess.
           default: ''
         use_image_entrypoint:
           type: boolean
@@ -4606,6 +4669,17 @@ components:
       - name
       title: CreateEnvironmentSpecRequest
       description: Request body for ``POST /v2/workspaces/{workspace}/environment-specs``.
+    CreateSampleAgentRequest:
+      properties:
+        model:
+          type: string
+          title: Model
+          description: Workspace-qualified model entity, for example default/my-model.
+      type: object
+      required:
+      - model
+      title: CreateSampleAgentRequest
+      description: Model to use when provisioning the packaged email security sample.
     CreateSessionRequest:
       properties:
         deployment_id:
@@ -4661,6 +4735,46 @@ components:
       - next_offset
       title: DeploymentLogsResponse
       description: Response body for ``GET /deployments/{name}/logs``.
+    DeploymentModeAvailability:
+      properties:
+        mode:
+          type: string
+          enum:
+          - subprocess
+          - docker
+          - k8s
+          - openshell
+          title: Mode
+          description: The deployment mode.
+        enabled:
+          type: boolean
+          title: Enabled
+          description: True when a deployment in this mode would run on a matching
+            executor backend.
+        requires_image:
+          type: boolean
+          title: Requires Image
+          description: True when a deployment in this mode must set 'image' because
+            no default image is configured.
+      type: object
+      required:
+      - mode
+      - enabled
+      - requires_image
+      title: DeploymentModeAvailability
+      description: Whether this platform can run deployments in one ``deployment_mode``.
+    DeploymentModeList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/DeploymentModeAvailability'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: DeploymentModeList
+      description: Response for ``GET /v2/workspaces/{workspace}/deployment-modes``.
     Endpoint:
       properties:
         name:
@@ -6670,6 +6784,96 @@ components:
       - config
       - config_format
       title: ResolvedAgentConfig
+    SampleAgentResponse:
+      properties:
+        status:
+          type: string
+          enum:
+          - created
+          - resumed
+          - already_exists
+          title: Status
+        workspace:
+          type: string
+          title: Workspace
+        studio_url:
+          type: string
+          title: Studio Url
+          description: Studio path relative to the platform origin.
+        agent:
+          type: string
+          title: Agent
+        deployment:
+          type: string
+          title: Deployment
+        deployment_status:
+          type: string
+          enum:
+          - pending
+          - starting
+          - running
+          - failed
+          - deleting
+          title: Deployment Status
+      type: object
+      required:
+      - status
+      - workspace
+      - studio_url
+      - agent
+      - deployment
+      - deployment_status
+      title: SampleAgentResponse
+      description: Provisioned sample agent and its workspace and deployment state.
+    SampleAgentStreamEvent:
+      properties:
+        kind:
+          type: string
+          enum:
+          - progress
+          - done
+          - error
+          title: Kind
+        component:
+          title: Component
+          type: string
+          enum:
+          - workspace
+          - agent
+          - deployment
+          - dataset
+          - evaluation_config
+        status:
+          title: Status
+          type: string
+          enum:
+          - created
+          - existing
+          - submitted
+          - uploaded
+          - updated
+        workspace:
+          title: Workspace
+          type: string
+        result:
+          $ref: '#/components/schemas/SampleAgentResponse'
+        message:
+          title: Message
+          type: string
+        status_code:
+          title: Status Code
+          type: integer
+        failed_step:
+          title: Failed Step
+          type: string
+        retryable:
+          title: Retryable
+          type: boolean
+      type: object
+      required:
+      - kind
+      title: SampleAgentStreamEvent
+      description: One NDJSON frame from sample-agent provisioning.
     SessionFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/sessions``.

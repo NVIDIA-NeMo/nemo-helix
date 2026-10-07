@@ -22,7 +22,7 @@ endif
 PYTEST_EXTRA ?=
 # Default development toolchain versions. Keep these aligned with Flox; the
 # version-consistency checks validate them in pre-commit and CI.
-PYTHON_VERSION ?= 3.12
+PYTHON_VERSION ?= 3.13
 UV_VERSION := 0.10.10
 NODE_VERSION := 22.23.2
 PNPM_VERSION := 10.34.5
@@ -335,7 +335,7 @@ clean: clean-python ## Clean the NeMo Helix DB, files, and Python virtual enviro
 .PHONY: update-licenses
 update-licenses: ## Update the third_party/license.txt file with the latest licenses
 	$(UV) sync --inexact
-	$(UV) run --frozen nemo-helix-sdk-tools license generate
+	$(UV) run --frozen nemo-helix-tools license generate
 
 .PHONY: check-licenses
 check-licenses: ## Check that license files are up to date
@@ -344,7 +344,7 @@ check-licenses: ## Check that license files are up to date
 	export PATH="$$HOME/.local/bin:$$PATH" && \
 	$(MAKE) update-licenses && \
 	diff third_party/licenses.jsonl "$${LICENSE_DIR}/$${LICENSE_NAME}" && \
-	$(UV) run --frozen nemo-helix-sdk-tools license find-missing
+	$(UV) run --frozen nemo-helix-tools license find-missing
 
 CMD_COPYRIGHT_HEADER_FIXER := $(UV) run python tools/lint/copyright_fixer.py
 .PHONY: update-copyright-headers
@@ -387,7 +387,7 @@ check-github-scripts: test-github-scripts lint-github-scripts ## Test, lint, and
 
 .PHONY: vendor
 vendor: ## Refresh the nemo-helix wheel metadata generated from [tool.bundle-package]
-	$(UV) run --no-sync nemo-helix-sdk-tools vendor bundle-metadata
+	$(UV) run --no-sync nemo-helix-tools vendor bundle-metadata
 
 # ============================================================================
 # Python Testing Targets

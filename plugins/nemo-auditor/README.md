@@ -32,7 +32,7 @@ NeMo CLI:
 
 ```bash
 # Create a config from a JSON file
-nemo auditor configs create quick-scan -w default -f ./quick-scan.json
+nemo auditor configs create quick-scan -w default --data-file ./quick-scan.json
 
 # Create a target inline
 nemo auditor targets create nemotron-3.5-lightning-30b -w default -d '{
@@ -53,20 +53,21 @@ audits via the `auditor.audit` job entry point.
 
 ## SDK quickstart
 
-Every CLI verb has a matching Python SDK method on `client.auditor`, plus
-`client.auditor.run(...)` for in-process execution that bypasses the jobs
-service.
+Every CLI verb has a matching method on `AuditorPluginResource`, plus
+`run(...)` for in-process execution that bypasses the jobs service. Wrap a
+`NemoClient` to use it; the typed `AuditorClient` exposes the raw endpoints.
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_auditor.sdk import AuditorPluginResource
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_auditor.entities import (
     AuditSystemData, AuditRunData, AuditPluginsData, AuditReportData,
 )
 
-client = NeMoHelix()
+auditor = AuditorPluginResource(NemoClient(base_url="http://localhost:8080", workspace="default"))
 
 # Persist a config
-cfg = client.auditor.configs.create(
+cfg = auditor.configs.create(
     workspace="default",
     name="quick-scan",
     system=AuditSystemData(lite=True, parallel_attempts=4),
@@ -76,7 +77,7 @@ cfg = client.auditor.configs.create(
 )
 
 # Persist a target
-tgt = client.auditor.targets.create(
+tgt = auditor.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
@@ -85,7 +86,7 @@ tgt = client.auditor.targets.create(
 )
 
 # Submit a K8s audit job and wait for it to finish.
-job = client.auditor.submit(
+job = auditor.submit(
     config="quick-scan",
     target="nemotron-3.5-lightning-30b",
     workspace="default",
@@ -96,7 +97,7 @@ artifacts_dir = job.download_artifacts()       # extracts garak reports to ./<jo
 print(f"Reports: {artifacts_dir}")
 
 # Or run an audit locally (no jobs-service submission).
-result = client.auditor.run(
+result = auditor.run(
     config="quick-scan",       # workspace-qualified name strings ("ws/name") also work
     target="nemotron-3.5-lightning-30b",
     workspace="default",

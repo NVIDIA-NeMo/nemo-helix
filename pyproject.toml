@@ -103,11 +103,9 @@ dev = [
   "nemo-agent-hardener-plugin",
   "nemo-agents-plugin[deepagents]", # Fabric agent E2E runtime
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for agentic-use trajectory validation
-  "nemo-helix-sdk-tools",               # Include SDK/license tool migration target for testing
+  "nemo-helix-tools",               # License and package-layout maintenance tooling
   "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
   "nhx-dev-mcp",                                    # Include MCP dev tools
-  # These are the dev dependencies from `sdk/python/nemo-helix`.
-  # Including here until we find a better way to include them.
   "pyright==1.1.399",
   "mypy",
   "respx",
@@ -321,13 +319,14 @@ constraint-dependencies = [
   "mcp>=1.28.1",
   "mlflow-skinny>=3.15.0,<3.16.0",
   "msgpack>=1.2.1",
-  "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-claude>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-codex>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0",
-  "nemo-fabric-runtime>=0.3.0,<0.4.0",
+  "nemo-fabric-adapter-contract>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-common>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0",
+  "nemo-fabric-collector>=0.4.0,<0.5.0",
+  "nemo-fabric-runtime>=0.4.0,<0.5.0",
   "nbconvert>=7.17.1",
   "nltk>=3.10.3",
   "pillow>=12.3.0",
@@ -404,10 +403,9 @@ nhx-models = { workspace = true }
 nhx-inference-gateway = { workspace = true }
 nhx-files = { workspace = true }
 nhx-entities = { workspace = true }
-nemo-helix-sdk = { workspace = true }
 nemo-helix = { workspace = true }
 nemo-helix-ext = { workspace = true }
-nemo-helix-sdk-tools = { workspace = true }
+nemo-helix-tools = { workspace = true }
 nhx-core-mcp = { workspace = true }
 nemo-nb = { workspace = true }
 nhx-common = { workspace = true }
@@ -476,11 +474,9 @@ members = [
   "services/core/files",
   "services/core/secrets",
   "services/core/mcp",
-  "tools/nemo-helix-sdk-tools",
+  "tools/nemo-helix-tools",
   "tools/mcp-dev-tools",
   "packages/nhx_testing",
-  # SDK
-  "sdk/python/nemo-helix",
   "packages/nemo_helix_ext",
   "packages/nemo_evaluator_sdk",
   "packages/filesets",
@@ -622,8 +618,13 @@ extra-paths = [
   # nemo-evaluator plugin is not a workspace member; add its src so ty can
   # resolve nemo_evaluator imports when checking plugin test files.
   "plugins/nemo-evaluator/src",
+  # temporary scaled-evals plugin is opt-in; add its src so ty can resolve
+  # nemo_scaled_evals_plugin and scaled_evals imports when checking plugin tests.
+  "plugins/_temporary-scaled-evals/src",
   # Source path for the Insights analyst plugin.
   "plugins/nemo-insights/src",
+  # nemo-builder isn't a workspace member; its tests import the package under test.
+  "plugins/nemo-builder/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
   # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared
@@ -704,9 +705,6 @@ exclude = [
   "docs/",
 
   "./sdk/",
-
-  "tools/nemo-helix-sdk-tools/src/nemo_helix_sdk_tools/sdk",
-  "tools/nemo-helix-sdk-tools/tests/sdk",
 ]
 
 # TEMPORARY — remove together with the fix in #1237, which is where this file is
@@ -745,16 +743,14 @@ include = [
 invalid-argument-type = "ignore"
 invalid-return-type = "ignore"
 
-# The platform venv pins nemo-relay 0.7.3 (the Fabric adapters cap it at <0.8), but this BYO
-# example image installs nemo-relay >= 0.8, whose typed API is incompatible with 0.7.3's
-# (`ToolExecutionResult` wrapper, `tool_call_id`). ty type-checks the example against the venv's
-# 0.7.3 and reports the 0.8 surface as missing. Scoped to the one file and the two rules the
-# version skew produces; expires when the Fabric cap lifts and the venv moves to >= 0.8.
+# `BestEffortAnyCodec` is `Codec[object]` and `Codec` is invariant, so ty cannot bind `TArgs` for a
+# `tool_execute` call whose `func` takes `dict[str, Any]` while the codec is typed `object`. The call
+# is correct at runtime (the codec accepts any value). Scoped to the one example file and the one
+# rule the invariance produces.
 [[tool.ty.overrides]]
 include = [
   "plugins/nemo-agent-hardener/examples/other-victim/agent.py",
 ]
 
 [tool.ty.overrides.rules]
-unresolved-attribute = "ignore"
 no-matching-overload = "ignore"

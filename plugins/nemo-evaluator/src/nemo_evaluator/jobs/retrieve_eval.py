@@ -30,7 +30,7 @@ from nemo_evaluator.jobs.evaluate import (
 )
 from nemo_evaluator.jobs.metric_resolution import HelixMetricModelResolver
 from nemo_evaluator.jobs.secret_env import build_task_environment
-from nemo_evaluator.jobs.utils import run_with_isolated_async_client
+from nemo_evaluator.jobs.utils import job_evaluator, run_with_isolated_async_client
 from nemo_evaluator_sdk import Evaluator
 from nemo_evaluator_sdk.execution.metric_execution import run_sync as run_coro_sync
 from nemo_evaluator_sdk.metrics.protocol import Metric
@@ -225,7 +225,7 @@ class _RetrieveEvalJobBase(NemoJob):
             RetrievalPrecisionMetric(k=cutoffs),
             RetrievalMAPMetric(k=cutoffs),
         ]
-        evaluator = Evaluator()
+        evaluator = job_evaluator()
         started_at = datetime.now(UTC)
         result, baseline_result = _run_pipelines(evaluator, dataset, spec, metrics)
         result_files = EvaluateJob._write_result_files(

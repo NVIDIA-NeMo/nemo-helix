@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getBuildThenDeployRequest } from '@studio/api/agents/buildThenDeploy';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -8,10 +9,12 @@ import { server } from '@studio/mocks/node';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { getAgentsListRoute } from '@studio/routes/utils';
+import { mockExecutionProfiles } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useLocation } from 'react-router';
 
 const workspace = workspace1.workspace;
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
@@ -19,6 +22,8 @@ const FILESET_URL = `${FILESETS_URL}/:name`;
 const UPLOAD_URL = `${FILESET_URL}/-/*`;
 const AGENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
 const AGENT_URL = `${AGENTS_URL}/:name`;
+const DEPLOYMENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`;
+const DEPLOYMENT_MODES_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
 
 const FABRIC_YAML = `config_format: nemo-agents-spec-v1
 name: calc
@@ -76,6 +81,7 @@ const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}
   const created: { name?: string }[] = [];
   const filesets: { storage?: unknown }[] = [];
   const deleted: string[] = [];
+  const deployments: { agent?: string; deployment_mode?: string }[] = [];
 
   server.use(
     http.get(FILESET_URL, ({ params }) =>
@@ -105,10 +111,25 @@ const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}
       const body = (await request.json()) as { name?: string };
       created.push(body);
       return HttpResponse.json({ ...body, workspace }, { status: 201 });
+    }),
+    http.post(DEPLOYMENTS_URL, async ({ request }) => {
+      const body = (await request.json()) as { agent?: string; deployment_mode?: string };
+      deployments.push(body);
+      return HttpResponse.json({ ...body, name: `${body.agent}-dep`, workspace }, { status: 201 });
     })
   );
 
-  return { uploaded, created, filesets, deleted };
+  return { uploaded, created, filesets, deleted, deployments };
+};
+
+const AgentDetailStub = () => {
+  const request = getBuildThenDeployRequest(useLocation().state);
+  return (
+    <>
+      <div>Agent detail page</div>
+      {request ? <div>{`Build then deploy with ${request.mode}`}</div> : null}
+    </>
+  );
 };
 
 const renderModal = () =>
@@ -119,12 +140,12 @@ const renderModal = () =>
         path: ROUTES.workspace.agentsList,
         element: <NewAgentModal open onClose={vi.fn()} workspace={workspace} />,
       },
-      { path: ROUTES.workspace.agentDetail, element: <div>Agent detail page</div> },
+      { path: ROUTES.workspace.agentDetail, element: <AgentDetailStub /> },
     ],
   });
 
 const openUploadTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'Upload agent' }));
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register with code upload' }));
   await screen.findByTestId('agent-directory-input');
 };
 
@@ -133,7 +154,7 @@ const openPromptTab = (dialog: HTMLElement) => {
 };
 
 const openGitHubTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'GitHub repository' }));
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from GitHub' }));
   await within(dialog).findByRole('textbox', { name: 'Repository' });
 };
 
@@ -150,7 +171,9 @@ const looseFile = (name: string, contents: string): File =>
   new File([contents], name, { type: 'text/plain' });
 
 const submit = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(within(dialog).getByRole('button', { name: /^(Create|Replace and create)$/ }));
+  await user.click(
+    within(dialog).getByRole('button', { name: /^(Register|Replace and register)$/ })
+  );
 };
 
 describe('NewAgentModal coding agent prompt tab', () => {
@@ -184,7 +207,7 @@ describe('NewAgentModal coding agent prompt tab', () => {
     await waitFor(() =>
       expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument()
     );
-    expect(within(dialog).queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Register' })).not.toBeInTheDocument();
   });
 
   it('leaves an upload failure behind when the user switches back to the prompt', async () => {
@@ -214,7 +237,7 @@ describe('NewAgentModal upload tab', () => {
     renderModal();
     const dialog = await screen.findByRole('dialog');
 
-    expect(within(dialog).getByRole('tab', { name: 'Upload agent' })).toHaveAttribute(
+    expect(within(dialog).getByRole('tab', { name: 'Register with code upload' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
@@ -287,7 +310,7 @@ describe('NewAgentModal upload tab', () => {
     await submit(dialog, user);
 
     expect(await within(dialog).findByText(/already owns the fileset/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeInTheDocument();
     expect(created).toHaveLength(0);
   });
 
@@ -304,7 +327,7 @@ describe('NewAgentModal upload tab', () => {
     await submit(dialog, user);
     expect(await within(dialog).findByText(/no agent owns it/)).toBeInTheDocument();
 
-    const replace = await within(dialog).findByRole('button', { name: 'Replace and create' });
+    const replace = await within(dialog).findByRole('button', { name: 'Replace and register' });
     await user.click(replace);
 
     await waitFor(() => expect(created).toHaveLength(1));
@@ -319,7 +342,7 @@ describe('NewAgentModal upload tab', () => {
     pickDirectory(dialog, [makeFile('calc-agent/mcps/calculator.py', 'print(1)\n')]);
 
     expect(await within(dialog).findByText(/No agent\.yaml/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 
   it('ignores a slower selection that a newer one replaced', async () => {
@@ -355,17 +378,17 @@ describe('NewAgentModal upload tab', () => {
     await openUploadTab(dialog);
     pickDirectory(dialog);
     await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled();
 
     pickDirectory(dialog, [gate.file]);
 
     await waitFor(() =>
-      expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled()
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled()
     );
 
     gate.release();
     await waitFor(() => expect(within(dialog).getByDisplayValue('slow')).toBeInTheDocument());
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled();
   });
 
   it('clears the previous failure when a new directory is picked', async () => {
@@ -414,7 +437,7 @@ describe('NewAgentModal oversized pick', () => {
     });
 
     expect(await within(dialog).findByText(/880,000 files/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 });
 
@@ -437,12 +460,12 @@ describe('NewAgentModal GitHub import', () => {
     await openGitHubTab(dialog);
     await typeRepo(dialog, user);
     await waitFor(() =>
-      expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled()
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
     );
 
     await openUploadTab(dialog);
 
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 
   it('backs the spec fileset with the repository instead of uploading files', async () => {
@@ -514,7 +537,7 @@ describe('NewAgentModal GitHub import', () => {
     await user.tab();
 
     expect(await within(dialog).findByText(/is not a GitHub repository/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 
   it('rolls the fileset back when the repository has no agent.yaml', async () => {
@@ -616,7 +639,7 @@ describe('NewAgentModal imported traces tab', () => {
   };
 
   const openTracesTab = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(within(dialog).getByRole('tab', { name: 'Create from traces' }));
+    await user.click(within(dialog).getByRole('tab', { name: 'Register from traces' }));
   };
 
   it('offers each distinct agent seen in the traces', async () => {
@@ -715,14 +738,274 @@ describe('NewAgentModal imported traces tab', () => {
     const dialog = await screen.findByRole('dialog');
     await openTracesTab(dialog, user);
 
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
 
     await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
     await user.click(await screen.findByRole('option', { name: 'billing-agent' }));
-    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Register' }));
 
     await waitFor(() => expect(created).toHaveLength(1));
     // Telemetry carries no config, and the platform defaults an empty one.
     expect(created[0]).toMatchObject({ name: 'billing-agent', config: {} });
+  });
+
+  it('never deploys an agent created from traces', async () => {
+    const user = userEvent.setup();
+    const { created, deployments } = mockHelix();
+    mockTraces(['billing-agent']);
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+    await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
+    await user.click(await screen.findByRole('option', { name: 'billing-agent' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Register' }));
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+});
+
+describe('NewAgentModal deploy after create', () => {
+  const serveModes = (docker: { enabled: boolean; requires_image: boolean }) =>
+    server.use(
+      http.get(DEPLOYMENT_MODES_URL, () =>
+        HttpResponse.json({
+          data: [
+            { mode: 'subprocess', enabled: true, requires_image: false },
+            { mode: 'docker', ...docker },
+            { mode: 'k8s', enabled: true, requires_image: true },
+          ],
+        })
+      )
+    );
+
+  const pickAgent = async (dialog: HTMLElement) => {
+    await openUploadTab(dialog);
+    pickDirectory(dialog);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+  };
+
+  it('deploys the new agent as a subprocess by default', async () => {
+    const user = userEvent.setup();
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    expect(within(dialog).getByRole('checkbox', { name: 'Deploy after creating' })).toBeChecked();
+    await submit(dialog, user);
+
+    await waitFor(() =>
+      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'subprocess' }])
+    );
+  });
+
+  it('creates without deploying when the box is cleared', async () => {
+    const user = userEvent.setup();
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Deploy after creating' }));
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+
+  const serveModeList = (modes: { mode: string; enabled: boolean; requires_image: boolean }[]) =>
+    server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({ data: modes })));
+
+  it('defaults to a container runtime when the platform turns subprocess off', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: false, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: false },
+      { mode: 'k8s', enabled: true, requires_image: false },
+    ]);
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    expect(await within(dialog).findByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Docker'
+    );
+    await submit(dialog, user);
+
+    await waitFor(() =>
+      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'docker' }])
+    );
+  });
+
+  it('builds an image, then deploys, when the only runtimes need one', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: false, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: true, requires_image: true },
+    ]);
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    expect(await within(dialog).findByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Docker'
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Build then deploy with docker')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+
+  it('creates without deploying when the platform can build no image for a runtime that needs one', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: false, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: true, requires_image: true },
+    ]);
+    mockExecutionProfiles([{ profile: 'default', backend: 'docker' }]);
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await waitFor(() =>
+      expect(
+        within(dialog).queryByRole('checkbox', { name: 'Deploy after creating' })
+      ).not.toBeInTheDocument()
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+
+  it('holds Register while the runtimes load', async () => {
+    let releaseModes = () => {};
+    const modesReleased = new Promise<void>((resolve) => {
+      releaseModes = resolve;
+    });
+    server.use(
+      http.get(DEPLOYMENT_MODES_URL, async () => {
+        await modesReleased;
+        return HttpResponse.json({
+          data: [{ mode: 'subprocess', enabled: true, requires_image: false }],
+        });
+      })
+    );
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    const register = within(dialog).getByRole('button', { name: 'Register' });
+    expect(register).toBeDisabled();
+
+    releaseModes();
+    await waitFor(() => expect(register).toBeEnabled());
+  });
+
+  it('creates without deploying when the runtimes cannot be read', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({}, { status: 403 })));
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await waitFor(() =>
+      expect(
+        within(dialog).queryByRole('checkbox', { name: 'Deploy after creating' })
+      ).not.toBeInTheDocument()
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+
+  it('deploys straight away with a runtime that has a default image', async () => {
+    const user = userEvent.setup();
+    serveModes({ enabled: true, requires_image: false });
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+    await user.click(await screen.findByRole('option', { name: 'Docker' }));
+    await submit(dialog, user);
+
+    await waitFor(() =>
+      expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'docker' }])
+    );
+    expect(screen.queryByText(/Build then deploy/)).not.toBeInTheDocument();
+  });
+
+  it('hands a runtime with no default image to the agent page to build first', async () => {
+    const user = userEvent.setup();
+    serveModes({ enabled: true, requires_image: false });
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+    await user.click(await screen.findByRole('option', { name: 'Kubernetes' }));
+    expect(
+      within(dialog).getAllByText(
+        /Kubernetes runs a container image, and none is set\. Deploying will build an image/
+      )
+    ).not.toHaveLength(0);
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Build then deploy with k8s')).toBeInTheDocument();
+    expect(deployments).toEqual([]);
+  });
+
+  it('leaves out a runtime with no default image when the platform cannot build one', async () => {
+    const user = userEvent.setup();
+    serveModes({ enabled: true, requires_image: false });
+    mockExecutionProfiles([{ profile: 'default', backend: 'docker' }]);
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+
+    expect(await screen.findByRole('option', { name: 'Docker' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Kubernetes' })).not.toBeInTheDocument();
+  });
+
+  it('still opens the new agent when deploying it fails', async () => {
+    const user = userEvent.setup();
+    const { created } = mockHelix();
+    server.use(
+      http.post(DEPLOYMENTS_URL, () =>
+        HttpResponse.json({ detail: 'no executor' }, { status: 400 })
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(
+      await screen.findByText(/was created, but deploying it failed: no executor/)
+    ).toBeInTheDocument();
   });
 });

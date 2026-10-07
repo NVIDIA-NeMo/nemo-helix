@@ -7,7 +7,7 @@ The public interface resolves lazily (PEP 562), for the same reason the package 
 every ``from nemo_evaluator_sdk.values.X import ...`` runs this barrel first, so
 eagerly re-exporting all 97 names dragged ``.datasets``/``.results`` (pyarrow, numpy) and
 ``.metrics``/``.scores`` (jsonschema, jinja2) into ``agent_eval``, which uses none of them.
-Measured: 485 modules and +57 MB RSS for ``import agent_eval.runtimes.harbor_runtime`` before,
+Measured: 485 modules and +57 MB RSS for ``import agent_eval.runtimes.harbor.runtime`` before,
 300 modules and pydantic alone after.
 
 Add a new re-export to ``_LAZY_ATTRS``, the ``TYPE_CHECKING`` block and ``__all__`` — never as a
@@ -145,10 +145,8 @@ if TYPE_CHECKING:
     )
 
 
-# Re-exported name -> the submodule that defines it, relative to this package. Relative on
-# purpose: the vendoring tool mirrors this file into nemo_helix.beta.evaluator by rewriting
-# module paths, and a relative name has nothing to rewrite, so the mirror is correct by
-# construction. Mirrors the TYPE_CHECKING block above, in the same order.
+# Re-exported name -> the submodule that defines it, relative to this package. Mirrors the
+# TYPE_CHECKING block above, in the same order.
 _LAZY_ATTRS: dict[str, str] = {
     "Agent": ".agents",
     "AgentBase": ".agents",

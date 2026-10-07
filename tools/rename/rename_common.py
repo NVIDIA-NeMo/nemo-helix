@@ -15,9 +15,17 @@ VERIFY_IMPL = Path("tools/rename/verify_nemo_helix_rename.py")
 COMMON_IMPL = Path("tools/rename/rename_common.py")
 TEST_PATH = Path("tests/tools/rename/test_rename_tools.py")
 GITIGNORE_PATH = Path(".gitignore")
+# The current release note documents the NeMo Platform to NeMo Helix rebrand
+# itself, so it legitimately names the pre-rename identifiers for readers
+# upgrading from an earlier release. Archived release-notes pages do not need
+# this exception once they stop being the current release.
+CURRENT_RELEASE_NOTE_PATH = Path("docs/about/release-notes/current-release.mdx")
+RELEASE_TEST_SCOPE_REFERENCES_PATH = Path(".agents/skills/release-test-scope/references")
 IGNORE_PATHS = {
     # These are existing GitHub team slugs, not product identifiers to rename.
     Path(".github/CODEOWNERS"),
+    # Intentional reference in the release notes
+    Path("docs/about/release-notes/release-0-6-0.mdx"),
     RENAME_SCRIPT,
     RENAME_IMPL,
     VERIFY_SCRIPT,
@@ -25,6 +33,8 @@ IGNORE_PATHS = {
     COMMON_IMPL,
     TEST_PATH,
     GITIGNORE_PATH,
+    CURRENT_RELEASE_NOTE_PATH,
+    RELEASE_TEST_SCOPE_REFERENCES_PATH,
 }
 
 PRODUCT_REPLACEMENTS = [
@@ -161,10 +171,14 @@ def git_file_set(
     return filter_paths(candidates, include_globs, exclude_globs)
 
 
+def ignored_path(path: Path) -> bool:
+    return any(path == ignored or ignored in path.parents for ignored in IGNORE_PATHS)
+
+
 def content_paths(
     include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = (), paths: list[Path] | None = None
 ) -> list[Path]:
-    return [path for path in git_file_set(include_globs, exclude_globs, paths=paths) if path not in IGNORE_PATHS]
+    return [path for path in git_file_set(include_globs, exclude_globs, paths=paths) if not ignored_path(path)]
 
 
 def read_text(path: Path) -> str | None:

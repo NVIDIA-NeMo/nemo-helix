@@ -10,13 +10,12 @@ DependencyProvider. These shared clients prevent each client instantiation from
 creating a new HTTP client, avoiding connection pool and SSL context overhead.
 
 Used by:
-- get_platform_sdk() / get_async_platform_sdk() for tasks, controllers, and
-  other code outside DependencyProvider context
-- Platform shutdown cleanup via close_cached_http_clients()
+- JWT / JWKS validation and other platform code outside DependencyProvider context
+- Platform shutdown cleanup via close_shared_http_clients()
 
 The wrapper classes make close()/aclose() a no-op so that client code can safely
 call client.close() without affecting other users of the shared client. Actual
-cleanup happens at shutdown via close_cached_http_clients().
+cleanup happens at shutdown via close_shared_http_clients().
 """
 
 import asyncio
@@ -62,7 +61,7 @@ def shared_async_http_client() -> httpx.AsyncClient:
     without binding a shared client to an arbitrary thread-local loop.
 
     The returned client ignores aclose() calls - cleanup happens at shutdown
-    via close_cached_http_clients(). This allows clients to safely call close()
+    via close_shared_http_clients(). This allows clients to safely call close()
     without breaking other users of the shared client.
     """
     try:
@@ -85,7 +84,7 @@ def shared_sync_http_client() -> httpx.Client:
     connection pool and SSL context.
 
     The returned client ignores close() calls - cleanup happens at shutdown
-    via close_cached_http_clients(). This allows clients to safely call close()
+    via close_shared_http_clients(). This allows clients to safely call close()
     without breaking other users of the shared client.
     """
     return _SharedSyncHttpClient()

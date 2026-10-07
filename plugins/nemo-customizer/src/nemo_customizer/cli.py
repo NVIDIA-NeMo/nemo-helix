@@ -138,8 +138,6 @@ def _add_upload_callback(app: typer.Typer) -> None:
             rich_help_panel=_UPLOAD_PANEL,
         ),
         workspace: WorkspaceOption = None,
-        base_url: str | None = typer.Option(None, "--base-url", help="Override the platform API host."),
-        cluster: str | None = typer.Option(None, "--cluster", help="Name of a cluster in the CLI config."),
         hf_token_secret: str | None = typer.Option(
             None,
             "--hf-token-secret",
@@ -160,8 +158,6 @@ def _add_upload_callback(app: typer.Typer) -> None:
                 "--upload-environment": upload_environment is not None,
                 "--exist-ok": exist_ok,
                 "--workspace": workspace is not None,
-                "--base-url": base_url is not None,
-                "--cluster": cluster is not None,
                 "--hf-token-secret": hf_token_secret is not None,
             }
             misplaced = [flag for flag, is_set in given.items() if is_set]
@@ -182,8 +178,6 @@ def _add_upload_callback(app: typer.Typer) -> None:
             dataset_source=upload_dataset,
             environment_source=upload_environment,
             workspace=workspace,
-            base_url=base_url,
-            cluster=cluster,
             exist_ok=exist_ok,
             hf_token_secret=hf_token_secret,
         )
@@ -197,8 +191,6 @@ def _create_customization_resources(
     dataset_source: str | None,
     environment_source: str | None,
     workspace: str,
-    base_url: str | None,
-    cluster: str | None,
     exist_ok: bool,
     hf_token_secret: str | None,
 ) -> UploadReport:
@@ -207,7 +199,7 @@ def _create_customization_resources(
     from nemo_helix_plugin.models.client import ModelsClient
     from nhx.customization_common.cli.overrides import run_uploads
 
-    resolved_base_url = resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
+    resolved_base_url = resolve_submit_base_url(typer_ctx)
     headers = resolve_submit_auth_headers(typer_ctx) or None
     return run_uploads(
         model_source=model_source,

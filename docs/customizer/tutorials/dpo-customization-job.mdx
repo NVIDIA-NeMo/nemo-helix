@@ -7,9 +7,9 @@ description: ""
 
 [Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/release/0.5/docs/customizer/tutorials/dpo-customization-job.ipynb)
 
-Learn how to use the NeMo Helix to align a model with **DPO** (Direct Preference Optimization) on a preference dataset. For each prompt, DPO trains on a *chosen* (preferred) and a *rejected* response so the model prefers the chosen style — no separate reward model required.
+Learn how to use NeMo Helix to align a model with **DPO** (Direct Preference Optimization) on a preference dataset. For each prompt, DPO trains on a *chosen* (preferred) and a *rejected* response so the model prefers the chosen style — no separate reward model required.
 
-This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Helix. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity.
+This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Helix deployment. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity.
 
 **Time to complete:** approximately 45-60 minutes. Job duration increases with model and dataset size.
 
@@ -17,7 +17,7 @@ This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](h
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install the NeMo Helix and Python SDK.
+1. **Completed the [Quickstart](/documentation/get-started)** to install NeMo Helix and Python SDK.
 2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all,nemo-rl-plugin]"` so `RlJobInput` is available; source checkout: run `make bootstrap` from the repository root). `nemo-helix[all]` does not include the RL plugin.
 3. **Installed the `datasets` package**: `pip install datasets`.
 4. **A platform configured with `platform.runtime: kubernetes`.** The `rl` (DPO) backend provisions a Ray cluster and has **no local Docker fallback** — `submit` fails fast on a Docker-runtime platform. Multi-node jobs (`parallelism.num_nodes > 1`) additionally require the platform-side `NHX_RL_MULTINODE_SHARED_STORAGE_PATH`.
@@ -28,7 +28,7 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize the SDK
 
-The SDK needs your NeMo Helix server URL. By default `http://localhost:8080` is used; set `NHX_BASE_URL` to override:
+The SDK needs the server URL for your NeMo Helix deployment. By default `http://localhost:8080` is used; set `NHX_BASE_URL` to override:
 
 ```sh
 export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
@@ -40,13 +40,25 @@ import os
 import time
 import uuid
 from pathlib import Path
-from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-from nemo_customizer.sdk import Customization
-from nemo_helix.types.secrets import HelixSecretResponse
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    CreateModelEntityRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
+)
+from nemo_helix_plugin.schema import SecretRef
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretResponse
+from nemo_customizer.sdk import Customization
 from nemo_rl_plugin.schema import RlJobInput
+from filesets import FilesetFileSystem
+from pydantic import SecretStr
 
 
 def max_wait_time_checker(seconds: int, label: str = ""):
@@ -61,7 +73,6 @@ def max_wait_time_checker(seconds: int, label: str = ""):
 
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-sdk = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
 client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
 customization = Customization.from_client(client)
 ```
@@ -132,17 +143,19 @@ print("overall_preference:", sample["overall_preference"])
 Upload both JSONL files to a single FileSet so the DPO job can read them.
 
 ```python
-sdk.files.client.create_fileset(
-    workspace="default",
-    body=CreateFilesetRequest(name=DATASET_NAME, description="DPO preference data"),
-    exist_ok=True,
-)
-print(f"Fileset ready: {DATASET_NAME}")
+try:
+    client.files.create_fileset(
+        body=CreateFilesetRequest(name=DATASET_NAME, description="DPO preference data"),
+    ).data()
+    print(f"Created fileset: {DATASET_NAME}")
+except ConflictError:
+    print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
 
-sdk.files.upload(local_path=DATASET_PATH, remote_path="", fileset=DATASET_NAME, workspace="default")
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(lpath=DATASET_PATH, rpath=f"default/{DATASET_NAME}/", recursive=True)
 
 print("Preference data:")
-print(json.dumps([f.model_dump() for f in sdk.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2, default=str))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_NAME).data().data], indent=2, default=str))
 ```
 
 ### 4. Secrets Setup
@@ -156,12 +169,14 @@ if not HF_TOKEN:
 
 def create_or_get_secret(name: str, value: str, label: str) -> HelixSecretResponse:
     try:
-        secret = sdk.secrets.create(name=name, workspace="default", value=value)
+        secret = client.secrets.create_secret(
+            body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
+        ).data()
         print(f"Created secret: {name}")
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        return sdk.secrets.retrieve(name=name, workspace="default")
+        return client.secrets.get_secret(name=name).data()
 
 
 hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
@@ -176,23 +191,30 @@ HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_NAME = "llama-3-2-1b-instruct"
 
 storage = HuggingfaceStorageConfig(
-    type="huggingface",
     repo_id=HF_REPO_ID,
     repo_type="model",
-    token_secret=hf_secret.name,
+    token_secret=SecretRef(hf_secret.name),
 )
 
-base_model_fs = sdk.files.client.create_fileset(
-    workspace="default",
-    body=CreateFilesetRequest(name=MODEL_NAME, description="Llama 3.2 1B Instruct base model", storage=storage),
-    exist_ok=True,
-).data()
-print(f"Base model fileset ready: {MODEL_NAME}")
+try:
+    base_model_fs = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            description="Llama 3.2 1B Instruct base model",
+            storage=storage,
+        ),
+    ).data()
+    print(f"Created base model fileset: {MODEL_NAME}")
+except ConflictError:
+    base_model_fs = client.files.get_fileset(name=MODEL_NAME).data()
+    print("Base model fileset already exists.")
 
 try:
-    base_model = sdk.models.create(workspace="default", name=MODEL_NAME, fileset=f"default/{MODEL_NAME}")
+    base_model = client.models.create_model(
+        body=CreateModelEntityRequest(name=MODEL_NAME, fileset=f"default/{MODEL_NAME}"),
+    ).data()
 except ConflictError:
-    base_model = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
+    base_model = client.models.get_model(name=MODEL_NAME).data()
 
 print(f"Base model fileset: fileset://default/{base_model.name}")
 
@@ -201,7 +223,7 @@ check = max_wait_time_checker(600, "Model spec")
 while not base_model.spec:
     check()
     time.sleep(10)
-    base_model = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
+    base_model = client.models.get_model(name=MODEL_NAME).data()
 print("Model spec ready")
 ```
 
@@ -249,37 +271,21 @@ print(f"Output model: {OUTPUT_NAME}")
 
 ### 7. Track Training Progress
 
-The DPO job runs four steps: download -> **dpo-training** (Ray) -> upload -> model-entity. We poll the top-level job status and surface the training step's progress.
+The DPO job runs four steps: download -> **dpo-training** (Ray) -> upload -> model-entity. Each update shows the current step, how much of that step is done, and the latest loss. Once the backend reports a loss history, the cell charts loss by step.
 
 ```python
-from IPython.display import clear_output
+import time
 
-check = max_wait_time_checker(7200, "DPO job")
+status = None
 while True:
-    check()
-    status = sdk.jobs.get_status(name=job.job.name, workspace="default")
-    clear_output(wait=True)
-    print(f"Job Status: {status.status}")
-
-    step = max_steps = phase = None
-    for job_step in status.steps or []:
-        if job_step.name == "dpo-training":
-            for task in job_step.tasks or []:
-                d = task.status_details or {}
-                step, max_steps, phase = d.get("step"), d.get("max_steps"), d.get("phase")
-                break
-            break
-    if step is not None and max_steps:
-        print(f"Training: Step {step}/{max_steps} ({100 * step / max_steps:.1f}%)")
-        if phase:
-            print(f"Phase: {phase}")
-
-    if status.status in ("completed", "failed", "cancelled", "error"):
-        print(f"\nJob finished: {status.status}")
+    status = client.jobs.get_status(name=job.job.name, workspace="default")
+    print(f"Status: {status.status}")
+    if status.status.lower() in ("completed", "failed", "cancelled", "error"):
         break
     time.sleep(15)
 
-assert status.status == "completed"
+assert status.status.lower() == "completed"
+
 ```
 
 **Interpreting DPO training metrics** (in `status_details.metrics`):
@@ -293,7 +299,7 @@ assert status.status == "completed"
 DPO produces a **full-weight model entity** (not an adapter). Confirm it was registered.
 
 ```python
-model_entity = sdk.models.retrieve(workspace="default", name=OUTPUT_NAME)
+model_entity = client.models.get_model(name=OUTPUT_NAME).data()
 print(model_entity.model_dump_json(indent=2))
 ```
 
@@ -306,30 +312,36 @@ deploy_suffix = uuid.uuid4().hex[:8]
 DEPLOYMENT_CONFIG_NAME = f"dpo-deployment-cfg-{deploy_suffix}"
 DEPLOYMENT_NAME = f"dpo-deployment-{deploy_suffix}"
 
-deployment_config = sdk.inference.deployment_configs.create(
-    workspace="default",
-    name=DEPLOYMENT_CONFIG_NAME,
-    engine="vllm",
-    model_spec={"model_namespace": "default", "model_name": OUTPUT_NAME},
-    executor_config={"gpu": 1, "image_name": "vllm/vllm-openai", "image_tag": "v0.22.1"},
-)
+deployment_config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name=DEPLOYMENT_CONFIG_NAME,
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(model_namespace="default", model_name=OUTPUT_NAME),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="docker.io/vllm/vllm-openai",
+            image_tag="v0.22.1",
+        ),
+    ),
+).data()
 
-deployment = sdk.inference.deployments.create(
-    workspace="default", name=DEPLOYMENT_NAME, config=deployment_config.name
-)
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(name=DEPLOYMENT_NAME, config=deployment_config.name),
+).data()
 print(f"Deployment name: {deployment.name}")
+
 ```
 
 ```python
 check = max_wait_time_checker(1800, "Deployment")
 while True:
     check()
-    deployment_status = sdk.inference.deployments.retrieve(name=deployment.name, workspace="default")
+    deployment_status = client.models.get_deployment(name=deployment.name).data()
     clear_output(wait=True)
     print(f"Deployment status: {deployment_status.status}")
     deployment_state = str(deployment_status.status).lower()
     if deployment_state in ("ready", "running"):
-        if not sdk.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
+        if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
             raise RuntimeError("Inference gateway did not become ready")
         break
     if deployment_state in ("failed", "error", "terminated", "lost"):
@@ -343,19 +355,24 @@ messages = [
     {"role": "user", "content": "Write a short, friendly email to a colleague asking to reschedule our meeting to Thursday."},
 ]
 
-response = sdk.inference.gateway.provider.post(
-    "v1/chat/completions",
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+response = InferenceGatewayClient.from_client(client).provider_post(
     name=deployment.name,
     workspace="default",
-    body={"model": f"default/{OUTPUT_NAME}", "messages": messages, "temperature": 0.7, "max_tokens": 256},
-)
+    trailing_uri="v1/chat/completions",
+    body=JsonBody(
+        {"model": f"default/{OUTPUT_NAME}", "messages": messages, "temperature": 0.7, "max_tokens": 256}
+    ),
+).data()
 print("Model output:\n")
 print(response["choices"][0]["message"]["content"])
 ```
 
 ## Conclusion
 
-You aligned a base model with **DPO** on the NeMo Helix using the `rl` backend:
+You aligned a base model with **DPO** on NeMo Helix using the `rl` backend:
 
 - Uploaded a HelpSteer3 preference dataset **as-is** (the platform detects the schema natively).
 - Submitted a full-weight DPO job that ran on a Ray cluster via the Kubernetes executor.

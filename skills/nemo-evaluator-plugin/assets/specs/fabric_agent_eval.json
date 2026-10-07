@@ -51,15 +51,17 @@
   ],
   "target": {
     "kind": "fabric",
-    "config": {
-      "metadata": {
-        "name": "readme-fabric-smoke"
+    "source": {
+      "config": {
+        "metadata": {
+          "name": "readme-fabric-smoke"
+        },
+        "harness": {
+          "adapter_id": "nvidia.fabric.codex"
+        }
       },
-      "harness": {
-        "adapter_id": "nvidia.fabric.codex"
-      }
+      "model": "<provider>/<model>"
     },
-    "model": "<provider>/<model>",
     "capture_trajectory": false
   },
   "max_concurrent_tasks": 1,

@@ -251,8 +251,8 @@ async def stage_fabric_ethos_config_files(
 ) -> list[ConfigFile]:
     """Download the Ethos fileset and return container ``config_files`` entries.
 
-    When the fileset is unavailable, returns a single inline ``agent.yaml`` entry
-    (AIRCORE-947 behavior). When available, maps every fileset file under the same
+    When the fileset is unavailable, returns a single inline ``agent.yaml`` entry.
+    When available, maps every fileset file under the same
     ``base_dir`` as *agent_yaml_path*, substituting the rewritten YAML for
     ``agent.yaml``.
     """

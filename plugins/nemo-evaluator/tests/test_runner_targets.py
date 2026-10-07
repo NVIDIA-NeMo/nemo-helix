@@ -5,53 +5,67 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 from nemo_evaluator.api.fields import TasksetRef
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymPlacement, GymRunnerTarget, HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import (
+    AgentEvalInputSpec,
+    GymAgentSource,
+    GymPlacement,
+    GymRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborRunnerTarget,
+)
 from nemo_evaluator.jobs.runner_targets import UnsubmittableRunnerError, runner_to_target
 from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.values import SecretRef
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from pydantic import ValidationError
 
 #: Target fields a runtime config cannot supply, so a round-trip cannot check them here: ``kind``
 #: discriminates the target union, and the other two come from the ``GymPlacement``.
-WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name"}
+#: ``resolved_config`` is what submit-time resolution of a registered agent writes; a live runner never has one.
+WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name", "resolved_config"}
 
-HARBOR_CARRIED_VALUES = {
+#: The runtime's three agent-selection fields become the target's one ``source``.
+HARBOR_AGENT_VALUES = {
     "agent_name": "codex",
     "agent_import_path": "custom_agent:Agent",
     "agent_model_name": "model",
+}
+HARBOR_CARRIED_VALUES = {
     "agent_kwargs": {"temperature": 0.2},
+    # A bare ref travels as-is; the platform resolves it in the job's workspace.
+    "env_secrets": {"OPENAI_API_KEY": "openai-api-key"},
+    "env_vars": {"FABRIC_LOG": "debug"},
     "n_attempts": 2,
     "n_concurrent_trials": 3,
     "max_retries": 2,
     "artifacts": ["/app/output"],
     "trace_dir": "/app/traces",
     "reward_key": "score",
+    "agent_setup_timeout_multiplier": 12.0,
+    "agent_timeout_multiplier": 5.0,
 }
 HARBOR_REJECTED_VALUES = {
     "job_name": "existing-job",
     "force_rerun": True,
     "quiet": False,
     "agent_dir": Path("local-agent"),
-    "agent_env_from_host": ["MODEL_API_KEY"],
     "timeout_multiplier": 2.0,
-    "agent_timeout_multiplier": 2.0,
     "verifier_timeout_multiplier": 2.0,
-    "agent_setup_timeout_multiplier": 2.0,
     "environment_build_timeout_multiplier": 2.0,
 }
 
 
 def test_harbor_configuration_survives_submission_without_local_storage(tmp_path, monkeypatch):
-    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", **HARBOR_CARRIED_VALUES)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", **HARBOR_AGENT_VALUES, **HARBOR_CARRIED_VALUES)
     runner = HarborAgentTaskRunner(config=config)
     # Conversion must not inspect the caller's filesystem or start Harbor.
     with monkeypatch.context() as scoped:
@@ -59,12 +73,58 @@ def test_harbor_configuration_survives_submission_without_local_storage(tmp_path
         scoped.setattr(Path, "mkdir", Mock(side_effect=AssertionError("local filesystem modified")))
         target = runner_to_target(runner)
     assert isinstance(target, HarborRunnerTarget)
-    assert target.model_dump(mode="json") == {"kind": "harbor", "env_secrets": {}, **HARBOR_CARRIED_VALUES}
+    assert target.model_dump(mode="json") == {
+        "kind": "harbor",
+        "source": {"import_path": "custom_agent:Agent", "model_name": "model"},  # the import path wins
+        **HARBOR_CARRIED_VALUES,
+    }
+
+
+_FAKE_KEY = "sk-not-a-real-key-0123456789"
+
+
+@pytest.mark.parametrize(
+    ("env_vars", "message"),
+    [
+        ({"X": "${WORKER_VAR}"}, "looks like a ${NAME} template"),
+        ({"MODEL_CREDS": _FAKE_KEY}, "look like plaintext credentials"),
+        ({"OPENAI_API_KEY": "x"}, "appear in both env_vars and env_secrets"),
+    ],
+)
+def test_harbor_invalid_env_vars_surface_their_own_message_without_the_value(tmp_path, env_vars, message):
+    # `model_copy` skips validators, so the target's own validation is what refuses it.
+    config = HarborRuntimeConfig(
+        jobs_dir=tmp_path, env_secrets={"OPENAI_API_KEY": SecretRef("openai-api-key")}
+    ).model_copy(update={"env_vars": env_vars})
+
+    with pytest.raises(UnsubmittableRunnerError, match=re.escape(message)) as excinfo:
+        runner_to_target(HarborAgentTaskRunner(config=config))
+
+    assert _FAKE_KEY not in str(excinfo.value)
+    assert _FAKE_KEY not in str(excinfo.value.__cause__)
+
+
+def test_nested_harbor_target_error_does_not_echo_the_value():
+    with pytest.raises(ValidationError) as excinfo:
+        AgentEvalInputSpec.model_validate(
+            {"tasks": TasksetRef("suite"), "target": {"kind": "harbor", "env_vars": {"MODEL_CREDS": _FAKE_KEY}}}
+        )
+    assert "plaintext credentials" in str(excinfo.value)
+    assert _FAKE_KEY not in str(excinfo.value)
+
+
+def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_path):
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
+    )
+    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
+    with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
+        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 
 
 def test_every_harbor_runtime_field_has_a_submission_policy():
     assert set(HarborRuntimeConfig.model_fields) == (
-        set(HARBOR_CARRIED_VALUES) | set(HARBOR_REJECTED_VALUES) | {"jobs_dir"}
+        set(HARBOR_AGENT_VALUES) | set(HARBOR_CARRIED_VALUES) | set(HARBOR_REJECTED_VALUES) | {"jobs_dir"}
     )
 
 
@@ -147,7 +207,26 @@ def test_a_gym_runner_describes_itself_as_a_submittable_target() -> None:
     # Every runtime field arrives, unchanged. What is excluded is the set with no runtime
     # counterpart, listed in one place so a new wire-only field is a deliberate addition here
     # rather than a puzzling failure.
-    assert target.model_dump(exclude=WIRE_ONLY_TARGET_FIELDS) == config.model_dump()
+    assert target.model_dump(exclude=WIRE_ONLY_TARGET_FIELDS | {"source"}) == config.model_dump(
+        exclude={"agent", "agent_config"}
+    )
+    assert target.source == GymAgentSource(component=config.agent, config=config.agent_config)
+
+
+def test_gym_runner_submission_carries_refs_but_not_custom_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Resolver:
+        def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
+            return "PRIVATE_SRC"
+
+    monkeypatch.setenv("PRIVATE_SRC", "private-value")
+    config = GymRuntimeConfig(
+        agent="a", agent_config="a.yaml", resources_server="r", env_secrets={"KEY": SecretRef("ws/key")}
+    )
+    target = runner_to_target(GymAgentTaskRunner(config=config, secret_resolver=Resolver()))
+    assert target.env_secrets == {"KEY": SecretRef("ws/key")}
+    serialized = target.model_dump_json()
+    assert "private-value" not in serialized
+    assert "PRIVATE_SRC" not in serialized
 
 
 def test_every_field_actually_travels_rather_than_defaulting() -> None:
@@ -283,8 +362,7 @@ def test_a_hand_written_target_cannot_name_a_variable_both_ways_either() -> None
     # Same rule as GymRuntimeConfig, because a hand-written spec never passes through one.
     with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
         GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="c",
+            source=GymAgentSource(component="simple_agent", config="c"),
             resources_server="mcqa",
             env_vars={"GYM_MODEL_KEY": "plaintext"},
             env_secrets={"GYM_MODEL_KEY": SecretRef("evals/nvidia-api-key")},

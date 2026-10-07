@@ -17,10 +17,6 @@ from typing import Any, Callable, NamedTuple
 
 from fastapi import HTTPException
 from multidict import CIMultiDict
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix.types.inference.middleware_call import MiddlewareCall as SDKMiddlewareCall
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.discovery import discover_inference_middleware
 from nemo_helix_plugin.inference_middleware import (
@@ -37,7 +33,6 @@ from nemo_helix_plugin.inference_middleware import (
 )
 from nemo_helix_plugin.inference_middleware_models import (
     MiddlewareCall,
-    VirtualModelInferenceConfig,
 )
 from nemo_helix_plugin.inference_middleware_models import (
     VirtualModel as PluginVirtualModel,
@@ -114,17 +109,16 @@ class InferenceMiddlewareCacheAccessorImpl:
     def get_virtual_model(self, virtual_model_id: str) -> PluginVirtualModel | None:
         """Return the VirtualModel for ``virtual_model_id`` (``"ws/name"``), or ``None``.
 
-        Converts the cached SDK VirtualModel to the ``nemo_helix_plugin`` VirtualModel type
-        so the return value satisfies the ``InferenceMiddlewareCacheAccessor`` Protocol.
+        Returns a deep copy of the cached VirtualModel so plugins cannot mutate the cache.
         """
         try:
             ref = parse_entity_ref(virtual_model_id)
         except ValueError:
             return None
-        sdk_vm = self._virtual_model_cache.get(ref.workspace, ref.name)
-        if sdk_vm is None:
+        cached_vm = self._virtual_model_cache.get(ref.workspace, ref.name)
+        if cached_vm is None:
             return None
-        return _sdk_vm_to_plugin_vm(sdk_vm)
+        return cached_vm.model_copy(deep=True)
 
     def list_virtual_models_for_workspace(self, workspace: str) -> list[str]:
         """Return VirtualModel IDs (``"workspace/name"``) in ``workspace``."""
@@ -315,7 +309,7 @@ class PrefetchResult:
 # ---------------------------------------------------------------------------
 
 
-def collect_config_refs(virtual_models: list[SDKVirtualModel]) -> set[MiddlewareConfigRef]:
+def collect_config_refs(virtual_models: list[PluginVirtualModel]) -> set[MiddlewareConfigRef]:
     """Return the de-duplicated set of external config refs across all *virtual_models*.
 
     Only includes calls that have both a ``name`` (plugin key) and a ``config_id``
@@ -341,7 +335,7 @@ def collect_config_refs(virtual_models: list[SDKVirtualModel]) -> set[Middleware
     return refs
 
 
-def vm_uses_any_changed_config(vm: SDKVirtualModel, updated_refs: set[MiddlewareConfigRef]) -> bool:
+def vm_uses_any_changed_config(vm: PluginVirtualModel, updated_refs: set[MiddlewareConfigRef]) -> bool:
     """Return ``True`` if *vm* references at least one ref in *updated_refs*."""
     return bool(collect_config_refs([vm]) & updated_refs)
 
@@ -447,7 +441,7 @@ class MiddlewareRegistry:
 
     async def resolve_configs_for_virtual_model(
         self,
-        vm: SDKVirtualModel,
+        vm: PluginVirtualModel,
         *,
         prefetch: PrefetchResult,
     ) -> None:
@@ -470,7 +464,7 @@ class MiddlewareRegistry:
         calls :meth:`notify_upserted` after this method even when the VM is
         marked broken — plugins must not assume resolution succeeded.
         """
-        if vm.workspace is None or vm.name is None:
+        if not vm.workspace or not vm.name:
             return
 
         key: tuple[str, str] = (vm.workspace, vm.name)
@@ -514,7 +508,7 @@ class MiddlewareRegistry:
         self,
         vm_id: str,
         phase: str,
-        calls: list[SDKMiddlewareCall],
+        calls: list[MiddlewareCall],
         prefetch: PrefetchResult,
     ) -> tuple[bool, list[ResolvedMiddlewareCall]]:
         """Resolve a single phase's calls and return ``(ok, resolved)``.
@@ -624,16 +618,13 @@ class MiddlewareRegistry:
 
         return True, resolved
 
-    async def notify_upserted(self, vm: SDKVirtualModel) -> None:
+    async def notify_upserted(self, vm: PluginVirtualModel) -> None:
         """Call ``on_virtual_model_upserted`` on each plugin referenced by *vm*.
 
         Errors are logged and swallowed — must not fail the cache refresh.
         """
-        if vm.workspace is None or vm.name is None:
-            return
-
         vm_id = f"{vm.workspace}/{vm.name}"
-        plugin_vm = _sdk_vm_to_plugin_vm(vm)
+        plugin_vm = vm.model_copy(deep=True)
 
         for plugin_name in _referenced_plugins(vm):
             plugin = self.plugins.get(plugin_name)
@@ -649,16 +640,13 @@ class MiddlewareRegistry:
                     exc_info=True,
                 )
 
-    async def notify_destroyed(self, vm: SDKVirtualModel) -> None:
+    async def notify_destroyed(self, vm: PluginVirtualModel) -> None:
         """Call ``on_virtual_model_destroyed`` on each plugin referenced by *vm*.
 
         Errors are logged and swallowed — must not fail the cache refresh.
         """
-        if vm.workspace is None or vm.name is None:
-            return
-
         vm_id = f"{vm.workspace}/{vm.name}"
-        plugin_vm = _sdk_vm_to_plugin_vm(vm)
+        plugin_vm = vm.model_copy(deep=True)
 
         for plugin_name in _referenced_plugins(vm):
             plugin = self.plugins.get(plugin_name)
@@ -705,7 +693,7 @@ class MiddlewareRegistry:
 # ---------------------------------------------------------------------------
 
 
-def _referenced_plugins(vm: SDKVirtualModel) -> set[str]:
+def _referenced_plugins(vm: PluginVirtualModel) -> set[str]:
     """Return the set of plugin names referenced in any of *vm*'s middleware lists."""
     names: set[str] = set()
     for calls in (
@@ -719,40 +707,6 @@ def _referenced_plugins(vm: SDKVirtualModel) -> set[str]:
     return names
 
 
-def _sdk_vm_to_plugin_vm(vm: SDKVirtualModel) -> PluginVirtualModel:
-    """Convert an SDK VirtualModel to the nemo_helix_plugin VirtualModel for lifecycle hooks.
-
-    Only the fields that plugins care about in lifecycle hooks are mapped.
-    """
-
-    def _to_middleware_calls(calls: list | None) -> list[MiddlewareCall]:
-        if not calls:
-            return []
-        return [
-            MiddlewareCall(
-                name=c.name or "",
-                config_type=c.config_type or "",
-                config=dict(c.config) if c.config is not None else None,
-                config_id=c.config_id,
-            )
-            for c in calls
-        ]
-
-    return PluginVirtualModel(
-        name=vm.name or "",
-        workspace=vm.workspace or "",
-        default_model_entity=vm.default_model_entity,
-        models=[
-            VirtualModelInferenceConfig(model=m.model, backend_format=m.backend_format)
-            for m in (getattr(vm, "models", None) or [])
-        ],
-        request_middleware=_to_middleware_calls(vm.request_middleware),
-        response_middleware=_to_middleware_calls(vm.response_middleware),
-        post_response_middleware=_to_middleware_calls(vm.post_response_middleware),
-        override_proxy=vm.override_proxy,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -762,7 +716,7 @@ async def load_middleware_plugins(
     model_cache: Any,  # ModelCache
     virtual_model_cache: Any,  # VirtualModelCache
     *,
-    plugin_sdk_factory: Callable[[str], AsyncNeMoHelix] | None = None,
+    plugin_client_factory: Callable[[str], AsyncNemoClient] | None = None,
 ) -> MiddlewareRegistry:
     """Discover ``nemo.inference_middleware`` entry-points, load, and start each plugin.
 
@@ -777,7 +731,7 @@ async def load_middleware_plugins(
     Args:
         model_cache: The IGW's :class:`~nhx.core.inference_gateway.api.model_cache.ModelCache`.
         virtual_model_cache: The IGW's :class:`~nhx.core.inference_gateway.api.virtual_model_cache.VirtualModelCache`.
-        plugin_sdk_factory: Optional factory for caller-owned service SDKs keyed by plugin name.
+        plugin_client_factory: Optional factory for caller-owned service clients keyed by plugin name.
 
     Returns:
         A :class:`MiddlewareRegistry` containing all successfully loaded plugins.
@@ -794,10 +748,8 @@ async def load_middleware_plugins(
         try:
             instance = cls()
             instance._inject_cache(accessor)
-            if plugin_sdk_factory is not None:
-                sdk = plugin_sdk_factory(name)
-                instance._inject_platform_sdk(sdk)
-                instance._inject_platform_client(client_from_platform(sdk, AsyncNemoClient))
+            if plugin_client_factory is not None:
+                instance._inject_platform_client(plugin_client_factory(name))
             await instance.on_startup()
             plugins[name] = instance
             logger.info("Loaded inference middleware plugin %r (%s)", name, cls.__qualname__)

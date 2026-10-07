@@ -9,7 +9,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.intake.client import AsyncIntakeClient, IntakeClient
 from nhx.intake.config import IntakeConfig
 from nhx.intake.service import IntakeService
-from nhx.testing.client import SDKTestClientAdapter, create_test_client
+from nhx.testing.client import TestClientHttpAdapter, create_test_client
 
 OTLP_TRACES_PATH = "/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
 OTLP_TRACES_ROUTE = "/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces"
@@ -50,7 +50,7 @@ def test_otlp_ingest_declares_a_protobuf_request_body(client: TestClient):
 def test_client_create_sends_the_protobuf_body(client: TestClient, make_otlp_request):
     # Executed coverage that the typed client's create_otlp_traces reaches the endpoint.
     intake = IntakeClient.from_client(
-        NemoClient(base_url="http://testserver", http_client=SDKTestClientAdapter(client))
+        NemoClient(base_url="http://testserver", http_client=TestClientHttpAdapter(client))
     )
     body = make_otlp_request(
         [

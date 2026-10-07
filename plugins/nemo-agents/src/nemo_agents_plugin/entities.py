@@ -82,15 +82,24 @@ class SessionStatus(StrEnum):
 
 # Runtime backend for an AgentDeployment. ``subprocess`` (the default) runs the
 # agent as a local ``nat serve`` process reachable on a loopback ``endpoint``.
-# ``docker``/``k8s`` run the agent as a durable container deployment via the
-# deployments plugin; their routable address is projected onto ``endpoints``.
+# ``docker``/``k8s``/``openshell`` run the agent as a durable container deployment
+# via the deployments plugin; their routable address is projected onto ``endpoints``.
 # Modes that compile to the nemo-deployments plugin (not local subprocess).
-CONTAINER_DEPLOYMENT_MODES: frozenset[str] = frozenset({"docker", "k8s"})
+CONTAINER_DEPLOYMENT_MODES: frozenset[str] = frozenset({"docker", "k8s", "openshell"})
+
+# Container modes whose substrate runs the image ENTRYPOINT/CMD. The OpenShell
+# sandbox supervisor ignores the entrypoint, so openshell needs an explicit command.
+IMAGE_ENTRYPOINT_DEPLOYMENT_MODES: frozenset[str] = frozenset({"docker", "k8s"})
 
 
 def is_container_deployment_mode(mode: str) -> bool:
     """Return True when *mode* uses the deployments-plugin runner backend."""
     return mode in CONTAINER_DEPLOYMENT_MODES
+
+
+def supports_image_entrypoint(mode: str) -> bool:
+    """Return True when *mode* can start the agent from the image ENTRYPOINT/CMD."""
+    return mode in IMAGE_ENTRYPOINT_DEPLOYMENT_MODES
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +347,7 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
         default="subprocess",
         description=(
             "Runtime backend for this deployment. 'subprocess' (default) reads the loopback "
-            "'endpoint'; 'docker'/'k8s' read the projected 'endpoints'."
+            "'endpoint'; 'docker'/'k8s'/'openshell' read the projected 'endpoints'."
         ),
     )
     # Dual addressing: subprocess uses loopback ``endpoint``; docker/k8s project
@@ -355,7 +364,7 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
     )
     image: str = Field(
         default="",
-        description="Container image for docker/k8s modes. Empty for subprocess; falls back to AgentsConfig.deployments.default_image.",
+        description="Container image for container modes. Empty for subprocess; falls back to AgentsConfig.deployments.default_image.",
     )
     use_image_entrypoint: bool = Field(
         default=False,

@@ -9,14 +9,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Awaitable, Callable
 
-from nemo_helix import APIConnectionError, APIStatusError, AsyncNeMoHelix
-from nemo_helix.types.inference import ModelProvider, ServedModelMapping
-from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.errors import NemoHTTPError as PluginHTTPError
-from nemo_helix_plugin.client.errors import NemoTransportError as PluginTransportError
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.models.client import AsyncModelsClient
-from nemo_helix_plugin.models.types import ModelEntity
+from nemo_helix_plugin.models.types import ModelEntity, ModelProvider, ServedModelMapping
+from nhx.common.entities.utils import parse_model_entity_ref
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nhx.core.inference_gateway.api.proxy import retrieve_secret_value
 from nhx.core.inference_gateway.api.virtual_model_cache import (
@@ -93,6 +91,15 @@ class ModelCache:
     secret_value_ttl: int = SECRETS_TTL_SEC
     """Time-to-live in seconds for cached secrets (0 = always refresh)"""
 
+    _entity_map_signature: frozenset[tuple[str, str, tuple[tuple[str, str], ...]]] | None = field(default=None)
+    """Signature of the provider layer as of the last ``rebuild_model_entity_map`` run.
+
+    Private to :class:`ModelCache`: :meth:`rebuild_model_entity_map_if_changed` owns computing,
+    comparing, and updating it, so the skip-when-unchanged optimization is encapsulated here rather
+    than in :func:`refresh_model_cache`. ``None`` means "no rebuild has run yet" (forces the first
+    rebuild).
+    """
+
     def get_from_provider(self, workspace: str, provider_name: str) -> ModelProviderInfo | None:
         model_info = self.workspace_name_provider_map.get((workspace, provider_name))
         return model_info
@@ -117,11 +124,15 @@ class ModelCache:
         for model_provider_info in self.workspace_name_provider_map.values():
             served_models = model_provider_info.model_provider.served_models or []
             for served_model in served_models:
-                parts = served_model.model_entity_id.split("/", 1)
-                if len(parts) < 2 or not (parts[0] and parts[1]):
+                # First-"/"-only split (preserving a LoRA composite as the entity name) via the
+                # shared parser; a malformed id (no "/" or empty segment) raises ValueError, which
+                # we log and skip. The parser also strips surrounding whitespace.
+                try:
+                    ref = parse_model_entity_ref(served_model.model_entity_id)
+                except ValueError:
                     logger.warning("Skipping malformed entity_id %r", served_model.model_entity_id)
                     continue
-                workspace, model_entity_name = parts[0], parts[1]
+                workspace, model_entity_name = ref.workspace, ref.name
                 key = (workspace, model_entity_name)
                 model_entity_info = rebuilt_map.get(key)
                 if model_entity_info is None:
@@ -138,6 +149,40 @@ class ModelCache:
                 model_entity_info.model_providers.append((served_model.served_model_name, model_provider_info))
                 rebuilt_map[key] = model_entity_info
         self.model_entity_info_map = rebuilt_map
+
+    def rebuild_model_entity_map_if_changed(self, model_providers: list[ModelProvider]) -> bool:
+        """Rebuild the model-entity map only when the provider layer changed since the last cycle.
+
+        Computes a signature over ``model_providers`` (each provider's identity + its ordered
+        served-models) and compares it to the last-rebuild signature. On a change it rebuilds and
+        records the new signature; otherwise it skips the rebuild. Returns ``True`` when a rebuild
+        ran, ``False`` when it was skipped.
+
+        Skipping is a compute-only optimization: it saves no network calls, but avoids the
+        synchronous O(providers x served_models) rebuild burst on the event loop every cycle.
+
+        The signature is order-sensitive over each provider's served_models because the rebuild
+        appends to an entity's ``model_providers`` list in that order and consumers pick ``[0]`` -- a
+        reorder is a real routing change and must invalidate. Metadata (spec/finetuning_type/
+        backend_format) and provider config (host_url/secrets) are excluded: both are applied in
+        place, not via rebuild. Cold start is covered by the initial ``None`` signature, so an empty
+        map with an unchanged signature (no served_models yet, or only malformed ids) is a valid
+        steady state and is correctly skipped.
+        """
+        signature = frozenset(
+            (
+                mp.workspace,
+                mp.name,
+                tuple((sm.model_entity_id, sm.served_model_name) for sm in (mp.served_models or [])),
+            )
+            for mp in model_providers
+        )
+        if signature == self._entity_map_signature:
+            logger.debug("Provider layer unchanged since last cycle; skipping model entity map rebuild")
+            return False
+        self.rebuild_model_entity_map()
+        self._entity_map_signature = signature
+        return True
 
     def update_model_entity_metadata(self, model_entities: list[ModelEntity]) -> None:
         """Populate cached ModelEntity metadata used by inference middleware."""
@@ -183,20 +228,19 @@ def _to_plugin_backend_format(value: object | None) -> BackendFormat | None:
     return None
 
 
-def model_provider_getter_from_sdk(models_sdk: AsyncNeMoHelix) -> Callable[[], Awaitable[list[ModelProvider]]]:
+def model_provider_getter_from_client(client: AsyncNemoClient) -> Callable[[], Awaitable[list[ModelProvider]]]:
+    models_client = AsyncModelsClient.from_client(client).with_headers(MARK_INTERNAL_REQUEST_HEADERS)
+
     async def _model_provider_getter() -> list[ModelProvider]:
         try:
-            # SDK returns AsyncPaginator - iterate through all pages to get all providers
-            resp = models_sdk.inference.providers.list(
+            resp = await models_client.list_providers(
                 workspace="-",  # Cross-workspace query
-                page_size=200,
-                extra_headers=MARK_INTERNAL_REQUEST_HEADERS,
+                query_params={"page_size": 200},
             )
-            providers = [provider async for provider in resp]
-            return providers
-        except APIConnectionError as exc:
+            return [provider async for provider in resp.items()]
+        except NemoTransportError as exc:
             raise ModelProviderRefreshError(f"Error connecting to models service: {exc}") from exc
-        except APIStatusError as exc:
+        except NemoHTTPError as exc:
             raise ModelProviderRefreshError(
                 f"Error refreshing from models service: {exc.status_code}, {exc.body}"
             ) from exc
@@ -204,19 +248,19 @@ def model_provider_getter_from_sdk(models_sdk: AsyncNeMoHelix) -> Callable[[], A
     return _model_provider_getter
 
 
-def model_entity_getter_from_sdk(models_sdk: AsyncNeMoHelix) -> Callable[[], Awaitable[list[ModelEntity]]]:
+def model_entity_getter_from_client(client: AsyncNemoClient) -> Callable[[], Awaitable[list[ModelEntity]]]:
+    models_client = AsyncModelsClient.from_client(client)
+
     async def _model_entity_getter() -> list[ModelEntity]:
         try:
-            # SDK returns AsyncPaginator - iterate through all pages to get all model entities.
-            resp = await client_from_platform(models_sdk, AsyncModelsClient).list_models(
+            resp = await models_client.list_models(
                 workspace="-",  # Cross-workspace query
                 query_params={"page_size": 200, "verbose": False},
             )
-            models = [model async for model in resp.items()]
-            return models
-        except PluginTransportError as exc:
+            return [model async for model in resp.items()]
+        except NemoTransportError as exc:
             raise ModelProviderRefreshError(f"Error connecting to models service: {exc}") from exc
-        except PluginHTTPError as exc:
+        except NemoHTTPError as exc:
             raise ModelProviderRefreshError(f"Error refreshing model entities from models service: {exc}") from exc
 
     return _model_entity_getter
@@ -247,7 +291,7 @@ def debug_model_provider_getter(
 async def refresh_model_cache(
     model_cache: ModelCache,
     model_provider_getter: Callable[[], Awaitable[list[ModelProvider]]],
-    secrets_sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     model_entity_getter: Callable[[], Awaitable[list[ModelEntity]]] | None = None,
     virtual_model_cache: VirtualModelCache | None = None,
     middleware_registry: MiddlewareRegistry | None = None,
@@ -281,10 +325,13 @@ async def refresh_model_cache(
         await refresh_model_provider_info(
             model_cache=model_cache,
             model_info=model_info,
-            secrets_sdk=secrets_sdk,
+            client=client,
         )
 
-    model_cache.rebuild_model_entity_map()
+    # Rebuild the entity map only when the provider layer changed since the last cycle. ModelCache
+    # owns the signature compute+compare (see rebuild_model_entity_map_if_changed); refresh no longer
+    # touches the private signature field.
+    model_cache.rebuild_model_entity_map_if_changed(model_providers)
     if model_entity_getter is not None:
         try:
             model_entities = await model_entity_getter()
@@ -298,7 +345,7 @@ async def refresh_model_cache(
 
     if virtual_model_cache is not None:
         try:
-            await refresh_virtual_model_cache(virtual_model_cache, secrets_sdk, registry=middleware_registry)
+            await refresh_virtual_model_cache(virtual_model_cache, client, registry=middleware_registry)
         except VirtualModelCacheRefreshError:
             logger.exception("Failed to refresh VirtualModel cache; stale entries will be used until next cycle")
 
@@ -306,7 +353,7 @@ async def refresh_model_cache(
 async def refresh_model_provider_info(
     model_cache: ModelCache,
     model_info: ModelProviderInfo,
-    secrets_sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
 ):
     now = datetime.now()
     model_provider = model_info.model_provider
@@ -314,13 +361,13 @@ async def refresh_model_provider_info(
     api_key_secret_name = model_provider.api_key_secret_name
     secret_value_diff = now - model_info.secret_value_updated_at
     if api_key_secret_name and (secret_value_diff.total_seconds() > model_cache.secret_value_ttl):
-        await _refresh_secret_value(model_info, secrets_sdk, api_key_secret_name)
+        await _refresh_secret_value(model_info, client, api_key_secret_name)
         model_info.secret_value_updated_at = now
 
     model_cache.update_model_info(model_info)
 
 
-async def _refresh_secret_value(model_info: ModelProviderInfo, secrets_sdk: AsyncNeMoHelix, api_key_secret_name: str):
+async def _refresh_secret_value(model_info: ModelProviderInfo, client: AsyncNemoClient, api_key_secret_name: str):
     """
     For a given model provider, update the cached secret value. This function
     mutates the passed-in model_info.
@@ -330,7 +377,7 @@ async def _refresh_secret_value(model_info: ModelProviderInfo, secrets_sdk: Asyn
         model_info.secret_value = await retrieve_secret_value(
             workspace=model_provider.workspace,
             secret_name=api_key_secret_name,
-            secrets_sdk=secrets_sdk,
+            client=client,
         )
         logger.debug(f"Updated secret cache for model provider: {model_provider.workspace}/{model_provider.name}")
     except Exception:
@@ -346,7 +393,7 @@ async def _async_pause(delay: float) -> None:
 async def refresh_model_cache_task(
     model_cache: ModelCache,
     model_provider_getter: Callable[[], Awaitable[list[ModelProvider]]],
-    secrets_sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     sleep_duration_s: int,
     max_consecutive_failures: int = 10,
     model_entity_getter: Callable[[], Awaitable[list[ModelEntity]]] | None = None,
@@ -358,7 +405,7 @@ async def refresh_model_cache_task(
     Args:
         model_cache: The cache to refresh
         model_provider_getter: Function to fetch model providers
-        secrets_sdk: SDK client for accessing secrets service
+        client: Platform client used to read secrets and list VirtualModels
         sleep_duration_s: Interval between refresh attempts in seconds
         max_consecutive_failures: Maximum number of consecutive failures before raising an exception
 
@@ -375,7 +422,7 @@ async def refresh_model_cache_task(
             await refresh_model_cache(
                 model_cache,
                 model_provider_getter,
-                secrets_sdk,
+                client,
                 model_entity_getter=model_entity_getter,
                 virtual_model_cache=virtual_model_cache,
                 middleware_registry=middleware_registry,

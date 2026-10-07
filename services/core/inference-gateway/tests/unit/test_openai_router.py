@@ -8,11 +8,8 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_helix.types.inference import ModelProvider, ServedModelMapping
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
 from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareError,
@@ -20,6 +17,8 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
 from nhx.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
     global_model_cache,
@@ -27,47 +26,35 @@ from nhx.core.inference_gateway.api.dependencies import (
 )
 from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, ResolvedMiddlewareCall
 from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
-from nhx.core.inference_gateway.api.v2.openai import ParseOpenAIModelError, parse_igw_openai_model, resolve_vm_for_model
+from nhx.core.inference_gateway.api.v2.openai import resolve_vm_for_model
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 
-def _autoprovisioned_vms_for_cache(model_cache: ModelCache) -> list[SDKVirtualModel]:
+def _autoprovisioned_vms_for_cache(model_cache: ModelCache) -> list[VirtualModel]:
     """Mirror conftest.autoprovisioned_vms_for_cache for tests that build a custom ModelCache.
 
     Local copy because the unit tests directory has no ``__init__.py`` so the
     conftest helper isn't importable.
     """
     return [
-        SDKVirtualModel(
-            id=f"{workspace}/{name}",
-            entity_id=f"{workspace}/{name}",
+        VirtualModel(
             workspace=workspace,
             name=name,
-            parent=workspace,
-            db_version=1,
             default_model_entity=f"{workspace}/{name}",
             autoprovisioned=True,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
         )
         for (workspace, name) in model_cache.model_entity_info_map.keys()
         if "&adapters/" not in name
     ]
 
 
-def _custom_vm(workspace: str, name: str, default_model_entity: str | None = None) -> SDKVirtualModel:
+def _custom_vm(workspace: str, name: str, default_model_entity: str | None = None) -> VirtualModel:
     """Build a non-autoprovisioned (operator/Switchyard-style) VirtualModel."""
-    return SDKVirtualModel(
-        id=f"{workspace}/{name}",
-        entity_id=f"{workspace}/{name}",
+    return VirtualModel(
         workspace=workspace,
         name=name,
-        parent=workspace,
-        db_version=1,
         default_model_entity=default_model_entity,
         autoprovisioned=False,
-        created_at="2026-01-01T00:00:00Z",
-        updated_at="2026-01-01T00:00:00Z",
     )
 
 
@@ -438,7 +425,7 @@ def test_proxy_body_mismatched_workspace_prefix_rejected(client: TestClient):
     assert response.status_code == 422
 
 
-def _make_base_vm(workspace: str, base_name: str) -> SDKVirtualModel:
+def _make_base_vm(workspace: str, base_name: str) -> VirtualModel:
     """Build the base model's VirtualModel that LoRA-adapter requests route through.
 
     Under the adapter-through-base-VM design there is NO per-adapter VM: a request for
@@ -447,15 +434,9 @@ def _make_base_vm(workspace: str, base_name: str) -> SDKVirtualModel:
     plain base entity ``{workspace}/{base_name}``; the ``&adapters/...`` suffix is spliced
     back on at proxy time so model-entity resolution still hits the adapter's served model.
     """
-    return SDKVirtualModel(
-        id=f"{workspace}/{base_name}",
-        entity_id=f"{workspace}/{base_name}",
+    return VirtualModel(
         name=base_name,
         workspace=workspace,
-        parent=workspace,
-        db_version=1,
-        created_at="2026-01-01T00:00:00Z",
-        updated_at="2026-01-01T00:00:00Z",
         default_model_entity=f"{workspace}/{base_name}",
     )
 
@@ -856,17 +837,11 @@ def test_proxy_no_providers_for_model_entity(app: FastAPI, client: TestClient):
     vm_cache = VirtualModelCache()
     vm_cache.rebuild(
         [
-            SDKVirtualModel(
-                id="ns1/orphan-model",
-                entity_id="ns1/orphan-model",
+            VirtualModel(
                 workspace="ns1",
                 name="orphan-model",
-                parent="ns1",
-                db_version=1,
                 default_model_entity="ns1/orphan-model",
                 autoprovisioned=True,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
             )
         ]
     )
@@ -910,17 +885,11 @@ def test_proxy_with_unresolved_provider_secret(app: FastAPI, client: TestClient)
     vm_cache = VirtualModelCache()
     vm_cache.rebuild(
         [
-            SDKVirtualModel(
-                id="ns1/secure-model",
-                entity_id="ns1/secure-model",
+            VirtualModel(
                 workspace="ns1",
                 name="secure-model",
-                parent="ns1",
-                db_version=1,
                 default_model_entity="ns1/secure-model",
                 autoprovisioned=True,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
             )
         ]
     )
@@ -1015,17 +984,11 @@ def test_proxy_resolves_served_model_name_with_slashes(app: FastAPI, client: Tes
     vm_cache = VirtualModelCache()
     vm_cache.rebuild(
         [
-            SDKVirtualModel(
-                id="ns1/my-model",
-                entity_id="ns1/my-model",
+            VirtualModel(
                 workspace="ns1",
                 name="my-model",
-                parent="ns1",
-                db_version=1,
                 default_model_entity="ns1/my-model",
                 autoprovisioned=True,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
             )
         ]
     )
@@ -1043,45 +1006,6 @@ def test_proxy_resolves_served_model_name_with_slashes(app: FastAPI, client: Tes
     call_args = mock_proxy_client.request.call_args
     body_data = json.loads(call_args.kwargs["data"])
     assert body_data["model"] == "vendor/model/v1.0"
-
-
-# Parse OpenAI Model Tests
-
-
-@pytest.mark.parametrize(
-    "model_id,expected",
-    [
-        ("ns1/model1", ("ns1", "model1")),
-        ("default/my-model", ("default", "my-model")),
-        ("workspace_with_underscores/model-with-dashes", ("workspace_with_underscores", "model-with-dashes")),
-        ("e2e-test/meta_llama-3.2-1b-instruct", ("e2e-test", "meta_llama-3.2-1b-instruct")),
-        # Split on first "/" only: model_entity_name may contain "/" (e.g. LoRA with &adapters/)
-        ("ws/base&adapters/ws/my-adapter", ("ws", "base&adapters/ws/my-adapter")),
-        ("e2e-ws/qwen-base&adapters/e2e-ws/lora-1", ("e2e-ws", "qwen-base&adapters/e2e-ws/lora-1")),
-        # Cross-workspace LoRA: base_ws ("ws-a") and adapter_ws ("ws-b") differ —
-        # first-/ split keeps the adapter_ws segment inside model_entity_name.
-        ("ws-a/base&adapters/ws-b/adapter", ("ws-a", "base&adapters/ws-b/adapter")),
-        # 3+ segments: everything after first "/" is model_entity_name
-        ("ns1/model1/extra", ("ns1", "model1/extra")),
-        ("ns1/model1/a/b/c", ("ns1", "model1/a/b/c")),
-    ],
-)
-def test_parse_valid_model(model_id, expected):
-    """Test parsing valid model IDs; split on first '/' so LoRA ids work."""
-    assert parse_igw_openai_model(model_id) == expected
-
-
-@pytest.mark.parametrize(
-    "invalid_model_id",
-    [
-        "invalid",  # No slash
-        "",  # Empty
-    ],
-)
-def test_parse_invalid_model(invalid_model_id):
-    """Test parsing invalid model IDs raises ParseOpenAIModelError."""
-    with pytest.raises(ParseOpenAIModelError):
-        parse_igw_openai_model(invalid_model_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1136,20 +1060,14 @@ def test_resolve_vm_for_model_misses_when_uncached():
 # ---------------------------------------------------------------------------
 
 
-def _make_sdk_vm(
+def _make_vm(
     workspace: str,
     name: str,
     default_model_entity: str | None = None,
-) -> SDKVirtualModel:
-    return SDKVirtualModel(
-        id=f"{workspace}/{name}",
-        entity_id=f"{workspace}/{name}",
+) -> VirtualModel:
+    return VirtualModel(
         name=name,
         workspace=workspace,
-        parent=workspace,
-        db_version=1,
-        created_at="2026-01-01T00:00:00Z",
-        updated_at="2026-01-01T00:00:00Z",
         default_model_entity=default_model_entity or f"{workspace}/{name}",
     )
 
@@ -1159,7 +1077,7 @@ def test_openai_proxy_routes_via_virtual_model(app: FastAPI, client: TestClient,
 
     # VirtualModel pointing at a different model entity name
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-alias", "e2e-test/meta_llama-3.2-1b-instruct")])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-alias", "e2e-test/meta_llama-3.2-1b-instruct")])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     response = client.post(
@@ -1190,15 +1108,9 @@ def test_openai_proxy_virtual_model_no_default_model_entity_no_middleware_return
     vm_cache = VirtualModelCache()
     vm_cache.rebuild(
         [
-            SDKVirtualModel(
-                id="ws/mw-only",
-                entity_id="ws/mw-only",
+            VirtualModel(
                 name="mw-only",
                 workspace="ws",
-                parent="ws",
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
                 default_model_entity=None,
             )
         ]
@@ -1249,7 +1161,7 @@ def test_openai_proxy_executes_request_middleware(app: FastAPI, client: TestClie
     )
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-router", default_model_entity=None)])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-router", default_model_entity=None)])
     registry = _make_registry_with_plugin("e2e-test", "my-router", plugin, phase="request")
 
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
@@ -1270,7 +1182,7 @@ def test_openai_proxy_response_middleware_receives_model_entity(app: FastAPI, cl
     plugin.process_response = AsyncMock(side_effect=lambda ctx, response, cfg: response)
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-router", "e2e-test/meta_llama-3.2-1b-instruct")])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-router", "e2e-test/meta_llama-3.2-1b-instruct")])
     registry = _make_registry_with_plugin("e2e-test", "my-router", plugin, phase="response")
 
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
@@ -1336,7 +1248,7 @@ def test_openai_proxy_request_middleware_path_rewrite_reaches_backend(
     registry.post_response_middleware_calls[("e2e-test", "my-router")] = []
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-router", default_model_entity=None)])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-router", default_model_entity=None)])
 
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
     app.dependency_overrides[global_middleware_registry] = lambda: registry
@@ -1361,7 +1273,7 @@ def test_openai_proxy_immediate_response_skips_proxy(app: FastAPI, client: TestC
     )
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-router", default_model_entity=None)])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-router", default_model_entity=None)])
     registry = _make_registry_with_plugin("e2e-test", "my-router", plugin, phase="request")
 
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
@@ -1383,7 +1295,7 @@ def test_openai_proxy_middleware_error_returns_correct_status(app: FastAPI, clie
     plugin.process_request = AsyncMock(side_effect=InferenceMiddlewareError("rate limited", status_code=429))
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm("e2e-test", "my-router", "e2e-test/meta_llama-3.2-1b-instruct")])
+    vm_cache.rebuild([_make_vm("e2e-test", "my-router", "e2e-test/meta_llama-3.2-1b-instruct")])
     registry = _make_registry_with_plugin("e2e-test", "my-router", plugin, phase="request")
 
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
@@ -1455,7 +1367,7 @@ def test_virtual_model_proxy_mock_provider_keeps_qualified_body_model(app: FastA
             MOCK_RESPONSE_MAP_HEADER: json.dumps(response_map),
             MOCK_SERVED_MODELS_HEADER: json.dumps([served_name]),
         },
-        status="READY",
+        status=ModelProviderStatus.READY,
     )
     cache = ModelCache()
     cache.update_model_info(ModelProviderInfo(model_provider=mock_provider))
@@ -1463,7 +1375,7 @@ def test_virtual_model_proxy_mock_provider_keeps_qualified_body_model(app: FastA
     app.dependency_overrides[global_model_cache] = lambda: cache
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm(workspace, served_name, default_model_entity=qualified_id)])
+    vm_cache.rebuild([_make_vm(workspace, served_name, default_model_entity=qualified_id)])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     response = client.post(
@@ -1512,7 +1424,7 @@ def test_virtual_model_proxy_streaming_mock_provider_runs_response_middleware(ap
             MOCK_RESPONSE_MAP_HEADER: json.dumps(response_map),
             MOCK_SERVED_MODELS_HEADER: json.dumps([served_name]),
         },
-        status="READY",
+        status=ModelProviderStatus.READY,
     )
     cache = ModelCache()
     cache.update_model_info(ModelProviderInfo(model_provider=mock_provider))
@@ -1520,7 +1432,7 @@ def test_virtual_model_proxy_streaming_mock_provider_runs_response_middleware(ap
     app.dependency_overrides[global_model_cache] = lambda: cache
 
     vm_cache = VirtualModelCache()
-    vm_cache.rebuild([_make_sdk_vm(workspace, served_name, default_model_entity=qualified_id)])
+    vm_cache.rebuild([_make_vm(workspace, served_name, default_model_entity=qualified_id)])
     app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
 
     plugin = MagicMock(spec=NemoInferenceMiddleware)

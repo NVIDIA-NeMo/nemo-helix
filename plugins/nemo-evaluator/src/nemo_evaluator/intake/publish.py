@@ -3,8 +3,8 @@
 
 """Publish a completed agent evaluation to Intake.
 
-``publish_to_intake`` is the explicit, post-run consumer of ``AgentEvalResult``
-(see AALGO-290). It is **not** a side effect of ``AgentEvaluator.run()`` and
+``publish_to_intake`` is the explicit, post-run consumer of ``AgentEvalResult``.
+It is **not** a side effect of ``AgentEvaluator.run()`` and
 there is no feature flag — optionality is structural: you make the call or you
 don't, and the platform client is a required argument.
 

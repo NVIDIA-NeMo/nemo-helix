@@ -8,10 +8,12 @@
 # Builds Python wheels for:
 #   - causal-conv1d (CUDA extension required by mamba-ssm)
 #   - mamba-ssm     (selective state space model)
+#   - magi-attention (context-parallel attention, Automodel `magi` dependency group)
 #   - av + opencv-python-headless + decord2 (FFmpeg 8.1.2 bundled wheels for nspect / VLM)
 #   - rl-cuda-ext-wheel (CPython 3.13 / torch 2.13.0+cu130 extensions for nhx-rl-base)
 #
-# causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc.
+# causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc; magi-attention is
+# git-only and compiles CUDA kernels against the NGC torch.
 # av / opencv wheels bundle FFmpeg; upstream PyPI wheels lag nspect 8.1.2.
 # The cp311/cp312 causal-conv1d and mamba-ssm targets stay for Automodel and Unsloth.
 # Build those via the nhx-automodel-gpu-wheels bake group.
@@ -20,6 +22,8 @@
 # Build args:
 #   CAUSAL_CONV1D_VERSION  - git tag to build              (default: v1.5.3)
 #   MAMBA_22_COMMIT        - git SHA or tag to build
+#   MAGI_ATTENTION_COMMIT  - MagiAttention git SHA (match Automodel's [tool.uv.sources] rev)
+#   NVSHMEM_VERSION        - nvidia-nvshmem-cu13 for magi-attention (match nhx-automodel-base)
 #   CUDA_VERSION           - CUDA devel image version      (default: 12.8.1)
 #   TORCH_CUDA_ARCH_LIST   - semicolon-separated SM targets (default: "8.0;8.6;9.0")
 #   FFMPEG_VERSION         - FFmpeg for av/opencv wheels   (default: 8.1.2)

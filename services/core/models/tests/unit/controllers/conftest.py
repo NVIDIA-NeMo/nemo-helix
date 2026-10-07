@@ -4,11 +4,17 @@
 """Test fixtures for Models Controller tests."""
 
 import inspect
+from collections.abc import Iterator
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
+from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayProviderClient
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx.common.config import HelixConfig
 
 
@@ -58,9 +64,9 @@ def mock_get_config_patch(mock_platform_config):
 
 
 @pytest.fixture
-def mock_sdk_class_patch():
-    """Patch get_async_platform_sdk factory function."""
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk") as mock:
+def mock_client_factory_patch():
+    """Patch the get_async_nemo_client factory function."""
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client") as mock:
         mock.return_value.close = AsyncMock()
         yield mock
 
@@ -82,10 +88,9 @@ def mock_asyncio_run_patch():
 
 
 @pytest.fixture
-def mock_models_sdk():
-    """Create a mock AsyncNeMoHelix SDK for testing."""
-    mock_sdk = MagicMock()
-    return mock_sdk
+def mock_client():
+    """Create a mock AsyncNemoClient carrying typed-client mocks for each service."""
+    return make_mock_platform_client()
 
 
 @pytest.fixture
@@ -147,7 +152,7 @@ def _assert_controller_has_required_attributes(controller):
     """Assert that controller has all required attributes."""
     assert hasattr(controller, "_is_healthy")
     assert hasattr(controller, "_backend_registry")
-    assert hasattr(controller, "_models_sdk")
+    assert hasattr(controller, "_client")
 
 
 def _assert_controller_healthy(controller, is_healthy=True):
@@ -155,14 +160,16 @@ def _assert_controller_healthy(controller, is_healthy=True):
     assert controller.is_healthy is is_healthy
 
 
-def _assert_sdk_initialized_correctly(mock_sdk_class_patch):
-    """Assert that get_async_platform_sdk was called with correct args for Models API."""
-    # Controller initializes ONE SDK for Models API (base_url is resolved from config inside the factory)
-    assert mock_sdk_class_patch.call_count == 1
-    call_kwargs = mock_sdk_class_patch.call_args.kwargs
+def _assert_client_initialized_correctly(mock_client_factory_patch):
+    """Assert that get_async_nemo_client was called with correct args for Models API."""
+    # Controller initializes one client for Models API; endpoint and client ownership live in the factory.
+    assert mock_client_factory_patch.call_count == 1
+    call_kwargs = mock_client_factory_patch.call_args.kwargs
     assert call_kwargs["as_service"] == "models"
     assert call_kwargs["internal"] is True
-    assert "http_client" in call_kwargs
+    assert isinstance(call_kwargs["timeout"], httpx.Timeout)
+    assert isinstance(call_kwargs["limits"], httpx.Limits)
+    assert call_kwargs["follow_redirects"] is True
 
 
 def _assert_asyncio_run_called_once(mock_asyncio_run_patch):
@@ -181,7 +188,7 @@ class AssertHelpers:
     assert_controller_initialized = staticmethod(_assert_controller_initialized)
     assert_controller_has_required_attributes = staticmethod(_assert_controller_has_required_attributes)
     assert_controller_healthy = staticmethod(_assert_controller_healthy)
-    assert_sdk_initialized_correctly = staticmethod(_assert_sdk_initialized_correctly)
+    assert_client_initialized_correctly = staticmethod(_assert_client_initialized_correctly)
     assert_asyncio_run_called_once = staticmethod(_assert_asyncio_run_called_once)
     assert_deployments_count = staticmethod(_assert_deployments_count)
 
@@ -234,7 +241,7 @@ def _status_error(status: int, detail: str):
 
 def make_async_models_client() -> MagicMock:
     """Build a mock ``AsyncModelsClient`` exposing the typed surface the
-    controllers/reconcilers consume via ``client_from_platform``."""
+    controllers/reconcilers consume via ``AsyncModelsClient.from_client``."""
     client = MagicMock()
     client.list_models = AsyncMock(return_value=_AsyncPage([]))
     client.create_model = AsyncMock(return_value=_ModelResponse())
@@ -256,26 +263,43 @@ def make_async_models_client() -> MagicMock:
 
 @pytest.fixture
 async def mock_models_client() -> MagicMock:
-    """A mock ``AsyncModelsClient`` returned by ``client_from_platform`` in the
+    """A mock ``AsyncModelsClient`` built by ``AsyncModelsClient.from_client`` in the
     controller/reconciler modules under test."""
     return make_async_models_client()
 
 
-@pytest.fixture
-async def patch_models_client(mock_models_client):
-    """Route ``client_from_platform(sdk, AsyncModelsClient)`` in the models
-    controller modules back to :data:`mock_models_client`."""
+def make_mock_platform_client(models_client: MagicMock | None = None) -> MagicMock:
+    """Build a mock ``AsyncNemoClient`` carrying one typed-client mock per service.
+
+    Pair with :func:`patch_typed_clients` so ``X.from_client(client)`` resolves to
+    the matching attribute. ``with_retry`` returns the same mock.
+    """
+    client = MagicMock(spec=AsyncNemoClient)
+    client.models_client = models_client or make_async_models_client()
+    client.virtual_models_client = MagicMock()
+    client.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
+    client.virtual_models_client.create_virtual_model = AsyncMock(return_value=_ModelResponse())
+    client.virtual_models_client.delete_virtual_model = AsyncMock(return_value=_ModelResponse())
+    client.gateway_provider_client = MagicMock()
+    client.gateway_provider_client.get_provider_models = AsyncMock()
+    client.with_retry = MagicMock(return_value=client)
+    return client
+
+
+@contextmanager
+def patch_typed_clients() -> Iterator[None]:
+    """Make ``AsyncModelsClient``/``AsyncVirtualModelsClient``/``AsyncInferenceGatewayProviderClient``
+    ``.from_client(client)`` return the matching typed-client mock on *client*."""
     with (
-        patch(
-            "nhx.core.models.controllers.entity_cache.client_from_platform",
-            return_value=mock_models_client,
-        ),
-        patch(
-            "nhx.core.models.sidecars.adapters.main.client_from_platform",
-            return_value=mock_models_client,
+        patch.object(AsyncModelsClient, "from_client", side_effect=lambda client: client.models_client),
+        patch.object(AsyncVirtualModelsClient, "from_client", side_effect=lambda client: client.virtual_models_client),
+        patch.object(
+            AsyncInferenceGatewayProviderClient,
+            "from_client",
+            side_effect=lambda client: client.gateway_provider_client,
         ),
     ):
-        yield mock_models_client
+        yield
 
 
 _ENTITY_FIELDS = ("model_providers", "fileset", "api_endpoint", "backend_format")
@@ -302,17 +326,17 @@ def make_entity(workspace: str, name: str, **attrs):
 
 
 async def seed_entity_cache(
-    mock_models_sdk,
+    mock_client,
     entity_cache,
     entities=(),
     *,
     models_client: MagicMock | None = None,
 ):
-    """Load the cache from the mock SDK so lookups resolve to ``entities``.
+    """Load the cache from the mock client so lookups resolve to ``entities``.
 
     ``models_client`` is the mock ``AsyncModelsClient`` returned by the patched
-    ``client_from_platform``; defaulting to ``mock_models_sdk.models_client``.
+    ``from_client``; defaulting to ``mock_client.models_client``.
     """
-    models_client = models_client or mock_models_sdk.models_client
+    models_client = models_client or mock_client.models_client
     models_client.list_models.return_value = _AsyncPage(list(entities))
     await entity_cache.refresh()

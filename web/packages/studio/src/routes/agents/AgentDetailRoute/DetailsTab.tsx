@@ -91,7 +91,7 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
       )}
 
       {extraEntries.length > 0 && (
-        <DetailPanel title="Additional configuration">
+        <DetailPanel title="Additional configuration" defaultCollapsed>
           <Stack gap="2">
             {extraEntries.map(([key, value]) => (
               <ConfigValue key={key} label={key} value={value} />

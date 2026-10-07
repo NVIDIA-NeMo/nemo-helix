@@ -20,6 +20,7 @@ interface ChatPlaygroundContentProps {
   onDeploy: () => void;
   /** Deploying requires a Platform-managed agent config (Fabric integration). */
   canDeploy: boolean;
+  isAgentPending?: boolean;
 }
 
 export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
@@ -33,6 +34,7 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
   onSelectDeployment,
   onDeploy,
   canDeploy,
+  isAgentPending,
 }) => {
   const deploymentSelectItems = healthyDeployments.flatMap((d) =>
     d.name
@@ -64,6 +66,7 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
             isDeploying={isDeploying}
             onDeploy={onDeploy}
             canDeploy={canDeploy}
+            isAgentPending={isAgentPending}
           />
         </Block>
       )}

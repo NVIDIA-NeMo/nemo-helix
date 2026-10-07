@@ -3,36 +3,16 @@
 
 """SDK resources for the example plugin.
 
-Endpoints are defined in ``types.endpoints`` as decorated functions.
-The client classes expose them as direct methods via ``method()`` wrappers.
+Mounts the typed clients from :mod:`nemo_example_plugin.client` on the
+platform SDK.
 """
 
 from __future__ import annotations
 
-from nemo_example_plugin.types import endpoints
-from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.method import method
+from nemo_example_plugin.client import AsyncExampleClient, ExampleClient
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 
-
-class _ExampleMethods:
-    hello = method(endpoints.hello)
-    create_item = method(endpoints.create_item)
-    list_items = method(endpoints.list_items)
-    get_item = method(endpoints.get_item)
-    update_item = method(endpoints.update_item)
-    delete_item = method(endpoints.delete_item)
-    count = method(endpoints.count)
-    upload_blob = method(endpoints.upload_blob)
-    download_blob = method(endpoints.download_blob)
-
-
-class ExampleClient(_ExampleMethods, NemoClient):
-    """Sync client for the example plugin API."""
-
-
-class AsyncExampleClient(_ExampleMethods, AsyncNemoClient):
-    """Async client for the example plugin API."""
+__all__ = ["AsyncExampleClient", "ExampleClient", "example_sdk_resources"]
 
 
 example_sdk_resources = NemoPluginSDKResources(

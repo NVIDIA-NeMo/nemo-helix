@@ -24,6 +24,7 @@ import textwrap
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
+from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_PREFIX
 from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth.models import Principal
@@ -68,16 +69,17 @@ def _exclude_deleting_workspaces(filter_op: FilterOperation | None) -> FilterOpe
 
 
 def _principal_for_role_binding(principal: Principal) -> str | None:
-    """Return the identifier to store on role bindings (email preferred for human-readable membership).
+    """Use the acting principal for role bindings, including on-behalf-of requests.
 
-    Falls back to principal ID when email is absent (e.g. some service accounts).
+    Effective identity matches the principal for direct requests. Prefer email for
+    human-readable membership, falling back to ID when email is absent.
     """
-    if principal.email:
-        email = principal.email.strip()
+    if principal.effective_email:
+        email = principal.effective_email.strip()
         if email:
             return email
-    if principal.id:
-        return principal.id.strip() or None
+    if principal.effective_id:
+        return principal.effective_id.strip() or None
     return None
 
 
@@ -179,6 +181,8 @@ async def _delete_all_role_bindings(entity_repository: EntityRepository, workspa
         By default, this endpoint waits for the Admin role to propagate before returning.
         Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).
 
+        Names beginning with `sample-` are reserved for the Agents sample flow.
+
         Example:
         ```
         POST /apis/entities/v2/workspaces
@@ -204,6 +208,12 @@ async def create_workspace(
     The creator is automatically granted Admin role on the workspace, keyed by email when
     available (otherwise principal ID).
     """
+    if workspace.name.startswith(SAMPLE_WORKSPACE_PREFIX) and auth_client.principal.id != "service:agents":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Workspace names beginning with '{SAMPLE_WORKSPACE_PREFIX}' are reserved for the sample flow",
+        )
+
     existing = await workspace_repository.get_workspace_by_name(name=workspace.name)
     if existing:
         raise HTTPException(

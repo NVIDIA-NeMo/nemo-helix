@@ -22,7 +22,7 @@ on:
           - nightly
           - stable
       source-sha:
-        description: "Exact source commit SHA. Required for stable releases; nightlies default to the latest release/X.X branch."
+        description: "Exact source commit SHA. Required for stable releases. Nightlies use the latest release/X.X version series; a pinned SHA must belong to that branch's history."
         required: false
         type: string
         default: ""
@@ -203,6 +203,11 @@ jobs:
                   per_page: 100,
                 },
               ),
+              compareCommits: async (base, head) => (await github.rest.repos.compareCommits({
+                ...context.repo,
+                base,
+                head,
+              })).data,
             });
             let nightlyBaseVersion = "";
             if (plan.releaseType === "nightly" && plan.sourceBranch) {
@@ -250,7 +255,7 @@ jobs:
           persist-credentials: false
 
       - name: Ensure selected source is an ancestor of this workflow revision
-        if: steps.plan.outputs.source_branch == ''
+        if: inputs.source-sha != ''
         shell: bash
         env:
           SOURCE_SHA: ${{ steps.plan.outputs.source_sha }}
@@ -1098,6 +1103,38 @@ jobs:
             --generate-notes \
             "${prerelease_flag[@]}" \
             "${notes_range[@]}"
+
+      - name: Dispatch post-release cleanup
+        if: >-
+          needs.plan-release.outputs.is_prerelease == 'false' &&
+          (needs.plan-release.outputs.release_scope == 'all' ||
+           needs.plan-release.outputs.release_scope == 'containers')
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          RELEASE_VERSION: ${{ needs.plan-release.outputs.version }}
+          SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
+        with:
+          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          script: |
+            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
+            const request = {
+              owner,
+              repo,
+              event_type: "cleanup-release-containers",
+              client_payload: {
+                version: process.env.RELEASE_VERSION,
+                source_sha: process.env.SOURCE_SHA,
+              },
+            };
+            if (process.env.ACT === "true") {
+              core.info(`ACT=true; skipped cleanup dispatch: ${JSON.stringify(request.client_payload)}`);
+              return;
+            }
+            await github.rest.repos.createDispatchEvent(request);
+            core.info("Dispatched post-release cleanup.");
 
   notify-end:
     name: Notify release result

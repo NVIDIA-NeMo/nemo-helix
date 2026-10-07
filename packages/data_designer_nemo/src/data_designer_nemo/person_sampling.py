@@ -6,21 +6,21 @@ import logging
 import data_designer.config as dd
 from data_designer_nemo.errors import NDDInternalError
 from data_designer_nemo.nemotron_personas import get_resource_name_for_locale
-from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 
 logger = logging.getLogger(__name__)
 
 
-async def ensure_nemotron_personas_filesets(config: dd.DataDesignerConfig, client: AsyncHelixClient) -> None:
+async def ensure_nemotron_personas_filesets(config: dd.DataDesignerConfig, client: AsyncNemoClient) -> None:
     """Validate filesets exist for all locales required to execute the given config."""
     locales = _get_required_personas_locales(config)
     if not locales:
         return
 
     unreachable_locales = set()
-    files = client_from_platform(client, AsyncFilesClient)
+    files = AsyncFilesClient.from_client(client)
 
     for locale in locales:
         fileset_name = get_resource_name_for_locale(locale)

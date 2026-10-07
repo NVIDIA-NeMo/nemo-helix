@@ -38,7 +38,7 @@ async def apply_embedded_policy_document(
     Args:
         entity_client_for_dynamic: Client used for ``build_authorization_data`` to fetch
             role bindings (typically ``entities_client.as_service("auth", internal=True)``
-            or ``dependency_provider.get_entity_client(as_service="auth")``). Pass
+            or ``dependency_provider.get_service_entity_client("auth")``). Pass
             ``None`` to load static YAML only (after bootstrap when applicable).
         skip_static_bootstrap: If ``False`` (default), load static YAML first so the PDP
             can authorize entity fetches. If ``True``, skip that step — use on steady-state

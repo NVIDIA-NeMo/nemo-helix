@@ -13,6 +13,8 @@ from nemo_helix_plugin.client.response import PageResult
 from nemo_helix_plugin.entities import _convert_filter_obj_to_filter_str
 from nemo_helix_plugin.entities.types import DeleteResponse, Entity
 from nhx.common.auth.models import AuthContext
+from nhx.common.config import AuthConfig, Configuration
+from nhx.common.config.base import OIDCConfig
 from nhx.common.entities import (
     ALL_WORKSPACES,
     DEFAULT_WORKSPACE,
@@ -58,6 +60,16 @@ def _page_resp(
         )
     )
     return resp
+
+
+def _auth_config_with_token_exchange() -> AuthConfig:
+    return AuthConfig(
+        enabled=True,
+        oidc=OIDCConfig(
+            workload_token_exchange_enabled=True,
+            workload_token_private_key_file="/tmp/test-workload-token-private-key.pem",
+        ),
+    )
 
 
 def test_entity_base_get_data_fields():
@@ -1383,10 +1395,17 @@ def _make_entity_with_auth_context(now: datetime) -> Entity:
 
 
 def _entity_client_with_headers(headers: dict[str, str]) -> EntityClient:
-    mock_api = Mock()
-    mock_api._http.headers = {}
-    mock_api._default_headers = headers
-    return EntityClient(mock_api)
+    import httpx
+    from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+
+    mock_http = AsyncMock(spec=httpx.AsyncClient)
+    mock_http.headers = {}
+    typed = AsyncEntitiesClient(
+        base_url="http://testserver",
+        default_headers=headers,
+        http_client=mock_http,
+    )
+    return EntityClient(typed)
 
 
 class TestAuthContextSanitization:
@@ -1463,19 +1482,24 @@ class TestAuthContextSanitization:
 # fails loudly instead of silently sending service traffic to the wrong host.
 
 
-def _service_entities_client(url_resolver=None) -> tuple[EntityClient, AsyncMock]:
+def _service_entities_client(
+    url_resolver=None,
+    *,
+    base_url: str = "http://localhost:8080",
+) -> tuple[EntityClient, AsyncMock]:
     """Build a real EntityClient over a mocked httpx transport."""
     import httpx
     from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 
     mock_http = AsyncMock(spec=httpx.AsyncClient)
+    mock_http.headers = {}
     mock_http.request.return_value = httpx.Response(
         200,
         request=httpx.Request("DELETE", "http://platform/apis/entities/v2/workspaces/default/entities/w/x"),
         json={"message": "deleted", "id": "default/widget/x", "deleted_count": 1},
     )
     typed = AsyncEntitiesClient(
-        base_url="http://platform",
+        base_url=base_url,
         workspace="default",
         default_headers={
             "X-NHX-Principal-Id": "service:platform",
@@ -1489,19 +1513,24 @@ def _service_entities_client(url_resolver=None) -> tuple[EntityClient, AsyncMock
     return EntityClient(typed), mock_http
 
 
-def _sync_service_entities_client(url_resolver=None) -> tuple[SyncEntityClient, Mock]:
+def _sync_service_entities_client(
+    url_resolver=None,
+    *,
+    base_url: str = "http://localhost:8080",
+) -> tuple[SyncEntityClient, Mock]:
     """Build a real SyncEntityClient over a mocked httpx transport."""
     import httpx
     from nemo_helix_plugin.entities.client import EntitiesClient
 
     mock_http = Mock(spec=httpx.Client)
+    mock_http.headers = {}
     mock_http.request.return_value = httpx.Response(
         200,
         request=httpx.Request("DELETE", "http://platform/apis/entities/v2/workspaces/default/entities/w/x"),
         json={"message": "deleted", "id": "default/widget/x", "deleted_count": 1},
     )
     typed = EntitiesClient(
-        base_url="http://platform",
+        base_url=base_url,
         workspace="default",
         default_headers={
             "X-NHX-Principal-Id": "service:platform",
@@ -1538,7 +1567,7 @@ def test_as_service_preserves_the_platform_url_resolver():
 
     elevated = client.as_service("models")
 
-    assert elevated._client._url_resolver is resolver
+    assert elevated._client._resolve_url("http://platform/apis/entities") == "http://uds-resolved/apis/entities"
 
 
 def test_as_service_shares_the_underlying_http_transport():
@@ -1582,6 +1611,77 @@ async def test_as_service_internal_marks_requests_internal_on_the_wire():
     assert sent_headers["X-NHX-Actor-Aliases"] == "service:audit"
 
 
+@pytest.mark.asyncio
+async def test_as_service_uses_bearer_token_in_token_exchange_mode(monkeypatch: pytest.MonkeyPatch):
+    class TestEntity(EntityBase):
+        field_1: str
+
+    async def get_access_token_async(_provider) -> str:
+        return "entity-service-token"
+
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+        monkeypatch.setattr(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+            get_access_token_async,
+        )
+        client, mock_http = _service_entities_client()
+
+        await client.as_service("models", internal=True).delete(
+            TestEntity,
+            "test-entity",
+            workspace="test-workspace",
+        )
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+    sent_headers = mock_http.request.call_args.kwargs["headers"]
+    assert sent_headers["Authorization"] == "Bearer entity-service-token"
+    assert sent_headers["X-NHX-Internal"] == "true"
+    assert "X-NHX-Principal-Id" not in sent_headers
+    assert "X-NHX-Actor-Aliases" not in sent_headers
+    assert "X-NHX-Principal-On-Behalf-Of" not in sent_headers
+
+
+@pytest.mark.asyncio
+async def test_as_service_rejects_bearer_token_to_remote_cleartext_endpoint(monkeypatch: pytest.MonkeyPatch):
+    class TestEntity(EntityBase):
+        field_1: str
+
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+        monkeypatch.setattr(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+            lambda _provider: "entity-service-token",
+        )
+        client, _ = _service_entities_client(base_url="http://entities.example.test")
+
+        with pytest.raises(ValueError, match="AsyncEntitiesClient.*cleartext remote endpoint"):
+            await client.as_service("models").delete(TestEntity, "test-entity", workspace="test-workspace")
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+
+def test_as_service_keeps_auth_context_for_direct_service_token_exchange(monkeypatch: pytest.MonkeyPatch):
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+        monkeypatch.setattr(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token_async",
+            lambda _provider: "entity-service-token",
+        )
+        client, _ = _service_entities_client()
+
+        result = client.as_service("deployments")._convert_api_entity_to_model(
+            _make_entity_with_auth_context(datetime.now()),
+            _EntityWithAuthContext,
+        )
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+    assert result.auth_context is not None
+    assert result.auth_context.principal_id == "creator@example.com"
+
+
 def test_sync_as_service_returns_new_client_without_mutating_the_original():
     client, _ = _sync_service_entities_client()
 
@@ -1602,7 +1702,7 @@ def test_sync_as_service_preserves_the_platform_url_resolver():
 
     elevated = client.as_service("models")
 
-    assert elevated._client._url_resolver is resolver
+    assert elevated._client._resolve_url("http://platform/apis/entities") == "http://uds-resolved/apis/entities"
 
 
 def test_sync_as_service_shares_the_underlying_http_transport():
@@ -1639,3 +1739,69 @@ def test_sync_as_service_internal_marks_requests_internal_on_the_wire():
     assert sent_headers["X-NHX-Principal-Id"] == "service:audit"
     assert sent_headers["X-NHX-Internal"] == "true"
     assert sent_headers["X-NHX-Actor-Aliases"] == "service:audit"
+
+
+def test_sync_as_service_uses_bearer_token_in_token_exchange_mode(monkeypatch: pytest.MonkeyPatch):
+    class TestEntity(EntityBase):
+        field_1: str
+
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+        monkeypatch.setattr(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+            lambda _provider: "sync-entity-service-token",
+        )
+        client, mock_http = _sync_service_entities_client()
+
+        client.as_service("audit", internal=True).delete(
+            TestEntity,
+            "test-entity",
+            workspace="test-workspace",
+        )
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+    sent_headers = mock_http.request.call_args.kwargs["headers"]
+    assert sent_headers["Authorization"] == "Bearer sync-entity-service-token"
+    assert sent_headers["X-NHX-Internal"] == "true"
+    assert "X-NHX-Principal-Id" not in sent_headers
+    assert "X-NHX-Actor-Aliases" not in sent_headers
+    assert "X-NHX-Principal-On-Behalf-Of" not in sent_headers
+
+
+def test_sync_as_service_rejects_bearer_token_to_remote_cleartext_endpoint(monkeypatch: pytest.MonkeyPatch):
+    class TestEntity(EntityBase):
+        field_1: str
+
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+        monkeypatch.setattr(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+            lambda _provider: "sync-entity-service-token",
+        )
+        client, _ = _sync_service_entities_client(base_url="http://entities.example.test")
+
+        with pytest.raises(ValueError, match="EntitiesClient.*cleartext remote endpoint"):
+            client.as_service("models").delete(TestEntity, "test-entity", workspace="test-workspace")
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+
+def test_sync_as_service_keeps_auth_context_for_direct_service_token_exchange(monkeypatch: pytest.MonkeyPatch):
+    try:
+        Configuration.set_override(_auth_config_with_token_exchange())
+        monkeypatch.setattr(
+            "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+            lambda _provider: "sync-entity-service-token",
+        )
+        client, _ = _sync_service_entities_client()
+
+        result = client.as_service("deployments")._convert_api_entity_to_model(
+            _make_entity_with_auth_context(datetime.now()),
+            _EntityWithAuthContext,
+        )
+    finally:
+        Configuration.clear_override(AuthConfig)
+
+    assert result.auth_context is not None
+    assert result.auth_context.principal_id == "creator@example.com"
