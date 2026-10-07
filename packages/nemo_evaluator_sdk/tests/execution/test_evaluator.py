@@ -12,6 +12,7 @@ import pytest
 from nemo_evaluator_sdk.enums import MetricType
 from nemo_evaluator_sdk.execution.config import RunConfig, RunConfigOnlineModel
 from nemo_evaluator_sdk.execution.evaluator import Evaluator
+from nemo_evaluator_sdk.execution.values import EvaluationError
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import FieldMapping, Model
@@ -332,6 +333,94 @@ class TestEvaluator:
 
         assert result.aggregate_scores.scores[0].mean == 0.5
         assert result.row_scores[0].sample["output_text"] == "blue"
+
+    def test_run_sync_field_mapping_binds_a_conversation_turn_by_index(self):
+        """A messages dataset binds through the mapping, so the metric template stays canonical.
+
+        This is the point of positional paths: the same ``{{reference}}`` template scores a flat
+        dataset and an OpenAI-messages one, with only the mapping differing.
+        """
+        evaluator = Evaluator()
+        conversation = [
+            {
+                "messages": [
+                    {"role": "system", "content": "be terse"},
+                    {"role": "user", "content": "capital of France?"},
+                    {"role": "assistant", "content": "Paris"},
+                ],
+                "prediction": "Paris",
+            }
+        ]
+
+        result = evaluator.run_sync(
+            metrics=[ExactMatchMetric(reference="{{reference}}")],
+            dataset=conversation,
+            field_mapping=FieldMapping(output="prediction", reference="messages[2].content"),
+        )
+
+        assert result.row_scores[0].item["reference"] == "Paris"
+        assert result.aggregate_scores.scores[0].mean == 1.0
+
+    def test_run_sync_field_mapping_binds_a_turn_by_role_across_differing_shapes(self):
+        """One mapping scores conversations whose turns sit at different positions.
+
+        The first row has a leading system turn and two exchanges, the second has neither. No single
+        positional index binds the final answer in both, which is what the predicate form is for.
+        """
+        evaluator = Evaluator()
+        conversations = [
+            {
+                "messages": [
+                    {"role": "system", "content": "be terse"},
+                    {"role": "user", "content": "capital of France?"},
+                    {"role": "assistant", "content": "Lyon"},
+                    {"role": "user", "content": "are you sure?"},
+                    {"role": "assistant", "content": "Paris"},
+                ],
+                "prediction": "Paris",
+            },
+            {
+                "messages": [
+                    {"role": "user", "content": "capital of Japan?"},
+                    {"role": "assistant", "content": "Tokyo"},
+                ],
+                "prediction": "Tokyo",
+            },
+        ]
+
+        result = evaluator.run_sync(
+            metrics=[ExactMatchMetric(reference="{{reference}}")],
+            dataset=conversations,
+            field_mapping=FieldMapping(output="prediction", reference="messages[role=assistant].content"),
+        )
+
+        assert result.row_scores[0].item["reference"] == "Paris"
+        assert result.row_scores[1].item["reference"] == "Tokyo"
+        assert result.aggregate_scores.scores[0].mean == 1.0
+
+    def test_an_unresolved_mapping_fails_rather_than_scoring_a_same_named_column(self):
+        """The scenario a reviewer flagged: a partial miss on a dataset that also has the column.
+
+        Row 1 resolves, row 0 does not, and both carry their own `reference`. Before the mapping
+        owned its field this completed with a plausible aggregate built partly from the dataset's
+        own column; it must fail instead.
+        """
+        evaluator = Evaluator()
+        rows = [
+            {"messages": [{"role": "user", "content": "q"}], "prediction": "Paris", "reference": "Paris"},
+            {
+                "messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "Tokyo"}],
+                "prediction": "Tokyo",
+                "reference": "Tokyo",
+            },
+        ]
+
+        with pytest.raises(EvaluationError, match="could not render its 'reference' template"):
+            evaluator.run_sync(
+                metrics=[ExactMatchMetric(reference="{{reference}}")],
+                dataset=rows,
+                field_mapping=FieldMapping(output="prediction", reference="messages[role=assistant].content"),
+            )
 
     @pytest.mark.asyncio
     async def test_run_uses_sync_backend_adapter_thread_bridge(self, mocker: MockerFixture):

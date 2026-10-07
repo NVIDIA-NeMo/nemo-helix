@@ -284,3 +284,37 @@ def test_merge_metric_required_schemas_rejects_incompatible_types():
                 ("m2", {"type": "object", "properties": {"score": {"type": "integer"}}, "required": ["score"]}),
             ]
         )
+
+
+class TestColumnMappingOwnsItsField:
+    """Canonical fields and dataset columns share one namespace, so a mapping must own its slot."""
+
+    _MAPPING = FieldMapping(reference="messages[role=assistant].content")
+    _NO_MATCH = [{"role": "user", "content": "q"}]
+    _MATCH = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "answer"}]
+
+    def test_a_miss_clears_a_dataset_column_of_the_same_name(self) -> None:
+        """The case that silently scored the wrong value: the file supplies its own `reference`."""
+        row = {"messages": self._NO_MATCH, "reference": "FROM THE FILE"}
+
+        assert "reference" not in apply_column_mapping_to_row(row, self._MAPPING)
+
+    def test_a_miss_leaves_the_field_unset_when_no_such_column_exists(self) -> None:
+        row = {"messages": self._NO_MATCH}
+
+        assert "reference" not in apply_column_mapping_to_row(row, self._MAPPING)
+
+    def test_a_hit_replaces_a_dataset_column_of_the_same_name(self) -> None:
+        """The mapping wins when it resolves, too -- not only when it fails."""
+        row = {"messages": self._MATCH, "reference": "FROM THE FILE"}
+
+        assert apply_column_mapping_to_row(row, self._MAPPING)["reference"] == "answer"
+
+    def test_unmapped_dataset_columns_are_untouched(self) -> None:
+        """Only the mapped canonical field is governed; the rest of the row passes through."""
+        row = {"messages": self._NO_MATCH, "reference": "FROM THE FILE", "notes": "keep me"}
+
+        mapped = apply_column_mapping_to_row(row, self._MAPPING)
+
+        assert mapped["notes"] == "keep me"
+        assert mapped["messages"] == self._NO_MATCH

@@ -5,9 +5,14 @@
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+#: Wildcard array segment. Declared here rather than imported from ``dataset_schemas.common``
+#: so this values module keeps no dependency on that package.
+_ARRAY_WILDCARD = "[]"
 
 _KNOWN_BINDING_FIELDS = (
     "input",
@@ -20,7 +25,21 @@ _KNOWN_BINDING_FIELDS = (
     "tools",
 )
 
-_FIELD_MAPPING_PATH_PATTERN = r"^[^\[\]]*$"
+#: A dotted path, optionally with array segments: ``answer``, ``messages[1].content``,
+#: ``turns[0][2].text``, ``messages[role=assistant].content``. A bracket group holds digits, or a
+#: ``key=value`` predicate whose sides exclude ``.``, quotes, brackets, ``=`` and whitespace.
+#: The wildcard ``[]`` parses here and is rejected by
+#: :meth:`FieldMapping.validate_supported_dataset_paths`, which can say why; so is a predicate
+#: followed by a further bracket group. Anything else bracketed -- ``[-1]``, ``[x]``, ``a[1]b`` --
+#: fails here.
+_FIELD_MAPPING_PATH_PATTERN = r"""^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$"""
+
+#: A predicate group immediately followed by another bracket group. The predicate already binds one
+#: element, so whatever follows can only fail to resolve. Rejecting it keeps the slot free: a bare
+#: predicate means the last match, and this position can later name one explicitly --
+#: ``[role=assistant][0]`` for the first -- without changing what the bare form means.
+_PREDICATE_THEN_BRACKET = re.compile(r"\[[^\[\]]*=[^\[\]]*\]\[")
+
 _FieldMappingPath = Annotated[str, Field(pattern=_FIELD_MAPPING_PATH_PATTERN, min_length=1)]
 
 
@@ -102,11 +121,29 @@ class FieldMapping(_FieldMappingBase):
 
     @model_validator(mode="after")
     def validate_supported_dataset_paths(self) -> Self:
-        unsupported = sorted(
+        """Reject paths that parse but can never bind a single element.
+
+        The pattern is deliberately permissive so these two cases can be explained rather than
+        rejected as a regex mismatch.
+        """
+        wildcard = sorted(
+            canonical_name for canonical_name, dataset_path in self.mapping().items() if _ARRAY_WILDCARD in dataset_path
+        )
+        if wildcard:
+            raise ValueError(
+                f"wildcard array segments ({_ARRAY_WILDCARD}) are not supported for column mappings: "
+                f"{wildcard}. Select a single element, with a positional index such as "
+                "messages[1].content or a predicate such as messages[role=assistant].content. "
+                "This is not JSONPath; filters like [?(@.role=='assistant')] are not accepted."
+            )
+        chained = sorted(
             canonical_name
             for canonical_name, dataset_path in self.mapping().items()
-            if "[" in dataset_path or "]" in dataset_path
+            if _PREDICATE_THEN_BRACKET.search(dataset_path)
         )
-        if unsupported:
-            raise ValueError(f"array path segments are not supported for column mappings: {unsupported}")
+        if chained:
+            raise ValueError(
+                f"a predicate already selects a single element, so it cannot be followed by another "
+                f"array segment: {chained}. Use one or the other."
+            )
         return self
