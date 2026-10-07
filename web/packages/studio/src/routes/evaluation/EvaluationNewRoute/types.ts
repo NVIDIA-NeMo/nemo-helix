@@ -9,7 +9,7 @@ import {
 import { z } from 'zod';
 
 /** Canonical evaluator fields a dataset column can be bound to, mirroring
- *  ``_KNOWN_BINDING_FIELDS`` in ``nemo_evaluator_sdk.values.dataset_schemas``.
+ *  ``_KNOWN_BINDING_FIELDS`` in ``nhx_evals_sdk.values.dataset_schemas``.
  *
  *  ``output`` is deliberately absent. It is a canonical field, but binding it is
  *  only meaningful for an OFFLINE evaluation, where ``build_offline_sample``

@@ -142,11 +142,11 @@ class TestDefaultNemoClientProvider:
     def test_sync_env_base_url_and_service_internal(self, monkeypatch):
         monkeypatch.setenv("NHX_BASE_URL", "http://test:9090")
         monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
-        client = DefaultNemoClientProvider().get_nemo_client(as_service="evaluator", internal=True)
+        client = DefaultNemoClientProvider().get_nemo_client(as_service="evals", internal=True)
         assert client.base_url == "http://test:9090"
-        assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
+        assert client._default_headers["X-NHX-Principal-Id"] == "service:evals"
         assert client._default_headers["X-NHX-Internal"] == "true"
-        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
+        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evals"
 
     def test_sync_workspace_passthrough(self, monkeypatch):
         monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
@@ -165,12 +165,12 @@ class TestDefaultNemoClientProvider:
     def test_async_service_internal(self, monkeypatch):
         monkeypatch.setenv("NHX_BASE_URL", "http://test:9090")
         monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
-        client = DefaultNemoClientProvider().get_async_nemo_client(as_service="evaluator", internal=True)
+        client = DefaultNemoClientProvider().get_async_nemo_client(as_service="evals", internal=True)
         assert isinstance(client, AsyncNemoClient)
         assert client.base_url == "http://test:9090"
-        assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
+        assert client._default_headers["X-NHX-Principal-Id"] == "service:evals"
         assert client._default_headers["X-NHX-Internal"] == "true"
-        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
+        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evals"
 
     def test_async_workspace_passthrough(self, monkeypatch):
         monkeypatch.delenv("NHX_PRINCIPAL", raising=False)

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentEvalResultSummary } from '@nemo/sdk/generated/evaluator/schema';
+import type { AgentEvalResultSummary } from '@nemo/sdk/generated/evals/schema';
 import { EvalMetricCoverageTable } from '@studio/components/evaluation/EvalMetricCoverageTable';
 import { render, screen } from '@testing-library/react';
 

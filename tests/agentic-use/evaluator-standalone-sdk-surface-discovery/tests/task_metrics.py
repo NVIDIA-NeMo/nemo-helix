@@ -9,11 +9,11 @@ from pathlib import Path
 
 from evaluator_agent_eval.task_config import load_agentic_use_task_config
 from evaluator_agent_eval.task_metric_utils import contains_all, extract_fenced_python_code, score_checks
-from nemo_evaluator_sdk.values.results import MetricResult, MetricScore
+from nhx_evals_sdk.values.results import MetricResult, MetricScore
 
 
 class SurfaceDiscoveryMetric:
-    """Verify the candidate found the standalone Evaluator SDK surface."""
+    """Verify the candidate found the standalone Evals SDK surface."""
 
     @property
     def type(self) -> str:
@@ -87,7 +87,7 @@ def _imports_sdk_symbols(code: str) -> bool:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom):
             continue
-        if node.module is None or not node.module.startswith("nemo_evaluator_sdk"):
+        if node.module is None or not node.module.startswith("nhx_evals_sdk"):
             continue
         for alias in node.names:
             imported_names.add(alias.asname or alias.name)

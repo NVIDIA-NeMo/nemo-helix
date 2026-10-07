@@ -71,7 +71,7 @@ class TestFilterFilesByPatterns:
         assert result == ["results.json", "metrics.json"]
 
     def test_combined_patterns_from_evaluator(self):
-        """Test the actual patterns used by the evaluator service."""
+        """Test the actual patterns used by the evals service."""
         files = [
             "aggregate-scores.json",
             "metrics.json",

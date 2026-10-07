@@ -16,7 +16,7 @@ def test_task_config_parses_evaluator_extension(evaluator_task_dir: Path):
     assert config.suite_version == "v-test"
     assert config.evaluator.surface.constraint == "standalone_sdk"
     assert config.evaluator.expected.required_terms == [
-        "packages/nemo_evaluator_sdk",
+        "packages/nhx_evals_sdk",
         "Evaluator",
         "ExactMatchMetric",
         "2+2?",

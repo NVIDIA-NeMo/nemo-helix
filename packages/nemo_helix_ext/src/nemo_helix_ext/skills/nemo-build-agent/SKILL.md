@@ -194,7 +194,7 @@ enabled, verify at least one trace with the expected agent, model and tool spans
 Treat missing telemetry or unreachable tools as incomplete onboarding even when
 the final answer looks correct.
 
-Run `nemo-evaluator` only after invocation passes. Use the confirmed requirements cases
+Run `nemo-evals` only after invocation passes. Use the confirmed requirements cases
 and thresholds. Report passed, failed and skipped checks separately.
 
 ## Gotchas

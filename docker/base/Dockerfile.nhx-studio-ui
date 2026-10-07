@@ -41,7 +41,7 @@ COPY plugins/nemo-anonymizer/openapi /app/plugins/nemo-anonymizer/openapi
 COPY plugins/nemo-data-designer/openapi /app/plugins/nemo-data-designer/openapi
 COPY plugins/nemo-agents/openapi /app/plugins/nemo-agents/openapi
 COPY plugins/nemo-safe-synthesizer/openapi /app/plugins/nemo-safe-synthesizer/openapi
-COPY plugins/nemo-evaluator/openapi /app/plugins/nemo-evaluator/openapi
+COPY plugins/nemo-evals/openapi /app/plugins/nemo-evals/openapi
 COPY plugins/nemo-customizer/openapi /app/plugins/nemo-customizer/openapi
 COPY plugins/nemo-agent-hardener/openapi /app/plugins/nemo-agent-hardener/openapi
 COPY plugins/nemo-insights/openapi /app/plugins/nemo-insights/openapi

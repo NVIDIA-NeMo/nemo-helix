@@ -85,7 +85,7 @@ describe('getStudioUiNavigationSuggestion', () => {
         id: 'agents',
       },
       {
-        prompt: 'Use the nemo-evaluator skill to review eval history',
+        prompt: 'Use the nemo-evals skill to review eval history',
         id: 'evaluations',
       },
       {
@@ -133,7 +133,7 @@ describe('getStudioUiNavigationSuggestion', () => {
       'Build an agent class for this test helper',
       'Configure inference in this TypeScript module',
       'Generate synthetic test data in fixtures',
-      'Review evaluator plugin imports',
+      'Review evals plugin imports',
     ];
 
     for (const prompt of prompts) {

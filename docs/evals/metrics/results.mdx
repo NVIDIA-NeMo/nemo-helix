@@ -1,0 +1,178 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Metric Results"
+description: ""
+---
+<a id="eval-metric-results"></a>
+
+When a metric job completes, the platform automatically creates a **metric job result** — a persistent, queryable entity that captures the outcome of that run. Each result is created exactly once per completed job and shares the job's name.
+
+Evals plugin SDK executions return an `EvaluationResult` from `job.get_result()` once the submitted job completes.
+
+An `EvaluationResult` contains:
+
+- **Aggregate scores**: `result.aggregate_scores.scores`, with statistics such as mean, min, max, count, NaN count, variance, standard deviation, percentiles, and rubric distributions when applicable.
+- **Row scores**: `result.row_scores`, with the original dataset row, generated sample payload, metric scores, request logs, and row-level errors.
+
+## Get Results from a Local Run
+
+```python
+from nhx_evals_sdk import Evaluator as LocalEvaluator
+from nhx_evals_sdk import ExactMatchMetric
+
+metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
+
+result = LocalEvaluator().run_sync(
+    metrics=[metric],
+    dataset=[
+        {"expected": "Paris", "output": "Paris"},
+        {"expected": "Berlin", "output": "Munich"},
+    ],
+)
+```
+
+## Get Results from a Submitted Job
+
+```python
+from nemo_evals.sdk import Evaluator
+from nhx_evals_sdk import RunConfig, ExactMatchMetric
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
+
+metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {"expected": "Paris", "output": "Paris"},
+        {"expected": "Berlin", "output": "Munich"},
+    ],
+    config=RunConfig(parallelism=4),
+)
+job.wait_until_done()
+```
+
+### Get Results in Memory
+
+```python
+result = job.get_result()
+```
+
+If the process that submitted the job is no longer running, reconnect by job name:
+
+```python
+job = evaluator.get_job_resource("my-job-name")
+job.wait_until_done()
+result = job.get_result()
+```
+
+### Download Results as Files
+
+```python
+artifacts_dir = job.download_artifacts(path="evaluation_artifacts")
+print(f"Saved artifacts under {artifacts_dir}")
+```
+
+## Read Aggregate Scores
+
+Use `result.aggregate_scores.scores` for run-level statistics.
+
+```python
+for score in result.aggregate_scores.scores:
+    print(
+        f"{score.name}: mean={score.mean} count={score.count} nan_count={score.nan_count}"
+    )
+```
+
+Aggregate score objects can represent range-style numeric scores or rubric scores. Common fields include:
+
+- `name`
+- `score_type`
+- `count`
+- `nan_count`
+- `mean`
+- `min`
+- `max`
+- `variance`
+- `std_dev`
+- `percentiles`
+
+Rubric scores also include rubric distribution fields, such as the count per rubric label.
+
+## Read Row-Level Scores
+
+Use `result.row_scores` for per-row debugging and error analysis.
+
+```python
+for row in result.row_scores:
+    print("row_index:", row.row_index)
+    print("item:", row.item)
+    print("sample:", row.sample)
+
+    for metric_key, scores in row.metrics.items():
+        for score in scores:
+            print(f"{metric_key}:{score.name}={score.value}")
+
+    if row.error or row.metric_errors:
+        print("row error:", row.error)
+        print("metric errors:", row.metric_errors)
+```
+
+Each row score can include:
+
+- `row_index`: stable zero-based row position used for result alignment
+- `item`: the original dataset row
+- `sample`: generated model or agent output for online evaluations; often empty for offline evaluations
+- `metrics`: metric scores keyed by metric name
+- `requests`: request and response logs captured during evaluation
+- `error`: row-level failure information
+- `metric_errors`: metric-specific failure information
+
+## Parse Results with Pandas
+
+The examples below require pandas.
+
+```shell
+uv add pandas
+```
+
+### Aggregate Scores with Pandas
+
+```python
+import pandas as pd
+
+df_agg = pd.DataFrame(
+    score.model_dump(mode="json", exclude_none=True)
+    for score in result.aggregate_scores.scores
+)
+print(df_agg[["name", "score_type", "mean", "std_dev", "min", "max", "count"]])
+```
+
+### Row Scores with Pandas
+
+```python
+import pandas as pd
+
+rows = []
+for row in result.row_scores:
+    flat_row = {"row_index": row.row_index, **row.item}
+    for metric_key, scores in row.metrics.items():
+        for score in scores:
+            flat_row[f"{metric_key}:{score.name}"] = score.value
+    rows.append(flat_row)
+
+df_rows = pd.DataFrame(rows)
+print(df_rows)
+```
+
+Filter low-scoring rows:
+
+```python
+score_cols = df_rows.select_dtypes(include="number").columns
+low_scores = df_rows[df_rows[score_cols].min(axis=1) < 0.7]
+print(f"Found {len(low_scores)} rows needing review")
+```

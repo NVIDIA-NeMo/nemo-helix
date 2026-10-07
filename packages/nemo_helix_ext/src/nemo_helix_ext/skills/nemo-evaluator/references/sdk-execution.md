@@ -15,23 +15,23 @@ repo-relative source paths:
 - Import SDK classes and inspect their signatures, docstrings, and exported
   field names.
 - Use package metadata, installed examples, and CLI help when available.
-- Prefer the public import surface, such as `nemo_evaluator_sdk.Evaluator`,
+- Prefer the public import surface, such as `nhx_evals_sdk.Evaluator`,
   metric classes, `RunConfig`, `RunConfigOnlineModel`, `Model`, and parser
   classes, over private paths.
 - If the user provides a repo checkout or you are already working inside one,
   use the source paths below as developer fallbacks before guessing a metric
   schema or execution parameter.
 
-- Metric config schemas: `packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/values/metrics.py`
-- Metric type names: `packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/enums.py`
-- Runtime metric behavior: `packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/metrics/`
-- RAGAS runtime metrics: `packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/metrics/ragas/metrics.py`
-- Execution API: `packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/execution/evaluator.py`
-- Run config types: `packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/values/params.py`
-- Request config normalization: `packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/execution/config.py`
-- Public examples: `packages/nemo_evaluator_sdk/examples/examples.py`
-- Focused tests: `packages/nemo_evaluator_sdk/tests/metrics/` and
-  `packages/nemo_evaluator_sdk/tests/execution/`
+- Metric config schemas: `packages/nhx_evals_sdk/src/nhx_evals_sdk/values/metrics.py`
+- Metric type names: `packages/nhx_evals_sdk/src/nhx_evals_sdk/enums.py`
+- Runtime metric behavior: `packages/nhx_evals_sdk/src/nhx_evals_sdk/metrics/`
+- RAGAS runtime metrics: `packages/nhx_evals_sdk/src/nhx_evals_sdk/metrics/ragas/metrics.py`
+- Execution API: `packages/nhx_evals_sdk/src/nhx_evals_sdk/execution/evaluator.py`
+- Run config types: `packages/nhx_evals_sdk/src/nhx_evals_sdk/values/params.py`
+- Request config normalization: `packages/nhx_evals_sdk/src/nhx_evals_sdk/execution/config.py`
+- Public examples: `packages/nhx_evals_sdk/examples/examples.py`
+- Focused tests: `packages/nhx_evals_sdk/tests/metrics/` and
+  `packages/nhx_evals_sdk/tests/execution/`
 
 Prefer the SDK class field names. For example, `StringCheckMetric` uses
 `operation`, `left_template`, and `right_template`; do not invent `field` or
@@ -74,7 +74,7 @@ Use `Evaluator` directly for local, completed-result evaluation. `run` and
 single one — and always return a `BenchmarkEvaluationResult`.
 
 ```python
-from nemo_evaluator_sdk import Evaluator, RunConfig, StringCheckMetric
+from nhx_evals_sdk import Evaluator, RunConfig, StringCheckMetric
 
 
 metric = StringCheckMetric(
@@ -101,7 +101,7 @@ Run multiple metrics together when evaluating multiple dimensions of the same
 dataset:
 
 ```python
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric, StringCheckMetric
+from nhx_evals_sdk import Evaluator, ExactMatchMetric, StringCheckMetric
 
 
 metrics = [
@@ -124,7 +124,7 @@ before scoring. Pass `target=Model(...)` or `target=Agent(...)` and a
 dataset rows.
 
 ```python
-from nemo_evaluator_sdk import (
+from nhx_evals_sdk import (
     Evaluator,
     ExactMatchMetric,
     InferenceParams,
@@ -167,7 +167,7 @@ model, and prompt template. Score names must use lowercase letters, numbers,
 and underscores.
 
 ```python
-from nemo_evaluator_sdk import Evaluator, JSONScoreParser, LLMJudgeMetric, Model, RangeScore
+from nhx_evals_sdk import Evaluator, JSONScoreParser, LLMJudgeMetric, Model, RangeScore
 
 
 judge_model = Model(
@@ -223,7 +223,7 @@ ground truth tool calls. It emits:
 - `function_name_and_args_accuracy`
 
 ```python
-from nemo_evaluator_sdk import Evaluator, ToolCallingMetric
+from nhx_evals_sdk import Evaluator, ToolCallingMetric
 
 
 metric = ToolCallingMetric(reference="{{item.expected_tool_calls}}")

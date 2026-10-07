@@ -78,7 +78,7 @@ class TestSyncConstruction:
         assert client.base_url == str(Configuration.get_platform_config().base_url).rstrip("/")
 
     def test_service_principal_and_internal_headers(self):
-        client = cf.get_nemo_client(as_service="evaluator", internal=True)
+        client = cf.get_nemo_client(as_service="evals", internal=True)
         assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NHX-Internal"] == "true"
         assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
@@ -91,7 +91,7 @@ class TestSyncConstruction:
                 "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
                 return_value="typed-service-token",
             ):
-                client = cf.get_nemo_client(as_service="evaluator", internal=True)
+                client = cf.get_nemo_client(as_service="evals", internal=True)
                 assert client._auth is not None
                 assert client._auth.get_access_token() == "typed-service-token"
         finally:
@@ -106,7 +106,7 @@ class TestSyncConstruction:
         try:
             Configuration.set_override(_auth_config_with_token_exchange())
 
-            client = cf.get_nemo_client(as_service="evaluator")
+            client = cf.get_nemo_client(as_service="evals")
             with pytest.raises(ValueError, match="NemoClient cannot send Authorization.*cleartext remote endpoint"):
                 client.send(_get("/apis/entities/v2/foo"))
         finally:
@@ -160,7 +160,7 @@ class TestAsyncConstruction:
         assert client.base_url == str(Configuration.get_platform_config().base_url).rstrip("/")
 
     def test_service_principal_and_internal_headers(self):
-        client = cf.get_async_nemo_client(as_service="evaluator", internal=True)
+        client = cf.get_async_nemo_client(as_service="evals", internal=True)
         assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NHX-Internal"] == "true"
         assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
@@ -369,7 +369,7 @@ class TestHeadersAuth:
                 "x-NHX-Subject-Aliases": "attacker",
             }
         ):
-            client = cf.get_async_nemo_client(as_service="evaluator", internal=True)
+            client = cf.get_async_nemo_client(as_service="evals", internal=True)
         assert client._default_headers["traceparent"] == "00-trace-span-01"
         assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NHX-Internal"] == "true"
@@ -439,7 +439,7 @@ class TestTestClientInjection:
     async def test_async_uses_explicit_http_client(self):
         test_client = httpx.AsyncClient(base_url="http://testserver")
         try:
-            client = cf.get_async_nemo_client(as_service="evaluator", http_client=test_client)
+            client = cf.get_async_nemo_client(as_service="evals", http_client=test_client)
             assert client._http is test_client
         finally:
             await test_client.aclose()

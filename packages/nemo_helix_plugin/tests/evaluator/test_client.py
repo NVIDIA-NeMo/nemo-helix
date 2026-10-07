@@ -7,8 +7,8 @@ import json
 
 import httpx
 import pytest
-from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_helix_plugin.evaluator.types import (
+from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.evals.types import (
     BundledMetricOutputSpec,
     CreateMetricRequest,
     InlineMetricPayload,
@@ -36,7 +36,7 @@ def _metric_create_request() -> CreateMetricRequest:
 def test_sync_submit_evaluate_job_uses_typed_transport() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert request.url.path == "/apis/evaluator/v2/workspaces/default/evaluate/jobs"
+        assert request.url.path == "/apis/evals/v2/workspaces/default/evaluate/jobs"
         assert request.read() == b'{"spec":{"metrics":[],"dataset":[]}}'
         return httpx.Response(201, request=request, json={"name": "job-1", "status": "created"})
 
@@ -55,8 +55,8 @@ def test_sync_submit_evaluate_job_uses_typed_transport() -> None:
 async def test_async_health_uses_typed_transport() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert request.url.path == "/apis/evaluator/v1/healthz"
-        return httpx.Response(200, request=request, json={"plugin": "evaluator", "status": "ok"})
+        assert request.url.path == "/apis/evals/v1/healthz"
+        return httpx.Response(200, request=request, json={"plugin": "evals", "status": "ok"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         client = AsyncEvaluatorClient(base_url=BASE, http_client=http_client)
@@ -69,9 +69,7 @@ async def test_async_health_uses_typed_transport() -> None:
 def test_binary_download_returns_content() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert (
-            request.url.path == "/apis/evaluator/v2/workspaces/default/evaluate/jobs/job-1/results/artifacts/download"
-        )
+        assert request.url.path == "/apis/evals/v2/workspaces/default/evaluate/jobs/job-1/results/artifacts/download"
         return httpx.Response(200, request=request, content=b"tar-bytes")
 
     client = EvaluatorClient(
@@ -86,7 +84,7 @@ def test_binary_download_returns_content() -> None:
 def test_create_metric_sends_name_path_body_and_project_query() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert request.url.path == "/apis/evaluator/v2/workspaces/default/metrics/accuracy"
+        assert request.url.path == "/apis/evals/v2/workspaces/default/metrics/accuracy"
         assert request.url.params["project"] == "proj-a"
         assert json.loads(request.read()) == {
             "metric_type": "exact-match",
@@ -123,10 +121,10 @@ def test_create_metric_exist_ok_returns_existing_on_conflict() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         if request.method == "POST":
-            assert request.url.path == "/apis/evaluator/v2/workspaces/default/metrics/accuracy"
+            assert request.url.path == "/apis/evals/v2/workspaces/default/metrics/accuracy"
             return httpx.Response(409, request=request, json={"detail": "Metric already exists"})
         assert request.method == "GET"
-        assert request.url.path == "/apis/evaluator/v2/workspaces/default/metrics/accuracy"
+        assert request.url.path == "/apis/evals/v2/workspaces/default/metrics/accuracy"
         return httpx.Response(200, request=request, json={"name": "accuracy", "workspace": "default"})
 
     client = EvaluatorClient(
@@ -152,10 +150,10 @@ async def test_async_create_metric_exist_ok_returns_existing_on_conflict() -> No
     async def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         if request.method == "POST":
-            assert request.url.path == "/apis/evaluator/v2/workspaces/default/metrics/accuracy"
+            assert request.url.path == "/apis/evals/v2/workspaces/default/metrics/accuracy"
             return httpx.Response(409, request=request, json={"detail": "Metric already exists"})
         assert request.method == "GET"
-        assert request.url.path == "/apis/evaluator/v2/workspaces/default/metrics/accuracy"
+        assert request.url.path == "/apis/evals/v2/workspaces/default/metrics/accuracy"
         return httpx.Response(200, request=request, json={"name": "accuracy", "workspace": "default"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
@@ -174,7 +172,7 @@ async def test_async_create_metric_exist_ok_returns_existing_on_conflict() -> No
 def test_list_metrics_returns_paginated_items() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert request.url.path == "/apis/evaluator/v2/workspaces/default/metrics"
+        assert request.url.path == "/apis/evals/v2/workspaces/default/metrics"
         assert request.url.params["include_derived"] == "true"
         return httpx.Response(
             200,

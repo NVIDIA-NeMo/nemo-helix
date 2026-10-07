@@ -2965,7 +2965,7 @@ class TestFabricWheelInstall:
         dist = tmp_path / "dist"
         dist.mkdir()
         ours = dist / "nemo_helix-0.4.0-py3-none-any.whl"
-        theirs = dist / "nemo_evaluator-9.9.9-py3-none-any.whl"
+        theirs = dist / "nemo_evals-9.9.9-py3-none-any.whl"
         ours.write_bytes(b"ours")
         theirs.write_bytes(b"theirs")
         os.utime(ours, (1, 1))
@@ -2989,7 +2989,7 @@ class TestFabricWheelInstall:
 
         dist = tmp_path / "dist"
         dist.mkdir()
-        (dist / "nemo_evaluator-9.9.9-py3-none-any.whl").write_bytes(b"theirs")
+        (dist / "nemo_evals-9.9.9-py3-none-any.whl").write_bytes(b"theirs")
         monkeypatch.setattr(builder, "_source_checkout_dist_dir", lambda: dist)
         monkeypatch.setenv(WHEEL_ENV, WHEEL_LATEST)
 

@@ -13,19 +13,19 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
-from nemo_evaluator_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric, ToolCallCountMetric
-from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
-from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
-from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
-from nemo_evaluator_sdk.enums import ModelFormat
-from nemo_evaluator_sdk.metrics.protocol import Metric
-from nemo_evaluator_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
-from nemo_evaluator_sdk.values.common import SecretRef
-from nemo_evaluator_sdk.values.evidence import EVIDENCE_TRACE
-from nemo_evaluator_sdk.values.models import Model
-from nemo_evaluator_sdk.values.params import InferenceParams
+from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
+from nhx_evals_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric, ToolCallCountMetric
+from nhx_evals_sdk.agent_eval.results import AgentEvalResult
+from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
+from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nhx_evals_sdk.enums import ModelFormat
+from nhx_evals_sdk.metrics.protocol import Metric
+from nhx_evals_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
+from nhx_evals_sdk.values.common import SecretRef
+from nhx_evals_sdk.values.evidence import EVIDENCE_TRACE
+from nhx_evals_sdk.values.models import Model
+from nhx_evals_sdk.values.params import InferenceParams
 from pydantic import ValidationError
 
 from nemo_optimization.atif_metadata import build_atif_trial_tags

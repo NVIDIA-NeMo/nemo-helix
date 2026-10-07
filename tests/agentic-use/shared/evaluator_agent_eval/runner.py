@@ -1,15 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Run Evaluator SDK scoring over normalized Evaluator rows."""
+"""Run Evals SDK scoring over normalized Evaluator rows."""
 
 from collections.abc import Iterable, Sequence
 
 from evaluator_agent_eval.metrics import default_agent_eval_metrics
 from evaluator_agent_eval.schemas import EvaluatorScoringRow
-from nemo_evaluator_sdk import Evaluator
-from nemo_evaluator_sdk.metrics.base import Metric
-from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
+from nhx_evals_sdk import Evaluator
+from nhx_evals_sdk.metrics.base import Metric
+from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 
 
 def score_evaluator_rows(

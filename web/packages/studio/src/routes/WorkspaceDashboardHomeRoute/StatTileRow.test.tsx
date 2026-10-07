@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
-import { useEvaluatorListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { useEvalsListEvaluateJobs } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
 import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
@@ -20,11 +20,9 @@ vi.mock('@nemo/sdk/generated/insights/insights-insights', async (importOriginal)
   ...(await importOriginal<typeof import('@nemo/sdk/generated/insights/insights-insights')>()),
   useInsightsListInsights: vi.fn(),
 }));
-vi.mock('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes', async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes')
-  >()),
-  useEvaluatorListEvaluateJobs: vi.fn(),
+vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/evals/evals-plugin-jobs-routes')>()),
+  useEvalsListEvaluateJobs: vi.fn(),
 }));
 vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/experiments')>()),
@@ -37,7 +35,7 @@ vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => ({
 
 const mockUseAgentsListAgents = vi.mocked(useAgentsListAgents);
 const mockUseInsightsListInsights = vi.mocked(useInsightsListInsights);
-const mockUseEvaluatorListEvaluateJobs = vi.mocked(useEvaluatorListEvaluateJobs);
+const mockUseEvalsListEvaluateJobs = vi.mocked(useEvalsListEvaluateJobs);
 const mockUseListExperiments = vi.mocked(useListExperiments);
 const mockUseModelsListModels = vi.mocked(useModelsListModels);
 
@@ -52,7 +50,7 @@ describe('StatTileRow', () => {
   beforeEach(() => {
     mockUseAgentsListAgents.mockReturnValue(queryResult(1));
     mockUseInsightsListInsights.mockReturnValue(queryResult(4));
-    mockUseEvaluatorListEvaluateJobs.mockReturnValue(queryResult(120));
+    mockUseEvalsListEvaluateJobs.mockReturnValue(queryResult(120));
     mockUseListExperiments.mockReturnValue(queryResult(1));
     mockUseModelsListModels.mockReturnValue(queryResult(0));
   });

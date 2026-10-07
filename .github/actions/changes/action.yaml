@@ -96,7 +96,7 @@ runs:
             - 'packages/nhx_common/src/nhx_common/api/**'
             - 'packages/nhx_common/src/nhx_common/datamodel/**'
             - 'packages/nemo_helix_plugin/src/**'
-            - 'packages/nemo_evaluator_sdk/src/**'
+            - 'packages/nhx_evals_sdk/src/**'
             - 'script/generate_openapi_spec.py'
             - 'script/generate-openapi-spec.sh'
             - 'script/openapi_helper/**'
@@ -112,28 +112,28 @@ runs:
             - 'tools/osv-scanner/**'
             - 'tools/python/**'
           fabric:
-            - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/runtimes/fabric/**'
-            - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/**'
-            - 'packages/nemo_evaluator_sdk/tests/agent_eval/test_fabric_*.py'
-            - 'packages/nemo_evaluator_sdk/pyproject.toml'
+            - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/runtimes/fabric/**'
+            - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/**'
+            - 'packages/nhx_evals_sdk/tests/agent_eval/test_fabric_*.py'
+            - 'packages/nhx_evals_sdk/pyproject.toml'
             - '.github/workflows/ci.yaml'
             - '.github/actions/changes/action.yaml'
           harbor-integration:
-            - 'plugins/nemo-evaluator/src/nemo_evaluator/harbor/**'
-            - 'plugins/nemo-evaluator/src/nemo_evaluator/revisions.py'
-            - 'plugins/nemo-evaluator/src/nemo_evaluator/sdk/**'
-            - 'plugins/nemo-evaluator/src/nemo_evaluator/jobs/**'
-            - 'plugins/nemo-evaluator/src/nemo_evaluator/api/**'
-            - 'plugins/nemo-evaluator/src/nemo_evaluator/task_refs.py'
-            - 'plugins/nemo-evaluator/src/nemo_evaluator/task_identity.py'
-            - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/**'
-            - 'packages/nemo_evaluator_sdk/tests/agent_eval/test_harbor_*.py'
-            - 'packages/nemo_evaluator_sdk/pyproject.toml'
-            - 'plugins/nemo-evaluator/tests/integration/test_harbor_*.py'
-            - 'plugins/nemo-evaluator/tests/integration/conftest.py'
-            - 'plugins/nemo-evaluator/examples/harbor_taskset/**'
-            - 'plugins/nemo-evaluator/src/nemo_evaluator/examples/harbor_test_agent.py'
-            - 'plugins/nemo-evaluator/pyproject.toml'
+            - 'plugins/nemo-evals/src/nemo_evals/harbor/**'
+            - 'plugins/nemo-evals/src/nemo_evals/revisions.py'
+            - 'plugins/nemo-evals/src/nemo_evals/sdk/**'
+            - 'plugins/nemo-evals/src/nemo_evals/jobs/**'
+            - 'plugins/nemo-evals/src/nemo_evals/api/**'
+            - 'plugins/nemo-evals/src/nemo_evals/task_refs.py'
+            - 'plugins/nemo-evals/src/nemo_evals/task_identity.py'
+            - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/**'
+            - 'packages/nhx_evals_sdk/tests/agent_eval/test_harbor_*.py'
+            - 'packages/nhx_evals_sdk/pyproject.toml'
+            - 'plugins/nemo-evals/tests/integration/test_harbor_*.py'
+            - 'plugins/nemo-evals/tests/integration/conftest.py'
+            - 'plugins/nemo-evals/examples/harbor_taskset/**'
+            - 'plugins/nemo-evals/src/nemo_evals/examples/harbor_test_agent.py'
+            - 'plugins/nemo-evals/pyproject.toml'
             - '.github/workflows/ci.yaml'
             - '.github/actions/changes/action.yaml'
           evaluator-integration:
@@ -148,8 +148,8 @@ runs:
             # targets via the IGW mock provider), secrets (env_secrets references), auth (the
             # auth-enabled platform fixture) and intake (result publishing). Extend it deliberately
             # when the suite starts calling something new.
-            - 'plugins/nemo-evaluator/**'
-            - 'packages/nemo_evaluator_sdk/**'
+            - 'plugins/nemo-evals/**'
+            - 'packages/nhx_evals_sdk/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_common/**'  # shared contracts every service above is built on
             - 'services/core/entities/**'
@@ -170,9 +170,9 @@ runs:
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
             # Paths that can change what `import ...harbor.runtime` loads or how the smoke job runs.
-            - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/**'  # package-wide import closure
-            - 'packages/nemo_evaluator_sdk/tests/test_lazy_public_api.py'  # smoke test file
-            - 'packages/nemo_evaluator_sdk/pyproject.toml'  # declared [project] dependencies
+            - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/**'  # package-wide import closure
+            - 'packages/nhx_evals_sdk/tests/test_lazy_public_api.py'  # smoke test file
+            - 'packages/nhx_evals_sdk/pyproject.toml'  # declared [project] dependencies
             - 'uv.lock'  # locked versions installed for the package
             - '.github/workflows/ci.yaml'  # smoke job definition
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)

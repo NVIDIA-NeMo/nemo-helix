@@ -13,7 +13,7 @@ from evaluator_agent_eval.metrics import (
     default_agent_eval_metrics,
 )
 from evaluator_agent_eval.schemas import EvaluatorScoringRow
-from nemo_evaluator_sdk.metrics.base import Metric
+from nhx_evals_sdk.metrics.base import Metric
 
 SURFACE_FIELD_KEYS = {
     "observed_surfaces_key": "observed_surfaces",
@@ -37,7 +37,7 @@ def _row(**overrides: object) -> EvaluatorScoringRow:
         "surface_constraint": "standalone_sdk",
         "allowed_surfaces": ["standalone_sdk"],
         "forbidden_surfaces": ["legacy_service"],
-        "output_text": "Used nemo_evaluator_sdk only.",
+        "output_text": "Used nhx_evals_sdk only.",
         "observed_surfaces": ["standalone_sdk"],
         "trajectory_summary": {"tool_call_count": 3, "failed_command_count": 1, "recovery_event_count": 1},
     }

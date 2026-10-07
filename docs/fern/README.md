@@ -36,7 +36,7 @@ Use `make docs` when you are only editing `docs/fern/` config. Use `make docs-wa
 
 ```text
 docs/                          # page content (.mdx), one tree per product area
-├── get-started/ , agents/ , evaluator/ , ...   # published pages
+├── get-started/ , agents/ , evals/ , ...   # published pages
 └── fern/                      # <- this directory: Fern site config
     ├── fern.config.json       # Fern organization + CLI version
     ├── package.json           # npm run check|dev|generate|preview|broken-links|*-gated-links

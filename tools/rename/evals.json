@@ -39,6 +39,7 @@
       "nemo_helix_plugin/evaluator": "nemo_helix_plugin/evals",
       "nemo_evaluator": "nemo_evals",
       "/apis/evaluator/": "/apis/evals/",
+      "_apis_evaluator_": "_apis_evals_",
       "nemo evaluator": "nemo evals",
       "NEMO_EVALUATOR_": "NEMO_EVALS_",
       "NHX_EVALUATOR_": "NHX_EVALS_"

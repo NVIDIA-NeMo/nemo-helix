@@ -67,7 +67,7 @@ export const RunEvaluationModal: FC<RunEvaluationModalProps> = ({
         <Block className="rounded border border-base bg-surface-sunken px-3 py-2">
           <Text className="text-secondary" kind="body/regular/sm">
             Preview only — Submit captures your choices and shows what would be sent. The wire-up to
-            the evaluator service lands in the next release.
+            the evals service lands in the next release.
           </Text>
         </Block>
         <Block>

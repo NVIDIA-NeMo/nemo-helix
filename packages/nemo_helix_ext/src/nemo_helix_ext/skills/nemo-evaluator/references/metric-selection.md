@@ -42,7 +42,7 @@ not for checks that can be expressed as exact, string, numeric, or code logic.
 
 ## RAG And Agentic Metrics
 
-Use RAGAS-backed metric classes from `nemo_evaluator_sdk.metrics.ragas` when the
+Use RAGAS-backed metric classes from `nhx_evals_sdk.metrics.ragas` when the
 task is about retrieval, grounding, or agent behavior. Keep dataset columns
 aligned with the metric:
 

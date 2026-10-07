@@ -186,6 +186,12 @@ class PluginRenameTests(unittest.TestCase):
             "plugins/nemo-evaluator/src/nemo_evaluator/service.py",
             'tag="Evaluator Plugin Jobs Routes"\nnamespace="evaluator"\nkind="evaluator"\n',
         )
+        self.write(
+            "plugins/nemo-evaluator/openapi/openapi.yaml",
+            "paths:\n  /apis/evaluator/v2/workspaces/{workspace}/evaluate/jobs:\n"
+            "    post:\n      operationId: create_job_apis_evaluator_v2_workspaces__workspace__evaluate_jobs_post\n"
+            "      tags: [Evaluator Plugin Jobs Routes]\n",
+        )
         self.write("plugins/nemo-evaluator/README.md", "nemo.cli:evaluator\nEvaluator plugin\n")
         result = self.run_rename("--allow-dirty", profile=EVALS)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -217,6 +223,11 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn('tag="Evals Plugin Jobs Routes"', service)
         self.assertIn('namespace="evaluator"', service)
         self.assertIn('kind="evaluator"', service)
+        spec = (self.repo / "plugins/nemo-evals/openapi/openapi.yaml").read_text()
+        self.assertIn("/apis/evals/", spec)
+        self.assertIn("create_job_apis_evals_", spec)
+        self.assertIn("Evals Plugin Jobs Routes", spec)
+        self.assertNotIn("_apis_evaluator_", spec)
         self.assertIn("nemo.cli:evals", (self.repo / "plugins/nemo-evals/README.md").read_text())
         self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
 

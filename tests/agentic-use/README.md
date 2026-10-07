@@ -213,14 +213,14 @@ Notes:
 
 ### Task metric authoring direction
 
-Task-local verification should prefer Evaluator SDK `Metric` implementations.
+Task-local verification should prefer Evals SDK `Metric` implementations.
 Keep reusable mechanics in `shared/evaluator_agent_eval/` helpers and keep
 task-specific files focused on task semantics.
 
 Task-local diagnostics can be emitted as additional numeric metric scores, but
 richer structured context should be attached via `MetricResult.diagnostics`
 (`list[MetricDiagnostic]`: required `message`, optional `details`). See
-`DiffDiagnosticExactMatchMetric` in `packages/nemo_evaluator_sdk/examples/examples.py`
+`DiffDiagnosticExactMatchMetric` in `packages/nhx_evals_sdk/examples/examples.py`
 for the recommended pattern.
 
 ## Planned follow-ups

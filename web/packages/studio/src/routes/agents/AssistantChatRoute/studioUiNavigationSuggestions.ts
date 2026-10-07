@@ -207,7 +207,7 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
       /\b(eval|evaluation) history\b/i,
       /\bnemo[-\s]?evaluator\b/i,
       /\bevaluator (jobs?|sdk specs?)\b/i,
-      /\buse (the )?evaluator plugin\b/i,
+      /\buse (the )?evals plugin\b/i,
     ],
   },
   {

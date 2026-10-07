@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: nemo-evaluator
+name: nemo-evals
 description: >
-  NeMo Evaluator SDK-first rubric-to-eval guide for BYOB (Bring Your Own
+  NeMo Helix Evals SDK-first rubric-to-eval guide for BYOB (Bring Your Own
   Benchmark): parse domain expert rubrics, choose composable evaluation
   primitives, generate human-reviewable eval configs/artifacts, and run
   reproducible exact, numeric, LLM-as-judge, code/custom, composite,
@@ -20,7 +20,7 @@ metadata:
   user-invocable: true
 ---
 
-# NeMo Evaluator
+# NeMo Helix Evals
 
 Use this skill to turn a domain-specific benchmark and expert-written rubric
 into a reproducible evaluation. The agent should parse the rubric, choose the
@@ -28,7 +28,7 @@ simplest correct composable primitive for each criterion, generate
 human-reviewable config/artifacts, run the evaluation, and explain both scores
 and reasoning.
 
-Use the NeMo Evaluator SDK as the source of truth for metric names, fields,
+Use the NeMo Helix Evals SDK as the source of truth for metric names, fields,
 templates, execution modes, result shapes, and failure behavior. Keep this skill
 focused on SDK guidance. Use CLI commands only when the user explicitly needs a
 remote platform job or an existing platform resource.

@@ -48,7 +48,7 @@ version: "0.1.0"
 Conduct the Nemotron embed/rerank pipeline **on NeMo Helix plugin CLIs**.
 Do not use `nemo data-designer create`.
 
-Plugin skills (`nemo-data-designer-plugin`, `nemo-customizer`, `nemo-evaluator-plugin`)
+Plugin skills (`nemo-data-designer-plugin`, `nemo-customizer`, `nemo-evals-plugin`)
 are stage manuals. This skill owns family routing, artifact IDs, frozen eval, and
 the 15% nDCG@10 / Recall@10 README bar.
 
@@ -83,7 +83,7 @@ Keep `query: ` / `passage: ` prefixes for embed and
    models. Do not ask users to paste API keys. Use `provider` / `chat_provider` /
    `embed_provider`, not `NVIDIA_API_KEY` on the job.
 2. Dry-run schemas first: `nemo data-designer retrieval-generate --help`,
-   `nemo customization automodel explain`, `nemo evaluator retrieve-eval explain`.
+   `nemo customization automodel explain`, `nemo evals retrieve-eval explain`.
 3. Live SDG is the default for a user corpus; drive it through Stage 0 generation
    knobs (see `references/sdg.md`). It needs **50+ documents**, since one file can
    dump every query into the test split and leave train empty (mining then crashes).
@@ -120,5 +120,5 @@ References: `references/sdg.md` (Stage 0+1 corpus and generation control),
 (Retriever / Ranking NIM via Deployment Manager).
 
 For stage-specific failures, hand off to `nemo-data-designer-plugin`,
-`nemo-customizer`, or `nemo-evaluator-plugin`. NIM serving for this recipe
+`nemo-customizer`, or `nemo-evals-plugin`. NIM serving for this recipe
 stays in `references/deploy.md`, not the `inference` skill.

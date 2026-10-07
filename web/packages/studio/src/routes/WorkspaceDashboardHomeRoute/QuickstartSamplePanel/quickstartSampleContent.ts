@@ -167,10 +167,10 @@ export const buildQuickstartSampleSteps = ({
       cli: {
         title: 'Evaluate the agent',
         description: 'Run your own evaluation or view results from a sample evaluation run.',
-        // There is no `submit` subcommand; nemo-evaluator has a regression test
+        // There is no `submit` subcommand; nemo-evals has a regression test
         // asserting that form never ships again. Matches EntityEmptyState/registry.ts.
         commands: [
-          continued('nemo evaluator evaluate', "--spec-file '<spec>.json'", `--workspace ${ws}`),
+          continued('nemo evals evaluate', "--spec-file '<spec>.json'", `--workspace ${ws}`),
         ],
       },
     },

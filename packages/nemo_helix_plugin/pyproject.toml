@@ -50,7 +50,7 @@ filesets = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-nemo-evaluator-sdk = [
+nhx-evals-sdk = [
   "pydantic>=2.10.6",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
@@ -106,4 +106,4 @@ packages = ["src/nemo_helix_plugin"]
 [tool.bundle-package]
 nemo-helix-ext = { source = "../nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", force_include = { "../../../../docs" = "nemo_helix_ext/cli/docs" } }
 filesets = { source = "../filesets/src/filesets", module = "filesets" }
-nemo-evaluator-sdk = { source = "../nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk" }
+nhx-evals-sdk = { source = "../nhx_evals_sdk/src/nhx_evals_sdk", module = "nhx_evals_sdk" }

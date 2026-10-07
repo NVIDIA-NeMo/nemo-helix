@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
-import { useEvaluatorListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { useEvalsListEvaluateJobs } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
 import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
@@ -62,7 +62,7 @@ export const useDashboardStatCounts = (
   const insights = useInsightsListInsights(workspace, MINIMAL_PAGE, {
     query: { enabled: enabled.insights },
   });
-  const testCases = useEvaluatorListEvaluateJobs(workspace, MINIMAL_PAGE, {
+  const testCases = useEvalsListEvaluateJobs(workspace, MINIMAL_PAGE, {
     query: { enabled: enabled.testCases },
   });
   const experiments = useListExperiments(workspace, MINIMAL_PAGE, {

@@ -3,7 +3,7 @@
 
 # Run a Simple Exact-Match Evaluation
 
-Use the local standalone Evaluator SDK to run this exact-match evaluation:
+Use the local standalone Evals SDK to run this exact-match evaluation:
 
 ```json
 [
@@ -12,13 +12,13 @@ Use the local standalone Evaluator SDK to run this exact-match evaluation:
 ]
 ```
 
-Use only `packages/nemo_evaluator_sdk` and SDK-level APIs in your answer. Do not propose the `nemo` CLI, plugin SDK APIs, or any `services/*` implementation path.
+Use only `packages/nhx_evals_sdk` and SDK-level APIs in your answer. Do not propose the `nemo` CLI, plugin SDK APIs, or any `services/*` implementation path.
 
 Write your runnable solution to `workspace/solution.py` from the repo root. The shared task workspace is mounted at `/app/workspace`, so the required artifact path is `/app/workspace/solution.py`.
 
 `workspace/solution.py` must:
 
-- Use the local standalone Evaluator SDK from `packages/nemo_evaluator_sdk`.
+- Use the local standalone Evals SDK from `packages/nhx_evals_sdk`.
 - Select the appropriate SDK metric for exact-match scoring.
 - Use `Evaluator().run_sync(...)` to evaluate both rows.
 - Call `print_summary()` on the evaluation result.

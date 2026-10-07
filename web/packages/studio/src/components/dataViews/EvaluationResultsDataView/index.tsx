@@ -18,14 +18,14 @@ import {
 } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import {
-  getEvaluatorListEvaluateJobsQueryKey,
-  useEvaluatorListEvaluateJobs,
-} from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+  getEvalsListEvaluateJobsQueryKey,
+  useEvalsListEvaluateJobs,
+} from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import {
   type EvaluateJob,
   type EvaluateJobsListFilter,
   EvaluateJobsSortField,
-} from '@nemo/sdk/generated/evaluator/schema';
+} from '@nemo/sdk/generated/evals/schema';
 import { Flex } from '@nvidia/foundations-react-core';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
@@ -76,7 +76,7 @@ export const EvaluationResultsDataView = () => {
     data: jobsData,
     isLoading,
     error,
-  } = useEvaluatorListEvaluateJobs(
+  } = useEvalsListEvaluateJobs(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -147,7 +147,7 @@ export const EvaluationResultsDataView = () => {
             jobStatus={row.original.status}
             onCancelled={() =>
               queryClient.invalidateQueries({
-                queryKey: getEvaluatorListEvaluateJobsQueryKey(workspace),
+                queryKey: getEvalsListEvaluateJobsQueryKey(workspace),
               })
             }
             compact

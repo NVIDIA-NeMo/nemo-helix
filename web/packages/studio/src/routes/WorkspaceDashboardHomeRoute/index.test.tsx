@@ -4,7 +4,7 @@
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { useAgentsListDeployments } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsGetAgent, useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
-import { useEvaluatorListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { useEvalsListEvaluateJobs } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
 import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
@@ -36,11 +36,9 @@ vi.mock('@nemo/sdk/generated/insights/insights-insights', async (importOriginal)
   ...(await importOriginal<typeof import('@nemo/sdk/generated/insights/insights-insights')>()),
   useInsightsListInsights: vi.fn(),
 }));
-vi.mock('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes', async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes')
-  >()),
-  useEvaluatorListEvaluateJobs: vi.fn(),
+vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/evals/evals-plugin-jobs-routes')>()),
+  useEvalsListEvaluateJobs: vi.fn(),
 }));
 vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/experiments')>()),
@@ -87,7 +85,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
     window.localStorage.clear();
     vi.mocked(useAgentsListAgents).mockReturnValue(queryResult(1));
     vi.mocked(useInsightsListInsights).mockReturnValue(queryResult(4));
-    vi.mocked(useEvaluatorListEvaluateJobs).mockReturnValue(queryResult(120));
+    vi.mocked(useEvalsListEvaluateJobs).mockReturnValue(queryResult(120));
     vi.mocked(useListExperiments).mockReturnValue(queryResult(1));
     vi.mocked(useModelsListModels).mockReturnValue(queryResult(0));
     vi.mocked(useAgentsGetAgent).mockReturnValue({

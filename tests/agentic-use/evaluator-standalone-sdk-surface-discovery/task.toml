@@ -31,7 +31,7 @@ allowed = ["standalone_sdk"]
 forbidden = ["cli", "plugin_sdk", "legacy_service"]
 
 [evaluator.expected]
-required_terms = ["packages/nemo_evaluator_sdk", "Evaluator", "ExactMatchMetric", "2+2?", "Capital of France?"]
+required_terms = ["packages/nhx_evals_sdk", "Evaluator", "ExactMatchMetric", "2+2?", "Capital of France?"]
 
 [evaluator]
 forbidden_patterns = ["services/", "nemo evaluation", "plugin SDK"]
