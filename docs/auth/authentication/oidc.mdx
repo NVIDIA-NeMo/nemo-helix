@@ -10,7 +10,7 @@ Connect NeMo Helix to an external OIDC identity provider (IdP) so users sign in 
 
 **Prerequisites**: You need an OAuth application registered in your IdP with the client ID, issuer URL, and device flow grant enabled. See the [Minimum IdP Checklist](#minimum-idp-checklist) below.
 
-For login after setup, see [Using Authentication](/documentation/access-control/authentication/using-authentication). For the full config reference, see [Auth Configuration](/documentation/access-control/deployment).
+For login after setup, see [Using Authentication](https://docs.nvidia.com/nemo-helix/latest/documentation/access-control/authentication/using-authentication). For the full config reference, see [Auth Configuration](https://docs.nvidia.com/nemo-helix/latest/documentation/access-control/deployment).
 
 ## How OIDC Fits in NeMo Helix
 
@@ -170,7 +170,7 @@ authorization request. The default remains enabled for providers that require th
 
 ## Claim mapping
 
-NeMo Helix maps JWT claims to [trusted identity headers](/documentation/access-control/security-model#trusted-identity-headers) using `email_claim`, `subject_claim`, and `groups_claim` (defaults: `email`, `sub`, `groups`). Override them when your IdP uses different claim names. Group values must match the principal strings you use for workspace members and role bindings.
+NeMo Helix maps JWT claims to [trusted identity headers](https://docs.nvidia.com/nemo-helix/latest/documentation/access-control/security-model#trusted-identity-headers) using `email_claim`, `subject_claim`, and `groups_claim` (defaults: `email`, `sub`, `groups`). Override them when your IdP uses different claim names. Group values must match the principal strings you use for workspace members and role bindings.
 
 | Purpose | Config key | Default | Header |
 |---------|------------|---------|--------|
@@ -180,18 +180,18 @@ NeMo Helix maps JWT claims to [trusted identity headers](/documentation/access-c
 
 <Note>
 
-For ordinary OIDC bearer validation, group values come from the configured `groups_claim`. They are included in the `X-NHX-Principal-Groups` header and OPA policy data, where they can match explicit workspace member or role-binding principals. Group names may contain dots, for example `employee.profile.read`. OAuth scopes from `scope` or `scp` do not become group principals; recognized NeMo Helix API scopes in those claims can still restrict API access. See [Managing Access](/documentation/access-control/authorization/managing-access).
+For ordinary OIDC bearer validation, group values come from the configured `groups_claim`. They are included in the `X-NHX-Principal-Groups` header and OPA policy data, where they can match explicit workspace member or role-binding principals. Group names may contain dots, for example `employee.profile.read`. OAuth scopes from `scope` or `scp` do not become group principals; recognized NeMo Helix API scopes in those claims can still restrict API access. See [Managing Access](https://docs.nvidia.com/nemo-helix/latest/documentation/access-control/authorization/managing-access).
 
 </Note>
 
 ## Provider-Specific Notes
 
-- **Azure AD**: See [Azure AD Setup](/documentation/access-control/authentication/providers/azure-ad-entra-id) (issuer, `additional_issuers`, device flow, claim overrides).
+- **Azure AD**: See [Azure AD Setup](https://docs.nvidia.com/nemo-helix/latest/documentation/access-control/authentication/providers/azure-ad-entra-id) (issuer, `additional_issuers`, device flow, claim overrides).
 - **Okta**: Choose the correct authorization server (custom vs org). Ensure device flow is enabled.
 - **Keycloak**: Configure realm, client, and role mappers. Enable device flow in client settings.
-- **Other providers**: See [Generic OIDC Provider](/documentation/access-control/authentication/providers/generic-oidc) for a provider-agnostic checklist.
+- **Other providers**: See [Generic OIDC Provider](https://docs.nvidia.com/nemo-helix/latest/documentation/access-control/authentication/providers/generic-oidc) for a provider-agnostic checklist.
 
 ## Related
 
-- [Using Authentication](/documentation/access-control/authentication/using-authentication) — Log in, make API calls, and manage tokens.
-- [Auth Configuration](/documentation/access-control/deployment) — Full auth config reference.
+- [Using Authentication](https://docs.nvidia.com/nemo-helix/latest/documentation/access-control/authentication/using-authentication) — Log in, make API calls, and manage tokens.
+- [Auth Configuration](https://docs.nvidia.com/nemo-helix/latest/documentation/access-control/deployment) — Full auth config reference.
