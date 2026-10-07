@@ -146,7 +146,11 @@ class TestOnlyPushGetsACredential:
 
     def test_no_step_config_carries_a_secret(self) -> None:
         for step in _compile(_set(), config=_config()).steps:
-            serialized = str(step.config).lower()
+            config = dict(step.config)
+            # Only names: the kubelet pulls the sandbox's image with these Secrets, and no step reads them.
+            if "sandbox" in config:
+                config["sandbox"] = {k: v for k, v in config["sandbox"].items() if k != "image_pull_secrets"}
+            serialized = str(config).lower()
             assert "secret" not in serialized and "key" not in serialized
 
 

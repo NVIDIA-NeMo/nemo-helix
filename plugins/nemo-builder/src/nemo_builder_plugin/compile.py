@@ -58,7 +58,7 @@ def _fetch_sources(plan: BuildPlan) -> list[ContextSource]:
     return sources
 
 
-def _fetch_step(plan: BuildPlan, config: BuilderConfig) -> HelixJobStepSpec:
+def _fetch_step(plan: BuildPlan, config: BuilderConfig, *, step_image: str) -> HelixJobStepSpec:
     return HelixJobStepSpec(
         name="fetch",
         executor=CPUExecutionProvider(
@@ -66,7 +66,9 @@ def _fetch_step(plan: BuildPlan, config: BuilderConfig) -> HelixJobStepSpec:
             # which would drop the discriminator, and the server would reject the spec.
             provider="cpu",
             profile=config.fetch_profile,
-            container=ContainerSpec(command=["nhx-build", "fetch"]),
+            # Named, or the profile's `default_task_image` would stand in, and failing that, the platform's
+            # `nhx-tasks`, neither of which has `nhx-build`.
+            container=ContainerSpec(image=step_image, command=["nhx-build", "fetch"]),
         ),
         environment=[HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT)],
         config=FetchStepConfig(sources=_fetch_sources(plan)).model_dump(),
@@ -77,7 +79,9 @@ def _build_step(
     plan: BuildPlan,
     config: BuilderConfig,
     *,
+    step_image: str,
     sandbox_image: str,
+    image_pull_secrets: list[str],
     work_profile: KubernetesJobExecutionProfileConfig,
 ) -> HelixJobStepSpec:
     """Holds no credential and no work volume: it declares no ``environment``, so Jobs mounts none.
@@ -100,7 +104,7 @@ def _build_step(
         executor=CPUExecutionProvider(
             provider="cpu",  # see _fetch_step
             profile=config.control_profile,
-            container=ContainerSpec(command=["nhx-build", "supervise"]),
+            container=ContainerSpec(image=step_image, command=["nhx-build", "supervise"]),
         ),
         config=SuperviseStepConfig(
             sandbox=SandboxSpec(
@@ -110,13 +114,14 @@ def _build_step(
                 dns_nameservers=config.sandbox.dns_nameservers,
                 cpu=config.sandbox.cpu,
                 memory=config.sandbox.memory,
+                image_pull_secrets=image_pull_secrets,
             ),
             groups=groups,
         ).model_dump(),
     )
 
 
-def _push_step(plan: BuildPlan, config: BuilderConfig, *, registry: str) -> HelixJobStepSpec:
+def _push_step(plan: BuildPlan, config: BuilderConfig, *, registry: str, step_image: str) -> HelixJobStepSpec:
     """The one step with a credential: the workspace's registry credential and signing key, read as the submitter.
 
     A secret the deployment turned off is left out, and the step told not to expect it.
@@ -136,7 +141,7 @@ def _push_step(plan: BuildPlan, config: BuilderConfig, *, registry: str) -> Heli
         executor=CPUExecutionProvider(
             provider="cpu",  # see _fetch_step
             profile=config.push_profile,
-            container=ContainerSpec(command=["nhx-build", "push"]),
+            container=ContainerSpec(image=step_image, command=["nhx-build", "push"]),
         ),
         environment=[
             HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=WORK_MOUNT),
@@ -166,14 +171,26 @@ def compile_build_set(
     *,
     config: BuilderConfig,
     registry: str,
+    step_image: str,
     sandbox_image: str,
+    image_pull_secrets: list[str],
     work_profile: KubernetesJobExecutionProfileConfig,
 ) -> HelixJobSpec:
-    """Compile a checked, placed plan into the job that builds it. ``work_profile`` is the fetch step's profile."""
+    """Compile a checked, placed plan into the job that builds it. ``work_profile`` is the fetch step's profile.
+
+    ``image_pull_secrets`` are the ones the sandbox pulls its image with.
+    """
     return HelixJobSpec(
         steps=[
-            _fetch_step(plan, config),
-            _build_step(plan, config, sandbox_image=sandbox_image, work_profile=work_profile),
-            _push_step(plan, config, registry=registry),
+            _fetch_step(plan, config, step_image=step_image),
+            _build_step(
+                plan,
+                config,
+                step_image=step_image,
+                sandbox_image=sandbox_image,
+                image_pull_secrets=image_pull_secrets,
+                work_profile=work_profile,
+            ),
+            _push_step(plan, config, registry=registry, step_image=step_image),
         ]
     )

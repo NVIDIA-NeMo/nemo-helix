@@ -210,6 +210,7 @@ enabled-plugins = [
   "nemo-optimization-plugin",
   "nemo-unsloth-plugin",
   "nemo-rl-plugin",
+  "nemo-builder-plugin[service]",
 ]
 
 # Legacy runtime needed specifically for task images that still invoke
@@ -283,6 +284,10 @@ gpu-tasks = [
   { include-group = "nhx-task-runtime" },
   "nhx-models",
 ]
+
+# The builder's job steps (for the nhx-builder-tasks container). The push step holds a workspace's registry
+# credential and signing key, so the image carries only the builder, not the task runtime.
+builder-steps = ["nemo-builder-plugin"]
 
 
 [project.scripts]
@@ -458,6 +463,7 @@ nemo-optimization-plugin = { workspace = true }
 nemo-agent-optimization-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
+nemo-builder-plugin = { workspace = true }
 nhx-automodel = { workspace = true }
 nhx-unsloth = { workspace = true }
 nhx-rl = { workspace = true }
@@ -518,6 +524,7 @@ members = [
   "plugins/nemo-agent-optimization",
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
+  "plugins/nemo-builder",
   "services/automodel",
   "services/unsloth",
   "services/rl",
@@ -646,8 +653,6 @@ extra-paths = [
   # prompt-master plugin is not a workspace member; add its src so ty can
   # resolve prompt_master_plugin imports when checking plugin test files.
   "plugins/prompt-master/src",
-  # nemo-builder isn't a workspace member; its tests import the package under test.
-  "plugins/nemo-builder/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
   # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared

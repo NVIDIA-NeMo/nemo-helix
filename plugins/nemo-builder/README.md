@@ -8,8 +8,8 @@ fileset. The plugin builds them with kaniko, in a sandbox pod that holds no cred
 pushes each image to the deployment's registry, signs it with your workspace's key, and records it
 as a `ContainerImage` you can pin by digest.
 
-**Status: proof of concept.** It runs end to end on minikube. It isn't a uv workspace member or in
-the Helm chart, and it has the [limitations](#limitations) listed below.
+**Status: proof of concept.** It runs end to end on minikube. It isn't in the Helm chart, and it has
+the [limitations](#limitations) listed below.
 
 ## Quickstart (minikube)
 
@@ -17,7 +17,7 @@ This runs the platform with the builder, and a registry, inside minikube. It bui
 checks the result. Run the commands from the repository root, in one shell: later steps use
 variables that earlier ones set.
 
-You need Docker with the default buildx driver, minikube, `kubectl`, `openssl`, `jq`, and the `nemo`
+You need Docker with buildx, minikube, `kubectl`, `openssl`, `jq`, and the `nemo`
 CLI (`make bootstrap`; see [SETUP.md](../../SETUP.md)). The cluster uses 3 CPUs and 5.5 GB of
 memory. Sandboxes resolve names with `8.8.8.8` and `1.1.1.1`, so your network must allow DNS to
 them; some corporate networks and VPNs don't.
@@ -30,33 +30,28 @@ minikube start --driver=docker --cpus=3 --memory=5500
 kubectl label node minikube nhx.nvidia.com/build-node=true
 ```
 
-**2. Images.** Build the platform image with this plugin added, the image the build steps run in,
-and the sandbox's kaniko image. On an x86 machine, use `linux/amd64` instead of `linux/arm64`.
-`Dockerfile.platform` starts `FROM` the local `my-registry/nhx-api:local`, which only the default
-`docker` buildx driver can see; if a `docker-container` builder is selected, run
-`docker buildx use default` first.
+**2. Images.** Build the platform image, `nhx-api`, which includes the builder; `nhx-builder-tasks`, the
+image the build steps run in; and `nhx-kaniko`, the sandbox's. On an x86 machine, use `linux/amd64`
+instead of `linux/arm64`.
 
 ```bash
-# nhx-api, with the Studio UI stubbed out; the builder doesn't use it
+# The Studio UI is stubbed out; the builder doesn't use it
 mkdir -p /tmp/empty-studio/artifacts && touch /tmp/empty-studio/artifacts/.keep
-docker buildx bake -f docker-bake.hcl nhx-api-docker --load \
+docker buildx bake -f docker-bake.hcl nhx-api-docker nhx-builder-tasks-docker nhx-kaniko-docker --load \
   --allow=fs.read=/tmp/empty-studio --set '*.platform=linux/arm64' \
   --set nhx-api-docker.contexts.nhx-studio-ui=/tmp/empty-studio
 
-docker buildx build --platform linux/arm64 -f plugins/nemo-builder/docker/Dockerfile.platform \
-  --build-arg NHX_API_IMAGE=my-registry/nhx-api:local -t nhx-api-builder:local --load .
-docker buildx build --platform linux/arm64 -f plugins/nemo-builder/docker/Dockerfile \
-  -t nhx-build:local --load .
-docker buildx build --platform linux/arm64 -f plugins/nemo-builder/docker/Dockerfile.kaniko \
-  -t nhx-kaniko:local --load plugins/nemo-builder/docker
-
-minikube image load nhx-api-builder:local
-minikube image load nhx-build:local
-minikube image load nhx-kaniko:local
+minikube image load my-registry/nhx-api:local
+minikube image load my-registry/nhx-builder-tasks:local
+minikube image load my-registry/nhx-kaniko:local
 ```
 
+The builder runs `nhx-builder-tasks` and `nhx-kaniko` from the platform's `image_registry` at its
+`image_tag`, whose defaults, `my-registry` and `local`, are what these are tagged.
+
 `minikube image load` doesn't reliably replace an image already loaded under the same tag. When you
-rebuild, use a new tag, and update `deploy/` and the config to match.
+rebuild, give all three a new tag with `BAKE_TAG=<tag> docker buildx bake …`, then set it in the
+config, as `platform.image_tag` and in `launcher_image`, and in `deploy/platform.yaml`'s image.
 
 **3. Keys and a password.** All for this cluster only, kept in a temporary directory rather than the
 repository: a signing key pair, a password for the registry, and the registry's password file. Keep
@@ -150,27 +145,32 @@ curl -s "$NHX_BASE_URL/apis/builder/v2/workspaces/default/container-images/hello
 }
 ```
 
-**8. Check the result.** The registry should serve the recorded digest, the signature should verify
-against your public key, and the image should contain the Dockerfile's output:
+**8. Check the result.** The registry should serve the recorded digest, and the image should contain
+the Dockerfile's output; the first command checks both with the crane in `nhx-builder-tasks`. The
+signature should verify against your public key; the second checks it with cosign's own image.
 
 ```bash
 DIGEST=$(curl -s "$NHX_BASE_URL/apis/builder/v2/workspaces/default/container-images/hello-1" | jq -r .digest)
-kubectl -n nhx-registry run check --rm -i --restart=Never --image=nhx-build:local \
-  --env="PASSWORD=$REGISTRY_PASSWORD" --env="DIGEST=$DIGEST" --env="PUB=$(cat "$KEYS/signing.pub")" --command -- sh -c '
+REF=registry.nhx-registry.svc.cluster.local:5000/default/demo/hello
+
+kubectl -n nhx-registry run check --rm -i --restart=Never --image=my-registry/nhx-builder-tasks:local \
+  --env="PASSWORD=$REGISTRY_PASSWORD" --env="DIGEST=$DIGEST" --env="REF=$REF" --command -- sh -c '
   set -e; export HOME=/tmp
-  REG=registry.nhx-registry.svc.cluster.local:5000 REF=registry.nhx-registry.svc.cluster.local:5000/default/demo/hello
-  crane auth login "$REG" -u builder -p "$PASSWORD" >/dev/null 2>&1
+  crane auth login "${REF%%/*}" -u builder -p "$PASSWORD" >/dev/null 2>&1
   V1=$(crane digest --insecure "$REF:v1")
   [ "$V1" = "$DIGEST" ] || { echo "v1 is $V1, not the recorded $DIGEST" >&2; exit 1; }
-  echo "$PUB" > /tmp/signing.pub
-  cosign verify --key /tmp/signing.pub --insecure-ignore-tlog=true --allow-http-registry "$REF@$DIGEST" \
-    >/dev/null 2>/tmp/verify.log || { cat /tmp/verify.log >&2; exit 1; }
-  echo "v1 is $DIGEST, and its signature verifies"
+  echo "v1 is $DIGEST"
   crane export --insecure "$REF:v1" - | tar -xO hello.txt'
+
+kubectl -n nhx-registry run verify --rm -i --restart=Never --image=ghcr.io/sigstore/cosign/cosign:v2.5.3 \
+  --env="PUB=$(cat "$KEYS/signing.pub")" -- verify --key env://PUB --insecure-ignore-tlog=true \
+  --allow-http-registry --registry-username builder --registry-password "$REGISTRY_PASSWORD" \
+  "$REF@$DIGEST" >/dev/null && echo "its signature verifies"
 ```
 
-On success it ends with `v1 is sha256:…, and its signature verifies` and `hello from nemo-builder`.
-If the digests differ or the signature doesn't verify, it says so and exits non-zero.
+On success the first prints `v1 is sha256:…` and `hello from nemo-builder`, and the second
+`its signature verifies`. If the digests differ or the signature doesn't verify, it says so and exits
+non-zero.
 
 To build again, submit with `"revision": 2`.
 
@@ -238,7 +238,7 @@ job: images in a set finish independently.
 | `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. |
 | `401` | Platform auth is on and the request names no one. |
 | `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and stay `pending`. Or you're a service that isn't acting for a person. |
-| `409` | The deployment can't build: `registry` or `sandbox.image` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
+| `409` | The deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
 | `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and stay `pending`. |
 | `500` | Anything else. |
@@ -464,8 +464,6 @@ variables. Callers can't set any of them.
 
 ```yaml
 builder:
-  sandbox:                                       # the pods your Dockerfiles run in
-    image: my-registry/nhx-kaniko:v1.25.19       # built from docker/Dockerfile.kaniko
   registry: us-central1-docker.pkg.dev           # a host only, never host/path; http://host for plain HTTP
   repository_prefix: my-project/my-repo          # images land at <prefix>/<workspace>/...
   # The push step's platform secrets, in the submitting workspace. These are the defaults; null turns one off.
@@ -474,11 +472,13 @@ builder:
   signing_key_secret: builder-signing-key
 ```
 
-`registry` and `sandbox.image` have no default; while either is unset, submits fail with a `409`
-rather than as builds that die in a pod. Set `repository_prefix` to a path dedicated to builds: left
-empty, each workspace name is a top-level namespace in the registry. The other sandbox settings are
-`cpu`, `memory` and `dns_nameservers`, each described on `SandboxConfig` in `config.py`. Where the
-sandboxes run isn't a builder setting: it comes from the
+`registry` has no default; while it is unset, submits fail with a `409` rather than as builds that
+die in a pod. Set `repository_prefix` to a path dedicated to builds: left empty, each workspace name
+is a top-level namespace in the registry. The steps run the release's `nhx-builder-tasks` image, and
+the sandboxes its `nhx-kaniko`, both from the platform's `image_registry` at its `image_tag`;
+`sandbox.image` names another kaniko image. The other sandbox settings are `cpu`, `memory` and `dns_nameservers`,
+each described on `SandboxConfig` in `config.py`. Where the sandboxes run isn't a builder setting:
+it comes from the
 [Jobs execution profiles](#jobs-execution-profiles). From the environment, the `sandbox` section is
 one JSON value, `NEMO_BUILDER_SANDBOX`: only its one-word settings can be set on their own.
 
@@ -531,8 +531,8 @@ other and with the manifests:
 - all three name the same `namespace`, and the fetch and push profiles the same `storage.pvc_name`;
   until they do, submits fail with a `409`
 - `service_account_name` is `nhx-build-fetch`, `nhx-build-control` or `nhx-build-push`
-- `default_task_image` is the `nhx-build` image, and `launcher_image` an image that ships
-  `/tools/jobs-launcher`, as the platform image does
+- `launcher_image` is an image that ships `/tools/jobs-launcher`, as the platform image does. The
+  steps name their image, so `default_task_image` doesn't apply
 - with a `ReadWriteOnce` work volume, every `node_selector` names the one node all build pods run on
 
 ## Limitations
@@ -640,9 +640,6 @@ other and with the manifests:
 
 ## Development
 
-The plugin isn't a uv workspace member. The root `pytest.ini` and `ty` config put its `src/` on the
-path instead, so the repository's unit tests collect these tests, and nothing needs installing:
-
 ```bash
 uv run --frozen pytest plugins/nemo-builder/tests
 uv run --frozen ruff check plugins/nemo-builder && uv run --frozen ty check plugins/nemo-builder
@@ -670,6 +667,6 @@ The tests need no cluster, registry or running platform.
 | `identity.py` | Registry hosts, repository paths and tags, and the system tag |
 | `config.py` | `BuilderConfig` |
 | `run/` | The programs: `fetch.py`, `supervise.py` and `push.py`; `main.py`, the `nhx-build` entry point; `utils.py`, what the steps share; and `tools.py`, which runs crane for `push` |
-| `docker/` | The `nhx-build` image, the sandbox's kaniko image, and the platform image with this plugin added |
+| `docker/builder/`, at the repository root | The `nhx-builder-tasks` and `nhx-kaniko` images |
 | `deploy/` | The quickstart's manifests, one per namespace |
 | `config/` | The platform config for the minikube quickstart |

@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, get_args, get_origin
 
 import yaml
+from nemo_builder_plugin.config import BuilderConfig
 from nemo_safe_synthesizer_plugin.config import SafeSynthesizerConfig
 from nhx.automodel.config import AutomodelConfig
 from nhx.common.config.base import CommonServiceConfig, HelixConfig
@@ -73,6 +74,7 @@ CONFIG_CLASSES: list[type[Any]] = [
     AutomodelConfig,
     UnslothConfig,
     SafeSynthesizerConfig,
+    BuilderConfig,
     StudioConfig,
 ]
 
