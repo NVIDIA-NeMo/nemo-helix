@@ -8,14 +8,7 @@ description: ""
 <a id="ft-cancel-customization-job"></a>
 ## Prerequisites
 
-Before you can cancel a customization job, make sure that you have:
-
-- Obtained the base URL of your NeMo Helix deployment.
-- Set the `NHX_BASE_URL` environment variable to your NeMo Helix deployment endpoint
-
-```bash
-export NHX_BASE_URL="https://your-nhx-base-url"
-```
+Before you can cancel a customization job, make sure that you have configured a CLI context that points at your NeMo Helix deployment. Refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ---
 
@@ -26,14 +19,10 @@ Running jobs may be cancelled. A cancelled job does not upload checkpoints. Cust
 Use the SDK to cancel a job:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
 # Initialize the client
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Cancel a job (use the job name and workspace from List Active Jobs)
 job_name = "automodel-a1b2c3d4e5f6"
@@ -44,6 +33,8 @@ print(f"Job {cancelled_job.name} has been cancelled")
 print(f"Current status: {cancelled_job.status}")
 print(f"Updated at: {cancelled_job.updated_at}")
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 <Accordion title="Example Response">
 

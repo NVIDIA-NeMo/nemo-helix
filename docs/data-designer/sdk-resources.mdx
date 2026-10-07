@@ -19,14 +19,10 @@ It provides Data Designer API preview and create operations for Data Designer co
 Build a `DataDesignerResource` from a `NemoClient` instance:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 data_designer = DataDesignerResource(client)
 ```
 

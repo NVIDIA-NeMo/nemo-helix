@@ -18,16 +18,11 @@ Customization jobs are submitted to one of two backends. Choose the backend that
 
 Before you can create a customization job, make sure that you have:
 
-- Obtained the base URL of your NeMo Helix deployment.
+- Configured a CLI context that points at your NeMo Helix deployment. Refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 - Created a [FileSet and Model Entity](/documentation/customizer-reference/manage-model-entities/overview) for your base model.
 - [Uploaded a dataset](/documentation/get-started/core-concepts/manage-files) as a FileSet.
 - Determined the [training configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration) you want to use for the customization job.
 - Verified that the platform has sufficient storage for the job. Budget against the downloaded base checkpoint size: Full SFT jobs require approximately 3× in free disk space, and LoRA jobs require approximately 1.5×. See [ft-tut-understand-models](/documentation/customizer-reference/tutorials/understanding-models-and-training) for details. Include any retained deployment copies separately.
-- Set the `NHX_BASE_URL` environment variable to your NeMo Helix deployment endpoint.
-
-```bash
-export NHX_BASE_URL="https://your-nemo-helix-url"
-```
 
 ---
 
@@ -36,16 +31,12 @@ export NHX_BASE_URL="https://your-nemo-helix-url"
 Build an `AutomodelJobInput` spec and submit it to the `automodel` backend. The job runs on the platform's GPU cluster, and `create()` returns a handle you can use to poll its status.
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_customizer.sdk import Customization
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 # Initialize the client
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 # Build the job spec (SFT + LoRA)
@@ -71,6 +62,8 @@ job = customization.automodel.jobs.create(spec=spec, workspace="default", name="
 print(f"Submitted job: {job.job.name}")
 print(f"Job status: {job.job.status}")
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 The response preserves the explicit `name`. If you omit `name`, the platform generates a backend-prefixed job name.
 
@@ -114,15 +107,11 @@ The response preserves the explicit `name`. If you omit `name`, the platform gen
 The Unsloth backend runs on a single GPU and supports 4-bit / 8-bit quantized loading for LoRA. Full-weight training requires `model.load_in_4bit=false` and `model.load_in_8bit=false`. Build a `UnslothJobInput` spec and submit it to the `unsloth` backend. Note that Unsloth uses its own field names (`model.name`, `dataset.path`, `batch.per_device_train_batch_size`).
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_customizer.sdk import Customization
 from nemo_unsloth_plugin.schema import UnslothJobInput
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 spec = UnslothJobInput(
@@ -147,15 +136,11 @@ print(f"Submitted job: {job.job.name}")
 Knowledge distillation is an Automodel feature. Set `training.training_type` to `"distillation"` and provide a `teacher_model` that references a second Model Entity. The `model` field is the student model being trained.
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_customizer.sdk import Customization
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 spec = AutomodelJobInput(

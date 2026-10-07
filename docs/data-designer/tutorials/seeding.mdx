@@ -63,7 +63,6 @@ Upload the symptom-to-diagnosis dataset to a Files API Fileset:
 
 {/* @nemo-docs: skip-python-type-check */}
 ```python
-import os
 import tempfile
 import urllib.request
 from nemo_helix_plugin.client.client import NemoClient
@@ -71,12 +70,12 @@ from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
-WORKSPACE = "default"
 FILESET_NAME = "seed-data"
 FILE_PATH = "symptom_to_diagnosis.csv"
 
-base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NemoClient(base_url=base_url, workspace=WORKSPACE)
+# Connect to the deployment and workspace in your current CLI context
+client = NemoClient.from_config()
+WORKSPACE = client.resolve_workspace()
 files_client = FilesClient.from_client(client)
 
 # Create fileset
@@ -90,6 +89,8 @@ with tempfile.NamedTemporaryFile(suffix=".csv") as tmpfile:
     with open(tmpfile.name, "rb") as fh:
         files_client.upload_file(name=FILESET_NAME, path=FILE_PATH, content=fh.read())
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 ### Step 2: Build Configuration
 
@@ -259,13 +260,13 @@ def load_config_builder() -> dd.DataDesignerConfigBuilder:
 Preview the dataset:
 
 ```bash
-nemo data-designer preview medical_notes.py --workspace default
+nemo data-designer preview medical_notes.py
 ```
 
 Generate a larger dataset:
 
 ```bash
-nemo data-designer create medical_notes.py --workspace default --num-records 30
+nemo data-designer create medical_notes.py --num-records 30
 ```
 
 #### SDK Execution

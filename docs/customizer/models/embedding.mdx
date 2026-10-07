@@ -98,15 +98,11 @@ Score the fine-tuned model and the base model on the same frozen `eval_beir` spl
  - **OpenAI routing**: `/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/embeddings`
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 gateway = InferenceGatewayClient.from_client(client)
 
 response = gateway.provider_post(
@@ -123,6 +119,8 @@ response = gateway.provider_post(
 ).data()
 print(len(response["data"][0]["embedding"]))
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 A ModelProvider attaches once the deployment reaches `READY`. `retrieve-eval` scores only entities with a non-empty `model_providers` list.
 

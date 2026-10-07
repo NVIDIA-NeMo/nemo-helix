@@ -285,6 +285,20 @@ To run the same metric remotely, install and start NeMo Helix using the [Setup g
 
 - A model entity that can be referenced as `workspace/model-name`. See [Model Configuration](/documentation/evaluate-models/metrics/model-configuration) for model setup details.
 - A platform secret for the model, if the model requires an API key.
+- A current CLI context that points at your deployment. See [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+
+### Create a Workspace
+
+Create a workspace for the tutorial and make it the default workspace for your current CLI context:
+
+```bash
+nemo workspaces create custom-python-metrics
+nemo config set --workspace custom-python-metrics
+```
+
+If the workspace already exists, the create command reports a conflict; continue with the second command. To return to your original workspace afterward, run `nemo config set --workspace default`.
+
+Create a client from your current CLI context:
 
 ```python
 import os
@@ -292,29 +306,10 @@ import os
 from nemo_evaluator.sdk import Evaluator as HelixEvaluator
 from nemo_helix_plugin.client.client import NemoClient
 
-WORKSPACE = "custom-python-metrics"
 MODEL_REF = os.environ.get("NHX_EVAL_MODEL_REF", "default/my-model")
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
+client = NemoClient.from_config()
 helix_evaluator = HelixEvaluator.from_client(client)
-```
-
-### Create a Workspace
-
-Create a workspace for the tutorial. If it already exists, continue using it.
-
-```python
-from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
-
-try:
-    client.workspaces.create_workspace(body=CreateWorkspaceRequest(name=WORKSPACE))
-    print(f"Workspace '{WORKSPACE}' created")
-except ConflictError:
-    print(f"Workspace '{WORKSPACE}' already exists, continuing...")
 ```
 
 ### Register a Dataset Fileset

@@ -127,14 +127,10 @@ place, and drives its stdout and any W&B or MLflow run.
 Get job status and training metrics through the platform Jobs service:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_customizer.sdk import Customization
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 # Get job status with metrics

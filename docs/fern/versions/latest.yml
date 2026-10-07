@@ -559,8 +559,9 @@ navigation:
           - section: CLI Reference
             path: ../../cli/index.mdx
             contents:
-              - page: Connect to Deployments
+              - page: Connect with CLI Contexts
                 path: ../../cli/connect-to-deployments.mdx
+                slug: connect-to-deployments
               - page: Configuration
                 path: ../../cli/configuration.mdx
               - page: Working with Resources

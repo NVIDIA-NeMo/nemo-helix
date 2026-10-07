@@ -241,8 +241,9 @@ on `nemo agents undeploy`. No image or executor configuration is required.
 <Tab title="CLI">
 
 ```bash
-# Confirm that the local Platform instance is ready
-export NHX_BASE_URL=http://localhost:8080
+# Confirm that the Platform instance is ready
+# (export NHX_BASE_URL first if your CLI context points at a remote deployment)
+: "${NHX_BASE_URL:=http://localhost:8080}"
 
 curl -fsS --connect-timeout 2 --max-time 5 \
   "$NHX_BASE_URL/health/ready" >/dev/null || {
@@ -271,16 +272,11 @@ nemo agents invoke \
 <Tab title="Python SDK">
 
 ```python
-import os
-
 import yaml
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_agents_plugin.sdk import AgentsResource
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 agents = AgentsResource(client)
 
 # Register the agent from an agent.yaml
@@ -461,16 +457,11 @@ nemo agents invoke \
 <Tab title="Python SDK">
 
 ```python
-import os
-
 import yaml
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_agents_plugin.sdk import AgentsResource
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 agents = AgentsResource(client)
 
 with open(
@@ -533,16 +524,11 @@ nemo agents invoke \
 <Tab title="Python SDK">
 
 ```python
-import os
-
 import yaml
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_agents_plugin.sdk import AgentsResource
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 agents = AgentsResource(client)
 
 with open(
@@ -676,15 +662,10 @@ nemo agents deployments get calculator-agent-deployment
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_agents_plugin.sdk import AgentsResource
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 agents = AgentsResource(client)
 
 deployment = agents.deployments.get("calculator-agent-deployment")
@@ -747,15 +728,10 @@ nemo agents delete calculator-agent
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_agents_plugin.sdk import AgentsResource
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 agents = AgentsResource(client)
 
 # Stop the running deployment (removes the process/container/k8s objects)

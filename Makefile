@@ -135,9 +135,13 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx
 
 .PHONY: docs-lint-snippets
-docs-lint-snippets: ## Syntax-check all Python fenced snippets and type-check curated executable docs
+docs-lint-snippets: docs-check-base-url ## Syntax-check all Python fenced snippets, type-check curated executable docs, and check NHX_BASE_URL usage
 	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py docs --no-type-check
 	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py $(DOCS_TYPED_SNIPPET_PATHS)
+
+.PHONY: docs-check-base-url
+docs-check-base-url: ## Flag doc snippets that bypass the CLI context with NHX_BASE_URL
+	$(UV) run --frozen python -m docs._scripts.check_base_url_usage docs
 
 .PHONY: docs-check-python-snippets
 docs-check-python-snippets: ## Syntax-check and type-check Python snippets in one doc (DOCS_PATH=...)
