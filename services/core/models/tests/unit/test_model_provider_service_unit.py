@@ -5,7 +5,7 @@
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
@@ -640,12 +640,14 @@ def _create_model_entity(
     name: str = "test-model",
     workspace: str = "default",
     model_providers: list[str] | None = None,
+    **kwargs: Any,
 ) -> Model:
     """Helper to create a Model entity for testing."""
     model = Model(
         name=name,
         workspace=workspace,
         model_providers=model_providers or [],
+        **kwargs,
     )
     model._id = f"model-{name}"
     model._created_at = datetime.now(timezone.utc)
@@ -677,8 +679,8 @@ def _make_entity_get_dispatcher(
 
 
 @pytest.mark.asyncio
-async def test_delete_provider_cleans_up_model_entity_references(model_provider_service, mock_entity_client):
-    """Deleting a provider removes it from model_providers on linked model entities."""
+async def test_delete_provider_unlinks_shared_model_entity(model_provider_service, mock_entity_client):
+    """Deleting a provider preserves models that are served by another provider."""
     model_entity = _create_model_entity(
         name="my-model",
         workspace="ws",
@@ -711,6 +713,183 @@ async def test_delete_provider_cleans_up_model_entity_references(model_provider_
         workspace="ws",
         expected_db_version=provider_entity.db_version,
     )
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_deletes_exclusively_served_model_entity(model_provider_service, mock_entity_client):
+    """Deleting a provider deletes a model entity when no other provider serves it."""
+    model_entity = _create_model_entity(
+        name="my-model",
+        workspace="ws",
+        model_providers=["ws/provider-to-delete"],
+    )
+    provider_entity = create_provider_entity(
+        name="provider-to-delete",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/my-model", served_model_name="my-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"my-model": model_entity})
+    mock_entity_client.delete.return_value = None
+
+    request = DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
+    result = await model_provider_service.delete_model_provider(request)
+
+    assert result is True
+    mock_entity_client.update.assert_not_called()
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "provider-to-delete",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "my-model",
+            workspace="ws",
+            expected_db_version=model_entity.db_version,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_deletes_associated_model_that_is_already_orphaned(
+    model_provider_service, mock_entity_client
+):
+    """Deleting a provider deletes its associated models when they already have no providers."""
+    model_entity = _create_model_entity(
+        name="orphaned-model",
+        workspace="ws",
+        model_providers=[],
+    )
+    provider_entity = create_provider_entity(
+        name="provider-to-delete",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/orphaned-model", served_model_name="orphaned-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"orphaned-model": model_entity})
+    mock_entity_client.delete.return_value = None
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
+    )
+
+    assert result is True
+    mock_entity_client.update.assert_not_called()
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "provider-to-delete",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "orphaned-model",
+            workspace="ws",
+            expected_db_version=model_entity.db_version,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_deletes_exclusively_served_user_model_entity(model_provider_service, mock_entity_client):
+    """Deleting a provider deletes a user-created model when no other provider serves it."""
+    model_entity = _create_model_entity(
+        name="user-model",
+        workspace="ws",
+        description="User-managed model metadata",
+        model_providers=["ws/provider-to-delete"],
+    )
+    provider_entity = create_provider_entity(
+        name="provider-to-delete",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/user-model", served_model_name="user-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"user-model": model_entity})
+    mock_entity_client.delete.return_value = None
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
+    )
+
+    assert result is True
+    mock_entity_client.update.assert_not_called()
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "provider-to-delete",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "user-model",
+            workspace="ws",
+            expected_db_version=model_entity.db_version,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_provider_deletes_exclusively_served_model_entity(
+    model_provider_service, mock_entity_client
+):
+    """Deleting a deployment provider deletes a model when no other provider serves it."""
+    model_entity = _create_model_entity(
+        name="deployed-model",
+        workspace="ws",
+        model_providers=["ws/deployment-provider"],
+    )
+    provider_entity = create_provider_entity(
+        name="deployment-provider",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        model_deployment_id="ws/deployment",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/deployed-model", served_model_name="deployed-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"deployed-model": model_entity})
+    mock_entity_client.delete.return_value = None
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="ws", name="deployment-provider")
+    )
+
+    assert result is True
+    mock_entity_client.update.assert_not_called()
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "deployment-provider",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "deployed-model",
+            workspace="ws",
+            expected_db_version=model_entity.db_version,
+        ),
+    ]
 
 
 @pytest.mark.asyncio
@@ -885,8 +1064,12 @@ async def test_delete_provider_cleanup_error_does_not_block_deletion(model_provi
 
 @pytest.mark.asyncio
 async def test_delete_provider_cleans_up_multiple_model_entities(model_provider_service, mock_entity_client):
-    """Deletion cleans up all model entities referenced in served_models."""
-    model_a = _create_model_entity(name="model-a", workspace="ws", model_providers=["ws/prov"])
+    """Deletion removes exclusive models and unlinks shared models."""
+    model_a = _create_model_entity(
+        name="model-a",
+        workspace="ws",
+        model_providers=["ws/prov"],
+    )
     model_b = _create_model_entity(name="model-b", workspace="ws", model_providers=["ws/prov", "ws/other"])
     provider_entity = create_provider_entity(
         name="prov",
@@ -909,8 +1092,19 @@ async def test_delete_provider_cleans_up_multiple_model_entities(model_provider_
     result = await model_provider_service.delete_model_provider(request)
 
     assert result is True
-    assert mock_entity_client.update.call_count == 2
-
-    updated_models = [call[0][0] for call in mock_entity_client.update.call_args_list]
-    for m in updated_models:
-        assert "ws/prov" not in m.model_providers
+    mock_entity_client.update.assert_called_once_with(model_b)
+    assert model_b.model_providers == ["ws/other"]
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "prov",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "model-a",
+            workspace="ws",
+            expected_db_version=model_a.db_version,
+        ),
+    ]
