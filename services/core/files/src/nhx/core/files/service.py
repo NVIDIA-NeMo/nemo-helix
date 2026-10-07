@@ -11,6 +11,7 @@ from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from nhx.common.service import RouterConfig, Service
 from nhx.core.files.api.v2.filesets import endpoints as filesets
+from nhx.core.files.api.v2.git_repositories import endpoints as git_repositories
 from nhx.core.files.api.v2.hf import endpoints as hf
 from nhx.core.files.api.v2.otlp import endpoints as otlp
 from nhx.core.files.app.backends import storage_impl_factory
@@ -35,6 +36,7 @@ class FilesService(Service[FilesConfig]):
         """Return routers for the files service."""
         return [
             RouterConfig(filesets.router, tag="Files", description="File management endpoints"),
+            RouterConfig(git_repositories.router, tag="Files", description="Lookups for setting up git filesets"),
             RouterConfig(
                 hf.router,
                 tag="HuggingFace",
