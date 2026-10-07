@@ -121,6 +121,10 @@ After applying a rename, review the diff, regenerate lockfiles with `uv`, run
 packaging, plugin discovery, CLI, API routes and authorization. Generated files
 receive mechanical edits; regenerate them from their authoritative sources.
 Review service configuration, UI consumers and external integrations as well.
+Run `make vendor generate-cli-reference-docs` to refresh bundled wheel metadata
+and CLI documentation. Run `uv run ruff check` across the checkout, including
+notebooks (the pre-commit lint hook excludes them), and run `make lint` before
+publishing a broad rename.
 
 Document compatibility limitations in the rename's MR: serialized metric bundles
 and compiled job specifications may reference removed Python modules. The generic

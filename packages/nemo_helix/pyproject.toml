@@ -379,28 +379,6 @@ nemo-evals-plugin = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-nhx-evals-sdk = [
-  "pydantic>=2.10.6",
-  "nemo-sandboxed-gym",
-  "jinja2>=3.1.6",
-  "jsonschema>=4.23.0",
-  "jsonpath-ng>=1.7.0",
-  "pyarrow>=19.0.1",
-  "pandas>=1.5.3",
-  "openai>=1.61.0",
-  "httpx>=0.27.0,<1",
-  "sacrebleu>=2.5.1",
-  "rouge_score==0.1.2",
-  "ragas==0.4.3",
-  "langchain-openai>=1.3.5",
-  "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
-  "nemo-relay>=0.9.3,<0.10",
-  "nemo-fabric>=0.4.0,<0.5.0",
-  "opentelemetry-proto>=1.27.0",
-  "pytrec-eval-terrier==0.5.10",
-]
-
-# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-guardrails-plugin = [
   "nemo-helix-plugin",
   "nemoguardrails[tracing]==0.23.0",
@@ -560,6 +538,28 @@ nhx-customization-common = [
   "pydantic-settings>=2.6.1",
   "httpx>=0.27.0",
   "tenacity>=8.5.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nhx-evals-sdk = [
+  "pydantic>=2.10.6",
+  "nemo-sandboxed-gym",
+  "jinja2>=3.1.6",
+  "jsonschema>=4.23.0",
+  "jsonpath-ng>=1.7.0",
+  "pyarrow>=19.0.1",
+  "pandas>=1.5.3",
+  "openai>=1.61.0",
+  "httpx>=0.27.0,<1",
+  "sacrebleu>=2.5.1",
+  "rouge_score==0.1.2",
+  "ragas==0.4.3",
+  "langchain-openai>=1.3.5",
+  "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
+  "nemo-relay>=0.9.3,<0.10",
+  "nemo-fabric>=0.4.0,<0.5.0",
+  "opentelemetry-proto>=1.27.0",
+  "pytrec-eval-terrier==0.5.10",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
