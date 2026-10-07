@@ -3,16 +3,23 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
+import { mimicEvaluation } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/mimicEvaluation';
 import type { OptimizationTarget } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
-import { loadStudyRows } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/studyDataset';
+import { loadStudyEvaluation } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/studyDataset';
 import { queryOptions, skipToken, useQuery } from '@tanstack/react-query';
 
 /** The rows a study stages for one evaluation. Shared by the summary's count and the submit path,
  *  so a submit soon after picking the evaluation reuses the download instead of repeating it. */
 export const studyRowsQueryOptions = (workspace: string, evaluation?: EvaluationResponse) =>
   queryOptions({
-    queryKey: ['studyRows', workspace, evaluation?.id],
-    queryFn: evaluation ? () => loadStudyRows(workspace, evaluation) : skipToken,
+    queryKey: ['studyEvaluation', workspace, evaluation?.id],
+    queryFn: evaluation
+      ? async () => {
+          const data = await loadStudyEvaluation(workspace, evaluation);
+          mimicEvaluation(data);
+          return data;
+        }
+      : skipToken,
     retry: false,
     staleTime: 60_000,
   });
@@ -36,7 +43,7 @@ export const useStudyRowCount = (
   const evaluation = target?.evaluation;
   const { data, error } = useQuery({
     ...studyRowsQueryOptions(workspace, evaluation),
-    select: (rows) => rows.length,
+    select: (evaluationData) => evaluationData.records.length,
   });
 
   return {
