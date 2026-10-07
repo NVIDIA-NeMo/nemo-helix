@@ -16,7 +16,6 @@ ARG TAG=latest
     COPY . /app/services/intake
     # Copy other root-level files we need to build Intake
     COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
-    COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
     COPY --from=root-lib-source-artifacts /artifacts/docs /app/docs
     COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi
 
