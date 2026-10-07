@@ -25,9 +25,10 @@
       "evaluator service": "evals service",
       "Evaluator documentation": "Evals documentation",
       "Evaluator API Reference": "Evals API Reference",
+      "Evaluator Troubleshooting": "Evals Troubleshooting",
       "docs/evaluator": "docs/evals",
       "../evaluator/": "../evals/",
-      "troubleshooting/evaluator": "troubleshooting/evals",
+      "troubleshooting/evaluator.mdx": "troubleshooting/evals.mdx",
       "@nemo/sdk/generated/evaluator": "@nemo/sdk/generated/evals",
       "@nemo/sdk/generated/fetchers/evaluator": "@nemo/sdk/generated/fetchers/evals",
       "generated/fetchers/evaluator": "generated/fetchers/evals",
@@ -53,6 +54,22 @@
       "docs/troubleshooting/evaluator.mdx": "docs/troubleshooting/evals.mdx"
     },
     "rules": [
+      {
+        "pattern": "^([ \\t]*)- page: Evaluator[ \\t]*\\n([ \\t]*)path: ([^\\n]*troubleshooting/evals\\.mdx)",
+        "replacement": "\\1- page: Evals\\n\\2slug: evals\\n\\2path: \\3",
+        "include": ["docs/fern/versions/latest.yml"]
+      },
+      {
+        "pattern": "/documentation/reference/troubleshooting/evaluator\\b",
+        "replacement": "/documentation/reference/troubleshooting/evals",
+        "include": ["docs/**"],
+        "exclude": ["docs/fern/docs.yml"]
+      },
+      {
+        "pattern": "^redirects:\\n(?!  # Evals troubleshooting URL rename\\.)",
+        "replacement": "redirects:\\n  # Evals troubleshooting URL rename.\\n  - source: \"/documentation/reference/troubleshooting/evaluator\"\\n    destination: \"/documentation/reference/troubleshooting/evals\"\\n  - source: \"/latest/documentation/reference/troubleshooting/evaluator\"\\n    destination: \"/latest/documentation/reference/troubleshooting/evals\"\\n",
+        "include": ["docs/fern/docs.yml"]
+      },
       {
         "pattern": "(?<=section: )evaluator\\b",
         "replacement": "evals",

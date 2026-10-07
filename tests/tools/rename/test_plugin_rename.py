@@ -156,9 +156,15 @@ class PluginRenameTests(unittest.TestCase):
         self.write("docs/evaluator/index.mdx", "Evaluator plugin SDK: `Evaluator.from_client(client)`\n")
         self.write("docs/troubleshooting/evaluator.mdx", "evaluator plugin\n")
         self.write(
-            "docs/fern/versions/latest.yml",
-            "path: ../../evaluator/index.mdx\npath: ../../troubleshooting/evaluator.mdx\n",
+            "docs/troubleshooting/index.mdx",
+            '<Card href="/documentation/reference/troubleshooting/evaluator">Previous URL</Card>\n'
+            '<Card href="/documentation/reference/troubleshooting/evals">Renamed URL</Card>\n',
         )
+        self.write(
+            "docs/fern/versions/latest.yml",
+            "path: ../../evaluator/index.mdx\n- page: Evaluator\n  path: ../../troubleshooting/evaluator.mdx\n",
+        )
+        self.write("docs/fern/docs.yml", "redirects:\n  - source: /old\n    destination: /existing\n")
         self.write("docs/fern/gated-nav.yml", "- section: evaluator\n")
         self.write("docs/fern/scripts/ipynb-to-mdx.py", r'pattern = r"\]\(\.\./\.\./evaluator/index"' + "\n")
         self.write("web/packages/sdk/orval/constants.ts", "evaluator: { path: 'evaluator' },\n")
@@ -198,9 +204,18 @@ class PluginRenameTests(unittest.TestCase):
         self.assertFalse((self.repo / "docs/evaluator").exists())
         self.assertTrue((self.repo / "docs/evals/index.mdx").is_file())
         self.assertTrue((self.repo / "docs/troubleshooting/evals.mdx").is_file())
+        troubleshooting = (self.repo / "docs/troubleshooting/index.mdx").read_text()
+        self.assertEqual(troubleshooting.count('/documentation/reference/troubleshooting/evals"'), 2)
+        self.assertNotIn('/documentation/reference/troubleshooting/evaluator"', troubleshooting)
         nav = (self.repo / "docs/fern/versions/latest.yml").read_text()
         self.assertIn("../../evals/index.mdx", nav)
         self.assertIn("../../troubleshooting/evals.mdx", nav)
+        self.assertIn("- page: Evals\n  slug: evals\n  path:", nav)
+        redirects = (self.repo / "docs/fern/docs.yml").read_text()
+        self.assertIn('source: "/documentation/reference/troubleshooting/evaluator"', redirects)
+        self.assertIn('destination: "/documentation/reference/troubleshooting/evals"', redirects)
+        self.assertIn('source: "/latest/documentation/reference/troubleshooting/evaluator"', redirects)
+        self.assertIn('destination: "/latest/documentation/reference/troubleshooting/evals"', redirects)
         self.assertEqual((self.repo / "docs/fern/gated-nav.yml").read_text(), "- section: evals\n")
         self.assertIn("evals/index", (self.repo / "docs/fern/scripts/ipynb-to-mdx.py").read_text())
         self.assertEqual((self.repo / "web/packages/sdk/orval/constants.ts").read_text(), "evals: { path: 'evals' },\n")

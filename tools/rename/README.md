@@ -105,7 +105,9 @@ are not migrated, so jobs with the old sources no longer appear in lists
 filtered by the new sources. This is an intentional breaking change.
 
 The profile also moves `docs/evaluator` to `docs/evals` and updates Fern source
-paths while preserving published navigation slugs. It renames the web SDK service
+paths. Troubleshooting moves to the explicit `evals` navigation slug, with redirects
+from the previous `evaluator` URL; other published navigation slugs are preserved.
+It renames the web SDK service
 configuration, generation scripts, OpenAPI tags, and corresponding consumer
 imports together; regenerate the ignored SDK output before building Studio.
 `Evaluator` classes, local `evaluator` variables, telemetry fields, and existing

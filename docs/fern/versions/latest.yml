@@ -577,7 +577,8 @@ navigation:
                 path: ../../troubleshooting/customizer.mdx
               - page: Data Designer
                 path: ../../troubleshooting/data-designer.mdx
-              - page: Evaluator
+              - page: Evals
+                slug: evals
                 path: ../../troubleshooting/evals.mdx
               - page: Guardrails
                 path: ../../troubleshooting/guardrails.mdx
