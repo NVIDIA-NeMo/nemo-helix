@@ -521,7 +521,7 @@ endif
 
 .PHONY: test-agents-nooa
 test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
-	$(UV) run --frozen --package nemo-agents-plugin --extra nooa \
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
 		pytest -v plugins/nemo-agents/tests/integration/test_fabric_nooa.py
 
 .PHONY: test-deployments-openshell
