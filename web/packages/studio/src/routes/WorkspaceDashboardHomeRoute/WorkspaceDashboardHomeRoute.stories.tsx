@@ -80,14 +80,14 @@ const meta = {
     msw: { handlers: [genericTotalResultsHandler] },
   },
   argTypes: {
-    agentsEnabled: { control: 'boolean', name: 'AGENTS_ENABLED' },
+    agentsEnabled: { control: 'boolean', name: 'agentsEnabled' },
     optimizerEnabled: { control: 'boolean', name: 'OPTIMIZER_ENABLED' },
     evaluatorEnabled: { control: 'boolean', name: 'EVALUATOR_ENABLED' },
     experimentEnabled: { control: 'boolean', name: 'EXPERIMENT_ENABLED' },
     customizerEnabled: { control: 'boolean', name: 'CUSTOMIZER_ENABLED' },
     intakeEnabled: { control: 'boolean', name: 'INTAKE_ENABLED' },
-    datasetsEnabled: { control: 'boolean', name: 'DATASETS_ENABLED' },
-    deploymentsEnabled: { control: 'boolean', name: 'DEPLOYMENTS_ENABLED' },
+    datasetsEnabled: { control: 'boolean', name: 'datasetsEnabled' },
+    deploymentsEnabled: { control: 'boolean', name: 'deploymentsEnabled' },
   },
 } satisfies Meta<typeof DashboardFlagsPreview>;
 

@@ -10,7 +10,6 @@ import {
   CUSTOMIZER_ENABLED,
   EVALUATOR_ENABLED,
   MODEL_COMPARE_ENABLED,
-  SAFE_SYNTHESIZER_ENABLED,
 } from '@studio/constants/environment';
 import { LINK_DOCS_SAFE_SYNTHESIZER, LINK_DOCS_STUDIO_EVALUATION } from '@studio/constants/links';
 import { ROUTES } from '@studio/constants/routes';
@@ -73,16 +72,14 @@ export const WorkspaceDashboardRoute: FC = () => {
               )}
 
               {/* Synthesize Safe Data */}
-              {SAFE_SYNTHESIZER_ENABLED && (
-                <DashboardCard
-                  icon={<SafeSynthesizerLogo className="w-8 h-8" />}
-                  title="Synthesize Safe Data"
-                  description="Generate synthetic datasets with built-in safety and quality controls."
-                  docsUrl={LINK_DOCS_SAFE_SYNTHESIZER}
-                  actionLabel="Synthesize"
-                  actionHref={generatePath(ROUTES.workspace.safeSynthesizerNew, { workspace })}
-                />
-              )}
+              <DashboardCard
+                icon={<SafeSynthesizerLogo className="w-8 h-8" />}
+                title="Synthesize Safe Data"
+                description="Generate synthetic datasets with built-in safety and quality controls."
+                docsUrl={LINK_DOCS_SAFE_SYNTHESIZER}
+                actionLabel="Synthesize"
+                actionHref={generatePath(ROUTES.workspace.safeSynthesizerNew, { workspace })}
+              />
             </Grid>
           </Stack>
 

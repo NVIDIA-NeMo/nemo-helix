@@ -3,7 +3,6 @@
 
 import { Button, Tooltip } from '@nvidia/foundations-react-core';
 import { TourTooltip } from '@studio/components/WelcomeTour/TourTooltip';
-import { TOUR_ENABLED } from '@studio/constants/environment';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { TOUR_SEEN_KEY } from '@studio/util/localStorage';
 import { CircleHelp } from 'lucide-react';
@@ -15,7 +14,6 @@ export const TourController: FC = () => {
   const { start, stop, isOpen } = useTour();
 
   const startTour = useCallback(() => {
-    if (!TOUR_ENABLED) return;
     start(0);
   }, [start]);
 
@@ -26,7 +24,7 @@ export const TourController: FC = () => {
 
   // Auto-start on first visit
   useEffect(() => {
-    if (!TOUR_ENABLED || tourSeen) return;
+    if (tourSeen) return;
     const timer = setTimeout(() => {
       start(0);
     }, 800);

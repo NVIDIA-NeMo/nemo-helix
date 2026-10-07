@@ -5,7 +5,6 @@ import { StatTile } from '@nemo/common/src/components/StatTile';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
 import { Grid } from '@nvidia/foundations-react-core';
 import {
-  AGENTS_ENABLED,
   CUSTOMIZER_ENABLED,
   EVALUATOR_ENABLED,
   EXPERIMENT_ENABLED,
@@ -58,7 +57,7 @@ const TILE_MIN_WIDTH = '200px';
 
 export const StatTileRow: FC<StatTileRowProps> = ({
   workspace,
-  agentsEnabled = AGENTS_ENABLED,
+  agentsEnabled = true,
   optimizerEnabled = OPTIMIZER_ENABLED,
   evaluatorEnabled = EVALUATOR_ENABLED,
   experimentEnabled = EXPERIMENT_ENABLED,

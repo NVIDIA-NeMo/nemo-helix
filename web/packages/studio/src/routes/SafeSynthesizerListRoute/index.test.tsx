@@ -32,16 +32,10 @@ describe('SafeSynthesizerListRoute', () => {
     vi.unstubAllEnvs();
   });
 
-  it('should render when feature flag is enabled', async () => {
+  it('should render the Safe Synthesizer list page', async () => {
     vi.stubEnv('VITE_PLATFORM_BASE_URL', PLATFORM_BASE_URL);
-    vi.stubEnv('VITE_FF_SAFE_SYNTHESIZER_ENABLED', 'true');
 
     const { SafeSynthesizerListRoute } = await import('./index');
-
-    expect(SafeSynthesizerListRoute).toBeDefined();
-    expect(SafeSynthesizerListRoute).not.toBeNull();
-
-    if (!SafeSynthesizerListRoute) return;
 
     render(
       <TestProviders>
@@ -56,13 +50,5 @@ describe('SafeSynthesizerListRoute', () => {
 
     expect(screen.getByText('Safe Synthesizer')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /synthesize data/i })).toBeInTheDocument();
-  });
-
-  it('should be null when feature flag is disabled', async () => {
-    vi.stubEnv('VITE_FF_SAFE_SYNTHESIZER_ENABLED', 'false');
-
-    const { SafeSynthesizerListRoute } = await import('./index');
-
-    expect(SafeSynthesizerListRoute).toBeNull();
   });
 });

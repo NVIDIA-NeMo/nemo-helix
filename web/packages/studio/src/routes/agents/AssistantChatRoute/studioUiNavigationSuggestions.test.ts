@@ -9,21 +9,13 @@ const workspace = 'default';
 describe('getStudioUiNavigationSuggestion', () => {
   beforeEach(() => {
     mockFeatureFlags({
-      agentsEnabled: true,
       customizerEnabled: true,
-      dataDesignerEnabled: true,
-      datasetsEnabled: true,
-      deploymentsEnabled: true,
       evaluatorEnabled: true,
       guardrailsEnabled: true,
       inferenceProviderEnabled: true,
       intakeEnabled: true,
-      jobsEnabled: true,
       modelCompareEnabled: true,
       monitorEnabled: true,
-      safeSynthesizerEnabled: true,
-      secretsEnabled: true,
-      settingsEnabled: true,
     });
   });
 

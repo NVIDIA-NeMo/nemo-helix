@@ -58,10 +58,8 @@ describe('DashboardLandingRoute', () => {
     localStorage.clear();
     vi.clearAllMocks();
     mockFeatureFlags({
-      agentsEnabled: true,
       guardrailsEnabled: true,
       inferenceProviderEnabled: true,
-      safeSynthesizerEnabled: true,
     });
   });
 

@@ -33,7 +33,6 @@ import {
 import { PageLayout } from '@studio/routes/PageLayout';
 import { RootLayout } from '@studio/routes/RootLayout';
 import { RootRedirect } from '@studio/routes/RootRedirect';
-import { gatePluginRoutes } from '@studio/routes/utils';
 import { lazy, Suspense } from 'react';
 import { Outlet, type RouteObject } from 'react-router';
 
@@ -125,12 +124,12 @@ export const routes: RouteObject[] = [
               ...dataDesignerRoutes,
               ...anonymizerRoutes,
               ...agentRoutes,
-              ...gatePluginRoutes({
+              {
                 // The /* suffix allows the plugin to own sub-paths via its own internal router.
                 path: `${ROUTES.workspace.plugin}/*`,
                 element: <PluginRenderer />,
                 errorElement: <RouteErrorPanel title="Plugin" />,
-              }),
+              },
               ...settingsRoutes,
               ...modelCompareRoutes,
               ...memberRoutes,

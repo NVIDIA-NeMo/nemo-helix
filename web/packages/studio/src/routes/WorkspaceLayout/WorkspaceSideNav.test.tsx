@@ -11,7 +11,6 @@ import type { ReactElement } from 'react';
 vi.hoisted(() => {
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'false');
   vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
-  vi.stubEnv('VITE_FF_DEPLOYMENTS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_MONITOR_ENABLED', 'true');
 });

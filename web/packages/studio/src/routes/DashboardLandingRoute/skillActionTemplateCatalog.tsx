@@ -39,7 +39,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the agents-optimize skill to inspect a deployed NeMo agent and recommend changes that improve cost, latency, or quality.',
     icon: <Gauge size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   'agents-secure': {
     title: 'Harden an agent',
@@ -47,7 +46,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the agents-secure skill to audit a deployed NeMo agent for safety, PII exposure, missing guardrails, and leaked secrets.',
     icon: <SearchCheck size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   anonymizer: {
     title: 'Anonymize a dataset',
@@ -55,7 +53,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the anonymizer skill to detect and anonymize PII in a dataset. Inspect the available files first and recommend a replacement strategy.',
     icon: <Database size={18} />,
-    requiredFeatureFlags: ['datasetsEnabled'],
   },
   auditor: {
     title: 'Run a security audit',
@@ -63,7 +60,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the auditor skill to configure and run a security audit for a NeMo Helix agent target.',
     icon: <SearchCheck size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   'guardrails-plugin': {
     title: 'Debug guardrails middleware',
@@ -87,7 +83,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-build-agent skill to build and deploy a NeMo agent from confirmed requirements. Inspect the workspace first and clarify any missing requirements.',
     icon: <Hammer size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   'nemo-customizer': {
     title: 'Fine-tune a model',
@@ -103,7 +98,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-data-designer-plugin skill to create a synthetic dataset for this workspace. Ask for any missing dataset requirements before generating files.',
     icon: <Sparkles size={18} />,
-    requiredFeatureFlags: ['dataDesignerEnabled'],
   },
   'nemo-eval-history': {
     title: 'Review eval history',
@@ -135,7 +129,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-files skill to inspect filesets and help upload, download, or manage dataset artifacts for this workspace.',
     icon: <Database size={18} />,
-    requiredFeatureFlags: ['datasetsEnabled'],
   },
   'nemo-fine-tune': {
     title: 'Check fine-tuning status',
@@ -159,7 +152,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-model-selection skill to compare model options for a NeMo Helix agent or workflow and recommend a starting point.',
     icon: <SearchCheck size={18} />,
-    requiredFeatureFlags: ['baseModelsEnabled'],
   },
   'nemo-secrets': {
     title: 'Manage secrets',
@@ -167,7 +159,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-secrets skill to help manage credentials for this workspace. Start by checking what secret operation is needed.',
     icon: <KeyRound size={18} />,
-    requiredFeatureFlags: ['secretsEnabled'],
   },
   'nemo-skill-selection': {
     title: 'Pick the right NeMo skill',
@@ -175,7 +166,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-skill-selection skill to route this NeMo Helix task to the right specialized skill before taking action.',
     icon: <GitBranch size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   'nemo-status': {
     title: 'Check platform status',
@@ -183,7 +173,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-status skill to check NeMo Helix health, deployed agents, providers, and available models.',
     icon: <Terminal size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   'nemo-teardown': {
     title: 'Shut down platform',
@@ -191,7 +180,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-teardown skill to guide a safe NeMo Helix shutdown or cleanup. Confirm before any destructive action.',
     icon: <Terminal size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   'nemo-try-agent': {
     title: 'Try a deployed agent',
@@ -199,7 +187,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-try-agent skill to send a query to a deployed NeMo Helix agent, announcing the routing decision before sending.',
     icon: <Terminal size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
   'safe-synthesizer': {
     title: 'Generate safety data',
@@ -207,7 +194,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the safe-synthesizer skill to create safety-focused synthetic data for a NeMo Helix workflow.',
     icon: <Sparkles size={18} />,
-    requiredFeatureFlags: ['safeSynthesizerEnabled'],
   },
   'skills-optimization': {
     title: 'Optimize agent skills',
@@ -215,7 +201,6 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the skills-optimization skill to evaluate and improve an agent skill suite, then summarize the recommended changes.',
     icon: <Gauge size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
   },
 } satisfies Record<string, SkillActionTemplate>;
 

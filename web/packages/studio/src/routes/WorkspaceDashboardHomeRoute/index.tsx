@@ -5,7 +5,6 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { Banner, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { AGENTS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
@@ -25,9 +24,7 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
   const navigate = useNavigate();
   const getStartedRef = useRef<HTMLDivElement>(null);
   const isSampleWorkspace = workspace === SAMPLE_WORKSPACE;
-  // The panel returns null with agents disabled, so gating the fetch on AGENTS_ENABLED sends
-  // that case to the regular Quickstart rather than leaving the heading below with no panel.
-  const sample = useSampleQuickstartAgent(workspace, isSampleWorkspace && AGENTS_ENABLED);
+  const sample = useSampleQuickstartAgent(workspace, isSampleWorkspace);
 
   useBreadcrumbs({
     items: [{ slotLabel: 'Dashboard' }],
