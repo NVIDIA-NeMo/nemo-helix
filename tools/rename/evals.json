@@ -8,7 +8,7 @@
     "**/*.swp"
   ],
   "notes": [
-    "Permissions, entity type names, task-kind discriminators, and all three existing job sources are preserved.",
+    "Permissions, entity type names, and task-kind discriminators are preserved. Job sources rename from nemo-evaluator to nemo-evals, including agent-evaluate and retrieve-eval; existing jobs are not migrated and no longer appear in source-filtered lists.",
     "MR compatibility note: old cloudpickle metric bundles and compiled jobs may reference removed Python modules; this rename provides no compatibility aliases or data migration.",
     "Review the diff, regenerate lockfiles with uv, run make update-sdk, and test SDK imports, plugin discovery, CLI, API routes and unchanged authorization before publishing. Verification checks only configured rules."
   ],
@@ -17,6 +17,7 @@
       "NeMo Evaluator Plugin": "NeMo Helix Evals Plugin",
       "NeMo Evaluator": "NeMo Helix Evals",
       "nemo-evaluator-plugin": "nemo-evals-plugin",
+      "nemo-evaluator": "nemo-evals",
       "plugins/nemo-evaluator": "plugins/nemo-evals",
       "nemo_helix_plugin.evaluator": "nemo_helix_plugin.evals",
       "nemo_helix_plugin/evaluator": "nemo_helix_plugin/evals",
@@ -32,6 +33,14 @@
       "skills/nemo-evaluator-plugin": "skills/nemo-evals-plugin"
     },
     "rules": [
+      {
+        "pattern": "``EvaluateJob`` keeps the derived default so its\\n#: existing records still match its list\\.",
+        "replacement": "``EvaluateJob`` keeps the module-derived default.",
+        "include": [
+          "plugins/nemo-evaluator/src/nemo_evaluator/service.py",
+          "plugins/nemo-evals/src/nemo_evals/service.py"
+        ]
+      },
       {
         "pattern": "(?<![\\w-])evaluator\\.(evaluate|agent-evaluate|retrieve-eval)\\b(?!\\s*\\()",
         "replacement": "evals.\\1"
@@ -55,14 +64,6 @@
           "plugins/nemo-evals/src/nemo_evals/service.py",
           "plugins/nemo-evals/src/nemo_evals/cli.py",
           "plugins/nemo-evals/src/nemo_evals/config.py"
-        ]
-      },
-      {
-        "pattern": "add_job_routes\\(EvaluateJob, authz=scope\\)",
-        "replacement": "add_job_routes(EvaluateJob, service_name=\"nemo-evaluator\", authz=scope)",
-        "include": [
-          "plugins/nemo-evaluator/src/nemo_evaluator/service.py",
-          "plugins/nemo-evals/src/nemo_evals/service.py"
         ]
       },
       {

@@ -235,7 +235,33 @@ class PluginRenameTests(unittest.TestCase):
         )
         self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
 
-    def test_evals_preserves_permissions_entity_kinds_and_job_sources(self) -> None:
+    def test_evals_renames_job_source_consumers_and_existing_overrides(self) -> None:
+        self.write(
+            "web/packages/studio/src/api/evaluation/evaluator-jobs.ts",
+            (ROOT / "web/packages/studio/src/api/evaluation/evaluator-jobs.ts").read_text(),
+        )
+        self.write(
+            "jobs.py",
+            'sources = ["nemo-evaluator", "nemo-evaluator.agent-evaluate", "nemo-evaluator.retrieve-eval"]\n'
+            'registrations = ["evaluator.evaluate", "evaluator.agent-evaluate", "evaluator.retrieve-eval"]\n'
+            'add_job_routes(EvaluateJob, service_name="nemo-evaluator", authz=scope)\n',
+        )
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 1)
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        consumer = (self.repo / "web/packages/studio/src/api/evaluation/evaluator-jobs.ts").read_text()
+        self.assertIn("['nemo-evals', 'nemo-evals.agent-evaluate']", consumer)
+        self.assertNotIn("nemo-evaluator", consumer)
+        self.assertEqual(
+            (self.repo / "jobs.py").read_text(),
+            'sources = ["nemo-evals", "nemo-evals.agent-evaluate", "nemo-evals.retrieve-eval"]\n'
+            'registrations = ["evals.evaluate", "evals.agent-evaluate", "evals.retrieve-eval"]\n'
+            'add_job_routes(EvaluateJob, service_name="nemo-evals", authz=scope)\n',
+        )
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+        self.assertIn("0 files would change", self.run_rename("--allow-dirty", profile=EVALS).stdout)
+
+    def test_evals_renames_job_sources_and_preserves_permissions_and_entity_kinds(self) -> None:
         paths = [
             "plugins/nemo-evaluator/src/nemo_evaluator/service.py",
             "plugins/nemo-evaluator/src/nemo_evaluator/authz.py",
@@ -270,9 +296,11 @@ class PluginRenameTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         service = (self.repo / "plugins/nemo-evals/src/nemo_evals/service.py").read_text()
         self.assertIn('name: ClassVar[str] = "evals"', service)
-        self.assertIn('service_name="nemo-evaluator", authz=scope', service)
-        self.assertIn('AGENT_EVAL_JOB_SOURCE = "nemo-evaluator.agent-evaluate"', service)
-        self.assertIn('RETRIEVE_EVAL_JOB_SOURCE = "nemo-evaluator.retrieve-eval"', service)
+        self.assertIn("add_job_routes(EvaluateJob, authz=scope)", service)
+        self.assertIn("from nemo_evals.jobs.evaluate import EvaluateJob", service)
+        self.assertIn('AGENT_EVAL_JOB_SOURCE = "nemo-evals.agent-evaluate"', service)
+        self.assertIn('RETRIEVE_EVAL_JOB_SOURCE = "nemo-evals.retrieve-eval"', service)
+        self.assertNotIn("nemo-evaluator", service)
         self.assertIn('namespace="evaluator"', service)
         authz = (self.repo / "plugins/nemo-evals/src/nemo_evals/authz.py").read_text()
         self.assertIn('AuthzScope("evaluator")', authz)
@@ -296,7 +324,7 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn('evals = "nemo_evals.service:', toml)
         usage = (self.repo / "usage.txt").read_text()
         self.assertIn("NeMo Helix Evals SDK; nemo evals info; /apis/evals/v2", usage)
-        self.assertIn("evals.agent-evaluate; nemo-evaluator.agent-evaluate", usage)
+        self.assertIn("evals.agent-evaluate; nemo-evals.agent-evaluate", usage)
         self.assertIn('kind="evaluator"', usage)
         self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
 

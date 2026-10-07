@@ -95,6 +95,15 @@ sources and task-kind discriminators as separate compatibility decisions. A job
 source derived from a module name may need an explicit override if that module
 is renamed while existing jobs must retain their source.
 
+The Evals profile renames job sources to `nemo-evals`,
+`nemo-evals.agent-evaluate` and `nemo-evals.retrieve-eval`, together with job
+registrations and source filters in consumers such as Studio. Row evaluation
+derives its new source from the renamed `nemo_evals` module. Permission names
+and the authorization scope remain `evaluator` / `evaluator.*`; entity type
+names and task-kind discriminators also remain unchanged. Existing stored jobs
+are not migrated, so jobs with the old sources no longer appear in lists
+filtered by the new sources. This is an intentional breaking change.
+
 After applying a rename, review the diff, regenerate lockfiles with `uv`, run
 `make update-sdk` when API or SDK surfaces change, and validate library imports,
 packaging, plugin discovery, CLI, API routes and authorization. Generated files
