@@ -55,7 +55,7 @@ import {
   DEFAULT_TAB,
   isAgentDetailTab,
   isOptimizationView,
-  type OptimizationView,
+  OptimizationView,
   TAB_SEARCH_PARAM,
   VIEW_SEARCH_PARAM,
 } from '@studio/routes/agents/AgentDetailRoute/tabs';
@@ -96,8 +96,11 @@ export const AgentDetailRoute: FC = () => {
   const viewFromUrl = searchParams.get(VIEW_SEARCH_PARAM);
   // Without the form flag there is nothing to create in the tab, so it only ever shows the table.
   const optimizationView: OptimizationView =
-    AGENT_OPTIMIZATION_FORM_ENABLED && isOptimizationView(viewFromUrl) ? viewFromUrl : 'table';
-  const isCreatingOptimization = selectedTab === 'optimizations' && optimizationView !== 'table';
+    AGENT_OPTIMIZATION_FORM_ENABLED && isOptimizationView(viewFromUrl)
+      ? viewFromUrl
+      : OptimizationView.Table;
+  const isCreatingOptimization =
+    selectedTab === 'optimizations' && optimizationView !== OptimizationView.Table;
 
   const {
     agent,
@@ -148,13 +151,15 @@ export const AgentDetailRoute: FC = () => {
 
   const setOptimizationView = (view: OptimizationView) => {
     const params = new URLSearchParams({ [TAB_SEARCH_PARAM]: 'optimizations' });
-    if (view !== 'table') params.set(VIEW_SEARCH_PARAM, view);
+    if (view !== OptimizationView.Table) params.set(VIEW_SEARCH_PARAM, view);
     setSearchParams(params);
   };
 
   // The in-tab flow is still behind its own flag; until it ships, Optimize opens the launch modal.
   const openOptimize = () =>
-    AGENT_OPTIMIZATION_FORM_ENABLED ? setOptimizationView('strategy') : setLaunchOptimizeOpen(true);
+    AGENT_OPTIMIZATION_FORM_ENABLED
+      ? setOptimizationView(OptimizationView.Strategy)
+      : setLaunchOptimizeOpen(true);
 
   const switchToChat = (deployment: AgentDeployment) => {
     setSelectedDeploymentName(deployment.name);

@@ -38,12 +38,14 @@ export const ACTION_SEARCH_PARAM = 'action';
 export const VIEW_SEARCH_PARAM = 'view';
 
 /** Table, then how to set the study up, then — for the guided path — the form itself. */
-export const OPTIMIZATION_VIEWS = ['table', 'strategy', 'form'] as const;
-
-export type OptimizationView = (typeof OPTIMIZATION_VIEWS)[number];
+export enum OptimizationView {
+  Table = 'table',
+  Strategy = 'strategy',
+  Form = 'form',
+}
 
 export const isOptimizationView = (value: string | null): value is OptimizationView =>
-  !!value && OPTIMIZATION_VIEWS.includes(value as OptimizationView);
+  Object.values(OptimizationView).some((view) => view === value);
 
 export const isAgentDetailTab = (value: string | null): value is AgentDetailTab =>
   !!value &&

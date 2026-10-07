@@ -7,7 +7,7 @@ import { useSubmitOptimization } from '@studio/routes/agents/AgentDetailRoute/op
 import { OptimizationStrategySelect } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect';
 import type { OptimizationStrategyId } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/types';
 import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
-import type { OptimizationView } from '@studio/routes/agents/AgentDetailRoute/tabs';
+import { OptimizationView } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { type FC } from 'react';
 
@@ -37,31 +37,31 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
   const submitOptimization = useSubmitOptimization({ workspace, agentName, evals });
   // A record rather than a switch, so a strategy added without a handler fails to compile.
   const continueWith: Record<OptimizationStrategyId, () => void> = {
-    form: () => onViewChange('form'),
+    form: () => onViewChange(OptimizationView.Form),
     upload: onUploadConfig,
   };
 
   switch (view) {
-    case 'strategy':
+    case OptimizationView.Strategy:
       return (
         <OptimizationStrategySelect
           agentName={agentName}
-          onBack={() => onViewChange('table')}
+          onBack={() => onViewChange(OptimizationView.Table)}
           onSelect={(strategy) => continueWith[strategy]()}
         />
       );
-    case 'form':
+    case OptimizationView.Form:
       return (
         <NewOptimizationForm
           key={agentName}
           agentName={agentName}
           evals={evals}
           isEvalsPending={isEvalsPending}
-          onBack={() => onViewChange('strategy')}
+          onBack={() => onViewChange(OptimizationView.Strategy)}
           onSubmit={submitOptimization}
         />
       );
-    case 'table':
+    case OptimizationView.Table:
       return <OptimizeJobsTable agentName={agentName} onOptimize={onOptimize} />;
   }
 };
