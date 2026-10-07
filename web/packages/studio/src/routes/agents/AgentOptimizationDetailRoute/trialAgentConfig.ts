@@ -164,6 +164,15 @@ const isSameValue = (left: unknown, right: unknown): boolean => {
 const isHelixAgent = (config: Record<string, unknown>): boolean =>
   config.config_format === FABRIC_CONFIG_FORMAT;
 
+// translate_agent_config copies instructions.system.{content,mode} through to Fabric unchanged.
+const SPEC_INSTRUCTION_FIELDS = new Set(['content', 'mode']);
+
+const isSpecInstructionPath = (segments: readonly string[]): boolean =>
+  segments.length === 3 &&
+  segments[0] === 'instructions' &&
+  segments[1] === 'system' &&
+  SPEC_INSTRUCTION_FIELDS.has(segments[2] ?? '');
+
 // Where the agent keeps the model the study ran as `modelKey`. A platform agent's default
 // harness model outranks `models.default`, as in translate_agent_config.
 const agentModelSegments = (
@@ -235,9 +244,9 @@ export const applyTrialToAgentConfig = (
     const [root, modelKey, ...field] = segments;
 
     if (root !== 'models' || !modelKey) {
-      if (isHelixAgent(config)) {
+      if (isHelixAgent(config) && !isSpecInstructionPath(segments)) {
         throw new Error(
-          `Cannot apply "${entry.path}" to a ${FABRIC_CONFIG_FORMAT} agent; only model settings are supported.`
+          `Cannot apply "${entry.path}" to a ${FABRIC_CONFIG_FORMAT} agent; only model settings and system instructions are supported.`
         );
       }
       setAt(next, segments, value);
