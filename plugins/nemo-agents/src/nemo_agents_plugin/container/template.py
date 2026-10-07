@@ -812,9 +812,7 @@ def render_fabric_dockerfile(
         shared.contract_version,
         pins_contract_version=template_path is None and not wheel_filename,
     )
-    platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(
-        agent_config, python_version=shared.python_version if template_path is None else None
-    )
+    platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(agent_config, python_version=shared.python_version)
     params = FabricRenderParams(
         **{f.name: getattr(shared, f.name) for f in fields(shared)},
         wheel_filename=wheel_filename,

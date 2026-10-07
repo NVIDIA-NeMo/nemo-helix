@@ -577,6 +577,30 @@ class TestRenderFabricDockerfile:
             with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
                 render_fabric_dockerfile(config, python_version=version)
 
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            "default_harness: bench\nharnesses:\n  bench:\n    kind: nooa-bench-agent\n",
+            "workflow:\n  target_id: nvidia.nooa.coding-agent\n",
+        ],
+    )
+    @pytest.mark.parametrize("version", ["3.12", "3.13", "3.11", "3.14"])
+    def test_nooa_custom_template_python_version(self, tmp_path: Path, selection: str, version: str) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(selection)
+        custom = tmp_path / "Dockerfile.j2"
+        custom.write_text("FROM python:{{ python_version }}\nRUN uv pip install nemo-helix[{{ platform_extra }}]\n")
+
+        if version in {"3.12", "3.13"}:
+            result = render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
+            assert f"FROM python:{version}" in result
+            assert "nemo-helix[nemo-agents-plugin-nooa]" in result
+        else:
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
+
     def test_nooa_container_checks_python_environment_override(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
