@@ -29,11 +29,6 @@ class TestCommandInvokedHook:
         assert event.duration_sec >= 0
 
     @patch("nemo_helix_ext.cli.telemetry.emit.emit_event")
-    def test_agent_mode_flag_captured(self, emit):
-        runner.invoke(app, ["--agent-mode", "docs", "--list"])
-        assert emit.call_args[0][0].agent_mode is True
-
-    @patch("nemo_helix_ext.cli.telemetry.emit.emit_event")
     def test_failing_command_emits_error(self, emit):
         with patch("nemo_helix_ext.cli.commands.docs._list_docs", side_effect=RuntimeError):
             runner.invoke(app, ["docs", "--list"])

@@ -46,9 +46,6 @@ class CLIContext:
     # Verbosity (CLI-specific, not in ConfigParams)
     verbosity: int = 0
 
-    # Agent mode (CLI-specific, not in ConfigParams)
-    agent_mode: bool = False
-
     # Lazy-loaded SDK context
     _sdk_context: Context | None = field(default=None, repr=False)
 
@@ -235,9 +232,8 @@ class CLIContext:
 
         Resolution order:
             1. Explicit command override (e.g. ``-f json``)
-            2. Agent mode forces ``markdown``
-            3. SDK context preference (default ``table``)
-            4. Non-TTY override (only when ``apply_non_tty_default=True``): when
+            2. SDK context preference (default ``table``)
+            3. Non-TTY override (only when ``apply_non_tty_default=True``): when
                the resolved preference is ``table`` and stdout is not a TTY
                (pipe, redirect, agent stdin), prefer ``json`` so callers parsing
                the output get structured data instead of box-drawing characters.
@@ -248,8 +244,6 @@ class CLIContext:
         """
         if override is not None:
             return override
-        if self.agent_mode:
-            return "markdown"
 
         from nemo_helix_ext.cli.core.api import is_tty
 
@@ -270,14 +264,6 @@ class CLIContext:
             return override
         # no_truncate is not in SDK preferences, default to False
         return False
-
-    def get_agent_hints(self, command_path: str) -> list[str]:
-        """Return the hints printed after *command_path* runs in agent mode, else none."""
-        if not self.agent_mode:
-            return []
-        from nemo_helix_ext.cli.core.agent_helpers import get_agent_helpers
-
-        return get_agent_helpers(command_path)
 
     def get_base_url(self, default: str | None = None) -> str | None:
         """Get effective base URL."""
