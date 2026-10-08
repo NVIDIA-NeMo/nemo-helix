@@ -194,6 +194,9 @@ navigation:
               - page: Dataset Format
                 path: ../../customizer/models/data-format.mdx
                 slug: dataset-format
+              - page: Nemotron
+                path: ../../customizer/models/llama-nemotron.mdx
+                slug: llama-nemotron
               - page: Embedding
                 path: ../../customizer/models/embedding.mdx
                 slug: embedding
@@ -203,9 +206,6 @@ navigation:
               - page: Llama
                 path: ../../customizer/models/llama.mdx
                 slug: llama
-              - page: Llama Nemotron
-                path: ../../customizer/models/llama-nemotron.mdx
-                slug: llama-nemotron
               - page: Mistral
                 path: ../../customizer/models/mistral.mdx
                 slug: mistral

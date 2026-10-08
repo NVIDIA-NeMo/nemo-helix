@@ -97,7 +97,7 @@ def _model_entity(name: str) -> ModelEntity:
         workspace="default",
         created_at=now,
         updated_at=now,
-        fileset="fileset://default/qwen3-fileset",
+        fileset="default/qwen3-fileset",
         trust_remote_code=False,
     )
 

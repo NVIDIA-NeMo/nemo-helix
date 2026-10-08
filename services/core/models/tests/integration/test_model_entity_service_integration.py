@@ -453,7 +453,7 @@ async def test_model_entity_complex_fields_integration(model_entity_service):
             base_num_parameters=70000000000,
             precision="fp16",
         ),
-        fileset="https://huggingface.co/meta-llama/Llama-2-70b",
+        fileset="default/llama-2-70b",
         api_endpoint=APIEndpointData(
             url="https://api.openai.com/v1/chat/completions",
             model_id="gpt-4",
@@ -482,7 +482,7 @@ async def test_model_entity_complex_fields_integration(model_entity_service):
     assert created_entity.spec is not None
     assert created_entity.spec.base_num_parameters == 70000000000
     assert created_entity.fileset is not None
-    assert created_entity.fileset == "https://huggingface.co/meta-llama/Llama-2-70b"
+    assert created_entity.fileset == "default/llama-2-70b"
     assert created_entity.api_endpoint is not None
     assert str(created_entity.api_endpoint.url) == "https://api.openai.com/v1/chat/completions"
     assert created_entity.prompt is not None

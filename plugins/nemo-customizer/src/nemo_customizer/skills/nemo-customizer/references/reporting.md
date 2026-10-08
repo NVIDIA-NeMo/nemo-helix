@@ -216,7 +216,7 @@ Match training context at inference — send **`messages[:-1]`** (all turns exce
 | `messages` | All turns except the final assistant label from the JSONL row | Same decode path as SFT |
 | `max_tokens` | `64` for short assistant labels | Training targets are brief (e.g. MCQA choice text) |
 | `temperature` | `0` | Reproducible eval / regression checks |
-| `chat_template_kwargs.enable_thinking` | `false` for Qwen3 short-answer SFT | Thinking mode needs extra tokens and changes output shape vs training |
+| `chat_template_kwargs.enable_thinking` | `false` for short-answer SFT on thinking models (Nemotron 3.5 Lightning, Qwen3) | Thinking mode needs extra tokens and changes output shape vs training |
 
 #### Example — LoRA adapter via provider
 

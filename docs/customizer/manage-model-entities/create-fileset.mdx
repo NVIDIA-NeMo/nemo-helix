@@ -17,7 +17,7 @@ Create a FileSet containing your base model checkpoint before creating a Model E
 
 ## From Hugging Face Hub
 
-The most common method is downloading directly from Hugging Face. The example below uses [Qwen/Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B), a public model that requires no token:
+The most common method is downloading directly from Hugging Face. The example below uses [nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16), a public model that requires no token:
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
@@ -28,15 +28,15 @@ from nemo_helix_plugin.schema import SecretRef
 
 client = NemoClient.from_config()
 
-HF_REPO_ID = "Qwen/Qwen3-1.7B"
-MODEL_NAME = "qwen3-1.7b"
+HF_REPO_ID = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+MODEL_NAME = "nemotron-3-5-lightning-30b-a3b"
 
 # Create FileSet from Hugging Face
 try:
     fileset = client.files.create_fileset(
         body=CreateFilesetRequest(
             name=MODEL_NAME,
-            description="Qwen3 1.7B from Hugging Face",
+            description="Nemotron 3.5 Lightning 30B A3B from Hugging Face",
             purpose=FilesetPurpose.MODEL,
             storage=HuggingfaceStorageConfig(
                 repo_id=HF_REPO_ID,
@@ -56,7 +56,7 @@ print(f"FileSet ready: {fileset.name}")
 
 <Tip>
 
-Gated models (such as Llama) require a Hugging Face token. To use one:
+Gated Hugging Face repositories require a Hugging Face token. To use one:
 
 1. Accept the model license on the Hugging Face model page.
 2. Create a Hugging Face token with read access.
@@ -64,7 +64,7 @@ Gated models (such as Llama) require a Hugging Face token. To use one:
 
 ```python
 storage=HuggingfaceStorageConfig(
-    repo_id="meta-llama/Llama-3.2-1B-Instruct",
+    repo_id="<org>/<gated-model>",
     repo_type="model",
     token_secret=SecretRef("my-hf-token"),
 )
@@ -142,7 +142,7 @@ Files are downloaded in the background after you create a FileSet. Check the sta
 # List files in the FileSet
 response = client.files.list_files(
     workspace="default",
-    name="qwen3-1.7b",
+    name="nemotron-3-5-lightning-30b-a3b",
 )
 files = response.data().data
 
@@ -157,27 +157,27 @@ for f in files[:10]:  # Show first 10
 {
   "data": [
     {
-      "file_ref": "/v2/workspaces/default/filesets/qwen3-1.7b/-/config.json",
+      "file_ref": "/v2/workspaces/default/filesets/nemotron-3-5-lightning-30b-a3b/-/config.json",
       "path": "config.json",
-      "size": 1234,
+      "size": 3254,
       "cache_status": null
     },
     {
-      "file_ref": "/v2/workspaces/default/filesets/qwen3-1.7b/-/model.safetensors",
-      "path": "model.safetensors",
-      "size": 2400000000,
+      "file_ref": "/v2/workspaces/default/filesets/nemotron-3-5-lightning-30b-a3b/-/model-00001-of-00014.safetensors",
+      "path": "model-00001-of-00014.safetensors",
+      "size": 4900000000,
       "cache_status": null
     },
     {
-      "file_ref": "/v2/workspaces/default/filesets/qwen3-1.7b/-/tokenizer.json",
+      "file_ref": "/v2/workspaces/default/filesets/nemotron-3-5-lightning-30b-a3b/-/model.safetensors.index.json",
+      "path": "model.safetensors.index.json",
+      "size": 1500000,
+      "cache_status": null
+    },
+    {
+      "file_ref": "/v2/workspaces/default/filesets/nemotron-3-5-lightning-30b-a3b/-/tokenizer.json",
       "path": "tokenizer.json",
-      "size": 9085657,
-      "cache_status": null
-    },
-    {
-      "file_ref": "/v2/workspaces/default/filesets/qwen3-1.7b/-/tokenizer_config.json",
-      "path": "tokenizer_config.json",
-      "size": 901,
+      "size": 17078110,
       "cache_status": null
     }
   ]

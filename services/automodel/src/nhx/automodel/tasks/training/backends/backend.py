@@ -6,7 +6,6 @@ import os
 import signal
 import subprocess
 import threading
-import time
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -118,56 +117,58 @@ class AutomodelBackend:
         signal.signal(signal.SIGINT, cleanup)
         signal.signal(signal.SIGTERM, cleanup)
 
-        start_time = time.time()
-
-        training_env = os.environ.copy()
-        if customizer_config.parallelism.num_nodes > 1:
-            training_env.update(get_nccl_ib_env())
-        training_process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,  # Line buffered
-            env=training_env,
-        )
-
-        # Start reader thread to capture output without blocking
-        reader_thread = threading.Thread(
-            target=read_subprocess_output,
-            args=(training_process, output_lines),
-            daemon=True,
-        )
-        reader_thread.start()
-
         try:
-            training_process.wait(timeout=customizer_config.training_timeout)
-        except subprocess.TimeoutExpired:
-            logger.exception("Training timed out")
-            training_process.kill()
-            # Reap the killed process to avoid zombies
-            try:
-                training_process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                logger.warning(
-                    "Killed training process did not terminate within 30s - "
-                    "process may be stuck in uninterruptible state"
+            with progress.training_wall_clock():
+                training_env = os.environ.copy()
+                if customizer_config.parallelism.num_nodes > 1:
+                    training_env.update(get_nccl_ib_env())
+                training_process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,  # Line buffered
+                    env=training_env,
                 )
-            # Wait for reader thread to capture any remaining output before re-raising
-            if reader_thread and reader_thread.is_alive():
-                reader_thread.join(timeout=5)
-            raise  # Let runner.py convert via create_error_details()
 
-        # Wait for reader thread to finish capturing output
-        if reader_thread and reader_thread.is_alive():
-            reader_thread.join(timeout=5)
+                # Start reader thread to capture output without blocking
+                reader_thread = threading.Thread(
+                    target=read_subprocess_output,
+                    args=(training_process, output_lines),
+                    daemon=True,
+                )
+                reader_thread.start()
 
-        duration = time.time() - start_time
-        logger.info(f"Training finished in {duration:.1f} seconds")
+                try:
+                    training_process.wait(timeout=customizer_config.training_timeout)
+                except subprocess.TimeoutExpired:
+                    logger.exception("Training timed out")
+                    training_process.kill()
+                    # Reap the killed process to avoid zombies
+                    try:
+                        training_process.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        logger.warning(
+                            "Killed training process did not terminate within 30s - "
+                            "process may be stuck in uninterruptible state"
+                        )
+                    # Wait for reader thread to capture any remaining output before re-raising
+                    if reader_thread and reader_thread.is_alive():
+                        reader_thread.join(timeout=5)
+                    raise  # Let runner.py convert via create_error_details()
 
-        if training_process.returncode != 0:
-            parsed = parse_error_from_output(output_lines, training_process.returncode)
-            raise parsed.to_exception()
+                # Wait for reader thread to finish capturing output
+                if reader_thread and reader_thread.is_alive():
+                    reader_thread.join(timeout=5)
+
+                if training_process.returncode != 0:
+                    parsed = parse_error_from_output(output_lines, training_process.returncode)
+                    raise parsed.to_exception()
+        finally:
+            # Covers timeout, nonzero exit, and SIGTERM.
+            duration = progress.training_duration_seconds
+            if duration is not None:
+                logger.info(f"Training finished in {duration:.1f} seconds")
 
         # Return empty metrics (actual metrics are reported via callbacks during training)
         # TODO: Consider parsing training logs or checkpoints to extract final metrics.

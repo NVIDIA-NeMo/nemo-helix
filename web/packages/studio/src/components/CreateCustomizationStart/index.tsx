@@ -1,26 +1,36 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Banner, Stack } from '@nvidia/foundations-react-core';
 import {
   START_OPTIONS,
   TEMPLATE_GROUP_TITLE,
 } from '@studio/components/CreateCustomizationStart/constants';
 import { DeleteSavedTemplate } from '@studio/components/CreateCustomizationStart/DeleteSavedTemplate';
+import { TemplateConflictBanner } from '@studio/components/CreateCustomizationStart/TemplateConflictBanner';
 import type {
   CreateCustomizationStartProps,
   StartOptionId,
 } from '@studio/components/CreateCustomizationStart/types';
 import { useSavedTemplates } from '@studio/components/CreateCustomizationStart/useSavedTemplates';
-import { useTemplateSetup } from '@studio/components/CreateCustomizationStart/useTemplateSetup';
+import {
+  useTemplateSetup,
+  type ConflictResolution,
+} from '@studio/components/CreateCustomizationStart/useTemplateSetup';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
 import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
-import { CUSTOMIZATION_TEMPLATES } from '@studio/constants/customizationTemplates';
+import {
+  CUSTOMIZATION_TEMPLATES,
+  type CustomizationTemplate,
+} from '@studio/constants/customizationTemplates';
+import { getFilesetRoute } from '@studio/routes/utils';
 import { toCustomizationBackend } from '@studio/util/customizationBackend';
 import { templateToFormFields } from '@studio/util/forms/customization';
 import { Box, Bookmark } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FC } from 'react';
+import { Link } from 'react-router';
 
 /** Namespaces saved-template ids so they cannot collide with a curated recipe's id. */
 const SAVED_PREFIX = 'saved:';
@@ -38,7 +48,14 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   const [selectedId, setSelectedId] = useState<StartOptionId>(DEFAULT_OPTION);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
 
-  const { run: runTemplateSetup, statusLabel, error: templateError } = useTemplateSetup(workspace);
+  const toast = useToast();
+  const {
+    run: runTemplateSetup,
+    statusLabel,
+    error: templateError,
+    conflict,
+    clearConflict,
+  } = useTemplateSetup(workspace);
   const isSettingUp = statusLabel !== '';
 
   const {
@@ -114,16 +131,43 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       return;
     }
     if (!selectedTemplate) return;
+    await provision(selectedTemplate);
+  };
 
-    // Registering the model and loading the dataset has to finish before the form can
-    // reference them, so it happens here rather than on the next screen.
-    const initialValues = await runTemplateSetup(selectedTemplate);
+  /**
+   * Registering the model and loading the dataset has to finish before the form can
+   * reference them, so it happens here rather than on the next screen.
+   *
+   * `resolution` is set when the user is answering a fileset conflict rather than starting
+   * the recipe fresh.
+   */
+  const provision = async (template: CustomizationTemplate, resolution?: ConflictResolution) => {
+    const result = await runTemplateSetup(template, resolution);
     // Provisioning spans a render, and the page is locked throughout, but only hand over
     // values that still match what is selected, and only if there is still a picker to
     // hand them over from.
-    if (initialValues && mounted.current && selectedTemplateId === selectedTemplate.id) {
-      onContinue({ optionId: 'template', initialValues });
+    if (!result || !mounted.current || selectedTemplateId !== template.id) return;
+
+    // Which fileset the job trains on is the whole point of the recipe, so a reuse is
+    // stated rather than left silent. It goes to a toast because handing the values over
+    // navigates away from this page immediately.
+    if (result.reusedFilesetRef) {
+      toast.info(
+        <span>
+          Reused the existing dataset{' '}
+          <Link
+            to={getFilesetRoute(workspace, result.reusedFilesetRef)}
+            className="text-primary underline"
+          >
+            {result.reusedFilesetRef}
+          </Link>{' '}
+          instead of downloading it again.
+        </span>,
+        { durationMs: 10_000 }
+      );
     }
+
+    onContinue({ optionId: 'template', initialValues: result.values });
   };
 
   return (
@@ -135,6 +179,7 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       onChange={(id) => {
         setSelectedId(id as StartOptionId);
         setSelectedTemplateId(null);
+        clearConflict();
       }}
       // Provisioning registers models and uploads a dataset, which takes long enough that
       // the cards would stay clickable behind the disabled Continue. Moving the selection
@@ -163,14 +208,29 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
             <TemplateGroups
               groups={templateGroups}
               value={selectedTemplateId}
-              onChange={setSelectedTemplateId}
+              // A conflict names one recipe's fileset; moving off that recipe retires it.
+              onChange={(id) => {
+                setSelectedTemplateId(id);
+                clearConflict();
+              }}
               disabled={isSettingUp}
             />
           </Stack>
         ) : null
       }
       slotBanner={
-        templateError ? (
+        conflict ? (
+          <TemplateConflictBanner
+            conflict={conflict}
+            busy={isSettingUp}
+            onRename={() =>
+              selectedTemplate && void provision(selectedTemplate, { action: 'rename', conflict })
+            }
+            onReplace={() =>
+              selectedTemplate && void provision(selectedTemplate, { action: 'replace', conflict })
+            }
+          />
+        ) : templateError ? (
           <Banner kind="inline" status="error">
             {templateError}
           </Banner>

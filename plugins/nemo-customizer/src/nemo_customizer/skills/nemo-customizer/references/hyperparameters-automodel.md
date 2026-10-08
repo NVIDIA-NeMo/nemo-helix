@@ -5,7 +5,7 @@
 
 # Automodel job JSON
 
-Job JSON for `nemo customization automodel submit` uses **`AutomodelJobInput`** (`plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`).
+Job JSON for `nemo customization automodel submit` uses **`AutomodelJobInput`** (`plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). For per-model values (LR, LoRA rank, batch, MoE layout), start from the model's recipe in **`recipes.md`**.
 
 **Schema dump:**
 
@@ -35,9 +35,9 @@ nemo customization automodel explain
 
 | Valid | Invalid |
 |-------|---------|
-| `default/qwen3-1.7b` (entity from `nemo models create`) | `Qwen/Qwen3-1.7B` (HF id) |
-| `default/llama-3.2-1b-instruct` | `default/commonsense_qa` (dataset fileset) |
-| `other-ws/my-model` (qualified ref) | `qwen3-1.7b-commonsense-qa-lora` (output fileset only, unless registered as entity) |
+| `default/nemotron-3-5-lightning-30b-a3b` (entity from `nemo models create`) | `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` (HF id) |
+| `default/qwen3-0.6b` | `default/commonsense_qa` (dataset fileset) |
+| `other-ws/my-model` (qualified ref) | `nemotron-3-5-lightning-commonsense-qa-lora` (output fileset only, unless registered as entity) |
 
 Register before submit (same as skill fast path): HF **model** fileset → `nemo models create <model-entity> …` with `"fileset":"default/<weights-fileset>"`. List: `nemo models list --workspace default`.
 
@@ -264,7 +264,7 @@ Apply user overrides to `/tmp/job.json` before submit. For **batch / GPU count /
 
 | Symptom / goal | Try first |
 |----------------|-----------|
-| CUDA OOM | **`batch-sizing.md` tuning loop:** halve `micro_batch_size`, then `global_batch_size`, then `max_seq_length`; use TP > 1 only if the model does not fit one ≥48 GB GPU |
+| CUDA OOM | **`batch-sizing.md` tuning loop:** halve `micro_batch_size`, then `global_batch_size`, then `max_seq_length`; use TP > 1 only if the model does not fit one ≥48 GB GPU. MoE with `expert_parallel_size` > 1 needs TP 1: add GPUs and raise `expert_parallel_size`, or set `training.activation_checkpointing: true` |
 | Slow / low GPU use | **`batch-sizing.md`:** step toward high-util column or double `micro`+GBS until ~35–40 GiB; multi-GPU data parallel if model fits one GPU |
 | Underfitting | More `epochs`, slightly higher `learning_rate`, higher LoRA `rank` (≤ 32 for NIM/vLLM deploy) |
 | Overfitting | Fewer `epochs`, lower `learning_rate`, higher `weight_decay`, smaller `rank` |
@@ -329,15 +329,15 @@ Use only when the user requests KD/distillation. **`model`** is the **student** 
 
 | Form | Example |
 |------|---------|
-| Same workspace | `default/llama-3.2-3b-instruct` |
+| Same workspace | `default/qwen3-8b` |
 | Explicit workspace | `default/<teacher-entity>` |
 
 It is **not** a Hugging Face repo id. Register the teacher like the student before submit:
 
 ```bash
-TEACHER_WEIGHTS=llama-3.2-3b-instruct   # fileset name
-TEACHER_ENTITY=llama-3.2-3b-instruct    # entity name
-TEACHER_HF=meta-llama/Llama-3.2-3B-Instruct
+TEACHER_WEIGHTS=qwen3-8b   # fileset name
+TEACHER_ENTITY=qwen3-8b    # entity name
+TEACHER_HF=Qwen/Qwen3-8B
 
 nemo files filesets create "$TEACHER_WEIGHTS" --workspace default --purpose model --exist-ok \
   --storage '{"type":"huggingface","repo_id":"'"$TEACHER_HF"'","repo_type":"model","revision":"main"}'

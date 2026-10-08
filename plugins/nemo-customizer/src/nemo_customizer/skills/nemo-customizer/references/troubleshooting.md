@@ -109,13 +109,13 @@ Same rule for `nemo jobs list-execution-profiles -f json`: parse stdout only; us
 
 ## Gated HuggingFace models
 
-Gated or private HuggingFace repos (e.g. Llama, Gemma) require a **platform secret** and **`token_secret`** on the model fileset. The Files service does **not** use your local `~/.cache/huggingface` or shell `HF_TOKEN`. Unlike W&B, the HF token is **not** set in job JSON — it is wired on the **model fileset** storage config.
+Gated or private HuggingFace repos require a **platform secret** and **`token_secret`** on the model fileset. The Files service does **not** use your local `~/.cache/huggingface` or shell `HF_TOKEN`. Unlike W&B, the HF token is **not** set in job JSON — it is wired on the **model fileset** storage config.
 
 | Symptom / log excerpt | Likely cause | Fix |
 |-----------------------|--------------|-----|
 | Job fails in **download** step; `Failed to access upstream storage`; `InternalServerError` 502; `Verify that the referenced credentials are valid` | Missing/stale `hf-token` secret, or fileset created without `token_secret` | Steps below — then re-submit |
 | Secret exists but download still fails | User has not **accepted the model license** on huggingface.co for that repo | Accept license with the same HF account as the token, then re-submit |
-| Public model (e.g. `Qwen/Qwen3-1.7B`) | No secret needed | Omit `token_secret` on the fileset |
+| Public model (e.g. `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`) | No secret needed | Omit `token_secret` on the fileset |
 
 **Convention:** secret name `hf-token` in workspace `default`. Any valid secret name works if referenced consistently in `token_secret`.
 
@@ -147,7 +147,7 @@ printf '%s' "$HF_TOKEN" | nemo secrets update "$HF_SECRET" \
 
 ```bash
 WEIGHTS=<weights-fileset>
-HF_REPO=<hf-repo>          # e.g. google/gemma-2-2b-it
+HF_REPO=<hf-repo>          # gated repo, <org>/<model>
 HF_SECRET=hf-token
 
 nemo files filesets create "$WEIGHTS" --workspace default --purpose model --exist-ok \

@@ -13,7 +13,7 @@ description: ""
 
 Learn how to use NeMo Helix to align a model with **DPO** (Direct Preference Optimization) on a preference dataset. For each prompt, DPO trains on a *chosen* (preferred) and a *rejected* response so the model prefers the chosen style — no separate reward model required.
 
-This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Helix deployment. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity.
+This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Helix deployment. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity. Full-weight DPO keeps a policy and a reference model in memory, so this tutorial uses [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) to fit on one GPU.
 
 **Time to complete:** approximately 45-60 minutes. Job duration increases with model and dataset size.
 
@@ -25,7 +25,7 @@ Before starting this tutorial, ensure you have:
 2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all,nemo-rl-plugin]"` so `RlJobInput` is available; source checkout: run `make bootstrap` from the repository root). `nemo-helix[all]` does not include the RL plugin.
 3. **Installed the `datasets` package**: `pip install datasets`.
 4. **A platform configured with `platform.runtime: kubernetes`.** The `rl` (DPO) backend provisions a Ray cluster and has **no local Docker fallback** — `submit` fails fast on a Docker-runtime platform. Multi-node jobs (`parallelism.num_nodes > 1`) additionally require the platform-side `NHX_RL_MULTINODE_SHARED_STORAGE_PATH`.
-5. **A Hugging Face token** with access to the gated base model (this tutorial uses `meta-llama/Llama-3.2-1B-Instruct`). Export it as `HF_TOKEN`.
+5. **Optional: a Hugging Face token**, exported as `HF_TOKEN`, if you substitute a gated base model. This tutorial's `Qwen/Qwen3-0.6B` is public.
 6. **At least one GPU with CUDA 13+** and a GPU execution profile (`nemo jobs list-execution-profiles`).
 
 ## Quick Start
@@ -48,9 +48,10 @@ import os
 import time
 import uuid
 from pathlib import Path
+
+from IPython.display import clear_output
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.models.types import (
@@ -61,12 +62,13 @@ from nemo_helix_plugin.models.types import (
     Engine,
     ModelDeploymentConfigModelSpec,
 )
-from nemo_helix_plugin.schema import SecretRef
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretResponse
 from nemo_customizer.sdk import Customization
 from nemo_rl_plugin.schema import RlJobInput
 from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
 from pydantic import SecretStr
+from nemo_helix_plugin.schema import SecretRef
 
 
 def max_wait_time_checker(seconds: int, label: str = ""):
@@ -167,14 +169,15 @@ print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_N
 
 ### 4. Secrets Setup
 
-The base model (`meta-llama/Llama-3.2-1B-Instruct`) is gated, so store your Hugging Face token as a platform secret named `hf-token` and reference it on the model fileset.
+The base model (`Qwen/Qwen3-0.6B`) is public, so the token is optional. For a gated model, store your Hugging Face token as a platform secret named `hf-token` and reference it on the model fileset.
 
 ```python
 HF_TOKEN = os.getenv("HF_TOKEN")
-if not HF_TOKEN:
-    raise RuntimeError("Set HF_TOKEN before running this tutorial.")
 
-def create_or_get_secret(name: str, value: str, label: str) -> HelixSecretResponse:
+def create_or_get_secret(name: str, value: str | None, label: str) -> HelixSecretResponse | None:
+    if not value:
+        print(f"{label} is not set - skipping setting secret")
+        return None
     try:
         secret = client.secrets.create_secret(
             body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
@@ -194,20 +197,20 @@ hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
 DPO starts from an instruction-tuned base model. The model entity's spec is inferred asynchronously after creation.
 
 ```python
-HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
-MODEL_NAME = "llama-3-2-1b-instruct"
+HF_REPO_ID = "Qwen/Qwen3-0.6B"
+MODEL_NAME = "qwen3-0.6b"
 
 storage = HuggingfaceStorageConfig(
     repo_id=HF_REPO_ID,
     repo_type="model",
-    token_secret=SecretRef(hf_secret.name),
+    token_secret=SecretRef(hf_secret.name) if hf_secret else None,
 )
 
 try:
     base_model_fs = client.files.create_fileset(
         body=CreateFilesetRequest(
             name=MODEL_NAME,
-            description="Llama 3.2 1B Instruct base model",
+            description="Qwen3 0.6B base model",
             storage=storage,
         ),
     ).data()
@@ -243,11 +246,13 @@ Submit a DPO job to the `rl` backend with `RlJobInput`. Note the DPO-specific sh
 - `ref_policy_kl_penalty` is **β** (DPO paper): how strongly the policy stays tied to the reference model.
 - `rl` auto-generates the job id (`rl-<hex>`); read it back from the response.
 
+The learning rate, β, and weight decay follow the NeMo-RL reference config [`dpo.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/dpo.yaml). `max_seq_length` is raised to 4096 so long HelpSteer3 conversations fit.
+
 Other configurable knobs: `optimizer_type`, `adam_eps`, `activation_checkpointing`, `keep_top_k`, `val_at_end`, `preference_loss_weight`, `sft_loss_weight`. Run `nemo customization rl explain` for the live schema.
 
 ```python
 job_suffix = uuid.uuid4().hex[:8]
-OUTPUT_NAME = f"llama-3-2-1b-dpo-{job_suffix}"
+OUTPUT_NAME = f"qwen3-0-6b-dpo-{job_suffix}"
 
 spec = RlJobInput(
     model=f"default/{base_model.name}",
@@ -255,11 +260,12 @@ spec = RlJobInput(
     training={
         "type": "dpo",
         "epochs": 1,
-        "batch_size": 16,
+        "batch_size": 32,
         "micro_batch_size": 1,
         "learning_rate": 5e-6,
+        "weight_decay": 0.1,
         "max_seq_length": 4096,
-        "ref_policy_kl_penalty": 0.1,
+        "ref_policy_kl_penalty": 0.05,
         "parallelism": {
             "num_nodes": 1,
             "num_gpus_per_node": 1,
@@ -346,12 +352,11 @@ while True:
     deployment_status = client.models.get_deployment(name=deployment.name).data()
     clear_output(wait=True)
     print(f"Deployment status: {deployment_status.status}")
-    deployment_state = str(deployment_status.status).lower()
-    if deployment_state in ("ready", "running"):
+    if deployment_status.status in ("READY", "RUNNING"):
         if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
             raise RuntimeError("Inference gateway did not become ready")
         break
-    if deployment_state in ("failed", "error", "terminated", "lost"):
+    if deployment_status.status in ("FAILED", "ERROR", "TERMINATED", "LOST"):
         raise RuntimeError(f"Deployment failed with status: {deployment_status.status}")
     time.sleep(15)
 ```
@@ -370,7 +375,14 @@ response = InferenceGatewayClient.from_client(client).provider_post(
     workspace="default",
     trailing_uri="v1/chat/completions",
     body=JsonBody(
-        {"model": f"default/{OUTPUT_NAME}", "messages": messages, "temperature": 0.7, "max_tokens": 256}
+        {
+            "model": f"default/{OUTPUT_NAME}",
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 256,
+            # Qwen3 reasons by default; turn it off to get the email directly.
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
     ),
 ).data()
 print("Model output:\n")
