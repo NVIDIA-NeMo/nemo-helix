@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="garak-targets"></a>
 
-An `AuditTarget` identifies the model under test. It pairs a garak generator class (`type`) with a model identifier (`model`) and a generator-specific options dict (`options`). Targets are persisted in NeMo Helix entity store and referenced by name from `client.garak.run(...)`.
+An `AuditTarget` identifies the model under test. It pairs a garak generator class (`type`) with a model identifier (`model`) and a generator-specific options dict (`options`). Targets are persisted in NeMo Helix entity store and referenced by name from `GarakPluginResource(client).run(...)`.
 
 ## What an AuditTarget Holds
 
@@ -36,7 +36,11 @@ for provider in providers.data:
 Use a `provider` name from this output in the target below. The model identifier format depends on the provider — check the provider's API documentation or served-model list if unsure.
 
 ```python
-target = client.garak.targets.create(
+from nemo_garak.sdk import GarakPluginResource
+
+garak = GarakPluginResource(client)
+
+target = garak.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
@@ -62,7 +66,7 @@ The `nhx_uri_spec` block resolves to a concrete `uri` at run time. See [Inferenc
 For a vanilla OpenAI-compatible endpoint routed through a provider:
 
 ```python
-target = client.garak.targets.create(
+target = garak.targets.create(
     workspace="default",
     name="gpt-4o-audit",
     type="openai.OpenAIGenerator",
@@ -87,7 +91,7 @@ target = client.garak.targets.create(
 `test.Blank` returns the empty string for every request — useful for verifying that an audit configuration is well-formed without making network calls:
 
 ```python
-target = client.garak.targets.create(
+target = garak.targets.create(
     workspace="default",
     name="smoke",
     type="test.Blank",
@@ -100,7 +104,7 @@ target = client.garak.targets.create(
 ## List Targets
 
 ```python
-listing = client.garak.targets.list(workspace="default")
+listing = garak.targets.list(workspace="default")
 for entry in listing["data"]:
     print(entry["name"], entry["type"], entry["model"])
 ```
@@ -110,7 +114,7 @@ for entry in listing["data"]:
 ## Retrieve a Target
 
 ```python
-target = client.garak.targets.get(workspace="default", name="nemotron-3.5-lightning-30b")
+target = garak.targets.get(workspace="default", name="nemotron-3.5-lightning-30b")
 ```
 
 ## Update a Target
@@ -118,7 +122,7 @@ target = client.garak.targets.get(workspace="default", name="nemotron-3.5-lightn
 `update()` replaces every field — pass the fields you want to keep alongside the ones you are changing.
 
 ```python
-updated = client.garak.targets.update(
+updated = garak.targets.update(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
@@ -137,5 +141,5 @@ updated = client.garak.targets.update(
 ## Delete a Target
 
 ```python
-client.garak.targets.delete(workspace="default", name="nemotron-3.5-lightning-30b")
+garak.targets.delete(workspace="default", name="nemotron-3.5-lightning-30b")
 ```

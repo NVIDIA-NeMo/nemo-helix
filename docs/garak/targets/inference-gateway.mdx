@@ -11,7 +11,7 @@ description: ""
 
 ## What `nhx_uri_spec` Is
 
-`nhx_uri_spec` is a nested dict placed inside `options.<generator>` that names an Inference Gateway provider. When `client.garak.run(...)` starts, the plugin walks the options tree, looks each `nhx_uri_spec` block up via `sdk.inference.providers.retrieve(...)`, replaces it with a `uri` key whose value is the provider's resolved OpenAI-compatible URL, and hands the rewritten options dict to garak.
+`nhx_uri_spec` is a nested dict placed inside `options.<generator>` that names an Inference Gateway provider. When `GarakPluginResource(client).run(...)` starts, the plugin walks the options tree, looks each `nhx_uri_spec` block up via `sdk.inference.providers.retrieve(...)`, replaces it with a `uri` key whose value is the provider's resolved OpenAI-compatible URL, and hands the rewritten options dict to garak.
 
 The original `AuditTarget` entity stays untouched — only the in-memory copy garak receives is rewritten.
 
@@ -33,7 +33,7 @@ Both `workspace` and `provider` are required. Other keys inside `nhx_uri_spec` a
 ## Conflict Rules
 
 - A dict cannot contain both `uri` and `nhx_uri_spec` — the plugin raises `ValueError` if it finds both. Pick one.
-- The plugin requires a connected SDK to resolve a `nhx_uri_spec`. If `client.garak.run(...)` is invoked without an SDK handle (a code path reserved for tests), and the target's options contain a sentinel, the run raises `RuntimeError`.
+- The plugin requires a connected SDK to resolve a `nhx_uri_spec`. If `GarakPluginResource(client).run(...)` is invoked without an SDK handle (a code path reserved for tests), and the target's options contain a sentinel, the run raises `RuntimeError`.
 - If the named provider does not exist, or the provider lookup fails for any other reason, the run raises `RuntimeError` with the provider workspace and name embedded in the message.
 
 ## Worked Example
@@ -41,7 +41,11 @@ Both `workspace` and `provider` are required. Other keys inside `nhx_uri_spec` a
 Audit a NIM endpoint registered as the `nvidia-inference-api` provider in the `default` workspace:
 
 ```python
-target = client.garak.targets.create(
+from nemo_garak.sdk import GarakPluginResource
+
+garak = GarakPluginResource(client)
+
+target = garak.targets.create(
     workspace="default",
     name="nemotron-3.5-lightning-30b",
     type="nim.NVOpenAIChat",
@@ -78,7 +82,7 @@ The resolved `uri` reflects whatever the provider is configured to point at — 
 For ad-hoc audits against a local endpoint you don't intend to keep around, you can specify `uri` directly and skip `nhx_uri_spec`:
 
 ```python
-target = client.garak.targets.create(
+target = garak.targets.create(
     workspace="default",
     name="local-llm",
     type="openai.OpenAIGenerator",
