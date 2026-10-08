@@ -2,23 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 config_format: nemo-agents-spec-v1
-name: test-agent
-description: Test agent config
+name: hermes-example
 
 instructions:
   system:
     content: You are a concise test assistant.
 
-default_harness: codex
+default_harness: hermes
 
 harnesses:
-  claude:
-    kind: claude
-    model:
-      provider: anthropic
-      model: anthropic/claude-sonnet-4-5
-    settings:
-      permission_mode: dontAsk
   hermes:
     kind: hermes
     model:
@@ -31,21 +23,6 @@ harnesses:
       max_tokens: 512
       reasoning_config:
         effort: none
-  deepagents:
-    kind: deepagents
-    settings:
-      deepagents: {}
-  codex:
-    kind: codex
-    settings:
-      sandbox: workspace-write
-      reasoning_effort: high
-
-models:
-  default:
-    provider: nvidia
-    model: nvidia-nemotron-3-5-lightning-30b-a3b
-    api_key_env: NVIDIA_API_KEY
 
 skills:
   paths: []

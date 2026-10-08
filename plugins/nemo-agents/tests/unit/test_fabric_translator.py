@@ -119,13 +119,11 @@ class TestTranslateAgentConfig:
         assert fabric_config.models["fast"].max_tokens == 256
 
     def test_repository_example_uses_current_codex_and_isolated_hermes_adapters(self) -> None:
-        example_path = Path(__file__).parents[2] / "examples/nemo-agent-config/agent.yaml"
-        config = load_agent_config(example_path)
-
-        codex_config = translate_agent_config(config, harness_name="codex")
-        claude_config = translate_agent_config(config, harness_name="claude")
-        deepagents_config = translate_agent_config(config, harness_name="deepagents")
-        hermes_config = translate_agent_config(config, harness_name="hermes")
+        examples = Path(__file__).parents[2] / "examples/nemo-agent-config"
+        codex_config = translate_agent_config(load_agent_config(examples / "agent-codex.yaml"))
+        claude_config = translate_agent_config(load_agent_config(examples / "agent-claude.yaml"))
+        deepagents_config = translate_agent_config(load_agent_config(examples / "agent-deepagents.yaml"))
+        hermes_config = translate_agent_config(load_agent_config(examples / "agent-hermes.yaml"))
 
         codex_harness = codex_config.harness
         claude_harness = claude_config.harness
