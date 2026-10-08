@@ -235,9 +235,9 @@ export const DataDesignerJobsDataView: FC = () => {
           DataViewTableContent: {
             renderErrorState: () => (
               <ErrorPanel
-                errorMessage={getErrorMessage(
-                  error ?? new Error('Failed to load Data Designer jobs')
-                )}
+                errorMessage={
+                  getErrorMessage(error ?? new Error()) || 'Failed to load Data Designer jobs'
+                }
                 attributes={{
                   ErrorMessage: {
                     slotFooter: (

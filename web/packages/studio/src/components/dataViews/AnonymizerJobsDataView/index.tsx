@@ -236,7 +236,9 @@ export const AnonymizerJobsDataView: FC = () => {
           DataViewTableContent: {
             renderErrorState: () => (
               <ErrorPanel
-                errorMessage={getErrorMessage(error ?? new Error('Failed to load anonymizer jobs'))}
+                errorMessage={
+                  getErrorMessage(error ?? new Error()) || 'Failed to load anonymizer jobs'
+                }
                 attributes={{
                   ErrorMessage: {
                     slotFooter: (

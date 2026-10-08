@@ -379,9 +379,9 @@ export const GenerateJobsDataView: FC = () => {
           DataViewTableContent: {
             renderErrorState: () => (
               <ErrorPanel
-                errorMessage={getErrorMessage(
-                  error ?? new Error('Failed to load Safe Synthesizer jobs')
-                )}
+                errorMessage={
+                  getErrorMessage(error ?? new Error()) || 'Failed to load Safe Synthesizer jobs'
+                }
                 attributes={{
                   ErrorMessage: {
                     slotFooter: (
