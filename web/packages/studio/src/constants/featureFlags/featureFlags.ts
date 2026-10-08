@@ -65,9 +65,7 @@ export const flagDefinitions = {
   anonymizerEnabled: booleanFlag('VITE_FF_ANONYMIZER_ENABLED', true),
   baseModelsEnabled: previewFlag('VITE_FF_BASE_MODELS_ENABLED', true),
   assistantStudioEnabled: previewFlag('VITE_FF_ASSISTANT_STUDIO_ENABLED', false),
-  copilotStudioEnabled: previewFlag('VITE_FF_COPILOT_STUDIO_ENABLED', false),
   customizerEnabled: previewFlag('VITE_FF_CUSTOMIZER_ENABLED', true),
-  dashboardEnabled: previewFlag('VITE_FF_DASHBOARD_ENABLED', false),
   dashboardSandboxEnabled: previewFlag('VITE_FF_DASHBOARD_SANDBOX_ENABLED', true),
   dataDesignerEnabled: previewFlag('VITE_FF_DATA_DESIGNER_ENABLED', true),
   datasetsEnabled: previewFlag('VITE_FF_DATASETS_ENABLED', true),
@@ -89,7 +87,6 @@ export const flagDefinitions = {
   safeSynthesizerEnabled: previewFlag('VITE_FF_SAFE_SYNTHESIZER_ENABLED', true),
   secretsEnabled: previewFlag('VITE_FF_SECRETS_ENABLED', true),
   settingsEnabled: previewFlag('VITE_FF_SETTINGS_ENABLED', true),
-  toolCallingEnabled: booleanFlag('VITE_FF_TOOL_CALLING_ENABLED'),
   tourEnabled: booleanFlag('VITE_FF_TOUR_ENABLED', true),
   traceGraphEnabled: booleanFlag('VITE_FF_TRACE_GRAPH_ENABLED'),
 } as const;
