@@ -379,7 +379,7 @@ describe('CreateCustomizationStart', () => {
      */
     it('reuses its own S3-backed fileset rather than calling S3 unwritable', async () => {
       const { dataset } = CUSTOMIZATION_TEMPLATES[0];
-      useFilesetStore({ [dataset.name]: reusableDataset({ type: 's3', bucket: 'nmp' }) });
+      useFilesetStore({ [dataset.name]: reusableDataset({ type: 's3', bucket: 'training-data' }) });
       const onContinue = vi.fn();
 
       await provisionSelectedTemplate(onContinue);
