@@ -8,6 +8,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { hasModelProvider } from '@nemo/common/src/utils/models';
 import { getEntitiesListWorkspacesQueryKey } from '@nemo/sdk/generated/platform/entity-store';
 import { FormField } from '@nvidia/foundations-react-core';
+import { useRecentWorkspaces } from '@studio/components/WorkspaceDropdown/useRecentWorkspaces';
 import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { getWorkspaceDashboardRoute } from '@studio/routes/utils';
 import { streamCreateSampleAgent } from '@studio/routes/WorkspaceDashboardHomeRoute/CreateSampleAgentModal/streamCreateSampleAgent';
@@ -35,6 +36,7 @@ export const CreateSampleAgentModal: FC<CreateSampleAgentModalProps> = ({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const accessToken = useOidcBearerToken();
+  const { addRecentWorkspace } = useRecentWorkspaces();
 
   const [model, setModel] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -60,6 +62,8 @@ export const CreateSampleAgentModal: FC<CreateSampleAgentModalProps> = ({
       );
       void queryClient.invalidateQueries({ queryKey: getEntitiesListWorkspacesQueryKey() });
       onClose();
+      // The workspace dropdown labels from recents when the new workspace isn't in its list yet.
+      addRecentWorkspace(result.workspace);
       navigate(getWorkspaceDashboardRoute(result.workspace));
     },
   });
