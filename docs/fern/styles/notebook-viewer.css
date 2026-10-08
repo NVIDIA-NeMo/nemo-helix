@@ -7,22 +7,42 @@
   margin: 1.5rem 0;
 }
 
-/* Colab banner – uses Fern's .fern-button styling */
-.notebook-viewer__colab-banner {
+/* Notebook action buttons */
+.notebook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
-/* Override prose/link color so Colab link renders as a button, not a green link */
-.notebook-viewer__colab-link,
-.notebook-viewer__colab-link:hover,
-.notebook-viewer__colab-link:visited,
-.notebook-viewer__colab-link:focus-visible {
-  color: white;
+.notebook-actions__button,
+.notebook-actions__button:hover,
+.notebook-actions__button:visited,
+.notebook-actions__button:focus-visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0.55rem 0.85rem;
   text-decoration: none;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.notebook-viewer__colab-link .fern-button-text {
-  color: inherit;
+.notebook-actions__button--primary,
+.notebook-actions__button--primary:visited {
+  background: var(--accent-primary, #76b900);
+  border: 1px solid var(--accent-primary, #76b900);
+  color: white;
+}
+
+.notebook-actions__button--primary:hover,
+.notebook-actions__button--primary:focus-visible {
+  background: #5f9500;
+  border-color: #5f9500;
+  color: white;
 }
 
 .notebook-viewer__cells {
