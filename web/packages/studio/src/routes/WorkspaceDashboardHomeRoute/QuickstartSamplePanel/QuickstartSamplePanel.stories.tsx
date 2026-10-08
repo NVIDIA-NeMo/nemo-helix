@@ -8,6 +8,8 @@ import {
   QuickstartSamplePanel,
   type QuickstartSampleAgent,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel';
+import { QuickstartSamplePanelError } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSamplePanelError';
+import { QuickstartSamplePanelSkeleton } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSamplePanelSkeleton';
 import type { ComponentType } from 'react';
 
 const SAMPLE_AGENT: QuickstartSampleAgent = {
@@ -83,6 +85,31 @@ export const NoSampleAgent: Story = {
         Dashboard content below — these two lines should sit flush, with nothing between.
       </Text>
     </Stack>
+  ),
+};
+
+/**
+ * What the dashboard shows while the sample agent and its deployments load. It takes the
+ * panel's feature flags, so it reserves the same number of steps the panel will render.
+ */
+export const Loading: Story = {
+  render: ({ intakeEnabled, agentOptimizationsEnabled }) => (
+    <QuickstartSamplePanelSkeleton
+      intakeEnabled={intakeEnabled}
+      agentOptimizationsEnabled={agentOptimizationsEnabled}
+    />
+  ),
+};
+
+/**
+ * What the dashboard shows when the sample agent cannot be loaded. Retry resolves after a
+ * delay, so the button's busy state is visible.
+ */
+export const LoadError: Story = {
+  render: () => (
+    <QuickstartSamplePanelError
+      onRetry={() => new Promise((resolve) => setTimeout(resolve, 1500))}
+    />
   ),
 };
 

@@ -1,18 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { server } from '@studio/mocks/node';
 import { getQuickstartDismissedKey } from '@studio/routes/WorkspaceDashboardHomeRoute/quickstartDismissedStorage';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { renderRoute } from '@studio/tests/util/render';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
 import type { ComponentProps } from 'react';
-import { MemoryRouter } from 'react-router';
 
 const renderQuickstartSection = (props: Partial<ComponentProps<typeof QuickstartSection>> = {}) =>
-  render(
-    <MemoryRouter>
-      <QuickstartSection workspace="my-workspace" {...props} />
-    </MemoryRouter>
-  );
+  renderRoute(<QuickstartSection workspace="my-workspace" {...props} />);
 
 describe('QuickstartSection', () => {
   beforeEach(() => {
@@ -74,13 +73,15 @@ describe('QuickstartSection', () => {
   });
 
   it('renders nothing when every panel flag is disabled', () => {
-    const { container } = renderQuickstartSection({
+    renderQuickstartSection({
       agentsEnabled: false,
       intakeEnabled: false,
       customizerEnabled: false,
     });
 
-    expect(container).toBeEmptyDOMElement();
+    // TestProviders adds wrapper elements, so the container is never empty.
+    expect(screen.queryByText('Quickstart')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('sizes panels to fill the row width regardless of how many are visible', () => {
@@ -90,5 +91,54 @@ describe('QuickstartSection', () => {
     expect(grid.style.getPropertyValue('--nv-grid-template-columns')).toBe(
       'repeat(auto-fit, minmax(320px, 1fr))'
     );
+  });
+
+  it('opens the sample workspace modal from the header', async () => {
+    renderQuickstartSection();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try a Sample Agent' }));
+
+    expect(await screen.findByText('Create Sample Workspace')).toBeInTheDocument();
+  });
+
+  // Each case renders an eligible section beside the gated one: the eligible button appearing
+  // proves the shared workspace list resolved, so the gated section had its chance to render one.
+  it('hides the sample button when agents are disabled', async () => {
+    renderRoute(
+      <>
+        <QuickstartSection workspace="my-workspace" />
+        <QuickstartSection workspace="other-workspace" agentsEnabled={false} />
+      </>
+    );
+
+    expect(await screen.findAllByRole('button', { name: 'Try a Sample Agent' })).toHaveLength(1);
+  });
+
+  it('hides the sample button inside a sample workspace', async () => {
+    renderRoute(
+      <>
+        <QuickstartSection workspace="my-workspace" />
+        <QuickstartSection workspace="sample-1a2b3c4d" />
+      </>
+    );
+
+    expect(await screen.findAllByRole('button', { name: 'Try a Sample Agent' })).toHaveLength(1);
+  });
+
+  it('hides the sample button when a sample workspace is visible', async () => {
+    const listWorkspaces = vi.fn(() =>
+      HttpResponse.json({
+        object: 'list',
+        data: [{ name: 'my-workspace' }, { name: 'sample-1a2b3c4d' }],
+        pagination: { page: 1, page_size: 1000, total_pages: 1, total_results: 2 },
+      })
+    );
+    server.use(http.get(`${PLATFORM_BASE_URL}/apis/entities/v2/workspaces`, listWorkspaces));
+
+    renderQuickstartSection();
+
+    await waitFor(() => expect(listWorkspaces).toHaveBeenCalled());
+    expect(await screen.findByText('Connect an Agent')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try a Sample Agent' })).not.toBeInTheDocument();
   });
 });
