@@ -15,6 +15,7 @@ import logging
 
 from nhx.common.files.storage_config import (
     GithubStorageConfig,
+    GitStorageConfig,
     HuggingfaceStorageConfig,
     LocalStorageConfig,
     NGCStorageConfig,
@@ -54,5 +55,9 @@ def storage_impl_factory(
             from nhx.core.files.app.backends.github import GithubStorageImpl
 
             return GithubStorageImpl(config, secrets)
+        case GitStorageConfig():
+            from nhx.core.files.app.backends.git import GitStorageImpl
+
+            return GitStorageImpl(config, secrets)
         case _:
             raise TypeError(f"Unsupported storage config type: {type(config).__name__}")

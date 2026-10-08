@@ -10598,6 +10598,7 @@ components:
           - $ref: '#/components/schemas/HuggingfaceStorageConfig'
           - $ref: '#/components/schemas/S3StorageConfig'
           - $ref: '#/components/schemas/GithubStorageConfig'
+          - $ref: '#/components/schemas/GitStorageConfig'
           title: Storage
           description: The storage configuration for the fileset. If not provided,
             uses default storage.
@@ -12997,6 +12998,7 @@ components:
           - $ref: '#/components/schemas/HuggingfaceStorageConfig'
           - $ref: '#/components/schemas/S3StorageConfig'
           - $ref: '#/components/schemas/GithubStorageConfig'
+          - $ref: '#/components/schemas/GitStorageConfig'
           title: Storage
         metadata:
           $ref: '#/components/schemas/FilesetMetadata'
@@ -13503,6 +13505,58 @@ components:
         with ``-`` for
 
         descending order.'
+    GitStorageConfig:
+      properties:
+        read_chunk_size:
+          type: integer
+          title: Read Chunk Size
+          description: 'Chunk size in bytes for reading/streaming files. Larger chunks
+            reduce async overhead but increase memory per concurrent download. Default:
+            1MB.'
+          default: 1048576
+        type:
+          type: string
+          const: git
+          title: Type
+          default: git
+        url:
+          type: string
+          title: Url
+          description: SSH remote, e.g. 'git@gitlab.example.com:org/repo.git' or 'ssh://host:2222/org/repo.git'
+        revision:
+          type: string
+          title: Revision
+          description: Branch, tag, or commit SHA. 'HEAD' resolves to the remote's
+            default branch.
+          default: HEAD
+        original_revision:
+          title: Original Revision
+          description: The original revision requested by the user before resolution
+            (e.g., 'main'). The 'revision' field contains the resolved commit SHA.
+          type: string
+        path:
+          type: string
+          title: Path
+          description: Optional directory within the repository. All paths are relative
+            to it.
+          default: ''
+        ssh_key_secret:
+          allOf:
+          - $ref: '#/components/schemas/SecretRef'
+          description: Secret holding an unencrypted SSH private key with read access
+        known_hosts:
+          type: string
+          title: Known Hosts
+          description: known_hosts lines for the remote host, e.g. the output of `ssh-keyscan
+            host` once its fingerprint has been checked against one obtained through
+            a trusted channel. The host key is verified against these and nothing
+            else.
+      type: object
+      required:
+      - url
+      - ssh_key_secret
+      - known_hosts
+      title: GitStorageConfig
     GithubStorageConfig:
       properties:
         read_chunk_size:
@@ -19519,6 +19573,7 @@ components:
       - huggingface
       - s3
       - github
+      - git
       title: StorageConfigType
       type: string
     StringFilter:

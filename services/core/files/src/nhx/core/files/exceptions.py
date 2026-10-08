@@ -32,6 +32,10 @@ class StorageUnavailableError(StorageBackendError):
     """
 
 
+class StorageServerFault(RuntimeError):
+    """Raised when the files service itself cannot serve a request, such as a missing binary or a full disk."""
+
+
 class NotFoundError(Exception):
     """Error when the resource isn't found."""
 
