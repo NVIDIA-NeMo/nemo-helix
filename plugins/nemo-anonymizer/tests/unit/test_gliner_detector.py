@@ -173,6 +173,16 @@ def test_prewarm_downloads_through_files_and_aligns_cache(monkeypatch: pytest.Mo
     assert (copied_snapshot / "config.json").read_text() == "{}"
     assert (copied_snapshot / "model.safetensors").exists()
 
+    # Files named the snapshot after its OWN commit hash ("f"*40), but upstream
+    # resolves revision=<pinned SHA> by looking for snapshots/<SHA> directly, so
+    # the align must also expose a snapshots/<SHA> entry pointing at it. Without
+    # this the offline loader fails with LocalEntryNotFoundError (regression:
+    # the real Files pull-through uses a hash != the pinned SHA).
+    sha_snapshot = upstream_folder / "snapshots" / gliner_detector.GLINER_MODEL_REVISION
+    assert sha_snapshot.is_symlink()
+    assert (sha_snapshot / "config.json").read_text() == "{}"
+    assert (sha_snapshot / "model.safetensors").exists()
+
 
 class _Overrides:
     def __init__(self, detection: dict[str, object] | None) -> None:

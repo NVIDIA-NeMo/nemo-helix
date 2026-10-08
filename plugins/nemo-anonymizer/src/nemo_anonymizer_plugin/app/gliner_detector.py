@@ -190,23 +190,34 @@ def _upstream_cache_folder() -> Path:
 
 
 def _align_fileset_cache_to_upstream_repo() -> None:
-    """Expose the Files-fetched weights under the repo id upstream requests.
+    """Expose the Files-fetched weights under the repo id/revision upstream requests.
 
     The pull-through download lands under the Fileset's cache folder
-    (``models--system--nhx-anonymizer-gliner-pii``). Upstream, however, calls
-    ``snapshot_download`` with the HuggingFace repo id and pinned SHA, so it reads
-    ``models--fastino--…``. We bridge the two by **copying the whole repo-cache
-    folder** (its ``blobs``/``snapshots``/``refs`` as HuggingFace Hub wrote them)
-    to the upstream folder name, so upstream's own ``snapshot_download`` resolves
-    it as an ordinary offline cache hit.
+    (``models--system--nhx-anonymizer-gliner-pii``), with the snapshot named by
+    the commit hash **Files** reports. Upstream, however, calls
+    ``snapshot_download`` with the HuggingFace repo id and the pinned fastino SHA,
+    so it reads ``models--fastino--…`` and resolves ``revision=<SHA>``.
 
-    A folder COPY (not a snapshot symlink) is used deliberately: a symlinked
-    ``snapshots/{SHA}`` collides with Hub's own materialization bookkeeping
-    (``FileExistsError`` on re-download, ``LocalEntryNotFoundError`` offline),
-    whereas a real folder with intact Hub metadata is what the offline loader
-    expects. Only the public on-disk cache layout is used; no internals are
+    Two steps bridge the gap:
+
+    1. **Copy the whole repo-cache folder** (its ``blobs``/``snapshots``/``refs``
+       as HuggingFace Hub wrote them) to the upstream folder name. A folder COPY
+       (not a cross-folder snapshot symlink) is used deliberately: the earlier
+       symlink approach collided with Hub's own materialization bookkeeping
+       (``FileExistsError`` on re-download, ``LocalEntryNotFoundError`` offline).
+
+    2. **Add a ``snapshots/<SHA>`` entry** for the pinned revision. Hub resolves a
+       40-hex ``revision`` by looking for ``snapshots/<revision>`` *directly* — it
+       does NOT consult ``refs/`` for a commit-hash-shaped revision — but Files
+       named the snapshot after its own commit hash, so without this the offline
+       loader can't find the pinned SHA. We point ``snapshots/<SHA>`` at the real
+       downloaded snapshot (named by the hash in ``refs/<SHA>``) via a relative
+       same-folder symlink, matching how Hub itself links revisions.
+
+    Only the public on-disk cache layout is used; no cache internals are
     synthesized.
     """
+    import os
     import shutil
 
     src = _fileset_cache_folder()
@@ -218,6 +229,16 @@ def _align_fileset_cache_to_upstream_repo() -> None:
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst, symlinks=True)
+
+    # Step 2: make the pinned SHA resolvable as a snapshot dir.
+    sha_snapshot = dst / "snapshots" / GLINER_MODEL_REVISION
+    if not sha_snapshot.exists():
+        ref_file = dst / "refs" / GLINER_MODEL_REVISION
+        files_commit = ref_file.read_text().strip() if ref_file.is_file() else None
+        actual_snapshot = dst / "snapshots" / files_commit if files_commit else None
+        if actual_snapshot is not None and actual_snapshot.is_dir():
+            # relative symlink within snapshots/, as Hub links revisions
+            sha_snapshot.symlink_to(os.path.relpath(actual_snapshot, sha_snapshot.parent))
 
 
 def prewarm_gliner_cache(base_url: str, *, on_download_start: Callable[[], None] | None = None) -> None:
