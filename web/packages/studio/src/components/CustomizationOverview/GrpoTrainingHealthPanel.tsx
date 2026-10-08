@@ -102,6 +102,7 @@ export const GrpoTrainingHealthPanel: FC<Props> = ({ statusDetails }) => {
                   xAxisLabel="Step"
                   height={CHART_HEIGHT}
                   showLegend={false}
+                  emptyMessage="No training metrics to compare"
                   referenceLines={diagnostic.referenceLines}
                   {...thresholdAxisBounds(diagnostic, series)}
                   formatYValue={diagnostic.formatAxisValue ?? diagnostic.formatValue}
