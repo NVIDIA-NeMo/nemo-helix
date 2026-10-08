@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from nemo_builder_plugin.schema import BuildSet, BuildSpec
+from nemo_builder_plugin.schema import JOB_NAME_PREFIX, BuildSet, BuildSpec
 from nemo_builder_plugin.steps import ContextSource
 
 
@@ -65,17 +65,17 @@ class BuildPlan:
 
     @classmethod
     def resolve(cls, build_set: BuildSet, *, workspace: str) -> BuildPlan:
-        job_name = f"{build_set.name}-{build_set.revision}"
+        base = f"{build_set.name}-{build_set.revision}"
         images = tuple(
             PlannedImage(
                 spec=spec,
                 workspace=workspace,
                 build_set=build_set.name,
-                name=f"{job_name}.{spec.name}" if spec.name else job_name,
+                name=f"{base}.{spec.name}" if spec.name else base,
             )
             for spec in build_set.build_specs
         )
-        return cls(build_set=build_set, workspace=workspace, job_name=job_name, images=images)
+        return cls(build_set=build_set, workspace=workspace, job_name=f"{JOB_NAME_PREFIX}{base}", images=images)
 
     def with_destinations(self, destination: Callable[[PlannedImage], Destination]) -> BuildPlan:
         placed = tuple(replace(image, destination=destination(image)) for image in self.images)

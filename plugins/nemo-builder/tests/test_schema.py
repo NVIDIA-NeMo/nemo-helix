@@ -170,11 +170,12 @@ class TestBuildSet:
             BuildSet(name=bad, revision=1, build_specs=[_spec("a")])
 
     def test_a_name_too_long_for_its_derived_names_is_refused_before_anything_is_written(self) -> None:
-        # `job-fileset-<name>-<rev>`, the name Jobs gives the job's fileset: 12 + 50 + 2 = 64, one over.
+        # `job-fileset-builder-<name>-<rev>`, the name Jobs gives the job's fileset: 12 + 8 + 42 + 2 = 64, one
+        # over. Without the job's `builder-` prefix, 42 would fit.
         unnamed = BuildSpec(source=FileSetSource(fileset="fs-a"))
         with pytest.raises(ValidationError, match="too long"):
-            BuildSet(name="a" * 50, revision=1, build_specs=[unnamed])
-        assert BuildSet(name="a" * 49, revision=1, build_specs=[unnamed])
+            BuildSet(name="a" * 42, revision=1, build_specs=[unnamed])
+        assert BuildSet(name="a" * 41, revision=1, build_specs=[unnamed])
 
     def test_a_spec_name_too_long_for_its_image_name_is_refused(self) -> None:
         # `demo-1.<spec>`: 7 + 57 = 64, one over.
@@ -213,6 +214,15 @@ class TestContainerImage:
         row = self._pending()
         row.digest = _DIGEST
         assert row.image_ref == f"reg.example.com/team/main@{_DIGEST}"
+
+    def test_image_ref_is_serialized_but_never_stored(self) -> None:
+        row = self._pending()
+        row.digest = _DIGEST
+        response = row.model_dump(mode="json")
+        assert response["image_ref"] == f"reg.example.com/team/main@{_DIGEST}"
+        assert "image_ref" not in row._get_data_fields()
+        # The push step reads rows back from the routes' responses.
+        assert ContainerImage.model_validate(response).image_ref == row.image_ref
 
     def test_a_digest_must_be_sha256(self) -> None:
         with pytest.raises(ValidationError):
