@@ -15,11 +15,11 @@ description: ""
 Learn how to use the NeMo Helix Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime.
 
 **In this tutorial, you will:**
-1. Fine-tune [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) on the SQuAD dataset using LoRA, with [sequence packing](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) enabled for one run and disabled for another.
+1. Fine-tune [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) on the SQuAD dataset using LoRA, with [sequence packing](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) enabled for one run and disabled for another.
 2. Compare training runtime, GPU utilization, and memory allocation between the two runs.
 3. Verify that validation loss remains comparable, confirming that sequence packing improves throughput without sacrificing model quality.
 
-> **Note:** While this tutorial demonstrates sequence packing with LoRA, the optimization is also available for all_weights (full) SFT customization jobs.
+> **Note:** While this tutorial demonstrates sequence packing with LoRA, the optimization is also available for all_weights (full) SFT customization jobs. To pack sequences for Nemotron 3.5 Lightning 30B-A3B, start from the Automodel reference recipe [`customizer_nemotron_nano_peft_packing.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft_packing.yaml).
 
 ## Prerequisites
 
@@ -193,12 +193,12 @@ Get your credentials to access base models:
 
 #### Quick Setup Example
 
-This tutorial uses the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/tree/main) model from Hugging Face. Ensure that you have sufficient permissions to download the model. If you cannot access the files on the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/tree/main) Hugging Face page, request access.
+This tutorial uses the [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) model from Hugging Face. It is public, so the Hugging Face token is optional.
 
 **Hugging Face Authentication:**
-- For gated models (Llama, Gemma), you must provide a Hugging Face token via the `token_secret` parameter
+- For gated models, you must provide a Hugging Face token via the `token_secret` parameter
 - Get your token from [Hugging Face Settings](https://huggingface.co/settings/tokens) (requires Read access)
-- Accept the model's terms on the Hugging Face model page before using it. Example: [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/tree/main)
+- Accept the model's terms on the Hugging Face model page before using it
 - For public models, you can omit the `token_secret` parameter when creating a fileset for the model in the next step.
 
 ```python
@@ -209,7 +209,8 @@ NGC_API_KEY = os.getenv("NGC_API_KEY")
 
 def create_or_get_secret(name: str, value: str | None, label: str):
     if not value:
-        raise ValueError(f"{label} environment variable is not set. Set it and try again.")
+        print(f"{label} is not set - skipping setting secret")
+        return None
     try:
         secret = client.secrets.create_secret(
             body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
@@ -223,8 +224,9 @@ def create_or_get_secret(name: str, value: str | None, label: str):
 
 # Create Hugging Face token secret
 hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
-print("HF_TOKEN secret:")
-print(hf_secret.model_dump_json(indent=2))
+if hf_secret:
+    print("HF_TOKEN secret:")
+    print(hf_secret.model_dump_json(indent=2))
 
 # Create NGC API key secret
 # Uncomment the line below if you have NGC API Key and want to finetune NGC models
@@ -233,7 +235,7 @@ print(hf_secret.model_dump_json(indent=2))
 
 ### 4. Create Base Model FileSet
 
-Create a fileset pointing to the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/tree/main) model on Hugging Face. This step creates a pointer to the model on Hugging Face and does not download it. The model is downloaded at job creation time.
+Create a fileset pointing to the [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) model on Hugging Face. This step creates a pointer to the model on Hugging Face and does not download it. The model is downloaded at job creation time.
 
 Note: for public models, you can omit the `token_secret` parameter when creating a model fileset.
 
@@ -241,22 +243,21 @@ Note: for public models, you can omit the `token_secret` parameter when creating
 import time
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
-HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
-MODEL_NAME = "llama-3-2-1b-base"
+HF_REPO_ID = "Qwen/Qwen3-0.6B"
+MODEL_NAME = "qwen3-0.6b"
 
-# Ensure you have a Hugging Face token secret created
 # Create a fileset pointing to the desired Hugging Face model
 try:
     base_model_fs = client.files.create_fileset(
         body=CreateFilesetRequest(
             name=MODEL_NAME,
-            description="Llama 3.2 1B base model from Hugging Face",
+            description="Qwen3 0.6B base model from Hugging Face",
             storage=HuggingfaceStorageConfig(
                 # repo_id is the full model name from Hugging Face
                 repo_id=HF_REPO_ID,
                 repo_type="model",
-                # we use the secret created in the previous step
-                token_secret=SecretRef(hf_secret.name),
+                # we use the secret created in the previous step, if any
+                token_secret=SecretRef(hf_secret.name) if hf_secret else None,
             ),
         ),
     ).data()
@@ -301,7 +302,7 @@ print(f"ModelSpec populated: {base_model.spec}")
 ```
 
 ### 5. Create LoRA Job with Sequence Packing
-Create a LoRA customization job with **sequence packing** enabled via `AutomodelJobInput` (`batch.sequence_packing=True`).
+Create a LoRA customization job with **sequence packing** enabled via `AutomodelJobInput` (`batch.sequence_packing=True`). The LoRA rank, alpha, and learning rate follow the Automodel reference recipe [`qwen3_0p6b_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/qwen/qwen3_0p6b_hellaswag_peft.yaml). With packing, `global_batch_size` counts packed sequences, and each pack holds several SQuAD samples. This job therefore uses a smaller `global_batch_size` (4) than the unpacked job (64). With the same value, the packed job would take only a few optimizer steps and its validation loss would not be comparable.
 
 ```python
 import uuid
@@ -319,15 +320,16 @@ spec = AutomodelJobInput(
     training={
         "training_type": "sft",
         "finetuning_type": "lora",
+        "lora": {"rank": 8, "alpha": 32},
         "max_seq_length": 4096,
     },
     schedule={"epochs": 1, "val_check_interval": 0.1},
     batch={
-        "global_batch_size": 64,
+        "global_batch_size": 4,
         "micro_batch_size": 1,
         "sequence_packing": SEQUENCE_PACKING_ENABLED,
     },
-    optimizer={"learning_rate": 5e-5},
+    optimizer={"learning_rate": 1e-5, "weight_decay": 0.0},
     parallelism={"num_gpus_per_node": 1},
     output={"name": PACK_OUTPUT_NAME},
 )
@@ -372,7 +374,11 @@ def _get_gpu_snapshot() -> tuple[list[float], list[float]]:
     """Return (vram_usage_pcts, compute_util_pcts) for each GPU."""
     if not _PYNVML_AVAILABLE:
         return [], []
-    pynvml.nvmlInit()
+    try:
+        pynvml.nvmlInit()
+    except pynvml.NVMLError:
+        # No local NVIDIA driver, e.g. the notebook runs on a different host than the GPUs.
+        return [], []
     try:
         vram, util = [], []
         for i in range(pynvml.nvmlDeviceGetCount()):
@@ -731,6 +737,7 @@ spec = AutomodelJobInput(
     training={
         "training_type": "sft",
         "finetuning_type": "lora",
+        "lora": {"rank": 8, "alpha": 32},
         "max_seq_length": 4096,
     },
     schedule={"epochs": 1, "val_check_interval": 0.1},
@@ -739,7 +746,7 @@ spec = AutomodelJobInput(
         "micro_batch_size": 1,
         "sequence_packing": False,
     },
-    optimizer={"learning_rate": 5e-5},
+    optimizer={"learning_rate": 1e-5, "weight_decay": 0.0},
     parallelism={"num_gpus_per_node": 1},
     output={"name": NO_PACK_OUTPUT_NAME},
 )
@@ -818,7 +825,7 @@ results_df.style.format({"Val Loss": "{:.2f}", "Training Step Time, sec": "{:.0f
 #### Examples of Validation Loss
 
 The expected validation loss curves should match closely for both jobs.
-![Validation loss comparison chart showing similar convergence patterns between sequence-packed and non-packed training runs over training steps](../_images/packed_vs_not_packed_val_loss.png)
+![Validation loss comparison chart showing similar convergence patterns between sequence-packed and non-packed training runs over one training epoch](../_images/packed_vs_not_packed_val_loss.png)
 
 Sequence packed version should complete significantly faster.
 ![Runtime comparison chart demonstrating significantly reduced training time for sequence-packed job compared to non-packed baseline](../_images/runtime.png)

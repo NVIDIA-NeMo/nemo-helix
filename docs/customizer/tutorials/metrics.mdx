@@ -194,17 +194,22 @@ from nemo_automodel_plugin.schema import AutomodelJobInput
 
 # Create an Automodel job with W&B integration
 spec = AutomodelJobInput(
-    model="default/llama-3-2-1b",
+    model="default/nemotron-3-5-lightning-30b-a3b",
     dataset={"training": "default/my-dataset"},
-    training={"training_type": "sft", "finetuning_type": "lora"},
+    training={
+        "training_type": "sft",
+        "finetuning_type": "lora",
+        "lora": {"rank": 16, "alpha": 32, "exclude_modules": ["*.out_proj"]},
+    },
     schedule={"epochs": 3},
-    batch={"global_batch_size": 16, "micro_batch_size": 1},
-    optimizer={"learning_rate": 1e-4},
+    batch={"global_batch_size": 8, "micro_batch_size": 1},
+    optimizer={"learning_rate": 1e-5},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
     integrations={
         "wandb": {
             "project": "my-finetuning-project",
             "entity": "my-team",
-            "tags": ["fine-tuning", "llama"],
+            "tags": ["fine-tuning", "nemotron"],
             "api_key_secret": "my-wandb-key",
         }
     },
