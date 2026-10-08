@@ -64,10 +64,11 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 [project.entry-points."nemo.jobs"]
 "agents.evaluate" = "nemo_agents_plugin.jobs.evaluate_agent:EvaluateAgentJob"
 "agents.execute" = "nemo_agents_plugin.jobs.execute:ExecuteAgentJob"
-# POC: agent-improvement workflow
+# POC: agent-improvement workflow (hidden from `nemo agents` help; see AgentsCLI.update_job_cli)
 "agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
 "agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
 "agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
+
 "agents.package-agent" = "nemo_agents_plugin.jobs.package_agent:PackageAgentJob"
 
 [project.entry-points."nemo.controllers"]
