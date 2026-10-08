@@ -88,6 +88,7 @@ const validValidation: CustomizationDatasetValidationResult = {
   hasTraining: true,
   hasValidation: false,
   unmatchedRootJson: [],
+  unmatchedRootJsonValid: true,
   autoSplitNotice: false,
   training: [],
   validation: [],

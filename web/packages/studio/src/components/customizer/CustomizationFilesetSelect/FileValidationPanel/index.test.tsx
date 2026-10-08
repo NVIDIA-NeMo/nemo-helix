@@ -28,6 +28,7 @@ const buildValidation = (
   hasTraining: true,
   hasValidation: true,
   unmatchedRootJson: [],
+  unmatchedRootJsonValid: true,
   autoSplitNotice: false,
   training: [],
   validation: [],

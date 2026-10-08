@@ -379,11 +379,13 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     // remain required for every backend.
     const skipSchemaAndCompleteness = backend === 'unsloth' && !unslothApplyChatTemplate;
     // For native Unsloth a root .json that matched no Customizer pattern still
-    // counts as training; for every other backend only the Customizer-discovered
-    // training files count.
+    // counts as training, provided it passed format and encoding checks.
+    // For every other backend only the Customizer-discovered training files count.
     const hasTraining =
       datasetValidation.hasTraining ||
-      (skipSchemaAndCompleteness && datasetValidation.unmatchedRootJson.length > 0);
+      (skipSchemaAndCompleteness &&
+        datasetValidation.unmatchedRootJson.length > 0 &&
+        datasetValidation.unmatchedRootJsonValid);
     if (
       datasetValidation.discoveryError ||
       !hasTraining ||
