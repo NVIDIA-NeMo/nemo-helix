@@ -290,7 +290,7 @@ class ModelProviderService:
             return _entity_to_schema(created)
 
     async def delete_model_provider(self, request: DeleteModelProviderRequest) -> bool:
-        """Delete a provider and models that have no remaining providers."""
+        """Delete a provider and the models only it serves, unless it is a deployment's provider."""
         logger.debug("Deleting model provider", extra={"workspace": request.workspace, "provider_name": request.name})
 
         try:
@@ -319,7 +319,11 @@ class ModelProviderService:
         return True
 
     async def _cleanup_model_entities(self, provider: ModelProviderEntity, provider_id: str) -> None:
-        """Delete orphaned models and unlink models that have other providers."""
+        """Unlink served models and delete the ones an external provider leaves without providers.
+
+        A deployment provider never creates the models it serves: its base model is the
+        deployment's input, so it outlives the deployment and is only unlinked.
+        """
         if not provider.served_models:
             logger.debug("No served_models, skipping model entity cleanup", extra={"provider_id": provider_id})
             return
@@ -338,7 +342,7 @@ class ModelProviderService:
                 model = await self.entity_client.get(Model, workspace=model_workspace, name=model_name)
 
                 remaining_providers = [p for p in model.model_providers if p != provider_id]
-                if remaining_providers:
+                if remaining_providers or provider.model_deployment_id is not None:
                     if provider_id in model.model_providers:
                         model.model_providers = remaining_providers
                         await self.entity_client.update(model)

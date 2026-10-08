@@ -3616,7 +3616,7 @@ nemo inference providers [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `create`: Create a new model provider.
-* `delete`: Delete a provider and models that have no remaining...
+* `delete`: Delete a provider and the models only it serves, unless...
 * `list`: List model providers for a specific workspace.
 * `get`: Get a model provider by workspace and name.
 * `update`: Create or update a model provider.
@@ -3680,7 +3680,7 @@ nemo inference providers create [OPTIONS] [NAME]
 
 ##### nemo inference providers delete
 
-Delete a provider and models that have no remaining providers.
+Delete a provider and the models only it serves, unless it is a deployment's provider.
 
 **Usage:**
 
