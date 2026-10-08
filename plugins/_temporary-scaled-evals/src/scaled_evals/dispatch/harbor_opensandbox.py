@@ -32,6 +32,7 @@ from typing import Any
 
 import tomlkit
 import yaml
+from nhx_sandbox.opensandbox_policy import canonical_egress_target
 from tomlkit.items import InlineTable, Table
 
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSION, HARBOR_OPENSANDBOX_RUNTIME
@@ -262,7 +263,8 @@ def preflight_staged_task(
     environment = document.get("environment") or {}
     if environment.get("network_mode") == "allowlist":
         requested = [str(host) for host in environment.get("allowed_hosts") or []]
-        extra = sorted(set(requested) - set(trusted_hosts))
+        trusted_targets = {canonical_egress_target(host) for host in trusted_hosts}
+        extra = sorted({host for host in requested if canonical_egress_target(host) not in trusted_targets})
         if extra:
             raise ValueError(
                 f"task requests egress to {extra}, which the operator allowlist for "
@@ -494,9 +496,11 @@ def make_harbor_opensandbox_submitter(
         # instruction are saved as run artifacts; the timeout change is kept for the launch handle.
         if spec.extra_skill_object_keys:
             materials = _inject_extra_skills(task_dir, spec.extra_skill_object_keys)
-            _save_extra_skill_materials_artifact(materials, spec.evaluation_id, harbor_dir=selected_harbor)
+            _save_extra_skill_materials_artifact(
+                materials, spec.evaluation_id, harbor_dir=selected_harbor, jobs_dir=jobs_dir
+            )
         _patch_instruction(task_dir, spec.instruction_prefix, spec.instruction_postfix)
-        _save_instruction_artifact(task_dir, spec.evaluation_id, harbor_dir=selected_harbor)
+        _save_instruction_artifact(task_dir, spec.evaluation_id, harbor_dir=selected_harbor, jobs_dir=jobs_dir)
         agent_timeout_apply = (
             apply_agent_timeout_floor(task_dir, spec.agent_timeout_floor_sec)
             if spec.agent_timeout_floor_sec is not None
@@ -621,9 +625,11 @@ def write_applied_egress_summary(job_dir: Path) -> None:
     (job_dir / APPLIED_EGRESS_SUMMARY_FILENAME).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
 
 
-def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> StatusReader:
+def make_harbor_opensandbox_status_reader(
+    *, harbor_dir: str, jobs_dir: str, artifact_root: str | None = None
+) -> StatusReader:
     """Read Harbor's status like ``sandbox_k8s``, and write the applied-egress summary once the run ends."""
-    read_harbor = make_sandbox_k8s_status_reader(harbor_dir=harbor_dir, jobs_dir=jobs_dir)
+    read_harbor = make_sandbox_k8s_status_reader(harbor_dir=harbor_dir, jobs_dir=jobs_dir, artifact_root=artifact_root)
 
     def read(handle: LaunchHandle) -> RuntimeStatus:
         # Harbor writes the same result.json as under sandbox_k8s, so reuse that runtime's reader.
@@ -632,7 +638,9 @@ def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> 
         # Once Harbor has finished, every trial has written its record, so summarize them now.
         # A failed write is logged, not raised: it must not change the evaluation's outcome.
         if status.phase in {"succeeded", "failed"}:
-            job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
+            job_dir = _harbor_result_path(
+                handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir, artifact_root=artifact_root
+            ).parent
             try:
                 write_applied_egress_summary(job_dir)
             except OSError as exc:
@@ -683,6 +691,7 @@ def make_harbor_opensandbox_terminator(
     *,
     harbor_dir: str,
     jobs_dir: str,
+    artifact_root: str | None = None,
     env_file: str | None = None,
     cleanup_runner: CleanupRunner | None = None,
     environ: Mapping[str, str] | None = None,
@@ -741,7 +750,9 @@ def make_harbor_opensandbox_terminator(
             failures.append(f"OpenSandbox cleanup failed: {exc}")
 
         # Also write the summary here: a cancelled run never reaches a terminal phase in the status reader.
-        job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
+        job_dir = _harbor_result_path(
+            handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir, artifact_root=artifact_root
+        ).parent
         try:
             write_applied_egress_summary(job_dir)
         except OSError as exc:
@@ -784,6 +795,13 @@ def validate_settings() -> None:
     if not settings.harbor_opensandbox_deployment_id.strip():
         raise RuntimeError("HARBOR_OPENSANDBOX_DEPLOYMENT_ID must be non-empty")
 
+    # Valid but probably a mistake: the fallback reads harbor_dir, which may not be the runner Harbor wrote under.
+    if not settings.harbor_opensandbox_artifact_root:
+        LOG.warning(
+            "harbor_opensandbox has no HARBOR_OPENSANDBOX_ARTIFACT_ROOT; reading job output from "
+            "HARBOR_DIR/HARBOR_OPENSANDBOX_JOBS_DIR, which misses runs written under another Harbor runner"
+        )
+
     # Valid but probably a mistake: without a model endpoint host, agents can't reach their model.
     if not settings.harbor_opensandbox_model_endpoint_hosts.strip():
         LOG.warning("harbor_opensandbox has no model endpoint host; trials can reach only the operator allowlist")
@@ -810,10 +828,12 @@ def build_backend() -> HarborOpenSandboxBackend:
         status_reader=make_harbor_opensandbox_status_reader(
             harbor_dir=settings.harbor_dir,
             jobs_dir=settings.harbor_opensandbox_jobs_dir,
+            artifact_root=settings.harbor_opensandbox_artifact_root,
         ),
         terminator=make_harbor_opensandbox_terminator(
             harbor_dir=settings.harbor_dir,
             jobs_dir=settings.harbor_opensandbox_jobs_dir,
+            artifact_root=settings.harbor_opensandbox_artifact_root,
             env_file=settings.harbor_opensandbox_env_file,
         ),
     )
@@ -821,6 +841,8 @@ def build_backend() -> HarborOpenSandboxBackend:
 
 def _artifact_root(evaluation_id: str) -> Path:
     """Harbor's job directory for one evaluation; the worker uploads it as the evaluation's artifacts."""
+    if settings.harbor_opensandbox_artifact_root:
+        return Path(settings.harbor_opensandbox_artifact_root).expanduser() / evaluation_id
     return Path(settings.harbor_dir).expanduser() / settings.harbor_opensandbox_jobs_dir / evaluation_id
 
 

@@ -1285,11 +1285,12 @@ def _save_extra_skill_materials_artifact(
     evaluation_id: str,
     *,
     harbor_dir: Path | None = None,
+    jobs_dir: str | None = None,
 ) -> None:
     if not materials:
         return
     root = harbor_dir or Path(settings.harbor_dir).expanduser()
-    artifact_dir = root / settings.sandbox_k8s_jobs_dir / evaluation_id
+    artifact_dir = root / (jobs_dir or settings.sandbox_k8s_jobs_dir) / evaluation_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     path = artifact_dir / "scaled-evals-extra-skill-materials.json"
     path.write_text(json.dumps({"materials": materials}, indent=2, sort_keys=True) + "\n")
@@ -1384,13 +1385,15 @@ def apply_agent_timeout_floor(task_tree: Path | None, floor_sec: int) -> dict[st
     return {"original": original, "effective": effective}
 
 
-def _save_instruction_artifact(task_tree: Path, evaluation_id: str, *, harbor_dir: Path | None = None) -> None:
+def _save_instruction_artifact(
+    task_tree: Path, evaluation_id: str, *, harbor_dir: Path | None = None, jobs_dir: str | None = None
+) -> None:
     """Copy the final instruction.md (post-patch) into the job artifact directory."""
     instr = task_tree / "instruction.md"
     if not instr.exists():
         return
     root = harbor_dir or Path(settings.harbor_dir).expanduser()
-    artifact_dir = root / settings.sandbox_k8s_jobs_dir / evaluation_id
+    artifact_dir = root / (jobs_dir or settings.sandbox_k8s_jobs_dir) / evaluation_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(instr, artifact_dir / "instruction.md")
 

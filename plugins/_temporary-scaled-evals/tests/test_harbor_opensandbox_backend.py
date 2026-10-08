@@ -386,6 +386,8 @@ def test_submit_stages_binds_renders_and_spawns(tmp_path: Path, monkeypatch: pyt
     task_dir = tmp_path / "work" / "ev_os1" / "hello-world"
     task = tomllib.loads((task_dir / "task.toml").read_text())
     assert task["environment"]["docker_image"] == f"nvcr.io/org/task@{DIGEST}"
+    assert (tmp_path / "harbor" / "jobs" / "os" / "ev_os1" / "instruction.md").is_file()
+    assert not (tmp_path / "harbor" / settings.sandbox_k8s_jobs_dir).exists()
 
     rendered_path = Path(handle.raw["config"])
     rendered_text = rendered_path.read_text()
@@ -563,6 +565,46 @@ def test_status_reader_writes_applied_egress_when_terminal(tmp_path: Path) -> No
 
     assert status.phase == "succeeded"
     assert [item["policy_sha256"] for item in _applied_summary(tmp_path)["sandboxes"]] == ["2" * 64]
+
+
+def test_artifact_root_prefers_configured_root_over_harbor_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "harbor_dir", str(tmp_path / "harbor"))
+    monkeypatch.setattr(settings, "harbor_opensandbox_jobs_dir", "jobs/os")
+    monkeypatch.setattr(settings, "harbor_opensandbox_artifact_root", None)
+    assert backend._artifact_root("ev_os1") == tmp_path / "harbor" / "jobs" / "os" / "ev_os1"
+
+    monkeypatch.setattr(settings, "harbor_opensandbox_artifact_root", str(tmp_path / "shared"))
+    assert backend._artifact_root("ev_os1") == tmp_path / "shared" / "ev_os1"
+
+
+def test_status_reader_and_terminator_read_configured_artifact_root(tmp_path: Path) -> None:
+    shared = tmp_path / "shared"
+    trial = shared / "ev_os1" / "trial-a"
+    trial.mkdir(parents=True)
+    (trial / backend.APPLIED_EGRESS_FILENAME).write_text(
+        json.dumps({"sandbox_id": "sb-trial-a", "network_mode": "public", "policy_sha256": "3" * 64})
+    )
+    (shared / "ev_os1" / "result.json").write_text(
+        json.dumps({"finished_at": "2026-09-28T00:00:00Z", "n_total_trials": 1, "stats": {"n_errored_trials": 0}})
+    )
+    summary = shared / "ev_os1" / backend.APPLIED_EGRESS_SUMMARY_FILENAME
+
+    read = backend.make_harbor_opensandbox_status_reader(
+        harbor_dir=str(tmp_path / "harbor"), jobs_dir="jobs", artifact_root=str(shared)
+    )
+    assert read(_handle(tmp_path)).phase == "succeeded"
+    assert json.loads(summary.read_text())["sandboxes"][0]["policy_sha256"] == "3" * 64
+
+    summary.unlink()
+    backend.make_harbor_opensandbox_terminator(
+        harbor_dir=str(tmp_path / "harbor"),
+        jobs_dir="jobs",
+        artifact_root=str(shared),
+        cleanup_runner=_CleanupRecorder(),
+        environ={"OPENSANDBOX_DOMAIN": "os.svc", "OPENSANDBOX_API_KEY": "k"},
+    )(_handle(tmp_path))
+    assert summary.is_file()
+    assert not (tmp_path / "harbor" / "jobs").exists()
 
 
 def test_backend_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
