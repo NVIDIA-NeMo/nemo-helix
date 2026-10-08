@@ -34,6 +34,18 @@ describe('traceKeyValues', () => {
     );
   });
 
+  it('leaves the agent out of the summary entries since the header links it', () => {
+    const trace = mockTraceById('trace-agent-run-001');
+    expect(trace).toBeDefined();
+
+    const entries = buildTraceSummaryEntries(
+      { ...trace!, agent_name: 'react-agent' },
+      { workspace: 'default' }
+    );
+
+    expect(entries.map(({ id }) => id)).not.toContain('agent_name');
+  });
+
   it('builds session headline metrics without a trace error count', () => {
     const session = mockSessionById('session-agent-run-001');
     expect(session).toBeDefined();

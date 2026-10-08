@@ -64,6 +64,7 @@ export const TRACE_HIGHLIGHT_METRIC_KEYS = new Set<keyof Trace | string>([
   'status',
   'started_at',
   'ended_at',
+  'agent_name',
   'span_count',
   'error_count',
   'duration_ms',
