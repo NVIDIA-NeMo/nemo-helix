@@ -68,14 +68,14 @@ def is_plugin_managed(path: Path) -> bool:
     return first_line[0] in (DOCKERFILE_SENTINEL, DOCKERIGNORE_SENTINEL)
 
 
-def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool]:
-    """Return the Platform extra and Hermes isolation flag for the default harness."""
+def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool, bool]:
+    """Return the Platform extra, Hermes isolation flag, and Pi (Node) harness flag."""
     try:
         payload = yaml.safe_load(agent_config.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
-        return "nemo-agents-plugin", False
+        return "nemo-agents-plugin", False, False
     if not isinstance(payload, Mapping):
-        return "nemo-agents-plugin", False
+        return "nemo-agents-plugin", False, False
 
     harnesses = payload.get("harnesses")
     default_harness = payload.get("default_harness")
@@ -84,8 +84,12 @@ def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool]:
     )
     kind = selected.get("kind") if isinstance(selected, Mapping) else None
     if not isinstance(kind, str):
-        return "nemo-agents-plugin", False
-    return _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin"), kind in _HERMES_HARNESS_KINDS
+        return "nemo-agents-plugin", False, False
+    return (
+        _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin"),
+        kind in _HERMES_HARNESS_KINDS,
+        kind in _PI_HARNESS_KINDS,
+    )
 
 
 # -- Defaults ---------------------------------------------------------------
@@ -132,6 +136,32 @@ _IMAGE_WORKDIR = "/workspace"
 # Unreleased Hermes main with Relay 0.9 (NousResearch/hermes-agent#115343); pin a release once one includes it.
 PINNED_HERMES_COMMIT = "dccb84b92401234db294667ec203d3ac3dc1b87f"
 
+# Pi harness (nvidia.fabric.pi) is a Node/npm adapter: the image installs Node + the
+# npm adapter + Pi SDK peers additively, alongside the Python/Rust Fabric stack.
+# Pi 0.86.x requires Node >= 22.19.0.
+PINNED_NODE_MAJOR = "22"
+PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.4.0"
+# The adapter declares the Pi SDK as OPTIONAL peers, so they are installed explicitly.
+# Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.4.0 requires
+# ^0.86.0) so the explicitly-installed SDK matches what the adapter was built against.
+PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@^0.86.0 @earendil-works/pi-coding-agent@^0.86.0"
+# NeMo Relay 0.9 CLI must be on PATH for Relay-enabled Pi telemetry (ATIF/OTEL/OpenInference).
+PI_RELAY_CLI_SPEC = "nemo-relay-cli-bin>=0.9.0,<0.10.0"
+# The Relay Pi extension is shipped only in the NeMo-Relay source tree (not the
+# nemo-relay-cli-bin wheel or the npm adapter), so the image fetches it from a
+# pinned Relay 0.9 ref. Kept in lockstep with PI_RELAY_CLI_SPEC's 0.9.x range so
+# the gateway CLI and the extension it loads cannot drift.
+PI_RELAY_EXTENSION_REF = "0.9.0"
+PI_RELAY_EXTENSION_REPO = "https://github.com/NVIDIA/NeMo-Relay.git"
+# Path to the Pi extension package WITHIN the Relay source tree.
+_PI_RELAY_EXTENSION_SRC_SUBDIR = "crates/cli/assets/pi-extension"
+# Stable in-image location the extension is copied to; translator.py defaults
+# harness.settings["relay_extension_path"] here for Relay-enabled Pi agents.
+PI_RELAY_EXTENSION_PATH = "/opt/pi-relay-extension"
+# npm global prefix for the adapter; its descriptor is linked into the Fabric
+# share/ tree so the Rust core's `preinstalled` discovery finds it.
+_PI_NPM_PREFIX = "/opt/pi-adapter"
+
 _FABRIC_HARNESS_INSTALLS = {
     "claude": "nemo-agents-plugin-claude",
     "nvidia.fabric.claude": "nemo-agents-plugin-claude",
@@ -141,6 +171,7 @@ _FABRIC_HARNESS_INSTALLS = {
     "nvidia.fabric.langchain.deepagents": "nemo-agents-plugin-deepagents",
 }
 _HERMES_HARNESS_KINDS = {"hermes", "nvidia.fabric.hermes"}
+_PI_HARNESS_KINDS = {"pi", "nvidia.fabric.pi"}
 
 # -- Jinja2 template --------------------------------------------------------
 
@@ -267,7 +298,7 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \\
     UV_LINK_MODE=copy
 
 RUN apt-get update && \\
-    apt-get install -y --no-install-recommends g++ gcc ca-certificates curl{% if install_hermes %} git{% endif %}{% if sandbox_apt_packages %} {{ sandbox_apt_packages }}{% endif %} && \\
+    apt-get install -y --no-install-recommends g++ gcc ca-certificates curl{% if install_hermes or install_pi %} git{% endif %}{% if install_pi %} gnupg{% endif %}{% if sandbox_apt_packages %} {{ sandbox_apt_packages }}{% endif %} && \\
     update-ca-certificates && \\
     rm -rf /var/lib/apt/lists/*
 
@@ -313,6 +344,33 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv pip check --python /opt/hermes-venv/bin/python && \\
     chmod -R a+rX /opt/hermes-agent /opt/hermes-venv
 ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python
+{% endif %}
+{% if install_pi %}
+# Pi is a Node adapter (Fabric spawns `node dist/cli.js`), so install Node + the npm
+# adapter + Pi SDK peers additively, and link the descriptor into the Fabric share/
+# tree for `preinstalled` discovery to resolve `nvidia.fabric.pi`.
+RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
+    curl -fsSL https://deb.nodesource.com/setup_{{ pinned_node_major }}.x | bash - && \\
+    apt-get install -y --no-install-recommends nodejs && \\
+    rm -rf /var/lib/apt/lists/* && \\
+    npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} {{ pi_sdk_npm_specs }} && \\
+    . /workspace/.venv/bin/activate && \\
+    uv pip install --no-sources --prerelease=allow "{{ pi_relay_cli_spec }}" && \\
+    git init --quiet /opt/pi-relay-src && \\
+    git -C /opt/pi-relay-src remote add origin {{ pi_relay_extension_repo }} && \\
+    git -C /opt/pi-relay-src fetch --depth 1 origin {{ pi_relay_extension_ref }} && \\
+    git -C /opt/pi-relay-src checkout --quiet --detach FETCH_HEAD && \\
+    test -d "/opt/pi-relay-src/{{ pi_relay_extension_src_subdir }}" && \\
+    cp -r "/opt/pi-relay-src/{{ pi_relay_extension_src_subdir }}" "{{ pi_relay_extension_path }}" && \\
+    rm -rf /opt/pi-relay-src && \\
+    chmod -R a+rX "{{ pi_relay_extension_path }}" && \\
+    PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \\
+    FABRIC_SHARE="$(/workspace/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("data"))')/share/nemo-fabric/adapters/pi" && \\
+    test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" && \\
+    mkdir -p "${FABRIC_SHARE}" && \\
+    ln -sf "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" "${FABRIC_SHARE}/pi.fabric-adapter.json" && \\
+    chmod -R a+rX {{ pi_npm_prefix }} "${FABRIC_SHARE}"
+ENV PATH="{{ pi_npm_prefix }}/bin:$PATH"
 {% endif %}
 
 LABEL org.opencontainers.image.title="{{ agent_name | dockerfile_escape }}" \\
@@ -430,6 +488,7 @@ class FabricRenderParams(SharedRenderParams):
     wheel_filename: str = ""
     platform_extra: str = "nemo-agents-plugin"
     install_hermes: bool = False
+    install_pi: bool = False
 
 
 # -- Public API -------------------------------------------------------------
@@ -505,6 +564,15 @@ def _jinja_env() -> jinja2.Environment:
     env.filters["dockerfile_escape"] = _dockerfile_escape
     template_globals: dict[str, Any] = env.globals
     template_globals["pinned_hermes_commit"] = PINNED_HERMES_COMMIT
+    template_globals["pinned_node_major"] = PINNED_NODE_MAJOR
+    template_globals["pi_adapter_npm_spec"] = PI_ADAPTER_NPM_SPEC
+    template_globals["pi_sdk_npm_specs"] = PI_SDK_NPM_SPECS
+    template_globals["pi_relay_cli_spec"] = PI_RELAY_CLI_SPEC
+    template_globals["pi_relay_extension_repo"] = PI_RELAY_EXTENSION_REPO
+    template_globals["pi_relay_extension_ref"] = PI_RELAY_EXTENSION_REF
+    template_globals["pi_relay_extension_src_subdir"] = _PI_RELAY_EXTENSION_SRC_SUBDIR
+    template_globals["pi_relay_extension_path"] = PI_RELAY_EXTENSION_PATH
+    template_globals["pi_npm_prefix"] = _PI_NPM_PREFIX
     return env
 
 
@@ -732,12 +800,13 @@ def render_fabric_dockerfile(
         shared.contract_version,
         pins_contract_version=template_path is None and not wheel_filename,
     )
-    platform_extra, install_hermes = resolve_fabric_harness_install(agent_config)
+    platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(agent_config)
     params = FabricRenderParams(
         **{f.name: getattr(shared, f.name) for f in fields(shared)},
         wheel_filename=wheel_filename,
         platform_extra=platform_extra,
         install_hermes=install_hermes,
+        install_pi=install_pi,
     )
 
     if template_path:
