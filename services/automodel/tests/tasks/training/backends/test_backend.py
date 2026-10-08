@@ -20,9 +20,9 @@ sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
 
 from nhx.automodel.tasks.training.backends.backend import AutomodelBackend  # noqa: E402
 from nhx.automodel.tasks.training.backends.checkpoints import ModelType  # noqa: E402
+from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter  # noqa: E402
 from nhx.automodel.tasks.training.protocol import LibraryConfig  # noqa: E402
 from nhx.automodel.tasks.training.schemas import TrainingRecipe  # noqa: E402
-from nhx.customization_common.training.progress import JobsServiceProgressReporter  # noqa: E402
 
 
 class TestAutomodelBackend:
@@ -232,7 +232,7 @@ class TestExecuteTrainingWallClock:
             proc.returncode = 0
             return 0
 
-        proc.wait = wait  # type: ignore[method-assign]
+        proc.wait = wait  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
         with caplog.at_level("INFO"):
             result = run_execute(monkeypatch, progress, proc)
 
