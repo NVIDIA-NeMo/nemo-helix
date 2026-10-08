@@ -64,6 +64,7 @@ export const TrainingHealthPanel: FC<Props> = ({ statusDetails }) => {
                 xAxisLabel="Step"
                 height={CHART_HEIGHT}
                 showLegend={false}
+                emptyMessage="No training metrics to compare"
                 formatYValue={diagnostic.formatValue}
               />
             </Stack>

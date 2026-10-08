@@ -5,9 +5,11 @@ import {
   ChartTooltipRow,
   ChartTooltipSurface,
 } from '@nemo/common/src/components/charts/ChartTooltip';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Text } from '@nvidia/foundations-react-core';
 import { Empty } from '@studio/components/Empty';
 import type { CustomizationMetricValue } from '@studio/types/customization';
+import { getTrainingMetricsEmptyState } from '@studio/util/trainingMetricsEmptyState';
 import { type ComponentProps, useMemo } from 'react';
 import {
   CartesianGrid,
@@ -23,6 +25,7 @@ import {
 } from 'recharts';
 
 interface Props {
+  jobStatus?: HelixJobStatus;
   trainLoss?: CustomizationMetricValue[];
   valLoss?: CustomizationMetricValue[];
   height?: number;
@@ -84,6 +87,7 @@ const interpolateValue = (step: number, data: CustomizationMetricValue[]): numbe
 };
 
 export function TrainValidationLossLineChart({
+  jobStatus,
   trainLoss = [],
   valLoss = [],
   height = 400,
@@ -165,8 +169,8 @@ export function TrainValidationLossLineChart({
     return boundaries;
   }, [chartData]);
 
-  if (chartData.length === 0) {
-    return <Empty title="No training data available" />;
+  if (!hasTrainData && !hasValData) {
+    return <Empty {...getTrainingMetricsEmptyState(jobStatus)} icon={null} />;
   }
 
   return (
@@ -184,7 +188,7 @@ export function TrainValidationLossLineChart({
           domain={['dataMin', 'dataMax']}
           {...xAxisAttributes}
         />
-        <YAxis label={{ value: 'Data Loss', angle: -90, position: 'insideLeft' }} />
+        <YAxis label={{ value: 'Loss', angle: -90, position: 'insideLeft' }} />
         <Tooltip
           content={<CustomTooltip />}
           cursor={{ stroke: 'var(--border-color-accent-gray)', strokeWidth: 1 }}

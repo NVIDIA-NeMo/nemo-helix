@@ -75,17 +75,17 @@ const validAutomodelValues = (): CustomizationFormFields => ({
   },
 });
 
-const emptyValidation: CustomizationDatasetValidationResult = {
+const validValidation: CustomizationDatasetValidationResult = {
   isPending: false,
   discoveryError: null,
   format: { ok: true, fileErrors: [] },
-  schema: null,
+  schema: { variant: 'sft-prompt-completion', label: 'SFT prompt/completion' },
   schemaExpectedCopy: '',
   schemaMismatchedFiles: [],
   schemaShape: '',
   completeness: { ok: true, skipped: false, errors: [] },
   encoding: { ok: true, fileErrors: [] },
-  hasTraining: false,
+  hasTraining: true,
   hasValidation: false,
   autoSplitNotice: false,
   training: [],
@@ -120,7 +120,7 @@ describe('NewCustomizationForm', () => {
       isLoading: false,
     });
     mockUseParams({ [ROUTE_PARAMS.workspace]: 'default' });
-    vi.mocked(useCustomizationDatasetValidation).mockReturnValue(emptyValidation);
+    vi.mocked(useCustomizationDatasetValidation).mockReturnValue(validValidation);
     mockListModels.mockReset();
     mockListModels.mockResolvedValue({
       data: [],
@@ -132,6 +132,46 @@ describe('NewCustomizationForm', () => {
         total_pages: 1,
       },
     } as Awaited<ReturnType<typeof modelsListModels>>);
+  });
+
+  it.each([
+    { hasTraining: false },
+    { discoveryError: new Error('Dataset not found') },
+    { format: { ok: false, fileErrors: [{ path: 'train.jsonl', error: 'Invalid JSON' }] } },
+    { schema: null },
+    { schemaMismatchedFiles: ['train.jsonl'] },
+    { completeness: { ok: false, skipped: false, errors: [] } },
+    { encoding: { ok: false, fileErrors: [{ path: 'train.jsonl' }] } },
+  ])('blocks launch when the dataset checks fail: %j', async (invalid) => {
+    vi.mocked(useCustomizationDatasetValidation).mockReturnValue({
+      ...validValidation,
+      ...invalid,
+    });
+    const user = userEvent.setup();
+    renderRoute(
+      <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+    );
+    await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+    expect(
+      await screen.findByText(/Review the dataset checks before launching/)
+    ).toBeInTheDocument();
+    expect(mutateAutomodel).not.toHaveBeenCalled();
+    expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+    expect(mockCreateUnboundConfig).not.toHaveBeenCalled();
+  });
+
+  it('waits for dataset validation before launching', async () => {
+    vi.mocked(useCustomizationDatasetValidation).mockReturnValue({
+      ...validValidation,
+      isPending: true,
+    });
+    const user = userEvent.setup();
+    renderRoute(
+      <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+    );
+    await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+    expect(await screen.findByText(/Dataset validation is still in progress/)).toBeInTheDocument();
+    expect(mutateAutomodel).not.toHaveBeenCalled();
   });
 
   it('defaults to the automodel backend and shows its compute controls', async () => {
@@ -241,7 +281,7 @@ describe('NewCustomizationForm', () => {
    */
   it('submits the validation dataset the picker resolved', async () => {
     vi.mocked(useCustomizationDatasetValidation).mockReturnValue({
-      ...emptyValidation,
+      ...validValidation,
       hasTraining: true,
       hasValidation: true,
     });

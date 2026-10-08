@@ -4,7 +4,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { getEntityReference } from '@nemo/common/src/namedEntity';
+import {
+  getEntityReference,
+  getPartsFromReference,
+  getURNFromNamedEntityRef,
+} from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
 import { useCustomizationCreateAutomodelJob } from '@nemo/sdk/generated/customizer/automodel-jobs';
@@ -45,6 +49,7 @@ import {
   useBaseModelDeploymentReadiness,
   type BaseModelDeploymentState,
 } from '@studio/hooks/useBaseModelDeploymentReadiness';
+import { useCustomizationDatasetValidation } from '@studio/hooks/useCustomizationDatasetValidation';
 import {
   configNameFromWizardBaseName,
   createDeploymentWizardSchema,
@@ -64,6 +69,7 @@ import {
   formToUnslothCreate,
   MODEL_FIELD_BY_BACKEND,
   producesAdapter,
+  resolveTrainingType,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
@@ -186,6 +192,20 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   });
 
   const backend = useWatch({ control: form.control, name: 'backend' });
+  const datasetRef = useWatch({ control: form.control, name: DATASET_FIELD_BY_BACKEND[backend] });
+  const datasetParts = datasetRef ? getPartsFromReference(datasetRef) : undefined;
+  const automodelTrainingType = useWatch({
+    control: form.control,
+    name: 'automodel.training.training_type',
+  });
+  const rlTrainingType = useWatch({ control: form.control, name: 'grpo.trainingType' });
+  const datasetValidation = useCustomizationDatasetValidation({
+    fileset:
+      datasetParts?.workspace && datasetParts.name
+        ? getURNFromNamedEntityRef({ workspace: datasetParts.workspace, name: datasetParts.name })
+        : undefined,
+    trainingType: resolveTrainingType(backend, automodelTrainingType, rlTrainingType),
+  });
   const automodelFinetuningType = useWatch({
     control: form.control,
     name: 'automodel.training.finetuning_type',
@@ -201,10 +221,17 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     control: form.control,
     name: 'unsloth.output.save_method',
   });
+  // When false, Unsloth feeds raw text to the model and skips chat-template
+  // formatting. Schema and completeness checks assume a chat-structured dataset
+  // (SFT-chat columns), so they must not gate a raw-text run.
+  const unslothApplyChatTemplate = useWatch({
+    control: form.control,
+    name: 'unsloth.dataset.apply_chat_template',
+  });
   // Bound to `grpo.trainingType` rather than `rl.training.type`: the form holds one
   // `rl.training` object, and flipping the union discriminator in place would leave it
   // carrying the other arm's fields. `formToRlCreate` sets `type` from this on submit.
-  const grpoTrainingType = useWatch({ control: form.control, name: 'grpo.trainingType' });
+  const grpoTrainingType = rlTrainingType;
   const grpoFinetuningType = useWatch({ control: form.control, name: 'grpo.finetuning_type' });
   const finetuningType = backend === 'automodel' ? automodelFinetuningType : unslothFinetuningType;
   // Gates the LoRA *hyperparameter* controls, so it includes `lora_merged`,
@@ -338,6 +365,33 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
 
   const onSubmit = async (fields: CustomizationFormFields) => {
     setValidationErrors([]);
+
+    // Reuse the dataset checks shown in the setup panel before creating any resources.
+    if (datasetValidation.isPending) {
+      setValidationErrors([
+        'Dataset validation is still in progress. Please wait before launching.',
+      ]);
+      return;
+    }
+    // Native Unsloth (apply_chat_template disabled) feeds raw text to the model,
+    // so the schema and completeness checks — which assume a chat-structured
+    // dataset — do not apply. Format, training-data presence, and encoding checks
+    // remain required for every backend.
+    const skipSchemaAndCompleteness = backend === 'unsloth' && !unslothApplyChatTemplate;
+    if (
+      datasetValidation.discoveryError ||
+      !datasetValidation.hasTraining ||
+      !datasetValidation.format.ok ||
+      (!skipSchemaAndCompleteness && !datasetValidation.schema) ||
+      (!skipSchemaAndCompleteness && datasetValidation.schemaMismatchedFiles.length > 0) ||
+      (!skipSchemaAndCompleteness && !datasetValidation.completeness.ok) ||
+      !datasetValidation.encoding.ok
+    ) {
+      setValidationErrors([
+        'The training dataset is missing or invalid. Review the dataset checks before launching.',
+      ]);
+      return;
+    }
 
     // The config first, and only the config. The job carries its name as
     // `deployment_config` and creates the deployment itself once training finishes
