@@ -1,0 +1,1291 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Agentic Evaluation Metrics"
+description: ""
+---
+<a id="eval-metrics-agentic"></a>
+
+Evaluate agent-based and multi-step reasoning models using metrics powered by [RAGAS](https://github.com/explodinggradients/ragas). These metrics assess tool calling accuracy, goal completion, topic adherence, and answer correctness in agentic workflows.
+
+## Agent Workflow Evaluation Stages
+
+Key stages of agent workflow evaluation:
+
+![Agent Evaluation Framework](../images/agent_eval_framework.png)
+
+**1. Intermediate Steps Evaluation**
+Assesses the correctness of intermediate steps during agent execution:
+
+- **Tool Use**: Validates that the agent invoked the right tools with correct arguments at each step. Refer to [Tool Call Accuracy](#tool-call-accuracy) for implementation details.
+
+**2. Final-Step Evaluation**
+Evaluates the quality of the agent's final output using:
+
+- **Agent Goal Accuracy**: Measures whether the agent successfully completed the requested task. Refer to [Agent Goal Accuracy](#agent-goal-accuracy).
+- **Topic Adherence**: Assesses how well the agent maintained focus on the assigned topic throughout the conversation. Refer to [Topic Adherence](#topic-adherence).
+- **Answer Accuracy**: Evaluates the factual correctness of agent answers. Refer to [Answer Accuracy](#answer-accuracy).
+- **Custom Metrics**: For domain-specific or custom evaluation criteria, use [LLM-as-a-Judge](/documentation/evaluate-models/metrics/llm-as-a-judge) with the `data` task type.
+
+**3. Trajectory Evaluation**
+Evaluates the agent's decision-making process by analyzing the entire sequence of actions taken to accomplish a goal. This includes assessing whether the agent chose appropriate tools in the correct order. Refer to [Trajectory Evaluation](#trajectory-evaluation) for the expected data format and current plugin SDK support.
+
+---
+
+## Online vs Offline Evaluation
+
+Agentic metrics support two execution patterns through the Evals plugin SDK:
+
+### Offline Evaluation
+
+Offline evaluation scores pre-generated responses or tool calls already present in the dataset:
+
+- Dataset rows are passed inline with `dataset=[...]`, as a file Path, or as a FilesetRef.
+- No model or agent generation is performed.
+- Use this mode to evaluate existing agent outputs or compare different response strategies.
+
+### Online Target Generation
+
+Online target generation first calls a model or agent target, then evaluates the generated output:
+
+- Configure the target with `Model` or `Agent` from `nhx_evals_sdk`.
+- Pass the target through `target=...`.
+- Use `RunConfigOnlineModel` for model targets and `RunConfigOnline` for agent targets.
+- Include a `prompt_template` when the dataset row must be transformed into a model or agent request.
+
+<Note>
+
+**Response Usage**: In online target generation, the generated response is used as the metric response. A dataset `response` column is optional and is superseded by the generated response for that run.
+
+</Note>
+---
+
+## Overview
+
+Agentic metrics evaluate different aspects of agent behavior:
+
+| Metric | Use Case | Requires Judge | Plugin SDK Execution |
+|--------|----------|----------------|----------------------|
+| [**Tool Call Accuracy**](#tool-call-accuracy) | Evaluates tool/function call correctness | No | `submit` |
+| [**Tool Calling** (template)](#tool-calling-template) | Evaluates tool/function call correctness using Jinja templates | No | `submit` |
+| [**Topic Adherence**](#topic-adherence) | Measures topic focus in multi-turn conversations | Yes | `submit` |
+| [**Agent Goal Accuracy**](#agent-goal-accuracy) | Assesses goal completion, with or without reference. | Yes | `submit` |
+| [**Answer Accuracy**](#answer-accuracy) | Checks factual correctness | Yes | `submit` |
+| [**Trajectory Evaluation**](#trajectory-evaluation) | Evaluates decision-making across action sequence | Yes | Not exposed as a typed plugin SDK metric |
+
+<Note>
+
+Use `evaluator.submit(...)` for durable platform jobs. For local in-process evaluation without the platform, use `nhx_evals_sdk.Evaluator` directly. The examples below use inline dataset rows through `dataset=[...]`, but you can use a file Path or a FilesetRef instead.
+
+</Note>
+## Prerequisites
+
+Before running agentic evaluations:
+
+1. **Workspace**: Have a workspace created. All remote resources, including secrets and jobs, are scoped to a workspace.
+2. **Judge LLM endpoint** *(for most metrics)*: Have access to an LLM that will serve as your judge.
+3. **API key secret** *(if judge requires auth)*: If your judge endpoint requires authentication, [create a secret](/documentation/get-started/core-concepts/manage-secrets) to store the API key. For `nhx_evals_sdk.Evaluator` versus submitted-job behavior, see [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication).
+4. **Initialize the SDK**:
+
+```python
+from nemo_evals.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
+```
+
+### Creating a Secret for API Keys
+
+If using external endpoints, such as [Build NVIDIA](https://build.nvidia.com/models) API endpoints (https://integrate.api.nvidia.com/v1), create a secret first:
+
+```python
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="nvidia-api-key",
+        value=SecretStr("nvapi-YOUR_API_KEY_HERE"),
+        description="NVIDIA Build API key for RAGAS metrics",
+    ),
+)
+```
+
+### SDK Types Reference
+
+The plugin SDK examples use context-agnostic metric classes and runtime value classes:
+
+```python
+from nhx_evals_sdk import (
+    ToolCallingMetric,
+)
+from nhx_evals_sdk.metrics.ragas import (
+    AgentGoalAccuracyMetric,
+    AnswerAccuracyMetric,
+    ToolCallAccuracyMetric,
+    TopicAdherenceMetric,
+)
+from nhx_evals_sdk import (
+    Agent,
+    RunConfigOnlineModel,
+    RunConfigOnline,
+    RunConfig,
+    InferenceParams,
+    Model,
+    ReasoningParams,
+)
+```
+
+Use `dataset=[...]` for inline rows. For offline scoring options, use `config=RunConfig(parallelism=...)`. Whenever outputs must be generated before scoring, pass `target=Model(...)` or `target=Agent(...)` plus the corresponding online parameters. Pass `dataset`, `config`, and `target` to `evaluator.submit(...)`, then wait for the job and fetch its result.
+
+---
+
+## Agentic Metrics
+
+### Tool Call Accuracy
+
+Evaluates whether the agent invoked the correct tools with the correct arguments. This metric **does not require a judge LLM**.
+
+<Note>
+
+**Online/offline support**: Tool Call Accuracy supports scoring existing tool calls directly. It can also score tool calls produced during online target generation when the target response includes the required tool-call fields.
+
+</Note>
+#### Data Format
+
+```json
+{
+  "user_input": [
+    {
+      "content": "What's the weather like in New York?",
+      "type": "human"
+    },
+    {
+      "content": "Let me check that for you.",
+      "type": "ai",
+      "tool_calls": [
+        {
+          "name": "weather_check",
+          "args": {
+            "location": "New York"
+          }
+        }
+      ]
+    },
+    {
+      "content": "It's 75°F and partly cloudy.",
+      "type": "tool"
+    },
+    {
+      "content": "The weather in New York is 75°F and partly cloudy.",
+      "type": "ai"
+    }
+  ],
+  "reference_tool_calls": [
+    {
+      "name": "weather_check",
+      "args": {
+        "location": "New York"
+      }
+    }
+  ]
+}
+```
+
+<Tabs>
+
+<Tab title="Offline Scoring">
+
+```python
+from nhx_evals_sdk.metrics.ragas import ToolCallAccuracyMetric
+metric = ToolCallAccuracyMetric()
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": [
+                {"content": "What's the weather in Paris?", "type": "human"},
+                {
+                    "content": "Let me check.",
+                    "type": "ai",
+                    "tool_calls": [{"name": "weather_api", "args": {"city": "Paris"}}],
+                },
+                {"content": "Sunny, 22°C", "type": "tool"},
+                {"content": "It's sunny and 22°C in Paris.", "type": "ai"},
+            ],
+            "reference_tool_calls": [
+                {"name": "weather_api", "args": {"city": "Paris"}}
+            ],
+        }
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Submit Job">
+
+```python
+from nhx_evals_sdk import RunConfig
+from nhx_evals_sdk.metrics.ragas import ToolCallAccuracyMetric
+metric = ToolCallAccuracyMetric()
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": [
+                {"content": "What's the weather in Paris?", "type": "human"},
+                {
+                    "content": "Let me check.",
+                    "type": "ai",
+                    "tool_calls": [{"name": "weather_api", "args": {"city": "Paris"}}],
+                },
+                {"content": "Sunny, 22°C", "type": "tool"},
+                {"content": "It's sunny and 22°C in Paris.", "type": "ai"},
+            ],
+            "reference_tool_calls": [
+                {"name": "weather_api", "args": {"city": "Paris"}}
+            ],
+        }
+    ],
+    config=RunConfig(parallelism=4),
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Result">
+
+```json
+{
+  "aggregate_scores": [
+    {
+      "name": "tool_call_accuracy",
+      "count": 1,
+      "mean": 1.0,
+      "min": 1.0,
+      "max": 1.0
+    }
+  ],
+  "row_scores": [
+    {
+      "index": 0,
+      "scores": {
+        "tool_call_accuracy": 1.0
+      }
+    }
+  ]
+}
+```
+
+</Tab>
+
+</Tabs>
+---
+
+### Tool Calling (Template)
+
+A template-based metric for evaluating tool/function call accuracy. Unlike the RAGAS Tool Call Accuracy metric, this metric uses configurable templates and produces multiple scores.
+
+<Note>
+
+**Online/offline support**: Tool Calling supports scoring existing tool-call outputs directly. Use online target generation when you want the model or agent target to produce the response first.
+
+</Note>
+#### Scores Produced
+
+- `function_name_accuracy` - Accuracy of function names only
+- `function_name_and_args_accuracy` - Accuracy of both function names and arguments
+
+#### Data Format
+
+Data must use OpenAI-compliant tool calling format:
+
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Book a table for 2 at 7pm."
+    },
+    {
+      "role": "assistant",
+      "content": "Booking a table...",
+      "tool_calls": [
+        {
+          "function": {
+            "name": "book_table",
+            "arguments": {
+              "people": 2,
+              "time": "7pm"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "tool_calls": [
+    {
+      "function": {
+        "name": "book_table",
+        "arguments": {
+          "people": 2,
+          "time": "7pm"
+        }
+      }
+    }
+  ],
+  "response": {
+    "choices": [
+      {
+        "message": {
+          "tool_calls": [
+            {
+              "function": {
+                "name": "book_table",
+                "arguments": "{\"people\": 2, \"time\": \"7pm\"}"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+<Note>
+
+- Function names with dots (`.`) must be replaced with underscores (`_`).
+- Comparison is case-sensitive.
+- Order of tool calls is ignored, which supports parallel tool calling.
+
+</Note>
+<Tabs>
+
+<Tab title="Offline Scoring">
+
+```python
+
+from nhx_evals_sdk import ToolCallingMetric
+metric = ToolCallingMetric(reference="{{item.tool_calls}}")
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "messages": [
+                {"role": "user", "content": "Book a table for 2 at 7pm."},
+                {
+                    "role": "assistant",
+                    "content": "Booking...",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "book_table",
+                                "arguments": {"people": 2, "time": "7pm"},
+                            }
+                        }
+                    ],
+                },
+            ],
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "book_table",
+                        "arguments": {"people": 2, "time": "7pm"},
+                    }
+                }
+            ],
+            "response": {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "book_table",
+                                        "arguments": '{"people": 2, "time": "7pm"}',
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Submit Job">
+
+```python
+from nhx_evals_sdk import RunConfig, ToolCallingMetric
+
+metric = ToolCallingMetric(reference="{{item.tool_calls}}")
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "book_table",
+                        "arguments": {"people": 2, "time": "7pm"},
+                    }
+                }
+            ],
+            "response": {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "book_table",
+                                        "arguments": '{"people": 2, "time": "7pm"}',
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+    ],
+    config=RunConfig(parallelism=4),
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Result">
+
+```json
+{
+  "aggregate_scores": [
+    {
+      "name": "function_name_accuracy",
+      "count": 1,
+      "mean": 1.0,
+      "min": 1.0,
+      "max": 1.0
+    },
+    {
+      "name": "function_name_and_args_accuracy",
+      "count": 1,
+      "mean": 1.0,
+      "min": 1.0,
+      "max": 1.0
+    }
+  ]
+}
+```
+
+</Tab>
+
+</Tabs>
+---
+
+### Topic Adherence
+
+Measures how well the agent maintained focus on assigned topics throughout a conversation. Supports F1, precision, or recall scoring modes.
+
+#### Data Format
+
+```json
+{
+  "user_input": [
+    {
+      "content": "How do I stay healthy?",
+      "type": "human"
+    },
+    {
+      "content": "Eat more fruits and vegetables, and exercise regularly.",
+      "type": "ai"
+    }
+  ],
+  "reference_topics": [
+    "health",
+    "nutrition",
+    "fitness"
+  ]
+}
+```
+
+#### Configuration Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `metric_mode` | string | `"f1"` | Scoring mode: `"f1"`, `"precision"`, or `"recall"` |
+
+<Note>
+
+Topic Adherence is a multi-turn metric: it scores a complete conversation supplied as a `user_input` message list. Online target generation produces a single response from a single prompt and cannot construct a multi-turn conversation, so it is not supported for this metric. Use the offline **Offline Scoring** or **Submit Job** modes with a pre-built multi-turn conversation.
+
+</Note>
+
+<Tabs>
+
+<Tab title="Offline Scoring">
+
+```python
+from nhx_evals_sdk import InferenceParams, Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import TopicAdherenceMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+# Force JSON-only judge output. RAGAS parses the judge's topic extraction and
+# classification responses as structured JSON; verbose free-text replies fail to
+# parse and are recorded as NaN scores instead of a valid result.
+metric = TopicAdherenceMetric(
+    metric_mode="f1",
+    judge_model=judge_model,
+    inference=InferenceParams.model_validate({"temperature": 0, "response_format": {"type": "json_object"}}),
+)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": [
+                {"content": "Tell me about healthy eating", "type": "human"},
+                {
+                    "content": "Eating fruits and vegetables is essential for good health.",
+                    "type": "ai",
+                },
+            ],
+            "reference_topics": ["health", "nutrition", "diet"],
+        }
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Submit Job">
+
+```python
+from nhx_evals_sdk import InferenceParams, RunConfig, Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import TopicAdherenceMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+# Force JSON-only judge output so RAGAS can parse the judge responses; verbose
+# free-text replies otherwise fail to parse and are recorded as NaN scores.
+metric = TopicAdherenceMetric(
+    metric_mode="f1",
+    judge_model=judge_model,
+    inference=InferenceParams.model_validate({"temperature": 0, "response_format": {"type": "json_object"}}),
+)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": [
+                {"content": "Tell me about healthy eating", "type": "human"},
+                {
+                    "content": "Eating fruits and vegetables is essential for good health.",
+                    "type": "ai",
+                },
+            ],
+            "reference_topics": ["health", "nutrition", "diet"],
+        }
+    ],
+    config=RunConfig(parallelism=4),
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Result">
+
+```json
+{
+  "aggregate_scores": [
+    {
+      "name": "topic_adherence",
+      "count": 1,
+      "mean": 0.85,
+      "min": 0.85,
+      "max": 0.85
+    }
+  ],
+  "row_scores": [
+    {
+      "index": 0,
+      "scores": {
+        "topic_adherence": 0.85
+      }
+    }
+  ]
+}
+```
+
+</Tab>
+
+</Tabs>
+
+<Note>
+
+Confirm a real score: a valid result has `count` of at least 1, `nan_count` of 0, and a `mean` in the range `[0, 1]`. A result with `count: 0` and `nan_count: 1` means the judge output could not be parsed into a score — verify the JSON-only judge configuration shown above is applied.
+
+</Note>
+
+---
+
+### Agent Goal Accuracy
+
+Evaluates whether the agent successfully completed the requested task. Returns a binary score (0 or 1). Supports evaluation with or without a reference outcome.
+
+#### With Reference
+
+Compare the agent's outcome against a known reference:
+
+**Data Format**
+
+```json
+{
+  "user_input": [
+    {
+      "content": "Book a table at a Chinese restaurant for 8pm",
+      "type": "human"
+    },
+    {
+      "content": "I'll search for restaurants.",
+      "type": "ai",
+      "tool_calls": [
+        {
+          "name": "restaurant_search",
+          "args": {}
+        }
+      ]
+    },
+    {
+      "content": "Found: Italian Place",
+      "type": "tool"
+    },
+    {
+      "content": "Your table at Italian Place is booked for 8pm.",
+      "type": "ai"
+    }
+  ],
+  "reference": "Successfully booked a table at a restaurant for 8pm"
+}
+```
+
+**Configuration Options**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `use_reference` | boolean | `True` | Whether to compare against a reference outcome |
+
+<Tabs>
+
+<Tab title="Offline Scoring">
+
+```python
+from nhx_evals_sdk import Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import AgentGoalAccuracyMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+metric = AgentGoalAccuracyMetric(use_reference=True, judge_model=judge_model)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": [
+                {"content": "Book a table at a restaurant for 8pm", "type": "human"},
+                {
+                    "content": "I'll search for restaurants.",
+                    "type": "ai",
+                    "tool_calls": [{"name": "restaurant_search", "args": {}}],
+                },
+                {"content": "Found: Italian Place", "type": "tool"},
+                {
+                    "content": "Your table at Italian Place is booked for 8pm.",
+                    "type": "ai",
+                },
+            ],
+            "reference": "Successfully booked a table at a restaurant for 8pm",
+        }
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Submit Job">
+
+```python
+from nhx_evals_sdk import RunConfig, Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import AgentGoalAccuracyMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+metric = AgentGoalAccuracyMetric(use_reference=True, judge_model=judge_model)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": [
+                {"content": "Book a table at a restaurant for 8pm", "type": "human"},
+                {
+                    "content": "I'll search for restaurants.",
+                    "type": "ai",
+                    "tool_calls": [{"name": "restaurant_search", "args": {}}],
+                },
+                {"content": "Found: Italian Place", "type": "tool"},
+                {
+                    "content": "Your table at Italian Place is booked for 8pm.",
+                    "type": "ai",
+                },
+            ],
+            "reference": "Successfully booked a table at a restaurant for 8pm",
+        }
+    ],
+    config=RunConfig(parallelism=4),
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Result">
+
+```json
+{
+  "aggregate_scores": [
+    {
+      "name": "agent_goal_accuracy",
+      "count": 1,
+      "mean": 1.0,
+      "min": 1.0,
+      "max": 1.0
+    }
+  ],
+  "row_scores": [
+    {
+      "index": 0,
+      "scores": {
+        "agent_goal_accuracy": 1.0
+      }
+    }
+  ]
+}
+```
+
+</Tab>
+
+</Tabs>
+#### Without Reference
+
+The judge LLM infers the goal from the conversation context:
+
+**Data Format**
+
+```json
+{
+  "user_input": [
+    {
+      "content": "Set a reminder for my dentist appointment tomorrow at 2pm",
+      "type": "human"
+    },
+    {
+      "content": "I'll set that reminder for you.",
+      "type": "ai",
+      "tool_calls": [
+        {
+          "name": "set_reminder",
+          "args": {
+            "title": "Dentist appointment",
+            "date": "tomorrow",
+            "time": "2pm"
+          }
+        }
+      ]
+    },
+    {
+      "content": "Reminder set successfully.",
+      "type": "tool"
+    },
+    {
+      "content": "Your reminder for the dentist appointment tomorrow at 2pm has been set.",
+      "type": "ai"
+    }
+  ]
+}
+```
+
+<Tabs>
+
+<Tab title="Offline Scoring">
+
+```python
+from nhx_evals_sdk import Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import AgentGoalAccuracyMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+metric = AgentGoalAccuracyMetric(use_reference=False, judge_model=judge_model)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": [
+                {
+                    "content": "Set a reminder for my dentist appointment tomorrow at 2pm",
+                    "type": "human",
+                },
+                {
+                    "content": "I'll set that reminder for you.",
+                    "type": "ai",
+                    "tool_calls": [
+                        {
+                            "name": "set_reminder",
+                            "args": {
+                                "title": "Dentist appointment",
+                                "date": "tomorrow",
+                                "time": "2pm",
+                            },
+                        }
+                    ],
+                },
+                {"content": "Reminder set successfully.", "type": "tool"},
+                {"content": "Your reminder has been set.", "type": "ai"},
+            ],
+        }
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Submit Job">
+
+```python
+from nhx_evals_sdk import RunConfig, Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import AgentGoalAccuracyMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+metric = AgentGoalAccuracyMetric(use_reference=False, judge_model=judge_model)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": [
+                {
+                    "content": "Set a reminder for my dentist appointment tomorrow at 2pm",
+                    "type": "human",
+                },
+                {
+                    "content": "I'll set that reminder for you.",
+                    "type": "ai",
+                    "tool_calls": [
+                        {
+                            "name": "set_reminder",
+                            "args": {
+                                "title": "Dentist appointment",
+                                "date": "tomorrow",
+                                "time": "2pm",
+                            },
+                        }
+                    ],
+                },
+                {"content": "Reminder set successfully.", "type": "tool"},
+                {"content": "Your reminder has been set.", "type": "ai"},
+            ],
+        }
+    ],
+    config=RunConfig(parallelism=4),
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+
+</Tabs>
+---
+
+### Answer Accuracy
+
+Evaluates the factual correctness of an agent's answer by comparing it against a reference answer. Two LLM judges independently rate the agreement, and scores are averaged. Scores range from 0 (incorrect) to 0.5 (partial match) to 1 (exact match).
+
+#### Data Format
+
+```json
+{
+  "user_input": "What is the capital of France?",
+  "response": "The capital of France is Paris.",
+  "reference": "Paris"
+}
+```
+
+<Tabs>
+
+<Tab title="Offline Scoring">
+
+```python
+from nhx_evals_sdk import Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import AnswerAccuracyMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+metric = AnswerAccuracyMetric(judge_model=judge_model)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": "What is the capital of France?",
+            "response": "The capital of France is Paris.",
+            "reference": "Paris",
+        }
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Submit Job">
+
+```python
+from nhx_evals_sdk import RunConfig, Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import AnswerAccuracyMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+metric = AnswerAccuracyMetric(judge_model=judge_model)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": "What is the capital of France?",
+            "response": "The capital of France is Paris.",
+            "reference": "Paris",
+        }
+    ],
+    config=RunConfig(parallelism=4),
+)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Online Target Generation">
+
+```python
+from nhx_evals_sdk import RunConfigOnlineModel, InferenceParams, Model, SecretRef
+from nhx_evals_sdk.metrics.ragas import AnswerAccuracyMetric
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+target_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+metric = AnswerAccuracyMetric(judge_model=judge_model)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "user_input": "What is the capital of France?",
+            "reference": "Paris",
+        }
+    ],
+    config=RunConfigOnlineModel(
+        parallelism=4,
+        inference=InferenceParams(temperature=0.7, max_tokens=1024),
+    ),
+    target=target_model,
+    prompt_template={
+        "messages": [
+            {
+                "role": "user",
+                "content": "{{item.user_input}}",
+            }
+        ]
+    },
+)
+
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+</Tab>
+<Tab title="Result">
+
+```json
+{
+  "aggregate_scores": [
+    {
+      "name": "nv_accuracy",
+      "count": 1,
+      "mean": 1.0,
+      "min": 1.0,
+      "max": 1.0
+    }
+  ],
+  "row_scores": [
+    {
+      "index": 0,
+      "scores": {
+        "nv_accuracy": 1.0
+      }
+    }
+  ]
+}
+```
+
+</Tab>
+
+</Tabs>
+---
+
+### Trajectory Evaluation
+
+Evaluates the agent's decision-making process by analyzing the entire sequence of actions (trajectory) taken to accomplish a goal. This **system metric** assesses whether the agent chose appropriate tools in the correct order.
+
+<Note>
+
+**NAT Format Requirement**: This metric supports the NVIDIA Agent Toolkit format with `intermediate_steps` containing detailed event traces.
+
+**Current plugin SDK support**: The current plugin SDK does not expose a typed trajectory-evaluation metric class. Use the data-format details below when preparing datasets for environments where the system metric is enabled, but do not use the old generated evaluator job APIs for plugin SDK execution.
+
+</Note>
+#### Data Format
+
+Each data entry must follow the [NeMo Agent Toolkit](https://docs.nvidia.com/nemo/agent-toolkit/latest/index.html) format:
+
+```json
+{
+  "question": "What are LLMs",
+  "generated_answer": "LLMs, or Large Language Models, are a type of artificial intelligence designed to process and generate human-like language. They are trained on vast amounts of text data and can be fine-tuned for specific tasks or guided by prompt engineering.",
+  "answer": "LLMs stand for Large Language Models, which are a type of machine learning model designed for natural language processing tasks such as language generation.",
+  "intermediate_steps": [
+    {
+      "payload": {
+        "event_type": "LLM_END",
+        "name": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "data": {
+          "input": "\nPrevious conversation history:\n\n\nQuestion: What are LLMs\n",
+          "output": "Thought: I need to find information about LLMs to answer this question.\n\nAction: wikipedia_search\nAction Input: {'question': 'LLMs'}\n\n"
+        }
+      }
+    },
+    {
+      "payload": {
+        "event_type": "TOOL_END",
+        "name": "wikipedia_search",
+        "data": {
+          "input": "{'question': 'LLMs'}",
+          "output": "<Document source=\"https://en.wikipedia.org/wiki/Large_language_model\" page=\"\"/>\nA large language model (LLM) is a language model trained with self-supervised machine learning..."
+        }
+      }
+    },
+    {
+      "payload": {
+        "event_type": "LLM_END",
+        "name": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "data": {
+          "input": "...",
+          "output": "Thought: I now know the final answer\n\nFinal Answer: LLMs, or Large Language Models, are a type of artificial intelligence..."
+        }
+      }
+    }
+  ]
+}
+```
+
+#### Parameters
+
+| Parameter | Required | Type | Description |
+|-----------|----------|------|-------------|
+| `judge` | required | object | Judge LLM configuration |
+| `trajectory_used_tools` | required | string | Comma-separated list of tools available to the agent. Example: `"wikipedia_search,current_datetime,code_generation"` |
+| `trajectory_custom_tools` | optional | object | JSON mapping custom tool names to descriptions for non-default tools |
+
+---
+
+## Judge Configuration
+
+Most agentic metrics require a judge LLM. Configure the judge model in the metric definition:
+
+```python
+from nhx_evals_sdk import Model, SecretRef
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+```
+
+<Note>
+
+**Recommended model size**: Use a 70B+ parameter model as the judge for reliable results. Smaller models may fail to follow the required output schema, causing parsing errors.
+
+</Note>
+### Using Reasoning Models
+
+For models that support extended reasoning, such as `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, add system prompt and reasoning parameters to online model generation:
+
+```python
+from nhx_evals_sdk import RunConfigOnlineModel, InferenceParams, Model, ReasoningParams, SecretRef
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+
+config = RunConfigOnlineModel(
+    system_prompt="detailed thinking on",
+    reasoning=ReasoningParams(end_token="</think>"),
+    inference=InferenceParams(max_tokens=1024),
+)
+```
+
+### Managing Secrets for Authenticated Endpoints
+
+If your judge endpoint requires an API key, store it as a secret:
+
+```python
+from pydantic import SecretStr
+from nhx_evals_sdk import Model, SecretRef
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="nvidia-api-key",
+        value=SecretStr("nvapi-YOUR_API_KEY_HERE"),
+    ),
+)
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1/chat/completions",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+```
+
+For more details on secret management, refer to [Managing Secrets](/documentation/get-started/core-concepts/manage-secrets).
+
+For `nhx_evals_sdk.Evaluator` versus submitted-job behavior of `api_key_secret`, see [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication).
+
+---
+
+## Job Management
+
+After submitting a durable remote job with `evaluator.submit(metric=metric, dataset=dataset)`, use the returned job resource to monitor execution and retrieve results:
+
+```python
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+Navigate to Metrics Job Management for more job lifecycle details.
+
+---
+
+## Dataset Notes
+
+The current plugin SDK examples use inline dataset rows through `dataset=[...]`. Keep each row shaped for the selected metric, including fields such as `user_input`, `response`, `reference`, `reference_topics`, `reference_tool_calls`, or OpenAI-style `tool_calls` as required.
+
+Use `RunConfig(limit_samples=...)` when you want to test a small slice of a larger inline dataset before submitting the full request.
+
+---
+
+## Important Notes
+
+1. **Execution choice**: Use `run` for local in-process evaluation and `submit` for durable remote jobs with `wait_until_done()` and `get_result()`.
+
+2. **Column Names**: RAGAS metrics use specific column names:
+ - `user_input` (not `question`)
+ - `response` (not `answer`)
+ - `reference` (not `ground_truth`)
+
+3. **Judge Model Quality**: For metrics requiring a judge, evaluation quality depends on the judge model's ability to follow instructions. Larger models (70B+) produce more consistent results.
+
+4. **RAGAS Dependency**: These metrics are powered by RAGAS and may have version-specific behavior.
+
+5. **NaN troubleshooting for judge-based metrics**: If you see `nan_count > 0` with `mean = null`, check judge model authentication first (API key secret, endpoint access, and model permissions). See [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication) for `api_key_secret` behavior. Some RAGAS metrics are known to convert auth failures into `NaN` scores instead of raising a hard error.
+
+<Note>
+
+- [Agent Configuration](/documentation/evaluate-models/metrics/agent-configuration) - Use agents (generic or NAT) as targets in online evaluation jobs
+- Agentic Benchmarks - BFCL benchmark for tool-calling evaluation
+- [LLM-as-a-Judge](/documentation/evaluate-models/metrics/llm-as-a-judge) - Custom judge-based evaluation
+- Evaluation Results - Understanding results
+- [RAG Metrics](/documentation/evaluate-models/metrics/rag-metrics) - RAGAS metrics for RAG pipelines
+
+</Note>

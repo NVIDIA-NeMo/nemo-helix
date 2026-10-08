@@ -16,7 +16,7 @@ triggers:
   - get my eval data into nemo
 not-for:
   - nemo-intake (use for general instrumentation, telemetry ingestion, trace queries, or evaluator results outside an Experiments leaderboard)
-  - nemo-evaluator (use to AUTHOR and RUN evaluations/metrics; this skill UPLOADS results)
+  - nemo-evals (use to AUTHOR and RUN evaluations/metrics; this skill UPLOADS results)
   - nemo-status (use for a read-only platform health dashboard)
   - nemo-skill-selection (use for dispatch when intent is unclear)
 preconditions:

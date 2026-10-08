@@ -219,7 +219,7 @@ does that procedure.
   `training.jsonl` using `schedule.validation_split`, which defaults to `0.1`.
   If you add `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl` at the fileset
   root, Automodel uses that optional validation data instead.
-- `nemo evaluator retrieve-eval` `dataset` — the BEIR loader accepts either the
+- `nemo evals retrieve-eval` `dataset` — the BEIR loader accepts either the
   BEIR directory or a fileset root containing `eval_beir`. It still rejects
   duplicate `(query-id, corpus-id)` rows in `qrels/test.tsv`.
 

@@ -29,7 +29,7 @@ const genericTotalResultsHandler = http.get('*', () =>
 interface DashboardFlagsArgs {
   agentsEnabled: boolean;
   optimizerEnabled: boolean;
-  evaluatorEnabled: boolean;
+  evalsEnabled: boolean;
   experimentEnabled: boolean;
   customizerEnabled: boolean;
   intakeEnabled: boolean;
@@ -45,7 +45,7 @@ interface DashboardFlagsArgs {
 const DashboardFlagsPreview: FC<DashboardFlagsArgs> = ({
   agentsEnabled,
   optimizerEnabled,
-  evaluatorEnabled,
+  evalsEnabled,
   experimentEnabled,
   customizerEnabled,
   intakeEnabled,
@@ -59,14 +59,14 @@ const DashboardFlagsPreview: FC<DashboardFlagsArgs> = ({
         workspace="acme"
         agentsEnabled={agentsEnabled}
         optimizerEnabled={optimizerEnabled}
-        evaluatorEnabled={evaluatorEnabled}
+        evalsEnabled={evalsEnabled}
         experimentEnabled={experimentEnabled}
         customizerEnabled={customizerEnabled}
       />
       <QuickstartSection
         workspace="acme"
         agentsEnabled={agentsEnabled}
-        evaluatorEnabled={evaluatorEnabled}
+        evalsEnabled={evalsEnabled}
         optimizerEnabled={optimizerEnabled}
         intakeEnabled={intakeEnabled}
         experimentEnabled={experimentEnabled}
@@ -97,7 +97,7 @@ const meta = {
   argTypes: {
     agentsEnabled: { control: 'boolean', name: 'AGENTS_ENABLED' },
     optimizerEnabled: { control: 'boolean', name: 'OPTIMIZER_ENABLED' },
-    evaluatorEnabled: { control: 'boolean', name: 'EVALUATOR_ENABLED' },
+    evalsEnabled: { control: 'boolean', name: 'EVALS_ENABLED' },
     experimentEnabled: { control: 'boolean', name: 'EXPERIMENT_ENABLED' },
     customizerEnabled: { control: 'boolean', name: 'CUSTOMIZER_ENABLED' },
     intakeEnabled: { control: 'boolean', name: 'INTAKE_ENABLED' },
@@ -112,7 +112,7 @@ type Story = StoryObj<typeof meta>;
 const ALL_ENABLED: DashboardFlagsArgs = {
   agentsEnabled: true,
   optimizerEnabled: true,
-  evaluatorEnabled: true,
+  evalsEnabled: true,
   experimentEnabled: true,
   customizerEnabled: true,
   intakeEnabled: true,
@@ -138,7 +138,7 @@ export const AgentsOnly: Story = {
   args: {
     agentsEnabled: true,
     optimizerEnabled: false,
-    evaluatorEnabled: false,
+    evalsEnabled: false,
     experimentEnabled: false,
     customizerEnabled: false,
     intakeEnabled: false,
@@ -152,7 +152,7 @@ export const AllFlagsDisabled: Story = {
   args: {
     agentsEnabled: false,
     optimizerEnabled: false,
-    evaluatorEnabled: false,
+    evalsEnabled: false,
     experimentEnabled: false,
     customizerEnabled: false,
     intakeEnabled: false,

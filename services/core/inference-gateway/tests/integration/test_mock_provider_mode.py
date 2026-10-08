@@ -1144,7 +1144,7 @@ def test_model_entity_not_found_still_returns_404(
 def test_llm_judge_e2e_use_case(mock_provider_test_clients: ClientContext):
     """Test the LLM Judge E2E use case as documented in the README.
 
-    This simulates how E2E tests for the evaluator service would use
+    This simulates how E2E tests for the evals service would use
     mock provider mode to test LLM Judge workflows without real inference backends.
     """
     judge_response = {
@@ -1378,7 +1378,7 @@ def test_fixture_llm_judge_pattern(mock_provider_test_clients: ClientContext):
     """Test LLM Judge pattern using the mock_provider_test_clients fixture.
 
     This demonstrates the recommended pattern for testing services that need
-    to call an LLM Judge through IGW (e.g., evaluator service tests).
+    to call an LLM Judge through IGW (e.g., evals service tests).
     """
     judge_response = {
         "id": "chatcmpl-judge",

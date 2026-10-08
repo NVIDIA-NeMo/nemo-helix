@@ -232,4 +232,4 @@ After compare, report for **base and each adapter**:
 - Any `warnings` from routing sanity checks
 - Inference settings (`enable_thinking`, `max_tokens`) and dataset fileset ref
 
-Uses the **nemo-evaluator SDK** (`Evaluator`, metrics, `RunConfigOnlineModel`) under the hood — no separate evaluator skill doc required. For general BYOB/rubric eval outside customization, use the **nemo-evaluator** skill.
+Uses the **nemo-evals SDK** (`Evaluator`, metrics, `RunConfigOnlineModel`) under the hood — no separate evaluator skill doc required. For general BYOB/rubric eval outside customization, use the **nemo-evals** skill.

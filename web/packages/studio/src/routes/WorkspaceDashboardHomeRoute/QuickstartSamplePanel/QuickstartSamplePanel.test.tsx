@@ -278,9 +278,7 @@ describe('QuickstartSamplePanel', () => {
       await waitForAllSnippets();
 
       expect(within(stepAt(2)).getByTestId('nv-code-snippet-code').textContent).toBe(
-        ['nemo evaluator evaluate', "--spec-file '<spec>.json'", `--workspace '${WS}'`].join(
-          ' \\\n  '
-        )
+        ['nemo evals evaluate', "--spec-file '<spec>.json'", `--workspace '${WS}'`].join(' \\\n  ')
       );
       expect(stepAt(2)).not.toHaveTextContent('evaluate submit');
     });
@@ -367,7 +365,7 @@ describe('QuickstartSamplePanel', () => {
         within(stepAt(2)).getByRole('button', { name: 'Copy the Evaluate the agent command' })
       );
 
-      expect(await navigator.clipboard.readText()).toContain('nemo evaluator evaluate');
+      expect(await navigator.clipboard.readText()).toContain('nemo evals evaluate');
     });
   });
 

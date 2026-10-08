@@ -78,7 +78,7 @@ NO_FRONTMATTER = "# Example Skill\n\nNo frontmatter here.\n"
 
 
 def test_is_canonical_skill_matches_top_level_skills_dir():
-    assert is_canonical_skill(Path("skills/nemo-evaluator-plugin/SKILL.md"))
+    assert is_canonical_skill(Path("skills/nemo-evals-plugin/SKILL.md"))
 
 
 def test_is_canonical_skill_matches_nemo_helix_ext():

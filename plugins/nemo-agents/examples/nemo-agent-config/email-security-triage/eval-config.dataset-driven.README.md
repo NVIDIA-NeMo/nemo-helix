@@ -81,7 +81,7 @@ bare `phishing` or `benign` on line one; an empty one reaches `review_messages`,
 its report with `ANALYSIS` and then one block per message.
 
 **Do not use the `tojson` filter here.** The SDK JSON-parses the rendered output of any
-template containing that substring (`nemo_evaluator_sdk/templates.py`), so the request stops
+template containing that substring (`nhx_evals_sdk/templates.py`), so the request stops
 being a string and `{{ prompt }}` in the target body goes undefined. The same trap applies to
 judge prompts. Plain text avoids it and exercises the agent's open-ended input path, which is
 what a pasted mail thread looks like anyway.
@@ -100,7 +100,7 @@ capability answered, whether or not the verdict was right.
 
 `accuracy` is a **fraction**, not a pass/fail: a 3-message review row that gets two verdicts
 right scores 0.67. That is why the metric's `scores` bounds are floats — the SDK emits an
-integer-only schema when they are ints (`nemo_evaluator_sdk/metrics/llm_judge.py`), and a judge
+integer-only schema when they are ints (`nhx_evals_sdk/metrics/llm_judge.py`), and a judge
 forced to return an integer cannot express partial credit.
 
 Read the two together — accuracy with headroom while routing holds is a judgement problem; both

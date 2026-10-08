@@ -3,7 +3,7 @@
 
 # Evaluator Service Agentic Flows
 
-The Evaluator service provides comprehensive evaluation capabilities for language models, including standard metrics, LLM-as-a-Judge, academic benchmarks, and tool calling evaluation.
+The Evals service provides comprehensive evaluation capabilities for language models, including standard metrics, LLM-as-a-Judge, academic benchmarks, and tool calling evaluation.
 
 **PIC**: Sandy Chapman
 **Priority**: Medium
@@ -152,9 +152,9 @@ The Evaluator service provides comprehensive evaluation capabilities for languag
 
 ## Documentation References
 
-- Evaluation template: docs/evaluator/flows/template.md
-- Run an evaluation: docs/evaluator/tutorials/run-an-evaluation.md
-- LLM-as-a-Judge: docs/evaluator/flows/llm-as-a-judge.md
-- LLM Judge tutorial: docs/evaluator/tutorials/run-llm-judge-evaluation.md
-- Academic benchmarks: docs/evaluator/flows/academic-benchmarks/
-- BFCL: docs/evaluator/flows/academic-benchmarks/bfcl.md
+- Evaluation template: docs/evals/flows/template.md
+- Run an evaluation: docs/evals/tutorials/run-an-evaluation.md
+- LLM-as-a-Judge: docs/evals/flows/llm-as-a-judge.md
+- LLM Judge tutorial: docs/evals/tutorials/run-llm-judge-evaluation.md
+- Academic benchmarks: docs/evals/flows/academic-benchmarks/
+- BFCL: docs/evals/flows/academic-benchmarks/bfcl.md

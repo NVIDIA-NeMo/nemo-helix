@@ -107,7 +107,7 @@ nemo setup [OPTIONS]
 * `--install-skills, --no-install-skills`: Install NeMo skills for coding agents
 * `--skills-agents`: Comma-separated list of agents to install skills for (e.g. 'codex,cursor'). Default: all detected. Only applied when --install-skills is set.
 * `--skills-scope <CHOICE>`: Install scope for skills: 'project' (this repo) or 'user' (home). Default: project. Only applied when --install-skills is set. [possible values: project, user]
-* `--skills-from`: Comma-separated list of skill sources to install from (e.g. 'nemo-helix,nemo-evaluator-plugin'). Use 'nemo-helix' for the built-in set. Default: all sources. Only applied when --install-skills is set.
+* `--skills-from`: Comma-separated list of skill sources to install from (e.g. 'nemo-helix,nemo-evals-plugin'). Use 'nemo-helix' for the built-in set. Default: all sources. Only applied when --install-skills is set.
 * `--skills-path <DIRECTORY>`: Install skills to a custom directory for another coding agent
 * `--resume`: Retry an interrupted setup using the normal idempotent setup path.
 * `--ready-timeout <INTEGER>`: Seconds to wait for platform readiness (default: 240)
@@ -9192,14 +9192,14 @@ nemo anonymizer run explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-### nemo evaluator
+### nemo evals
 
-Plugin commands for evaluator.
+Plugin commands for evals.
 
 **Usage:**
 
 ```shell
-nemo evaluator [OPTIONS] COMMAND [ARGS]...
+nemo evals [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -9214,31 +9214,31 @@ nemo evaluator [OPTIONS] COMMAND [ARGS]...
 *Jobs:*
 
 * `agent-evaluate`: Run agent evaluation over tasks against a model, agent,...
-* `evaluate`: Run evaluator SDK metrics against inline rows or...
+* `evaluate`: Run evals SDK metrics against inline rows or FilesetRef...
 * `retrieve-eval`: Evaluate dense retrieval over a BEIR corpus with nDCG,...
 
-#### nemo evaluator info
+#### nemo evals info
 
 Print the current plugin status.
 
 **Usage:**
 
 ```shell
-nemo evaluator info [OPTIONS]
+nemo evals info [OPTIONS]
 ```
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo evaluator metric-types
+#### nemo evals metric-types
 
 Print available evaluator metric names or a metric JSON schema.
 
 **Usage:**
 
 ```shell
-nemo evaluator metric-types [OPTIONS] [<metric-name>]
+nemo evals metric-types [OPTIONS] [<metric-name>]
 ```
 
 **Arguments:**
@@ -9249,14 +9249,14 @@ nemo evaluator metric-types [OPTIONS] [<metric-name>]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo evaluator agent-evaluate
+#### nemo evals agent-evaluate
 
 Run agent evaluation over tasks against a model, agent, or runner.
 
 **Usage:**
 
 ```shell
-nemo evaluator agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
+nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
@@ -9293,14 +9293,14 @@ Some spec fields cannot be represented as CLI flags: `target`, `trials`, `labels
 
 * `explain`: Show input/output schemas.
 
-##### nemo evaluator agent-evaluate explain
+##### nemo evals agent-evaluate explain
 
 Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo evaluator agent-evaluate explain [OPTIONS]
+nemo evals agent-evaluate explain [OPTIONS]
 ```
 
 **Options:**
@@ -9311,14 +9311,14 @@ nemo evaluator agent-evaluate explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo evaluator evaluate
+#### nemo evals evaluate
 
-Run evaluator SDK metrics against inline rows or FilesetRef datasets.
+Run evals SDK metrics against inline rows or FilesetRef datasets.
 
 **Usage:**
 
 ```shell
-nemo evaluator evaluate [OPTIONS] [COMMAND] [ARGS]...
+nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
@@ -9355,14 +9355,14 @@ Some spec fields cannot be represented as CLI flags: `dataset`, `params`, `targe
 
 * `explain`: Show input/output schemas.
 
-##### nemo evaluator evaluate explain
+##### nemo evals evaluate explain
 
 Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo evaluator evaluate explain [OPTIONS]
+nemo evals evaluate explain [OPTIONS]
 ```
 
 **Options:**
@@ -9373,14 +9373,14 @@ nemo evaluator evaluate explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo evaluator retrieve-eval
+#### nemo evals retrieve-eval
 
 Evaluate dense retrieval over a BEIR corpus with nDCG, recall, precision, and MAP.
 
 **Usage:**
 
 ```shell
-nemo evaluator retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
+nemo evals retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
@@ -9412,14 +9412,14 @@ Some spec fields cannot be represented as CLI flags: `target`, `baseline`, `k`. 
 
 * `explain`: Show input/output schemas.
 
-##### nemo evaluator retrieve-eval explain
+##### nemo evals retrieve-eval explain
 
 Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo evaluator retrieve-eval explain [OPTIONS]
+nemo evals retrieve-eval explain [OPTIONS]
 ```
 
 **Options:**

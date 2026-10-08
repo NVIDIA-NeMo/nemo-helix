@@ -597,13 +597,13 @@ def test_example_plugin_entry_point_is_visible_when_installed():
 def test_evaluator_plugin_entry_point_has_deliberate_order_before_unknown_plugins():
     plugin_entry_points = {
         "aardvark": SimpleNamespace(value="plugin.module:AardvarkCLI"),
-        "evaluator": SimpleNamespace(value="plugin.module:EvaluatorCLI"),
+        "evals": SimpleNamespace(value="plugin.module:EvaluatorCLI"),
         "zeta": SimpleNamespace(value="plugin.module:ZetaCLI"),
     }
 
     visible_entries = build_top_level_entries((), plugin_entry_points, include_hidden=False)
 
-    assert [entry.name for entry in visible_entries] == ["evaluator", "aardvark", "zeta"]
+    assert [entry.name for entry in visible_entries] == ["evals", "aardvark", "zeta"]
 
 
 @pytest.mark.parametrize(

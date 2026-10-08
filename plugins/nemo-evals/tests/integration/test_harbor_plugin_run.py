@@ -1,0 +1,216 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Plugin-level end-to-end Harbor run through the real sync job machinery.
+
+Unlike the unit tests (which fake the evaluator so the Harbor runner is built but never executed),
+This drives ``AgentEvalJob.run(...)`` against a *real* HarborRunnerTarget using an explicit
+``JobContext`` and sync typed client. The Harbor runner resolves to a native
+``HarborAgentTaskRunner``, Harbor runs the bundled hello-world task in Docker, and the verifier
+reward is scored (by a cloudpickle-bundled ``HarborRewardMetric``) and persisted into the run bundle.
+It is the plugin analog of the SDK's ``tests/e2e/test_harbor_runtime.py``.
+
+Needs the ``harbor`` extra (Python >=3.12; ``pip install nhx-evals-sdk[harbor]``) and a working
+Docker daemon; ``importorskip('harbor')`` + a Docker check skip it otherwise (so it's inert on the
+3.11 workspace and in CI). Marked ``integration`` — a heavy, external-dependency run — but unlike the
+sibling tests it stands up no platform.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import shutil
+import subprocess
+import tarfile
+import time
+import uuid
+from pathlib import Path
+
+import pytest
+from nemo_evals.api.schemas import MetadataItem, MetricInline, TaskInputs
+from nemo_evals.jobs.agent_evaluate import AGENT_BUNDLE_DIR, DEFAULT_RESULT_NAME, AgentEvalJob
+from nemo_evals.jobs.agent_spec import (
+    AgentEvalInputSpec,
+    AgentEvalTaskInput,
+    HarborBuiltinAgentSource,
+    HarborRunnerTarget,
+)
+from nemo_evals.sdk.resources import Evaluator
+from nemo_evals.shared.metric_bundles.bundles import bundle_metric
+from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRewardMetric, discover_harbor_tasks
+from nhx_evals_sdk.execution.metric_execution import run_sync
+
+pytestmark = [pytest.mark.integration]
+
+
+@pytest.mark.parametrize("direct", [False, True], ids=["taskset", "direct-list"])
+@pytest.mark.parametrize(
+    "subprocess_platform",
+    [["--services", "auth,entities,files,jobs,secrets,evals", "--controllers", "jobs,entities"]],
+    indirect=True,
+    ids=["harbor-services"],
+)
+@pytest.mark.timeout(900)
+def test_publish_stored_harbor_source_and_execute(subprocess_platform, tmp_path, direct):
+    """Publish a stored task, submit it directly or through a taskset, and verify the real job's trials and reward."""
+    pytest.importorskip("harbor")
+    if not _docker_available():
+        pytest.skip("Docker daemon is required to run a Harbor job")
+    import httpx
+    from nemo_evals.api.schemas import TaskInput, TaskRef, TasksetInput
+    from nemo_evals.harbor.publication import publish_harbor_task_archive
+    from nemo_helix_plugin.files.client import FilesClient
+    from nemo_helix_plugin.files.types import CreateFilesetRequest
+    from nemo_helix_plugin.jobs.client import JobsClient
+
+    base_url = subprocess_platform
+    name = f"harbor-bridge-{uuid.uuid4().hex[:8]}"
+    task_dir = _DATASET_DIR / "hello-world"
+    files_client = FilesClient(base_url=base_url, workspace="default")
+    files_client.create_fileset(body=CreateFilesetRequest(name=name)).data()
+    definition = publish_harbor_task_archive(task_dir, files_client=files_client, fileset_ref=f"default/{name}")
+    evaluator = Evaluator.from_client(NemoClient(base_url=base_url, workspace="default"))
+    evaluator.tasks.create(
+        name,
+        task=TaskInput(spec=definition),
+    )
+    evaluator.tasksets.create(name, taskset=TasksetInput(tasks=[TaskRef(f"default/{name}")]))
+    route = f"{base_url}/apis/evals/v2/workspaces/default/agent-evaluate/jobs"
+    public_tasks = [f"default/{name}"] if direct else f"default/{name}"
+    response = httpx.post(
+        route,
+        json={
+            "profile": "harbor-test",
+            "spec": {
+                "tasks": public_tasks,
+                "target": {"kind": "harbor", "source": {"name": "oracle"}},
+            },
+        },
+        timeout=60,
+    )
+    assert response.status_code == 201, response.text
+    job = response.json()
+    snapshots = job["spec"]["tasks"]
+    assert len(snapshots) == 1
+    assert snapshots[0]["spec"]["provenance"]["entity_name"] == f"default/{name}"
+    assert snapshots[0]["spec"]["native_task_id"] == "harbor/hello-world"
+    assert snapshots[0]["spec"]["source"] == definition.source.model_dump(mode="json")
+    jobs_client = JobsClient(base_url=base_url, workspace="default")
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        status = httpx.get(f"{route}/{job['name']}/status", timeout=30).raise_for_status().json()
+        if status["status"] in {"completed", "error", "failed", "cancelled"}:
+            break
+        time.sleep(2)
+    assert status["status"] == "completed", status
+    payload = jobs_client.download_job_result(job=job["name"], name=DEFAULT_RESULT_NAME).read()
+    with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+        trial_file = next(member for member in tar.getmembers() if member.name.endswith("trials.jsonl"))
+        stream = tar.extractfile(trial_file)
+        assert stream is not None
+        trials = [json.loads(line) for line in stream if line.strip()]
+        assert trials and {trial["task_id"] for trial in trials} == {"harbor/hello-world"}
+        score_file = next(member for member in tar.getmembers() if member.name.endswith("scores.jsonl"))
+        stream = tar.extractfile(score_file)
+        assert stream is not None
+        scores = [json.loads(line) for line in stream if line.strip()]
+        assert scores and all(score["status"] == "completed" for score in scores), scores
+        assert any(
+            output["name"] == "reward" and output["value"] == 1.0 for score in scores for output in score["outputs"]
+        ), scores
+
+
+#: The bundled Harbor hello-world dataset (repo root → SDK examples).
+_DATASET_DIR = Path(__file__).resolve().parents[4] / "packages/nhx_evals_sdk/examples/harbor/hello_world_dataset"
+
+
+def _docker_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    try:
+        # Bound the probe: a wedged daemon can make ``docker info`` hang until the
+        # test-level timeout. Treat a stalled daemon as unavailable and skip.
+        return subprocess.run(["docker", "info"], capture_output=True, timeout=10).returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def _reward_metric() -> MetricInline:
+    # HarborRewardMetric is a custom metric (not in MetricsUnion), so it rides as a cloudpickle bundle.
+    bundle = bundle_metric(HarborRewardMetric(), CloudpickleMetricBundlePackager())
+    return MetricInline.model_validate(bundle.model_dump(mode="json"))
+
+
+def _job_context(tmp_path: Path) -> JobContext:
+    storage = StoragePaths(ephemeral=tmp_path / "ephemeral", persistent=tmp_path / "persistent")
+    storage.ephemeral.mkdir()
+    storage.persistent.mkdir()
+    return JobContext(
+        workspace="dev",
+        storage=storage,
+        results=LocalJobResults(root=storage.persistent / "results"),
+        job_id="harbor-plugin-run",
+    )
+
+
+@pytest.mark.timeout(600)
+def test_sync_job_runs_a_real_harbor_target(tmp_path: Path) -> None:
+    pytest.importorskip("harbor")
+    if not _docker_available():
+        pytest.skip("Docker daemon is required to run a Harbor job")
+
+    # Reuse the SDK's dataset discovery so the task id matches the name Harbor writes into result.json,
+    # and the tasks carry the `harbor_dataset_path` metadata the native runner reads. Each task is
+    # scored by a HarborRewardMetric, re-bundled here into the plugin's inline-metric wire shape.
+    runtime_tasks = discover_harbor_tasks(_DATASET_DIR)
+    assert runtime_tasks, "no Harbor tasks discovered in the hello-world dataset"
+    input_spec = AgentEvalInputSpec(
+        tasks=[
+            AgentEvalTaskInput(
+                id=rt.id,
+                intent=rt.intent,
+                inputs=TaskInputs.model_validate(rt.inputs),
+                metrics=[_reward_metric()],
+                metadata=[MetadataItem(key=key, value=value) for key, value in rt.metadata.items()],
+            )
+            for rt in runtime_tasks
+        ],
+        target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle")),
+    )
+    ctx = _job_context(tmp_path)
+
+    # The real sync job path: validate the submitter spec to the canonical spec, then invoke run()
+    # with the real evaluator (no fake) → resolve the Harbor target → native HarborAgentTaskRunner →
+    # Harbor runs the task in Docker → adapt to trials → score → persist. The explicit ctx keeps
+    # storage hermetic under tmp_path so the persisted bundle is readable here.
+    client = NemoClient(base_url="http://platform.test", workspace="dev")
+    canonical = run_sync(
+        lambda: AgentEvalJob.to_spec(
+            input_spec,
+            workspace="default",
+            entity_client=None,
+            async_sdk=AsyncNemoClient(base_url="http://platform.test"),
+            is_local=True,
+        )
+    )
+    result = AgentEvalJob().run(
+        canonical.model_dump(mode="json"),
+        ctx=ctx,
+        client=client,
+    )
+
+    assert result["status"] == "completed", result
+    assert result["artifact"]["name"] == DEFAULT_RESULT_NAME
+
+    # The persisted bundle records the Harbor verifier reward: the oracle agent solves hello-world, so
+    # the reward metric scores 1.0.
+    scores_path = ctx.storage.persistent / AGENT_BUNDLE_DIR / "scores.jsonl"
+    assert scores_path.exists(), "run bundle is missing scores.jsonl"
+    scores_text = scores_path.read_text(encoding="utf-8")
+    assert '"reward"' in scores_text
+    assert "1.0" in scores_text

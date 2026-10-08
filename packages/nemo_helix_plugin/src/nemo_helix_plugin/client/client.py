@@ -774,8 +774,8 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         return self._resource_client(GuardrailClient, AsyncGuardrailClient)
 
     @property
-    def evaluator(self) -> NemoClient | AsyncNemoClient:
-        from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+    def evals(self) -> NemoClient | AsyncNemoClient:
+        from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
 
         return self._resource_client(EvaluatorClient, AsyncEvaluatorClient)
 

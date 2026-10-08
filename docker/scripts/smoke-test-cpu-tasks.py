@@ -35,9 +35,9 @@ CLI_TIMEOUT_SECONDS = 120
 #: Modules and the attribute each must expose, covering the Evaluator and Gym
 #: task entrypoints plus the server deps they import at runtime.
 EVALUATOR_IMPORTS: dict[str, str | None] = {
-    "nemo_evaluator.tasks.agent_evaluate": None,
-    "nemo_evaluator.tasks.evaluate": None,
-    "nemo_evaluator.tasks.stage_environment": None,
+    "nemo_evals.tasks.agent_evaluate": None,
+    "nemo_evals.tasks.evaluate": None,
+    "nemo_evals.tasks.stage_environment": None,
     "uvicorn": "__version__",
     "yaml": "__version__",
     "opensandbox.config": "ConnectionConfig",

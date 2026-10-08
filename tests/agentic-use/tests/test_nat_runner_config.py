@@ -816,8 +816,8 @@ workflow:
         assert passed is True
         assert (str(nat_runner.SHARED_DIR), "/app/tests/agentic-use/shared:ro") in captured_mounts
         assert (
-            str(nat_runner.REPO_ROOT / "packages" / "nemo_evaluator_sdk" / "src"),
-            "/app/packages/nemo_evaluator_sdk/src:ro",
+            str(nat_runner.REPO_ROOT / "packages" / "nhx_evals_sdk" / "src"),
+            "/app/packages/nhx_evals_sdk/src:ro",
         ) in captured_mounts
 
     def test_run_task_records_agent_metadata(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

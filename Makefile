@@ -126,8 +126,8 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/data-designer/retrieval-sdg.mdx \
 	docs/data-designer/tutorials/basics.mdx \
 	docs/data-designer/tutorials/seeding.mdx \
-	docs/evaluator/agent-eval/gym-runner.mdx \
-	docs/evaluator/agent-eval/index.mdx \
+	docs/evals/agent-eval/gym-runner.mdx \
+	docs/evals/agent-eval/index.mdx \
 	docs/pysdk/client/index.mdx \
 	docs/safe-synthesizer/about/jobs.mdx \
 	docs/safe-synthesizer/about/reference.mdx \

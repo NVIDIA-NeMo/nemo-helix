@@ -1044,7 +1044,7 @@ async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz
     data = static_authz_data["authz"]
     data["principals"] = {"member@test.com": {"workspaces": {"source": ["TaskReader"]}}}
     data["roles"]["TaskReader"] = {"permissions": ["evaluator.tasks.read"]}
-    data["endpoints"]["/apis/evaluator/v2/workspaces/{workspace}/tasks/{name}"] = {
+    data["endpoints"]["/apis/evals/v2/workspaces/{workspace}/tasks/{name}"] = {
         "get": {"permissions": ["evaluator.tasks.read"], "scopes": ["evaluator:read", "platform:read"]}
     }
     set_policy_data(static_authz_data)
@@ -1062,10 +1062,10 @@ async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz
         request = Request({"type": "http", "headers": [(b"x-nhx-scopes", scope.encode())]})
         check = get_request_authorizer(request)
         if scope == "evaluator:read" and workspace == "source":
-            await check("GET", f"/apis/evaluator/v2/workspaces/{workspace}/tasks/task")
+            await check("GET", f"/apis/evals/v2/workspaces/{workspace}/tasks/task")
         else:
             with pytest.raises(HTTPException) as denied:
-                await check("GET", f"/apis/evaluator/v2/workspaces/{workspace}/tasks/task")
+                await check("GET", f"/apis/evals/v2/workspaces/{workspace}/tasks/task")
             assert denied.value.status_code == 403
     finally:
         auth_client_context.reset(token)

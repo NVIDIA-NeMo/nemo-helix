@@ -47,11 +47,11 @@ _LINK_REWRITES: list[tuple[re.Pattern[str], str]] = [
         "](/documentation/customizer-reference/manage-customization-jobs/get-job-status)",
     ),
     (
-        re.compile(r"\]\(\.\./\.\./evaluator/index(?:\.md)?\)"),
+        re.compile(r"\]\(\.\./\.\./evals/index(?:\.md)?\)"),
         "](/documentation/evaluate-models)",
     ),
     (
-        re.compile(r"\]\(\.\./\.\./evaluator/metrics/rag\.md?\)"),
+        re.compile(r"\]\(\.\./\.\./evals/metrics/rag\.md?\)"),
         "](/documentation/evaluate-models/metrics/rag-metrics)",
     ),
     (

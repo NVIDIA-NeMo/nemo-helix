@@ -338,7 +338,8 @@ def _derive_service_contribution(service: NemoService) -> tuple[AuthzContributio
     # cross-namespace can reach the merged policy.
     # Role-granted permissions are registered in the catalog above, so the ownership fence below
     # covers them too: a plugin cannot grant a role a permission outside its own namespace.
-    owner = service.name
+    # Preserve the existing permission namespace for the renamed Evals service.
+    owner = {"evals": "evaluator"}.get(service.name, service.name)
     malformed = sorted(pid for pid in catalog if not is_valid_permission_id(pid))
     out_of_namespace = sorted(p.id for p in catalog.values() if p.service != owner)
     if malformed:

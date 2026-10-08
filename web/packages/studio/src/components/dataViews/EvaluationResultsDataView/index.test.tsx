@@ -15,7 +15,7 @@ vi.mock('use-debounce', () => ({
 
 const WORKSPACE = 'default';
 
-const JOBS_URL = `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/:workspace/evaluate/jobs`;
+const JOBS_URL = `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/evaluate/jobs`;
 
 const mockJobsPage = {
   data: [

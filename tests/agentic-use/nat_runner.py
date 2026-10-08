@@ -1550,7 +1550,7 @@ def run_verify_phase(
         "bash",
         "-c",
         textwrap.dedent(f"""\
-            export PYTHONPATH="/app/tests/agentic-use/shared:/app/packages/nemo_evaluator_sdk/src:${{PYTHONPATH}}"
+            export PYTHONPATH="/app/tests/agentic-use/shared:/app/packages/nhx_evals_sdk/src:${{PYTHONPATH}}"
             export NAT_AGENT=1
             {smoke_seed_cmd}
             /app/.venv/bin/python -m pytest /tests/test_outputs.py -rA -v 2>&1 | tee /logs/verifier/test-stdout.txt
@@ -1584,7 +1584,7 @@ def run_verify_phase(
             (str(task_dir), "/task"),
             (str(workspace_dir), "/app/workspace"),
             (str(SHARED_DIR), "/app/tests/agentic-use/shared:ro"),
-            (str(REPO_ROOT / "packages" / "nemo_evaluator_sdk" / "src"), "/app/packages/nemo_evaluator_sdk/src:ro"),
+            (str(REPO_ROOT / "packages" / "nhx_evals_sdk" / "src"), "/app/packages/nhx_evals_sdk/src:ro"),
             (str(agent_log_dir), "/logs/agent"),
             (str(verifier_log_dir), "/logs/verifier"),
             # Persist service/database state across AGENT and VERIFY containers.
