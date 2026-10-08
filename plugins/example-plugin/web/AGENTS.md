@@ -65,7 +65,7 @@ resolve the SDK's types, types `host.sdk` as Studio does.
 service ships its own client, and must prefix every request with
 `host.apiBaseUrl` — Studio's dev-server `/apis` proxy is opt-in, so a bare
 `/apis/...` request hits the dev server rather than the platform whenever
-`VITE_PLATFORM_BASE_URL` is set. See `plugins/nemo-iron-swarm/web` for a
+`VITE_PLATFORM_BASE_URL` is set. See `plugins/nemo-agent-hardener/web` for a
 generated client wired this way.
 
 ## Shared UI (`@nemo/common`)

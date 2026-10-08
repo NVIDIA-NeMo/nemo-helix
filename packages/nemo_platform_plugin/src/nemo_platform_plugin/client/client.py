@@ -618,10 +618,10 @@ class BaseNemoClient(Generic[HttpClientT]):
         return self._resource_client(DataDesignerClient, AsyncDataDesignerClient)
 
     @property
-    def iron_swarm(self) -> NemoClient | AsyncNemoClient:
-        from nemo_platform_plugin.iron_swarm.client import AsyncIronSwarmClient, IronSwarmClient
+    def agent_hardener(self) -> NemoClient | AsyncNemoClient:
+        from nemo_platform_plugin.agent_hardener.client import AgentHardenerClient, AsyncAgentHardenerClient
 
-        return self._resource_client(IronSwarmClient, AsyncIronSwarmClient)
+        return self._resource_client(AgentHardenerClient, AsyncAgentHardenerClient)
 
     @property
     def inference(self: NemoClient | AsyncNemoClient) -> _InferenceNamespace:

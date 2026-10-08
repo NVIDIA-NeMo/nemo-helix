@@ -33,7 +33,7 @@ The generator no longer emits one spec per microservice and merges them. It now 
 | Data Designer | `plugins/nemo-data-designer/openapi/openapi.yaml` |
 | Deployments | `plugins/nemo-deployments/openapi/openapi.yaml` |
 | Evaluator | `plugins/nemo-evaluator/openapi/openapi.yaml` |
-| Iron Swarm | `plugins/nemo-iron-swarm/openapi/openapi.yaml` |
+| Agent Hardener | `plugins/nemo-agent-hardener/openapi/openapi.yaml` |
 | Safe Synthesizer | `plugins/nemo-safe-synthesizer/openapi/openapi.yaml` |
 
 The Customization spec is assembled at generation time from whichever customization contributors (`nemo.customization.contributors` entry points — e.g. `automodel`, `rl`, `unsloth`) are installed in the workspace, so its route surface depends on the synced environment. To add a new plugin to this list, add an (empty is fine) `[tool.nemo.openapi]` table to its `pyproject.toml`; if the plugin has more than one `nemo.services` entry point, set `service_name` in that table to disambiguate.

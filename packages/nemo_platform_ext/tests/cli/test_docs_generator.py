@@ -48,19 +48,19 @@ def test_cli_docs_use_supported_plugins_regardless_of_environment(monkeypatch):
     )
 
     for name in plugin_docs_discovery_env:
-        monkeypatch.setenv(name, "iron-swarm")
+        monkeypatch.setenv(name, "agent-hardener")
 
     enable_plugin_cli_docs()
 
     assert all(os.environ[name] == value for name, value in plugin_docs_discovery_env.items())
     assert os.environ["NEMO_PLUGIN_ALLOWLIST"] == "*"
     assert os.environ["NEMO_PLUGIN_CLI_ALLOWLIST"] == ",".join(documented_plugin_clis)
-    assert "iron-swarm" not in documented_plugin_clis
+    assert "agent-hardener" not in documented_plugin_clis
 
 
 def test_cli_docs_main_includes_supported_plugin_commands(tmp_path):
     env = os.environ.copy()
-    env.update({name: "iron-swarm" for name in plugin_docs_discovery_env})
+    env.update({name: "agent-hardener" for name in plugin_docs_discovery_env})
     repo_root = Path(_docs_generator.__file__).resolve().parents[3]
 
     result = subprocess.run(
@@ -77,12 +77,12 @@ def test_cli_docs_main_includes_supported_plugin_commands(tmp_path):
     )
     for plugin_name in documented_plugin_clis:
         assert f"`{plugin_name}`" in functional_plugins_row
-    assert "`iron-swarm`" not in functional_plugins_row
+    assert "`agent-hardener`" not in functional_plugins_row
 
 
 def test_cli_docs_main_documents_supported_plugin_subcommands(tmp_path):
     env = os.environ.copy()
-    env.update({name: "iron-swarm" for name in plugin_docs_discovery_env})
+    env.update({name: "agent-hardener" for name in plugin_docs_discovery_env})
     repo_root = Path(_docs_generator.__file__).resolve().parents[3]
 
     result = subprocess.run(
@@ -99,7 +99,7 @@ def test_cli_docs_main_documents_supported_plugin_subcommands(tmp_path):
         assert re.search(rf"^#### nemo {re.escape(plugin_name)} \S", result.stdout, re.MULTILINE), (
             f"expected at least one documented subcommand for `nemo {plugin_name}`"
         )
-    assert "iron-swarm" not in result.stdout
+    assert "agent-hardener" not in result.stdout
 
 
 def test_index_snippet_skips_hidden_lazy_commands_without_loading():
