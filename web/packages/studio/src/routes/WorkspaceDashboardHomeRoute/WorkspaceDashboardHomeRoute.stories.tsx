@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
+import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
 import { PageHeader, Stack } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
 import { StatTileRow } from '@studio/routes/WorkspaceDashboardHomeRoute/StatTileRow';
 import { http, HttpResponse } from 'msw';
 import type { FC } from 'react';
+import { AuthContext, type AuthContextProps } from 'react-oidc-context';
+
+/** Auth off: no signed-in user. */
+const signedOut = { user: null } as unknown as AuthContextProps;
 
 /**
  * Every StatTile/Quickstart action fetches a `total_results` count from a
@@ -79,6 +84,16 @@ const meta = {
   parameters: {
     msw: { handlers: [genericTotalResultsHandler] },
   },
+  // QuickstartSection's "Try a Sample Agent" modal reads auth and raises toasts.
+  decorators: [
+    (Story) => (
+      <AuthContext.Provider value={signedOut}>
+        <ToastProvider>
+          <Story />
+        </ToastProvider>
+      </AuthContext.Provider>
+    ),
+  ],
   argTypes: {
     agentsEnabled: { control: 'boolean', name: 'AGENTS_ENABLED' },
     optimizerEnabled: { control: 'boolean', name: 'OPTIMIZER_ENABLED' },
