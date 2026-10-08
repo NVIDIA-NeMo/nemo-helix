@@ -153,7 +153,8 @@ export const useDescribeWithAi = (
         setRequestError(CONTEXT_ERROR.test(message) ? `${message} ${CONTEXT_HINT}` : message);
         setValidation(null);
       } finally {
-        setIsGenerating(false);
+        // A newer run aborts this one but is still in flight, so only the latest run settles.
+        if (runRef.current === run) setIsGenerating(false);
       }
     },
     [chatCompletion, onDraft, workspace]

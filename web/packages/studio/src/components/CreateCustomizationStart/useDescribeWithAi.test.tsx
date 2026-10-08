@@ -185,6 +185,36 @@ describe('useDescribeWithAi', () => {
     expect(onDraft).toHaveBeenLastCalledWith(null);
   });
 
+  it('stays generating while a newer run is in flight', async () => {
+    const replies: ((value: unknown) => void)[] = [];
+    mutateAsync.mockImplementation(() => new Promise((resolve) => replies.push(resolve)));
+    const { result } = setUp();
+
+    let first: Promise<void> = Promise.resolve();
+    let second: Promise<void> = Promise.resolve();
+    act(() => {
+      first = result.current.generate(INPUTS);
+    });
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    act(() => {
+      second = result.current.generate(INPUTS);
+    });
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2));
+
+    // The first run was aborted by the second; its reply landing must not end the second.
+    await act(async () => {
+      replies[0](toolCallResponse(automodelDraft()));
+      await first;
+    });
+    expect(result.current.isGenerating).toBe(true);
+
+    await act(async () => {
+      replies[1](toolCallResponse(automodelDraft()));
+      await second;
+    });
+    expect(result.current.isGenerating).toBe(false);
+  });
+
   it('drops a reply that lands after the panel unmounts', async () => {
     let resolve: (value: unknown) => void = () => {};
     mutateAsync.mockReturnValue(new Promise((r) => (resolve = r)));
