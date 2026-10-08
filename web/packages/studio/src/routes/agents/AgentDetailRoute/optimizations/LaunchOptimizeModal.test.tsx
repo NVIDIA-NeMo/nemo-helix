@@ -1,9 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  getFilesListFilesetFilesQueryKey,
+  getFilesListFilesetsQueryKey,
+} from '@nemo/sdk/generated/platform/files';
+import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
 import { getAgentDetailRoute } from '@studio/routes/utils';
@@ -11,13 +17,23 @@ import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useLocation } from 'react-router';
+
+/** Contents of the files in the fileset the test picks, keyed by path. */
+const filesetContents = new Map<string, string>();
+
+vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => ({
+  useFetchFileAsArrayBuffer:
+    () =>
+    async ({ path }: DownloadFileAsArrayBufferArgs) =>
+      new TextEncoder().encode(filesetContents.get(path) ?? '').buffer,
+}));
 
 const workspace = workspace1.workspace;
 const agentName = 'hermes';
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 const UPLOAD_URL = `${FILESETS_URL}/:name/-/*`;
 const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
-
 const OVERLAY = `optimizer:
   numeric:
     enabled: true
@@ -62,6 +78,34 @@ const mockHelix = () => {
   return { uploaded, submitted };
 };
 
+const mockFileset = (files: Record<string, string>) => {
+  filesetContents.clear();
+  Object.entries(files).forEach(([path, contents]) => filesetContents.set(path, contents));
+  server.use(
+    http.get(mockApiUrl(getFilesListFilesetsQueryKey, ':workspace'), () =>
+      HttpResponse.json({
+        data: [{ name: 'curated-bundle', workspace }],
+        pagination: { total: 1, page: 1, page_size: 20 },
+      })
+    ),
+    http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+      HttpResponse.json({
+        data: Object.keys(files).map((path) => ({
+          file_ref: `${workspace}/curated-bundle#${path}`,
+          file_url: `/${path}`,
+          path,
+          size: 10,
+        })),
+      })
+    )
+  );
+};
+
+const LocationSearch = () => <div data-testid="location-search">{useLocation().search}</div>;
+
+const jobsTable = () =>
+  screen.findByText('?tab=optimizations', { selector: '[data-testid="location-search"]' });
+
 const renderModal = () =>
   renderRoute(undefined, {
     history: getAgentDetailRoute(workspace, agentName),
@@ -69,16 +113,31 @@ const renderModal = () =>
       {
         path: ROUTES.workspace.agentDetail,
         element: (
-          <LaunchOptimizeModal open onClose={vi.fn()} workspace={workspace} agentName={agentName} />
+          <>
+            <LaunchOptimizeModal
+              open
+              onClose={vi.fn()}
+              workspace={workspace}
+              agentName={agentName}
+            />
+            <LocationSearch />
+          </>
         ),
       },
-      { path: ROUTES.workspace.agentOptimizationDetail, element: <div>Study detail page</div> },
     ],
   });
 
 const pickBundle = async (files: File[]) => {
   const dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByTestId('optimize-bundle-input'), { target: { files } });
+  fireEvent.change(within(dialog).getByTestId('bundle-input'), { target: { files } });
+  return dialog;
+};
+
+const pickFileset = async (user: ReturnType<typeof userEvent.setup>) => {
+  const dialog = await screen.findByRole('dialog');
+  await user.click(within(dialog).getByRole('radio', { name: 'Choose from a fileset' }));
+  await user.click(await within(dialog).findByRole('combobox', { name: 'Fileset' }));
+  await user.click(await screen.findByRole('option', { name: 'curated-bundle' }));
   return dialog;
 };
 
@@ -98,7 +157,7 @@ describe('LaunchOptimizeModal', () => {
     await waitFor(() => expect(startButton(dialog)).toBeEnabled());
     fireEvent.click(startButton(dialog));
 
-    expect(await screen.findByText('Study detail page')).toBeInTheDocument();
+    expect(await jobsTable()).toBeInTheDocument();
     expect(uploaded.sort()).toEqual(['dataset.json', 'optimize.yaml']);
     expect(submitted).toHaveLength(1);
     expect(submitted[0]?.spec).toMatchObject({
@@ -115,7 +174,7 @@ describe('LaunchOptimizeModal', () => {
 
     const dialog = await pickBundle([makeFile('bundle/optimize.yaml', OVERLAY)]);
 
-    const problems = await within(dialog).findByTestId('optimize-bundle-problems');
+    const problems = await within(dialog).findByTestId('bundle-problems');
     expect(problems).toHaveTextContent('eval.general.dataset points at "dataset.json"');
     expect(startButton(dialog)).toBeDisabled();
   });
@@ -179,6 +238,85 @@ describe('LaunchOptimizeModal', () => {
     expect(
       await within(dialog).findByText(/Profile default is not configured/)
     ).toBeInTheDocument();
-    expect(screen.queryByText('Study detail page')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toBeEmptyDOMElement();
+  });
+
+  describe('from a fileset', () => {
+    it('runs the study from the fileset in place', async () => {
+      const user = userEvent.setup();
+      const { uploaded, submitted } = mockHelix();
+      mockFileset({ 'optimize.yaml': OVERLAY, 'dataset.json': '[]' });
+      renderModal();
+
+      const dialog = await pickFileset(user);
+      await waitFor(() => expect(startButton(dialog)).toBeEnabled());
+      await user.click(startButton(dialog));
+
+      expect(await jobsTable()).toBeInTheDocument();
+      expect(uploaded).toEqual([]);
+      expect(submitted).toHaveLength(1);
+      expect(submitted[0]?.spec).toMatchObject({
+        optimize_config: 'optimize.yaml',
+        optimize_config_fileset: `${workspace}/curated-bundle`,
+        agent: agentName,
+      });
+      expect(submitted[0]).not.toHaveProperty('custom_fields');
+    });
+
+    it('preflights the config against the fileset listing', async () => {
+      const user = userEvent.setup();
+      mockHelix();
+      mockFileset({ 'configs/optimize.yaml': OVERLAY });
+      renderModal();
+
+      const dialog = await pickFileset(user);
+
+      const problems = await within(dialog).findByTestId('bundle-problems');
+      expect(problems).toHaveTextContent('eval.general.dataset points at "dataset.json"');
+      expect(startButton(dialog)).toBeDisabled();
+    });
+
+    it('asks which YAML to run when the fileset holds several', async () => {
+      const user = userEvent.setup();
+      const { submitted } = mockHelix();
+      mockFileset({
+        'agent.yaml': 'name: not-an-optimize-config\n',
+        'optimize.yaml': OVERLAY,
+        'dataset.json': '[]',
+      });
+      renderModal();
+
+      const dialog = await pickFileset(user);
+      await user.click(await within(dialog).findByRole('combobox', { name: 'Optimize config' }));
+      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+        'agent.yaml',
+        'optimize.yaml',
+      ]);
+      await user.click(screen.getByRole('option', { name: 'agent.yaml' }));
+
+      expect(
+        await within(dialog).findByText(/agent.yaml is not a valid optimize config/)
+      ).toBeInTheDocument();
+      expect(startButton(dialog)).toBeDisabled();
+
+      await user.click(within(dialog).getByRole('combobox', { name: 'Optimize config' }));
+      await user.click(screen.getByRole('option', { name: 'optimize.yaml' }));
+      await waitFor(() => expect(startButton(dialog)).toBeEnabled());
+      await user.click(startButton(dialog));
+
+      await waitFor(() => expect(submitted[0]?.spec?.optimize_config).toBe('optimize.yaml'));
+    });
+
+    it('says when the fileset holds no YAML', async () => {
+      const user = userEvent.setup();
+      mockHelix();
+      mockFileset({ 'dataset.json': '[]' });
+      renderModal();
+
+      const dialog = await pickFileset(user);
+
+      expect(await within(dialog).findByText('This fileset has no YAML files.')).toBeVisible();
+      expect(startButton(dialog)).toBeDisabled();
+    });
   });
 });

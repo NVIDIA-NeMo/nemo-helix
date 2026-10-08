@@ -12,19 +12,22 @@ import {
 } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { rollbackFileset } from '@studio/api/agents/agentSpecFileset';
-import type { FilesetEntry } from '@studio/api/files/types';
+import type { BundleSource } from '@studio/api/files/types';
 import { uploadFilesetEntries } from '@studio/api/files/uploadFilesetEntries';
 import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
 
-export interface LaunchOptimizeStudyParams {
+/**
+ * A bundle of `entries` is staged into a new fileset the study owns, so deleting the study deletes
+ * it too. A `fileset` bundle is run from in place and never deleted with the study.
+ */
+export type LaunchOptimizeStudyParams = BundleSource & {
   workspace: string;
   agentName: string;
-  entries: readonly FilesetEntry[];
   /** The optimize YAML, as a path relative to the bundle root. */
   optimizeConfig: string;
   /** Name for the study; the server generates one when omitted. */
   name?: string;
-}
+};
 
 /**
  * The optimization strategy Studio submits a staged bundle to.
@@ -106,13 +109,29 @@ export const optimizeBundleFilesetName = (agentName: string, now = Date.now()): 
   return `${base}${suffix}`;
 };
 
-export const launchOptimizeStudy = async ({
-  workspace,
-  agentName,
-  entries,
-  optimizeConfig,
-  name,
-}: LaunchOptimizeStudyParams): Promise<RunStrategyJob> => {
+const createStudy = (
+  { workspace, agentName, optimizeConfig, name }: LaunchOptimizeStudyParams,
+  filesetName: string,
+  customFields?: Record<string, string>
+): Promise<RunStrategyJob> =>
+  agentOptimizationCreateRunStrategyJob(workspace, {
+    ...(name ? { name } : {}),
+    spec: {
+      strategy: STUDIO_OPTIMIZE_STRATEGY,
+      optimize_config: optimizeConfig,
+      optimize_config_fileset: `${workspace}/${filesetName}`,
+      agent: agentName,
+    },
+    ...(customFields ? { custom_fields: customFields } : {}),
+  });
+
+export const launchOptimizeStudy = async (
+  params: LaunchOptimizeStudyParams
+): Promise<RunStrategyJob> => {
+  const { workspace, agentName } = params;
+  // No ownership marker: the fileset is the user's, so deleting the study must leave it alone.
+  if (params.fileset !== undefined) return createStudy(params, params.fileset);
+
   const filesetName = optimizeBundleFilesetName(agentName);
 
   await filesCreateFileset(workspace, {
@@ -122,18 +141,8 @@ export const launchOptimizeStudy = async ({
   });
 
   try {
-    await uploadFilesetEntries(workspace, filesetName, entries);
-
-    return await agentOptimizationCreateRunStrategyJob(workspace, {
-      ...(name ? { name } : {}),
-      spec: {
-        strategy: STUDIO_OPTIMIZE_STRATEGY,
-        optimize_config: optimizeConfig,
-        optimize_config_fileset: `${workspace}/${filesetName}`,
-        agent: agentName,
-      },
-      custom_fields: { [STUDIO_BUNDLE_FIELD]: filesetName },
-    });
+    await uploadFilesetEntries(workspace, filesetName, params.entries);
+    return await createStudy(params, filesetName, { [STUDIO_BUNDLE_FIELD]: filesetName });
   } catch (error) {
     await rollbackFileset(workspace, filesetName);
     throw error;

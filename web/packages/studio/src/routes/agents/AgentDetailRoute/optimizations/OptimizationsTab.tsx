@@ -37,7 +37,7 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
   const submitOptimization = useSubmitOptimization({ workspace, agentName, evals });
   // A record rather than a switch, so a strategy added without a handler fails to compile.
   const continueWith: Record<OptimizationStrategyId, () => void> = {
-    form: () => onViewChange(OptimizationView.Form),
+    hyperparameter: () => onViewChange(OptimizationView.Form),
     upload: onUploadConfig,
   };
 
