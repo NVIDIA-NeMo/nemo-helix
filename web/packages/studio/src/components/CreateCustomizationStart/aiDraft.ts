@@ -18,6 +18,7 @@ import {
   type CustomizerSchemaDetection,
   type CustomizerSchemaVariant,
   type TrainingType,
+  usesChatTemplate,
 } from '@studio/util/customizerSchema';
 import {
   customizationFormSchema,
@@ -201,7 +202,15 @@ const applyInputs = (
     return {
       ...job,
       model: { ...record(job.model), name: modelRef },
-      dataset: { ...record(job.dataset), path: dataset.fileset, validation_path: validationRef },
+      dataset: {
+        ...record(job.dataset),
+        path: dataset.fileset,
+        validation_path: validationRef,
+        // Set from the dataset's format, as the form does once the draft loads.
+        ...(dataset.schema && {
+          apply_chat_template: usesChatTemplate(dataset.schema.variant),
+        }),
+      },
     };
   }
   return { ...job, model: modelRef, dataset: dataset.fileset, environment: environment?.fileset };
