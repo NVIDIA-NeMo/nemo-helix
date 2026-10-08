@@ -243,11 +243,11 @@ class TestDescribeCommandPath:
         assert {"create", "list", "get"} <= set(names)
 
     def test_describes_hidden_commands_by_name(self):
-        result = _invoke("describe", "-f", "json", "agent")
+        result = _invoke("describe", "-f", "json", "projects")
         assert result.exit_code == 0
         description = json.loads(result.stdout)
         assert description["hidden"] is True
-        assert [subcommand["name"] for subcommand in description["subcommands"]] == ["context", "commands"]
+        assert {"create", "list", "get"} <= {subcommand["name"] for subcommand in description["subcommands"]}
 
     def test_unknown_command_is_a_usage_error(self):
         result = _invoke("describe", "models", "nope")
@@ -273,7 +273,7 @@ class TestDescribeCommandPath:
         assert description["command"] == "nemo"
         names = [subcommand["name"] for subcommand in description["subcommands"]]
         assert "describe" in names
-        assert "agent" not in names
+        assert "projects" not in names
         assert loaded == ["describe"]
 
     def test_bare_markdown_is_the_cli_overview(self):
