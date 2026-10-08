@@ -2329,6 +2329,45 @@ def _fake_download(pack: Path):  # noqa: ANN202
     return _dl
 
 
+def test_status_read_failure_tears_down_before_syncing_artifacts(monkeypatch: pytest.MonkeyPatch) -> None:
+    order: list[str] = []
+    backend = _FakeBackend()
+    backend.status_error = RuntimeError("result.json unreadable")
+    original_teardown = backend.teardown
+
+    def teardown(handle: LaunchHandle) -> None:
+        order.append("teardown")
+        original_teardown(handle)
+
+    monkeypatch.setattr(backend, "teardown", teardown)
+    snapshot = {
+        "schema_version": "scaled-evals-execution-inputs-v1",
+        "captured_at": NOW.isoformat(),
+        "evaluation": {"framework": "harbor", "framework_version": None, "runtime": "gym_daytona"},
+        "task": {"slug": "task"},
+        "profiles": {},
+        "credentials": {},
+        "submission_identity": {},
+    }
+    conn, executed = _worker_conn(
+        _eval_row(status="queued", runtime="gym_daytona", execution_snapshot=snapshot, image_ref="")
+    )
+    worker = _dispatcher(backend, conn)
+    for method, step in (
+        ("_write_provenance_warn", "provenance"),
+        ("_sync_artifacts_warn", "sync"),
+        ("_build_archive_warn", "archive"),
+    ):
+        monkeypatch.setattr(worker, method, lambda *args, _step=step, **kwargs: order.append(_step))
+
+    worker.run("ev_test123")
+
+    assert order == ["teardown", "provenance", "sync", "archive"]
+    assert backend.teardown_handles == [LaunchHandle(backend="fake", external_id="hbr-ev-test123")]
+    params = _status_update_params(executed, "failed")
+    assert any("status read failed: result.json unreadable" in str(value) for value in params)
+
+
 # ---------- gym_daytona backend (no Daytona account) ----------------------
 
 

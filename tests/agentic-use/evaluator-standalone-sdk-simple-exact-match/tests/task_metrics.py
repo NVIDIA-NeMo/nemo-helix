@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Task-specific metrics for the simple exact-match Evaluator SDK task."""
+"""Task-specific metrics for the simple exact-match Evals SDK task."""
 
 import asyncio
 import contextlib
@@ -12,8 +12,8 @@ from pathlib import Path
 
 from evaluator_agent_eval.task_config import load_agentic_use_task_config
 from evaluator_agent_eval.task_metric_utils import contains_all, run_python_file, score_checks
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
-from nemo_evaluator_sdk.values.protocol import MetricDiagnostic, MetricOutput, MetricResult
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk.values.protocol import MetricDiagnostic, MetricOutput, MetricResult
 
 
 class ExactMatchEvaluationMetric:
@@ -135,9 +135,9 @@ def _repo_root(path: Path | None) -> Path:
         candidates.extend([path, *path.parents])
     candidates.extend([Path.cwd(), *Path(__file__).resolve().parents])
     for candidate in candidates:
-        if (candidate / "packages" / "nemo_evaluator_sdk" / "src").exists():
+        if (candidate / "packages" / "nhx_evals_sdk" / "src").exists():
             return candidate
-    raise RuntimeError("Could not locate repo root containing packages/nemo_evaluator_sdk/src")
+    raise RuntimeError("Could not locate repo root containing packages/nhx_evals_sdk/src")
 
 
 def _normalize_summary(text: str) -> str:

@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.models.execution_snapshot import (
     canonical_sha256,
@@ -560,20 +561,75 @@ def _runtime(row: Mapping[str, Any], *, backend: str | None, handle: str | None)
         if runtime.startswith("gym"):
             runner_image_ref = runner_image_ref or _first_env("GYM_RUNNER_IMAGE")
             runner_image_digest = runner_image_digest or _first_env("GYM_RUNNER_IMAGE_DIGEST")
-    if runtime == "sandbox_k8s":
+    if runtime in ("sandbox_k8s", HARBOR_OPENSANDBOX_RUNTIME):
         runner_image_ref = runner_image_ref or _first_env("HARBOR_RUNNER_IMAGE")
         runner_image_digest = runner_image_digest or _first_env("HARBOR_RUNNER_IMAGE_DIGEST")
+    sandbox = (
+        {} if runtime.startswith("gym") and row.get("execution_snapshot") is not None else _selected_env(_RUNTIME_ENV)
+    )
+    isolation = _effective_isolation(row)
+    if runtime == HARBOR_OPENSANDBOX_RUNTIME:
+        sandbox = {**sandbox, **_opensandbox_sandbox(row)}
+        isolation = _opensandbox_isolation(row, isolation)
     return RuntimeProvenance(
         name=runtime,
         network_policy=str(row.get("network_policy") or "unrestricted"),
-        effective_isolation=_effective_isolation(row),
+        effective_isolation=isolation,
         backend=backend,
         handle=handle,
         runner_image_ref=runner_image_ref,
         runner_image_digest=runner_image_digest,
-        sandbox={}
-        if runtime.startswith("gym") and row.get("execution_snapshot") is not None
-        else _selected_env(_RUNTIME_ENV),
+        sandbox=sandbox,
+    )
+
+
+def _opensandbox_applied_egress(row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Return the per-sandbox egress records the evidence builder loaded, ignoring malformed entries."""
+    return [item for item in row.get("opensandbox_applied_egress") or [] if isinstance(item, Mapping)]
+
+
+def _opensandbox_sandbox(row: Mapping[str, Any]) -> dict[str, str]:
+    """Launch-time facts from the persisted handle, plus the per-sandbox results the evidence builder loaded."""
+    raw = backend_handle_raw(row.get("backend_handle"))
+    launch = _mapping(raw.get("provenance"))
+    ownership = _mapping(raw.get("ownership"))
+    fields: dict[str, Any] = {
+        "opensandbox_sdk_version": launch.get("opensandbox_sdk_version"),
+        "egress_allowed_hosts": ",".join(str(host) for host in launch.get("trusted_allowed_hosts") or []),
+        "egress_verification": launch.get("egress_verification"),
+        "ownership_labels": json.dumps(dict(ownership), sort_keys=True) if ownership else None,
+    }
+    if "opensandbox_applied_egress" in row:
+        applied = _opensandbox_applied_egress(row)
+        fields["verified_sandboxes"] = len(applied)
+        fields["applied_policy_sha256s"] = ",".join(
+            sorted({str(item["policy_sha256"]) for item in applied if item.get("policy_sha256")})
+        )
+    return {key: str(value) for key, value in fields.items() if value not in (None, "")}
+
+
+def _opensandbox_isolation(
+    row: Mapping[str, Any], isolation: EffectiveIsolationProvenance
+) -> EffectiveIsolationProvenance:
+    """``NemoOpenSandboxEnvironment`` records a sandbox only after its applied policy passes verification, and kills
+    it otherwise, so the presence of the records is the verification evidence."""
+    launch = _mapping(backend_handle_raw(row.get("backend_handle")).get("provenance"))
+    mode = launch.get("egress_verification")
+    applied = _opensandbox_applied_egress(row)
+    verified = (
+        mode in ("default_action", "strict") and bool(applied) and all(item.get("policy_sha256") for item in applied)
+    )
+    warnings = list(isolation.warnings)
+    if verified and mode == "default_action":
+        warnings.append(
+            "OpenSandbox egress verification checked the default action only; allowed hosts were not compared"
+        )
+    return isolation.model_copy(
+        update={
+            "direct_egress": "scoped" if launch.get("trusted_allowed_hosts") else "denied",
+            "platform_verified": verified,
+            "warnings": warnings,
+        }
     )
 
 

@@ -11,7 +11,7 @@ quickstart environment does not include the job execution worker.
 import os
 
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.evaluator.client import EvaluatorClient
+from nemo_helix_plugin.evals.client import EvaluatorClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 

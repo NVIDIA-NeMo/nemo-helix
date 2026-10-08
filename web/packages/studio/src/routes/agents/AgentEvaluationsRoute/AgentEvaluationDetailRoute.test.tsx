@@ -65,11 +65,11 @@ describe('AgentEvaluationDetailRoute', () => {
     beforeEach(() => {
       server.use(
         http.get(
-          `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
+          `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
           () => HttpResponse.json(failedJob)
         ),
         http.get(
-          `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/${workspace}/agent-eval-results/${JOB_NAME}`,
+          `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-eval-results/${JOB_NAME}`,
           () =>
             HttpResponse.json({
               name: JOB_NAME,
@@ -117,11 +117,11 @@ describe('AgentEvaluationDetailRoute', () => {
     beforeEach(() => {
       server.use(
         http.get(
-          `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
+          `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
           () => HttpResponse.json(completedJob)
         ),
         http.get(
-          `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/${workspace}/agent-eval-results/${JOB_NAME}`,
+          `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-eval-results/${JOB_NAME}`,
           () =>
             HttpResponse.json({
               name: JOB_NAME,
@@ -166,7 +166,7 @@ describe('AgentEvaluationDetailRoute', () => {
     it('does not show the Runner metrics section when there are no runner scores', async () => {
       server.use(
         http.get(
-          `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/${workspace}/agent-eval-results/${JOB_NAME}`,
+          `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-eval-results/${JOB_NAME}`,
           () =>
             HttpResponse.json({
               name: JOB_NAME,

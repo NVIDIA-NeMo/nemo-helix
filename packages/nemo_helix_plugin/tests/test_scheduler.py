@@ -119,9 +119,9 @@ class TestApiSegmentFor:
         class _J(NemoJob):
             name = "evaluate"
 
-        _J.__module__ = "nemo_evaluator.jobs.evaluate"
+        _J.__module__ = "nemo_evals.jobs.evaluate"
         monkeypatch.setattr("nemo_helix_plugin.discovery.discover_jobs", lambda: {})
-        assert _api_segment_for(_J) == "evaluator"
+        assert _api_segment_for(_J) == "evals"
 
     def test_handles_missing_nemo_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from nemo_helix_plugin.scheduler import _api_segment_for

@@ -8,8 +8,8 @@ from typing import get_args, get_origin
 
 import pytest
 from nemo_helix_plugin.client.types import BinaryContent, Paginated, PreparedRequest
-from nemo_helix_plugin.evaluator import endpoints
-from nemo_helix_plugin.evaluator.types import (
+from nemo_helix_plugin.evals import endpoints
+from nemo_helix_plugin.evals.types import (
     AgentEvalJob,
     AgentEvalResult,
     BundledMetricOutputSpec,
@@ -72,7 +72,7 @@ def test_submit_evaluate_job_endpoint_shape() -> None:
 
     assert isinstance(prepared, PreparedRequest)
     assert prepared.method == "POST"
-    assert prepared.path_template == "/apis/evaluator/v2/workspaces/{workspace}/evaluate/jobs"
+    assert prepared.path_template == "/apis/evals/v2/workspaces/{workspace}/evaluate/jobs"
     assert prepared.path_params == {"workspace": "team-a"}
     assert isinstance(prepared.content, bytes)
     assert json.loads(prepared.content) == {"spec": {"metrics": [], "dataset": []}}
@@ -87,7 +87,7 @@ def test_submit_agent_eval_job_endpoint_shape() -> None:
     )
 
     assert prepared.method == "POST"
-    assert prepared.path_template == "/apis/evaluator/v2/workspaces/{workspace}/agent-evaluate/jobs"
+    assert prepared.path_template == "/apis/evals/v2/workspaces/{workspace}/agent-evaluate/jobs"
     assert prepared.path_params == {"workspace": "team-a"}
     assert prepared.response_type is AgentEvalJob
 
@@ -96,7 +96,7 @@ def test_health_endpoint_shape() -> None:
     prepared = endpoints.get_health()
 
     assert prepared.method == "GET"
-    assert prepared.path_template == "/apis/evaluator/v1/healthz"
+    assert prepared.path_template == "/apis/evals/v1/healthz"
     assert prepared.path_params == {}
     assert prepared.response_type is EvaluatorHealth
 
@@ -105,7 +105,7 @@ def test_hello_endpoint_shape() -> None:
     prepared = endpoints.hello(name="ada")
 
     assert prepared.method == "GET"
-    assert prepared.path_template == "/apis/evaluator/v1/hello/{name}"
+    assert prepared.path_template == "/apis/evals/v1/hello/{name}"
     assert prepared.path_params == {"name": "ada"}
     assert prepared.response_type is HelloResponse
 
@@ -125,7 +125,7 @@ def test_evaluate_job_and_download_endpoint_shapes() -> None:
     download = endpoints.download_evaluate_job_result(workspace="team-a", job="job-1", name="aggregate-scores")
 
     assert job.method == "GET"
-    assert job.path_template == "/apis/evaluator/v2/workspaces/{workspace}/evaluate/jobs/{name}"
+    assert job.path_template == "/apis/evals/v2/workspaces/{workspace}/evaluate/jobs/{name}"
     assert job.path_params == {"workspace": "team-a", "name": "job-1"}
     assert job.response_type is EvaluateJob
     assert jobs.query_params == {"page": 2, "page_size": 25, "sort": "-created_at", "filter": '{"status":"completed"}'}
@@ -161,7 +161,7 @@ def test_agent_eval_job_endpoint_shapes() -> None:
     download = endpoints.download_agent_eval_job_result(workspace="team-a", job="job-1", name="summary")
 
     assert job.method == "GET"
-    assert job.path_template == "/apis/evaluator/v2/workspaces/{workspace}/agent-evaluate/jobs/{name}"
+    assert job.path_template == "/apis/evals/v2/workspaces/{workspace}/agent-evaluate/jobs/{name}"
     assert job.path_params == {"workspace": "team-a", "name": "job-1"}
     assert job.response_type is AgentEvalJob
     assert jobs.query_params == {"page": 2, "page_size": 25, "sort": "-created_at", "filter": '{"status":"completed"}'}
@@ -209,7 +209,7 @@ def test_retrieve_eval_job_endpoint_shapes() -> None:
     download = endpoints.download_retrieve_eval_job_result(workspace="team-a", job="job-1", name="eval-results")
 
     assert submitted.method == "POST"
-    assert submitted.path_template == "/apis/evaluator/v2/workspaces/{workspace}/retrieve-eval/jobs"
+    assert submitted.path_template == "/apis/evals/v2/workspaces/{workspace}/retrieve-eval/jobs"
     assert isinstance(submitted.content, bytes)
     assert json.loads(submitted.content) == {
         "name": "retrieval-smoke",
@@ -326,7 +326,7 @@ def test_metric_endpoint_shapes() -> None:
     )
 
     assert metric_create.method == "POST"
-    assert metric_create.path_template == "/apis/evaluator/v2/workspaces/{workspace}/metrics/{name}"
+    assert metric_create.path_template == "/apis/evals/v2/workspaces/{workspace}/metrics/{name}"
     assert metric_create.path_params == {"workspace": "team-a", "name": "accuracy"}
     assert metric_create.query_params == {"project": "proj-a"}
     assert isinstance(metric_create.content, bytes)
@@ -372,7 +372,7 @@ def test_task_endpoint_shapes() -> None:
     )
 
     assert created.method == "POST"
-    assert created.path_template == "/apis/evaluator/v2/workspaces/{workspace}/tasks/{name}"
+    assert created.path_template == "/apis/evals/v2/workspaces/{workspace}/tasks/{name}"
     assert created.query_params == {"project": "proj-a"}
     assert created.response_type is Task
     assert replaced.method == "PUT"
@@ -409,7 +409,7 @@ def test_taskset_endpoint_shapes() -> None:
     )
 
     assert created.method == "POST"
-    assert created.path_template == "/apis/evaluator/v2/workspaces/{workspace}/tasksets/{name}"
+    assert created.path_template == "/apis/evals/v2/workspaces/{workspace}/tasksets/{name}"
     assert created.response_type is Taskset
     assert replaced.method == "PUT"
     assert replaced.query_params == {"project": "proj-a"}

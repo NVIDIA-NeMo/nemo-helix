@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
+from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
 
 REASONING_OUTPUT_NAME = "reasoning"
 logger = logging.getLogger(__name__)

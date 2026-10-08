@@ -8,18 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
-from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
-from nemo_evaluator_sdk.enums import ModelFormat
-from nemo_evaluator_sdk.metrics.protocol import MetricOutput
-from nemo_evaluator_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
-from nemo_evaluator_sdk.values.evidence import (
-    EVIDENCE_FORMAT_ATIF,
-    EVIDENCE_TRACE,
-    CandidateEvidence,
-    EvidenceDescriptor,
-)
 from nemo_optimization.candidate import CandidateEvaluationError, CandidateEvaluationResult
 from nemo_optimization.fabric_evaluator import (
     FabricCandidateEvaluator,
@@ -27,6 +15,18 @@ from nemo_optimization.fabric_evaluator import (
     _model_from_fabric,
     build_agent_eval_tasks,
     reduce_agent_eval_scores,
+)
+from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
+from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
+from nhx_evals_sdk.enums import ModelFormat
+from nhx_evals_sdk.metrics.protocol import MetricOutput
+from nhx_evals_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
+from nhx_evals_sdk.values.evidence import (
+    EVIDENCE_FORMAT_ATIF,
+    EVIDENCE_TRACE,
+    CandidateEvidence,
+    EvidenceDescriptor,
 )
 
 
@@ -515,8 +515,8 @@ def test_resolve_mcp_server_paths_absolutizes_only_bundle_files(tmp_path: Path) 
 
 
 def test_build_metrics_accepts_tool_argument_matches_input_and_rejects_bad_normalize() -> None:
-    from nemo_evaluator_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric
     from nemo_optimization.fabric_evaluator import _build_metrics
+    from nhx_evals_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric
 
     (metric,) = _build_metrics(
         {},

@@ -2077,7 +2077,7 @@ def _render_status_legend() -> str:
             "passed",
             "PASS",
             "Benchmark success",
-            "The agent ran, verification ran, and the deterministic Evaluator SDK checks passed.",
+            "The agent ran, verification ran, and the deterministic Evals SDK checks passed.",
         ),
         (
             "verify_failed",
@@ -2124,7 +2124,7 @@ def _render_status_legend() -> str:
 
 def _status_description(status: str) -> str:
     return {
-        "passed": "The agent ran, verification ran, and the deterministic Evaluator SDK checks passed.",
+        "passed": "The agent ran, verification ran, and the deterministic Evals SDK checks passed.",
         "verify_failed": "The agent completed, but the task-specific verifier rejected its output or artifacts.",
         "agent_failed": "The agent phase failed before the task could be successfully verified.",
         "failed": "The run failed without a more specific agent or verifier status.",
@@ -2181,13 +2181,13 @@ def _render_verifier_scores(value: object) -> str:
     scores_payload = _object_dict(value)
     aggregate_scores = scores_payload.get("aggregate_scores")
     if not isinstance(aggregate_scores, list) or not aggregate_scores:
-        return '<p class="muted">No structured Evaluator SDK scores were captured for this run.</p>'
+        return '<p class="muted">No structured Evals SDK scores were captured for this run.</p>'
 
     score_dicts = [_object_dict(score) for score in aggregate_scores if isinstance(score, dict)]
     chips = [_render_score_chip(score) for score in score_dicts]
     failed_chips = [_render_score_chip(score) for score in score_dicts if _is_failed_score(score)]
     if not chips:
-        return '<p class="muted">No structured Evaluator SDK scores were captured for this run.</p>'
+        return '<p class="muted">No structured Evals SDK scores were captured for this run.</p>'
     failed_section = ""
     if failed_chips:
         failed_section = (

@@ -68,7 +68,7 @@ def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
     from nemo_helix_plugin.auth.access_keys.client import AccessKeysClient
     from nemo_helix_plugin.auth.client import AuthenticationClient
     from nemo_helix_plugin.data_designer.client import DataDesignerClient
-    from nemo_helix_plugin.evaluator.client import EvaluatorClient
+    from nemo_helix_plugin.evals.client import EvaluatorClient
     from nemo_helix_plugin.files.client import FilesClient
     from nemo_helix_plugin.guardrail.client import GuardrailClient
     from nemo_helix_plugin.iam.client import IAMClient
@@ -91,7 +91,7 @@ def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
         ("agents", AgentsClient),
         ("auditor", AuditorClient),
         ("guardrail", GuardrailClient),
-        ("evaluator", EvaluatorClient),
+        ("evals", EvaluatorClient),
         ("projects", ProjectsClient),
         ("data_designer", DataDesignerClient),
         ("agent_hardener", AgentHardenerClient),
@@ -110,7 +110,7 @@ def test_convenience_properties_return_async_clients_for_async_client() -> None:
     from nemo_helix_plugin.auth.access_keys.client import AsyncAccessKeysClient
     from nemo_helix_plugin.auth.client import AsyncAuthenticationClient
     from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient
-    from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient
+    from nemo_helix_plugin.evals.client import AsyncEvaluatorClient
     from nemo_helix_plugin.files.client import AsyncFilesClient
     from nemo_helix_plugin.guardrail.client import AsyncGuardrailClient
     from nemo_helix_plugin.iam.client import AsyncIAMClient
@@ -133,7 +133,7 @@ def test_convenience_properties_return_async_clients_for_async_client() -> None:
         ("agents", AsyncAgentsClient),
         ("auditor", AsyncAuditorClient),
         ("guardrail", AsyncGuardrailClient),
-        ("evaluator", AsyncEvaluatorClient),
+        ("evals", AsyncEvaluatorClient),
         ("projects", AsyncProjectsClient),
         ("data_designer", AsyncDataDesignerClient),
         ("agent_hardener", AsyncAgentHardenerClient),

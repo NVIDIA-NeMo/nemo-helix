@@ -22,7 +22,7 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.client.response import NemoBinaryResponse, NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.data_designer.client import DataDesignerClient
-from nemo_helix_plugin.evaluator.client import EvaluatorClient
+from nemo_helix_plugin.evals.client import EvaluatorClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest, GuardrailCheckRequest
@@ -1312,7 +1312,7 @@ def check_status(service: str, job_name: str, workspace: str | None = None) -> s
         if service == "auditor":
             job = AuditorClient.from_client(client).get_audit_job(workspace=workspace, name=job_name).data()
             return json.dumps(_serialize(job), indent=2, default=str)
-        if service == "evaluator":
+        if service == "evals":
             status = EvaluatorClient.from_client(client).get_evaluate_job_status(workspace=workspace, name=job_name)
             return json.dumps(_serialize(status.data()), indent=2, default=str)
 

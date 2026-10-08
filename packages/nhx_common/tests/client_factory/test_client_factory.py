@@ -78,10 +78,10 @@ class TestSyncConstruction:
         assert client.base_url == str(Configuration.get_platform_config().base_url).rstrip("/")
 
     def test_service_principal_and_internal_headers(self):
-        client = cf.get_nemo_client(as_service="evaluator", internal=True)
-        assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
+        client = cf.get_nemo_client(as_service="evals", internal=True)
+        assert client._default_headers["X-NHX-Principal-Id"] == "service:evals"
         assert client._default_headers["X-NHX-Internal"] == "true"
-        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
+        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evals"
 
     def test_service_principal_uses_bearer_auth_in_token_exchange_mode(self):
         try:
@@ -91,7 +91,7 @@ class TestSyncConstruction:
                 "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
                 return_value="typed-service-token",
             ):
-                client = cf.get_nemo_client(as_service="evaluator", internal=True)
+                client = cf.get_nemo_client(as_service="evals", internal=True)
                 assert client._auth is not None
                 assert client._auth.get_access_token() == "typed-service-token"
         finally:
@@ -106,7 +106,7 @@ class TestSyncConstruction:
         try:
             Configuration.set_override(_auth_config_with_token_exchange())
 
-            client = cf.get_nemo_client(as_service="evaluator")
+            client = cf.get_nemo_client(as_service="evals")
             with pytest.raises(ValueError, match="NemoClient cannot send Authorization.*cleartext remote endpoint"):
                 client.send(_get("/apis/entities/v2/foo"))
         finally:
@@ -160,10 +160,10 @@ class TestAsyncConstruction:
         assert client.base_url == str(Configuration.get_platform_config().base_url).rstrip("/")
 
     def test_service_principal_and_internal_headers(self):
-        client = cf.get_async_nemo_client(as_service="evaluator", internal=True)
-        assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
+        client = cf.get_async_nemo_client(as_service="evals", internal=True)
+        assert client._default_headers["X-NHX-Principal-Id"] == "service:evals"
         assert client._default_headers["X-NHX-Internal"] == "true"
-        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
+        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evals"
 
     async def test_uses_endpoint_async_http_client(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         socket_path = tmp_path / "entities.sock"
@@ -369,11 +369,11 @@ class TestHeadersAuth:
                 "x-NHX-Subject-Aliases": "attacker",
             }
         ):
-            client = cf.get_async_nemo_client(as_service="evaluator", internal=True)
+            client = cf.get_async_nemo_client(as_service="evals", internal=True)
         assert client._default_headers["traceparent"] == "00-trace-span-01"
-        assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
+        assert client._default_headers["X-NHX-Principal-Id"] == "service:evals"
         assert client._default_headers["X-NHX-Internal"] == "true"
-        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
+        assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evals"
         assert all(name.lower() != "x-nhx-principal-groups" for name in client._default_headers)
         assert all(name.lower() != "x-nhx-subject-aliases" for name in client._default_headers)
 
@@ -439,7 +439,7 @@ class TestTestClientInjection:
     async def test_async_uses_explicit_http_client(self):
         test_client = httpx.AsyncClient(base_url="http://testserver")
         try:
-            client = cf.get_async_nemo_client(as_service="evaluator", http_client=test_client)
+            client = cf.get_async_nemo_client(as_service="evals", http_client=test_client)
             assert client._http is test_client
         finally:
             await test_client.aclose()
@@ -482,11 +482,11 @@ class TestTaskClientDelegation:
             "NHX_PRINCIPAL",
             '{"id": "user:alice@acme.com", "email": "alice@acme.com", "groups": ["team-a"]}',
         )
-        client = cf.get_task_nemo_client("evaluator")
+        client = cf.get_task_nemo_client("evals")
         headers = client._default_headers
         assert headers["X-NHX-Internal"] == "true"
-        assert headers["X-NHX-Principal-Id"] == "service:evaluator"
-        assert headers["X-NHX-Actor-Aliases"] == "service:evaluator"
+        assert headers["X-NHX-Principal-Id"] == "service:evals"
+        assert headers["X-NHX-Actor-Aliases"] == "service:evals"
         assert headers["X-NHX-Principal-On-Behalf-Of"] == "user:alice@acme.com"
         assert headers["X-NHX-Principal-On-Behalf-Of-Email"] == "alice@acme.com"
         assert headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "team-a"
@@ -494,8 +494,8 @@ class TestTaskClientDelegation:
     def test_task_client_without_principal_warns(self, monkeypatch: pytest.MonkeyPatch, caplog):
         monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
         with caplog.at_level("WARNING"):
-            client = cf.get_task_nemo_client("evaluator")
-        assert client._default_headers["X-NHX-Principal-Id"] == "service:evaluator"
+            client = cf.get_task_nemo_client("evals")
+        assert client._default_headers["X-NHX-Principal-Id"] == "service:evals"
         assert "X-NHX-Principal-On-Behalf-Of" not in client._default_headers
         assert "without on-behalf-of delegation" in caplog.text
 
@@ -504,13 +504,13 @@ class TestTaskClientDelegation:
             "NHX_PRINCIPAL",
             '{"id": "user:alice@acme.com", "email": "alice@acme.com", "groups": ["team-a"]}',
         )
-        client = cf.get_async_task_nemo_client("evaluator")
+        client = cf.get_async_task_nemo_client("evals")
         assert client._default_headers["X-NHX-Principal-On-Behalf-Of"] == "user:alice@acme.com"
 
     def test_provider_exposes_task_methods(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("NHX_PRINCIPAL", '{"id": "user:alice@acme.com"}')
         provider = cf.HelixNemoClientProvider()
-        headers = provider.get_task_nemo_client("evaluator")._default_headers
+        headers = provider.get_task_nemo_client("evals")._default_headers
         assert headers["X-NHX-Principal-On-Behalf-Of"] == "user:alice@acme.com"
 
 
@@ -551,7 +551,7 @@ class TestTaskClientWorkloadIdentity:
         monkeypatch.setenv("NHX_PRINCIPAL", '{"id": "user:alice@acme.com"}')  # ignored in WI mode
         Configuration.clear_cache()
 
-        client = cf.get_task_nemo_client("evaluator")
+        client = cf.get_task_nemo_client("evals")
         assert isinstance(client._auth, _FakeExchangeProvider)
         assert _stub_exchange["base_url"] == "http://platform:8080"
         # No trusted principal headers in workload-identity mode.
@@ -583,7 +583,7 @@ class TestTaskClientWorkloadIdentity:
         monkeypatch.setenv("NHX_PRINCIPAL", '{"id": "user:alice@acme.com"}')
         Configuration.clear_cache()
 
-        client = cf.get_task_nemo_client("evaluator")
+        client = cf.get_task_nemo_client("evals")
         assert client._auth is None
         assert client._default_headers["X-NHX-Principal-Id"] == "user:alice@acme.com"
         assert "X-NHX-Principal-On-Behalf-Of" not in client._default_headers

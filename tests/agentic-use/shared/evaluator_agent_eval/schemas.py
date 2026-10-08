@@ -138,7 +138,7 @@ class EvaluatorScoringRow(BaseModel):
         return value
 
     def to_dataset_row(self) -> dict[str, object]:
-        """Serialize as a JSON-compatible Evaluator SDK dataset row."""
+        """Serialize as a JSON-compatible Evals SDK dataset row."""
         return self.model_dump(mode="json")
 
 

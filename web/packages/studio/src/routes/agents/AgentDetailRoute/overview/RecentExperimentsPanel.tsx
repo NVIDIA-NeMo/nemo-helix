@@ -104,7 +104,7 @@ export const RecentExperimentsPanel: FC<RecentExperimentsPanelProps> = ({
               slotSubheading={
                 <Block className="max-w-[650px]">
                   {
-                    'Run evaluations for agents, models, and components with NeMo Evaluator and compare evaluations in Experiments. '
+                    'Run evaluations for agents, models, and components with NeMo Helix Evals and compare evaluations in Experiments. '
                   }
                   <Anchor href={LINK_DOCS_EXPERIMENTS_CLI} target="_blank">
                     Learn more

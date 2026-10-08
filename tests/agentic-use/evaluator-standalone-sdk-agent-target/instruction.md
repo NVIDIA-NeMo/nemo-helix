@@ -3,14 +3,14 @@
 
 # Configure An Agent Target
 
-Use the local standalone Evaluator SDK to configure a mock agent endpoint as the evaluated target and run a one-row exact-match evaluation.
+Use the local standalone Evals SDK to configure a mock agent endpoint as the evaluated target and run a one-row exact-match evaluation.
 
-Use only `packages/nemo_evaluator_sdk` and SDK-level APIs in your answer. Do not propose the `nemo` CLI, plugin SDK APIs, or any `services/*` implementation path.
+Use only `packages/nhx_evals_sdk` and SDK-level APIs in your answer. Do not propose the `nemo` CLI, plugin SDK APIs, or any `services/*` implementation path.
 
 Your final answer must include:
 
-- The package/path `packages/nemo_evaluator_sdk`.
-- The import or API symbols `Evaluator`, `run_sync`, `Agent`, `AgentFormat.GENERIC`, and `ExactMatchMetric`, including `Agent` from `nemo_evaluator_sdk.values.agents`.
+- The package/path `packages/nhx_evals_sdk`.
+- The import or API symbols `Evaluator`, `run_sync`, `Agent`, `AgentFormat.GENERIC`, and `ExactMatchMetric`, including `Agent` from `nhx_evals_sdk.values.agents`.
 - A directly runnable Python snippet that starts a mock HTTP endpoint returning `{"answer": "4", "trajectory": {"steps": [{"tool_calls": [{"name": "calculator"}]}]}}`.
 - A generic `Agent` target configured with `body`, `response_path="$.answer"`, and `trajectory_path="$.trajectory"`.
 - A dataset row asking `What is 2+2?` with expected answer `4`.

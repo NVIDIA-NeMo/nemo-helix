@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { EvaluateJob, HelixJobStatus } from '@nemo/sdk/generated/evaluator/schema';
+import { EvaluateJob, HelixJobStatus } from '@nemo/sdk/generated/evals/schema';
 import { ActionMenu } from '@studio/components/evaluation/Jobs/ActionMenu';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
@@ -12,12 +12,12 @@ const TEST_WORKSPACE = 'test-workspace';
 
 // Mock the delete API
 const mockDeleteJob = vi.fn();
-vi.mock('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes', async (importOriginal) => {
+vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => {
   const original = await importOriginal();
   return {
     // @ts-expect-error expect issue here with spread
     ...original,
-    useEvaluatorDeleteEvaluateJob: vi.fn(() => ({
+    useEvalsDeleteEvaluateJob: vi.fn(() => ({
       mutateAsync: mockDeleteJob,
     })),
   };

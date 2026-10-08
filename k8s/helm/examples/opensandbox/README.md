@@ -44,11 +44,32 @@ Replace `REPLACE_WITH_RELEASE_NAMESPACE` in the server values before install.
 | `opensandbox-controller.yaml` | Shared controller (snapshots unused on CRI-O) |
 | `opensandbox-server.yaml` | Shared-kernel server (no `[secure_runtime]`) |
 | `opensandbox-server-kata-qemu.yaml` | Kata QEMU server (`[secure_runtime] type=kata`) |
-| `batchsandbox-template.yaml` | ConfigMap — exclude control-plane; pull Secret name `nvcrimagepullsecret` |
-| `batchsandbox-template-kata-qemu.yaml` | ConfigMap — example Kata node selectors; same pull Secret name |
+| `batchsandbox-template.yaml` | ConfigMap — exclude control-plane; pull Secret name `nvcrimagepullsecret`; [Harbor directories](#harbor-directories) |
+| `batchsandbox-template-kata-qemu.yaml` | ConfigMap — example Kata node selectors; same pull Secret name; [Harbor directories](#harbor-directories) |
 
 `[secure_runtime]` is server-global. Install **one** server for production
 (shared-kernel **or** Kata). Dual releases are only for proving both paths.
+
+## Harbor directories
+
+Both BatchSandbox templates mount writable `emptyDir` volumes at `/logs`
+(2Gi), `/solution` (1Gi) and `/installed-agent` (2Gi) in the sandbox
+container. Scaled-evals' `harbor_opensandbox` runtime needs them: Harbor
+creates its log, solution and agent directories through `execd`, which runs as
+the task image's `USER`, so an image with a non-root `USER` can't create them
+on its own. Kubernetes creates an `emptyDir` world-writable, so the sandbox
+doesn't have to run as root.
+
+- Keep these mounts if you run Harbor tasks; removing them breaks every task
+  image with a non-root `USER` at sandbox start (`mkdir /logs: permission
+  denied`).
+- `/tests` is not mounted on purpose: verifier images bake their tests into
+  `/tests`, and an empty mount would hide them.
+- The sizes count against node ephemeral storage. A sandbox that writes more
+  than a volume's `sizeLimit` is evicted; raise the limits for long agent runs.
+- The OpenSandbox server reads the template only at startup. After changing
+  it, restart the server: `kubectl rollout restart deploy/opensandbox-server
+  -n opensandbox-system`.
 
 ## Install (shared-kernel)
 

@@ -7,7 +7,7 @@
 # from a wheel. It is required for live ATIF trajectory capture on out-of-process harnesses (codex).
 #
 # Everything else is in the lock —
-# `uv sync --frozen --package nemo-evaluator-sdk --extra fabric --inexact` installs the nemo-fabric
+# `uv sync --frozen --package nhx-evals-sdk --extra fabric --inexact` installs the nemo-fabric
 # SDK, the codex/claude/hermes adapters, and the nemo-relay Python bindings without removing the
 # existing workspace environment. The pip `nemo-relay` package is bindings-only (its wheel declares
 # no console script and contains no executable), so the daemon is published solely as a GitHub
@@ -23,8 +23,8 @@
 # from source.)
 #
 # A live codex run additionally needs the `codex` CLI + `codex login` auth.
-# See skills/nemo-evaluator-plugin/references/agent-evaluation.md and
-# packages/nemo_evaluator_sdk/tests/agent_eval/test_fabric_integration.py.
+# See skills/nemo-evals-plugin/references/agent-evaluation.md and
+# packages/nhx_evals_sdk/tests/agent_eval/test_fabric_integration.py.
 #
 # Usage:
 #   script/dev-install-fabric.sh                                # version matching the installed bindings
@@ -43,7 +43,7 @@ if [ -z "${NEMO_RELAY_VERSION:-}" ]; then
   bindings_version="$("$VENV_PY" -c 'import importlib.metadata as m; print(m.version("nemo-relay"))' 2>/dev/null || true)"
   if [ -z "$bindings_version" ]; then
     echo "nemo-relay is not installed in $VENV_PY, so the gateway version cannot be derived." >&2
-    echo "Run 'uv sync --frozen --package nemo-evaluator-sdk --extra fabric --inexact' first," >&2
+    echo "Run 'uv sync --frozen --package nhx-evals-sdk --extra fabric --inexact' first," >&2
     echo "or pass NEMO_RELAY_VERSION=<release> explicitly." >&2
     exit 1
   fi

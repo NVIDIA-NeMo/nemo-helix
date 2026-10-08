@@ -389,6 +389,112 @@ def test_entity_search_filter(entity_store_client: EntitiesClient, workspace: st
                 pass
 
 
+def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace: str):
+    """``$elemMatch`` selects on one element of an object array, on whichever database backs the store.
+
+    The SQL differs per dialect (SQLite ``json_each`` vs PostgreSQL ``json_array_elements``) and the
+    Kubernetes e2e deploys PostgreSQL, so this is the CI check for the PostgreSQL branch. The
+    non-array row matters there: expanding an object raises on PostgreSQL unless it is guarded.
+    Scalar elements must be skipped on both: SQLite raises on them, PostgreSQL reads them as null.
+    """
+    prefix = _unique_name("elem-match")
+    owner = _unique_name("owner")
+    rows = {
+        f"{prefix}-match": {
+            "metadata": [
+                {"key": "owner", "value": owner},
+                {"key": "verified", "value": True},
+            ]
+        },
+        f"{prefix}-split": {"metadata": [{"key": "owner", "value": "someone-else"}, {"key": "suite", "value": owner}]},
+        f"{prefix}-object": {"metadata": {"key": "owner", "value": owner}},
+        f"{prefix}-scalars": {"metadata": ["red", 3, None]},
+        f"{prefix}-none": {},
+    }
+
+    def names_matching(condition: dict) -> set[str]:
+        filter_query = json.dumps({"$and": [{"name": {"$like": f"{prefix}%"}}, condition]})
+        response = entity_store_client.list_entities(
+            entity_type=ENTITY_TYPE,
+            workspace=workspace,
+            query_params=ListEntitiesQueryParams(filter=filter_query),
+        )
+        return {entity.name for entity in response.items()}
+
+    try:
+        for name, data in rows.items():
+            entity_store_client.create_entity(
+                entity_type=ENTITY_TYPE, workspace=workspace, body=EntityCreateInput(name=name, data=data)
+            ).data()
+
+        owner_is_mine = {"data.metadata": {"$elemMatch": {"key": "owner", "value": owner}}}
+        assert names_matching(owner_is_mine) == {f"{prefix}-match"}
+        assert names_matching({"$not": owner_is_mine}) == {
+            f"{prefix}-split",
+            f"{prefix}-object",
+            f"{prefix}-scalars",
+            f"{prefix}-none",
+        }
+        assert names_matching({"data.metadata": {"$elemMatch": {"value": None}}}) == set()
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": True}}}) == {
+            f"{prefix}-match"
+        }
+        owner_prefix = {"key": "owner", "value": {"$startsWith": owner[:-2]}}
+        assert names_matching({"data.metadata": {"$elemMatch": owner_prefix}}) == {f"{prefix}-match"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"$startsWith": "re"}}}) == {f"{prefix}-scalars"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"$eq": 3}}}) == {f"{prefix}-scalars"}
+    finally:
+        for name in rows:
+            try:
+                entity_store_client.delete_entity_by_name(name=name, entity_type=ENTITY_TYPE, workspace=workspace)
+            except Exception:
+                pass
+
+
+def test_entity_prefix_suffix_and_object_key_filters(entity_store_client: EntitiesClient, workspace: str):
+    """``$startsWith`` and ``$endsWith`` are case-sensitive and anchored, and ``$hasKey`` treats a dotted key as one key.
+
+    Like ``$elemMatch``, these run on both SQLite and PostgreSQL in CI; under ``$not`` a row without
+    the field must still match on both.
+    """
+    prefix = _unique_name("prefix-key")
+    rows = {
+        f"{prefix}-pins": {"tasks": ["ws/task_a#d1"], "tags": {"v1.2": 1}},
+        f"{prefix}-near": {"tasks": ["other-ws/task_a#d1", "ws/taskXa#d1"], "tags": {"v1": 1}},
+        f"{prefix}-none": {},
+    }
+
+    def names_matching(condition: dict) -> set[str]:
+        filter_query = json.dumps({"$and": [{"name": {"$like": f"{prefix}%"}}, condition]})
+        response = entity_store_client.list_entities(
+            entity_type=ENTITY_TYPE,
+            workspace=workspace,
+            query_params=ListEntitiesQueryParams(filter=filter_query),
+        )
+        return {entity.name for entity in response.items()}
+
+    try:
+        for name, data in rows.items():
+            entity_store_client.create_entity(
+                entity_type=ENTITY_TYPE, workspace=workspace, body=EntityCreateInput(name=name, data=data)
+            ).data()
+
+        has_task_a = {"data.tasks": {"$elemMatch": {"$startsWith": "ws/task_a#"}}}
+        assert names_matching(has_task_a) == {f"{prefix}-pins"}
+        assert names_matching({"$not": has_task_a}) == {f"{prefix}-near", f"{prefix}-none"}
+        assert names_matching({"name": {"$endsWith": "-pins"}}) == {f"{prefix}-pins"}
+        assert names_matching({"name": {"$endsWith": "-PINS"}}) == set()
+        assert names_matching({"created_at": {"$startsWith": "20"}}) == set(rows)
+        assert names_matching({"data.tags": {"$hasKey": "v1.2"}}) == {f"{prefix}-pins"}
+        assert names_matching({"data.tags": {"$hasKey": "v1"}}) == {f"{prefix}-near"}
+    finally:
+        for name in rows:
+            try:
+                entity_store_client.delete_entity_by_name(name=name, entity_type=ENTITY_TYPE, workspace=workspace)
+            except Exception:
+                pass
+
+
 def test_entity_rename(entity_store_client: EntitiesClient, workspace: str):
     """Test renaming an entity via update.
 

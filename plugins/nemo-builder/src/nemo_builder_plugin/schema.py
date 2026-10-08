@@ -26,6 +26,9 @@ _SPEC_NAME_PATTERN = r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
 
 MAX_BUILD_SPECS = 100
 
+#: A set's job is `builder-<set>-<revision>`. Jobs names are per workspace, shared with every other job there.
+JOB_NAME_PREFIX = "builder-"
+
 # Jobs names a job's fileset `job-fileset-<job name>`: the longest name a set's name ends up in.
 _JOBS_FILESET_PREFIX = "job-fileset-"
 
@@ -177,8 +180,11 @@ class BuildSet(BaseModel):
     @model_validator(mode="after")
     def _derived_names_fit(self) -> Self:
         """Valid parts can still compose a name over the limit; checked here, before anything is written."""
-        job = f"{self.name}-{self.revision}"
-        composed = [f"{_JOBS_FILESET_PREFIX}{job}", *(f"{job}.{spec.name}" for spec in self.build_specs if spec.name)]
+        base = f"{self.name}-{self.revision}"
+        composed = [
+            f"{_JOBS_FILESET_PREFIX}{JOB_NAME_PREFIX}{base}",
+            *(f"{base}.{spec.name}" for spec in self.build_specs if spec.name),
+        ]
         longest = max(composed, key=len)
         if len(longest) > NAME_MAX_LENGTH:
             raise ValueError(

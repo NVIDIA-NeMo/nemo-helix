@@ -5014,6 +5014,16 @@
         },
         {
           "package": {
+            "name": "nemo-fabric-adapters-nooa",
+            "version": "0.4.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
             "name": "nemo-fabric-adapters-remote-agent",
             "version": "0.4.0",
             "ecosystem": "PyPI"
@@ -20046,7 +20056,7 @@
     },
     {
       "name": "Apache-2.0",
-      "count": 156
+      "count": 157
     },
     {
       "name": "BSD-3-Clause",

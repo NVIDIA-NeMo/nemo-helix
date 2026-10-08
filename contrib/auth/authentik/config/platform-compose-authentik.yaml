@@ -91,7 +91,7 @@ deployments:
     interval_seconds: 2
     terminal_orphan_grace_seconds: 300
 
-evaluator:
+evals:
   recreate_existing_system_entities: true
 
 safe_synthesizer: {}

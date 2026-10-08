@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Container E2E tests for the nemo-evaluator plugin.
+"""Container E2E tests for the nemo-evals plugin.
 
 The suite exercises the plugin through the public Platform SDK against an
 external deployment configured through ``NHX_BASE_URL``. Durable evaluator
 jobs execute in CPU task containers, so these tests intentionally do not mock
-the evaluator service or job scheduler.
+the evals service or job scheduler.
 """
 
 from __future__ import annotations
@@ -23,34 +23,19 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_evaluator.api.schemas import MetricInline, MetricRef
-from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import GymAgentSource, GymRunnerTarget
-from nemo_evaluator.jobs.evaluate import EvaluateInputSpec
-from nemo_evaluator.sdk.job_resources import EvaluatorJobResource
-from nemo_evaluator.sdk.resources import Evaluator
-from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
-from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
-from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
-from nemo_evaluator_sdk import (
-    ExactMatchMetric,
-    InferenceParams,
-    Model,
-    ModelRef,
-    RunConfig,
-    RunConfigOnlineModel,
-)
-from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
-from nemo_evaluator_sdk.enums import ModelFormat
-from nemo_evaluator_sdk.metrics.llm_judge import LLMJudgeMetric
-from nemo_evaluator_sdk.metrics.string_check import StringCheckMetric
-from nemo_evaluator_sdk.metrics.tool_calling import ToolCallingMetric
-from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
+from nemo_evals.api.schemas import MetricInline, MetricRef
+from nemo_evals.filesets import FilesetRef
+from nemo_evals.jobs.agent_spec import GymAgentSource, GymRunnerTarget
+from nemo_evals.jobs.evaluate import EvaluateInputSpec
+from nemo_evals.sdk.job_resources import EvaluatorJobResource
+from nemo_evals.sdk.resources import Evaluator
+from nemo_evals.shared.metric_bundles.bundles import bundle_metric
+from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
-from nemo_helix_plugin.evaluator.client import EvaluatorClient
-from nemo_helix_plugin.evaluator.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
+from nemo_helix_plugin.evals.client import EvaluatorClient
+from nemo_helix_plugin.evals.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
@@ -64,6 +49,21 @@ from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.testing import add_mock_provider, short_unique_name, wait_for_model_entity
 from nhx.testing.e2e import wait_for_platform_job
 from nhx.testing.utils import ensure_passthrough_virtual_model
+from nhx_evals_sdk import (
+    ExactMatchMetric,
+    InferenceParams,
+    Model,
+    ModelRef,
+    RunConfig,
+    RunConfigOnlineModel,
+)
+from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
+from nhx_evals_sdk.enums import ModelFormat
+from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
+from nhx_evals_sdk.metrics.string_check import StringCheckMetric
+from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
+from nhx_evals_sdk.values.results import EvaluationResult
+from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 
 pytestmark = [
     pytest.mark.container_only,
@@ -391,11 +391,11 @@ def completed_offline_job(evaluator_client: NemoClient) -> Iterator[EvaluatorJob
 def test_health_check(client: NemoClient) -> None:
     status = _evaluator(client).plugin_status()
 
-    assert status["plugin"] == "evaluator"
+    assert status["plugin"] == "evals"
     assert status["status"] == "ok"
     jobs = status["jobs"]
     assert isinstance(jobs, list)
-    assert "evaluator.evaluate" in jobs
+    assert "evals.evaluate" in jobs
 
 
 def test_stored_metric_lifecycle(evaluator_client: NemoClient) -> None:
@@ -769,7 +769,7 @@ def test_missing_fileset_reaches_terminal_error(evaluator_client: NemoClient) ->
 # Checked-in copy of mcqa's example.jsonl: discover_gym_tasks runs client-side here, where
 # nemo-gym isn't installed (the dedicated task image has it).
 GYM_MCQA_FIXTURE = (
-    Path(__file__).resolve().parents[1] / "packages/nemo_evaluator_sdk/tests/agent_eval/fixtures/gym_mcqa_example.jsonl"
+    Path(__file__).resolve().parents[1] / "packages/nhx_evals_sdk/tests/agent_eval/fixtures/gym_mcqa_example.jsonl"
 )
 
 

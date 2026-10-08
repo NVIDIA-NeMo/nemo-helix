@@ -55,7 +55,7 @@ becomes this in the final wheel metadata:
 Requires-Dist: nemo-helix[nhx-common]
 ```
 
-With extras, `nemo-evaluator-sdk[harbor]` becomes `nemo-helix[nemo-evaluator-sdk,harbor]`.
+With extras, `nhx-evals-sdk[harbor]` becomes `nemo-helix[nhx-evals-sdk,harbor]`.
 
 ### `make vendor` (vendor tool)
 

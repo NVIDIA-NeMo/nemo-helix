@@ -19,7 +19,7 @@ from evaluator_agent_eval.task_metric_utils import (
     score_checks,
     string_list,
 )
-from nemo_evaluator_sdk.values.results import MetricResult, MetricScore
+from nhx_evals_sdk.values.results import MetricResult, MetricScore
 
 HARNESS_RESULT_MARKER = "__SURFACE_METRIC_RESULT__="
 
@@ -169,7 +169,7 @@ import asyncio
 import inspect
 import json
 
-from nemo_evaluator_sdk.metrics.base import Metric
+from nhx_evals_sdk.metrics.base import Metric
 
 
 def __scores_to_dict(metric_result):

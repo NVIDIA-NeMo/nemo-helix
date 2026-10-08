@@ -7,7 +7,7 @@ import pytest
 from evaluator_agent_eval.pytest_verifier import _assert_evaluator_scores
 from evaluator_agent_eval.runner import score_evaluator_rows
 from evaluator_agent_eval.schemas import EvaluatorScoringRow
-from nemo_evaluator_sdk.values.results import MetricResult, MetricScore
+from nhx_evals_sdk.values.results import MetricResult, MetricScore
 
 
 class ScriptedTaskMetric:
@@ -66,7 +66,7 @@ def _row() -> EvaluatorScoringRow:
             "surface_constraint": "standalone_sdk",
             "allowed_surfaces": ["standalone_sdk"],
             "forbidden_surfaces": ["legacy_service"],
-            "output_text": "Used nemo_evaluator_sdk only.",
+            "output_text": "Used nhx_evals_sdk only.",
             "observed_surfaces": ["standalone_sdk"],
         }
     )

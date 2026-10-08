@@ -3,14 +3,14 @@
 
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import {
-  evaluatorCreateAgentEvaluateJob,
-  evaluatorGetAgentEvaluateJob,
-  evaluatorListAgentEvaluateJobs,
-} from '@nemo/sdk/generated/evaluator/evaluator-plugin-agent-eval-jobs-routes';
+  evalsCreateAgentEvaluateJob,
+  evalsGetAgentEvaluateJob,
+  evalsListAgentEvaluateJobs,
+} from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-jobs-routes';
 import {
-  evaluatorGetAgentEvalResult,
-  evaluatorListAgentEvalResults,
-} from '@nemo/sdk/generated/evaluator/evaluator-plugin-agent-eval-results-routes';
+  evalsGetAgentEvalResult,
+  evalsListAgentEvalResults,
+} from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-results-routes';
 import type {
   AggregateRangeScore,
   AggregateRubricScore,
@@ -20,7 +20,7 @@ import type {
   AgentEvalResult,
   AgentEvaluateJobsSortField,
   ResultFilter,
-} from '@nemo/sdk/generated/evaluator/schema';
+} from '@nemo/sdk/generated/evals/schema';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 
 const PAGE_SIZE = 50;
@@ -63,7 +63,7 @@ export const fetchAgentEvalJobs = async (
   const all: AgentEvaluateJob[] = [];
   let page = 1;
   while (true) {
-    const res = await evaluatorListAgentEvaluateJobs(
+    const res = await evalsListAgentEvaluateJobs(
       workspace,
       { page, page_size: PAGE_SIZE, sort: '-created_at' as AgentEvaluateJobsSortField },
       signal
@@ -82,7 +82,7 @@ export const fetchAgentEvalJob = async (
   signal: AbortSignal
 ): Promise<AgentEvaluateJob | null> => {
   try {
-    return await evaluatorGetAgentEvaluateJob(workspace, name, signal);
+    return await evalsGetAgentEvaluateJob(workspace, name, signal);
   } catch (err) {
     const e = err as { response?: { status?: number }; status?: number };
     if (e?.response?.status === 404 || e?.status === 404) return null;
@@ -94,7 +94,7 @@ export const submitAgentEvalJob = async (
   workspace: string,
   request: AgentEvaluateJobRequest,
   signal?: AbortSignal
-): Promise<AgentEvaluateJob> => evaluatorCreateAgentEvaluateJob(workspace, request, signal);
+): Promise<AgentEvaluateJob> => evalsCreateAgentEvaluateJob(workspace, request, signal);
 
 // ---------------------------------------------------------------------------
 // Structured results (agent-eval-results record)
@@ -110,7 +110,7 @@ export const fetchAgentEvalResult = async (
   signal: AbortSignal
 ): Promise<AgentEvalResult | null> => {
   try {
-    return await evaluatorGetAgentEvalResult(workspace, name, signal);
+    return await evalsGetAgentEvalResult(workspace, name, signal);
   } catch (err) {
     const e = err as { response?: { status?: number }; status?: number };
     if (e?.response?.status === 404 || e?.status === 404) return null;
@@ -126,7 +126,7 @@ export const fetchAgentEvalResultsForJobs = async (
   signal: AbortSignal
 ): Promise<Map<string, AgentEvalResult>> => {
   if (jobNames.length === 0) return new Map();
-  const page = await evaluatorListAgentEvalResults(
+  const page = await evalsListAgentEvalResults(
     workspace,
     {
       page: 1,

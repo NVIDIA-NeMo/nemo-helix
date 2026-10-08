@@ -21,15 +21,15 @@ import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import {
-  getEvaluatorListAgentEvaluateJobsQueryKey,
-  useEvaluatorDeleteAgentEvaluateJob,
-  useEvaluatorListAgentEvaluateJobs,
-} from '@nemo/sdk/generated/evaluator/evaluator-plugin-agent-eval-jobs-routes';
+  getEvalsListAgentEvaluateJobsQueryKey,
+  useEvalsDeleteAgentEvaluateJob,
+  useEvalsListAgentEvaluateJobs,
+} from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-jobs-routes';
 import {
   type AgentEvaluateJob,
   type AgentEvaluateJobsListFilter,
   AgentEvaluateJobsSortField,
-} from '@nemo/sdk/generated/evaluator/schema';
+} from '@nemo/sdk/generated/evals/schema';
 import { Button, Flex } from '@nvidia/foundations-react-core';
 import { agentNameForJob, evalConfigName } from '@studio/api/evaluation/agent-evaluations';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
@@ -67,11 +67,11 @@ export const AgentEvaluationsDataView = () => {
     defaultSort: [{ id: 'created_at', desc: true }],
   });
 
-  const deleteJobMutation = useEvaluatorDeleteAgentEvaluateJob({
+  const deleteJobMutation = useEvalsDeleteAgentEvaluateJob({
     mutation: {
       onSuccess: () =>
         queryClient.resetQueries({
-          queryKey: getEvaluatorListAgentEvaluateJobsQueryKey(workspace),
+          queryKey: getEvalsListAgentEvaluateJobsQueryKey(workspace),
         }),
     },
   });
@@ -98,7 +98,7 @@ export const AgentEvaluationsDataView = () => {
     data: jobsData,
     isLoading,
     error,
-  } = useEvaluatorListAgentEvaluateJobs(
+  } = useEvalsListAgentEvaluateJobs(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,

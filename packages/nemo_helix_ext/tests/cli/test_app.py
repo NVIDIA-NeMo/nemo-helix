@@ -404,18 +404,19 @@ def test_inference_deployments_create_exposes_wait_and_watch_flags():
     assert "until it is stable" in result.stdout
 
 
-def test_root_help_excludes_hidden_commands_and_context_option():
+def test_root_help_shows_context_option_and_excludes_hidden_commands():
     runner = CliRunner()
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "--context" not in result.stdout
+    assert "--context, -c" in result.stdout
     assert "\n  auth" in result.stdout
-    for hidden_command in ("config", "quickstart", "cluster-info", "adapters", "projects"):
+    assert "\n  config" in result.stdout
+    for hidden_command in ("quickstart", "cluster-info", "adapters", "projects"):
         assert f"\n  {hidden_command}" not in result.stdout
 
 
-def test_auth_command_and_hidden_context_option_remain_invokable():
+def test_auth_command_and_context_option_are_invokable():
     runner = CliRunner()
     qs_config = QuickstartConfig(auth_enabled=False)
 
@@ -596,13 +597,13 @@ def test_example_plugin_entry_point_is_visible_when_installed():
 def test_evaluator_plugin_entry_point_has_deliberate_order_before_unknown_plugins():
     plugin_entry_points = {
         "aardvark": SimpleNamespace(value="plugin.module:AardvarkCLI"),
-        "evaluator": SimpleNamespace(value="plugin.module:EvaluatorCLI"),
+        "evals": SimpleNamespace(value="plugin.module:EvaluatorCLI"),
         "zeta": SimpleNamespace(value="plugin.module:ZetaCLI"),
     }
 
     visible_entries = build_top_level_entries((), plugin_entry_points, include_hidden=False)
 
-    assert [entry.name for entry in visible_entries] == ["evaluator", "aardvark", "zeta"]
+    assert [entry.name for entry in visible_entries] == ["evals", "aardvark", "zeta"]
 
 
 @pytest.mark.parametrize(

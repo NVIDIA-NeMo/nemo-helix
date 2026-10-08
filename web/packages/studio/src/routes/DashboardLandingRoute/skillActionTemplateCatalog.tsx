@@ -111,23 +111,23 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-eval-history skill to review previous evaluation runs and summarize the most important changes or failures.',
     icon: <BarChart3 size={18} />,
-    requiredFeatureFlags: ['evaluatorEnabled'],
+    requiredFeatureFlags: ['evalsEnabled'],
   },
-  'nemo-evaluator': {
+  'nemo-evals': {
     title: 'Run model evaluations',
     description: 'Create metrics or benchmarks and inspect results.',
     prompt:
-      'Use the nemo-evaluator skill to create or run an evaluation, then summarize the metric results and any follow-up recommendations.',
+      'Use the nemo-evals skill to create or run an evaluation, then summarize the metric results and any follow-up recommendations.',
     icon: <BarChart3 size={18} />,
-    requiredFeatureFlags: ['evaluatorEnabled'],
+    requiredFeatureFlags: ['evalsEnabled'],
   },
-  'nemo-evaluator-plugin': {
-    title: 'Use evaluator plugin',
-    description: 'Work with evaluator jobs, SDK specs, and plugin-owned skills.',
+  'nemo-evals-plugin': {
+    title: 'Use evals plugin',
+    description: 'Work with evals jobs, SDK specs, and plugin-owned skills.',
     prompt:
-      'Use the nemo-evaluator-plugin skill to inspect or update evaluator plugin jobs, SDK specs, or plugin-owned evaluator skills.',
+      'Use the nemo-evals-plugin skill to inspect or update evals plugin jobs, SDK specs, or plugin-owned evals skills.',
     icon: <BarChart3 size={18} />,
-    requiredFeatureFlags: ['evaluatorEnabled'],
+    requiredFeatureFlags: ['evalsEnabled'],
   },
   'nemo-files': {
     title: 'Manage filesets',

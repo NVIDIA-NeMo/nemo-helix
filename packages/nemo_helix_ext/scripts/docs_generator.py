@@ -695,7 +695,7 @@ _DOCUMENTED_PLUGIN_CLIS = (
     "auditor",
     "customization",
     "data-designer",
-    "evaluator",
+    "evals",
     "experiments",
     "guardrail",
     "insights",

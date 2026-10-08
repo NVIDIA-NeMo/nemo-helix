@@ -15,7 +15,7 @@ description: ""
 
 ```text
  ┌───────────────────────────────┐ ┌─────────────────────────────┐
- │ Nemo Data Designer │ │ Nemo Evaluator │
+ │ Nemo Data Designer │ │ NeMo Helix Evals │
  │ +------------------------+ │ │ +-----------------------+ │
  │ | Nurse Triage Note |───┼───────▶│ | LLM predicts ESI | │
  │ +------------------------+ │ │ +-----------------------+ │
@@ -436,7 +436,7 @@ def show_example_triage_notes(filtered_df, num_examples=5):
 show_example_triage_notes(filtered_df, num_examples=3)
 ```
 
-## **Step 2**: 📊 Nemo Evaluator
+## **Step 2**: 📊 NeMo Helix Evals
 
 We evaluate the model on filtered triage notes to see if it predicts the correct ESI level.
 
@@ -445,7 +445,7 @@ We evaluate the model on filtered triage notes to see if it predicts the correct
 - **Metric**: String containment check against ground-truth ESI
 
 ```python
-from nemo_evaluator.sdk import FilesetRef
+from nemo_evals.sdk import FilesetRef
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
@@ -539,8 +539,8 @@ For *each* complexity level, the accuracy score for each model is printed, allow
 import pandas as pd
 from typing import Any
 
-from nemo_evaluator.sdk import Evaluator, FilesetRef
-from nemo_evaluator_sdk import Model, RunConfigOnlineModel, SecretRef, StringCheckMetric
+from nemo_evals.sdk import Evaluator, FilesetRef
+from nhx_evals_sdk import Model, RunConfigOnlineModel, SecretRef, StringCheckMetric
 
 # This code assumes EVALUATOR_CONFIG is available in the notebook scope
 

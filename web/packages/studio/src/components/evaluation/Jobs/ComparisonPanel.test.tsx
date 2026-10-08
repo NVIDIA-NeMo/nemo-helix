@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getEvaluatorListEvaluateJobResultsQueryKey } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import { HelixJobStatus } from '@nemo/sdk/generated/evaluator/schema';
+import { getEvalsListEvaluateJobResultsQueryKey } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import { HelixJobStatus } from '@nemo/sdk/generated/evals/schema';
 import { ComparisonPanel } from '@studio/components/evaluation/Jobs/ComparisonPanel';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -24,14 +24,11 @@ describe('ComparisonPanel', () => {
       id: metricEvaluationJob1.id,
     });
 
-    // Mock the results list endpoint used by useEvaluatorListEvaluateJobResults
+    // Mock the results list endpoint used by useEvalsListEvaluateJobResults
     server.use(
-      http.get(
-        mockApiUrl(getEvaluatorListEvaluateJobResultsQueryKey, ':workspace', ':jobName'),
-        () => {
-          return HttpResponse.json({ data: [], pagination: {} });
-        }
-      )
+      http.get(mockApiUrl(getEvalsListEvaluateJobResultsQueryKey, ':workspace', ':jobName'), () => {
+        return HttpResponse.json({ data: [], pagination: {} });
+      })
     );
   });
 
@@ -83,7 +80,7 @@ describe('ComparisonPanel', () => {
     beforeEach(() => {
       server.use(
         http.get(
-          mockApiUrl(getEvaluatorListEvaluateJobResultsQueryKey, ':workspace', ':jobName'),
+          mockApiUrl(getEvalsListEvaluateJobResultsQueryKey, ':workspace', ':jobName'),
           () => {
             return HttpResponse.json({
               download_url: 'http://localhost/mock-scores.json',

@@ -23,7 +23,7 @@ This notebook starts from NVIDIA's published NVDocs Stage 0 dump instead of gene
 | 1 Prep | `nemo data-designer retrieval-prepare` with `enable_mining: true` | Writes `training.jsonl` and the frozen `eval_beir/` split |
 | 2 Finetune | Automodel `recipe: bi_encoder` | Alternate data: [SPECTER or triplet JSONL](/documentation/customizer-reference/tutorials/embedding-triplet-dataset) |
 | 3 Deploy | Retriever NIM 2.2.0 | Base and tuned endpoints |
-| 4 Eval | `nemo evaluator retrieve-eval` | nDCG@k, Recall@k, Precision@k, MAP@k |
+| 4 Eval | `nemo evals retrieve-eval` | nDCG@k, Recall@k, Precision@k, MAP@k |
 
 Deployment precedes evaluation because `retrieve-eval` scores Inference Gateway providers rather than filesets, so both models have to be served first. Export is a setting on the training job rather than a stage of its own.
 
@@ -619,7 +619,7 @@ print("dim", len(resp_body["data"][0]["embedding"]))
 Equivalent CLI:
 
 ```bash
-nemo evaluator retrieve-eval --workspace default --spec '{
+nemo evals retrieve-eval --workspace default --spec '{
   "dataset": "default/nvdocs-embed-artifacts",
   "target": "default/nemotron-3-embed-1b-tuned",
   "baseline": "default/nemotron-3-embed-1b",

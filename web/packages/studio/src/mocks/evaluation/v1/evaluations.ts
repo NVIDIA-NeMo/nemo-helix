@@ -5,7 +5,7 @@ import {
   type EvaluateJob,
   type EvaluateJobsPage,
   HelixJobStatus,
-} from '@nemo/sdk/generated/evaluator/schema';
+} from '@nemo/sdk/generated/evals/schema';
 
 export const mockEvalConfigOnline1 = {
   id: 'eval-config-online-1',

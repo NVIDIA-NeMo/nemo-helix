@@ -132,6 +132,22 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         "${runner}/.venv/bin/python" -c 'import nhx_sandbox.egress, nhx_sandbox.opensandbox_policy'; \
     done
 
+# Harbor loads NemoOpenSandboxEnvironment, and the backend runs the cleanup
+# module, inside those same venvs. The rest of scaled_evals is not installed
+# there, so a .pth file adds just these two modules.
+COPY plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_environment.py \
+     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_cleanup.py \
+     /tmp/nemo-extensions/scaled_evals/
+RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
+        runner="/opt/harbor/${version}"; \
+        grep -q '^opensandbox==' "/opt/harbor/requirements/${version}.txt" || continue; \
+        cp -R /tmp/nemo-extensions "${runner}/nemo-extensions"; \
+        site="$("${runner}/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+        echo "${runner}/nemo-extensions" > "${site}/nemo-extensions.pth"; \
+        "${runner}/.venv/bin/python" -c \
+            'from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment; import scaled_evals.harbor_opensandbox_cleanup'; \
+    done
+
 # Harbor resolves jobs_dir relative to its own root, so point it at the path the
 # runtime mounts writable. /opt/harbor itself stays read-only.
 RUN set -eu; \

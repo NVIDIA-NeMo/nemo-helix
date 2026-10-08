@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Evaluator SDK metrics for normalized captured agent runs."""
+"""Evals SDK metrics for normalized captured agent runs."""
 
 from collections.abc import Sequence
 
@@ -12,7 +12,7 @@ from evaluator_agent_eval.metrics.surface import (
     SurfaceAdherenceMetric,
 )
 from evaluator_agent_eval.metrics.trajectory import TrajectoryEvidenceMetric
-from nemo_evaluator_sdk.metrics.base import Metric
+from nhx_evals_sdk.metrics.base import Metric
 
 SURFACE_FIELD_KEYS = {
     "observed_surfaces_key": "observed_surfaces",

@@ -5,16 +5,16 @@ import { createChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { resolveKeyPath } from '@nemo/common/src/utils/file';
 import { logger } from '@nemo/common/src/utils/logger';
 import {
-  evaluatorCreateEvaluateJob,
-  evaluatorDeleteEvaluateJob,
-  evaluatorGetEvaluateJob,
-  evaluatorListEvaluateJobResults,
-} from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+  evalsCreateEvaluateJob,
+  evalsDeleteEvaluateJob,
+  evalsGetEvaluateJob,
+  evalsListEvaluateJobResults,
+} from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import {
   type EvaluateJobRequest,
   type MetricInline,
   HelixJobStatus,
-} from '@nemo/sdk/generated/evaluator/schema';
+} from '@nemo/sdk/generated/evals/schema';
 import { buildEvalJobName } from '@studio/components/evaluation/submitEvaluationJob';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { buildMetricBundles } from '@studio/routes/evaluation/EvaluationNewRoute/buildEvaluationSpec';
@@ -137,7 +137,7 @@ export function useLiveTest() {
     (name: string) => {
       // Fire and forget: the score is already read, and a failed cleanup must not
       // present as a failed live test.
-      void evaluatorDeleteEvaluateJob(workspace, name).catch((error) => {
+      void evalsDeleteEvaluateJob(workspace, name).catch((error) => {
         logger.error(`Dry run: could not delete ephemeral job ${name}: ${String(error)}`);
       });
     },
@@ -251,7 +251,7 @@ export function useLiveTest() {
       let created: string | null = null;
 
       try {
-        const job = await evaluatorCreateEvaluateJob(workspace, request);
+        const job = await evalsCreateEvaluateJob(workspace, request);
         created = job.name;
 
         const deadline = Date.now() + POLL_TIMEOUT_MS;
@@ -259,7 +259,7 @@ export function useLiveTest() {
         while (Date.now() < deadline) {
           if (superseded()) return;
           await sleep(POLL_INTERVAL_MS);
-          const polled = await evaluatorGetEvaluateJob(workspace, job.name);
+          const polled = await evalsGetEvaluateJob(workspace, job.name);
           status = polled.status ?? undefined;
           if (status && TERMINAL_STATUSES.includes(status)) break;
         }
@@ -277,7 +277,7 @@ export function useLiveTest() {
           return;
         }
 
-        const results = await evaluatorListEvaluateJobResults(workspace, job.name);
+        const results = await evalsListEvaluateJobResults(workspace, job.name);
         const aggregate = results?.data?.find((entry) => entry.name === 'aggregate-scores');
         const scores = (
           aggregate?.download_url

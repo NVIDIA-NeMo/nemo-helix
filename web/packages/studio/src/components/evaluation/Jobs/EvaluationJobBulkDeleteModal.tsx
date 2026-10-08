@@ -3,7 +3,7 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
-import { useEvaluatorDeleteEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { useEvalsDeleteEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { Button, Flex, Modal } from '@nvidia/foundations-react-core';
 import { useMutateMany } from '@studio/api/common/useMutateMany';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -22,7 +22,7 @@ export const EvaluationJobBulkDeleteModal: FC<EvaluationJobBulkDeleteModalProps>
   const [open, setOpen] = useState<boolean>(false);
   const workspace = useWorkspaceFromPath();
 
-  const { mutateAsync: deleteJob } = useEvaluatorDeleteEvaluateJob();
+  const { mutateAsync: deleteJob } = useEvalsDeleteEvaluateJob();
   const { mutateAsync: deleteJobs, isPending } = useMutateMany(deleteJob);
   const toast = useToast();
 

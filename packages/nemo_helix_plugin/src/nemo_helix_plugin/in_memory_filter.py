@@ -12,7 +12,7 @@ import operator
 from datetime import datetime
 from typing import Any, Callable, Dict, List
 
-from nemo_helix_plugin.filter_ops import FilterOperator, FilterRepository
+from nemo_helix_plugin.filter_ops import ElemMatchCondition, FilterOperator, FilterRepository
 
 # Sentinel distinguishing "field/key is absent" from an explicit None value.
 _MISSING = object()
@@ -44,13 +44,6 @@ class InMemoryFilterRepository(FilterRepository):
     compare strings, numbers, and datetimes, where native and SQL semantics agree.
     """
 
-    _ORDERED: Dict[FilterOperator, Callable[[Any, Any], bool]] = {
-        FilterOperator.LT: operator.lt,
-        FilterOperator.LTE: operator.le,
-        FilterOperator.GT: operator.gt,
-        FilterOperator.GTE: operator.ge,
-    }
-
     def __init__(self, entity: Any):
         self.entity = entity
 
@@ -68,54 +61,34 @@ class InMemoryFilterRepository(FilterRepository):
         raise ValueError(f"Field '{field}' does not exist on {type(self.entity).__name__}")
 
     def eq(self, field: str, value: Any) -> bool:
-        field_value = self._value(field)
-        # Absent collapses to None, so only `$eq None` matches a missing/null field.
-        return (None if field_value is _MISSING else field_value) == value
+        return _compare(self._value(field), FilterOperator.EQ, value)
 
     def like(self, field: str, value: str) -> bool:
-        field_value = self._value(field)
-        if field_value is _MISSING or field_value is None:
-            return False
-        return str(value).lower() in str(field_value).lower()
+        return _compare(self._value(field), FilterOperator.LIKE, value)
 
     def lt(self, field: str, value: Any) -> bool:
-        return self._ordered_compare(field, value, FilterOperator.LT)
+        return _compare(self._value(field), FilterOperator.LT, value)
 
     def lte(self, field: str, value: Any) -> bool:
-        return self._ordered_compare(field, value, FilterOperator.LTE)
+        return _compare(self._value(field), FilterOperator.LTE, value)
 
     def gt(self, field: str, value: Any) -> bool:
-        return self._ordered_compare(field, value, FilterOperator.GT)
+        return _compare(self._value(field), FilterOperator.GT, value)
 
     def gte(self, field: str, value: Any) -> bool:
-        return self._ordered_compare(field, value, FilterOperator.GTE)
-
-    def _ordered_compare(self, field: str, value: Any, op: FilterOperator) -> bool:
-        field_value = self._value(field)
-        # Absent/None never satisfies an ordered comparison (SQL `NULL < x` is NULL).
-        if field_value is _MISSING or field_value is None:
-            return False
-        if isinstance(field_value, datetime) and isinstance(value, str):
-            value = datetime.fromisoformat(value).replace(tzinfo=None)
-        try:
-            return self._ORDERED[op](field_value, value)
-        except TypeError:
-            # Incomparable operands (e.g. text vs number) — no match.
-            return False
+        return _compare(self._value(field), FilterOperator.GTE, value)
 
     def in_op(self, field: str, values: List[Any]) -> bool:
-        field_value = self._value(field)
-        if field_value is _MISSING or field_value is None:
-            return False
-        return field_value in values
+        return _compare(self._value(field), FilterOperator.IN, values)
 
     def nin(self, field: str, values: List[Any]) -> bool:
-        field_value = self._value(field)
-        # Absent/None matches nothing (`NULL NOT IN (...)` is NULL, i.e. not true)
-        # — this is NOT simply `not in_op`.
-        if field_value is _MISSING or field_value is None:
-            return False
-        return field_value not in values
+        return _compare(self._value(field), FilterOperator.NIN, values)
+
+    def starts_with(self, field: str, prefix: str) -> bool:
+        return _compare(self._value(field), FilterOperator.STARTS_WITH, prefix)
+
+    def ends_with(self, field: str, suffix: str) -> bool:
+        return _compare(self._value(field), FilterOperator.ENDS_WITH, suffix)
 
     def contains(self, field: str, value: Any) -> bool:
         """Array membership: true when the list at ``field`` contains ``value``.
@@ -128,6 +101,16 @@ class InMemoryFilterRepository(FilterRepository):
             return False
         return value in field_value
 
+    def elem_match(self, field: str, conditions: List[ElemMatchCondition]) -> bool:
+        field_value = self._value(field)
+        if not isinstance(field_value, (list, tuple)):
+            return False
+        return any(_element_matches(element, conditions) for element in field_value)
+
+    def has_key(self, field: str, key: str) -> bool:
+        field_value = self._value(field)
+        return isinstance(field_value, dict) and field_value.get(key) is not None
+
     def and_op(self, operations: List[Any]) -> bool:
         return all(operations)
 
@@ -136,6 +119,52 @@ class InMemoryFilterRepository(FilterRepository):
 
     def not_op(self, operation: Any) -> bool:
         return not operation
+
+
+_ORDERED: Dict[FilterOperator, Callable[[Any, Any], bool]] = {
+    FilterOperator.LT: operator.lt,
+    FilterOperator.LTE: operator.le,
+    FilterOperator.GT: operator.gt,
+    FilterOperator.GTE: operator.ge,
+}
+
+
+def _compare(field_value: Any, op: FilterOperator, value: Any) -> bool:
+    """Apply one comparison to an already-resolved value (``_MISSING`` when absent)."""
+    if op == FilterOperator.EQ:
+        # Absent collapses to None, so only `$eq None` matches a missing/null field.
+        return (None if field_value is _MISSING else field_value) == value
+    # Every other comparison is false on absent/None (SQL `NULL <op> x` is NULL); in
+    # particular `$nin` is NOT simply `not $in`.
+    if field_value is _MISSING or field_value is None:
+        return False
+    if op == FilterOperator.LIKE:
+        return str(value).lower() in str(field_value).lower()
+    if op == FilterOperator.STARTS_WITH:
+        return str(field_value).startswith(value)
+    if op == FilterOperator.ENDS_WITH:
+        return str(field_value).endswith(value)
+    if op == FilterOperator.IN:
+        return field_value in value
+    if op == FilterOperator.NIN:
+        return field_value not in value
+    if isinstance(field_value, datetime) and isinstance(value, str):
+        value = datetime.fromisoformat(value).replace(tzinfo=None)
+    try:
+        return _ORDERED[op](field_value, value)
+    except TypeError:
+        # Incomparable operands (e.g. text vs number) — no match.
+        return False
+
+
+def _element_matches(element: Any, conditions: List[ElemMatchCondition]) -> bool:
+    if conditions[0].key is None:
+        if isinstance(element, (dict, list, tuple)):
+            return False
+        return all(_compare(element, c.operator, c.value) for c in conditions)
+    if not isinstance(element, dict):
+        return False
+    return all(_compare(element.get(c.key, _MISSING), c.operator, c.value) for c in conditions)
 
 
 def _has_attr(entity: Any, field: str) -> bool:
