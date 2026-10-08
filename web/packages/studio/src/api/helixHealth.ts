@@ -3,41 +3,29 @@
 
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useQuery } from '@tanstack/react-query';
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 
 /**
- * Outcome of probing the platform's readiness endpoint.
+ * Outcome of probing the platform's liveness endpoint.
  *
- * - `ready`: `/health/ready` returned 200 — every service and controller is up.
- * - `not-ready`: the platform process answered 503 with its `not_ready` body, so it is
- *   reachable but still starting (or a service is down).
+ * - `live`: the platform is reachable, even if some services or controllers are not ready.
  * - `unreachable`: no usable response — connection refused, DNS failure, timeout, a dev
  *   proxy that could not reach its target, or any response (even a 200) that is not the
  *   platform's.
  */
-export type HelixHealthStatus = 'ready' | 'not-ready' | 'unreachable';
+export type HelixHealthStatus = 'live' | 'unreachable';
 
 export const HELIX_HEALTH_QUERY_KEY = ['platform-health'] as const;
 
 const HEALTH_TIMEOUT_MS = 10_000;
+export const HELIX_HEALTH_RETRY_INTERVAL_MS = 5_000;
 
-/** Readiness probe exposed by the platform runner; it is not part of the OpenAPI spec. */
+/** Liveness probe exposed by the platform runner; it is not part of the OpenAPI spec. */
 export const getHelixHealthUrl = (): string =>
-  `${PLATFORM_BASE_URL.replace(/\/+$/, '')}/health/ready`;
+  `${PLATFORM_BASE_URL.replace(/\/+$/, '')}/health/live`;
 
-const isNotReadyResponse = (error: unknown): boolean => {
-  if (!(error instanceof AxiosError) || error.response?.status !== 503) return false;
-  const detail: unknown = error.response.data?.detail;
-  return (
-    typeof detail === 'object' &&
-    detail !== null &&
-    'status' in detail &&
-    detail.status === 'not_ready'
-  );
-};
-
-const isReadyResponse = (data: unknown): boolean =>
-  typeof data === 'object' && data !== null && 'status' in data && data.status === 'ready';
+const isLiveResponse = (data: unknown): boolean =>
+  typeof data === 'object' && data !== null && 'status' in data && data.status === 'live';
 
 export const checkHelixHealth = async (): Promise<HelixHealthStatus> => {
   try {
@@ -47,17 +35,16 @@ export const checkHelixHealth = async (): Promise<HelixHealthStatus> => {
     });
     // A 200 without Helix's body (e.g. a dev server's SPA fallback serving index.html) is
     // not the platform answering, so it must not unblock the app.
-    return isReadyResponse(data) ? 'ready' : 'unreachable';
-  } catch (error) {
-    return isNotReadyResponse(error) ? 'not-ready' : 'unreachable';
+    return isLiveResponse(data) ? 'live' : 'unreachable';
+  } catch {
+    return 'unreachable';
   }
 };
 
 /**
- * Probes the platform once per app load. The query function never throws — failures are
- * folded into {@link HelixHealthStatus} — so callers branch on `data`, and `refetch`
- * is the manual retry. No background refetching: once the platform is confirmed up we
- * get out of the way.
+ * Retries failed connectivity probes automatically so a transient failure cannot leave
+ * Studio blocked after the platform recovers. Stops polling once liveness is confirmed;
+ * individual features handle their own service errors. `refetch` also allows manual retry.
  */
 export const useHelixHealth = () =>
   useQuery({
@@ -69,4 +56,6 @@ export const useHelixHealth = () =>
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false,
+    refetchInterval: (query) =>
+      query.state.data === 'unreachable' ? HELIX_HEALTH_RETRY_INTERVAL_MS : false,
   });

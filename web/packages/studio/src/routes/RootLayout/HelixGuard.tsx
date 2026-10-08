@@ -17,19 +17,18 @@ interface HelixGuardProps {
 const UNGUARDED_PATHS: ReadonlySet<string> = new Set([ROUTES.auth.success]);
 
 /**
- * Blocks the app behind a single platform readiness probe. Without it, a stopped
+ * Blocks the app only while platform liveness cannot be confirmed. Without it, a stopped
  * platform surfaces as dozens of unrelated per-query errors across the UI.
  */
 export const HelixGuard = ({ children }: HelixGuardProps) => {
   const { pathname } = useLocation();
   const { data: status, isPending, isFetching, refetch } = useHelixHealth();
 
-  if (UNGUARDED_PATHS.has(pathname) || status === 'ready') return <>{children}</>;
+  if (UNGUARDED_PATHS.has(pathname) || status === 'live') return <>{children}</>;
   if (isPending) return <Loading description="Connecting to NeMo Helix..." />;
 
   return (
     <HelixUnavailable
-      status={status ?? 'unreachable'}
       healthUrl={getHelixHealthUrl()}
       onRetry={() => void refetch()}
       isRetrying={isFetching}

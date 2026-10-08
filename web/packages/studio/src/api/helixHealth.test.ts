@@ -6,15 +6,15 @@ import { server } from '@studio/mocks/node';
 import { http, HttpResponse } from 'msw';
 
 describe('checkHelixHealth', () => {
-  it('probes /health/ready on the platform base URL', () => {
-    expect(getHelixHealthUrl()).toBe('http://localhost:8080/health/ready');
+  it('probes /health/live on the platform base URL', () => {
+    expect(getHelixHealthUrl()).toBe('http://localhost:8080/health/live');
   });
 
-  it('resolves "ready" on 200', async () => {
-    await expect(checkHelixHealth()).resolves.toBe('ready');
+  it('resolves "live" on the platform liveness response', async () => {
+    await expect(checkHelixHealth()).resolves.toBe('live');
   });
 
-  it('resolves "unreachable" on a 200 that is not the platform readiness body (e.g. SPA fallback)', async () => {
+  it('resolves "unreachable" on a 200 that is not the platform liveness body (e.g. SPA fallback)', async () => {
     server.use(
       http.get(getHelixHealthUrl(), () =>
         HttpResponse.html('<!doctype html><html><body>Studio</body></html>')
@@ -23,13 +23,13 @@ describe('checkHelixHealth', () => {
     await expect(checkHelixHealth()).resolves.toBe('unreachable');
   });
 
-  it('resolves "not-ready" when the platform answers 503 with its not_ready body', async () => {
+  it('resolves "unreachable" when the liveness endpoint answers 503', async () => {
     server.use(
       http.get(getHelixHealthUrl(), () =>
         HttpResponse.json({ detail: { status: 'not_ready' } }, { status: 503 })
       )
     );
-    await expect(checkHelixHealth()).resolves.toBe('not-ready');
+    await expect(checkHelixHealth()).resolves.toBe('unreachable');
   });
 
   it('resolves "unreachable" on a 503 that is not from the platform (e.g. a proxy)', async () => {

@@ -3,56 +3,35 @@
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { Anchor, CodeSnippet, Stack, StatusMessage, Text } from '@nvidia/foundations-react-core';
-import type { HelixHealthStatus } from '@studio/api/helixHealth';
 import { GlobeX } from 'lucide-react';
-import type { FC, ReactNode } from 'react';
+import type { FC } from 'react';
 
 interface HelixUnavailableProps {
-  status: Exclude<HelixHealthStatus, 'ready'>;
   /** URL Studio probed, shown so the user can confirm it points at the right platform. */
   healthUrl: string;
   onRetry: () => void;
   isRetrying?: boolean;
 }
 
-const COPY: Record<HelixUnavailableProps['status'], { heading: string; explanation: ReactNode }> = {
-  unreachable: {
-    heading: "Studio can't connect to NeMo Helix",
-    explanation: (
-      <>
-        The platform did not respond, so Studio cannot load any data.
-        <br />
-        Make sure the platform is running and that Studio is pointed at it.
-      </>
-    ),
-  },
-  'not-ready': {
-    heading: 'NeMo Helix is still starting',
-    explanation: (
-      <>
-        The platform is reachable, but not all of its services are ready yet.
-        <br />
-        This usually resolves within a minute of starting it.
-      </>
-    ),
-  },
-};
-
 export const HelixUnavailable: FC<HelixUnavailableProps> = ({
-  status,
   healthUrl,
   onRetry,
   isRetrying = false,
 }) => {
-  const { heading, explanation } = COPY[status];
-
   return (
     <Stack gap="density-xl" align="center" justify="center" className="h-screen px-density-lg">
       <StatusMessage
         className="max-w-[640px]"
         slotMedia={<GlobeX className="size-16 stroke-2" />}
-        slotHeading={heading}
-        slotSubheading={explanation}
+        slotHeading="Studio can't connect to NeMo Helix"
+        slotSubheading={
+          <>
+            Studio could not confirm a connection to the platform.
+            <br />
+            Make sure the platform is running and that Studio is pointed at it. Studio will retry
+            automatically.
+          </>
+        }
         slotFooter={
           <LoadingButton color="brand" onClick={onRetry} loading={isRetrying} disabled={isRetrying}>
             Retry connection
