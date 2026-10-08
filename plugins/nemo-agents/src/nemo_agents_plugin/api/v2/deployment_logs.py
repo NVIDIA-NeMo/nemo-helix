@@ -27,6 +27,7 @@ existing ``LogViewer`` component without a new schema.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -158,11 +159,10 @@ async def _resolve_external_logs(
         log_result = await get_logs(workspace=workspace, name=name, tail=tail)
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
-    lines = getattr(log_result, "lines", None)
-    if lines is None:
-        return None
+    lines = [line.rstrip("\n") for line in list(getattr(log_result, "lines", []) or [])]
+    cursors = _external_line_cursors(lines)
     parsed = [_parse_line(line) for line in lines]
-    next_offset = _external_line_cursor(lines[-1]) if lines else ""
+    next_offset = cursors[-1] if cursors else ""
     return DeploymentLogsResponse(data=parsed, total_lines=len(parsed), next_offset=next_offset)
 
 
@@ -232,20 +232,76 @@ def _parse_last_event_id(value: str | None) -> int | None:
     return offset if offset >= 0 else None
 
 
-def _external_line_cursor(raw: str) -> str:
-    """Return the external-log resume cursor for a raw substrate log line."""
+_EXTERNAL_CURSOR_PREFIX = "v1:"
+
+
+def _external_line_identity(raw: str) -> tuple[str, str]:
+    """Return the timestamp and exact text identity for an external log line."""
     line = raw.rstrip("\n")
     parsed = _parse_line(line)
-    return parsed.timestamp or line
+    return parsed.timestamp, line
+
+
+def _encode_external_cursor(raw: str, occurrence: int) -> str:
+    """Return an opaque, per-line external-log cursor safe for SSE ids."""
+    timestamp, line = _external_line_identity(raw)
+    payload = json.dumps({"ts": timestamp, "line": line, "n": occurrence}, separators=(",", ":"))
+    encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"{_EXTERNAL_CURSOR_PREFIX}{encoded}"
+
+
+def _decode_external_cursor(cursor: str) -> tuple[str, str, int] | None:
+    """Decode an external-log cursor, returning None for legacy cursors."""
+    if not cursor.startswith(_EXTERNAL_CURSOR_PREFIX):
+        return None
+    encoded = cursor[len(_EXTERNAL_CURSOR_PREFIX) :]
+    padded = encoded + "=" * (-len(encoded) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    timestamp = payload.get("ts")
+    line = payload.get("line")
+    occurrence = payload.get("n")
+    if not isinstance(timestamp, str) or not isinstance(line, str) or not isinstance(occurrence, int):
+        return None
+    return timestamp, line, occurrence
+
+
+def _external_line_cursors(lines: list[str]) -> list[str]:
+    """Build stable, per-line cursors for a fetched external log window."""
+    occurrences: dict[tuple[str, str], int] = {}
+    cursors: list[str] = []
+    for line in lines:
+        identity = _external_line_identity(line)
+        occurrence = occurrences.get(identity, 0) + 1
+        occurrences[identity] = occurrence
+        cursors.append(_encode_external_cursor(line, occurrence))
+    return cursors
 
 
 def _last_external_cursor_index(lines: list[str], cursor: str | None) -> int:
-    """Return the index just after the last line matching an external cursor."""
+    """Return the index just after the exact external cursor in a fetched window."""
     if not cursor:
-        return len(lines)
-    for index in range(len(lines) - 1, -1, -1):
-        line = lines[index].rstrip("\n")
-        if _external_line_cursor(line) == cursor or line == cursor:
+        return 0
+    decoded = _decode_external_cursor(cursor)
+    if decoded is not None:
+        timestamp, line, wanted_occurrence = decoded
+        occurrence = 0
+        for index, candidate in enumerate(lines):
+            if _external_line_identity(candidate) != (timestamp, line):
+                continue
+            occurrence += 1
+            if occurrence == wanted_occurrence:
+                return index + 1
+        return 0
+
+    # Legacy cursor support for clients that reconnected with a timestamp or
+    # raw-line cursor from an earlier server version. Prefer the first match to
+    # avoid skipping later lines with the same timestamp.
+    for index, line in enumerate(lines):
+        timestamp, text = _external_line_identity(line)
+        if cursor in (timestamp, text):
             return index + 1
     return 0
 
@@ -288,22 +344,29 @@ async def _stream_external_log_lines(
     workspace: str,
     name: str,
     start_cursor: str | None,
+    initial_lines: list[str] | None = None,
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[str]:
     """Poll external substrate logs and yield SSE events after a log-line cursor."""
     poll_interval = 0.5
     keepalive_interval = 15.0
     cursor = start_cursor
+    pending_lines = initial_lines
     last_keepalive = asyncio.get_running_loop().time()
     while True:
         if is_disconnected is not None and await is_disconnected():
             return
-        log_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
-        lines = [line.rstrip("\n") for line in list(getattr(log_result, "lines", []) or [])]
+        if pending_lines is None:
+            log_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
+            lines = [line.rstrip("\n") for line in list(getattr(log_result, "lines", []) or [])]
+        else:
+            lines = pending_lines
+            pending_lines = None
+        cursors = _external_line_cursors(lines)
         start = _last_external_cursor_index(lines, cursor)
-        for line in lines[start:]:
+        for line, line_cursor in zip(lines[start:], cursors[start:], strict=True):
             payload = _parse_line(line).model_dump()
-            cursor = _external_line_cursor(line)
+            cursor = line_cursor
             yield f"id: {cursor}\ndata: {json.dumps(payload)}\n\n"
             last_keepalive = asyncio.get_running_loop().time()
         now = asyncio.get_running_loop().time()
@@ -366,12 +429,18 @@ async def stream_deployment_logs(
     last_event_id = request.headers.get("last-event-id")
     get_logs = await _resolve_external_log_getter(workspace, name, entity_client)
     if get_logs is not None:
+        try:
+            initial_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
+        initial_lines = [line.rstrip("\n") for line in list(getattr(initial_result, "lines", []) or [])]
         return StreamingResponse(
             _stream_external_log_lines(
                 get_logs,
                 workspace=workspace,
                 name=name,
                 start_cursor=last_event_id,
+                initial_lines=initial_lines,
                 is_disconnected=request.is_disconnected,
             ),
             media_type="text/event-stream",

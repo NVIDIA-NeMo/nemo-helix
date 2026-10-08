@@ -142,45 +142,70 @@ def test_logs_fetches_external_backend_lines(client: TestClient, monkeypatch: py
     assert resp.status_code == 200
     body = resp.json()
     assert body["total_lines"] == 2
-    assert body["next_offset"] == "2026-05-19T21:00:01Z"
+    cursor = module._decode_external_cursor(body["next_offset"])
+    assert cursor == ("2026-05-19T21:00:01Z", "2026-05-19T21:00:01Z request served", 1)
     assert body["data"][0]["timestamp"] == "2026-05-19T21:00:00.123456Z"
     assert body["data"][0]["message"] == "pod started"
     assert body["data"][1]["message"] == "request served"
 
 
-async def test_stream_external_logs_resumes_from_timestamp_cursor() -> None:
-    """External log streaming uses the initial response next_offset as a timestamp cursor."""
+async def test_stream_external_logs_resumes_from_exact_line_cursor() -> None:
+    """External log streaming resumes after the exact cursor line, even with duplicate timestamps."""
     from nemo_deployments_plugin.backends.base import LogResult
 
     calls = 0
+    lines = [
+        "2026-05-19T21:00:00Z already delivered",
+        "2026-05-19T21:00:00Z first new line",
+        "2026-05-19T21:00:01Z second new line",
+    ]
+    start_cursor = module._external_line_cursors(lines[:1])[-1]
 
     async def get_logs(*, workspace: str, name: str, tail: int) -> LogResult:  # noqa: ARG001
         nonlocal calls
         calls += 1
-        return LogResult(
-            lines=[
-                "2026-05-19T21:00:00Z already delivered",
-                "2026-05-19T21:00:01Z first new line",
-                "2026-05-19T21:00:02Z second new line",
-            ]
-        )
+        return LogResult(lines=lines)
 
     events = await _collect(
         module._stream_external_log_lines(
             get_logs,
             workspace="default",
             name="test",
-            start_cursor="2026-05-19T21:00:00Z",
+            start_cursor=start_cursor,
         ),
         n=2,
     )
     parsed = [_parse_event(event) for event in events]
-    assert [event_id for event_id, _payload in parsed] == ["2026-05-19T21:00:01Z", "2026-05-19T21:00:02Z"]
+    assert [module._decode_external_cursor(event_id) for event_id, _payload in parsed if event_id] == [
+        ("2026-05-19T21:00:00Z", "2026-05-19T21:00:00Z first new line", 1),
+        ("2026-05-19T21:00:01Z", "2026-05-19T21:00:01Z second new line", 1),
+    ]
     assert [payload["message"] for _event_id, payload in parsed if payload is not None] == [
         "first new line",
         "second new line",
     ]
     assert calls == 1
+
+
+async def test_stream_external_logs_emits_after_empty_initial_page() -> None:
+    """An empty initial cursor should not suppress later external log lines."""
+    from nemo_deployments_plugin.backends.base import LogResult
+
+    async def get_logs(*, workspace: str, name: str, tail: int) -> LogResult:  # noqa: ARG001
+        return LogResult(lines=["2026-05-19T21:00:00Z first line"])
+
+    events = await _collect(
+        module._stream_external_log_lines(
+            get_logs,
+            workspace="default",
+            name="test",
+            start_cursor="",
+            initial_lines=[],
+        ),
+        n=1,
+    )
+    parsed = [_parse_event(event) for event in events]
+    assert [payload["message"] for _event_id, payload in parsed if payload is not None] == ["first line"]
 
 
 def test_logs_rejects_negative_tail(client: TestClient) -> None:
