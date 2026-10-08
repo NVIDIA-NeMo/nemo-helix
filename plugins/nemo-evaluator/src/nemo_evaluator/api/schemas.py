@@ -79,7 +79,7 @@ from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
-from nemo_helix_plugin.filter_ops import ElemMatchScalar, validate_elem_match_criteria
+from nemo_helix_plugin.filter_ops import ElemMatchScalar, parse_elem_match_criteria
 from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN as FILESET_REF_PATTERN,
 )
@@ -124,7 +124,6 @@ _METADATA_PREFIX = f"{_METADATA_FIELD}."
 
 #: Stored ref arrays a filter matches by ``workspace/name``; unqualified filter refs take the route's workspace.
 _REF_ARRAY_FIELDS = frozenset({"data.spec.metrics", "data.tasks"})
-_REF_MATCH_OPERATORS = frozenset({FilterOperator.CONTAINS, FilterOperator.CONTAINS_PREFIX})
 
 
 def _one_or_any(op: ComparisonOperation, match: Callable[[object], FilterOperation]) -> FilterOperation:
@@ -141,10 +140,16 @@ def _string_operand(field: str, value: object) -> str:
     return value
 
 
-def _metadata_pair_match(key: str, value: object) -> ComparisonOperation:
+def _metadata_match(key: str, operator: FilterOperator, value: object) -> ComparisonOperation:
     if not key:
         raise ValueError("metadata filters need a key, e.g. 'metadata.<key>'")
-    criteria = validate_elem_match_criteria({"key": key, "value": value})
+    if operator in (FilterOperator.IN, FilterOperator.NIN) and isinstance(value, str):
+        value = value.split(",")
+    criteria = {"key": key, "value": value if operator == FilterOperator.EQ else {operator.value: value}}
+    try:
+        parse_elem_match_criteria(criteria)
+    except ValueError as exc:
+        raise ValueError(f"'{_METADATA_PREFIX}{key}': {exc}") from None
     return ComparisonOperation(operator=FilterOperator.ELEM_MATCH, field=f"data.{_METADATA_FIELD}", value=criteria)
 
 
@@ -161,7 +166,9 @@ def _has_member(value: object) -> FilterOperation:
     ref = _string_operand("tasks", value)
     if REF_FRAGMENT_SEPARATOR not in ref:
         return ComparisonOperation(
-            operator=FilterOperator.CONTAINS_PREFIX, field="data.tasks", value=f"{ref}{REF_FRAGMENT_SEPARATOR}"
+            operator=FilterOperator.ELEM_MATCH,
+            field="data.tasks",
+            value={FilterOperator.STARTS_WITH.value: f"{ref}{REF_FRAGMENT_SEPARATOR}"},
         )
     if not re.fullmatch(DIGEST_PATTERN, ref.split(REF_FRAGMENT_SEPARATOR, 1)[1]):
         raise ValueError(
@@ -189,20 +196,24 @@ def _translate_metadata_comparison(op: ComparisonOperation) -> FilterOperation:
             for operator, operand in _operator_operands(value)
         ]
         return pairs[0] if len(pairs) == 1 else LogicalOperation(operator=FilterOperator.AND, operations=pairs)
-    key = op.field.removeprefix(_METADATA_PREFIX)
-    return _one_or_any(op, lambda value: _metadata_pair_match(key, value))
+    return _metadata_match(op.field.removeprefix(_METADATA_PREFIX), op.operator, op.value)
 
 
 def qualify_ref_filters(operation: FilterOperation | None, workspace: str) -> FilterOperation | None:
     """Qualify bare ``name`` refs in metric and member filters with ``workspace``."""
+
+    def qualify(ref: str) -> str:
+        return ref if "/" in ref.split(REF_FRAGMENT_SEPARATOR, 1)[0] else f"{workspace}/{ref}"
+
     if isinstance(operation, ComparisonOperation):
-        if (
-            operation.field in _REF_ARRAY_FIELDS
-            and operation.operator in _REF_MATCH_OPERATORS
-            and isinstance(operation.value, str)
-            and "/" not in operation.value.split(REF_FRAGMENT_SEPARATOR, 1)[0]
-        ):
-            return operation.model_copy(update={"value": f"{workspace}/{operation.value}"})
+        if operation.field not in _REF_ARRAY_FIELDS:
+            return operation
+        value = operation.value
+        if operation.operator == FilterOperator.CONTAINS and isinstance(value, str):
+            return operation.model_copy(update={"value": qualify(value)})
+        prefix = value.get(FilterOperator.STARTS_WITH.value) if isinstance(value, dict) else None
+        if operation.operator == FilterOperator.ELEM_MATCH and len(value) == 1 and isinstance(prefix, str):
+            return operation.model_copy(update={"value": {FilterOperator.STARTS_WITH.value: qualify(prefix)}})
         return operation
     if isinstance(operation, LogicalOperation):
         return operation.model_copy(
@@ -217,7 +228,8 @@ class RecordFilter(DataFilter):
     metadata: dict[str, ElemMatchScalar] | None = Field(
         None,
         description="Filter by metadata annotations: `metadata.<key>` (or `metadata[<key>]`) matches records "
-        "whose metadata has that key with that value. Supports `$eq` and `$in`.",
+        "whose metadata has that key with a matching value. Supports `$eq`, `$in`, `$nin`, `$like`, `$startsWith`, "
+        "`$endsWith`, `$lt`, `$lte`, `$gt`, and `$gte`.",
     )
     tags: str | None = Field(
         None,

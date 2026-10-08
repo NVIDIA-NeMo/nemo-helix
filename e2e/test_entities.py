@@ -439,6 +439,10 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
         assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": True}}}) == {
             f"{prefix}-match"
         }
+        owner_prefix = {"key": "owner", "value": {"$startsWith": owner[:-2]}}
+        assert names_matching({"data.metadata": {"$elemMatch": owner_prefix}}) == {f"{prefix}-match"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"$startsWith": "re"}}}) == {f"{prefix}-scalars"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"$eq": 3}}}) == {f"{prefix}-scalars"}
     finally:
         for name in rows:
             try:
@@ -447,8 +451,8 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
                 pass
 
 
-def test_entity_array_prefix_and_object_key_filters(entity_store_client: EntitiesClient, workspace: str):
-    """``$containsPrefix`` anchors at an element's start and ``$hasKey`` treats a dotted key as one key.
+def test_entity_prefix_suffix_and_object_key_filters(entity_store_client: EntitiesClient, workspace: str):
+    """``$startsWith`` and ``$endsWith`` are case-sensitive and anchored, and ``$hasKey`` treats a dotted key as one key.
 
     Like ``$elemMatch``, these run on both SQLite and PostgreSQL in CI; under ``$not`` a row without
     the field must still match on both.
@@ -475,9 +479,12 @@ def test_entity_array_prefix_and_object_key_filters(entity_store_client: Entitie
                 entity_type=ENTITY_TYPE, workspace=workspace, body=EntityCreateInput(name=name, data=data)
             ).data()
 
-        has_task_a = {"data.tasks": {"$containsPrefix": "ws/task_a#"}}
+        has_task_a = {"data.tasks": {"$elemMatch": {"$startsWith": "ws/task_a#"}}}
         assert names_matching(has_task_a) == {f"{prefix}-pins"}
         assert names_matching({"$not": has_task_a}) == {f"{prefix}-near", f"{prefix}-none"}
+        assert names_matching({"name": {"$endsWith": "-pins"}}) == {f"{prefix}-pins"}
+        assert names_matching({"name": {"$endsWith": "-PINS"}}) == set()
+        assert names_matching({"created_at": {"$startsWith": "20"}}) == set(rows)
         assert names_matching({"data.tags": {"$hasKey": "v1.2"}}) == {f"{prefix}-pins"}
         assert names_matching({"data.tags": {"$hasKey": "v1"}}) == {f"{prefix}-near"}
     finally:

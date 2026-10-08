@@ -169,10 +169,45 @@ CASES = [
     ("elem_match_across_elements", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "team", "value": "alice"})),
     ("elem_match_absent_field", C(FilterOperator.ELEM_MATCH, "data.nope", {"key": "owner"})),
     ("not_elem_match", NOT(C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": "alice"}))),
-    ("contains_prefix_any_revision", C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task_a#")),
-    ("contains_prefix_exact_member", C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task-b#d2")),
-    ("contains_prefix_absent_field", C(FilterOperator.CONTAINS_PREFIX, "data.nope", "ws/")),
-    ("not_contains_prefix", NOT(C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task_a#"))),
+    (
+        "elem_match_starts_with_any_revision",
+        C(FilterOperator.ELEM_MATCH, "data.members", {"$startsWith": "ws/task_a#"}),
+    ),
+    ("elem_match_starts_with_exact", C(FilterOperator.ELEM_MATCH, "data.members", {"$startsWith": "ws/task-b#d2"})),
+    ("elem_match_ends_with", C(FilterOperator.ELEM_MATCH, "data.members", {"$endsWith": "#d2"})),
+    ("elem_match_starts_with_absent_field", C(FilterOperator.ELEM_MATCH, "data.nope", {"$startsWith": "ws/"})),
+    ("not_elem_match_starts_with", NOT(C(FilterOperator.ELEM_MATCH, "data.members", {"$startsWith": "ws/task_a#"}))),
+    ("elem_match_scalar_eq", C(FilterOperator.ELEM_MATCH, "data.meta", {"$eq": 3})),
+    ("elem_match_scalar_starts_with", C(FilterOperator.ELEM_MATCH, "data.meta", {"$startsWith": "re"})),
+    # Object elements' serialized text contains "owner"; plain-element criteria must skip them.
+    ("elem_match_scalar_like_skips_objects", C(FilterOperator.ELEM_MATCH, "data.meta", {"$like": "owner"})),
+    (
+        "elem_match_value_starts_with",
+        C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": {"$startsWith": "al"}}),
+    ),
+    ("elem_match_value_gt", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "level", "value": {"$gt": 2}})),
+    (
+        "elem_match_value_in",
+        C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": {"$in": ["alice", "bob"]}}),
+    ),
+    ("elem_match_value_like", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "team", "value": {"$like": "EV"}})),
+    ("elem_match_key_starts_with", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": {"$startsWith": "le"}})),
+    # A missing or null JSON value renders as the text "null"; it must not match these.
+    ("starts_with_missing_or_null", C(FilterOperator.STARTS_WITH, "data.k", "n")),
+    (
+        "elem_match_value_starts_with_null",
+        C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": {"$startsWith": "n"}}),
+    ),
+    (
+        "elem_match_value_nin_skips_null",
+        C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": {"$nin": ["alice"]}}),
+    ),
+    # Case-sensitive, unlike SQLite LIKE: "Llama" must not match "llama".
+    ("starts_with_name", C(FilterOperator.STARTS_WITH, "name", "Llama")),
+    ("ends_with_name", C(FilterOperator.ENDS_WITH, "name", "-2")),
+    ("starts_with_data_tier", C(FilterOperator.STARTS_WITH, "data.tier", "pr")),
+    ("ends_with_data_tier", C(FilterOperator.ENDS_WITH, "data.tier", "ree")),
+    ("ends_with_longer_than_value", C(FilterOperator.ENDS_WITH, "data.tier", "xxxxxxxxxxxxfree")),
     ("has_key_dotted", C(FilterOperator.HAS_KEY, "data.tag_map", "v1.2")),
     ("has_key_prefix_of_dotted", C(FilterOperator.HAS_KEY, "data.tag_map", "v1")),
     ("has_key_common", C(FilterOperator.HAS_KEY, "data.tag_map", "latest")),
@@ -230,7 +265,7 @@ def test_elem_match_requires_one_element_to_satisfy_every_criterion(db, criteria
     "op",
     [
         C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner"}),
-        C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/"),
+        C(FilterOperator.ELEM_MATCH, "data.members", {"$startsWith": "ws/"}),
     ],
 )
 def test_element_operators_reject_unknown_dialect(op):
@@ -241,14 +276,19 @@ def test_element_operators_reject_unknown_dialect(op):
 @pytest.mark.parametrize(
     "op,expected_ids",
     [
-        (C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task_a#"), {1, 3}),
-        (C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task-b#d2"), {1}),
+        (C(FilterOperator.ELEM_MATCH, "data.members", {"$startsWith": "ws/task_a#"}), {1, 3}),
+        (C(FilterOperator.ELEM_MATCH, "data.members", {"$startsWith": "ws/task-b#d2"}), {1}),
+        (C(FilterOperator.ELEM_MATCH, "data.meta", {"$startsWith": "re"}), {5}),
+        (C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": {"$startsWith": "al"}}), {1}),
+        (C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "level", "value": {"$gt": 2}}), {2}),
+        (C(FilterOperator.STARTS_WITH, "name", "Llama"), {2}),
+        (C(FilterOperator.ENDS_WITH, "data.tier", "ree"), {1, 5}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "v1.2"), {1}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "v1"), {2}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "latest"), {1, 2}),
     ],
 )
-def test_contains_prefix_and_has_key_select_expected_rows(db, op, expected_ids):
-    """Prefixes stay quote-anchored with ``_`` literal, and a dotted key is one key, not a path."""
+def test_prefix_suffix_and_key_operators_select_expected_rows(db, op, expected_ids):
+    """Prefix and suffix matches are case-sensitive with ``_`` literal, and a dotted key is one key, not a path."""
     condition = op.apply(SQLAlchemyFilterRepository(FakeEntity, dialect_name="sqlite"))
     assert {r.id for r in db.execute(select(FakeEntity).where(condition)).scalars().all()} == expected_ids

@@ -412,6 +412,12 @@ def _names(client: TestClient, params: dict[str, str]) -> set[str]:
         ({"filter": '{"metadata.level": 2}'}, {"bob-smoke"}),
         ({"filter": '{"$not": {"metadata.owner": "alice"}}'}, {"bob-smoke", "untagged"}),
         ({"filter[metadata.owner]": "carol"}, set()),
+        ({"filter[metadata.owner][$like]": "ALI"}, {"alice-smoke", "alice-harbor"}),
+        ({"filter[metadata][owner][$startsWith]": "al"}, {"alice-smoke", "alice-harbor"}),
+        ({"filter[metadata.owner][$endsWith]": "ob"}, {"bob-smoke"}),
+        ({"filter": '{"metadata.level": {"$gt": 1}}'}, {"bob-smoke"}),
+        ({"filter[metadata.owner][$nin]": "alice"}, {"bob-smoke"}),
+        ({"filter[metadata][owner][$in]": "alice,bob"}, {"alice-smoke", "bob-smoke", "alice-harbor"}),
     ],
 )
 def test_list_filters_by_kind_and_metadata(filterable: TestClient, params: dict[str, str], expected: set[str]) -> None:
@@ -448,8 +454,8 @@ def test_metadata_filter_matches_key_and_value_on_the_same_annotation(filterable
 @pytest.mark.parametrize(
     "params",
     [
-        {"filter[metadata.owner][$like]": "ali"},
-        {"filter[metadata][owner][$like]": "ali"},
+        {"filter[metadata.owner][$contains]": "ali"},
+        {"filter[metadata][owner][$hasKey]": "ali"},
         {"filter": '{"metadata": {"owner": {"$bogus": "x"}}}'},
         {"filter[metadata.owner][$in]": ""},
         {"filter[metadata]": "alice"},

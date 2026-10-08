@@ -210,6 +210,31 @@ class TestEntityCRUD:
         assert response.status_code == 200
         assert [item["name"] for item in response.json()["data"]] == ["alice-smoke"]
 
+    @pytest.mark.parametrize(
+        "filter_query",
+        [
+            {"data.tasks": {"$elemMatch": "x"}},
+            {"data.metadata": {"$elemMatch": {"key": {"$contains": "x"}}}},
+            {"data.tags": {"$hasKey": ""}},
+            {"name": {"$startsWith": 3}},
+        ],
+    )
+    async def test_list_entities_rejects_malformed_operator_operands(self, client: AsyncClient, ctx, filter_query):
+        response = await client.get(
+            "/apis/entities/v2/workspaces/default/entities/elem_match_case",
+            params={"filter": json.dumps(filter_query)},
+        )
+
+        assert response.status_code == 400, response.text
+
+    async def test_list_entities_rejects_malformed_bracket_operand(self, client: AsyncClient, ctx):
+        response = await client.get(
+            "/apis/entities/v2/workspaces/default/entities/elem_match_case",
+            params={"filter[data.tasks][$elemMatch]": "x"},
+        )
+
+        assert response.status_code == 400, response.text
+
     @pytest.mark.parametrize("count_by", ["name", ""])
     async def test_list_entities_rejects_unsupported_count_field(self, client: AsyncClient, ctx, count_by: str):
         response = await client.get(

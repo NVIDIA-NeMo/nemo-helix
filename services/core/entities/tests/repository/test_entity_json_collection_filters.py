@@ -63,13 +63,13 @@ REFERENCING = {
     [
         (
             ComparisonOperation(
-                field="data.tasks", operator=FilterOperator.CONTAINS_PREFIX, value="workspace-1/task_a#"
+                field="data.tasks", operator=FilterOperator.ELEM_MATCH, value={"$startsWith": "workspace-1/task_a#"}
             ),
             set(),
         ),
         (
             ComparisonOperation(
-                field="data.tasks", operator=FilterOperator.CONTAINS_PREFIX, value="workspace-1/task-a#"
+                field="data.tasks", operator=FilterOperator.ELEM_MATCH, value={"$startsWith": "workspace-1/task-a#"}
             ),
             {"pins-a"},
         ),
@@ -78,7 +78,9 @@ REFERENCING = {
                 operator=FilterOperator.NOT,
                 operations=[
                     ComparisonOperation(
-                        field="data.tasks", operator=FilterOperator.CONTAINS_PREFIX, value="workspace-1/task-a#"
+                        field="data.tasks",
+                        operator=FilterOperator.ELEM_MATCH,
+                        value={"$startsWith": "workspace-1/task-a#"},
                     )
                 ],
             ),

@@ -383,7 +383,7 @@ forms.
 | `GET /tasksets` | `description` | Any | `?filter[description][$like]=geography` |
 | `GET /tasksets` | `tasks` | `$eq`, `$in` | `?filter[tasks]=default/capital-of-france` |
 | Both | `tags` | `$eq`, `$in` | `?filter[tags][$in]=blessed,v1.2` |
-| Both | `metadata.<key>` | `$eq`, `$in` | `?filter[metadata.suite]=geography` or `?filter[metadata][suite]=geography` |
+| Both | `metadata.<key>` | `$eq`, `$in`, `$nin`, `$like`, `$startsWith`, `$endsWith`, `$lt`, `$lte`, `$gt`, `$gte` | `?filter[metadata.suite]=geography` or `?filter[metadata][suite][$startsWith]=geo` |
 | Both | `name`, `created_at`, `updated_at` | Any | `?filter[created_at][$gte]=2026-01-01` |
 
 Bracket values arrive as strings. To match a non-string metadata value, such as a number or a
@@ -571,7 +571,7 @@ The SDK resources are a thin client over the Evaluator plugin REST API, mounted 
 | Reserved or malformed tag name | `422` | `latest` cannot be moved by hand; a digest-shaped tag is refused. |
 | Retrieving or deleting an unknown name or revision | `404` | Applies to both records and revisions. |
 | Listing with an unknown filter field | `400` | Includes `kind` on `/tasksets`, which have no kind. |
-| Listing with an unsupported operator on `metrics`, `tasks`, `tags`, or `metadata` | `400` | These accept only `$eq`, and `$in` with at least one value. |
+| Listing with an unsupported operator on `metrics`, `tasks`, `tags`, or `metadata` | `400` | `metrics`, `tasks`, and `tags` accept only `$eq`, and `$in` with at least one value; `metadata.<key>` accepts the comparisons listed under [Filter over REST](#filter-over-rest). |
 | Listing tasksets with a `tasks` filter pinned by tag | `400` | Members are stored pinned to a digest, so a tag could never match. |
 | `TasksetRef` pinning a revision that no longer resolves | job fails | Expansion refuses rather than falling back to the current revision. |
 | `DELETE` on a task a taskset pins | `204` | Not prevented; the taskset's reference dangles and fails on read. |
