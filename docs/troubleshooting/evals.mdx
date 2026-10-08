@@ -180,7 +180,7 @@ Use the following code to create an evaluation job that skips validation checks.
 
 ```bash
 curl -X 'POST' \
-'https://${EVALUATOR_BASE_URL}/v1/evaluation/jobs?skip_validation_checks=True' \
+'${EVALUATOR_BASE_URL}/v1/evaluation/jobs?skip_validation_checks=True' \
 -H 'accept: application/json' \
 -H 'Content-Type: application/json' \
 -d '{
@@ -194,6 +194,10 @@ curl -X 'POST' \
 <Tab title="Python">
 
 ```python
+import requests
+
+EVALUATOR_BASE_URL = "http://localhost:8080"
+
 data = {
     "namespace": "my-organization",
     "target": "<my-target-namespace/my-target-name>",

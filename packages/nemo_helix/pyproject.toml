@@ -543,7 +543,7 @@ nhx-customization-common = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nhx-evals-sdk = [
   "pydantic>=2.10.6",
-  "nemo-sandboxed-gym",
+  "nemo-sandboxed-gym==0.1.0",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
   "jsonpath-ng>=1.7.0",
