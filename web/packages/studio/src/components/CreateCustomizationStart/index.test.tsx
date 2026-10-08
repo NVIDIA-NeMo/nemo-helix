@@ -241,15 +241,15 @@ describe('CreateCustomizationStart', () => {
       const user = userEvent.setup();
       renderStart();
       await user.click(screen.getByRole('radio', { name: /Describe with AI/ }));
-      // The panel loads lazily.
-      await screen.findByText('Training dataset');
+      // The panel loads lazily, and its first import can outlast findBy's 1s default.
+      await screen.findByText('Training dataset', {}, { timeout: 10_000 });
       return user;
     };
 
     it('keeps Continue disabled until a draft passes the checks', async () => {
       await openAi();
 
-      expect(await screen.findByText('Training dataset')).toBeInTheDocument();
+      expect(screen.getByText('Training dataset')).toBeInTheDocument();
       expect(continueButton()).toBeDisabled();
       expect(
         screen.getByText('Draft settings that pass the checks to continue.')
