@@ -13,8 +13,11 @@ This is distinct from the server-side config in
 from __future__ import annotations
 
 from abc import ABC
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
 
+from nemo_helix_plugin.client.auth import AsyncClientTokenProvider, AsyncClientTokenProviderAdapter, TokenProvider
 from pydantic import (
     BaseModel,
     Discriminator,
@@ -37,9 +40,28 @@ OutputFormat = Literal["table", "json", "yaml", "markdown", "csv", "raw"]
 TimestampFormat = Literal["relative", "iso8601"]
 
 
+@dataclass(frozen=True)
+class ClientAuthResolutionContext:
+    """Inputs needed to turn a config user into a request-time auth provider."""
+
+    base_url: str
+    context_name: str
+    config_exists: bool
+    config_path: Path
+    explicit_access_token: bool = False
+
+
 class BaseUser(BaseModel, ABC):
     def get_client_config(self) -> dict[str, object]:
         return {}
+
+    def nemo_client_auth(self, context: ClientAuthResolutionContext) -> TokenProvider | None:
+        _ = context
+        return None
+
+    def async_nemo_client_auth(self, context: ClientAuthResolutionContext) -> AsyncClientTokenProvider | None:
+        _ = context
+        return None
 
 
 class OAuthUser(BaseUser):
@@ -73,6 +95,36 @@ class OAuthUser(BaseUser):
                 "Authorization": f"Bearer {self.token.get_secret_value()}",
             }
         }
+
+    def nemo_client_auth(self, context: ClientAuthResolutionContext) -> TokenProvider:
+        from nemo_helix_plugin.client.oidc_factory import resolve_oidc_provider
+
+        return resolve_oidc_provider(
+            base_url=context.base_url,
+            context_name=context.context_name,
+            access_token=self.token.get_secret_value(),
+            refresh_token=self.refresh_token.get_secret_value() if self.refresh_token else None,
+            expires_at=self.expires_at,
+            config_exists=context.config_exists,
+            config_path=context.config_path,
+            explicit_access_token=context.explicit_access_token,
+        )
+
+    def async_nemo_client_auth(self, context: ClientAuthResolutionContext) -> AsyncClientTokenProvider:
+        from nemo_helix_plugin.client.oidc_factory import resolve_oidc_provider
+
+        return AsyncClientTokenProviderAdapter(
+            resolve_oidc_provider(
+                base_url=context.base_url,
+                context_name=context.context_name,
+                access_token=self.token.get_secret_value(),
+                refresh_token=self.refresh_token.get_secret_value() if self.refresh_token else None,
+                expires_at=self.expires_at,
+                config_exists=context.config_exists,
+                config_path=context.config_path,
+                explicit_access_token=context.explicit_access_token,
+            )
+        )
 
 
 class NoAuthUser(BaseUser):

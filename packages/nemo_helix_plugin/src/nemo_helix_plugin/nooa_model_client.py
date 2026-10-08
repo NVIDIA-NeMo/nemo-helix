@@ -9,13 +9,12 @@ and client lifetime behavior without making Nooa a required dependency of the
 public plugin contract.
 """
 
-import inspect
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
-from nemo_helix_plugin.client.auth import AsyncTokenProvider, TokenProvider, resolve_token_async
+from nemo_helix_plugin.client.auth import AsyncClientTokenProvider
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.config.config import get_context
 from nemo_helix_plugin.models.client import AsyncModelsClient
@@ -137,7 +136,7 @@ class _AuthenticatedCompletionClient(CompletionClient):
         self,
         model: str,
         *,
-        platform_auth: TokenProvider | AsyncTokenProvider,
+        platform_auth: AsyncClientTokenProvider,
         **config,
     ) -> None:
         self._platform_auth = platform_auth
@@ -151,13 +150,7 @@ class _AuthenticatedCompletionClient(CompletionClient):
         return headers
 
     def _sync_access_token(self) -> str:
-        get_token = self._platform_auth.get_access_token
-        if inspect.iscoroutinefunction(get_token):
-            raise TypeError("Async token provider cannot be used from a synchronous Nooa completion call")
-        token = get_token()
-        if inspect.isawaitable(token):
-            raise TypeError("Async token provider cannot be used from a synchronous Nooa completion call")
-        return token
+        raise TypeError("Async token provider cannot be used from a synchronous Nooa completion call")
 
     def call(
         self,
@@ -184,7 +177,7 @@ class _AuthenticatedCompletionClient(CompletionClient):
         cache_control_injection_points: list[dict[str, object]] | None = None,
         **kwargs,
     ) -> LLMResponse:
-        token = await resolve_token_async(self._platform_auth)
+        token = await self._platform_auth.get_access_token_async()
         kwargs["extra_headers"] = self._extra_headers(token, kwargs.get("extra_headers"))
         return await super().acall(
             messages,
@@ -198,7 +191,7 @@ class _AuthenticatedCompletionClient(CompletionClient):
 def _platform_completion_client(
     model: str,
     *,
-    platform_auth: TokenProvider | AsyncTokenProvider | None,
+    platform_auth: AsyncClientTokenProvider | None,
     **config,
 ) -> CompletionClient:
     if platform_auth is None:

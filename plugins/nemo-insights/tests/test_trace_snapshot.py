@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_insights_plugin.analyst.trace_snapshot import load_trace_snapshot
 
@@ -115,7 +116,7 @@ async def test_loads_all_pages_and_preserves_complete_traces() -> None:
         client = AsyncIntakeClient(
             base_url="https://platform.example",
             http_client=http_client,
-            auth="test-token",
+            auth=StaticToken("test-token"),
         )
         snapshot = await load_trace_snapshot(
             client,

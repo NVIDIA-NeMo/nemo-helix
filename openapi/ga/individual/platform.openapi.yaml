@@ -9703,7 +9703,7 @@ components:
       required:
       - auth_enabled
       title: AuthDiscoveryResponse
-      description: Auth discovery response for CLI/SDK.
+      description: Auth discovery response returned by the auth discovery endpoint.
     AuthenticateErrorResponse:
       properties:
         detail:
@@ -17786,7 +17786,7 @@ components:
       - issuer
       - client_id
       title: OIDCDiscoveryResponse
-      description: OIDC discovery response for CLI/SDK.
+      description: OIDC discovery response returned by the auth discovery endpoint.
     OpenAIListModelsResp:
       properties:
         data:

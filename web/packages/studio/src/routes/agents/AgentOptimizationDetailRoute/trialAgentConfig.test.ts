@@ -287,8 +287,77 @@ describe('applyTrialToAgentConfig', () => {
         trial({ depth: '3' }),
         study({ depth: { path: 'adapter.settings.depth' } })
       )
-    ).toThrow(/only model settings are supported/);
+    ).toThrow(/only model settings and system instructions are supported/);
   });
+
+  it('writes the system instructions a trial ran onto a platform agent', () => {
+    const source = specAgent();
+    const { config: next } = applyTrialToAgentConfig(
+      source,
+      trial({ instructions: 'Today is 2026-05-07.' }),
+      study({
+        instructions: {
+          path: 'instructions.system.content',
+          values: ['Baseline.', 'Today is 2026-05-07.'],
+        },
+      })
+    );
+
+    expect(next.instructions).toEqual({ system: { content: 'Today is 2026-05-07.' } });
+    expect(source).not.toHaveProperty('instructions');
+  });
+
+  it('replaces system instructions the agent already has', () => {
+    const { config: next } = applyTrialToAgentConfig(
+      { ...specAgent(), instructions: { system: { content: 'Old.', mode: 'replace' } } },
+      trial({ instructions: 'New.' }),
+      study({ instructions: { path: 'instructions.system.content' } })
+    );
+
+    expect(next.instructions).toEqual({ system: { content: 'New.', mode: 'replace' } });
+  });
+
+  it('accepts a system instruction mode listed before its content', () => {
+    const { config: next } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ mode: 'replace', instructions: 'New.' }),
+      study({
+        mode: { path: 'instructions.system.mode' },
+        instructions: { path: 'instructions.system.content' },
+      })
+    );
+
+    expect(next.instructions).toEqual({ system: { mode: 'replace', content: 'New.' } });
+  });
+
+  it('rejects a system instruction mode with no content', () => {
+    expect(() =>
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ mode: 'replace' }),
+        study({ mode: { path: 'instructions.system.mode' } })
+      )
+    ).toThrow(/non-empty system instruction content/);
+  });
+
+  it('rejects blank system instruction content', () => {
+    expect(() =>
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ instructions: '   ' }),
+        study({ instructions: { path: 'instructions.system.content' } })
+      )
+    ).toThrow(/non-empty system instruction content/);
+  });
+
+  it.each(['instructions.system.extra', 'instructions.user.content', 'instructions.system'])(
+    'rejects the instructions path %s that the platform spec does not define',
+    (path) => {
+      expect(() =>
+        applyTrialToAgentConfig(specAgent(), trial({ p: 'x' }), study({ p: { path } }))
+      ).toThrow(/only model settings and system instructions are supported/);
+    }
+  );
 
   it('rejects params that are not in the search space', () => {
     expect(() =>

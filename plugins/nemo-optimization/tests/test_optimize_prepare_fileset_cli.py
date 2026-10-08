@@ -58,6 +58,17 @@ class _StubSDK:
     pass
 
 
+class _FakeCLIContext:
+    def __init__(self) -> None:
+        self.sdk = _StubSDK()
+
+    def get_base_url(self, default: str | None = None) -> str:
+        return "http://platform"
+
+    def typed_client(self, _client_cls: type, timeout: object = None) -> _StubSDK:
+        return self.sdk
+
+
 def _patch_upload(record: dict[str, Any]) -> ExitStack:
     class _StubManager:
         def validate_storage(self) -> None:
@@ -75,7 +86,6 @@ def _patch_upload(record: dict[str, Any]) -> ExitStack:
         return _StubManager()
 
     stack = ExitStack()
-    stack.enter_context(patch("nemo_optimization.optimize_cli._platform_sdk", return_value=_StubSDK()))
     stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io.FilesClient.from_client", return_value=object()))
     stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=manager))
     return stack
@@ -96,6 +106,7 @@ def test_uploads_the_bundle_and_prints_the_submit_command(app: typer.Typer, bund
                 "my-opt-fs",
                 "--no-check-models",
             ],
+            obj=_FakeCLIContext(),
         )
 
     assert result.exit_code == 0, result.output
@@ -128,6 +139,7 @@ def test_honours_a_workspace_qualified_fileset_ref(app: typer.Typer, bundle: Pat
                 "default",
                 "--no-check-models",
             ],
+            obj=_FakeCLIContext(),
         )
 
     assert result.exit_code == 0, result.output
@@ -139,47 +151,39 @@ def test_refuses_to_upload_a_bundle_that_fails_preflight(app: typer.Typer, bundl
     broken["eval"] = {"general": {"dataset": {"file_path": "/Users/me/dataset.json"}}}
     (bundle / "optimize.yml").write_text(yaml.safe_dump(broken))
 
-    def _no_sdk(_base_url: str) -> Any:
-        raise AssertionError("preflight must fail before the platform is contacted")
-
-    with patch("nemo_optimization.optimize_cli._platform_sdk", side_effect=_no_sdk):
-        result = CliRunner().invoke(
-            app,
-            [
-                "prepare-fileset",
-                "--source",
-                str(bundle),
-                "--optimize-config",
-                "optimize.yml",
-                "--fileset",
-                "my-opt-fs",
-                "--no-check-models",
-            ],
-        )
+    result = CliRunner().invoke(
+        app,
+        [
+            "prepare-fileset",
+            "--source",
+            str(bundle),
+            "--optimize-config",
+            "optimize.yml",
+            "--fileset",
+            "my-opt-fs",
+            "--no-check-models",
+        ],
+    )
 
     assert result.exit_code == 1
     assert "eval.general.dataset is an absolute path" in result.output
 
 
 def test_dry_run_validates_without_uploading(app: typer.Typer, bundle: Path) -> None:
-    def _no_sdk(_base_url: str) -> Any:
-        raise AssertionError("--dry-run must not contact the platform")
-
-    with patch("nemo_optimization.optimize_cli._platform_sdk", side_effect=_no_sdk):
-        result = CliRunner().invoke(
-            app,
-            [
-                "prepare-fileset",
-                "--source",
-                str(bundle),
-                "--optimize-config",
-                "optimize.yml",
-                "--fileset",
-                "my-opt-fs",
-                "--no-check-models",
-                "--dry-run",
-            ],
-        )
+    result = CliRunner().invoke(
+        app,
+        [
+            "prepare-fileset",
+            "--source",
+            str(bundle),
+            "--optimize-config",
+            "optimize.yml",
+            "--fileset",
+            "my-opt-fs",
+            "--no-check-models",
+            "--dry-run",
+        ],
+    )
 
     assert result.exit_code == 0, result.output
     assert "Would upload" in result.output

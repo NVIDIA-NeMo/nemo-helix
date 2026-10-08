@@ -4,8 +4,9 @@
 import inspect
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import httpx
 import typer
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.config.models import NoAuthUser, OAuthUser
@@ -128,7 +129,7 @@ def test_get_client_uses_config_bootstrap_for_persisted_oauth_context_and_is_cac
         base_url="http://test.example.com",
         context_name="dev",
         workspace="test-workspace",
-        timeout=60.0,
+        timeout=None,
     )
     assert client is mock_build.return_value
     assert client is client2
@@ -178,7 +179,8 @@ def test_get_client_passes_explicit_access_token_override():
     assert isinstance(client, NemoClient)
     assert client.workspace == "test-workspace"
     assert client.default_headers == {"Authorization": "Bearer token-123"}
-    assert client._http.headers["Authorization"] == "Bearer token-123"
+    assert "Authorization" not in client._http.headers
+    assert client.request_headers() == {"Authorization": "Bearer token-123"}
 
 
 def test_get_client_uses_bootstrap_for_workload_identity(monkeypatch):
@@ -202,7 +204,7 @@ def test_get_client_uses_bootstrap_for_workload_identity(monkeypatch):
         base_url="http://test.example.com",
         context_name=None,
         workspace="default",
-        timeout=60.0,
+        timeout=None,
     )
 
 
@@ -231,7 +233,7 @@ def test_get_async_client_uses_config_bootstrap_for_persisted_oauth_context_and_
         base_url="http://test.example.com",
         context_name="dev",
         workspace="test-workspace",
-        timeout=60.0,
+        timeout=None,
     )
     assert client is mock_build.return_value
     assert client is client2
@@ -254,3 +256,25 @@ def test_typed_client_shares_transport_and_auth():
     assert secrets._http is ctx.get_client()._http
     assert secrets.workspace == "test-workspace"
     assert secrets.default_headers == {"Authorization": "Bearer token-123"}
+
+
+def test_get_http_client_returns_shared_cli_transport():
+    """Raw CLI HTTP calls borrow the same transport as typed clients."""
+    http_client = MagicMock(spec=httpx.Client)
+    nemo_client = SimpleNamespace(_client=http_client)
+    ctx = CLIContext(_client=cast(NemoClient, nemo_client))
+
+    assert ctx.get_http_client() is http_client
+
+
+def test_get_http_headers_resolves_from_shared_cli_client():
+    """Raw CLI HTTP calls can opt into the shared client's per-request headers."""
+    nemo_client = MagicMock(spec=NemoClient)
+    nemo_client.request_headers.return_value = {"Authorization": "Bearer token-123", "X-Request-ID": "req-1"}
+    ctx = CLIContext(_client=nemo_client)
+
+    assert ctx.get_http_headers({"X-Request-ID": "req-1"}) == {
+        "Authorization": "Bearer token-123",
+        "X-Request-ID": "req-1",
+    }
+    nemo_client.request_headers.assert_called_once_with({"X-Request-ID": "req-1"}, url=None)

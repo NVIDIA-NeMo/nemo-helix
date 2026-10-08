@@ -18,6 +18,7 @@ import pytest
 import respx
 import yaml
 from nemo_helix_plugin.client.auth import (
+    AsyncClientTokenProviderAdapter,
     StaticToken,
     TokenProvider,
 )
@@ -80,8 +81,8 @@ class TestStaticToken:
         assert provider.get_access_token() == "my-token"
 
     def test_satisfies_protocol(self):
-        provider = StaticToken("t")
-        assert isinstance(provider, TokenProvider)
+        provider: TokenProvider = StaticToken("t")
+        assert provider.get_access_token() == "t"
 
     def test_async_get_access_token(self):
         provider = StaticToken("my-token")
@@ -256,14 +257,17 @@ class TestNemoClientAuth:
 class TestAsyncNemoClientAuth:
     @respx.mock
     def test_async_provider_called(self):
-        """AsyncNemoClient(auth=AsyncProvider()) calls async get_access_token()."""
+        """AsyncNemoClient calls explicit async client token providers."""
         route = respx.get("http://localhost:8080/test").mock(return_value=httpx.Response(200, json={"ok": True}))
 
         class AsyncProvider:
-            async def get_access_token(self) -> str:
+            async def get_access_token_async(self) -> str:
                 return "async-token"
 
-        client = AsyncNemoClient(base_url="http://localhost:8080", auth=AsyncProvider())
+        client = AsyncNemoClient(
+            base_url="http://localhost:8080",
+            auth=AsyncClientTokenProviderAdapter(AsyncProvider()),
+        )
 
         from nemo_helix_plugin.client.types import PreparedRequest
 
@@ -277,10 +281,10 @@ class TestAsyncNemoClientAuth:
         assert route.calls[0].request.headers["Authorization"] == "Bearer async-token"
 
     @respx.mock
-    def test_sync_provider_works_in_async_client(self):
-        """AsyncNemoClient accepts a sync TokenProvider too."""
+    def test_static_token_works_in_async_client(self):
+        """AsyncNemoClient accepts an explicit async-capable static token."""
         route = respx.get("http://localhost:8080/test").mock(return_value=httpx.Response(200, json={"ok": True}))
-        client = AsyncNemoClient(base_url="http://localhost:8080", auth="sync-token")
+        client = AsyncNemoClient(base_url="http://localhost:8080", auth=StaticToken("sync-token"))
 
         from nemo_helix_plugin.client.types import PreparedRequest
 
@@ -310,13 +314,13 @@ class TestAsyncNemoClientAuth:
         from nemo_helix_plugin.client.types import PreparedRequest
 
         class ExplodingProvider:
-            async def get_access_token(self) -> str:
+            async def get_access_token_async(self) -> str:
                 raise AssertionError("token provider should not be called")
 
         seen: list[httpx.Request] = []
         client = AsyncNemoClient(
             base_url="http://nemo.example.test",
-            auth=ExplodingProvider(),
+            auth=AsyncClientTokenProviderAdapter(ExplodingProvider()),
             http_client=httpx.AsyncClient(
                 transport=httpx.MockTransport(lambda request: seen.append(request) or httpx.Response(200))
             ),
@@ -338,6 +342,28 @@ class TestAsyncNemoClientAuth:
 
 # Any fixed instant; only its constancy across processes matters.
 _FIXED_IAT = 1_700_000_000
+_NON_FINITE_EXPIRY_CASES = [
+    (
+        generate_unsigned_jwt(
+            "user",
+            expires_in_seconds=None,
+            issued_at=_FIXED_IAT,
+            extra_claims={"exp": float("nan")},
+        ),
+        {},
+        "JWT exp",
+    ),
+    (
+        generate_unsigned_jwt("user", expires_in_seconds=None, issued_at=_FIXED_IAT),
+        {"expires_at": float("inf")},
+        "expires_at",
+    ),
+    (
+        generate_unsigned_jwt("user", expires_in_seconds=None, issued_at=_FIXED_IAT),
+        {"expires_in": float("-inf")},
+        "expires_in",
+    ),
+]
 
 
 def _make_jwt(exp: float | None = None, sub: str = "user") -> str:
@@ -385,28 +411,7 @@ class TestOIDCTokenProvider:
     # parameter, so the workers disagree on what was collected and the whole run aborts.
     @pytest.mark.parametrize(
         ("token", "kwargs", "field"),
-        [
-            (
-                generate_unsigned_jwt(
-                    "user",
-                    expires_in_seconds=None,
-                    issued_at=_FIXED_IAT,
-                    extra_claims={"exp": float("nan")},
-                ),
-                {},
-                "JWT exp",
-            ),
-            (
-                generate_unsigned_jwt("user", expires_in_seconds=None, issued_at=_FIXED_IAT),
-                {"expires_at": float("inf")},
-                "expires_at",
-            ),
-            (
-                generate_unsigned_jwt("user", expires_in_seconds=None, issued_at=_FIXED_IAT),
-                {"expires_in": float("-inf")},
-                "expires_in",
-            ),
-        ],
+        _NON_FINITE_EXPIRY_CASES,
         ids=["jwt-exp", "expires-at", "expires-in"],
     )
     def test_token_set_rejects_non_finite_expiry(self, token, kwargs, field):
@@ -414,16 +419,9 @@ class TestOIDCTokenProvider:
             TokenSet.from_access_token(token, **kwargs)
 
     def test_non_finite_expiry_params_do_not_vary_between_xdist_workers(self):
-        collected = [
-            # `pytest.param(...)` would expose `.values`; a bare tuple is the value itself.
-            getattr(case, "values", case)[0]
-            for mark in type(self).test_token_set_rejects_non_finite_expiry.pytestmark
-            if mark.name == "parametrize"
-            for case in mark.args[1]
-        ]
         # Each worker evaluates the decorator in its own process; a token carrying a wall-clock
         # `iat` differs between them, and pytest names the test after it.
-        assert collected == [
+        assert [case[0] for case in _NON_FINITE_EXPIRY_CASES] == [
             generate_unsigned_jwt(
                 "user", expires_in_seconds=None, issued_at=_FIXED_IAT, extra_claims={"exp": float("nan")}
             ),
@@ -1158,7 +1156,12 @@ class TestGetNemoClient:
     def test_async_client_uses_workload_exchange_provider_from_env(self, monkeypatch, tmp_path):
         subject_token_file = tmp_path / "workload-token"
         subject_token_file.write_text("subject-token\n", encoding="utf-8")
-        provider = object()
+
+        class Provider:
+            def get_access_token(self) -> str:
+                return "workload-token"
+
+        provider = Provider()
         monkeypatch.setenv("NHX_BASE_URL", "https://nemo.example.com")
         monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
         monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
@@ -1169,7 +1172,8 @@ class TestGetNemoClient:
         ) as resolve_provider:
             client = get_async_nemo_client()
 
-        assert client._auth is provider
+        assert client._auth is not None
+        assert asyncio.run(client._auth.get_access_token_or_none_async()) == "workload-token"
         resolve_provider.assert_called_once_with(
             base_url="https://nemo.example.com",
             subject_token_file=subject_token_file,
