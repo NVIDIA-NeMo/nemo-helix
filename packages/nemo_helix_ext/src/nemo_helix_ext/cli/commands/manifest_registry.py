@@ -189,19 +189,6 @@ nemo describe -f json models create my-model --spec-file model.yaml""",
         kind="command",
     ),
     TopLevelEntry(
-        import_path="nemo_helix_ext.cli.commands.use_cases.agent:app",
-        help="""\
-Deprecated: use 'nemo describe' instead.
-
-Examples:
-# Describe the installed CLI, plugins, and skills.
-nemo describe""",
-        name="agent",
-        panel="CLI functions",
-        kind="group",
-        hidden=True,
-    ),
-    TopLevelEntry(
         import_path="nemo_helix_ext.cli.commands.jobs:app",
         help="Manage jobs.",
         name="jobs",

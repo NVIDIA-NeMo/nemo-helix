@@ -50,7 +50,8 @@ class TestDescribe:
                 "nemo_helix_ext.cli.commands.use_cases.describe._build_plugin_surfaces",
                 return_value={},
             ),
-            patch.dict("sys.modules", {"nemo_helix_plugin": None, "nemo_helix_plugin.discovery": None}),
+            # Hide only discovery: the CLI itself still imports other nemo_helix_plugin modules.
+            patch.dict("sys.modules", {"nemo_helix_plugin.discovery": None}),
         ):
             result = _invoke("describe")
         assert result.exit_code == 0
@@ -134,6 +135,11 @@ class TestDescribe:
         assert "nemo describe" in result.stdout
         assert "nemo agent context" not in result.stdout
         assert "nemo agent commands" not in result.stdout
+
+    def test_removed_agent_command_is_unknown(self):
+        result = _invoke("agent", "context")
+        assert result.exit_code == 2
+        assert "No such command 'agent'" in result.output
 
 
 class TestCommandsTable:
