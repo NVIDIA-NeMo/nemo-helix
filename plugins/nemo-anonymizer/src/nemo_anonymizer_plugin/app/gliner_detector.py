@@ -43,9 +43,10 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
 logger = logging.getLogger(__name__)
 
 #: System-owned Fileset that fronts the GLiNER weights for pull-through caching.
-#: Static + ``nhx-``-prefixed in the ``default`` workspace so it is discoverable
-#: by name across restarts and clearly platform-owned.
-GLINER_FILESET_WORKSPACE = "default"
+#: Static + ``nhx-``-prefixed in the ``system`` workspace (platform-provided,
+#: read-only for users) so it is discoverable by name across restarts, clearly
+#: platform-owned, and unlikely to collide with a user-created fileset.
+GLINER_FILESET_WORKSPACE = "system"
 GLINER_FILESET_NAME = "nhx-anonymizer-gliner-pii"
 
 #: Path suffix for the Files HuggingFace-Hub-compatible resolve API.
@@ -181,7 +182,7 @@ def _align_fileset_cache_to_upstream_repo(fileset_snapshot: Path) -> None:
     """Expose a Files-fetched snapshot under the repo id/revision upstream requests.
 
     The pull-through download lands under the Fileset's cache folder
-    (``models--default--nhx-anonymizer-gliner-pii``) at the commit hash Files
+    (``models--system--nhx-anonymizer-gliner-pii``) at the commit hash Files
     reports. Upstream, however, calls ``snapshot_download`` with the HuggingFace
     repo id and pinned SHA, so it reads ``models--fastino--…/snapshots/{SHA}``.
     We bridge the two by symlinking that path at the Files-fetched snapshot. Only
