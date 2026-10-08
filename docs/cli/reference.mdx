@@ -463,7 +463,8 @@ nemo config [OPTIONS] [COMMAND] [ARGS]...
 
 Display the configuration file.
 
-By default, this shows only the current context and its referenced cluster and user.
+By default, this shows only the effective current context (from --context,
+NHX_CURRENT_CONTEXT, or the config file) and its referenced cluster and user.
 Use --all-contexts to show the full configuration.
 
 **Usage:**
