@@ -46,6 +46,8 @@ Replace `REPLACE_WITH_RELEASE_NAMESPACE` in the server values before install.
 | `opensandbox-server-kata-qemu.yaml` | Kata QEMU server (`[secure_runtime] type=kata`) |
 | `batchsandbox-template.yaml` | ConfigMap — exclude control-plane; pull Secret name `nvcrimagepullsecret`; [Harbor directories](#harbor-directories) |
 | `batchsandbox-template-kata-qemu.yaml` | ConfigMap — example Kata node selectors; same pull Secret name; [Harbor directories](#harbor-directories) |
+| `nemo-opensandbox-ext.yaml` | ConfigMap — optional NeMo services extension (generated; see [Compose services](#compose-services)) |
+| `opensandbox-ext-rbac.yaml` | Role — `pods/exec` and `pods/log` in the release namespace for that extension |
 
 `[secure_runtime]` is server-global. Install **one** server for production
 (shared-kernel **or** Kata). Dual releases are only for proving both paths.
@@ -133,6 +135,42 @@ Follow the Kata page for `kata-deploy` and CRI-O retrofit, then the same
 controller install plus `-f opensandbox-server-kata-qemu.yaml`. Override
 `opensandbox.domain` to `opensandbox-server-kata.opensandbox-system.svc.cluster.local`.
 
+## Compose services
+
+Benchmark tasks that ship a Docker Compose file (a database, a queue, a mock
+API next to the agent's container) need those services in the sandbox. The
+optional NeMo services extension adds them as extra containers in the sandbox
+pod when a create request carries `extensions["nemo.nvidia.com/services"]`. It
+runs inside the stock server image: the server values above put
+`/opt/nemo-opensandbox-ext` on `PYTHONPATH` and mount this ConfigMap there.
+Without the ConfigMap the server runs unchanged.
+
+The extension also adds two routes behind the server's API key:
+`POST /v1/sandboxes/{id}/containers/{name}/exec`, which runs a command in one
+service container (and only those), and `GET /v1/nemo-ext/health`.
+
+```bash
+# The Role and ConfigMap below, then a restart so the server loads the extension.
+sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NHX_NAMESPACE}/g" \
+  "${EXAMPLES}/opensandbox-ext-rbac.yaml"
+kubectl apply -f "${EXAMPLES}/opensandbox-ext-rbac.yaml"
+kubectl apply -n opensandbox-system -f "${EXAMPLES}/nemo-opensandbox-ext.yaml"
+kubectl rollout restart deploy/opensandbox-server -n opensandbox-system
+kubectl logs -n opensandbox-system deploy/opensandbox-server | grep "nemo services"
+```
+
+The log shows `registered NemoServicesProvider` and the added routes. Repeat
+the apply and restart after every update to the ConfigMap. The extension is
+tested against the server version in the values files (`v0.2.1`) and only
+loads on that version. On any other version the server starts without it and
+logs `extension not loaded`, and Compose evaluations fail before creating a
+sandbox. Upgrade the server and the extension together.
+
+The ConfigMap is generated from
+`plugins/_temporary-scaled-evals/opensandbox_ext/`. After changing those
+sources, run
+`uv run python plugins/_temporary-scaled-evals/opensandbox_ext/render_configmap.py`.
+
 ## Verify
 
 ```bash
@@ -140,4 +178,6 @@ export OPEN_SANDBOX_WORKLOAD_NS="${NHX_NAMESPACE}"
 ./k8s/helm/examples/opensandbox/verify/shared-kernel.sh
 # or, after installing the Kata server:
 ./k8s/helm/examples/opensandbox/verify/kata-qemu.sh
+# with the Compose services extension installed:
+./k8s/helm/examples/opensandbox/verify/services.sh
 ```

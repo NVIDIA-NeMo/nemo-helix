@@ -27,6 +27,10 @@ server:
         secretKeyRef:
           name: opensandbox-server-kata-api-key
           key: api-key
+    # Loads the NeMo services extension (nemo-opensandbox-ext.yaml) when its
+    # ConfigMap exists; without it the server runs unchanged.
+    - name: PYTHONPATH
+      value: /opt/nemo-opensandbox-ext
 
   resources:
     requests:
@@ -51,10 +55,17 @@ server:
       mountPath: /etc/opensandbox/batchsandbox-template-kata-qemu.yaml
       subPath: batchsandbox-template.yaml
       readOnly: true
+    - name: nemo-opensandbox-ext
+      mountPath: /opt/nemo-opensandbox-ext
+      readOnly: true
   volumes:
     - name: batchsandbox-template
       configMap:
         name: opensandbox-batchsandbox-template-kata-qemu
+    - name: nemo-opensandbox-ext
+      configMap:
+        name: nemo-opensandbox-ext
+        optional: true
 
   gateway:
     enabled: false
