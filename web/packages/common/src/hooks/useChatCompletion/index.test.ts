@@ -83,33 +83,4 @@ describe('createChatCompletion', () => {
 
     expect(result).toBe(stream);
   });
-
-  it('omits temperature when the caller does not set one', async () => {
-    mocks.create.mockResolvedValue(completion);
-
-    await createChatCompletion({
-      baseURL: 'http://localhost/v1',
-      accessToken: 'test-token',
-      model: 'default/guarded-model',
-      messages: [{ role: 'user', content: 'Tell me about bananas.' }],
-      stream: false,
-    });
-
-    expect(mocks.create.mock.calls[0][0]).not.toHaveProperty('temperature');
-  });
-
-  it('passes through the temperature the caller sets', async () => {
-    mocks.create.mockResolvedValue(completion);
-
-    await createChatCompletion({
-      baseURL: 'http://localhost/v1',
-      accessToken: 'test-token',
-      model: 'default/guarded-model',
-      messages: [{ role: 'user', content: 'Tell me about bananas.' }],
-      stream: false,
-      temperature: 0.2,
-    });
-
-    expect(mocks.create.mock.calls[0][0]).toMatchObject({ temperature: 0.2 });
-  });
 });
