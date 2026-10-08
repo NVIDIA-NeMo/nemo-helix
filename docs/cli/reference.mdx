@@ -1138,6 +1138,30 @@ nemo docs [OPTIONS] [PATH]
 
 * `--help, -h`: Show this message and exit.
 
+### nemo describe
+
+Describe the installed NeMo Helix CLI, plugins, and skills.
+
+Prints installed plugins, top-level commands, the plugin entry-point
+catalog, available agent skills, and quick-reference patterns as
+Markdown. Reads local metadata only and does not contact the platform.
+
+**Examples:**
+
+```shell
+nemo describe
+```
+
+**Usage:**
+
+```shell
+nemo describe [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
 ### nemo wait
 
 Wait for resources to reach a desired status.
@@ -1251,81 +1275,6 @@ nemo wait inference provider [OPTIONS] NAME
 * `--workspace`: Workspace name
 * `--timeout, -t <INTEGER RANGE>`: Maximum time to wait in seconds [default: 60]
 * `--poll-interval <INTEGER RANGE>`: Seconds between status checks [default: 1]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-### nemo agent
-
-Commands for AI agent context and capability discovery.
-
-**Examples:**
-
-```shell
-# Dump full agent context (plugins, commands, skills).
-nemo agent context
-# List all available commands.
-nemo agent commands
-```
-
-**Usage:**
-
-```shell
-nemo agent [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `context`: Dump everything an agent needs in one call.
-* `commands`: List all available top-level CLI commands.
-
-#### nemo agent context
-
-Dump everything an agent needs in one call.
-
-Outputs installed plugins, CLI commands, entry-point catalog,
-available skills, and quick-reference patterns. Runs without a
-connected cluster (metadata-only).
-
-**Examples:**
-
-```shell
-nemo agent context
-```
-
-**Usage:**
-
-```shell
-nemo agent context [OPTIONS]
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-#### nemo agent commands
-
-List all available top-level CLI commands.
-
-Outputs a flat list of commands with descriptions, useful for
-agent capability discovery.
-
-**Examples:**
-
-```shell
-nemo agent commands
-```
-
-**Usage:**
-
-```shell
-nemo agent commands [OPTIONS]
-```
 
 **Help:**
 

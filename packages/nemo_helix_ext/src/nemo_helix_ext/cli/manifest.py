@@ -31,7 +31,7 @@ PANEL_DESCRIPTIONS: dict[PanelName, str] = {
 
 TOP_LEVEL_COMMAND_ORDER: dict[PanelName, tuple[str, ...]] = {
     "Setup": ("setup", "auth", "config", "services", "skills"),
-    "CLI functions": ("chat", "docs", "wait", "agent", "plugins"),
+    "CLI functions": ("chat", "docs", "describe", "wait", "plugins"),
     "Core plugins": ("files", "inference", "jobs", "models", "secrets", "workspaces"),
     "Functional plugins": (
         "agents",
