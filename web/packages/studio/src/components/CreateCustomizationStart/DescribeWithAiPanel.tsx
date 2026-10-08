@@ -11,6 +11,7 @@ import { getEntityReference, getPartsFromReference } from '@nemo/common/src/name
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Banner, Flex, FormField, Grid, List, Stack, Text } from '@nvidia/foundations-react-core';
 import {
+  datasetProblem,
   type DraftInputs,
   estimateTrainingRows,
 } from '@studio/components/CreateCustomizationStart/aiDraft';
@@ -33,12 +34,6 @@ const DRAFTING_MODEL_HELP =
 
 const GOAL_HELP =
   'Mention constraints that matter — cheap to serve, one GPU, a quick test run. Press ⌘/Ctrl + Enter to draft.';
-
-const NO_TRAINING_FILES =
-  'No training files were found in this dataset. Customizer needs at least one training file to start fine-tuning.';
-
-const UNRECOGNIZED_FORMAT =
-  "This dataset isn't in a format Customizer accepts. Training rows need messages (chat), prompt and completion, chosen and rejected (preference), or responses_create_params and agent_ref (NeMo Gym).";
 
 const NO_ENVIRONMENT = '__none__';
 
@@ -74,16 +69,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   // The full form's dataset check, without a training type so it detects any format.
   const dataset = useCustomizationDatasetValidation({ fileset: datasetRef ?? undefined });
   const isGymDataset = dataset.schema?.variant === 'grpo-gym';
-  const datasetError =
-    !datasetRef || dataset.isPending
-      ? null
-      : dataset.discoveryError
-        ? `Couldn't read the dataset: ${getErrorMessage(dataset.discoveryError)}`
-        : !dataset.hasTraining
-          ? NO_TRAINING_FILES
-          : !dataset.schema
-            ? UNRECOGNIZED_FORMAT
-            : null;
+  const datasetError = !datasetRef || dataset.isPending ? null : datasetProblem(dataset);
   const { trainingRowCount, rowCountIsEstimate } = estimateTrainingRows(
     dataset.training,
     dataset.encoding.ok

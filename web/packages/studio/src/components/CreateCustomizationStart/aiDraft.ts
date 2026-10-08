@@ -1,12 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import type { AnnotatedFilesetFile } from '@studio/hooks/useCustomizationDatasetValidation';
+import type {
+  AnnotatedFilesetFile,
+  CustomizationDatasetValidationResult,
+} from '@studio/hooks/useCustomizationDatasetValidation';
 import type { GymEnvironmentManifest } from '@studio/hooks/useGymEnvironmentManifest';
 import type { CustomizationBackend } from '@studio/util/customizationBackend';
 import {
@@ -40,6 +44,35 @@ export interface DraftDataset {
   /** Field names and types of the first training row — no values. */
   shape: string;
 }
+
+export const NO_TRAINING_FILES =
+  'No training files were found in this dataset. Customizer needs at least one training file to start fine-tuning.';
+
+export const UNRECOGNIZED_FORMAT =
+  "This dataset isn't in a format Customizer accepts. Training rows need messages (chat), prompt and completion, chosen and rejected (preference), or responses_create_params and agent_ref (NeMo Gym).";
+
+/**
+ * Why the picked dataset cannot be drafted from, or null when it can. A file that failed to
+ * download or parse has no detectable format either, so its own error is named before the
+ * format is blamed.
+ */
+export const datasetProblem = (
+  dataset: Pick<
+    CustomizationDatasetValidationResult,
+    'discoveryError' | 'hasTraining' | 'schema' | 'format'
+  >
+): string | null => {
+  if (dataset.discoveryError) {
+    return `Couldn't read the dataset: ${getErrorMessage(dataset.discoveryError)}`;
+  }
+  if (!dataset.hasTraining) return NO_TRAINING_FILES;
+  if (dataset.schema) return null;
+  const [first, ...rest] = dataset.format.fileErrors;
+  if (!first) return UNRECOGNIZED_FORMAT;
+  const more =
+    rest.length > 0 ? ` (${rest.length} more ${rest.length === 1 ? 'file' : 'files'} too)` : '';
+  return `Couldn't read ${first.path}: ${first.error}${more}`;
+};
 
 interface RowCount {
   trainingRowCount: number;
