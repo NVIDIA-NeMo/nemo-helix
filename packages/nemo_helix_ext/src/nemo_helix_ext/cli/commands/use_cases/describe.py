@@ -1,16 +1,22 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""nemo describe command - describe the installed CLI, plugins, and skills."""
+"""nemo describe command - describe the installed CLI or any command in it."""
 
 from __future__ import annotations
 
+import json
 import logging
 from importlib.metadata import EntryPoint
+from typing import Annotated, Any, Literal
 
 import typer
+from nemo_helix_plugin.cli_options import OUTPUT_FORMAT_FLAGS
 
+from nemo_helix_ext.cli.core.command_description import describe_command, resolve_command_path
 from nemo_helix_ext.cli.manifest import build_top_level_entries
+
+DescribeOutputFormat = Literal["markdown", "json"]
 
 logger = logging.getLogger(__name__)
 
@@ -92,17 +98,123 @@ def _all_top_level_entries() -> list[tuple[str, str, str]]:
     return [(entry.name, entry.panel, entry.help.splitlines()[0] if entry.help else "") for entry in entries]
 
 
-def describe_command() -> None:
-    """Describe the installed NeMo Helix CLI, plugins, and skills.
+def describe_cli_command(
+    ctx: typer.Context,
+    path: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="Command path to describe, such as 'models create'. Tokens after the path are ignored.",
+            metavar="COMMAND...",
+            show_default=False,
+        ),
+    ] = None,
+    output_format: Annotated[
+        DescribeOutputFormat,
+        typer.Option(*OUTPUT_FORMAT_FLAGS, help="Output format. Put it before the command path."),
+    ] = "markdown",
+) -> None:
+    """Describe the NeMo Helix CLI or any command in it.
 
-    Prints installed plugins, top-level commands, the plugin entry-point
-    catalog, available agent skills, and quick-reference patterns as
-    Markdown. Reads local metadata only and does not contact the platform.
+    Without a command path, prints an overview of installed plugins,
+    top-level commands, the plugin entry-point catalog, agent skills, and
+    quick-reference patterns. With a command path, prints that command's
+    usage, arguments, options, and subcommands.
+
+    Tokens after the command path, such as the command's own arguments and
+    options, are ignored, so 'describe' can go in front of a full command
+    line. Put describe's own options before the path. Reads local metadata
+    only and does not contact the platform.
 
     Examples:
+    # Overview of the installed CLI.
     nemo describe
+    # Describe one command.
+    nemo describe models create
+    # Describe a full command line as JSON.
+    nemo describe -f json models create my-model --spec-file model.yaml
     """
-    typer.echo(render_cli_description())
+    tokens = path or []
+    if not tokens and output_format == "markdown":
+        typer.echo(render_cli_description())
+        return
+
+    resolved = resolve_command_path(ctx.find_root().command, tokens)
+    description = describe_command(
+        resolved,
+        # The root group lists its children from the manifest so describing
+        # `nemo` itself does not import every plugin.
+        subcommand_summaries=_top_level_summaries if resolved.context.parent is None else None,
+    )
+    if output_format == "json":
+        typer.echo(json.dumps(description, indent=2))
+    else:
+        typer.echo(render_command_description(description))
+
+
+# Stop parsing describe's options at the command path, so the described
+# command's own options pass through as path tokens instead of being rejected.
+describe_cli_command.__nhx_context_settings__ = {"allow_interspersed_args": False}  # type: ignore[attr-defined]
+
+
+def _top_level_summaries() -> list[tuple[str, str]]:
+    return [(name, description) for name, _panel, description in _all_top_level_entries()]
+
+
+def render_command_description(description: dict[str, Any]) -> str:
+    """Render one command's description as Markdown."""
+    lines: list[str] = [f"# {description['command']}\n"]
+    if description["deprecated"]:
+        lines.append("_Deprecated._\n")
+    if description["help"]:
+        lines.append(f"{description['help']}\n")
+    lines.append(f"Usage: `{description['usage']}`")
+
+    if description["arguments"]:
+        lines.append("\n## Arguments\n")
+        lines.append("| Argument | Type | Required | Description |")
+        lines.append("|----------|------|----------|-------------|")
+        for argument in description["arguments"]:
+            lines.append(
+                f"| {_normalize_cell(argument['name'])} | {_normalize_cell(_type_label(argument))} "
+                f"| {'yes' if argument['required'] else 'no'} | {_normalize_cell(argument['help'])} |"
+            )
+
+    if description["options"]:
+        lines.append("\n## Options\n")
+        lines.append("| Option | Type | Default | Description |")
+        lines.append("|--------|------|---------|-------------|")
+        for option in description["options"]:
+            flags = ", ".join(option["flags"])
+            if option["required"]:
+                flags += " (required)"
+            default = "" if option["default"] in (None, False, []) else f"`{option['default']}`"
+            lines.append(
+                f"| {_normalize_cell(flags)} | {_normalize_cell(_type_label(option))} "
+                f"| {_normalize_cell(default)} | {_normalize_cell(option['help'])} |"
+            )
+
+    if description["subcommands"]:
+        lines.append("\n## Subcommands\n")
+        lines.append("| Command | Description |")
+        lines.append("|---------|-------------|")
+        for subcommand in description["subcommands"]:
+            lines.append(
+                f"| {_normalize_cell(description['command'])} {_normalize_cell(subcommand['name'])} "
+                f"| {_normalize_cell(subcommand['help'])} |"
+            )
+
+    if description["ignored_args"]:
+        lines.append(f"\n_Ignored arguments: `{' '.join(description['ignored_args'])}`_")
+
+    return "\n".join(lines)
+
+
+def _type_label(param: dict[str, Any]) -> str:
+    if param.get("is_flag"):
+        return "flag"
+    if "choices" in param:
+        return " | ".join(str(choice) for choice in param["choices"])
+    return str(param["type"])
 
 
 def render_cli_description() -> str:
@@ -188,7 +300,8 @@ def render_cli_description() -> str:
     lines.append("\n## Quick Reference\n")
     lines.append("- Read docs: `nemo docs <path>`")
     lines.append("- List doc topics: `nemo docs --list`")
-    lines.append("- Re-run this description: `nemo describe`")
+    lines.append("- Describe a command: `nemo describe <command> [<subcommand>...]`")
+    lines.append("- Describe a command as JSON: `nemo describe -f json <command> [<subcommand>...]`")
     lines.append("- Explore an API resource: `nemo <resource> --help`")
     lines.append("- List resources: `nemo <resource> list`")
     lines.append("- Get a resource: `nemo <resource> get <name-or-id>`")

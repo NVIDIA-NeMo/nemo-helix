@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -164,7 +165,7 @@ class TestCommandsTable:
             "| nemo skills | Setup | Install AI agent skill files for Nemo. |",
             "| nemo chat | CLI functions | Start an interactive chat session with a model. |",
             "| nemo docs | CLI functions | Read NeMo Helix documentation. |",
-            "| nemo describe | CLI functions | Describe the installed NeMo Helix CLI, plugins, and skills. |",
+            "| nemo describe | CLI functions | Describe the NeMo Helix CLI or any command in it. |",
             "| nemo wait | CLI functions | Wait for resources to reach a desired status. |",
             "| nemo plugins | CLI functions | Commands for plugin discovery. |",
             "| nemo files | Core plugins | Manage files. |",
@@ -180,3 +181,102 @@ class TestCommandsTable:
             "| nemo experiments | Functional plugins | Plugin commands for experiments. |",
             "| nemo intake | Functional plugins | Plugin commands for intake. |",
         ]
+
+
+class TestDescribeCommandPath:
+    def test_describes_a_leaf_command_as_markdown(self):
+        result = _invoke("describe", "models", "create")
+        assert result.exit_code == 0
+        assert result.stdout.startswith("# nemo models create\n")
+        assert "Usage: `nemo models create [OPTIONS] [NAME]`" in result.stdout
+        assert "## Arguments" in result.stdout
+        assert "| --description | text |" in result.stdout
+
+    def test_strips_rich_markup_from_help(self):
+        result = _invoke("describe", "models", "create")
+        assert result.exit_code == 0
+        assert "[bold" not in result.stdout
+        assert "[/]" not in result.stdout
+        assert "Required fields: name" in result.stdout
+
+    def test_describes_a_leaf_command_as_json(self):
+        result = _invoke("describe", "-f", "json", "models", "create")
+        assert result.exit_code == 0
+        description = json.loads(result.stdout)
+        assert description["schema_version"] == "v1"
+        assert description["command"] == "nemo models create"
+        assert description["kind"] == "command"
+        assert description["ignored_args"] == []
+        options = {option["name"]: option for option in description["options"]}
+        assert options["description"]["flags"] == ["--description"]
+        assert options["output_format"]["choices"] == ["json", "yaml", "raw", "code"]
+        assert "help" not in options
+
+    def test_generated_required_suffix_marks_argument_required(self):
+        result = _invoke("describe", "-f", "json", "models", "create")
+        assert result.exit_code == 0
+        (argument,) = json.loads(result.stdout)["arguments"]
+        assert argument["name"] == "NAME"
+        assert argument["required"] is True
+        assert not argument["help"].endswith("(required)")
+
+    def test_ignores_the_described_commands_own_arguments_and_options(self):
+        result = _invoke(
+            "describe", "-f", "json", "models", "create", "my-model", "--spec-file", "model.yaml", "-f", "yaml"
+        )
+        assert result.exit_code == 0
+        description = json.loads(result.stdout)
+        assert description["command"] == "nemo models create"
+        assert description["ignored_args"] == ["my-model", "--spec-file", "model.yaml", "-f", "yaml"]
+
+    def test_ignored_arguments_are_reported_in_markdown(self):
+        result = _invoke("describe", "models", "list", "--page-size", "2")
+        assert result.exit_code == 0
+        assert "_Ignored arguments: `--page-size 2`_" in result.stdout
+
+    def test_describes_a_group_with_its_subcommands(self):
+        result = _invoke("describe", "-f", "json", "models")
+        assert result.exit_code == 0
+        description = json.loads(result.stdout)
+        assert description["kind"] == "group"
+        names = [subcommand["name"] for subcommand in description["subcommands"]]
+        assert {"create", "list", "get"} <= set(names)
+
+    def test_describes_hidden_commands_by_name(self):
+        result = _invoke("describe", "-f", "json", "projects")
+        assert result.exit_code == 0
+        description = json.loads(result.stdout)
+        assert description["hidden"] is True
+        assert {"create", "list", "get"} <= {subcommand["name"] for subcommand in description["subcommands"]}
+
+    def test_unknown_command_is_a_usage_error(self):
+        result = _invoke("describe", "models", "nope")
+        assert result.exit_code == 2
+        assert "No such command 'nope' in 'nemo models'" in result.stderr
+        assert "nemo describe models" in result.stderr
+
+    def test_root_json_lists_top_level_commands_without_loading_them(self):
+        from nemo_helix_ext.cli.core import lazy_load
+
+        loaded: list[str] = []
+        original = lazy_load.build_lazy_loader
+
+        def _record(entry):
+            loaded.append(entry.name)
+            return original(entry)
+
+        with patch("nemo_helix_ext.cli.core.lazy_load.build_lazy_loader", side_effect=_record):
+            result = _invoke("describe", "-f", "json")
+
+        assert result.exit_code == 0
+        description = json.loads(result.stdout)
+        assert description["command"] == "nemo"
+        names = [subcommand["name"] for subcommand in description["subcommands"]]
+        assert "describe" in names
+        assert "projects" not in names
+        assert loaded == ["describe"]
+
+    def test_bare_markdown_is_the_cli_overview(self):
+        result = _invoke("describe")
+        assert result.exit_code == 0
+        assert result.stdout.startswith("# NeMo Helix CLI\n")
