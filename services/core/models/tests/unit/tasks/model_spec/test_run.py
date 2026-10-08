@@ -248,7 +248,7 @@ def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: P
         ]
     )
     files_sdk.download.side_effect = _download
-    sdk = cast(NeMoHelix, SimpleNamespace(files=files_sdk))
+    sdk = SimpleNamespace(files=files_sdk)
 
     model_name = "rel06-rerank-output"
     model_entity = _model_entity(model_name)
@@ -263,7 +263,7 @@ def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: P
     files_client = MagicMock()
     files_client.get_fileset.return_value = _Response(_fileset(tmp_path))
 
-    def client_factory(_sdk: NeMoHelix, client_cls: type[Any]) -> Any:
+    def client_factory(_sdk: object, client_cls: type[Any]) -> Any:
         if client_cls is ModelsClient:
             return models_client
         if client_cls is FilesClient:
