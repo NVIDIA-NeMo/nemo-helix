@@ -8592,14 +8592,14 @@ nemo guardrail configs update [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-### nemo auditor
+### nemo garak
 
-Plugin commands for auditor.
+Plugin commands for garak.
 
 **Usage:**
 
 ```shell
-nemo auditor [OPTIONS] COMMAND [ARGS]...
+nemo garak [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -8614,30 +8614,30 @@ nemo auditor [OPTIONS] COMMAND [ARGS]...
 
 *Jobs:*
 
-* `audit`: Run an auditor scan against a configured target.
+* `audit`: Run a garak scan against a configured target.
 
-#### nemo auditor info
+#### nemo garak info
 
 Print the current plugin status.
 
 **Usage:**
 
 ```shell
-nemo auditor info [OPTIONS]
+nemo garak info [OPTIONS]
 ```
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo auditor configs
+#### nemo garak configs
 
 Manage audit configurations.
 
 **Usage:**
 
 ```shell
-nemo auditor configs [OPTIONS] COMMAND [ARGS]...
+nemo garak configs [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -8652,12 +8652,12 @@ nemo auditor configs [OPTIONS] COMMAND [ARGS]...
 * `update`
 * `delete`
 
-##### nemo auditor configs create
+##### nemo garak configs create
 
 **Usage:**
 
 ```shell
-nemo auditor configs create [OPTIONS] NAME
+nemo garak configs create [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8678,12 +8678,12 @@ nemo auditor configs create [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor configs list
+##### nemo garak configs list
 
 **Usage:**
 
 ```shell
-nemo auditor configs list [OPTIONS]
+nemo garak configs list [OPTIONS]
 ```
 
 **Options:**
@@ -8704,12 +8704,12 @@ nemo auditor configs list [OPTIONS]
 
 * `--all-pages`: Fetch all pages
 
-##### nemo auditor configs get
+##### nemo garak configs get
 
 **Usage:**
 
 ```shell
-nemo auditor configs get [OPTIONS] NAME
+nemo garak configs get [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8728,12 +8728,12 @@ nemo auditor configs get [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor configs update
+##### nemo garak configs update
 
 **Usage:**
 
 ```shell
-nemo auditor configs update [OPTIONS] NAME
+nemo garak configs update [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8754,12 +8754,12 @@ nemo auditor configs update [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor configs delete
+##### nemo garak configs delete
 
 **Usage:**
 
 ```shell
-nemo auditor configs delete [OPTIONS] NAME
+nemo garak configs delete [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8774,14 +8774,14 @@ nemo auditor configs delete [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo auditor targets
+#### nemo garak targets
 
 Manage audit targets.
 
 **Usage:**
 
 ```shell
-nemo auditor targets [OPTIONS] COMMAND [ARGS]...
+nemo garak targets [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -8796,12 +8796,12 @@ nemo auditor targets [OPTIONS] COMMAND [ARGS]...
 * `update`
 * `delete`
 
-##### nemo auditor targets create
+##### nemo garak targets create
 
 **Usage:**
 
 ```shell
-nemo auditor targets create [OPTIONS] NAME
+nemo garak targets create [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8822,12 +8822,12 @@ nemo auditor targets create [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor targets list
+##### nemo garak targets list
 
 **Usage:**
 
 ```shell
-nemo auditor targets list [OPTIONS]
+nemo garak targets list [OPTIONS]
 ```
 
 **Options:**
@@ -8848,12 +8848,12 @@ nemo auditor targets list [OPTIONS]
 
 * `--all-pages`: Fetch all pages
 
-##### nemo auditor targets get
+##### nemo garak targets get
 
 **Usage:**
 
 ```shell
-nemo auditor targets get [OPTIONS] NAME
+nemo garak targets get [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8872,12 +8872,12 @@ nemo auditor targets get [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor targets update
+##### nemo garak targets update
 
 **Usage:**
 
 ```shell
-nemo auditor targets update [OPTIONS] NAME
+nemo garak targets update [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8898,12 +8898,12 @@ nemo auditor targets update [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor targets delete
+##### nemo garak targets delete
 
 **Usage:**
 
 ```shell
-nemo auditor targets delete [OPTIONS] NAME
+nemo garak targets delete [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8918,14 +8918,14 @@ nemo auditor targets delete [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo auditor audit
+#### nemo garak audit
 
-Run an auditor scan against a configured target.
+Run a garak scan against a configured target.
 
 **Usage:**
 
 ```shell
-nemo auditor audit [OPTIONS] [COMMAND] [ARGS]...
+nemo garak audit [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
@@ -8958,14 +8958,14 @@ Some spec fields cannot be represented as CLI flags: `config`, `target`. Supply 
 
 * `explain`: Show input/output schemas.
 
-##### nemo auditor audit explain
+##### nemo garak audit explain
 
 Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo auditor audit explain [OPTIONS]
+nemo garak audit explain [OPTIONS]
 ```
 
 **Options:**

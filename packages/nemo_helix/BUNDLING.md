@@ -17,7 +17,7 @@ All source bundling is configured in `pyproject.toml` via `[tool.bundle-package]
 [tool.bundle-package]
 nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_plugin", module = "nemo_helix_plugin" }
 nemo-helix-ext = { source = "../../packages/nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", inherit = { "entry-points" = ["nemo.*"] }, scripts = [{ name = "nemo", value = "nemo_helix_ext.cli.app:cli" }] }
-nemo-auditor-plugin = { source = "../../plugins/nemo-auditor/src/nemo_auditor", module = "nemo_auditor", inherit = { "entry-points" = ["nemo.*"] } }
+nemo-garak-plugin = { source = "../../plugins/nemo-garak/src/nemo_garak", module = "nemo_garak", inherit = { "entry-points" = ["nemo.*"] } }
 nhx-auth = { source = "../../services/core/auth/src/nhx/core/auth", module = "nhx/core/auth", deps_group = "auth-service" }
 ```
 

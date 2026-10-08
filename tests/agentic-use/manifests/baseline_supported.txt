@@ -6,6 +6,6 @@ files-crud-cli-easy
 entities-basic-cli-easy
 evaluator-simple-job-cli-easy
 inference-provider-reg-cli-easy
-auditor-target-crud-cli-easy
-auditor-config-crud-cli-easy
+garak-target-crud-cli-easy
+garak-config-crud-cli-easy
 guardrails-content-safety-cli-easy

@@ -84,16 +84,16 @@ def test_default_display_name_preserves_known_names() -> None:
     assert default_display_name("nhx-safe-synthesizer-tasks") == "Safe Synthesizer Tasks"
 
 
-@pytest.mark.parametrize("front_matter", ["labels: [NeMo]\n", "display_name: Auditor Tasks\n"])
+@pytest.mark.parametrize("front_matter", ["labels: [NeMo]\n", "display_name: Garak Tasks\n"])
 def test_load_asset_uses_defaults(tmp_path: Path, front_matter: str) -> None:
-    path = tmp_path / "nhx-auditor-tasks.md"
+    path = tmp_path / "nhx-garak-tasks.md"
     path.write_text(f"---\n{front_matter}---\n# Overview\n", encoding="utf-8")
 
     asset = load_asset(path, "container")
 
-    assert asset.name == "nhx-auditor-tasks"
-    assert asset.display_name == "Auditor Tasks"
-    assert asset.description == "Auditor Tasks is part of the NeMo Helix"
+    assert asset.name == "nhx-garak-tasks"
+    assert asset.display_name == "Garak Tasks"
+    assert asset.description == "Garak Tasks is part of the NeMo Helix"
     assert asset.labels == DEFAULT_LABELS
     assert asset.logo == DEFAULT_LOGO
     assert asset.overview == "# Overview\n"
@@ -108,11 +108,11 @@ def test_load_chart_uses_deployment_description(tmp_path: Path) -> None:
 
 
 def test_load_asset_applies_front_matter_overrides(tmp_path: Path) -> None:
-    path = tmp_path / "nhx-auditor-tasks.md"
+    path = tmp_path / "nhx-garak-tasks.md"
     path.write_text(
         "---\n"
-        "display_name: NeMo Auditor\n"
-        "description: Runs auditor jobs\n"
+        "display_name: NeMo Garak\n"
+        "description: Runs garak jobs\n"
         "labels: [NeMo, Security]\n"
         "logo: https://example.com/logo.png\n"
         "---\n"
@@ -122,8 +122,8 @@ def test_load_asset_applies_front_matter_overrides(tmp_path: Path) -> None:
 
     asset = load_asset(path, "container")
 
-    assert asset.display_name == "NeMo Auditor"
-    assert asset.description == "Runs auditor jobs"
+    assert asset.display_name == "NeMo Garak"
+    assert asset.description == "Runs garak jobs"
     assert asset.labels == ["NeMo", "Security"]
     assert asset.logo == "https://example.com/logo.png"
     assert asset.overview == "# Overview\n"

@@ -34,8 +34,8 @@ from typing import Literal
 NOT_403 = "not-403"
 
 # Paths under test (placeholders substituted at runtime).
-TARGETS = "/apis/auditor/v2/workspaces/{wsA}/targets"
-TARGETS_B = "/apis/auditor/v2/workspaces/{wsB}/targets"
+TARGETS = "/apis/garak/v2/workspaces/{wsA}/targets"
+TARGETS_B = "/apis/garak/v2/workspaces/{wsB}/targets"
 WORKSPACES = "/apis/entities/v2/workspaces"
 EVAL_HELLO = "/apis/evals/v1/hello/world"
 EVAL_HEALTHZ = "/apis/evals/v1/healthz"
@@ -46,7 +46,7 @@ UNRULED_OK = "/apis/harness-unruled/ruled"
 UNRULED_BAD = "/apis/harness-unruled/unruled"
 BROKEN_SUB = "/apis/harness-broken/anything"
 BROKEN_BARE = "/apis/harness-broken"
-UNKNOWN_PATH = "/apis/auditor/v2/path-that-matches-no-rule"
+UNKNOWN_PATH = "/apis/garak/v2/path-that-matches-no-rule"
 IAM_BINDINGS = "/apis/auth/v2/iam/role-bindings"
 PDP_ALLOW = "/apis/auth/v2/authz/allow"
 

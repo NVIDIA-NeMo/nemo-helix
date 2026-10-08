@@ -139,8 +139,8 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
         )
         + "\n"
     )
-    (repo / "docs/overview.md").write_text("The nemo-helix repository publishes nhx-auditor-tasks.\n")
-    (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-auditor-tasks") }\n')
+    (repo / "docs/overview.md").write_text("The nemo-helix repository publishes nhx-garak-tasks.\n")
+    (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-garak-tasks") }\n')
 
     run(["git", "add", "."], repo)
     run(["git", "add", "-f", "dist/index.js", "dist/binary.dat"], repo)
@@ -154,7 +154,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert b"NHX" in index_bytes
     assert (repo / "dist/binary.dat").read_bytes() == b"NeMo Helix NHX should remain in undecodable content: \xff\n"
     assert "nemo-helix" in (repo / "docs/overview.md").read_text()
-    assert "nhx-auditor-tasks" in (repo / "docker-bake.hcl").read_text()
+    assert "nhx-garak-tasks" in (repo / "docker-bake.hcl").read_text()
 
     renamed_path = repo / "docs/snmp/nhx-common/NHX_DATA.txt"
     assert renamed_path.exists()
@@ -200,8 +200,8 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
 
     common_text = (repo / "tools/rename/rename_common.py").read_text()
     assert f'("{LEGACY_PRODUCT}", "NeMo Helix")' in common_text
-    assert '"auditor-tasks"' in common_text
-    assert '"nhx-auditor-tasks"' not in common_text
+    assert '"garak-tasks"' in common_text
+    assert '"nhx-garak-tasks"' not in common_text
 
     verify = run([str(repo / "tools/rename/verify-nemo-helix-rename.sh"), "--repo-dir", str(repo)], tmp_path)
     assert "No legacy product" in verify.stdout
@@ -305,7 +305,7 @@ def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
         f"{LEGACY_ACRONYM_LOWER}_common {LEGACY_ACRONYM_PASCAL}Context "
         f"{LEGACY_ACRONYM_LOWER}client {LEGACY_ACRONYM}JobContext\n"
     )
-    (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-auditor-tasks") }\n')
+    (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("nhx-garak-tasks") }\n')
 
     run(["git", "add", "."], repo)
     run(["git", "add", "-f", "dist/index.js"], repo)

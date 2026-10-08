@@ -188,8 +188,8 @@ def match_pairs(results: list[TrialResult]) -> list[EvalPairComparison]:
 
     # Known base names
     base_names = [
-        "auditor-config-crud-cli",
-        "auditor-target-crud-cli",
+        "garak-config-crud-cli",
+        "garak-target-crud-cli",
         "auth-authorization-cli",
         "data-designer-config-cli",
         "entities-basic-cli",

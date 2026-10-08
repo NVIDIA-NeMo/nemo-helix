@@ -1,0 +1,1947 @@
+openapi: 3.1.0
+info:
+  title: garak (plugin)
+  version: 0.0.0
+paths:
+  /apis/garak/v1/healthz:
+    get:
+      tags:
+      - Garak Plugin
+      summary: Healthz
+      operationId: healthz_apis_garak_v1_healthz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Healthz Apis Garak V1 Healthz Get
+  /apis/garak/v2/workspaces/{workspace}/configs:
+    post:
+      tags:
+      - Garak Configs
+      summary: Create Config
+      description: Create a new audit config.
+      operationId: create_config_apis_garak_v2_workspaces__workspace__configs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAuditConfigRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditConfigOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Garak Configs
+      summary: List Configs
+      description: List audit configs in the workspace with pagination and filter
+        support.
+      operationId: list_configs_apis_garak_v2_workspaces__workspace__configs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/ConfigFilter'
+        description: 'Filter results on various criteria. Supports bracket notation
+          (?filter[field][$op]=value), JSON ({"field":{"$op":"value"}}), and text
+          syntax (field:"value"). Operators: $eq (exact match), $like (substring),
+          $lt, $lte, $gt, $gte (comparison), $in, $nin (set membership), $and, $or,
+          $not (logical). Default operator is $eq.'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Configs Apis Garak V2 Workspaces  Workspace  Configs
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/configs/{name}:
+    get:
+      tags:
+      - Garak Configs
+      summary: Get Config
+      description: Get an audit config by name.
+      operationId: get_config_apis_garak_v2_workspaces__workspace__configs__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditConfigOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Garak Configs
+      summary: Update Config
+      description: Replace an audit config's contents.
+      operationId: update_config_apis_garak_v2_workspaces__workspace__configs__name__put
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAuditConfigRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditConfigOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Garak Configs
+      summary: Delete Config
+      description: Delete an audit config by name.
+      operationId: delete_config_apis_garak_v2_workspaces__workspace__configs__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit:
+    post:
+      tags:
+      - Garak Jobs
+      summary: Create Job
+      operationId: create_job_apis_garak_v2_workspaces__workspace__jobs_audit_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditJobRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Garak Jobs
+      summary: List Jobs
+      operationId: list_jobs_apis_garak_v2_workspaces__workspace__jobs_audit_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/AuditJobsSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/AuditJobsListFilter'
+        description: Filter jobs on various criteria.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditJobsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit/{job}/results/artifacts/download:
+    get:
+      tags:
+      - Garak Jobs
+      summary: Download Audit Artifacts
+      description: Stream an aggregate tar.gz of all garak report artifacts for an
+        audit job.
+      operationId: download_audit_artifacts_apis_garak_v2_workspaces__workspace__jobs_audit__job__results_artifacts_download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      responses:
+        '200':
+          description: Aggregate gzip archive of all garak report artifacts.
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: No report artifacts found for the job.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit/{job}/results/{name}:
+    get:
+      tags:
+      - Garak Jobs
+      summary: Get Job Result
+      operationId: get_job_result_apis_garak_v2_workspaces__workspace__jobs_audit__job__results__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit/{job}/results/{name}/download:
+    get:
+      tags:
+      - Garak Jobs
+      summary: Download Job Result
+      operationId: download_job_result_apis_garak_v2_workspaces__workspace__jobs_audit__job__results__name__download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit/{name}:
+    get:
+      tags:
+      - Garak Jobs
+      summary: Get Job
+      operationId: get_job_apis_garak_v2_workspaces__workspace__jobs_audit__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Garak Jobs
+      summary: Delete Job
+      operationId: delete_job_apis_garak_v2_workspaces__workspace__jobs_audit__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit/{name}/cancel:
+    post:
+      tags:
+      - Garak Jobs
+      summary: Cancel Job
+      operationId: cancel_job_apis_garak_v2_workspaces__workspace__jobs_audit__name__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit/{name}/logs:
+    get:
+      tags:
+      - Garak Jobs
+      summary: Get Job Logs
+      operationId: get_job_logs_apis_garak_v2_workspaces__workspace__jobs_audit__name__logs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          title: Limit
+          type: integer
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          title: Page Cursor
+          type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit/{name}/results:
+    get:
+      tags:
+      - Garak Jobs
+      summary: List Job Results
+      operationId: list_job_results_apis_garak_v2_workspaces__workspace__jobs_audit__name__results_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/jobs/audit/{name}/status:
+    get:
+      tags:
+      - Garak Jobs
+      summary: Get Job Status
+      operationId: get_job_status_apis_garak_v2_workspaces__workspace__jobs_audit__name__status_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/targets:
+    post:
+      tags:
+      - Garak Targets
+      summary: Create Target
+      description: Create a new audit target.
+      operationId: create_target_apis_garak_v2_workspaces__workspace__targets_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAuditTargetRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditTargetOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Garak Targets
+      summary: List Targets
+      description: List audit targets in the workspace with pagination and filter
+        support.
+      operationId: list_targets_apis_garak_v2_workspaces__workspace__targets_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/TargetFilter'
+        description: 'Filter results on various criteria. Supports bracket notation
+          (?filter[field][$op]=value), JSON ({"field":{"$op":"value"}}), and text
+          syntax (field:"value"). Operators: $eq (exact match), $like (substring),
+          $lt, $lte, $gt, $gte (comparison), $in, $nin (set membership), $and, $or,
+          $not (logical). Default operator is $eq.'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Targets Apis Garak V2 Workspaces  Workspace  Targets
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/garak/v2/workspaces/{workspace}/targets/{name}:
+    get:
+      tags:
+      - Garak Targets
+      summary: Get Target
+      description: Get an audit target by name.
+      operationId: get_target_apis_garak_v2_workspaces__workspace__targets__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditTargetOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Garak Targets
+      summary: Update Target
+      description: Replace an audit target's contents.
+      operationId: update_target_apis_garak_v2_workspaces__workspace__targets__name__put
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAuditTargetRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditTargetOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Garak Targets
+      summary: Delete Target
+      description: Delete an audit target by name.
+      operationId: delete_target_apis_garak_v2_workspaces__workspace__targets__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AuditClassConfig:
+      additionalProperties: true
+      type: object
+      title: AuditClassConfig
+      description: Per-class plugin configuration mapping.
+    AuditConfigInput:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        description:
+          title: Description
+          description: Config description
+          type: string
+        system:
+          $ref: '#/components/schemas/AuditSystemData'
+        run:
+          $ref: '#/components/schemas/AuditRunData'
+        plugins:
+          $ref: '#/components/schemas/AuditPluginsData'
+        reporting:
+          $ref: '#/components/schemas/AuditReportData'
+      type: object
+      required:
+      - workspace
+      title: AuditConfigInput
+      description: Audit configuration stored in the entity store.
+    AuditConfigOutput:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        description:
+          title: Description
+          description: Config description
+          type: string
+        system:
+          $ref: '#/components/schemas/AuditSystemData'
+        run:
+          $ref: '#/components/schemas/AuditRunData'
+        plugins:
+          $ref: '#/components/schemas/AuditPluginsData'
+        reporting:
+          $ref: '#/components/schemas/AuditReportData'
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: AuditConfigOutput
+      description: Audit configuration stored in the entity store.
+    AuditInputSpec:
+      properties:
+        config:
+          anyOf:
+          - $ref: '#/components/schemas/AuditConfigInput'
+          - type: string
+            minLength: 1
+          title: Config
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/AuditTargetInput'
+          - type: string
+            minLength: 1
+          title: Target
+        max_probe_retries:
+          type: integer
+          minimum: 0.0
+          title: Max Probe Retries
+          default: 0
+        fail_job_on_retries_exhausted:
+          type: boolean
+          title: Fail Job On Retries Exhausted
+          default: true
+      additionalProperties: false
+      type: object
+      required:
+      - config
+      - target
+      title: AuditInputSpec
+      description: "User-facing spec \u2014 each field accepts an inline entity payload\
+        \ OR a\nworkspace-qualified name string referencing one in the entity store.\n\
+        \nResolved by :meth:`AuditJob.to_spec` into a canonical :class:`AuditSpec`\n\
+        before :meth:`AuditJob.run` is invoked."
+    AuditJob:
+      properties:
+        id:
+          title: Id
+          type: string
+        name:
+          type: string
+          title: Name
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        workspace:
+          title: Workspace
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+        spec:
+          $ref: '#/components/schemas/AuditSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - name
+      - spec
+      title: AuditJob
+    AuditJobRequest:
+      properties:
+        name:
+          title: Name
+          type: string
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        spec:
+          $ref: '#/components/schemas/AuditInputSpec'
+        profile:
+          title: Profile
+          type: string
+        options:
+          title: Options
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        output_location:
+          title: Output Location
+          type: string
+      type: object
+      required:
+      - spec
+      title: AuditJobRequest
+    AuditJobsListFilter:
+      additionalProperties: false
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+      title: AuditJobsListFilter
+      type: object
+    AuditJobsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/AuditJob'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: AuditJobsPage
+    AuditJobsSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: AuditJobsSortField
+    AuditModuleConfig:
+      additionalProperties:
+        $ref: '#/components/schemas/AuditClassConfig'
+      type: object
+      title: AuditModuleConfig
+      description: Per-module plugin configuration mapping.
+    AuditPluginsData:
+      properties:
+        model_type:
+          title: Model Type
+          type: string
+        model_name:
+          title: Model Name
+          type: string
+        probe_spec:
+          type: string
+          title: Probe Spec
+          default: all
+        detector_spec:
+          type: string
+          title: Detector Spec
+          default: auto
+        extended_detectors:
+          type: boolean
+          title: Extended Detectors
+          default: false
+        buff_spec:
+          title: Buff Spec
+          type: string
+        buffs_include_original_prompt:
+          type: boolean
+          title: Buffs Include Original Prompt
+          default: false
+        buff_max:
+          title: Buff Max
+          type: string
+        detectors:
+          additionalProperties:
+            anyOf:
+            - $ref: '#/components/schemas/AuditModuleConfig'
+            - $ref: '#/components/schemas/AuditClassConfig'
+          type: object
+          title: Detectors
+        generators:
+          additionalProperties:
+            anyOf:
+            - $ref: '#/components/schemas/AuditModuleConfig'
+            - $ref: '#/components/schemas/AuditClassConfig'
+          type: object
+          title: Generators
+        buffs:
+          additionalProperties:
+            anyOf:
+            - $ref: '#/components/schemas/AuditModuleConfig'
+            - $ref: '#/components/schemas/AuditClassConfig'
+          type: object
+          title: Buffs
+        harnesses:
+          additionalProperties:
+            anyOf:
+            - $ref: '#/components/schemas/AuditModuleConfig'
+            - $ref: '#/components/schemas/AuditClassConfig'
+          type: object
+          title: Harnesses
+        probes:
+          additionalProperties:
+            anyOf:
+            - $ref: '#/components/schemas/AuditModuleConfig'
+            - $ref: '#/components/schemas/AuditClassConfig'
+          type: object
+          title: Probes
+      type: object
+      title: AuditPluginsData
+    AuditReportData:
+      properties:
+        report_prefix:
+          type: string
+          title: Report Prefix
+          default: run1
+        taxonomy:
+          title: Taxonomy
+          type: string
+        report_dir:
+          type: string
+          title: Report Dir
+          default: garak_runs
+        show_100_pass_modules:
+          type: boolean
+          title: Show 100 Pass Modules
+          default: true
+      type: object
+      title: AuditReportData
+    AuditRunData:
+      properties:
+        seed:
+          title: Seed
+          type: integer
+        deprefix:
+          type: boolean
+          title: Deprefix
+          default: true
+        eval_threshold:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Eval Threshold
+          default: 0.5
+        generations:
+          type: integer
+          minimum: 1.0
+          title: Generations
+          default: 5
+        probe_tags:
+          title: Probe Tags
+          type: string
+        user_agent:
+          type: string
+          title: User Agent
+          default: garak/{version} (LLM vulnerability scanner https://garak.ai)
+      type: object
+      title: AuditRunData
+    AuditSpec:
+      properties:
+        config:
+          $ref: '#/components/schemas/AuditConfigOutput'
+        target:
+          $ref: '#/components/schemas/AuditTargetOutput'
+        max_probe_retries:
+          type: integer
+          minimum: 0.0
+          title: Max Probe Retries
+          default: 0
+        fail_job_on_retries_exhausted:
+          type: boolean
+          title: Fail Job On Retries Exhausted
+          default: true
+      additionalProperties: false
+      type: object
+      required:
+      - config
+      - target
+      title: AuditSpec
+      description: Canonical, fully-resolved spec passed to :meth:`AuditJob.run`.
+    AuditSystemData:
+      properties:
+        verbose:
+          type: integer
+          maximum: 1.0
+          minimum: 0.0
+          title: Verbose
+          default: 0
+        narrow_output:
+          type: boolean
+          title: Narrow Output
+          default: false
+        parallel_requests:
+          type: boolean
+          title: Parallel Requests
+          default: false
+        parallel_attempts:
+          anyOf:
+          - type: boolean
+          - type: integer
+          title: Parallel Attempts
+          default: false
+        lite:
+          type: boolean
+          title: Lite
+          default: true
+        show_z:
+          type: boolean
+          title: Show Z
+          default: false
+        enable_experimental:
+          type: boolean
+          title: Enable Experimental
+          default: false
+      additionalProperties: false
+      type: object
+      title: AuditSystemData
+    AuditTargetInput:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        description:
+          title: Description
+          description: Target description
+          type: string
+        type:
+          type: string
+          title: Type
+          description: Target type (e.g., 'nim', 'openai').
+        model:
+          type: string
+          title: Model
+          description: Model identifier.
+        options:
+          additionalProperties: true
+          type: object
+          title: Options
+          description: Additional target options.
+      type: object
+      required:
+      - workspace
+      - type
+      - model
+      title: AuditTargetInput
+      description: Audit target (model under test) stored in the entity store.
+    AuditTargetOutput:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        description:
+          title: Description
+          description: Target description
+          type: string
+        type:
+          type: string
+          title: Type
+          description: Target type (e.g., 'nim', 'openai').
+        model:
+          type: string
+          title: Model
+          description: Model identifier.
+        options:
+          additionalProperties: true
+          type: object
+          title: Options
+          description: Additional target options.
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - type
+      - model
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: AuditTargetOutput
+      description: Audit target (model under test) stored in the entity store.
+    ConfigFilter:
+      additionalProperties: false
+      description: Query filter for ``GET /v2/workspaces/{workspace}/configs``.
+      properties:
+        description:
+          description: Filter to configs with this description.
+          title: Description
+          type: string
+        project:
+          description: Filter to configs in this project.
+          title: Project
+          type: string
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Filter on creation time (supports $gte / $lte).
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Filter on last-update time (supports $gte / $lte).
+      title: ConfigFilter
+      type: object
+    CreateAuditConfigRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Unique config name within the workspace.
+        description:
+          title: Description
+          description: Human-readable description.
+          type: string
+        system:
+          $ref: '#/components/schemas/AuditSystemData'
+        run:
+          $ref: '#/components/schemas/AuditRunData'
+        plugins:
+          $ref: '#/components/schemas/AuditPluginsData'
+        reporting:
+          $ref: '#/components/schemas/AuditReportData'
+      type: object
+      required:
+      - name
+      title: CreateAuditConfigRequest
+      description: Request body for ``POST /v2/workspaces/{workspace}/configs``.
+    CreateAuditTargetRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Unique target name within the workspace.
+        description:
+          title: Description
+          type: string
+        type:
+          type: string
+          title: Type
+          description: Target type (e.g., 'nim', 'openai').
+        model:
+          type: string
+          title: Model
+          description: Model identifier.
+        options:
+          additionalProperties: true
+          type: object
+          title: Options
+      type: object
+      required:
+      - name
+      - type
+      - model
+      title: CreateAuditTargetRequest
+      description: Request body for ``POST /v2/workspaces/{workspace}/targets``.
+    DatetimeFilter:
+      additionalProperties: false
+      properties:
+        $gte:
+          description: Filter for results greater than or equal to this datetime.
+          title: $Gte
+          format: date-time
+          type: string
+        $lte:
+          description: Filter for results less than or equal to this datetime.
+          title: $Lte
+          format: date-time
+          type: string
+      title: DatetimeFilter
+      type: object
+    FileStorageType:
+      type: string
+      enum:
+      - fileset
+      title: FileStorageType
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
+    PaginationData:
+      properties:
+        page:
+          type: integer
+          title: Page
+          description: The current page number.
+        page_size:
+          type: integer
+          title: Page Size
+          description: The page size used for the query.
+        current_page_size:
+          type: integer
+          title: Current Page Size
+          description: The size for the current page.
+        total_pages:
+          type: integer
+          title: Total Pages
+          description: The total number of pages.
+        total_results:
+          type: integer
+          title: Total Results
+          description: The total number of results.
+      type: object
+      required:
+      - page
+      - page_size
+      - current_page_size
+      - total_pages
+      - total_results
+      title: PaginationData
+    StringFilter:
+      additionalProperties: false
+      properties:
+        $eq:
+          description: Filter for results equal to this value.
+          title: $Eq
+          type: string
+        $like:
+          description: Filter for results matching this pattern.
+          title: $Like
+          type: string
+        $in:
+          description: Filter for results in this list of values.
+          title: $In
+          items:
+            type: string
+          type: array
+        $nin:
+          description: Filter for results not in this list of values.
+          title: $Nin
+          items:
+            type: string
+          type: array
+      title: StringFilter
+      type: object
+    TargetFilter:
+      additionalProperties: false
+      description: Query filter for ``GET /v2/workspaces/{workspace}/targets``.
+      properties:
+        type:
+          description: Filter to targets of this type (e.g., 'nim', 'openai').
+          title: Type
+          type: string
+        model:
+          description: Filter to targets using this model identifier.
+          title: Model
+          type: string
+        description:
+          description: Filter to targets with this description.
+          title: Description
+          type: string
+        project:
+          description: Filter to targets in this project.
+          title: Project
+          type: string
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Filter on creation time (supports $gte / $lte).
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Filter on last-update time (supports $gte / $lte).
+      title: TargetFilter
+      type: object
+    UpdateAuditConfigRequest:
+      properties:
+        description:
+          title: Description
+          type: string
+        system:
+          $ref: '#/components/schemas/AuditSystemData'
+        run:
+          $ref: '#/components/schemas/AuditRunData'
+        plugins:
+          $ref: '#/components/schemas/AuditPluginsData'
+        reporting:
+          $ref: '#/components/schemas/AuditReportData'
+      type: object
+      title: UpdateAuditConfigRequest
+      description: Request body for ``PUT /v2/workspaces/{workspace}/configs/{name}``.
+    UpdateAuditTargetRequest:
+      properties:
+        description:
+          title: Description
+          type: string
+        type:
+          type: string
+          title: Type
+          description: Target type (e.g., 'nim', 'openai').
+        model:
+          type: string
+          title: Model
+          description: Model identifier.
+        options:
+          additionalProperties: true
+          type: object
+          title: Options
+      type: object
+      required:
+      - type
+      - model
+      title: UpdateAuditTargetRequest
+      description: Request body for ``PUT /v2/workspaces/{workspace}/targets/{name}``.
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+          additionalProperties: true
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

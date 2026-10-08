@@ -19,7 +19,7 @@ the ``nemo.sdk`` entry-point in :file:`pyproject.toml`. Exposes:
   :class:`~nemo_insights_plugin.entities.Insight` CRUD against the FastAPI
   routes mounted under ``/apis/insights/v2/workspaces/{workspace}/``.
 
-Modeled on ``nemo_auditor.sdk`` — same shape, same hand-written CRUD-only
+Modeled on ``nemo_garak.sdk`` — same shape, same hand-written CRUD-only
 resource pattern. No Stainless codegen.
 """
 
