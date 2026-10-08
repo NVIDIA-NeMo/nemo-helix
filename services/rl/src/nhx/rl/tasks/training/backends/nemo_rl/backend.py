@@ -165,6 +165,7 @@ class NemoRLBackend(TrainingBackend):
         logger.info(f"Driver args: {driver_args}")
 
         bootstrap = create_bootstrap_from_env()
+        bootstrap.progress = progress
 
         # Set up signal handler for cleanup — terminate the driver subprocess
         # explicitly so it doesn't become orphaned, then let SystemExit propagate

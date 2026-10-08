@@ -11,7 +11,6 @@ using file-based barriers for cross-pod synchronization.
 import json
 import logging
 import random
-import time
 from enum import Enum
 from pathlib import Path
 from types import TracebackType
@@ -86,7 +85,6 @@ class TrainingRunner:
         random.seed(self._config.seed)
         logger.info(f"Global random seed set to {self._config.seed}")
 
-        start_time = time.time()
         gpu_info = get_gpu_info()
         result = TrainingResult(success=False, error_message="No result")
 
@@ -94,7 +92,7 @@ class TrainingRunner:
             library_config = self._compile_config_phase()
             metrics = self._training_phase(library_config)
             self._dist_ctx.sync_point(BARRIER_TRAINING_COMPLETE)
-            result = self._postprocess_phase(gpu_info, metrics, start_time, library_config)
+            result = self._postprocess_phase(gpu_info, metrics, library_config)
 
         except Exception as e:
             logger.exception(f"Training failed: {e}")
@@ -103,7 +101,7 @@ class TrainingRunner:
                 success=False,
                 error_message=error_details.get("message", str(e)),
                 gpu_info=gpu_info,
-                training_duration_seconds=time.time() - start_time,
+                training_duration_seconds=self._progress.training_duration_seconds,
             )
             if self._dist_ctx.is_coordinator:
                 self._progress.report_error(dict(error_details))
@@ -184,14 +182,13 @@ class TrainingRunner:
         self,
         gpu_info: GPUInfo | None,
         metrics: TrainingMetrics,
-        start_time: float,
         library_config: LibraryConfig,
     ) -> TrainingResult:
         if not self._dist_ctx.is_coordinator:
             return TrainingResult(
                 success=True,
                 gpu_info=gpu_info,
-                training_duration_seconds=time.time() - start_time,
+                training_duration_seconds=self._progress.training_duration_seconds,
             )
 
         self._progress.report_running("processing_checkpoint")
@@ -209,7 +206,7 @@ class TrainingRunner:
             checkpoint=checkpoint_info,
             gpu_info=gpu_info,
             metrics=metrics,
-            training_duration_seconds=time.time() - start_time,
+            training_duration_seconds=self._progress.training_duration_seconds,
         )
         self._progress.report_completed("Training completed")
         return result
