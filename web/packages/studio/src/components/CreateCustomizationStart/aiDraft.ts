@@ -135,8 +135,31 @@ type Job = Record<string, unknown>;
 
 export const ERROR_NOT_JSON = "The model's reply was not valid JSON.";
 
-const formatIssues = (issues: z.ZodIssue[]): string[] =>
-  issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`);
+const formatIssues = (issues: z.ZodIssue[], toPath = (path: string) => path): string[] =>
+  issues.map((issue) => `${toPath(issue.path.join('.')) || '(root)'}: ${issue.message}`);
+
+/** Form fields the job keeps somewhere other than the form does. */
+const JOB_PATH_OF_FIELD: Record<string, string> = {
+  outputName: 'output.name',
+  description: 'output.description',
+  'grpo.trainingType': 'training.type',
+  'grpo.environmentFileset': 'environment',
+};
+
+/** Each backend's section of the form holds its job spec as written. */
+const SPEC_SECTIONS = ['automodel.', 'unsloth.', 'rl.'];
+
+/**
+ * Where a form field lives in the job the model wrote, so a form error points it at the key
+ * to fix. GRPO's settings sit in their own form section but under `training` in the job.
+ */
+const toJobPath = (path: string): string => {
+  const mapped = JOB_PATH_OF_FIELD[path];
+  if (mapped) return mapped;
+  const section = SPEC_SECTIONS.find((prefix) => path.startsWith(prefix));
+  if (section) return path.slice(section.length);
+  return path.startsWith('grpo.') ? `training.${path.slice('grpo.'.length)}` : path;
+};
 
 const TO_REQUEST = {
   automodel: formToAutomodelCreate,
@@ -350,7 +373,8 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
   const formErrors = formatIssues(
     (customizationFormSchema.safeParse(values).error?.issues ?? []).filter(
       (issue) => !DEFERRABLE_FIELDS.has(issue.path.join('.'))
-    )
+    ),
+    toJobPath
   );
   if (formErrors.length > 0) return { status: 'invalid', errors: formErrors };
 
