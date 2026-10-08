@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import tomlkit
+from packaging.requirements import Requirement
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 WRAPPER_PYPROJECT = REPO_ROOT / "packages" / "nemo_helix" / "pyproject.toml"
@@ -33,6 +34,14 @@ KNOWN_MISSING: frozenset[tuple[str, str, str]] = frozenset(
 
 def _load(path: Path) -> dict:
     return tomlkit.parse(path.read_text(encoding="utf-8")).unwrap()
+
+
+def test_wrapper_dependencies_have_no_direct_urls() -> None:
+    project = _load(WRAPPER_PYPROJECT)["project"]
+    dependency_groups = [project.get("dependencies", []), *project.get("optional-dependencies", {}).values()]
+    for dependencies in dependency_groups:
+        for dependency in dependencies:
+            assert Requirement(dependency).url is None, f"PyPI rejects direct dependency: {dependency}"
 
 
 def _source_pyproject(source: Path) -> Path:

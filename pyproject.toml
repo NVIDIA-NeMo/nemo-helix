@@ -68,8 +68,12 @@ dependencies = [
 version = "0.0.0"
 
 [dependency-groups]
-# Insights analyst plugin convenience group.
-insights = ["nemo-insights-plugin"]
+# Keep Git-only analyst dependencies out of published wheel metadata.
+insights = [
+  "nemo-insights-plugin",
+  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137",
+  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest",
+]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
 # The scaled-evals plugin is opt-in: it is a path dependency rather than a workspace
 # member, so neither `enabled-plugins` nor `uv sync --all-packages` installs it. It needs
@@ -184,7 +188,7 @@ enabled-plugins = [
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-evaluator-plugin",
-  "nemo-insights-plugin",
+  { include-group = "insights" },
   "nemo-guardrails-plugin",
   "nemo-auditor-plugin",
   "nemo-safe-synthesizer-plugin",
@@ -251,7 +255,7 @@ cpu-tasks = [
   # managed CPU task environment. Hermes requires a separate execution image.
   "nemo-agents-plugin[all]",
   # Insights Analyst Fabric adapter and insights.analysis execute extension.
-  "nemo-insights-plugin",
+  { include-group = "insights" },
   "nemo-evaluator-plugin",
   "nemo-sandboxed-gym[server,opensandbox]",
   "nemo-anonymizer-plugin",
