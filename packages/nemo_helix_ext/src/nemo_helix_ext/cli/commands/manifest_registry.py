@@ -163,18 +163,19 @@ nemo docs cli/configuration""",
         kind="group",
     ),
     TopLevelEntry(
-        import_path="nemo_helix_ext.cli.commands.use_cases.agent:app",
+        import_path="nemo_helix_ext.cli.commands.use_cases.describe:describe_command",
         help="""\
-Commands for AI agent context and capability discovery.
+Describe the installed NeMo Helix CLI, plugins, and skills.
+
+Prints installed plugins, top-level commands, the plugin entry-point
+catalog, available agent skills, and quick-reference patterns as
+Markdown. Reads local metadata only and does not contact the platform.
 
 Examples:
-# Dump full agent context (plugins, commands, skills).
-nemo agent context
-# List all available commands.
-nemo agent commands""",
-        name="agent",
+nemo describe""",
+        name="describe",
         panel="CLI functions",
-        kind="group",
+        kind="command",
     ),
     TopLevelEntry(
         import_path="nemo_helix_ext.cli.commands.jobs:app",

@@ -93,7 +93,6 @@ def test_generated_list_validates_stream_output_before_client_setup():
     ("argv", "expected_text"),
     [
         ([], "Command-line interface for NeMo Helix."),
-        (["agent"], "Commands for AI agent context and capability discovery."),
         (["skills"], "Install AI agent skill files for Nemo."),
         (["services"], "Run Helix services locally."),
     ],
@@ -733,6 +732,21 @@ def test_token_refresh_runs_when_quickstart_auth_enabled():
         runner.invoke(app, ["workspaces", "--help"])
 
     mock_ensure.assert_called_once()
+
+
+def test_token_refresh_skipped_for_describe():
+    """Describing the CLI reads local metadata only, so it must not require auth."""
+    runner = CliRunner()
+    qs_config = QuickstartConfig(auth_enabled=True)
+
+    with (
+        patch("nemo_helix_ext.quickstart.QuickstartConfig.load", return_value=qs_config),
+        patch("nemo_helix_ext.cli.commands.auth.ensure_valid_token") as mock_ensure,
+    ):
+        result = runner.invoke(app, ["describe"])
+
+    assert result.exit_code == 0
+    mock_ensure.assert_not_called()
 
 
 def test_cli_entry_point_discards_the_command_return_value(monkeypatch: pytest.MonkeyPatch) -> None:

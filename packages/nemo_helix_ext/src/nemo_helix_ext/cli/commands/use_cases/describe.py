@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""CLI commands for AI agent context and capability discovery."""
+"""nemo describe command - describe the installed CLI, plugins, and skills."""
 
 from __future__ import annotations
 
@@ -10,23 +10,9 @@ from importlib.metadata import EntryPoint
 
 import typer
 
-from nemo_helix_ext.cli.core.help_formatter import create_typer_app
 from nemo_helix_ext.cli.manifest import build_top_level_entries
 
 logger = logging.getLogger(__name__)
-
-app = create_typer_app(
-    name="agent",
-    no_args_is_help=False,
-    help="""\
-Commands for AI agent context and capability discovery.
-
-Examples:
-# Dump full agent context (plugins, commands, skills).
-nemo agent context
-# List all available commands.
-nemo agent commands""",
-)
 
 _SURFACE_GROUPS: tuple[tuple[str, str], ...] = (
     ("nemo.cli", "CLI"),
@@ -106,27 +92,24 @@ def _all_top_level_entries() -> list[tuple[str, str, str]]:
     return [(entry.name, entry.panel, entry.help.splitlines()[0] if entry.help else "") for entry in entries]
 
 
-@app.callback(invoke_without_command=True)
-def agent_callback(ctx: typer.Context) -> None:
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(0)
+def describe_command() -> None:
+    """Describe the installed NeMo Helix CLI, plugins, and skills.
 
-
-@app.command("context")
-def context_command() -> None:
-    """Dump everything an agent needs in one call.
-
-    Outputs installed plugins, CLI commands, entry-point catalog,
-    available skills, and quick-reference patterns. Runs without a
-    connected cluster (metadata-only).
+    Prints installed plugins, top-level commands, the plugin entry-point
+    catalog, available agent skills, and quick-reference patterns as
+    Markdown. Reads local metadata only and does not contact the platform.
 
     Examples:
-      nemo agent context
+    nemo describe
     """
+    typer.echo(render_cli_description())
+
+
+def render_cli_description() -> str:
+    """Render the Markdown description of the installed CLI."""
     lines: list[str] = []
 
-    lines.append("# NeMo Helix Agent Context\n")
+    lines.append("# NeMo Helix CLI\n")
     lines.append("## Installed Plugins\n")
 
     plugin_surfaces = _build_plugin_surfaces()
@@ -153,12 +136,7 @@ def context_command() -> None:
         lines.append("_No plugins installed._")
 
     lines.append("\n## Available CLI Commands\n")
-    lines.append("| Command | Panel | Description |")
-    lines.append("|---------|-------|-------------|")
-    for cmd_name, panel, description in _all_top_level_entries():
-        lines.append(
-            f"| nemo {_normalize_cell(cmd_name)} | {_normalize_cell(panel)} | {_normalize_cell(description)} |"
-        )
+    lines.append(render_commands_table())
 
     lines.append("\n## Entry-Point Catalog\n")
 
@@ -210,36 +188,19 @@ def context_command() -> None:
     lines.append("\n## Quick Reference\n")
     lines.append("- Read docs: `nemo docs <path>`")
     lines.append("- List doc topics: `nemo docs --list`")
-    lines.append("- List all commands: `nemo agent commands`")
-    lines.append("- Re-run this dump: `nemo agent context`")
+    lines.append("- Re-run this description: `nemo describe`")
     lines.append("- Explore an API resource: `nemo <resource> --help`")
     lines.append("- List resources: `nemo <resource> list`")
     lines.append("- Get a resource: `nemo <resource> get <name-or-id>`")
 
-    typer.echo("\n".join(lines))
+    return "\n".join(lines)
 
 
-@app.command("commands")
-def commands_command() -> None:
-    """List all available top-level CLI commands.
-
-    Outputs a flat list of commands with descriptions, useful for
-    agent capability discovery.
-
-    Examples:
-      nemo agent commands
-    """
-    lines: list[str] = ["# NeMo CLI Commands\n"]
-    lines.append("| Command | Panel | Description |")
-    lines.append("|---------|-------|-------------|")
+def render_commands_table() -> str:
+    """Render the Markdown table of visible top-level CLI commands."""
+    lines: list[str] = ["| Command | Panel | Description |", "|---------|-------|-------------|"]
     for cmd_name, panel, description in _all_top_level_entries():
         lines.append(
             f"| nemo {_normalize_cell(cmd_name)} | {_normalize_cell(panel)} | {_normalize_cell(description)} |"
         )
-    typer.echo("\n".join(lines))
-
-
-# Typer registers commands in definition order, but help output follows registered_commands.
-# Sort explicitly so "context" always appears before "commands" regardless of future additions.
-_COMMAND_ORDER = {"context": 0, "commands": 1}
-app.registered_commands.sort(key=lambda c: _COMMAND_ORDER.get(c.name or "", len(_COMMAND_ORDER)))
+    return "\n".join(lines)

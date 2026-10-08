@@ -35,7 +35,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SKIP_AUTH_CHECK_SUBCOMMANDS = frozenset(
-    {"agent", "auth", "config", "setup", "quickstart", "cluster-info", "skills", "docs", "services", "plugins"}
+    {
+        "auth",
+        "config",
+        "describe",
+        "setup",
+        "quickstart",
+        "cluster-info",
+        "skills",
+        "docs",
+        "services",
+        "plugins",
+    }
 )
 # Create the main CLI app with custom help formatting
 app = typer.Typer(
