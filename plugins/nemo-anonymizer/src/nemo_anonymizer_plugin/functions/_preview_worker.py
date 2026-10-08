@@ -18,7 +18,7 @@ import pandas as pd
 from anonymizer.config.anonymizer_config import AnonymizerConfig, AnonymizerInput
 from anonymizer.interface.anonymizer import Anonymizer
 from data_designer.config.models import ModelProvider as DDModelProvider
-from nemo_anonymizer_plugin.app.gliner_detector import build_gliner_anonymizer, stop_gliner_runtime
+from nemo_anonymizer_plugin.app.gliner_detector import build_gliner_anonymizer
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
 from nemo_anonymizer_plugin.functions.preview import (
     FailedRecordsFrame,
@@ -47,11 +47,11 @@ def _make_preview(
     )
     config: AnonymizerConfig = spec.config
 
-    try:
-        result = anonymizer.preview(config=config, data=data, num_records=num_records)
-    finally:
-        if use_in_process_detector:
-            stop_gliner_runtime()
+    # Do NOT stop the in-process GLiNER runtime here: it is owned by the long-lived
+    # Anonymizer service and shared across previews, so tearing it down per request
+    # would re-pay the model load + server startup on every preview. Upstream's
+    # runtime registers an atexit handler to stop the child on service shutdown.
+    result = anonymizer.preview(config=config, data=data, num_records=num_records)
 
     send_frame(PreviewDatasetFrame(records=_to_jsonable_records(result.dataframe)))
     send_frame(

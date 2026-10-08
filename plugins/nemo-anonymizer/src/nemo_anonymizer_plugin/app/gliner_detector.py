@@ -178,26 +178,46 @@ def is_gliner_cached() -> bool:
     return has_weights and has_config
 
 
-def _align_fileset_cache_to_upstream_repo(fileset_snapshot: Path) -> None:
-    """Expose a Files-fetched snapshot under the repo id/revision upstream requests.
+def _fileset_cache_folder() -> Path:
+    """Repo-cache folder the Files pull-through download lands in."""
+    ref = f"{GLINER_FILESET_WORKSPACE}/{GLINER_FILESET_NAME}"
+    return _hf_hub_cache_dir() / repo_folder_name(repo_id=ref, repo_type="model")
+
+
+def _upstream_cache_folder() -> Path:
+    """Repo-cache folder upstream's ``snapshot_download(MODEL_ID)`` reads."""
+    return _hf_hub_cache_dir() / repo_folder_name(repo_id=GLINER_MODEL_ID, repo_type="model")
+
+
+def _align_fileset_cache_to_upstream_repo() -> None:
+    """Expose the Files-fetched weights under the repo id upstream requests.
 
     The pull-through download lands under the Fileset's cache folder
-    (``models--system--nhx-anonymizer-gliner-pii``) at the commit hash Files
-    reports. Upstream, however, calls ``snapshot_download`` with the HuggingFace
-    repo id and pinned SHA, so it reads ``models--fastino--…/snapshots/{SHA}``.
-    We bridge the two by symlinking that path at the Files-fetched snapshot. Only
-    the public on-disk cache layout is used (``repo_folder_name``); no cache
-    internals are synthesized.
+    (``models--system--nhx-anonymizer-gliner-pii``). Upstream, however, calls
+    ``snapshot_download`` with the HuggingFace repo id and pinned SHA, so it reads
+    ``models--fastino--…``. We bridge the two by **copying the whole repo-cache
+    folder** (its ``blobs``/``snapshots``/``refs`` as HuggingFace Hub wrote them)
+    to the upstream folder name, so upstream's own ``snapshot_download`` resolves
+    it as an ordinary offline cache hit.
+
+    A folder COPY (not a snapshot symlink) is used deliberately: a symlinked
+    ``snapshots/{SHA}`` collides with Hub's own materialization bookkeeping
+    (``FileExistsError`` on re-download, ``LocalEntryNotFoundError`` offline),
+    whereas a real folder with intact Hub metadata is what the offline loader
+    expects. Only the public on-disk cache layout is used; no internals are
+    synthesized.
     """
-    upstream_snapshot = _upstream_snapshot_dir()
-    upstream_snapshot.parent.mkdir(parents=True, exist_ok=True)
-    if upstream_snapshot.exists() or upstream_snapshot.is_symlink():
+    import shutil
+
+    src = _fileset_cache_folder()
+    dst = _upstream_cache_folder()
+    if is_gliner_cached():
         return
-    try:
-        upstream_snapshot.symlink_to(fileset_snapshot.resolve(), target_is_directory=True)
-    except FileExistsError:
-        # A concurrent cold-start preview aligned it first; the link now exists.
-        pass
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    # copytree needs a non-existent dst; a prior partial/aligned copy is replaced.
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst, symlinks=True)
 
 
 def prewarm_gliner_cache(base_url: str, *, on_download_start: Callable[[], None] | None = None) -> None:
@@ -225,7 +245,8 @@ def prewarm_gliner_cache(base_url: str, *, on_download_start: Callable[[], None]
         token=_GLINER_HF_TOKEN,
         cache_dir=str(_hf_hub_cache_dir()),
     )
-    _align_fileset_cache_to_upstream_repo(Path(fileset_snapshot))
+    del fileset_snapshot  # we align by repo-folder, not by the returned snapshot path
+    _align_fileset_cache_to_upstream_repo()
 
 
 def ensure_gliner_weights(sdk: SyncHelixClient, *, on_download_start: Callable[[], None] | None = None) -> None:

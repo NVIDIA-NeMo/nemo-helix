@@ -126,29 +126,31 @@ def test_prewarm_is_noop_when_cached(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_prewarm_downloads_through_files_and_aligns_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(gliner_detector, "_hf_hub_cache_dir", lambda: tmp_path / "hub")
+    # Isolate the HuggingFace cache to tmp_path so the test never touches the real one.
+    hub = tmp_path / "hub"
+    monkeypatch.setattr(gliner_detector, "_hf_hub_cache_dir", lambda: hub)
     monkeypatch.setattr(gliner_detector, "is_gliner_cached", lambda: False)
 
-    # Simulate the Files pull-through landing a snapshot under the fileset's cache folder.
-    fileset_snapshot = (
-        tmp_path
-        / "hub"
-        / repo_folder_name(
-            repo_id=f"{gliner_detector.GLINER_FILESET_WORKSPACE}/{gliner_detector.GLINER_FILESET_NAME}",
-            repo_type="model",
-        )
-        / "snapshots"
-        / "files-generated-commit-hash"
+    fileset_folder = hub / repo_folder_name(
+        repo_id=f"{gliner_detector.GLINER_FILESET_WORKSPACE}/{gliner_detector.GLINER_FILESET_NAME}",
+        repo_type="model",
     )
-    fileset_snapshot.mkdir(parents=True)
-    (fileset_snapshot / "config.json").write_text("{}")
-    (fileset_snapshot / "model.safetensors").write_bytes(b"\x00")
 
     captured: dict[str, Any] = {}
 
     def _fake_download(**kwargs: Any) -> str:
+        # Mimic a Files pull-through: Hub writes a full repo-cache folder
+        # (snapshots/<files-hash> + refs/<revision> + blobs).
         captured.update(kwargs)
-        return str(fileset_snapshot)
+        files_hash = "f" * 40
+        snapshot = fileset_folder / "snapshots" / files_hash
+        snapshot.mkdir(parents=True)
+        (snapshot / "config.json").write_text("{}")
+        (snapshot / "model.safetensors").write_bytes(b"\x00")
+        (fileset_folder / "refs").mkdir(parents=True, exist_ok=True)
+        (fileset_folder / "refs" / kwargs["revision"]).write_text(files_hash)
+        (fileset_folder / "blobs").mkdir(parents=True, exist_ok=True)
+        return str(snapshot)
 
     monkeypatch.setattr(gliner_detector, "snapshot_download", _fake_download)
     started = Mock()
@@ -160,16 +162,16 @@ def test_prewarm_downloads_through_files_and_aligns_cache(monkeypatch: pytest.Mo
     assert captured["repo_id"] == f"{gliner_detector.GLINER_FILESET_WORKSPACE}/{gliner_detector.GLINER_FILESET_NAME}"
     assert captured["endpoint"] == "http://localhost:8080/apis/files/v2/hf"
     assert captured["revision"] == gliner_detector.GLINER_MODEL_REVISION
-    # The result is aligned to the repo id/revision upstream reads.
-    upstream_snapshot = (
-        tmp_path
-        / "hub"
-        / repo_folder_name(repo_id=gliner_detector.GLINER_MODEL_ID, repo_type="model")
-        / "snapshots"
-        / gliner_detector.GLINER_MODEL_REVISION
-    )
-    assert upstream_snapshot.is_symlink()
-    assert (upstream_snapshot / "config.json").read_text() == "{}"
+    assert captured["token"] == "service:anonymizer"
+
+    # The whole repo-cache folder is COPIED (not symlinked) to the upstream repo name,
+    # with the Hub metadata intact so upstream's offline snapshot_download resolves it.
+    upstream_folder = hub / repo_folder_name(repo_id=gliner_detector.GLINER_MODEL_ID, repo_type="model")
+    assert upstream_folder.is_dir() and not upstream_folder.is_symlink()
+    assert (upstream_folder / "refs" / gliner_detector.GLINER_MODEL_REVISION).read_text() == "f" * 40
+    copied_snapshot = upstream_folder / "snapshots" / ("f" * 40)
+    assert (copied_snapshot / "config.json").read_text() == "{}"
+    assert (copied_snapshot / "model.safetensors").exists()
 
 
 class _Overrides:
