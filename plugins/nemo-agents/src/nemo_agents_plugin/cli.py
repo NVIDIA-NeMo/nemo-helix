@@ -185,7 +185,7 @@ _COMPUTE_SPEC_LIST_COLUMNS = [
 ]
 
 
-_AGENT_CLI_PANEL = "Platform agents"
+_AGENT_CLI_PANEL = "Additional commands from plugins"
 
 
 @dataclass(frozen=True)
