@@ -4,17 +4,22 @@
 import type { StartOption } from '@studio/components/StartOptions/types';
 
 /**
- * Every way into a new optimization. A new id needs a tile in `STRATEGY_OPTIONS` and a handler in
- * `OptimizationsTab`; the tab will not compile until it has one.
+ * Every way into a new optimization that Studio can start. A new id needs a tile in
+ * `STRATEGY_OPTIONS` and a handler in `OptimizationsTab`; the tab will not compile until it has one.
  */
-export type OptimizationStrategyId = 'form' | 'upload';
+export type OptimizationStrategyId = 'hyperparameter' | 'upload';
 
-export type OptimizationStrategyOption = StartOption<OptimizationStrategyId>;
+/** Strategies shown in the picker but disabled until Studio can start them. */
+export type PlannedOptimizationStrategyId = 'skill' | 'routing';
+
+export type OptimizationStrategyOption = StartOption<
+  OptimizationStrategyId | PlannedOptimizationStrategyId
+>;
 
 export interface OptimizationStrategySelectProps {
   agentName?: string;
   /** Returns to the studies table. */
   onBack: () => void;
-  /** Fired as soon as the user picks a strategy. */
+  /** Fired as soon as the user picks a strategy. Disabled tiles never fire it. */
   onSelect: (strategy: OptimizationStrategyId) => void;
 }
