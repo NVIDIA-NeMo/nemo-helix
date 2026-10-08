@@ -24,6 +24,10 @@ import { z } from 'zod';
 export const ERROR_NO_TOOL_CALL =
   'The model replied without drafting a config. Try again, or pick a model with tool-calling support.';
 
+/** A retry would hit the same output limit, so this is shown rather than retried. */
+export const ERROR_TRUNCATED =
+  'The model ran out of output tokens before finishing the draft. Try again, or pick a drafting model with a larger output limit.';
+
 export const ERROR_INPUTS_NOT_READY =
   "Studio hasn't finished reading the base model or dataset. Pick them again, then draft.";
 
@@ -123,6 +127,12 @@ export const useDescribeWithAi = (
           })) as ChatCompletion;
           if (run.signal.aborted) return;
 
+          // Cut off mid-reply, the tool call's JSON is incomplete and would fail as "not
+          // valid JSON" on every retry.
+          if (response.choices[0]?.finish_reason === 'length') {
+            setValidation({ status: 'invalid', errors: [ERROR_TRUNCATED] });
+            return;
+          }
           const toolCall = response.choices[0]?.message?.tool_calls?.[0];
           if (!toolCall || toolCall.type !== 'function') {
             setValidation({ status: 'invalid', errors: [ERROR_NO_TOOL_CALL] });
