@@ -121,6 +121,9 @@ const mockAgents = (workspace: unknown) => {
 export const handlers = [
   // Platform readiness probe gating the whole app (HelixGuard)
   http.get(`${PLATFORM_BASE_URL}/health/ready`, () => HttpResponse.json({ status: 'ready' })),
+  http.get(`${PLATFORM_BASE_URL}/apis/auth/discovery`, () =>
+    HttpResponse.json({ auth_enabled: false, oidc: null })
+  ),
 
   ...sampleDatasetsHandlers,
 
