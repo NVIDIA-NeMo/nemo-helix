@@ -18058,9 +18058,9 @@ components:
       title: ParetoConfig
       description: "Default X/Y metrics for a group's cost-vs-accuracy Pareto view.\n\
         \nMetric ids use the same vocabulary as the evaluations list sort/filter fields\
-        \ \u2014 ``cost_usd``,\n``latency_ms``, or ``evaluators.<name>``. Defaults\
-        \ to cost (x) vs latency (y): both exist for\nevery group, so the chart always\
-        \ has something to render before anyone customizes it."
+        \ \u2014 ``cost_usd``,\n``latency_ms``, ``tokens``, or ``evaluators.<name>``.\
+        \ Defaults to cost (x) vs latency (y): both exist for\nevery group, so the\
+        \ chart always has something to render before anyone customizes it."
     PatronusEvaluateApiParams:
       properties:
         success_strategy:
