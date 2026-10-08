@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -36,6 +37,7 @@ from nemo_evals.shared.metric_bundles.bundles import (
     unbundle_metric,
 )
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evals.tasks.evaluate import main as evaluate_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -610,6 +612,45 @@ async def test_evaluate_job_resolves_metric_model_refs_before_sdk_run(
     payload = _load_artifact_payload(run_result)
     assert payload["aggregate_scores"]["scores"][0]["name"] == "llm-judge.quality"
     assert payload["aggregate_scores"]["scores"][0]["mean"] == 1.0
+
+
+async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
+    mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Embedded auth resolves over loopback; the spec must carry the service URL, inline judges as written."""
+    route = "/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
+    monkeypatch.delenv("NEMO_INTERNAL_BASE_URL", raising=False)
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api:8080")
+    entity = SimpleNamespace(workspace="default", name="judge", model_providers=[])
+    mocker.patch.object(
+        AsyncModelsClient, "get_model", AsyncMock(return_value=mocker.Mock(data=mocker.Mock(return_value=entity)))
+    )
+    inline_judge = LLMJudgeMetric(
+        model=Model(url=f"http://localhost:9000{route}", name="sidecar"),
+        scores=[RangeScore(name="fluency", minimum=0, maximum=1, parser=JSONScoreParser(json_path="fluency"))],
+    )
+
+    spec = await EvaluateJob.to_spec(
+        EvaluateInputSpec.model_validate(
+            {
+                "metrics": [
+                    bundle_metric(metric, InlineMetricBundlePackager()).model_dump(mode="json")
+                    for metric in (_llm_judge_ref_metric(), inline_judge)
+                ],
+                "dataset": [{"output_text": "hello"}],
+            }
+        ),
+        workspace="default",
+        entity_client=object(),
+        async_sdk=AsyncNemoClient(
+            base_url="http://localhost:8080", workspace="default", http_client=AsyncMock(spec=httpx.AsyncClient)
+        ),
+        is_local=False,
+    )
+
+    assert isinstance(spec, EvaluateSpec)
+    judge_urls = [metric.payload.model_dump()["metric"]["model"]["url"] for metric in spec.metrics]
+    assert judge_urls == [f"http://nemo-api:8080{route}", f"http://localhost:9000{route}"]
 
 
 async def test_evaluate_job_compile_produces_cpu_task_step() -> None:
