@@ -16,6 +16,9 @@ outputs:
   deps:
     description: "'true' if any dependency-related files changed"
     value: ${{ steps.filter.outputs.deps }}
+  agents-nooa:
+    description: "'true' if NOOA adapter integration code or tests changed"
+    value: ${{ steps.filter.outputs.agents-nooa }}
   fabric:
     description: "'true' if the Fabric agent-eval runtime, its tests, or its dependency extra changed"
     value: ${{ steps.filter.outputs.fabric }}
@@ -111,6 +114,14 @@ runs:
             - 'tools/common/**'
             - 'tools/osv-scanner/**'
             - 'tools/python/**'
+          agents-nooa:
+            - 'plugins/nemo-agents/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nemo_helix/pyproject.toml'
+            - 'conftest.py'
+            - 'pytest.ini'
+            - '.github/workflows/ci.yaml'
+            - '.github/actions/changes/action.yaml'
           fabric:
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/runtimes/fabric/**'
             - 'packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/**'

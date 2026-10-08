@@ -161,6 +161,27 @@ export `ADAPTER_PYTHON` before starting NeMo Helix, or restart NeMo Helix after
 exporting it. The NeMo Helix service launches the agent subprocess, so exporting
 `ADAPTER_PYTHON` only in the later CLI shell is not enough.
 
+### NOOA
+
+Use Python 3.12 or 3.13 and install the NOOA harness:
+
+```bash
+uv sync --package nemo-agents-plugin --extra nooa --python 3.13
+export NVIDIA_API_KEY="<your NVIDIA API key>"
+```
+
+Use [agent-nooa-coding.yaml](agent-nooa-coding.yaml) for CodingAgent or
+[agent-nooa-bench.yaml](agent-nooa-bench.yaml) for BenchAgent with the invoke
+commands above. Both examples call the NVIDIA model endpoint directly.
+
+CodingAgent selects `workflow.target_id: nvidia.nooa.coding-agent`; BenchAgent
+selects `kind: nooa-bench-agent` under `harnesses`. A config uses either
+`workflow` or `default_harness` with `harnesses`, not both. Workflow models go
+under `models.default` and target options under `workflow.settings`.
+
+Helix enables Relay for streaming and sessions. Generated containers install the
+NOOA extra and require Python 3.12 or 3.13.
+
 ### Remote Agent
 
 Use [agent-remote.yaml](agent-remote.yaml) to connect to a running agent; no

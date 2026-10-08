@@ -68,7 +68,7 @@ def is_plugin_managed(path: Path) -> bool:
     return first_line[0] in (DOCKERFILE_SENTINEL, DOCKERIGNORE_SENTINEL)
 
 
-def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool, bool]:
+def resolve_fabric_harness_install(agent_config: Path, *, python_version: str | None = None) -> tuple[str, bool, bool]:
     """Return the Platform extra, Hermes isolation flag, and Pi (Node) harness flag."""
     try:
         payload = yaml.safe_load(agent_config.read_text(encoding="utf-8"))
@@ -77,19 +77,32 @@ def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool, bool]
     if not isinstance(payload, Mapping):
         return "nemo-agents-plugin", False, False
 
-    harnesses = payload.get("harnesses")
-    default_harness = payload.get("default_harness")
-    selected = (
-        harnesses.get(default_harness) if isinstance(harnesses, Mapping) and isinstance(default_harness, str) else None
-    )
-    kind = selected.get("kind") if isinstance(selected, Mapping) else None
-    if not isinstance(kind, str):
-        return "nemo-agents-plugin", False, False
-    return (
-        _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin"),
-        kind in _HERMES_HARNESS_KINDS,
-        kind in _PI_HARNESS_KINDS,
-    )
+    workflow = payload.get("workflow")
+    if isinstance(workflow, Mapping):
+        target_id = workflow.get("target_id")
+        if not isinstance(target_id, str):
+            return "nemo-agents-plugin", False, False
+        platform_extra = _FABRIC_WORKFLOW_INSTALLS.get(target_id, "nemo-agents-plugin")
+        install_hermes = False
+        install_pi = False
+    else:
+        harnesses = payload.get("harnesses")
+        default_harness = payload.get("default_harness")
+        selected = (
+            harnesses.get(default_harness)
+            if isinstance(harnesses, Mapping) and isinstance(default_harness, str)
+            else None
+        )
+        kind = selected.get("kind") if isinstance(selected, Mapping) else None
+        if not isinstance(kind, str):
+            return "nemo-agents-plugin", False, False
+        platform_extra = _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin")
+        install_hermes = kind in _HERMES_HARNESS_KINDS
+        install_pi = kind in _PI_HARNESS_KINDS
+    if python_version is not None and platform_extra == "nemo-agents-plugin-nooa":
+        if re.fullmatch(r"3\.(12|13)(?:\.\d+)?", python_version) is None:
+            raise ValueError(f"NOOA requires Python 3.12 or 3.13; got {python_version!r}. Set --python-version 3.13.")
+    return platform_extra, install_hermes, install_pi
 
 
 # -- Defaults ---------------------------------------------------------------
@@ -168,7 +181,13 @@ _FABRIC_HARNESS_INSTALLS = {
     "codex": "nemo-agents-plugin-codex",
     "nvidia.fabric.codex": "nemo-agents-plugin-codex",
     "deepagents": "nemo-agents-plugin-deepagents",
+    "nooa-bench-agent": "nemo-agents-plugin-nooa",
+    "nvidia.fabric.nooa.bench-agent": "nemo-agents-plugin-nooa",
     "nvidia.fabric.langchain.deepagents": "nemo-agents-plugin-deepagents",
+}
+_FABRIC_WORKFLOW_INSTALLS = {
+    "nvidia.nooa.coding-agent": "nemo-agents-plugin-nooa",
+    "nvidia.nooa.arc-solver": "nemo-agents-plugin-nooa",
 }
 _HERMES_HARNESS_KINDS = {"hermes", "nvidia.fabric.hermes"}
 _PI_HARNESS_KINDS = {"pi", "nvidia.fabric.pi"}
@@ -800,7 +819,9 @@ def render_fabric_dockerfile(
         shared.contract_version,
         pins_contract_version=template_path is None and not wheel_filename,
     )
-    platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(agent_config)
+    platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(
+        agent_config, python_version=shared.python_version
+    )
     params = FabricRenderParams(
         **{f.name: getattr(shared, f.name) for f in fields(shared)},
         wheel_filename=wheel_filename,

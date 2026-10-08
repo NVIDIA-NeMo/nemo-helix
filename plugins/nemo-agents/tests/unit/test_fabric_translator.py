@@ -760,3 +760,55 @@ def test_auto_wired_intake_telemetry_translates_to_a_relay_http_storage() -> Non
     # Relay identifies the trajectory by these; both come from the agent config.
     assert atif.agent_name == payload["name"]
     assert atif.model_name
+
+
+@pytest.mark.parametrize("target_id", ["nvidia.nooa.coding-agent", "com.example.workflow"])
+def test_workflow_reuses_shared_config_translation(target_id: str) -> None:
+    payload = _example_yaml_config()
+    payload["default_harness"] = "codex"
+    payload["telemetry"]["enabled"] = True
+    harness_config = translate_agent_config(AgentConfig.model_validate(payload))
+    del payload["default_harness"]
+    del payload["harnesses"]
+    payload["workflow"] = {"target_id": target_id, "settings": {"limit": 3}}
+
+    workflow_config = translate_agent_config(AgentConfig.model_validate(payload))
+
+    assert workflow_config.harness is None
+    assert workflow_config.workflow is not None
+    assert workflow_config.workflow.target_id == target_id
+    assert workflow_config.workflow.settings == {"limit": 3}
+    shared_fields = {"harness", "workflow"}
+    assert workflow_config.model_dump(exclude=shared_fields) == harness_config.model_dump(exclude=shared_fields)
+
+
+def test_workflow_rejects_harness_override() -> None:
+    config = AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "workflow-agent",
+            "workflow": {"target_id": "nvidia.nooa.coding-agent"},
+        }
+    )
+    with pytest.raises(FabricTranslationError, match="harness override"):
+        translate_agent_config(config, harness_name="codex")
+    with pytest.raises(FabricTranslationError, match="Workflow requires models.default"):
+        translate_agent_config(config)
+
+
+@pytest.mark.parametrize("kind", ["nooa-bench-agent", "nvidia.fabric.nooa.bench-agent"])
+def test_nooa_bench_harness_selection(kind: str) -> None:
+    config = AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "nooa-bench",
+            "default_harness": "bench",
+            "harnesses": {"bench": {"kind": kind}},
+            "models": {"default": {"provider": "openai", "model": "test-model"}},
+        }
+    )
+    translated = translate_agent_config(config)
+    assert translated.workflow is None
+    assert translated.harness is not None
+    assert translated.harness.adapter_id == "nvidia.fabric.nooa.bench-agent"
+    assert translated.harness.resolution == "preinstalled"
