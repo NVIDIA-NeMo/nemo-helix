@@ -82,6 +82,9 @@ typecheck = ["transformers>=5.5.0,<5.9.0"]
 # without it neither the plugin nor psycopg is importable there.
 scaled-evals = [
   "nemo-scaled-evals-plugin",
+  # The OpenSandbox server version the plugin's server extension is tested against;
+  # must match the server image deployed from k8s/helm/examples/opensandbox.
+  "opensandbox-server==0.2.1",
 ]
 dev = [
   "pre-commit>=3.8.0",
