@@ -10,8 +10,8 @@ export type StartOptionId = 'ai' | 'template' | 'scratch';
 export type StartOption = SharedStartOption<StartOptionId>;
 
 /**
- * What the user confirmed via the Continue footer. Every arm but "scratch" resolves to
- * concrete form values, so the route never has to know how they were produced.
+ * How the user chose to start. Every arm but "scratch" resolves to concrete form values,
+ * so the route never has to know how they were produced.
  */
 export type StartSelection =
   | { optionId: 'scratch' }
@@ -20,7 +20,7 @@ export type StartSelection =
 export interface CreateCustomizationStartProps {
   /** Workspace the template option provisions into and the AI option drafts against. */
   workspace: string;
-  /** Fired when the user confirms a selected start option via the Continue footer. */
+  /** Fired once a way in is chosen and, for templates and AI, its form values are ready. */
   onContinue: (selection: StartSelection) => void;
 }
 

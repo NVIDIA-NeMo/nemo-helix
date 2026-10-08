@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block, Divider, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
-import { StartFooter } from '@studio/components/StartOptions/StartFooter';
 import { StartOptionCards } from '@studio/components/StartOptions/StartOptionCards';
 import { CONTENT_WIDTH } from '@studio/components/StartOptions/tile';
 import type { StartPageProps } from '@studio/components/StartOptions/types';
 import type { FC } from 'react';
 
 /**
- * Pick a way in from the stacked cards, fill in whatever that way needs in the panel
- * below, then Continue. The panel is the caller's: only it knows what its options mean.
+ * The ways in, stacked, with the selected one's panel below. A card acts on click: the
+ * caller decides whether that continues, opens the option's own view, or shows its panel.
  */
 export const StartPage: FC<StartPageProps> = ({
   heading,
@@ -20,12 +19,6 @@ export const StartPage: FC<StartPageProps> = ({
   onChange,
   disabled,
   slotDetail,
-  continueLabel,
-  continueLoading,
-  canContinue,
-  onContinue,
-  blockedHint,
-  slotFooterStart,
   slotBanner,
 }) => (
   <Stack className="h-full">
@@ -56,14 +49,5 @@ export const StartPage: FC<StartPageProps> = ({
         <Stack className={CONTENT_WIDTH}>{slotDetail}</Stack>
       </Flex>
     </Block>
-
-    <StartFooter
-      continueLabel={continueLabel}
-      continueLoading={continueLoading}
-      canContinue={canContinue}
-      onContinue={onContinue}
-      blockedHint={blockedHint}
-      slotFooterStart={slotFooterStart}
-    />
   </Stack>
 );

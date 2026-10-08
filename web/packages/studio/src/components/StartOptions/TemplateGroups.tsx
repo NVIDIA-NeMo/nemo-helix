@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
-import { RadioGroupRoot, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
+import { RadioGroupRoot, Skeleton, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   TILE_DESCRIPTION_KIND,
   TILE_LABEL_KIND,
@@ -15,15 +15,18 @@ import type { FC } from 'react';
 const PLACEHOLDER_TILES = 2;
 
 /**
- * The recipes behind the "start from a template" option, grouped by section.
+ * The recipes behind the "start from a template" option, grouped by section. Picking one
+ * acts on it; while it is being acted on, its card shows progress in place of its icon and
+ * description.
  *
  * Its own radio group: the option cards above choose a way in, these choose which recipe,
  * and one group spanning both would make picking a recipe clear the option that revealed it.
  */
 export const TemplateGroups: FC<TemplateGroupsProps> = ({
   groups,
-  value,
-  onChange,
+  onSelect,
+  pendingId = null,
+  pendingLabel,
   disabled = false,
 }) => {
   const shown = groups.filter((group) => group.loading || group.templates.length > 0);
@@ -34,8 +37,8 @@ export const TemplateGroups: FC<TemplateGroupsProps> = ({
     <RadioGroupRoot
       name="start-template"
       aria-label="Templates"
-      value={value ?? ''}
-      onValueChange={onChange}
+      value={pendingId ?? ''}
+      onValueChange={onSelect}
       disabled={disabled}
       className="w-full"
     >
@@ -60,19 +63,37 @@ export const TemplateGroups: FC<TemplateGroupsProps> = ({
                     />
                   ))
                 : group.templates.map((template) => (
-                    <RadioCard
-                      key={template.id}
-                      value={template.id}
-                      label={template.name}
-                      description={template.description}
-                      icon={<template.icon size={16} color={group.accent} aria-hidden />}
-                      compact
-                      labelKind={TILE_LABEL_KIND}
-                      descriptionKind={TILE_DESCRIPTION_KIND}
-                      showIndicator={false}
-                      className={TILE_RADIUS}
-                      disabled={disabled}
-                    />
+                    // The action is a sibling laid over the card, not inside it: the card
+                    // is one click target, and may not hold another.
+                    <div key={template.id} className="relative">
+                      <RadioCard
+                        value={template.id}
+                        label={template.name}
+                        description={
+                          template.id === pendingId ? (
+                            <span role="status">{pendingLabel}</span>
+                          ) : (
+                            template.description
+                          )
+                        }
+                        icon={
+                          template.id === pendingId ? (
+                            <Spinner size="small" aria-label={pendingLabel ?? 'Setting up'} />
+                          ) : (
+                            <template.icon size={16} color={group.accent} aria-hidden />
+                          )
+                        }
+                        compact
+                        labelKind={TILE_LABEL_KIND}
+                        descriptionKind={TILE_DESCRIPTION_KIND}
+                        showIndicator={false}
+                        className={`${TILE_RADIUS} ${template.action ? '[&_.nv-card-content]:pr-10!' : ''}`}
+                        disabled={disabled}
+                      />
+                      {template.action ? (
+                        <div className="absolute right-2 top-2">{template.action}</div>
+                      ) : null}
+                    </div>
                   ))}
             </div>
           </Stack>

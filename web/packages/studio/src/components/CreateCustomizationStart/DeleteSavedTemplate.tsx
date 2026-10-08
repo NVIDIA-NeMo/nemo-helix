@@ -13,13 +13,14 @@ interface Props {
   template: CustomizationJobTemplate;
   /** Called once the delete lands, so the list can refetch. */
   onDeleted: () => void;
+  disabled?: boolean;
 }
 
 /**
- * Deletes the selected saved template, from the page footer rather than the card: an
- * interactive Card is a single click target and may not carry its own buttons.
+ * Deletes a saved template from a trash icon laid over its card, after a confirmation. The
+ * card itself starts a job from the template, so this stays a separate control.
  */
-export const DeleteSavedTemplate: FC<Props> = ({ workspace, template, onDeleted }) => {
+export const DeleteSavedTemplate: FC<Props> = ({ workspace, template, onDeleted, disabled }) => {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { mutateAsync: deleteTemplate, isPending } = useCustomizationDeleteJobTemplate();
@@ -43,13 +44,16 @@ export const DeleteSavedTemplate: FC<Props> = ({ workspace, template, onDeleted 
       <Button
         kind="tertiary"
         color="danger"
+        size="small"
+        aria-label={`Delete ${name}`}
+        title="Delete template"
+        disabled={disabled}
         onClick={() => {
           setError(null);
           setConfirming(true);
         }}
       >
         <Trash2 size={16} aria-hidden />
-        Delete
       </Button>
 
       <Modal

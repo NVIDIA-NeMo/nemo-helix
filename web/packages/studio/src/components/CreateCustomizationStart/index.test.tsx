@@ -70,7 +70,6 @@ const provisionSelectedTemplate = async (onContinue: Mock) => {
   const user = userEvent.setup();
   renderStart(onContinue);
   await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-  await user.click(continueButton());
 };
 
 describe('CreateCustomizationStart', () => {
@@ -90,25 +89,9 @@ describe('CreateCustomizationStart', () => {
     }
   });
 
-  it('keeps Continue disabled until something is picked', async () => {
-    const user = userEvent.setup();
+  it('acts on a tile click, with no Continue footer', () => {
     renderStart();
-    expect(continueButton()).toBeDisabled();
-
-    await user.click(screen.getByText('Build from scratch'));
-    expect(continueButton()).toBeEnabled();
-  });
-
-  it('opens on the template rung, and waits for a recipe', async () => {
-    const user = userEvent.setup();
-    renderStart();
-
-    expect(screen.getByRole('radio', { name: 'Start from a template' })).toBeChecked();
-    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
-    expect(screen.getByText('Pick a recipe to continue.')).toBeInTheDocument();
-
-    await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-    expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
   });
 
   it('hands "from scratch" over without any form values', async () => {
@@ -116,8 +99,7 @@ describe('CreateCustomizationStart', () => {
     const onContinue = vi.fn();
     renderStart(onContinue);
 
-    await user.click(screen.getByText('Build from scratch'));
-    await user.click(continueButton());
+    await user.click(screen.getByRole('radio', { name: /Build from scratch/ }));
 
     expect(onContinue).toHaveBeenCalledWith({ optionId: 'scratch' });
   });
@@ -132,10 +114,11 @@ describe('CreateCustomizationStart', () => {
       return user;
     };
 
-    it('keeps Continue disabled until a draft passes the checks', async () => {
+    it('opens on its own page, with Continue held until a draft passes the checks', async () => {
       await openAi();
 
       expect(screen.getByText('Training dataset')).toBeInTheDocument();
+      expect(screen.queryByText(CUSTOMIZATION_TEMPLATES[0].title)).not.toBeInTheDocument();
       expect(continueButton()).toBeDisabled();
       expect(
         screen.getByText('Draft settings that pass the checks to continue.')
@@ -169,6 +152,13 @@ describe('CreateCustomizationStart', () => {
       expect(screen.queryByText('nv-embedqa-e5')).not.toBeInTheDocument();
     });
 
+    it('goes back to the options', async () => {
+      const user = await openAi();
+      await user.click(screen.getByRole('button', { name: 'Back' }));
+
+      expect(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title)).toBeInTheDocument();
+    });
+
     it('drafts from the goal box with Cmd/Ctrl+Enter', async () => {
       const user = await openAi();
       await user.click(screen.getByRole('textbox', { name: /goal of this fine-tune/i }));
@@ -179,21 +169,12 @@ describe('CreateCustomizationStart', () => {
   });
 
   describe('templates', () => {
-    it('arms Continue as soon as a recipe is picked', async () => {
-      const user = userEvent.setup();
-      renderStart();
-
-      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-      expect(continueButton()).toBeEnabled();
-    });
-
     it('provisions the recipe and hands over the form values it produced', async () => {
       const user = userEvent.setup();
       const onContinue = vi.fn();
       renderStart(onContinue);
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-      await user.click(continueButton());
 
       await waitFor(
         () =>
@@ -213,7 +194,6 @@ describe('CreateCustomizationStart', () => {
       renderStart();
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-      await user.click(continueButton());
 
       const { dataset } = CUSTOMIZATION_TEMPLATES[0];
       await waitFor(() =>
@@ -255,9 +235,7 @@ describe('CreateCustomizationStart', () => {
       const onContinue = vi.fn();
       const { unmount } = renderStart(onContinue);
 
-      await user.click(screen.getByText('Start from a template'));
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-      await user.click(continueButton());
 
       // Leave only once setup is genuinely in flight, blocked on the dataset read.
       await waitFor(() => expect(rowsOptions).toHaveBeenCalled());
@@ -275,10 +253,30 @@ describe('CreateCustomizationStart', () => {
       renderStart(onContinue);
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-      await user.click(continueButton());
 
       expect(await screen.findByText(/No dataset file matched/i)).toBeInTheDocument();
       expect(onContinue).not.toHaveBeenCalled();
+    });
+
+    it('unlocks the recipe after a failed setup, so it can be tried again', async () => {
+      serveRows(() => Promise.reject(new Error('No dataset file matched the recipe pattern.')));
+      const user = userEvent.setup();
+      const onContinue = vi.fn();
+      renderStart(onContinue);
+
+      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await screen.findByText(/No dataset file matched/i);
+
+      serveDefaultRows();
+      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+
+      await waitFor(
+        () =>
+          expect(onContinue).toHaveBeenCalledWith(
+            expect.objectContaining({ optionId: 'template' })
+          ),
+        { timeout: 10_000 }
+      );
     });
 
     /**
@@ -316,14 +314,14 @@ describe('CreateCustomizationStart', () => {
     });
 
     /**
-     * Provisioning takes long enough that the cards stay on screen behind a disabled
-     * Continue. Changing the selection mid-flight used to leave the finished setup handing
-     * the form a recipe the user had moved off.
+     * Provisioning takes long enough that the tiles stay on screen while it runs. Acting
+     * on another one mid-flight would leave the finished setup handing the form a recipe
+     * the user had moved off.
      *
      * The mocked read would otherwise resolve before a click could land, so the response is
      * held open to make the in-flight window real rather than a race.
      */
-    it('ignores clicks on the option cards while setup is running', async () => {
+    it('ignores clicks on the tiles while setup is running', async () => {
       let releaseRows: () => void = () => {};
       const held = new Promise<void>((resolve) => {
         releaseRows = resolve;
@@ -338,9 +336,10 @@ describe('CreateCustomizationStart', () => {
       renderStart(onContinue);
 
       await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-      await user.click(continueButton());
 
-      // Setup is now parked on the held read. The cards are still mounted and clickable.
+      // Setup is now parked on the held read: the tile says so, and every tile waits.
+      expect(await screen.findByRole('status')).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /Build from scratch/ })).toBeDisabled();
       await user.click(screen.getByText('Build from scratch'));
       expect(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title)).toBeInTheDocument();
 
@@ -396,7 +395,6 @@ describe('CreateCustomizationStart', () => {
       renderStart(onContinue);
 
       await user.click(await screen.findByText('my-sft-recipe'));
-      await user.click(screen.getByRole('button', { name: /continue/i }));
 
       await waitFor(() =>
         expect(onContinue).toHaveBeenCalledWith(expect.objectContaining({ optionId: 'template' }))
@@ -405,28 +403,40 @@ describe('CreateCustomizationStart', () => {
       expect(selection.initialValues.automodel.model).toBe(`${DEFAULT_WORKSPACE}/base-model`);
     });
 
-    it('offers Delete only once a saved template is picked', async () => {
+    it('deletes a saved template from its tile, after confirming, without starting from it', async () => {
       serveSaved([SAVED]);
+      const user = userEvent.setup();
+      const onContinue = vi.fn();
+      renderStart(onContinue);
+
+      await user.click(await screen.findByRole('button', { name: 'Delete my-sft-recipe' }));
+
+      expect(await screen.findByText('Delete my-sft-recipe?')).toBeInTheDocument();
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+
+    it('holds deletes while a recipe is being set up', async () => {
+      serveSaved([SAVED]);
+      serveRows(() => new Promise(() => {}));
       const user = userEvent.setup();
       renderStart();
 
       await screen.findByText('my-sft-recipe');
-      expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
 
-      await user.click(screen.getByText('my-sft-recipe'));
-
-      expect(await screen.findByRole('button', { name: /delete/i })).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Delete my-sft-recipe' })).toBeDisabled()
+      );
     });
 
     it('leaves the curated recipes undeletable', async () => {
       serveSaved([SAVED]);
-      const user = userEvent.setup();
       renderStart();
 
-      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await screen.findByText('my-sft-recipe');
 
-      // Curated recipes are code, not entities.
-      expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+      // Curated recipes are code, not entities: the saved one is the only delete control.
+      expect(screen.getAllByRole('button', { name: /^Delete / })).toHaveLength(1);
     });
 
     it('leaves out a template whose backend the form has no arm for', async () => {

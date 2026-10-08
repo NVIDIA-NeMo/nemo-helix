@@ -3,9 +3,9 @@
 
 import type { Meta, StoryObj } from '@storybook/react';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
+import { StartSubPage } from '@studio/components/StartOptions/StartSubPage';
 import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
 import { Box, LayoutTemplate, Plus, Sparkles } from 'lucide-react';
-import { useState } from 'react';
 
 const meta: Meta<typeof StartPage> = {
   component: StartPage,
@@ -54,49 +54,58 @@ const group = (id: string, title: string, names: string[]) => ({
 });
 
 const GROUPS = [
-  group('a', 'Template Group Title', ['Template Name', 'Template Name', 'Template Name']),
-  group('b', 'Template Group Title', ['Template Name', 'Template Name']),
+  group('a', 'Template Group Title', ['Template One', 'Template Two', 'Template Three']),
+  group('b', 'Template Group Title', ['Template Four', 'Template Five']),
 ];
 
-const Demo = (args: Partial<React.ComponentProps<typeof StartPage>>) => {
-  const [value, setValue] = useState<string>('template');
-  const [templateId, setTemplateId] = useState<string | null>(null);
-  return (
-    <div className="h-screen">
-      <StartPage
-        heading="Page Title"
-        headingDescription="Page Description"
-        options={OPTIONS}
-        value={value}
-        onChange={(next) => {
-          setValue(next);
-          setTemplateId(null);
-        }}
-        canContinue={value !== 'template' || templateId !== null}
-        onContinue={() => undefined}
-        blockedHint={value === 'template' ? 'Pick a recipe to continue.' : undefined}
-        slotDetail={
-          value === 'template' ? (
-            <TemplateGroups groups={GROUPS} value={templateId} onChange={setTemplateId} />
-          ) : null
-        }
-        {...args}
-      />
-    </div>
-  );
-};
+const Demo = ({
+  pendingId = null,
+  ...args
+}: Partial<React.ComponentProps<typeof StartPage>> & { pendingId?: string | null }) => (
+  <div className="h-screen">
+    <StartPage
+      heading="Page Title"
+      headingDescription="Page Description"
+      options={OPTIONS}
+      value="template"
+      onChange={() => undefined}
+      slotDetail={
+        <TemplateGroups
+          groups={GROUPS}
+          onSelect={() => undefined}
+          pendingId={pendingId}
+          pendingLabel="Registering model…"
+          disabled={pendingId !== null}
+        />
+      }
+      disabled={pendingId !== null}
+      {...args}
+    />
+  </div>
+);
 
 type Story = StoryObj<typeof StartPage>;
 
-/** Opens on the template rung, with its recipes revealed below. */
+/** Opens on the template rung, with its recipes below. Every tile acts on click. */
 export const Default: Story = { render: () => <Demo /> };
 
-/** A different rung selected: the recipes give way to that option's own panel. */
-export const OtherOptionSelected: Story = {
-  render: () => <Demo slotDetail={null} value="scratch" canContinue blockedHint={undefined} />,
-};
+/** A recipe being set up: its tile says what is running, and every tile waits. */
+export const SettingUp: Story = { render: () => <Demo pendingId="a-Template One" /> };
 
-/** Locked while the picked entry point is being acted on. */
-export const Working: Story = {
-  render: () => <Demo disabled continueLoading canContinue={false} continueLabel="Setting up…" />,
+/** An option's own step, reached from its tile, with Back and a gated Continue. */
+export const SubPage: StoryObj<typeof StartSubPage> = {
+  render: () => (
+    <div className="h-screen">
+      <StartSubPage
+        heading="Describe with AI"
+        headingDescription="Say what you want in a sentence and start from the draft."
+        onBack={() => undefined}
+        canContinue={false}
+        onContinue={() => undefined}
+        blockedHint="Generate a valid config to continue."
+      >
+        <div>Option content</div>
+      </StartSubPage>
+    </div>
+  ),
 };

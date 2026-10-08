@@ -35,6 +35,8 @@ export interface StartTemplate {
   name: string;
   description: string;
   icon: LucideIcon;
+  /** A control for this template, laid over its card's end rather than inside the card. */
+  action?: ReactNode;
 }
 
 export interface StartTemplateGroup {
@@ -70,7 +72,7 @@ export interface StartFooterProps {
   };
 }
 
-export interface StartPageProps extends StartOptionCardsProps, StartFooterProps {
+export interface StartPageProps extends StartOptionCardsProps {
   heading: string;
   headingDescription: string;
   /** The selected option's own panel, rendered under the cards. */
@@ -79,10 +81,22 @@ export interface StartPageProps extends StartOptionCardsProps, StartFooterProps 
   slotBanner?: ReactNode;
 }
 
+/** A start option's own step, reached from its card, with Back and Continue. */
+export interface StartSubPageProps extends Pick<
+  StartFooterProps,
+  'canContinue' | 'onContinue' | 'blockedHint'
+> {
+  heading: string;
+  headingDescription: string;
+  onBack: () => void;
+  children: ReactNode;
+}
+
 export interface TemplateGroupsProps {
   groups: StartTemplateGroup[];
-  /** The selected template id, independent of which option is selected. */
-  value: string | null;
-  onChange: (value: string) => void;
+  onSelect: (id: string) => void;
+  /** The template being acted on; its card shows `pendingLabel` while the rest wait. */
+  pendingId?: string | null;
+  pendingLabel?: string;
   disabled?: boolean;
 }

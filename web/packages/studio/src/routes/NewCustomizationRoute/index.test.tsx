@@ -33,12 +33,11 @@ describe('NewCustomizationRoute', () => {
     ).toBeInTheDocument();
   });
 
-  it('navigates to /new/scratch when "Build from scratch" is confirmed', async () => {
+  it('navigates to /new/scratch when "Build from scratch" is clicked', async () => {
     const user = userEvent.setup();
     renderRoute();
 
-    await user.click(screen.getByText('Build from scratch'));
-    await user.click(screen.getByRole('button', { name: /continue/i }));
+    await user.click(screen.getByRole('radio', { name: /Build from scratch/ }));
 
     expect((await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).textContent).toBe(
       '/workspaces/default/fine-tune/new/scratch'
