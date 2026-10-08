@@ -23,6 +23,7 @@ import {
   FormField,
   SelectContent,
   SelectItem,
+  SelectListbox,
   SelectRoot,
   SelectTrigger,
   SidePanel,
@@ -224,17 +225,19 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
             }
           />
           <SelectContent>
-            {filesets.map((f) => {
-              const ref = getEntityReference(f);
-              return (
-                <SelectItem key={ref} value={ref}>
-                  {f.name ?? ''}
-                </SelectItem>
-              );
-            })}
-            <SelectItem className="border-t border-base" value={NEW_DATASET_VALUE}>
-              New Dataset
-            </SelectItem>
+            <SelectListbox>
+              {filesets.map((f) => {
+                const ref = getEntityReference(f);
+                return (
+                  <SelectItem key={ref} value={ref}>
+                    {f.name ?? ''}
+                  </SelectItem>
+                );
+              })}
+              <SelectItem className="border-t border-base" value={NEW_DATASET_VALUE}>
+                New Dataset
+              </SelectItem>
+            </SelectListbox>
           </SelectContent>
         </SelectRoot>
       </FormField>
