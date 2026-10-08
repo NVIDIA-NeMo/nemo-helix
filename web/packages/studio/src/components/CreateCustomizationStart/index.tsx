@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Banner, Stack } from '@nvidia/foundations-react-core';
+import { Banner, Flex, Spinner, Stack } from '@nvidia/foundations-react-core';
 import {
   START_OPTIONS,
   TEMPLATE_GROUP_TITLE,
 } from '@studio/components/CreateCustomizationStart/constants';
 import { DeleteSavedTemplate } from '@studio/components/CreateCustomizationStart/DeleteSavedTemplate';
-import { DescribeWithAiPanel } from '@studio/components/CreateCustomizationStart/DescribeWithAiPanel';
 import type {
   CreateCustomizationStartProps,
   StartOptionId,
@@ -24,7 +23,20 @@ import {
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
 import { Box, Bookmark } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type FC } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FC } from 'react';
+
+// Inlines the customizer skill's references (~75 KB), so it loads only once AI is picked.
+const DescribeWithAiPanel = lazy(() =>
+  import('@studio/components/CreateCustomizationStart/DescribeWithAiPanel').then((module) => ({
+    default: module.DescribeWithAiPanel,
+  }))
+);
+
+const panelFallback = (
+  <Flex align="center" justify="center" className="h-64">
+    <Spinner size="medium" aria-label="Loading..." />
+  </Flex>
+);
 
 /** Namespaces saved-template ids so they cannot collide with a curated recipe's id. */
 const SAVED_PREFIX = 'saved:';
@@ -180,7 +192,9 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       }
       slotDetail={
         selectedId === 'ai' ? (
-          <DescribeWithAiPanel workspace={workspace} onDraft={setDraftValues} />
+          <Suspense fallback={panelFallback}>
+            <DescribeWithAiPanel workspace={workspace} onDraft={setDraftValues} />
+          </Suspense>
         ) : selectedId === 'template' ? (
           <Stack gap="density-2xl" className="w-full">
             <TemplateGroups

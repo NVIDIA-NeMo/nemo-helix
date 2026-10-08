@@ -127,13 +127,15 @@ describe('CreateCustomizationStart', () => {
       const user = userEvent.setup();
       renderStart();
       await user.click(screen.getByRole('radio', { name: /Describe with AI/ }));
+      // The panel loads lazily.
+      await screen.findByText('Training dataset');
       return user;
     };
 
     it('keeps Continue disabled until a draft passes the checks', async () => {
       await openAi();
 
-      expect(screen.getByText('Training dataset')).toBeInTheDocument();
+      expect(await screen.findByText('Training dataset')).toBeInTheDocument();
       expect(continueButton()).toBeDisabled();
       expect(
         screen.getByText('Draft settings that pass the checks to continue.')

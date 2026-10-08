@@ -13,6 +13,7 @@ import {
   type DraftInputs,
   methodsForVariant,
 } from '@studio/components/CreateCustomizationStart/aiDraft';
+import { CustomizationBackend } from '@studio/util/customizationBackend';
 import {
   CUSTOMIZER_SCHEMA_LABELS,
   type CustomizerSchemaVariant,
@@ -39,7 +40,7 @@ export const draftCustomizationJobTool: ChatCompletionTool = {
       properties: {
         backend: {
           type: 'string',
-          enum: ['automodel', 'unsloth', 'rl'],
+          enum: Object.values(CustomizationBackend),
           description: 'Which backend plugin the job is for.',
         },
         job: {
