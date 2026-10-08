@@ -532,7 +532,7 @@ class TestStudioConfigEnvReplacements:
         assert replacements["STUDIO_UI_VITE_AUTH_BEARER_TOKEN_SOURCE"] == "id_token"
 
     def test_env_replacements_empty_global_setting_falls_back_to_config_field(self, monkeypatch: pytest.MonkeyPatch):
-        """Test that empty global settings do not block StudioConfig field fallback."""
+        """Empty global settings do not block an explicit StudioConfig field override."""
         mock_settings = {"studio": {"platform_base_url": ""}}
         from nhx.common import config as common_config
 
@@ -542,6 +542,18 @@ class TestStudioConfigEnvReplacements:
         replacements = config.env_replacements
 
         assert replacements["STUDIO_UI_VITE_PLATFORM_BASE_URL"] == "http://fallback.example.com"
+
+    def test_env_replacements_empty_platform_base_url_stays_empty(self, monkeypatch: pytest.MonkeyPatch):
+        """An explicit empty studio.platform_base_url is published as same-origin."""
+        mock_settings = {"studio": {"platform_base_url": ""}}
+        from nhx.common import config as common_config
+
+        monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: mock_settings)
+
+        config = StudioConfig()
+        replacements = config.env_replacements
+
+        assert replacements["STUDIO_UI_VITE_PLATFORM_BASE_URL"] == ""
 
     def test_env_replacements_is_cached(self, monkeypatch: pytest.MonkeyPatch):
         """Test that env_replacements is cached and not recomputed."""
@@ -566,8 +578,8 @@ class TestStudioConfigEnvReplacements:
         # Should only have called get_global_settings_from_env once (during first access)
         assert call_count == 1
 
-    def test_platform_base_url_falls_back_to_platform_base_url(self, monkeypatch: pytest.MonkeyPatch):
-        """When studio.platform_base_url is blank, platform.base_url is used."""
+    def test_platform_base_url_does_not_fall_back_to_platform_base_url(self, monkeypatch: pytest.MonkeyPatch):
+        """The browser-facing Studio URL must not inherit the in-cluster platform.base_url."""
         mock_settings = {
             "platform": {"base_url": "http://0.0.0.0:8080"},
             "studio": {},
@@ -579,7 +591,7 @@ class TestStudioConfigEnvReplacements:
         config = StudioConfig()
         replacements = config.env_replacements
 
-        assert replacements["STUDIO_UI_VITE_PLATFORM_BASE_URL"] == "http://0.0.0.0:8080"
+        assert replacements["STUDIO_UI_VITE_PLATFORM_BASE_URL"] == ""
 
     def test_platform_base_url_studio_value_takes_precedence(self, monkeypatch: pytest.MonkeyPatch):
         """An explicit studio.platform_base_url wins over the platform-level fallback."""

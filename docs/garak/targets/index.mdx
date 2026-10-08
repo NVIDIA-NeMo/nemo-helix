@@ -27,9 +27,12 @@ See [Target Schema](/documentation/vulnerability-scanning/targets/schema) for th
 Audit a NIM (or any OpenAI-compatible chat endpoint) routed through a NeMo Helix provider:
 
 ```python
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+
 # List providers registered in your deployment and pick one.
-providers = client.inference.providers.list(workspace="default")
-for provider in providers.data:
+for provider in client.models.list_providers(workspace="default").items():
     print(provider.name, provider.host_url)
 ```
 

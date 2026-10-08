@@ -54,6 +54,7 @@ Instantiate the platform client.
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
 client = NemoClient.from_config()
@@ -121,7 +122,7 @@ nemo inference virtual-models create guarded-injection-detect \
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.create_virtual_model(
+VirtualModelsClient.from_client(client).create_virtual_model(
     body=CreateVirtualModelRequest(
         name="guarded-injection-detect",
         default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -257,7 +258,7 @@ inline_rules_config = client.guardrail.create_guardrail_config(
 Create a VirtualModel for the inline config:
 
 ```python
-client.inference.virtual_models.create_virtual_model(
+VirtualModelsClient.from_client(client).create_virtual_model(
     body=CreateVirtualModelRequest(
         name="guarded-injection-inline",
         default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -310,10 +311,10 @@ print(response.model_dump_json(indent=2))
 ## Cleanup
 
 ```python
-client.inference.virtual_models.delete_virtual_model(name="guarded-injection-detect")
+VirtualModelsClient.from_client(client).delete_virtual_model(name="guarded-injection-detect")
 client.guardrail.delete_guardrail_config(name=config_name)
 # Uncomment if Optional section was run:
-# client.inference.virtual_models.delete_virtual_model(name="guarded-injection-inline")
+# VirtualModelsClient.from_client(client).delete_virtual_model(name="guarded-injection-inline")
 # client.guardrail.delete_guardrail_config(name="injection-detection-inline-config")
 print("Cleanup complete")
 ```

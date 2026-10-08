@@ -16,7 +16,7 @@ Prefer the form that's most natural for the caller:
 
 - **CLI**: `--filter.<field>` dot flags for simple cases → `--filter '<text>'` when you need operators/boolean logic → `--filter '<json>'` for complex nested queries.
 - **REST URL**: `?filter[field][$op]=value` bracket notation → JSON blob (`?filter={...}` URL-encoded) → text syntax (readable but requires URL-encoding spaces and quotes).
-- **SDK**: JSON dicts on typed endpoints; text or JSON strings on endpoints whose `filter` parameter is typed as `str` (`client.projects.list`, `client.workspaces.list`, `client.entities.list`).
+- **SDK**: pass `filter` inside the endpoint's `query_params` TypedDict. Most list endpoints type it as `str` (text or JSON, use `json.dumps` for dicts); `client.jobs.list_jobs` also accepts a JSON dict directly.
 
 ## Filter syntaxes
 
@@ -63,7 +63,20 @@ nemo files filesets list --filter 'purpose:"dataset" AND created_at>"2025-01-01"
 ```
 
 ```python
-projects = client.projects.list(filter='name~"eval" AND created_at>"2025-01-01"')
+import json
+
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.evals.types import ListMetricsQueryParams
+from nemo_helix_plugin.files.types import ListFilesetsQueryParams
+from nemo_helix_plugin.jobs.types import ListJobsQueryParams
+from nemo_helix_plugin.models.types import ListModelsQueryParams
+from nemo_helix_plugin.projects.types import ListProjectsQueryParams
+
+client = NemoClient.from_config()
+
+projects = client.projects.list_projects(
+    query_params=ListProjectsQueryParams(filter='name~"eval" AND created_at>"2025-01-01"')
+)
 ```
 
 **Text operators:**
@@ -98,31 +111,27 @@ Pass a JSON object to the `filter` parameter. Keys are field names; values are e
 import json
 
 # Exact match
-results = client.files.client.list_filesets(
-    query_params={"filter": json.dumps({"purpose": "dataset"})}
+results = client.files.list_filesets(
+    query_params=ListFilesetsQueryParams(filter=json.dumps({"purpose": "dataset"}))
 )
 
 # Operator syntax
-results = client.files.client.list_filesets(
-    query_params={"filter": json.dumps({"name": {"$like": "training"}})}
+results = client.files.list_filesets(
+    query_params=ListFilesetsQueryParams(filter=json.dumps({"name": {"$like": "training"}}))
 )
 
 # Multiple conditions
-results = client.files.client.list_filesets(
-    query_params={
-        "filter": json.dumps(
-            {"$and": [{"purpose": "dataset"}, {"description": {"$like": "training"}}]}
-        )
-    }
+results = client.files.list_filesets(
+    query_params=ListFilesetsQueryParams(
+        filter=json.dumps({"$and": [{"purpose": "dataset"}, {"description": {"$like": "training"}}]})
+    )
 )
 
 # Date range
-results = client.files.client.list_filesets(
-    query_params={
-        "filter": json.dumps(
-            {"created_at": {"$gte": "2025-01-01T00:00:00", "$lte": "2025-06-30T23:59:59"}}
-        )
-    }
+results = client.files.list_filesets(
+    query_params=ListFilesetsQueryParams(
+        filter=json.dumps({"created_at": {"$gte": "2025-01-01T00:00:00", "$lte": "2025-06-30T23:59:59"}})
+    )
 )
 ```
 
@@ -130,8 +139,8 @@ When a bare value is provided (without an operator object), it defaults to `$eq`
 
 ```python
 # These are equivalent
-client.files.client.list_filesets(query_params={"filter": json.dumps({"purpose": "dataset"})})
-client.files.client.list_filesets(query_params={"filter": json.dumps({"purpose": {"$eq": "dataset"}})})
+client.files.list_filesets(query_params=ListFilesetsQueryParams(filter='{"purpose": "dataset"}'))
+client.files.list_filesets(query_params=ListFilesetsQueryParams(filter='{"purpose": {"$eq": "dataset"}}'))
 ```
 
 ## Operators reference
@@ -184,12 +193,12 @@ Services often wrap these in named filters that are easier to use. For example, 
 
 ## Nested fields
 
-The API supports filtering on labels via `extra_query` with bracket notation:
+Dotted field names reach into nested objects such as labels:
 
 ```python
 # Filter by a custom label
-benchmarks = client.evaluation.benchmarks.list(
-    extra_query={"filter[labels.eval_category]": "agentic"}
+metrics = client.evals.list_metrics(
+    query_params=ListMetricsQueryParams(filter=json.dumps({"labels.eval_category": "agentic"}))
 )
 ```
 
@@ -204,32 +213,34 @@ The equivalent REST call:
 ### Date range
 
 ```python
-results = client.evaluation.metrics.list(
-    filter={
-        "created_at": {"$gte": "2025-01-01T00:00:00", "$lte": "2025-06-30T23:59:59"}
-    }
+results = client.evals.list_metrics(
+    query_params=ListMetricsQueryParams(
+        filter=json.dumps({"created_at": {"$gte": "2025-01-01T00:00:00", "$lte": "2025-06-30T23:59:59"}})
+    )
 )
 ```
 
 ### Substring match
 
 ```python
-models = client.models.list(filter={"name": {"$like": "llama"}})
+models = client.models.list_models(
+    query_params=ListModelsQueryParams(filter=json.dumps({"name": {"$like": "llama"}}))
+)
 ```
 
 ### Multiple conditions
 
 ```python
-metrics = client.evaluation.metrics.list(
-    filter={"$and": [{"name": {"$like": "bleu"}}, {"type": "llm-as-a-judge"}]}
+metrics = client.evals.list_metrics(
+    query_params=ListMetricsQueryParams(
+        filter=json.dumps({"$and": [{"name": {"$like": "bleu"}}, {"type": "llm-as-a-judge"}]})
+    )
 )
 ```
 
 ### Filtering by status
 
 ```python
-from nemo_helix_plugin.jobs.types import ListJobsQueryParams
-
 jobs = client.jobs.list_jobs(
     workspace="default",
     query_params=ListJobsQueryParams(filter={"source": "customization", "status": "completed"}),

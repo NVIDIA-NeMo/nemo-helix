@@ -18,13 +18,21 @@ Specify the `project` parameter when creating a fileset using the Python SDK or 
 *Creating a Fileset Using the Python SDK and Associating with a Project:*
 
 ```python
-dataset = client.datasets.create(
-    name="sample-basic-test",
-    namespace="default",
-    description="This is an example of a dataset",
-    files_url="hf://datasets/default/sample-basic-test",
-    project="sample_project",
-)
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+
+client = NemoClient.from_config()
+dataset = client.files.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
+        name="sample-basic-test",
+        description="This is an example of a dataset",
+        purpose=FilesetPurpose.DATASET,
+        storage=HuggingfaceStorageConfig(repo_id="default/sample-basic-test", repo_type="dataset"),
+        project="sample_project",
+    ),
+).data()
 ```
 
 *Creating a Dataset Using cURL and Associating with a Project:*

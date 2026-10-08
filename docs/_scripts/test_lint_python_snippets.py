@@ -94,6 +94,50 @@ print("kept")
     ]
 
 
+def test_extract_python_snippets_inlines_fern_markdown_includes(tmp_path: Path) -> None:
+    docs_dir = tmp_path / "docs"
+    snippet_dir = docs_dir / "fern" / "snippets" / "_snippets"
+    snippet_dir.mkdir(parents=True)
+    (snippet_dir / "setup.mdx").write_text(
+        """<Tabs>
+```python
+client = object()
+```
+</Tabs>
+""",
+        encoding="utf-8",
+    )
+    page_dir = docs_dir / "guide"
+    page_dir.mkdir()
+    doc = page_dir / "page.mdx"
+    doc.write_text(
+        """# Page
+
+<Markdown src="/snippets/_snippets/setup.mdx" />
+
+```python
+print(client)
+```
+""",
+        encoding="utf-8",
+    )
+
+    snippets = extract_python_snippets(doc)
+
+    assert [(snippet.path, snippet.start_line, snippet.source) for snippet in snippets] == [
+        (doc, 3, "client = object()"),
+        (doc, 6, "print(client)"),
+    ]
+
+
+def test_extract_python_snippets_ignores_unresolvable_include(tmp_path: Path) -> None:
+    doc = tmp_path / "docs" / "page.mdx"
+    doc.parent.mkdir()
+    doc.write_text('<Markdown src="/snippets/missing.mdx" />\n```python\nx = 1\n```\n', encoding="utf-8")
+
+    assert [snippet.source for snippet in extract_python_snippets(doc)] == ["x = 1"]
+
+
 def test_syntax_check_reports_original_doc_line(tmp_path: Path) -> None:
     doc = tmp_path / "page.mdx"
     doc.write_text(

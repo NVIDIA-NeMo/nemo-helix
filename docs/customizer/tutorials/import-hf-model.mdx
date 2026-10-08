@@ -334,7 +334,7 @@ time_check = max_wait_time_checker(3600, "Customization Job")
 
 while True:
     time_check()
-    status = client.jobs.get_status(name=job.job.name, workspace="default")
+    status = client.jobs.get_job_status(name=job.job.name, workspace="default").data()
     clear_output(wait=True)
     print(f"Job status: {status.status}")
 
