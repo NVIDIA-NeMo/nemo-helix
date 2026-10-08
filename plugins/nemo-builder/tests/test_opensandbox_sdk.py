@@ -31,10 +31,19 @@ class _Model(SimpleNamespace):
         return cls(**data)
 
 
+class Unset:
+    """The SDK's marker for a field the response left out."""
+
+
+class PolicyStatusResponse(SimpleNamespace):
+    """What the egress sidecar answers on `GET /policy`."""
+
+
 class FakeSdkSandbox:
     def __init__(self, server: FakeServer) -> None:
         self.id = "sbx-1"
         self.commands = SimpleNamespace(run=self._run)
+        self._egress_service = SimpleNamespace(_client="the sidecar's client")
         self.ran: list[tuple[str, Any, Any]] = []
         self.killed = self.closed = False
         self._server = server
@@ -65,6 +74,14 @@ class FakeServer:
         self.managers_closed = 0
         self.create_fails = self.kill_fails = False
         self.sandbox = FakeSdkSandbox(self)
+        self.policy_reads: list[Any] = []
+        self.policy = SimpleNamespace(
+            status_code=200,
+            parsed=PolicyStatusResponse(
+                enforcement_mode="dns+nft",
+                policy=SimpleNamespace(to_dict=lambda: {"defaultAction": "deny", "egress": [{"action": "allow"}]}),
+            ),
+        )
 
 
 @pytest.fixture
@@ -104,13 +121,20 @@ def sdk(monkeypatch: pytest.MonkeyPatch, server: FakeServer) -> Iterator[ModuleT
                 raise TimeoutError("the sandbox never became ready")
             return server.sandbox
 
+    def read_policy(*, client: Any) -> SimpleNamespace:
+        server.policy_reads.append(client)
+        return server.policy
+
     def module(name: str, **attributes: Any) -> None:
         stand_in = ModuleType(name)
         vars(stand_in).update(attributes)
         monkeypatch.setitem(sys.modules, name, stand_in)
 
-    module("opensandbox")
-    module("opensandbox.models")
+    for package in ("opensandbox", "opensandbox.models", "opensandbox.api", "opensandbox.api.egress"):
+        module(package)
+    module("opensandbox.api.egress.api.policy", get_policy=SimpleNamespace(sync_detailed=read_policy))
+    module("opensandbox.api.egress.models.policy_status_response", PolicyStatusResponse=PolicyStatusResponse)
+    module("opensandbox.api.egress.types", Unset=Unset)
     module("opensandbox.config", ConnectionConfigSync=_Model)
     module("opensandbox.models.execd", RunCommandOpts=_Model)
     module("opensandbox.models.execd_sync", ExecutionHandlersSync=_Model)
@@ -197,6 +221,25 @@ class TestASandbox:
         assert (command, opts.timeout) == ("true", timedelta(seconds=30))
         assert handlers.skip_accumulation is True
         assert output == ["out\n", "err\n"]
+
+    def test_it_reports_its_sidecars_enforcement_mode_with_its_policy(
+        self, sdk: ModuleType, server: FakeServer
+    ) -> None:
+        """SDK 0.1.16's own get_egress_policy drops the mode."""
+        applied = _create(sdk).applied_egress()
+        assert server.policy_reads == ["the sidecar's client"]
+        assert applied.enforcement_mode == "dns+nft"
+        assert applied.policy == _Model(defaultAction="deny", egress=[{"action": "allow"}])
+
+    def test_a_sidecar_that_reports_no_mode_has_none(self, sdk: ModuleType, server: FakeServer) -> None:
+        server.policy.parsed.enforcement_mode = Unset()
+        assert _create(sdk).applied_egress().enforcement_mode is None
+
+    @pytest.mark.parametrize("parsed", ["unauthorized", PolicyStatusResponse(enforcement_mode="dns", policy=Unset())])
+    def test_a_policy_that_cannot_be_read_raises(self, sdk: ModuleType, server: FakeServer, parsed: object) -> None:
+        server.policy = SimpleNamespace(status_code=401, parsed=parsed)
+        with pytest.raises(RuntimeError, match="could not be read: HTTP 401"):
+            _create(sdk).applied_egress()
 
     def test_it_is_closed_even_if_it_cannot_be_killed(self, sdk: ModuleType, server: FakeServer) -> None:
         server.kill_fails = True

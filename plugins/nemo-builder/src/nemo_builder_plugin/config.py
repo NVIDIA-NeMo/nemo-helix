@@ -38,7 +38,8 @@ class SandboxConfig(BaseModel):
         default=None,
         description=(
             "The kaniko image the sandbox runs, built from `docker/Dockerfile.kaniko`, or any with `/kaniko/executor` "
-            "and a shell at `/busybox/sh`. OpenSandbox also needs `/bin/sh`. Unset refuses every submit."
+            "and a shell at `/busybox/sh`. OpenSandbox also needs `/bin/sh` and `/kaniko/nhx-dropcaps`. Unset refuses "
+            "every submit."
         ),
     )
     provider: Literal["kubernetes_pod", "opensandbox"] = Field(
@@ -72,8 +73,9 @@ class SandboxConfig(BaseModel):
         description=(
             "What an OpenSandbox sandbox may reach: names, `*.`-prefixed wildcards, addresses or CIDRs. Everything "
             "else is denied, and so is every private range, the cluster's and the metadata server's included, unless "
-            "an address here is in it. Base images and package indexes must be reachable through it. A plain pod "
-            "sandbox's network is unrestricted."
+            "an address here is in it: a CIDR here is taken out of the denied ranges, so `0.0.0.0/0` would leave no "
+            "IPv4 range denied. Base images and package indexes must be reachable through it. A plain pod sandbox's "
+            "network is unrestricted."
         ),
     )
 

@@ -6,6 +6,7 @@
 # (github.com/chainguard-dev/kaniko), which publishes no images. It has the layout of kaniko's
 # `debug` image that `supervise` relies on: /kaniko/executor, and a shell at /busybox/sh. kaniko
 # replaces the root filesystem as it builds, except /kaniko and volumes, so busybox is a volume.
+# It adds /kaniko/nhx-dropcaps, which the opensandbox provider runs kaniko through (nhx-dropcaps/).
 # It has no registry credential helpers: the sandbox holds no credential.
 
 ARG KANIKO_VERSION=v1.25.19
@@ -24,6 +25,11 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -mod=vendor -tr
       -o /out/kaniko/executor ./cmd/executor \
  && mkdir -p /out/kaniko/.docker /out/kaniko/ssl/certs \
  && cp /etc/ssl/certs/ca-certificates.crt /out/kaniko/ssl/certs/
+
+COPY nhx-dropcaps /nhx-dropcaps
+RUN cd /nhx-dropcaps \
+ && GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w" \
+      -o /out/kaniko/nhx-dropcaps .
 
 FROM busybox:musl@sha256:32b5cdad7cce41dfd53d0ae06baebcf8357a147ee7694dc706911c373bc30c37 AS busybox
 

@@ -29,7 +29,7 @@ _NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 
 def _build_group(provider: SandboxProvider, index: int, group: SandboxGroup) -> int:
-    """Build one group in its own sandbox, and return how many of its images failed.
+    """Build one group's images, and return how many of them failed.
 
     Never raises: a sandbox that can't be created, run or read fails its own images, not the images other
     sandboxes have built.

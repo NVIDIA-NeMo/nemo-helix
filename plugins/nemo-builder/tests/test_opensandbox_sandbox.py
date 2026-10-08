@@ -15,8 +15,11 @@ import pytest
 from kubernetes import client as k8s
 from nemo_builder_plugin.run import opensandbox_sandbox
 from nemo_builder_plugin.run.opensandbox_sandbox import (
+    DROPCAPS,
+    ENFORCEMENT_MODE,
     EXECD_TMPDIR,
     KEEPALIVE,
+    AppliedEgress,
     OpenSandboxProvider,
 )
 from nemo_builder_plugin.run.sandbox import (
@@ -31,33 +34,33 @@ from nemo_builder_plugin.run.supervise import _build_group, _read_api_key
 from nemo_builder_plugin.steps import DEFAULT_EGRESS_ALLOW, ContextSource, SandboxGroup, SandboxImage, SandboxSpec
 from nhx_sandbox import egress
 from nhx_sandbox.egress import EgressPolicy
-from nhx_sandbox.opensandbox_policy import EgressVerificationError
 
 JOB_SUB_PATH = "jobs/default/abc"
 
-#: What the fake sidecar reports: the policy it was given, unless a test says otherwise.
-APPLIED_AS_GIVEN = object()
+#: What a fake egress sidecar reports, from the policy its sandbox was created with.
+Readback = Callable[[EgressPolicy], AppliedEgress]
 
 
-@pytest.fixture(autouse=True)
-def _no_local_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep this machine's nameservers out of the policies these tests build."""
-    monkeypatch.setattr(egress, "local_resolver_addresses", lambda path=None: ())
+def as_given(policy: EgressPolicy, *, mode: str | None = ENFORCEMENT_MODE) -> AppliedEgress:
+    return AppliedEgress(mode, SimpleNamespace(default_action=policy.default_action, egress=list(policy.rules)))
 
 
 class FakeSandbox:
     def __init__(
-        self, results: Mapping[str, int | None], *, fail_on: str | None, destroy_fails: bool, applied: object
+        self,
+        sandbox_id: str,
+        results: Mapping[str, int | None],
+        *,
+        given: EgressPolicy,
+        fail_on: str | None,
+        destroy_fails: bool,
+        applied: Readback | Exception,
     ) -> None:
+        self.id = sandbox_id
         self.commands: list[str] = []
         self.destroyed = False
-        self.given: EgressPolicy | None = None
-        self._results, self._fail_on, self._destroy_fails = results, fail_on, destroy_fails
+        self._results, self._given, self._fail_on, self._destroy_fails = results, given, fail_on, destroy_fails
         self._applied = applied
-
-    @property
-    def id(self) -> str:
-        return "sbx-1"
 
     def run(self, command: str, *, timeout_seconds: int, on_output: Callable[[str], None]) -> int | None:
         assert timeout_seconds > 0
@@ -71,13 +74,10 @@ class FakeSandbox:
         on_output(f"building {image}\nstep 2")
         return self._results.get(image)
 
-    def applied_egress(self) -> object:
+    def applied_egress(self) -> AppliedEgress:
         if isinstance(self._applied, Exception):
             raise self._applied
-        if self._applied is not APPLIED_AS_GIVEN:
-            return self._applied
-        assert self.given is not None
-        return SimpleNamespace(default_action=self.given.default_action, egress=list(self.given.rules))
+        return self._applied(self._given)
 
     def destroy(self) -> None:
         self.destroyed = True
@@ -96,22 +96,35 @@ class FakeApi:
         existing: Mapping[str, str] | None = None,
         kill_fails: bool = False,
         killed_stay: bool = False,
-        applied: object = APPLIED_AS_GIVEN,
+        applied: Readback | Exception = as_given,
     ) -> None:
         self.created: list[dict[str, Any]] = []
+        self.sandboxes: list[FakeSandbox] = []
         self.killed: list[str] = []
-        self.sandbox = FakeSandbox(results or {}, fail_on=fail_on, destroy_fails=destroy_fails, applied=applied)
-        self._create_fails = create_fails
+        self._results, self._create_fails, self._fail_on = results or {}, create_fails, fail_on
+        self._destroy_fails, self._applied = destroy_fails, applied
         #: Each existing sandbox's ID, and the job label it carries.
         self._existing = dict(existing or {})
         self._kill_fails, self._killed_stay = kill_fails, killed_stay
+
+    @property
+    def commands(self) -> list[str]:
+        return [command for sandbox in self.sandboxes for command in sandbox.commands]
 
     def create(self, **kwargs: Any) -> FakeSandbox:
         self.created.append(kwargs)
         if self._create_fails:
             raise TimeoutError("admission refused the pod; the SDK only times out")
-        self.sandbox.given = kwargs["egress"]
-        return self.sandbox
+        sandbox = FakeSandbox(
+            f"sbx-{len(self.sandboxes)}",
+            self._results,
+            given=kwargs["egress"],
+            fail_on=self._fail_on,
+            destroy_fails=self._destroy_fails,
+            applied=self._applied,
+        )
+        self.sandboxes.append(sandbox)
+        return sandbox
 
     def labelled(self, labels: Mapping[str, str]) -> list[str]:
         assert list(labels) == [JOB_LABEL]
@@ -168,10 +181,21 @@ class TestTheSandbox:
         """In /tmp, kaniko's own log would land in the image, and a multi-stage build would delete it."""
         assert self._created()["env"] == {"TMPDIR": EXECD_TMPDIR}
 
-    def test_it_mounts_what_the_plain_pod_mounts(self) -> None:
-        created = self._created()
+    def test_each_image_has_a_sandbox_of_its_own(self) -> None:
+        """In a shared one, an earlier image's `RUN` could replace what starts a later image's build."""
+        api = FakeApi({"img-a": 0, "img-b": 0})
+        _provider(api).build(0, _group("img-a", "img-b"))
+        assert [sandbox.commands[-1].split("--oci-layout-path=")[1].split()[0] for sandbox in api.sandboxes] == [
+            "/nhx-work/out/img-a",
+            "/nhx-work/out/img-b",
+        ]
+
+    def test_it_mounts_its_context_and_only_its_own_output(self) -> None:
+        api = FakeApi({"img-a": 0, "img-b": 0})
+        _provider(api).build(0, _group("img-a", "img-b"))
+        created = api.created[1]
         assert created["claim"] == "nhx-build-work"
-        assert created["mounts"] == mounts(_group("img-a"), JOB_SUB_PATH)
+        assert created["mounts"] == mounts(_group("img-b"), JOB_SUB_PATH)
         assert created["mounts"][0] == Mount(f"{JOB_SUB_PATH}/context/ws/fs-a", "/nhx-work/context/ws/fs-a", True)
 
     def test_it_carries_the_labels_a_policy_and_a_sweep_select_on(self) -> None:
@@ -195,6 +219,15 @@ class TestItsNetwork:
         _provider(api, **sandbox).build(0, _group("img-a"))
         return api.created[0]["egress"]
 
+    def _refused(self, caplog: pytest.LogCaptureFixture, applied: Readback | Exception) -> str:
+        """Build with a sidecar reporting ``applied``, check nothing ran, and return what was logged."""
+        api = FakeApi({"img-a": 0}, applied=applied)
+        with caplog.at_level(logging.ERROR, logger=opensandbox_sandbox.__name__):
+            assert _provider(api).build(0, _group("img-a")) == {}
+        assert api.commands == []
+        assert api.sandboxes[0].destroyed
+        return caplog.text
+
     def test_it_denies_by_default_and_allows_the_deployments_list(self) -> None:
         policy = self._policy()
         assert policy.default_action == "deny"
@@ -204,39 +237,57 @@ class TestItsNetwork:
         denied = {rule.target for rule in self._policy().rules if rule.action == "deny"}
         assert {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7"} <= denied
 
+    def test_this_steps_resolver_is_denied_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """On GKE with Cloud DNS, the resolver is the metadata server. The sidecar reaches it on its own."""
+        monkeypatch.setattr(egress, "local_resolver_addresses", lambda path=None: ("169.254.169.254", "10.96.0.10"))
+        policy = self._policy()
+        assert [rule.target for rule in policy.rules if rule.action == "allow"] == DEFAULT_EGRESS_ALLOW
+        assert {"10.0.0.0/8", "169.254.0.0/16"} <= {rule.target for rule in policy.rules if rule.action == "deny"}
+
     def test_the_deployment_names_what_it_may_reach(self) -> None:
         policy = self._policy(egress_allow=["*.example.com", "10.1.2.3"])
         assert [rule.target for rule in policy.rules if rule.action == "allow"] == ["*.example.com", "10.1.2.3"]
         # An allowed address is carved out of the range that would deny it.
         assert "10.0.0.0/8" not in {rule.target for rule in policy.rules if rule.action == "deny"}
 
-    def test_a_sandbox_that_allows_by_default_runs_nothing(self) -> None:
-        api = FakeApi({"img-a": 0}, applied=SimpleNamespace(default_action="allow", egress=[]))
-        with pytest.raises(EgressVerificationError, match="default_action='allow'"):
-            _provider(api).build(0, _group("img-a"))
-        assert api.sandbox.commands == []
-        assert api.sandbox.destroyed
+    def test_a_sandbox_that_allows_by_default_runs_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
+        applied = AppliedEgress(ENFORCEMENT_MODE, SimpleNamespace(default_action="allow", egress=[]))
+        assert "default_action='allow'" in self._refused(caplog, lambda given: applied)
 
-    def test_a_sandbox_whose_policy_cannot_be_read_runs_nothing(self) -> None:
-        api = FakeApi({"img-a": 0}, applied=ConnectionError("no egress sidecar"))
-        with pytest.raises(ConnectionError):
-            _provider(api).build(0, _group("img-a"))
-        assert api.sandbox.commands == []
-        assert api.sandbox.destroyed
+    def test_a_sidecar_that_filters_names_only_runs_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
+        """In `dns` mode, the server's default, it enforces nothing on addresses."""
+        assert "enforces 'dns', not 'dns+nft'" in self._refused(caplog, lambda given: as_given(given, mode="dns"))
+
+    def test_a_sidecar_that_reports_no_mode_runs_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
+        assert "enforces None" in self._refused(caplog, lambda given: as_given(given, mode=None))
+
+    def test_a_sandbox_missing_a_denied_range_runs_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
+        """The sidecar reports the policy it was given, so a rule it doesn't report is one it doesn't enforce."""
+
+        def without_the_cluster(given: EgressPolicy) -> AppliedEgress:
+            rules = [rule for rule in given.rules if rule.target != "10.0.0.0/8"]
+            return AppliedEgress(ENFORCEMENT_MODE, SimpleNamespace(default_action="deny", egress=rules))
+
+        assert "did not apply 1 requested egress rule(s)" in self._refused(caplog, without_the_cluster)
+
+    def test_a_sandbox_whose_policy_cannot_be_read_runs_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
+        assert "no egress sidecar" in self._refused(caplog, ConnectionError("no egress sidecar"))
 
     def test_it_fails_only_its_own_images(self) -> None:
-        api = FakeApi({"img-a": 0}, applied=SimpleNamespace(default_action="allow", egress=[]))
+        applied = AppliedEgress(ENFORCEMENT_MODE, SimpleNamespace(default_action="allow", egress=[]))
+        api = FakeApi({"img-a": 0}, applied=lambda given: applied)
         assert _build_group(_provider(api), 0, _group("img-a", "img-b")) == 2
 
 
 class TestBuilding:
-    def test_each_image_is_its_own_command_after_its_output_is_emptied(self) -> None:
+    def test_each_image_is_built_through_nhx_dropcaps_after_its_output_is_emptied(self) -> None:
         api = FakeApi({"img-a": 0, "img-b": 0})
         _provider(api).build(0, _group("img-a", "img-b"))
-        commands = api.sandbox.commands
-        assert [c.split()[0] for c in commands] == ["rm", "/kaniko/executor", "rm", "/kaniko/executor"]
-        assert "/nhx-work/out/img-a" in commands[0] and "--oci-layout-path=/nhx-work/out/img-a" in commands[1]
-        assert all("--no-push" in c for c in commands[1::2])
+        for sandbox, image in zip(api.sandboxes, ["img-a", "img-b"], strict=True):
+            clear, build = sandbox.commands
+            assert clear.startswith("rm -rf") and f"/nhx-work/out/{image}" in clear
+            assert build.split()[:2] == [DROPCAPS, "/kaniko/executor"]
+            assert f"--oci-layout-path=/nhx-work/out/{image}" in build and "--no-push" in build
 
     def test_each_exit_code_is_the_result(self) -> None:
         api = FakeApi({"img-a": 0, "img-b": 7})
@@ -250,7 +301,17 @@ class TestBuilding:
         """Else a failed build would leave an earlier attempt's layout for `push`."""
         api = FakeApi({"unclearable": 0, "img-b": 0})
         assert _provider(api).build(0, _group("unclearable", "img-b")) == {"img-b": 0}
-        assert not any("--oci-layout-path=/nhx-work/out/unclearable" in c for c in api.sandbox.commands)
+        assert not any("--oci-layout-path=/nhx-work/out/unclearable" in c for c in api.commands)
+
+    def test_a_command_that_fails_costs_only_its_own_image(self) -> None:
+        api = FakeApi({"img-a": 0, "img-b": 0}, fail_on="--oci-layout-path=/nhx-work/out/img-b")
+        assert _provider(api).build(0, _group("img-a", "img-b")) == {"img-a": 0}
+
+    def test_no_sandbox_is_created_once_the_groups_hour_is_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(opensandbox_sandbox, "BUILD_TIMEOUT_SECONDS", 0)
+        api = FakeApi({"img-a": 0})
+        assert _provider(api).build(0, _group("img-a")) == {}
+        assert api.created == []
 
     def test_output_is_logged_a_line_at_a_time(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO, logger=opensandbox_sandbox.__name__):
@@ -261,15 +322,14 @@ class TestBuilding:
 
 class TestTheSandboxAlwaysGoes:
     def test_after_building(self) -> None:
-        api = FakeApi({"img-a": 0})
-        _provider(api).build(0, _group("img-a"))
-        assert api.sandbox.destroyed
+        api = FakeApi({"img-a": 0, "img-b": 0})
+        _provider(api).build(0, _group("img-a", "img-b"))
+        assert [sandbox.destroyed for sandbox in api.sandboxes] == [True, True]
 
     def test_after_a_command_fails(self) -> None:
         api = FakeApi({"img-a": 0}, fail_on="/kaniko/executor")
-        with pytest.raises(ConnectionError):
-            _provider(api).build(0, _group("img-a"))
-        assert api.sandbox.destroyed
+        assert _provider(api).build(0, _group("img-a")) == {}
+        assert api.sandboxes[0].destroyed
 
     def test_a_sandbox_that_cannot_be_deleted_keeps_what_it_built(self) -> None:
         api = FakeApi({"img-a": 0}, destroy_fails=True)

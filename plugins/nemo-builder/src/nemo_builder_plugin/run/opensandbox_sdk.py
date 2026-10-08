@@ -13,10 +13,14 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import timedelta
 
+from nemo_builder_plugin.run.opensandbox_sandbox import AppliedEgress
 from nemo_builder_plugin.run.sandbox import Mount
 from nemo_builder_plugin.steps import OpenSandboxServer
 from nhx_sandbox.egress import EgressPolicy
 from nhx_sandbox.opensandbox_policy import to_opensandbox_policy
+from opensandbox.api.egress.api.policy import get_policy
+from opensandbox.api.egress.models.policy_status_response import PolicyStatusResponse
+from opensandbox.api.egress.types import Unset
 from opensandbox.config import ConnectionConfigSync
 from opensandbox.models.execd import RunCommandOpts
 from opensandbox.models.execd_sync import ExecutionHandlersSync
@@ -49,8 +53,14 @@ class _Sandbox:
         )
         return execution.exit_code
 
-    def applied_egress(self) -> NetworkPolicy:
-        return self._sandbox.get_egress_policy()
+    def applied_egress(self) -> AppliedEgress:
+        # Read here, rather than with get_egress_policy, which in SDK 0.1.16 drops the sidecar's enforcement mode.
+        response = get_policy.sync_detailed(client=self._sandbox._egress_service._client)
+        status = response.parsed
+        if not isinstance(status, PolicyStatusResponse) or isinstance(status.policy, Unset):
+            raise RuntimeError(f"the egress sidecar's policy could not be read: HTTP {int(response.status_code)}")
+        mode = None if isinstance(status.enforcement_mode, Unset) else status.enforcement_mode
+        return AppliedEgress(enforcement_mode=mode, policy=NetworkPolicy.model_validate(status.policy.to_dict()))
 
     def destroy(self) -> None:
         try:

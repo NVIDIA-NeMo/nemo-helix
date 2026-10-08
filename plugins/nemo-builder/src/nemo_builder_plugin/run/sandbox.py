@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What every sandbox provider shares: one sandbox per build context, the same mounts, and the same kaniko run.
+"""What every sandbox provider shares: the same mounts, and the same kaniko run.
 
 A provider is how ``supervise`` gets a sandbox: a plain Kubernetes pod, or OpenSandbox. Either way the sandbox runs
 the caller's Dockerfiles, so it holds no ServiceAccount token, no secret, and no credential in its environment.
@@ -108,8 +108,8 @@ class SandboxProvider(Protocol):
         ...
 
     def build(self, index: int, group: SandboxGroup) -> dict[str, int]:
-        """Build ``group``'s images in one sandbox, deleting it afterwards; each image's kaniko exit code.
+        """Build ``group``'s images, in one sandbox or one each, deleting them afterwards; each image's kaniko exit code.
 
-        An image without a code didn't build. Raises if the sandbox can't be created or run.
+        An image without a code didn't build. May raise if a sandbox can't be created or run.
         """
         ...
