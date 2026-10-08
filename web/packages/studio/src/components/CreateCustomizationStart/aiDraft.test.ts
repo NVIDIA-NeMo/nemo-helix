@@ -276,6 +276,13 @@ describe('datasetProblem', () => {
     );
   });
 
+  it('names a failed file even when another file was read, rather than drafting without it', () => {
+    const fileErrors = [{ path: 'training/b.jsonl', error: 'Failed to download file: 403' }];
+    expect(
+      datasetProblem({ ...read, schema: INPUTS.dataset.schema, format: { ok: false, fileErrors } })
+    ).toBe("Couldn't read training/b.jsonl: Failed to download file: 403");
+  });
+
   it('blames the format only when every file was read', () => {
     expect(datasetProblem(read)).toBe(UNRECOGNIZED_FORMAT);
   });
