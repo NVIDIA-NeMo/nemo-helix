@@ -9,6 +9,7 @@ version = "0.98.1"
 dependencies = [
   "nemo-helix-plugin",
   "nemo-helix",
+  "nhx-sandbox",
   "boto3>=1.35.0",
   "click>=8.1.0",
   "cryptography>=43.0.0",
@@ -62,6 +63,7 @@ packages = ["src/scaled_evals", "src/nemo_scaled_evals_plugin"]
 [tool.uv.sources]
 nemo-helix = { path = "../../packages/nemo_helix", editable = true }
 nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
+nhx-sandbox = { path = "../../packages/nhx_sandbox", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -534,6 +534,8 @@ class TestRenderFabricDockerfile:
         ("kind", "extra"),
         [
             ("claude", "nemo-agents-plugin-claude"),
+            ("nooa-bench-agent", "nemo-agents-plugin-nooa"),
+            ("nvidia.fabric.nooa.bench-agent", "nemo-agents-plugin-nooa"),
             ("remote-agent", "nemo-agents-plugin"),
             ("nvidia.fabric.remote-agent", "nemo-agents-plugin"),
             ("nvidia.fabric.codex", "nemo-agents-plugin-codex"),
@@ -558,6 +560,102 @@ class TestRenderFabricDockerfile:
         assert f'"nemo-helix[{extra}]=={get_contract_version()}"' in result
         if extra != "nemo-agents-plugin-claude":
             assert "nemo-agents-plugin-claude]==" not in result
+
+    @pytest.mark.parametrize("kind", ["nooa-bench-agent", "nvidia.fabric.nooa.bench-agent"])
+    @pytest.mark.parametrize("version", [None, "3.12", "3.13.12", "3.11", "3.14", "3.130", "invalid"])
+    def test_nooa_container_python_version(self, tmp_path: Path, kind: str, version: str | None) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"default_harness: selected\nharnesses:\n  selected:\n    kind: {kind}\n")
+        if version in {None, "3.12", "3.13.12"}:
+            result = render_fabric_dockerfile(config, python_version=version)
+            assert f"ARG PYTHON_VERSION={version or '3.13'}" in result
+        else:
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version)
+
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            "default_harness: bench\nharnesses:\n  bench:\n    kind: nooa-bench-agent\n",
+            "workflow:\n  target_id: nvidia.nooa.coding-agent\n",
+        ],
+    )
+    @pytest.mark.parametrize("version", ["3.12", "3.13", "3.11", "3.14"])
+    def test_nooa_custom_template_python_version(self, tmp_path: Path, selection: str, version: str) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(selection)
+        custom = tmp_path / "Dockerfile.j2"
+        custom.write_text("FROM python:{{ python_version }}\nRUN uv pip install nemo-helix[{{ platform_extra }}]\n")
+
+        if version in {"3.12", "3.13"}:
+            result = render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
+            assert f"FROM python:{version}" in result
+            assert "nemo-helix[nemo-agents-plugin-nooa]" in result
+        else:
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
+
+    @pytest.mark.parametrize("kind", ["nooa", "nvidia.fabric.nooa"])
+    def test_generic_nooa_kind_does_not_select_harness_dependencies(self, tmp_path: Path, kind: str) -> None:
+        from nemo_agents_plugin.container.template import resolve_fabric_harness_install
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"default_harness: selected\nharnesses:\n  selected:\n    kind: {kind}\n")
+
+        assert resolve_fabric_harness_install(config) == ("nemo-agents-plugin", False, False)
+
+    def test_nooa_container_checks_python_environment_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(
+            "default_harness: selected\nharnesses:\n  selected:\n    kind: nvidia.fabric.nooa.bench-agent\n"
+        )
+        monkeypatch.setenv("NEMO_AGENTS_PYTHON_VERSION", "3.14")
+        with pytest.raises(ValueError, match="Set --python-version 3.13"):
+            render_fabric_dockerfile(config)
+        assert "ARG PYTHON_VERSION=3.13" in render_fabric_dockerfile(config, python_version="3.13")
+
+    def test_unused_nooa_does_not_restrict_container_python(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(
+            "default_harness: selected\nharnesses:\n  selected:\n    kind: codex\n"
+            "  unused:\n    kind: nvidia.fabric.nooa.bench-agent\n"
+        )
+        assert "ARG PYTHON_VERSION=3.14" in render_fabric_dockerfile(config, python_version="3.14")
+
+    @pytest.mark.parametrize("target", ["nvidia.nooa.coding-agent", "nvidia.nooa.arc-solver"])
+    @pytest.mark.parametrize("version", ["3.12", "3.13.12", "3.14"])
+    def test_nooa_workflow_container_install(self, tmp_path: Path, target: str, version: str) -> None:
+        from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"workflow:\n  target_id: {target}\n")
+        if version == "3.14":
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version)
+        else:
+            result = render_fabric_dockerfile(config, python_version=version)
+            assert f'"nemo-helix[nemo-agents-plugin-nooa]=={get_contract_version()}"' in result
+            assert f"ARG PYTHON_VERSION={version}" in result
+
+    @pytest.mark.parametrize("target", ["com.example.agent", "nvidia.nooa.custom-agent"])
+    def test_custom_workflow_does_not_infer_harness_dependencies(self, tmp_path: Path, target: str) -> None:
+        from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"workflow:\n  target_id: {target}\n")
+        result = render_fabric_dockerfile(config, python_version="3.14")
+        assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
+        assert "nemo-agents-plugin-nooa" not in result
 
     def test_hermes_uses_an_isolated_pinned_environment(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import (

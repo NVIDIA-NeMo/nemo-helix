@@ -248,7 +248,7 @@ cpu-tasks = [
   "nemo-agent-optimization-plugin",
   # agents.execute task module plus the harnesses that can coexist in the
   # managed CPU task environment. Hermes requires a separate execution image.
-  "nemo-agents-plugin[all]",
+  "nemo-agents-plugin[claude,codex,deepagents]",
   # Insights Analyst Fabric adapter and insights.analysis execute extension.
   "nemo-insights-plugin",
   "nemo-evals-plugin",
@@ -328,6 +328,7 @@ constraint-dependencies = [
   "nemo-fabric-adapters-common>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-nooa>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
   "nemo-fabric-collector>=0.4.0,<0.5.0",
   "nemo-fabric-runtime>=0.4.0,<0.5.0",
@@ -617,8 +618,6 @@ extra-paths = [
   "plugins/nemo-guardrails/src",
   # So ``integration.*`` and ``from .utils import`` resolve in plugin tests (PEP 420).
   "plugins/nemo-guardrails/tests",
-  # agent-hardener is a virtual workspace member (not installed by default); add its src so ty resolves it.
-  "plugins/nemo-agent-hardener/src",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
   # nemo-evals plugin is not a workspace member; add its src so ty can

@@ -337,3 +337,58 @@ class TestLoadAgentConfig:
 
         with pytest.raises(AgentConfigLoadError, match="Invalid agent config"):
             load_agent_config(config_path)
+
+
+@pytest.mark.parametrize("target_id", ["nvidia.nooa.coding-agent", "com.example.workflow"])
+def test_workflow_config_round_trip(target_id: str) -> None:
+    config = AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "workflow-agent",
+            "workflow": {"target_id": target_id, "settings": {"limit": 3}},
+        }
+    )
+    assert config.default_harness is None
+    assert config.harnesses == {}
+    assert config.workflow is not None
+    assert config.workflow.settings == {"limit": 3}
+    assert AgentConfig.model_validate(config.model_dump()) == config
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        {"default_harness": "codex"},
+        {"harnesses": {"codex": {"kind": "codex"}}},
+        {"default_harness": "codex", "harnesses": {"codex": {"kind": "codex"}}},
+    ],
+)
+def test_workflow_rejects_harness_selection(selection: dict) -> None:
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        AgentConfig.model_validate(
+            {
+                "config_format": "nemo-agents-spec-v1",
+                "name": "workflow-agent",
+                "workflow": {"target_id": "nvidia.nooa.coding-agent"},
+                **selection,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "workflow", [{}, {"target_id": ""}, {"target_id": "   "}, {"target_id": "target", "unknown": True}]
+)
+def test_rejects_invalid_workflow(workflow: dict) -> None:
+    with pytest.raises(ValidationError):
+        AgentConfig.model_validate(
+            {
+                "config_format": "nemo-agents-spec-v1",
+                "name": "workflow-agent",
+                "workflow": workflow,
+            }
+        )
+
+
+def test_requires_execution_selection() -> None:
+    with pytest.raises(ValidationError, match="Configure workflow or default_harness"):
+        AgentConfig.model_validate({"config_format": "nemo-agents-spec-v1", "name": "agent"})

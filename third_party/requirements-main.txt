@@ -2044,6 +2044,7 @@ nemo-fabric-adapter-contract==0.4.0 ; (platform_machine == 'arm64' and sys_platf
     #   nemo-fabric-adapters-common
     #   nemo-fabric-adapters-deepagents
     #   nemo-fabric-adapters-hermes
+    #   nemo-fabric-adapters-nooa
     #   nemo-fabric-adapters-remote-agent
     #   nemo-helix
     #   nemo-insights-plugin
@@ -2064,6 +2065,7 @@ nemo-fabric-adapters-common==0.4.0 ; (platform_machine == 'arm64' and sys_platfo
     #   nemo-fabric-adapters-codex
     #   nemo-fabric-adapters-deepagents
     #   nemo-fabric-adapters-hermes
+    #   nemo-fabric-adapters-nooa
     #   nemo-fabric-adapters-remote-agent
     #   nemo-helix
     #   nemo-insights-plugin
@@ -2074,6 +2076,11 @@ nemo-fabric-adapters-deepagents==0.4.0 ; (platform_machine == 'arm64' and sys_pl
     #   nemo-helix
 nemo-fabric-adapters-hermes==0.4.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:07d8acbeb6db3db9c2f5a9043d374e43704643158df59617ac395346eb6e4144
+    # via
+    #   nemo-agents-plugin
+    #   nemo-helix
+nemo-fabric-adapters-nooa==0.4.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:f799f98b4478f9c3b4d6939e09983df4e07d07776a48693ad40f70590b33d4a0
     # via
     #   nemo-agents-plugin
     #   nemo-helix

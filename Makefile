@@ -519,6 +519,37 @@ endif
 	@echo "Running tests for package: $(PACKAGE)..."
 	$(UV) run --frozen pytest -v packages/$(PACKAGE)/tests/
 
+.PHONY: test-agents-nooa
+test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
+		python -c 'import nooa_cli; import nooa_bench'
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_nooa.py
+
+.PHONY: test-agents-claude
+test-agents-claude: ## Run Claude Code adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
+		python -c 'import claude_agent_sdk'
+	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_claude.py
+
+.PHONY: test-agents-codex
+test-agents-codex: ## Run Codex adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
+		python -c 'import openai_codex'
+	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_codex.py
+
+.PHONY: test-agents-hermes
+test-agents-hermes: ## Run Hermes adapter integration tests with its isolated harness installed
+	$(UV) run --frozen --package nemo-agents-plugin --extra test bash script/dev-install-hermes.sh
+	ADAPTER_PYTHON="$(CURDIR)/.venv-hermes/bin/python" \
+		$(UV) run --frozen --package nemo-agents-plugin --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_hermes.py
+
 .PHONY: test-deployments-openshell
 test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the platform-restricted [openshell] extra installed
 	# The openshell extra is not part of the default sync (platform-restricted

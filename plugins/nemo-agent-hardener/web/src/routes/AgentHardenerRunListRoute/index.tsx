@@ -11,14 +11,14 @@ import { Link, Outlet } from 'react-router';
 
 export const AgentHardenerRunListRoute: FC = () => {
   const workspace = useWorkspace();
-  useBreadcrumbs({ items: [{ slotLabel: 'Agent Hardener' }] });
+  useBreadcrumbs({ items: [{ slotLabel: 'Agent Hardening' }] });
 
   return (
-    <AccessibleTitle title="Agent Hardener">
+    <AccessibleTitle title="Agent Hardening">
       <Stack className="h-full overflow-auto" gap="density-2xl" padding="density-2xl">
         <PageHeader
           className="p-0"
-          slotHeading="Agent Hardener"
+          slotHeading="Agent Hardening"
           slotDescription="Attack, defend, and validate war-game runs that harden your deployed agents."
           slotActions={
             <Button asChild color="brand">

@@ -16,6 +16,9 @@ outputs:
   deps:
     description: "'true' if any dependency-related files changed"
     value: ${{ steps.filter.outputs.deps }}
+  agents-harnesses:
+    description: "'true' if harness adapter integration code or tests changed"
+    value: ${{ steps.filter.outputs.agents-harnesses }}
   fabric:
     description: "'true' if the Fabric agent-eval runtime, its tests, or its dependency extra changed"
     value: ${{ steps.filter.outputs.fabric }}
@@ -111,6 +114,15 @@ runs:
             - 'tools/common/**'
             - 'tools/osv-scanner/**'
             - 'tools/python/**'
+          agents-harnesses:
+            - 'script/dev-install-hermes.sh'
+            - 'plugins/nemo-agents/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nemo_helix/pyproject.toml'
+            - 'conftest.py'
+            - 'pytest.ini'
+            - '.github/workflows/ci.yaml'
+            - '.github/actions/changes/action.yaml'
           fabric:
             - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/runtimes/fabric/**'
             - 'packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/**'
@@ -180,6 +192,7 @@ runs:
             - 'plugins/_temporary-scaled-evals/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
+            - 'packages/nhx_sandbox/**'
             # test_files_backend.py imports these from outside the plugin tree.
             - 'packages/filesets/src/filesets/resources.py'
             - 'packages/nhx_testing/src/nhx/testing/**'

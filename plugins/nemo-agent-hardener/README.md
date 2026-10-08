@@ -268,7 +268,7 @@ uv run nemo services run --service-group all --controllers models,jobs \
   --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 ```
 
-Open **http://localhost:8080/studio/** → **Governance → Agent Hardener**. If the entry is missing,
+Open **http://localhost:8080/studio/** → **Governance → Agent Hardening**. If the entry is missing,
 confirm the plugin is installed (`curl -s localhost:8080/apis/plugins`) and hard-reload (⌘⇧R).
 
 1. **Manifests → New Manifest** — pick `react-agent`, accept the detected port and secrets, add any
@@ -375,7 +375,7 @@ uv run nemo agent-hardener sanity-check --manifest-id react-agent \
 
 ## Troubleshooting
 
-**Agent Hardener missing from the Studio side nav.** The UI ships with the plugin, so this means
+**Agent Hardening missing from the Studio side nav.** The UI ships with the plugin, so this means
 Studio did not load its bundle. Check the plugin is registered (`curl -s localhost:8080/apis/plugins`
 should list `agent-hardener` with a `bundleUrl`) and that the bundle is served
 (`curl -sI localhost:8080/plugin-ui/agent-hardener/index.js`). Then hard-reload the browser.

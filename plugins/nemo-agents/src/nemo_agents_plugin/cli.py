@@ -74,10 +74,8 @@ from nemo_agents_plugin.entities import (
     ethos_fileset_name,
     supports_image_entrypoint,
 )
-from nemo_agents_plugin.leaderboard.cli import register_leaderboard_commands
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_agents_plugin.usage.cli import register_usage_commands
 from nemo_helix_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
 from nemo_helix_ext.cli.core.help_formatter import NhxGroup
 from nemo_helix_ext.ui.prompts import is_interactive
@@ -187,7 +185,7 @@ _COMPUTE_SPEC_LIST_COLUMNS = [
 ]
 
 
-_AGENT_CLI_PANEL = "Platform agents"
+_AGENT_CLI_PANEL = "Additional commands from plugins"
 
 
 @dataclass(frozen=True)
@@ -299,8 +297,6 @@ class AgentsCLI(NemoCLI):
         _register_package_command(app)
         _register_platform_commands(app)
         _register_environment_commands(app)
-        register_leaderboard_commands(app)
-        register_usage_commands(app)
         return app
 
 

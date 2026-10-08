@@ -53,6 +53,13 @@ class HarnessConfig(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: str = Field(min_length=1, pattern=r"\S")
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
 class EnvironmentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -147,8 +154,9 @@ class AgentConfig(BaseModel):
     config_format: Literal["nemo-agents-spec-v1"]
     name: str
     description: str = ""
-    default_harness: str
-    harnesses: dict[str, HarnessConfig]
+    default_harness: str | None = None
+    harnesses: dict[str, HarnessConfig] = Field(default_factory=dict)
+    workflow: WorkflowConfig | None = None
     models: dict[str, ModelConfig] = Field(default_factory=dict)
     prompts: dict[str, str] = Field(default_factory=dict)
     instructions: InstructionsConfig | None = None
@@ -160,7 +168,13 @@ class AgentConfig(BaseModel):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
     @model_validator(mode="after")
-    def _validate_default_harness(self) -> Self:
+    def _validate_execution_selection(self) -> Self:
+        if self.workflow is not None:
+            if self.default_harness is not None or self.harnesses:
+                raise ValueError("workflow and harness selection are mutually exclusive")
+            return self
+        if self.default_harness is None:
+            raise ValueError("Configure workflow or default_harness with harnesses")
         if self.default_harness not in self.harnesses:
             available = ", ".join(sorted(self.harnesses))
             raise ValueError(f"default_harness must reference one of harnesses: {available}")
