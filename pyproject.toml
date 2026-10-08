@@ -618,8 +618,6 @@ extra-paths = [
   "plugins/nemo-guardrails/src",
   # So ``integration.*`` and ``from .utils import`` resolve in plugin tests (PEP 420).
   "plugins/nemo-guardrails/tests",
-  # agent-hardener is a virtual workspace member (not installed by default); add its src so ty resolves it.
-  "plugins/nemo-agent-hardener/src",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
   # nemo-evaluator plugin is not a workspace member; add its src so ty can
