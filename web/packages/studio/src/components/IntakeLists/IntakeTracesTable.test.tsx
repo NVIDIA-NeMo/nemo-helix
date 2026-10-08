@@ -8,7 +8,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { mockTracesPage } from '@studio/mocks/intake/telemetry';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
-import { getIntakeTracesRoute } from '@studio/routes/utils';
+import { getAgentDetailRoute, getIntakeTracesRoute } from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
@@ -64,6 +64,68 @@ describe('IntakeTracesTable', () => {
 
     expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
       '/workspaces/default/intake/sessions/session-agent-run-001?traceId=trace-agent-run-001'
+    );
+  });
+
+  it('links registered trace agents to the agent page and leaves unknown names as text', async () => {
+    const [registered, unregistered] = mockTracesPage.data;
+    server.use(
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          ...mockTracesPage,
+          data: [
+            { ...registered, agent_name: 'react-agent' },
+            { ...unregistered, agent_name: 'unregistered-agent' },
+          ],
+        })
+      )
+    );
+
+    renderRoute(<IntakeTracesTable workspace="default" />, {
+      history: '/workspaces/default/intake/traces',
+    });
+
+    expect(await screen.findByRole('link', { name: 'react-agent' })).toHaveAttribute(
+      'href',
+      getAgentDetailRoute('default', 'react-agent')
+    );
+    expect(screen.getByText('unregistered-agent')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'unregistered-agent' })).not.toBeInTheDocument();
+  });
+
+  it('opens the agent page from the agent link instead of the trace row', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          ...mockTracesPage,
+          data: [{ ...mockTracesPage.data[0], agent_name: 'react-agent' }],
+        })
+      )
+    );
+
+    renderRoute(undefined, {
+      history: '/workspaces/default/intake/traces',
+      routes: [
+        {
+          path: ROUTES.workspace.intakeTraces,
+          element: <IntakeTracesTable workspace="default" />,
+        },
+        {
+          path: ROUTES.workspace.intakeSession,
+          element: <LocationDisplay />,
+        },
+        {
+          path: ROUTES.workspace.agentDetail,
+          element: <LocationDisplay />,
+        },
+      ],
+    });
+
+    await user.click(await screen.findByRole('link', { name: 'react-agent' }));
+
+    expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
+      getAgentDetailRoute('default', 'react-agent')
     );
   });
 

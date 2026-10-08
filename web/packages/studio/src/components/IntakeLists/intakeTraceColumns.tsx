@@ -6,6 +6,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import type { Trace } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
 import { IntakeTelemetryStatusBadge } from '@studio/components/IntakeDetail/IntakeComponents/IntakeTelemetryStatusBadge';
+import { TraceAgentLink } from '@studio/components/IntakeDetail/IntakeComponents/TraceAgentLink';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import type { IntakeTelemetryDataView } from '@studio/components/IntakeLists/IntakeTelemetryDataView';
 import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
@@ -85,7 +86,12 @@ export const makeIntakeTraceColumns =
                 placeholder: 'Filter by agent name',
               },
             },
-            cell: ({ row }) => row.original.agent_name ?? '—',
+            cell: ({ row }) => (
+              <TraceAgentLink
+                workspace={row.original.workspace}
+                agentName={row.original.agent_name}
+              />
+            ),
           }),
         ]
       : []),
