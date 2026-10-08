@@ -23,7 +23,7 @@ import type {
   EvaluationSessionResponse,
   ListEvaluationSessionsParams,
 } from '@nemo/sdk/generated/platform/schema';
-import { Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Badge, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';
@@ -173,6 +173,9 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
       for (const name of Object.keys(session.evaluator_scores ?? {})) {
         names.add(name);
       }
+      for (const name of session.failed_evaluators ?? []) {
+        names.add(name);
+      }
     }
     return Array.from(names).sort();
   }, [experiment?.evaluator_names, sessionsData]);
@@ -258,6 +261,13 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
         meta: { alignment: 'right' },
         cell: ({ row }) => {
           const value = row.original.evaluator_scores?.[name];
+          if (value == null && row.original.failed_evaluators?.includes(name)) {
+            return (
+              <Badge kind="outline" color="red" title="The evaluator ran but produced no score.">
+                Failed
+              </Badge>
+            );
+          }
           return <Text>{formatEvaluatorScore(value)}</Text>;
         },
       })

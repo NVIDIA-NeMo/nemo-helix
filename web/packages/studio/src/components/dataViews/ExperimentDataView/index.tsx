@@ -438,6 +438,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                 count={score?.count}
                 runCount={row.original.run_count}
                 countsMissingAsZero
+                failedCount={score?.failed_count ?? 0}
               >
                 {formatEvaluatorScore(score?.mean)}
               </MeanValueTooltipCell>
