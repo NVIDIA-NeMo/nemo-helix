@@ -92,7 +92,7 @@ def test_ensure_fileset_rejects_wrong_storage_type(monkeypatch: pytest.MonkeyPat
 
 
 def test_is_gliner_cached_reflects_snapshot_presence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    monkeypatch.setattr(gliner_detector, "_hf_hub_cache_dir", lambda: tmp_path / "hub")
     assert gliner_detector.is_gliner_cached() is False
 
     snapshot = (
@@ -103,7 +103,11 @@ def test_is_gliner_cached_reflects_snapshot_presence(monkeypatch: pytest.MonkeyP
         / gliner_detector.GLINER_MODEL_REVISION
     )
     snapshot.mkdir(parents=True)
+    # A config-only snapshot is a partial/interrupted download, not a usable model.
     (snapshot / "config.json").write_text("{}")
+    assert gliner_detector.is_gliner_cached() is False
+    # Weights alongside the config make it complete.
+    (snapshot / "model.safetensors").write_bytes(b"\x00")
     assert gliner_detector.is_gliner_cached() is True
 
 
@@ -122,7 +126,7 @@ def test_prewarm_is_noop_when_cached(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_prewarm_downloads_through_files_and_aligns_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    monkeypatch.setattr(gliner_detector, "_hf_hub_cache_dir", lambda: tmp_path / "hub")
     monkeypatch.setattr(gliner_detector, "is_gliner_cached", lambda: False)
 
     # Simulate the Files pull-through landing a snapshot under the fileset's cache folder.
@@ -138,6 +142,7 @@ def test_prewarm_downloads_through_files_and_aligns_cache(monkeypatch: pytest.Mo
     )
     fileset_snapshot.mkdir(parents=True)
     (fileset_snapshot / "config.json").write_text("{}")
+    (fileset_snapshot / "model.safetensors").write_bytes(b"\x00")
 
     captured: dict[str, Any] = {}
 

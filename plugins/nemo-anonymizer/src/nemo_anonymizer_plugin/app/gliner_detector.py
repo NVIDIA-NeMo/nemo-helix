@@ -148,7 +148,11 @@ async def ensure_gliner_fileset_async(async_sdk: AsyncHelixClient) -> None:
 
 
 def _hf_hub_cache_dir() -> Path:
-    return Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
+    # Match ``snapshot_download``'s own default (``HF_HUB_CACHE``, which already
+    # honors ``HF_HOME``), so prewarming writes exactly where the runtime reads.
+    from huggingface_hub import constants as hf_constants
+
+    return Path(hf_constants.HF_HUB_CACHE)
 
 
 def _upstream_snapshot_dir() -> Path:
@@ -158,9 +162,19 @@ def _upstream_snapshot_dir() -> Path:
 
 
 def is_gliner_cached() -> bool:
-    """True when the pinned GLiNER snapshot is already materialized where upstream reads it."""
+    """True when the pinned GLiNER snapshot is materialized AND looks complete.
+
+    A bare non-empty check would treat a partial/interrupted download (e.g. only
+    ``config.json`` landed) as cached, so the offline runtime would then fail to
+    load the weights. Require a model-weights file alongside a config.
+    """
     snapshot = _upstream_snapshot_dir()
-    return snapshot.is_dir() and any(snapshot.iterdir())
+    if not snapshot.is_dir():
+        return False
+    names = {entry.name for entry in snapshot.iterdir()}
+    has_weights = any(name.endswith((".safetensors", ".bin", ".onnx", ".pt")) for name in names)
+    has_config = "config.json" in names
+    return has_weights and has_config
 
 
 def _align_fileset_cache_to_upstream_repo(fileset_snapshot: Path) -> None:
