@@ -150,6 +150,10 @@ def _build_router() -> APIRouter:
             pattern=r"^[^/]+$",
             description="Only the images this build job produces: the `job` a submit returned, in this workspace.",
         ),
+        build_set: str | None = Query(
+            default=None, max_length=128, description="Only the images of the build set with this `name`."
+        ),
+        revision: int | None = Query(default=None, ge=1, description="Only the images of this `revision`."),
         status: Literal["pending", "ready", "failed"] | None = Query(
             default=None, description="Only images in this state."
         ),
@@ -157,10 +161,14 @@ def _build_router() -> APIRouter:
         page_size: int = Query(default=100, ge=1, le=100),
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> list[ContainerImage]:
-        """List the images in a workspace, in whatever state they are in, or only one job's."""
+        """List the images in a workspace, in whatever state they are in, or only one job's or one build set's."""
         filters: dict[str, object] = {}
         if job is not None:
             filters["provenance.job"] = f"{workspace}/{job}"
+        if build_set is not None:
+            filters["provenance.build_set"] = build_set
+        if revision is not None:
+            filters["provenance.revision"] = revision
         if status is not None:
             filters["status"] = status
         response = await entity_client.list(

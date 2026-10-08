@@ -47,6 +47,27 @@ class TestListingOneJobsImages:
             "status": "pending",
         }
 
+    def test_a_build_set_and_a_revision_filter_on_the_stored_provenance(self) -> None:
+        entities = AsyncMock()
+        entities.list.return_value = _empty_page()
+        response = TestClient(_app(entities)).get(
+            "/v2/workspaces/team-a/container-images", params={"build_set": "demo", "revision": "1"}
+        )
+        assert response.status_code == 200
+        assert entities.list.await_args.kwargs["filter_obj"] == {
+            "provenance.build_set": "demo",
+            "provenance.revision": 1,
+        }
+
+    @pytest.mark.parametrize("revision", ["0", "one"])
+    def test_a_revision_that_no_set_can_have_is_refused(self, revision: str) -> None:
+        entities = AsyncMock()
+        response = TestClient(_app(entities)).get(
+            "/v2/workspaces/team-a/container-images", params={"revision": revision}
+        )
+        assert response.status_code == 422
+        entities.list.assert_not_awaited()
+
     def test_the_job_is_always_in_the_path_workspace(self) -> None:
         entities = AsyncMock()
         response = TestClient(_app(entities)).get(
@@ -112,6 +133,7 @@ class TestComplete:
         response, entities = self._post(_row())
         assert response.status_code == 200
         assert (response.json()["status"], response.json()["digest"]) == ("ready", DIGEST)
+        assert response.json()["image_ref"] == f"reg.example.com/ws-a/app@{DIGEST}"
         entities.update.assert_awaited_once()
 
     def test_an_image_already_ready_at_that_digest_is_returned_as_it_is(self) -> None:
