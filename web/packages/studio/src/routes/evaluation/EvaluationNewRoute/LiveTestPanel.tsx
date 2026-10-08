@@ -64,12 +64,7 @@ export const LiveTestPanel: FC = () => {
    *
    *  Create never requires a live test; sharing the resolver only means Test cannot
    *  pass on a config Create would reject. */
-  const modelResponse =
-    state.status === 'done'
-      ? state.result.output
-      : state.status === 'busy'
-        ? (state.output ?? null)
-        : null;
+  const modelResponse = state.status === 'done' ? state.result.output : null;
 
   const runTest = handleSubmit((values) => {
     if (!row) return;
@@ -100,17 +95,21 @@ export const LiveTestPanel: FC = () => {
         <>
           <Stack gap="density-xs">
             <Text kind="label/bold/lg">Score</Text>
-            {state.result.scores.length === 0 ? (
+            {state.result.scores.length === 0 && state.result.errors.length === 0 ? (
               <Text kind="body/regular/md" className="text-secondary">
                 The run produced no scores.
               </Text>
-            ) : (
-              state.result.scores.map((score) => (
-                <Text key={score.name} kind="body/regular/md">
-                  {score.name}: {score.label ?? formatEvaluatorScore(score.value)}
-                </Text>
-              ))
-            )}
+            ) : null}
+            {state.result.scores.map((score) => (
+              <Text key={score.name} kind="body/regular/md">
+                {score.name}: {score.label ?? formatEvaluatorScore(score.value)}
+              </Text>
+            ))}
+            {state.result.errors.map((error) => (
+              <Text key={error.metric} kind="body/regular/md" className="text-feedback-danger">
+                {error.metric}: {error.message}
+              </Text>
+            ))}
           </Stack>
         </>
       ) : null}
