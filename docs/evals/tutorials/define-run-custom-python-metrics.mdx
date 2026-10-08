@@ -397,14 +397,14 @@ Pass `CloudpickleMetricBundlePackager()` to `helix_evaluator.submit(...)` so the
 
 ### Enable Cloudpickle Metrics on the Deployment
 
-NeMo Helix rejects cloudpickle metrics by default. A cloudpickle bundle is arbitrary Python that the Evaluator runs with its own service credentials, which can read secrets and entities in every workspace. Anyone who can create metrics or submit Evaluator jobs on a deployment that accepts them can run code as the platform. Enable them only on a deployment where you trust every such user, such as a single-user local install.
+NeMo Helix rejects cloudpickle metrics by default. A cloudpickle bundle is arbitrary Python that the Evals service runs with its own service credentials, which can read secrets and entities in every workspace. Anyone who can create metrics or submit Evaluator jobs on a deployment that accepts them can run code as the platform. Enable them only on a deployment where you trust every such user, such as a single-user local install.
 
 Until a deployment enables them, creating a cloudpickle metric, a task with an inline cloudpickle metric, a job that uses one, or a `/live` request that uses one fails with HTTP 422 and the message `cloudpickle metrics are disabled on this deployment`.
 
-The setting has two parts, because Evaluator job workers do not read the platform config file. Set both, and change them together:
+The setting has two parts, because Evals job workers do not read the platform config file. Set both, and change them together:
 
-- `evaluator.allow_insecure_cloudpickle_metrics: true` in the platform config, read by the API.
-- `NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "true"` in `jobs.executor_defaults.<backend>.env` for every job backend that runs Evaluator jobs, read by the job worker.
+- `evals.allow_insecure_cloudpickle_metrics: true` in the platform config, read by the API.
+- `NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "true"` in `jobs.executor_defaults.<backend>.env` for every job backend that runs Evals jobs, read by the job worker.
 
 For a local install, edit both values in your platform config file and restart NeMo Helix:
 
@@ -418,14 +418,14 @@ jobs:
       env:
         NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "true"
 
-evaluator:
+evals:
   allow_insecure_cloudpickle_metrics: true
 ```
 
 For a Helm install, set one value. The chart applies it to the API and to the Kubernetes and Volcano job backends:
 
 ```yaml
-evaluator:
+evals:
   allowInsecureCloudpickleMetrics: true
 ```
 
@@ -480,7 +480,7 @@ remote_result.print_summary()
 
 <Warning>
 
-Cloudpickle metric bundles execute serialized Python code with the Evaluator's service credentials when the metric is loaded. Use this path only for metric code that you fully understand and trust.
+Cloudpickle metric bundles execute serialized Python code with the Evals service's credentials when the metric is loaded. Use this path only for metric code that you fully understand and trust.
 
 </Warning>
 

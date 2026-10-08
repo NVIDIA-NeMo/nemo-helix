@@ -32,13 +32,6 @@ from nemo_evals.metric_refs import MetricRef
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
-from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
-from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
-from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
-from nhx_evals_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nhx_evals_sdk.values import Model, SecretRef
-from nhx_evals_sdk.values.common import SupportedJobTypes
-from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.job import NemoJob
@@ -46,12 +39,19 @@ from nemo_helix_plugin.scheduler import submit_path_for
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.testing.e2e import wait_for_platform_job
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
+from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
+from nhx_evals_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nhx_evals_sdk.values import Model, SecretRef
+from nhx_evals_sdk.values.common import SupportedJobTypes
+from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 
 pytestmark = pytest.mark.integration
 
 WORKSPACE = "default"
 DISABLED_MESSAGE = "cloudpickle metrics are disabled on this deployment"
-EVALUATOR_API = f"/apis/evals/v2/workspaces/{WORKSPACE}"
+EVALS_API = f"/apis/evals/v2/workspaces/{WORKSPACE}"
 
 # The job subprocesses cannot import this module, so the metric class must travel inside the pickle.
 cloudpickle.register_pickle_by_value(sys.modules[__name__])
@@ -194,8 +194,8 @@ def test_opted_in_evaluate_job_scores_inline_cloudpickle_metric_and_reads_never_
     assert job.status == "completed", job.status_details
     unpickled_by_submit_and_run = _unpickle_count(marker)
     assert unpickled_by_submit_and_run > 0
-    got = opted_in.get(f"{EVALUATOR_API}/evaluate/jobs/{name}")
-    listed = opted_in.get(f"{EVALUATOR_API}/evaluate/jobs")
+    got = opted_in.get(f"{EVALS_API}/evaluate/jobs/{name}")
+    listed = opted_in.get(f"{EVALS_API}/evaluate/jobs")
     assert got.status_code == 200, got.text
     assert listed.status_code == 200, listed.text
     assert got.json()["spec"]["metrics"][0]["payload"]["kind"] == "cloudpickle"
@@ -207,7 +207,7 @@ def test_opted_in_evaluate_job_scores_stored_cloudpickle_metric(
     subprocess_platform: str, opted_in: httpx.Client, tmp_path: Path
 ) -> None:
     metric_name = _unique("custom")
-    created = opted_in.post(f"{EVALUATOR_API}/metrics/{metric_name}", json=_cloudpickle_metric(tmp_path / "m.log"))
+    created = opted_in.post(f"{EVALS_API}/metrics/{metric_name}", json=_cloudpickle_metric(tmp_path / "m.log"))
     assert created.status_code == 201, created.text
     assert created.json()["payload_kind"] == "cloudpickle"
 
@@ -223,9 +223,7 @@ def test_opted_in_agent_eval_scores_task_with_inline_cloudpickle_metric(
     subprocess_platform: str, opted_in: httpx.Client, tmp_path: Path
 ) -> None:
     task_name = _unique("custom-task")
-    created = opted_in.post(
-        f"{EVALUATOR_API}/tasks/{task_name}", json=_task_body(_cloudpickle_metric(tmp_path / "m.log"))
-    )
+    created = opted_in.post(f"{EVALS_API}/tasks/{task_name}", json=_task_body(_cloudpickle_metric(tmp_path / "m.log")))
     assert created.status_code == 201, created.text
     spec = _agent_eval_spec(_cloudpickle_metric(tmp_path / "m.log"))
     spec["tasks"] = [TaskRef(f"{WORKSPACE}/{task_name}").model_dump(mode="json")]
@@ -237,7 +235,7 @@ def test_opted_in_agent_eval_scores_task_with_inline_cloudpickle_metric(
 
 
 def test_opted_in_live_scores_cloudpickle_metric(opted_in: httpx.Client, tmp_path: Path) -> None:
-    response = opted_in.post(f"{EVALUATOR_API}/evaluate/live", json=_live_body(_cloudpickle_metric(tmp_path / "m.log")))
+    response = opted_in.post(f"{EVALS_API}/evaluate/live", json=_live_body(_cloudpickle_metric(tmp_path / "m.log")))
 
     assert response.status_code == 200, response.text
     assert response.json()["metrics"][0]["scores"][0]["mean"] == pytest.approx(1.0)
@@ -318,8 +316,8 @@ def opted_out(
     with cloudpickle_toggle_platform(allow_cloudpickle_metrics=True) as base_url:
         _client(base_url)
         with httpx.Client(base_url=base_url, timeout=120) as http:
-            assert http.post(f"{EVALUATOR_API}/metrics/{stored_metric}", json=metric).status_code == 201
-            assert http.post(f"{EVALUATOR_API}/tasks/{stored_task}", json=_task_body(metric)).status_code == 201
+            assert http.post(f"{EVALS_API}/metrics/{stored_metric}", json=metric).status_code == 201
+            assert http.post(f"{EVALS_API}/tasks/{stored_task}", json=_task_body(metric)).status_code == 201
             stored_job, job = _run_to_completion(base_url, http, EvaluateJob, _evaluate_spec(metric))
             assert job.status == "completed", job.status_details
     marker.unlink(missing_ok=True)
@@ -339,9 +337,9 @@ def test_opted_out_metric_create_is_refused(opted_out: _OptedOut) -> None:
     name = _unique("custom")
 
     _assert_refused(
-        opted_out.http.post(f"{EVALUATOR_API}/metrics/{name}", json=_cloudpickle_metric(opted_out.marker)), opted_out
+        opted_out.http.post(f"{EVALS_API}/metrics/{name}", json=_cloudpickle_metric(opted_out.marker)), opted_out
     )
-    assert opted_out.http.get(f"{EVALUATOR_API}/metrics/{name}").status_code == 404
+    assert opted_out.http.get(f"{EVALS_API}/metrics/{name}").status_code == 404
 
 
 @pytest.mark.parametrize("method", ["post", "put"])
@@ -349,11 +347,11 @@ def test_opted_out_task_with_inline_cloudpickle_metric_is_refused(opted_out: _Op
     name = _unique("custom-task")
 
     response = opted_out.http.request(
-        method.upper(), f"{EVALUATOR_API}/tasks/{name}", json=_task_body(_cloudpickle_metric(opted_out.marker))
+        method.upper(), f"{EVALS_API}/tasks/{name}", json=_task_body(_cloudpickle_metric(opted_out.marker))
     )
 
     _assert_refused(response, opted_out)
-    assert opted_out.http.get(f"{EVALUATOR_API}/tasks/{name}").status_code == 404
+    assert opted_out.http.get(f"{EVALS_API}/tasks/{name}").status_code == 404
 
 
 def test_opted_out_evaluate_job_with_inline_cloudpickle_metric_is_refused(opted_out: _OptedOut) -> None:
@@ -386,12 +384,12 @@ def test_opted_out_agent_eval_over_stored_task_with_cloudpickle_metric_is_refuse
 def test_opted_out_live_with_cloudpickle_metric_is_refused(opted_out: _OptedOut, stored: bool) -> None:
     metric = f"{WORKSPACE}/{opted_out.stored_metric}" if stored else _cloudpickle_metric(opted_out.marker)
 
-    _assert_refused(opted_out.http.post(f"{EVALUATOR_API}/evaluate/live", json=_live_body(metric)), opted_out)
+    _assert_refused(opted_out.http.post(f"{EVALS_API}/evaluate/live", json=_live_body(metric)), opted_out)
 
 
 def test_opted_out_job_stored_with_cloudpickle_metric_stays_readable(opted_out: _OptedOut) -> None:
-    got = opted_out.http.get(f"{EVALUATOR_API}/evaluate/jobs/{opted_out.stored_job}")
-    listed = opted_out.http.get(f"{EVALUATOR_API}/evaluate/jobs")
+    got = opted_out.http.get(f"{EVALS_API}/evaluate/jobs/{opted_out.stored_job}")
+    listed = opted_out.http.get(f"{EVALS_API}/evaluate/jobs")
 
     assert got.status_code == 200, got.text
     assert got.json()["spec"]["metrics"][0]["payload"]["kind"] == "cloudpickle"
@@ -402,7 +400,7 @@ def test_opted_out_job_stored_with_cloudpickle_metric_stays_readable(opted_out: 
 
 @pytest.mark.timeout(600)
 def test_opted_out_builtin_metrics_still_run(opted_out: _OptedOut) -> None:
-    live = opted_out.http.post(f"{EVALUATOR_API}/evaluate/live", json=_live_body(_inline_exact_match()))
+    live = opted_out.http.post(f"{EVALS_API}/evaluate/live", json=_live_body(_inline_exact_match()))
     _, job = _run_to_completion(opted_out.base_url, opted_out.http, EvaluateJob, _evaluate_spec(_inline_exact_match()))
 
     assert live.status_code == 200, live.text

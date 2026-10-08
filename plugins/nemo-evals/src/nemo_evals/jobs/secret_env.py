@@ -29,7 +29,7 @@ GYM_SANDBOX_PLAN_ENVVAR = "NEMO_EVALS_GYM_SANDBOX_PLAN"
 #: Env names a job sets itself, so they cannot be sourced from a secret ref.
 RESERVED_SECRET_ENV_NAMES = frozenset({PERSISTENT_JOB_STORAGE_PATH_ENVVAR, GYM_SANDBOX_PLAN_ENVVAR})
 
-#: Env prefixes that configure the platform or evaluator, so they cannot be sourced from a secret ref.
+#: Env prefixes that configure the platform or Evals, so they cannot be sourced from a secret ref.
 RESERVED_SECRET_ENV_PREFIXES = (NHX_PREFIX_BASE, EvaluatorConfig.model_config["env_prefix"])
 
 

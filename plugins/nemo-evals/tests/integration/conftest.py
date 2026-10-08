@@ -243,7 +243,7 @@ def _materialize_subprocess_config(
             "executor_defaults": {"subprocess": subprocess_executor_config},
         },
         "secrets": {"allow_key_creation": True},
-        "evaluator": {"allow_insecure_cloudpickle_metrics": allow_cloudpickle_metrics},
+        "evals": {"allow_insecure_cloudpickle_metrics": allow_cloudpickle_metrics},
         "files": {"default_storage_config": {"type": "local", "path": str(work_root / "files")}},
     }
     config_path = work_root / "subprocess-platform.yaml"
@@ -380,7 +380,7 @@ def _materialize_docker_config(work_root: Path, *, base_url: str) -> Path:
             "executor_defaults": {"docker": docker_executor_config},
         },
         "secrets": {"allow_key_creation": True},
-        "evaluator": {"allow_insecure_cloudpickle_metrics": True},
+        "evals": {"allow_insecure_cloudpickle_metrics": True},
         "files": {"default_storage_config": {"type": "local", "path": str(work_root / "files")}},
     }
     config_path = work_root / "docker-platform.yaml"

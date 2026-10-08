@@ -16,13 +16,13 @@ from nemo_evals.api.schemas import MetricInline
 from nemo_evals.config import get_config
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
-from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretAccessResponse
+from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
 
 def matches_filter(entity, operation) -> bool:

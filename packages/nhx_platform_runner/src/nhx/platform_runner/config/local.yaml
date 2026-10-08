@@ -52,7 +52,7 @@ jobs:
       ttl_seconds_before_active: 60
       ttl_seconds_active: 3600
       ttl_seconds_after_finished: 300
-      # Job workers read the cloudpickle opt-in from here, not from the `evaluator` config. Change both together.
+      # Job workers read the cloudpickle opt-in from here, not from the `evals` config. Change both together.
       env:
         NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "false"
     subprocess:
@@ -61,7 +61,7 @@ jobs:
       ttl_seconds_before_active: 60
       ttl_seconds_active: 3600
       ttl_seconds_after_finished: 300
-      # Job workers read the cloudpickle opt-in from here, not from the `evaluator` config. Change both together.
+      # Job workers read the cloudpickle opt-in from here, not from the `evals` config. Change both together.
       env:
         NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "false"
 

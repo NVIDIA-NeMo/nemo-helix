@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import pytest
 from nemo_evals.jobs.secret_env import JobEnvSecretSource, build_task_environment
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx_evals_sdk.resolver_protocols import MissingSecretError
 from nhx_evals_sdk.values.common import SecretRef
-from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
 
 def test_two_secrets_under_one_env_name_are_refused_naming_both() -> None:
@@ -53,7 +53,7 @@ def test_job_resolver_reads_only_injected_keys(monkeypatch: pytest.MonkeyPatch) 
         "NHX_CONFIG_FILE_PATH",
     ],
 )
-def test_submitter_secrets_cannot_set_evaluator_or_platform_config(env_name: str) -> None:
+def test_submitter_secrets_cannot_set_evals_or_platform_config(env_name: str) -> None:
     """Config reads env case-insensitively, and a worker would honour any of these as operator settings."""
     with pytest.raises(ValueError, match="reserved"):
         build_task_environment([(env_name, "ws/attacker-controlled")])

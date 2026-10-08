@@ -54,9 +54,9 @@ def require_cloudpickle_metrics_allowed() -> None:
     if not get_config().allow_insecure_cloudpickle_metrics:
         raise CloudpickleMetricsDisabledError(
             "cloudpickle metrics are disabled on this deployment because they run caller-supplied Python "
-            "with the evaluator's service credentials. Bundle built-in metrics inline instead "
+            "with the Evals service's credentials. Bundle built-in metrics inline instead "
             "(HybridMetricBundlePackager keeps them inline), or ask an operator to enable "
-            "`evaluator.allow_insecure_cloudpickle_metrics` and set "
+            "`evals.allow_insecure_cloudpickle_metrics` and set "
             f"{ALLOW_CLOUDPICKLE_METRICS_ENV_VAR}=true in the job executor environment."
         )
 
