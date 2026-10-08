@@ -552,6 +552,30 @@ describe('CreateCustomizationStart', () => {
       expect(filesets.get(dataset.name)?.files.has('validation.jsonl')).toBe(true);
     });
 
+    /**
+     * Replace cannot be atomic — the files API has no swap — so the delete is held until
+     * the rebuilt rows are in memory and only the create and uploads remain. Deleting up
+     * front meant a failed download left the user with neither the old fileset nor a new
+     * one, and nothing here can put it back.
+     */
+    it('keeps the fileset it is replacing until the new data is ready', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      const filesets = useFilesetStore({
+        [dataset.name]: { storage: { type: 'huggingface', repo_id: dataset.hfRepoId } },
+      });
+      serveRows(() => Promise.reject(new Error('No dataset file matched the recipe pattern.')));
+      const onContinue = vi.fn();
+      const user = userEvent.setup();
+
+      await provisionSelectedTemplate(onContinue);
+      await user.click(await screen.findByRole('button', { name: /replace it/i }));
+      await user.click(await screen.findByRole('button', { name: /delete and rebuild/i }));
+
+      expect(await screen.findByText(/No dataset file matched/i)).toBeInTheDocument();
+      expect(filesets.has(dataset.name)).toBe(true);
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+
     it('does not delete anything until the replace is confirmed', async () => {
       const { dataset } = CUSTOMIZATION_TEMPLATES[0];
       const filesets = useFilesetStore({

@@ -153,11 +153,17 @@ export const useTemplateSetup = (workspace: string): UseTemplateSetupResult => {
       let convertedName = dataset.name;
 
       // "Replace" is the one path that destroys data, so it only ever touches the single
-      // fileset the user was shown, by the name they were shown it under.
-      if (resolution?.action === 'replace') {
+      // fileset the user was shown, by the name they were shown it under — and it holds
+      // the delete until the last moment that still fails safely. Deleting up front would
+      // mean a second conflict, a failed download or a failed upload leaves the user with
+      // neither the old fileset nor a new one, and nothing here can put it back.
+      const replacing = resolution?.action === 'replace' ? resolution.conflict : null;
+      const replaceTarget = replacing?.target ?? null;
+      const removeReplaced = async () => {
+        if (!replacing) return;
         setLabel('Removing the old fileset…');
-        await deleteFileset({ workspace, name: resolution.conflict.name });
-      }
+        await deleteFileset({ workspace, name: replacing.name });
+      };
 
       setLabel('Checking the workspace…');
 
@@ -172,33 +178,32 @@ export const useTemplateSetup = (workspace: string): UseTemplateSetupResult => {
       // Checked before the source fileset is registered and long before any bytes move:
       // if the converted rows are already here, none of that work is needed, and if they
       // cannot be written, the user should not wait for a download to find out.
-      const converted = await preflightConvertedFileset({
-        workspace,
-        name: convertedName,
-        readHead: (path) =>
-          downloadFileHead({ workspace, datasetName: convertedName, path, bytes: 8192 }),
-      });
-      if (converted.kind === 'conflict') {
-        setConflict(converted.conflict);
-        return null;
-      }
-      if (converted.kind === 'reusable') {
-        return {
-          values: template.buildFormSpec(workspace, converted.filesetRef),
-          reusedFilesetRef: converted.filesetRef,
-        };
+      //
+      // Skipped when the user has already been shown this exact fileset and chosen to
+      // rebuild it; re-checking would only re-raise the conflict they just answered.
+      if (replaceTarget !== 'converted') {
+        const converted = await preflightConvertedFileset({
+          workspace,
+          name: convertedName,
+          readHead: (path) =>
+            downloadFileHead({ workspace, datasetName: convertedName, path, bytes: 8192 }),
+        });
+        if (converted.kind === 'conflict') {
+          setConflict(converted.conflict);
+          return null;
+        }
+        if (converted.kind === 'reusable') {
+          return {
+            values: template.buildFormSpec(workspace, converted.filesetRef),
+            reusedFilesetRef: converted.filesetRef,
+          };
+        }
       }
 
-      const source = await preflightSourceFileset(workspace, sourceName, dataset.hfRepoId);
-      if (source.kind === 'conflict') {
-        setConflict(source.conflict);
-        return null;
-      }
-
-      if (source.kind === 'absent') {
-        // Creating this fileset costs three sequential HuggingFace round trips server-side
-        // (validate_storage, then resolve_config to pin the revision to a commit SHA), so
-        // it gets its own label rather than sitting silently behind the previous one.
+      // Creating this fileset costs three sequential HuggingFace round trips server-side
+      // (validate_storage, then resolve_config to pin the revision to a commit SHA), so it
+      // gets its own label rather than sitting silently behind the previous one.
+      const registerSource = async () => {
         setLabel('Connecting to Hugging Face…');
         await swallowConflict(
           createFileset({
@@ -216,6 +221,20 @@ export const useTemplateSetup = (workspace: string): UseTemplateSetupResult => {
             },
           })
         );
+      };
+
+      if (replaceTarget === 'source') {
+        // The download reads through this fileset, so it has to be back in place before
+        // the rows are fetched. Nothing else happens in between.
+        await removeReplaced();
+        await registerSource();
+      } else {
+        const source = await preflightSourceFileset(workspace, sourceName, dataset.hfRepoId);
+        if (source.kind === 'conflict') {
+          setConflict(source.conflict);
+          return null;
+        }
+        if (source.kind === 'absent') await registerSource();
       }
 
       const datasetFiles = await fetchAndConvertDataset(
@@ -236,6 +255,11 @@ export const useTemplateSetup = (workspace: string): UseTemplateSetupResult => {
           }
         }
       );
+
+      // Every step that could still fail with the old data intact is now behind us: the
+      // rows are downloaded and converted in memory, so the gap between losing the old
+      // fileset and holding a rebuilt one is just the create and the two uploads.
+      if (replaceTarget === 'converted') await removeReplaced();
 
       setLabel('Uploading dataset…');
       await swallowConflict(
