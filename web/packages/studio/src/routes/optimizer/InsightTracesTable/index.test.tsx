@@ -52,6 +52,62 @@ const installTraceHandler = ({
 };
 
 describe('InsightTracesTable', () => {
+  it('groups supporting spans by trace and falls back to the trace link', async () => {
+    installTraceHandler({ traces: [makeTrace(1)] });
+    renderRoute(
+      <InsightTracesTable
+        workspace={DEFAULT_WORKSPACE}
+        evidence={[
+          {
+            trace_id: makeTrace(1).id,
+            url: 'https://provider.example/trace/1',
+            spans: [
+              { span_id: 'parent', url: 'https://provider.example/span/parent' },
+              { span_id: 'nested-child' },
+              { span_id: 'unsafe-link', url: 'javascript:alert(1)' },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(
+      screen.getByRole('list', { name: `Supporting spans for ${makeTrace(1).id}` })
+    ).toHaveTextContent('nested-child');
+    expect(screen.getByRole('link', { name: 'parent' })).toHaveAttribute(
+      'href',
+      'https://provider.example/span/parent'
+    );
+    expect(screen.getByRole('link', { name: 'nested-child' })).toHaveAttribute(
+      'href',
+      'https://provider.example/trace/1'
+    );
+    expect(screen.getByRole('link', { name: 'unsafe-link' })).toHaveAttribute(
+      'href',
+      'https://provider.example/trace/1'
+    );
+    await screen.findByText('Trace 01');
+  });
+
+  it('shows span references without links when the trace is unavailable', async () => {
+    installTraceHandler({ traces: [] });
+    renderRoute(
+      <InsightTracesTable
+        workspace={DEFAULT_WORKSPACE}
+        evidence={[
+          {
+            trace_id: 'missing-trace',
+            spans: [{ span_id: 'unlinked-span' }],
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('unlinked-span')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'unlinked-span' })).not.toBeInTheDocument();
+    await screen.findByText("1 of 1 traces couldn't be loaded.");
+  });
+
   it('requests and displays only the current page in reference order using preview mode', async () => {
     const user = userEvent.setup();
     const traces = Array.from({ length: 11 }, (_, index) => makeTrace(index + 1));
@@ -59,9 +115,15 @@ describe('InsightTracesTable', () => {
     const missingId = traces[9].id;
     const requests = installTraceHandler({ traces, missingIds: [missingId] });
 
-    renderRoute(<InsightTracesTable workspace={DEFAULT_WORKSPACE} traceIds={traceIds} />, {
-      history: '/optimizer?page_size=10',
-    });
+    renderRoute(
+      <InsightTracesTable
+        workspace={DEFAULT_WORKSPACE}
+        evidence={traceIds.map((trace_id) => ({ trace_id }))}
+      />,
+      {
+        history: '/optimizer?page_size=10',
+      }
+    );
 
     expect(screen.queryByText("10 of 10 traces couldn't be loaded.")).not.toBeInTheDocument();
 
@@ -93,7 +155,12 @@ describe('InsightTracesTable', () => {
       )
     );
 
-    renderRoute(<InsightTracesTable workspace={DEFAULT_WORKSPACE} traceIds={[makeTrace(1).id]} />);
+    renderRoute(
+      <InsightTracesTable
+        workspace={DEFAULT_WORKSPACE}
+        evidence={[{ trace_id: makeTrace(1).id }]}
+      />
+    );
 
     expect(await screen.findByText('Error')).toBeInTheDocument();
     expect(

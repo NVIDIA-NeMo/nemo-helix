@@ -49,6 +49,7 @@ from nemo_insights_plugin.entities import (
     Insight,
     InsightStatus,
 )
+from nemo_insights_plugin.evidence import TraceEvidence
 from nemo_insights_plugin.schedule import is_due, previous_scheduled
 from nemo_insights_plugin.schema import AnalysisRunResponse, CreateAnalysisRunRequest
 from pydantic import JsonValue, ValidationError
@@ -130,7 +131,8 @@ class _RecordingInsights:
         agent: str,
         description: str,
         status: InsightStatus | str = InsightStatus.OPEN,
-        trace_refs: list[str] | None = None,
+        evidence: list | None = None,
+        updated_date: datetime | None = None,
     ) -> Insight:
         insight_id = f"insight-remote-{len(self.rows) + 1}"
         row = Insight(
@@ -140,7 +142,8 @@ class _RecordingInsights:
             agent=agent,
             description=description,
             status=InsightStatus(status),
-            trace_refs=list(trace_refs or []),
+            evidence=list(evidence or []),
+            updated_date=updated_date,
         )
         row._id = insight_id
         row._created_at = _STAMP
@@ -164,7 +167,8 @@ class _RecordingInsights:
         agent: str | None = None,
         description: str | None = None,
         status: InsightStatus | str | None = None,
-        trace_refs: list[str] | None = None,
+        evidence: list | None = None,
+        updated_date: datetime | None = None,
     ) -> Insight:
         del workspace
         row = self.rows.get(insight_id)
@@ -176,8 +180,10 @@ class _RecordingInsights:
             row.description = description
         if status is not None:
             row.status = InsightStatus(status)
-        if trace_refs is not None:
-            row.trace_refs = list(trace_refs)
+        if evidence is not None:
+            row.evidence = list(evidence)
+        if updated_date is not None:
+            row.updated_date = updated_date
         return row
 
 
@@ -219,7 +225,11 @@ async def test_remote_persist_mirrors_platform_records_to_the_file(
     path = tmp_path / "insights.yaml"
     result = AnalystResult(
         summary="Found one.",
-        new_insights=[NewInsight(title="Retrieval drops context", description="Long inputs.", trace_refs=["t1"])],
+        new_insights=[
+            NewInsight(
+                title="Retrieval drops context", description="Long inputs.", evidence=[TraceEvidence(trace_id="t1")]
+            )
+        ],
     )
 
     async with _remote_backend_with_mirror(path, monkeypatch) as (backend, _):
@@ -227,7 +237,7 @@ async def test_remote_persist_mirrors_platform_records_to_the_file(
 
     records = yaml.safe_load(path.read_text(encoding="utf-8"))["insights"]
     assert [r["id"] for r in records] == ["insight-remote-1"]
-    assert records[0]["trace_refs"] == ["t1"]
+    assert [item["trace_id"] for item in records[0]["evidence"]] == ["t1"]
     assert records[0]["created_at"] == _STAMP.isoformat()
     assert f"- mirrored 1 insight(s) to {path}" in report
 
@@ -242,7 +252,11 @@ async def test_mirror_updates_match_platform_ids_across_runs(tmp_path: Path, mon
             result=AnalystResult(
                 summary="Found one.",
                 new_insights=[
-                    NewInsight(title="Retrieval drops context", description="Long inputs.", trace_refs=["t1"])
+                    NewInsight(
+                        title="Retrieval drops context",
+                        description="Long inputs.",
+                        evidence=[TraceEvidence(trace_id="t1")],
+                    )
                 ],
             ),
         )
@@ -252,13 +266,13 @@ async def test_mirror_updates_match_platform_ids_across_runs(tmp_path: Path, mon
             agent="research-agent",
             result=AnalystResult(
                 summary="More evidence.",
-                updated_insights=[InsightUpdate(id="insight-remote-1", trace_refs=["t2"])],
+                updated_insights=[InsightUpdate(id="insight-remote-1", evidence=[TraceEvidence(trace_id="t2")])],
             ),
         )
 
     records = yaml.safe_load(path.read_text(encoding="utf-8"))["insights"]
     assert len(records) == 1, "the second run must update the mirrored record, not append a second one"
-    assert records[0]["trace_refs"] == ["t1", "t2"]
+    assert [item["trace_id"] for item in records[0]["evidence"]] == ["t1", "t2"]
 
 
 @pytest.mark.asyncio

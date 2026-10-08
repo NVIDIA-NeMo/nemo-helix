@@ -8,9 +8,10 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import type { TraceEvidence } from '@nemo/sdk/generated/insights/schema';
 import type { Trace, TraceFilter } from '@nemo/sdk/generated/platform/schema';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';
-import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Anchor, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { IntakeTelemetryDataView } from '@studio/components/IntakeLists/IntakeTelemetryDataView';
 import { makeIntakeTraceColumns } from '@studio/components/IntakeLists/intakeTraceColumns';
 import { getIntakeSessionTraceRoute } from '@studio/routes/utils';
@@ -21,10 +22,19 @@ import { type FC } from 'react';
 // whenever makeColumns changes.
 const makeTraceColumns = makeIntakeTraceColumns();
 
+function safeEvidenceUrl(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return ['https:', 'http:'].includes(url.protocol) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface InsightTracesTableProps {
   workspace: string;
-  /** Intake trace ids (the insight's `trace_refs`). */
-  traceIds: string[];
+  evidence: TraceEvidence[];
 }
 
 /**
@@ -32,7 +42,8 @@ export interface InsightTracesTableProps {
  * `IntakeTracesTable`. Unlike the workspace browse table, this fetches only the referenced
  * traces by id and preserves `traceIds` order (no server sort/filter).
  */
-export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, traceIds }) => {
+export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, evidence }) => {
+  const traceIds = evidence.map((item) => item.trace_id);
   const openRow = useRowNavigation();
   const dataViewState = useStudioDataViewState();
   const { pageIndex, pageSize } = dataViewState.pagination.state;
@@ -70,6 +81,38 @@ export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, tra
           </Text>
         </Flex>
       ) : null}
+      {evidence.slice(firstVisibleIndex, firstVisibleIndex + pageSize).map((item) => {
+        const trace = tracesById.get(item.trace_id);
+        const traceUrl =
+          safeEvidenceUrl(item.url) ??
+          (trace ? getIntakeSessionTraceRoute(workspace, trace.session_id, trace.id) : undefined);
+        if (!item.url && !item.spans?.length) return null;
+        return (
+          <Stack key={item.trace_id} className="gap-density-xs">
+            {traceUrl ? (
+              <Anchor href={traceUrl}>{item.trace_id}</Anchor>
+            ) : (
+              <Text>{item.trace_id}</Text>
+            )}
+            {item.spans?.length ? (
+              <ul aria-label={`Supporting spans for ${item.trace_id}`} className="pl-4">
+                {item.spans.map((span) => {
+                  const url = safeEvidenceUrl(span.url) ?? traceUrl;
+                  return (
+                    <li key={span.span_id}>
+                      {url ? (
+                        <Anchor href={url}>{span.span_id}</Anchor>
+                      ) : (
+                        <Text>{span.span_id}</Text>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </Stack>
+        );
+      })}
       <IntakeTelemetryDataView<Trace>
         dataViewState={dataViewState}
         makeColumns={makeTraceColumns}

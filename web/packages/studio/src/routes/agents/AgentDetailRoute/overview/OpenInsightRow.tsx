@@ -16,7 +16,7 @@ interface OpenInsightRowProps {
  * problem is and when it was last seen.
  */
 export const OpenInsightRow: FC<OpenInsightRowProps> = ({ insight, onOpen }) => {
-  const traceCount = insight.trace_refs?.length ?? 0;
+  const traceCount = insight.evidence?.length ?? 0;
 
   return (
     <Button

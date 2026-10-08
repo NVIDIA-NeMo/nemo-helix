@@ -126,7 +126,8 @@ def _build_insights_router() -> APIRouter:
             agent=body.agent,
             description=body.description,
             status=body.status,
-            trace_refs=list(body.trace_refs),
+            evidence=list(body.evidence),
+            updated_date=body.updated_date,
         )
         try:
             saved = await entity_client.create(insight)
@@ -199,7 +200,7 @@ def _build_insights_router() -> APIRouter:
             try:
                 last_seen_at = await spans_service.latest_trace_started_at_by_group(
                     workspace=workspace,
-                    trace_refs_by_group={item.id: item.trace_refs for item in items},
+                    trace_refs_by_group={item.id: [entry.trace_id for entry in item.evidence] for item in items},
                 )
             except Exception:
                 logger.exception("Failed to find latest traces for insights")
@@ -273,8 +274,10 @@ def _build_insights_router() -> APIRouter:
             insight.description = body.description
         if body.status is not None:
             insight.status = body.status
-        if body.trace_refs is not None:
-            insight.trace_refs = list(body.trace_refs)
+        if body.updated_date is not None:
+            insight.updated_date = body.updated_date
+        if body.evidence is not None:
+            insight.evidence = list(body.evidence)
 
         try:
             saved = await entity_client.update(insight)

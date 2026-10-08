@@ -70,7 +70,7 @@ describe('EvaluationDetailRoute with Optimizer enabled', () => {
           description: 'Actual insight description',
           agent: 'agent',
           status: 'open',
-          trace_refs: [],
+          evidence: [],
         })
       )
     );

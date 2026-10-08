@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.entity_client import NemoPaginationInfo, get_entity_client
 from nemo_insights_plugin.entities import Insight
+from nemo_insights_plugin.evidence import TraceEvidence
 from nemo_insights_plugin.service import InsightsService
 from nhx.intake.entities.experiments import ExperimentGroup
 from nhx.intake.spans.api.dependencies import get_spans_service
@@ -43,6 +44,46 @@ def test_service_exposes_analysis_runs_without_legacy_job_routes() -> None:
     assert not any("/jobs/" in path for path in paths)
 
 
+def test_api_returns_converted_evidence_and_persists_span_updates() -> None:
+    entity_client = AsyncMock()
+    insight = Insight.model_validate(
+        {
+            "name": "stable-name",
+            "workspace": "default",
+            "title": "Original title",
+            "description": "Original description",
+            "agent": "test-agent",
+            "trace_refs": ["trace-a"],
+            "trace_links": {"trace-a": "https://provider/trace-a"},
+        }
+    )
+    insight._id = "insight-a"
+    entity_client.get_by_id.return_value = insight
+    entity_client.update.side_effect = lambda item: item
+    client = TestClient(_app(entity_client, AsyncMock()))
+    response = client.get("/v2/workspaces/default/insights/insight-a")
+    assert response.status_code == 200
+    assert "trace_refs" not in response.json()
+    assert response.json()["evidence"][0]["url"] == "https://provider/trace-a"
+    response = client.patch(
+        "/v2/workspaces/default/insights/insight-a",
+        json={
+            "evidence": [{"trace_id": "trace-a", "spans": [{"span_id": "child"}]}],
+            "updated_date": "2026-10-07T12:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["evidence"][0]["spans"][0]["span_id"] == "child"
+    assert data["updated_date"] == "2026-10-07T12:00:00Z"
+    assert (data["id"], data["name"], data["title"], data["description"]) == (
+        "insight-a",
+        "stable-name",
+        "Original title",
+        "Original description",
+    )
+
+
 def test_list_insights_enriches_the_page_with_counts_and_last_seen_at() -> None:
     entity_client = AsyncMock()
     spans_service = AsyncMock()
@@ -51,8 +92,8 @@ def test_list_insights_enriches_the_page_with_counts_and_last_seen_at() -> None:
         _insight("second", "insight-b"),
         _insight("third", "insight-c"),
     ]
-    insights[0].trace_refs = ["trace-old", "trace-new"]
-    insights[1].trace_refs = ["trace-missing"]
+    insights[0].evidence = [TraceEvidence(trace_id=ref) for ref in ["trace-old", "trace-new"]]
+    insights[1].evidence = [TraceEvidence(trace_id="trace-missing")]
     entity_client.list.return_value = SimpleNamespace(
         data=insights,
         pagination=NemoPaginationInfo(
