@@ -53,8 +53,8 @@ export const UNRECOGNIZED_FORMAT =
 
 /**
  * Why the picked dataset cannot be drafted from, or null when it can. A file that failed to
- * download or parse has no detectable format either, so its own error is named before the
- * format is blamed.
+ * download or parse is named even when another file's format was detected, rather than
+ * drafting from a count its rows are missing from.
  */
 export const datasetProblem = (
   dataset: Pick<
@@ -66,9 +66,8 @@ export const datasetProblem = (
     return `Couldn't read the dataset: ${getErrorMessage(dataset.discoveryError)}`;
   }
   if (!dataset.hasTraining) return NO_TRAINING_FILES;
-  if (dataset.schema) return null;
   const [first, ...rest] = dataset.format.fileErrors;
-  if (!first) return UNRECOGNIZED_FORMAT;
+  if (!first) return dataset.schema ? null : UNRECOGNIZED_FORMAT;
   const more =
     rest.length > 0 ? ` (${rest.length} more ${rest.length === 1 ? 'file' : 'files'} too)` : '';
   return `Couldn't read ${first.path}: ${first.error}${more}`;
