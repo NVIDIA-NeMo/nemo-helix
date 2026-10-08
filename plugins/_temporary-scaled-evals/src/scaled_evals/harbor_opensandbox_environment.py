@@ -218,7 +218,10 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
                     break
                 page += 1
             for sandbox_id in orphans:
-                await manager.kill_sandbox(sandbox_id)
+                try:
+                    await manager.kill_sandbox(sandbox_id)
+                except Exception:
+                    self.logger.warning("Could not kill orphaned OpenSandbox sandbox %s", sandbox_id, exc_info=True)
             if orphans:
                 self.logger.warning(
                     "Killed OpenSandbox sandboxes left by create attempt %s: %s", attempt_id, ", ".join(orphans)
