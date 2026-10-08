@@ -24,6 +24,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 from nemo_scaled_evals_plugin.jobs.naming import task_image_build_job_name
 from nemo_scaled_evals_plugin.jobs.specs import TaskImageBuildSpec
 from pydantic import BaseModel
+from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
 
 
@@ -153,11 +154,13 @@ def resolve_secret_environment() -> list[EnvironmentVariable] | None:
     return _secret_environment(_shared_secret_refs())
 
 
-def resolve_evaluation_secret_environment() -> list[EnvironmentVariable] | None:
-    """Secrets for evaluation Jobs: the shared set plus runtime credentials builds never need."""
-    return _secret_environment(
-        {**_shared_secret_refs(), "OPENSANDBOX_API_KEY": settings.platform_jobs_opensandbox_api_key_secret}
-    )
+def resolve_evaluation_secret_environment(runtime: str) -> list[EnvironmentVariable] | None:
+    """Secrets for evaluation Jobs: the shared set plus credentials only ``runtime`` needs."""
+    refs = _shared_secret_refs()
+    if runtime == HARBOR_OPENSANDBOX_RUNTIME:
+        refs["OPENSANDBOX_API_KEY"] = settings.platform_jobs_opensandbox_api_key_secret
+
+    return _secret_environment(refs)
 
 
 def _secret_environment(refs: dict[str, str]) -> list[EnvironmentVariable] | None:

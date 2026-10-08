@@ -1463,45 +1463,31 @@ def _terminate_process_group(pid: int) -> None:
     os.killpg(pid, signal.SIGKILL)
 
 
-def _stop_detached_runner(handle: LaunchHandle) -> None:
-    """Stop the detached ``harbor run`` recorded in ``handle.raw["pid_file"]``, if it is still running.
-
-    The detached runner deletes its pid file on exit, so a missing file means there is nothing to stop.
-    Renaming the file first makes concurrent terminators race for it rather than both signalling.
-
-    Raises:
-        RuntimeError: The recorded pid now belongs to a different process, or its group is not detached.
-        OSError, ValueError, KeyError: The pid file is unreadable or malformed.
-    """
-    pid_path_value = handle.raw.get("pid_file")
-    if not isinstance(pid_path_value, str) or not pid_path_value:
-        return
-    pid_path = Path(pid_path_value)
-    claimed_pid_path = pid_path.with_name(f"{pid_path.name}.terminating")
-    try:
-        pid_path.rename(claimed_pid_path)
-    except FileNotFoundError:
-        return
-    try:
-        identity = json.loads(claimed_pid_path.read_text())
-        pid = int(identity["pid"])
-        expected_start = identity.get("start_ticks")
-        if expected_start is None or _process_start_ticks(pid) != expected_start:
-            raise RuntimeError(f"refusing to terminate reused runner pid {pid}")
-        _terminate_process_group(pid)
-    finally:
-        claimed_pid_path.unlink(missing_ok=True)
-
-
 def make_sandbox_k8s_process_terminator() -> Callable[[LaunchHandle], None]:
     """Build a terminator for host-launched detached ``harbor run`` processes."""
 
     def terminate(handle: LaunchHandle) -> None:
         failures: list[str] = []
-        try:
-            _stop_detached_runner(handle)
-        except (OSError, ValueError, KeyError, RuntimeError) as exc:
-            failures.append(f"harbor runner termination failed: {exc}")
+        pid_path_value = handle.raw.get("pid_file")
+        if isinstance(pid_path_value, str) and pid_path_value:
+            pid_path = Path(pid_path_value)
+            claimed_pid_path = pid_path.with_name(f"{pid_path.name}.terminating")
+            try:
+                pid_path.rename(claimed_pid_path)
+            except FileNotFoundError:
+                pass
+            else:
+                try:
+                    identity = json.loads(claimed_pid_path.read_text())
+                    pid = int(identity["pid"])
+                    expected_start = identity.get("start_ticks")
+                    if expected_start is None or _process_start_ticks(pid) != expected_start:
+                        raise RuntimeError(f"refusing to terminate reused runner pid {pid}")
+                    _terminate_process_group(pid)
+                except (OSError, ValueError, RuntimeError) as exc:
+                    failures.append(f"harbor runner termination failed: {exc}")
+                finally:
+                    claimed_pid_path.unlink(missing_ok=True)
         try:
             _cleanup_sandbox_k8s_resources(handle)
         except RuntimeError as exc:

@@ -225,8 +225,8 @@ class Settings(BaseSettings):
         allow_inf_nan=False,
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BUDGET_SECONDS",
     )
-    # Platform Secret holding the OpenSandbox API key, exposed to evaluation
-    # Jobs only (never task-image builds) as OPENSANDBOX_API_KEY.
+    # Platform Secret holding the OpenSandbox API key, exposed as OPENSANDBOX_API_KEY
+    # only to harbor_opensandbox evaluation Jobs (never other runtimes or task-image builds).
     platform_jobs_opensandbox_api_key_secret: str = Field(
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_OPENSANDBOX_API_KEY_SECRET",

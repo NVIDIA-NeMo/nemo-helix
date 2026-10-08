@@ -49,6 +49,27 @@ def _evaluation_spec() -> EvaluationExecutionSpec:
     )
 
 
+@pytest.mark.asyncio
+async def test_only_harbor_opensandbox_evaluations_get_opensandbox_key(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(settings, "platform_jobs_opensandbox_api_key_secret", "scaled-evals-opensandbox-api-key")
+
+    async def environment_for(runtime: str) -> dict[str, str | None]:
+        job = await EvaluationExecutionJob.compile(
+            workspace="default",
+            spec=_evaluation_spec().model_copy(update={"runtime": runtime}),
+            entity_client=object(),
+            job_name=None,
+            async_sdk=object(),
+            options={"scaled_evals": {"application_image": "registry.example/scaled-evals:test"}},
+        )
+        return {
+            item.name: item.from_secret.name if item.from_secret else None for item in job.steps[0].environment or []
+        }
+
+    assert (await environment_for("harbor_opensandbox"))["OPENSANDBOX_API_KEY"] == "scaled-evals-opensandbox-api-key"
+    assert "OPENSANDBOX_API_KEY" not in await environment_for("sandbox_k8s")
+
+
 def test_specs_and_deterministic_names() -> None:
     assert _build_spec().model_dump()["payload"] == {}
     assert _evaluation_spec().deadline_seconds == 7200
@@ -128,7 +149,6 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
         "PGPASSWORD": "scaled-evals-postgres-password",
         "CREDENTIALS_ENCRYPTION_KEY": "scaled-evals-credentials-encryption-key",
         "TASK_IMAGE_REGISTRY_AUTH_JSON": "scaled-evals-registry-auth",
-        "OPENSANDBOX_API_KEY": "scaled-evals-opensandbox-api-key",
     }
     assert evaluation_step.executor.resources.requests.cpu == "50m"
     assert evaluation_step.executor.resources.limits.memory == "1Gi"

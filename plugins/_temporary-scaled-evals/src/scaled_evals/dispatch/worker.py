@@ -1977,6 +1977,12 @@ class Dispatcher:
                     handle=handle,
                     harbor_rc=1,
                 )
+                # Tear down before syncing: the terminator stops the runner and may write
+                # artifacts (such as the OpenSandbox applied-egress summary) that must be uploaded.
+                self._mark_campaign_cleanup_pending(conn, row)
+                teardown_note = self._teardown_failed_runtime_warn(backend, handle)
+                if teardown_note is None:
+                    self._acknowledge_campaign_cleanup(conn, row)
                 self._write_provenance_warn(row, status="failed", artifact_root=artifact_root, handle=handle)
                 self._sync_artifacts_warn(
                     evaluation_id,
@@ -1991,10 +1997,6 @@ class Dispatcher:
                     execution_number=execution_number,
                 )
                 detail = f"status read failed: {exc}"
-                self._mark_campaign_cleanup_pending(conn, row)
-                teardown_note = self._teardown_failed_runtime_warn(backend, handle)
-                if teardown_note is None:
-                    self._acknowledge_campaign_cleanup(conn, row)
                 if switchyard_note:
                     detail = f"{detail}; {switchyard_note}"
                 if switchyard_manifest_note:
