@@ -2046,9 +2046,6 @@ paths:
       responses:
         '200':
           description: Successful Response
-          content:
-            application/json:
-              schema: {}
         '422':
           description: Validation Error
           content:
@@ -10663,6 +10660,18 @@ components:
       - source
       title: CreateHelixJobRequest
       description: Request model for creating a new platform job.
+      examples:
+      - name: hello-world
+        platform_spec:
+          steps:
+          - config: {}
+            executor:
+              container:
+                image: python:3.11
+              provider: cpu
+            name: run
+        source: api-reference
+        spec: {}
     CreateModelAdapterRequest:
       properties:
         name:
@@ -10759,6 +10768,12 @@ components:
       - executor_config
       title: CreateModelDeploymentConfigRequest
       description: Request model for creating a ModelDeploymentConfig.
+      examples:
+      - engine: nim
+        executor_config:
+          gpu: 1
+        model_spec: {}
+        name: nim-config-v1
     CreateModelDeploymentRequest:
       properties:
         name:
@@ -11626,6 +11641,10 @@ components:
           title: Data
           description: Entity-specific data (schema is opaque to entity store, validated
             by client SDK)
+          examples:
+          - target_id: llama-2-7b
+            training_options:
+              learning_rate: 0.01
       type: object
       required:
       - data
@@ -11636,6 +11655,12 @@ components:
         Name is optional - if not provided, it will be auto-generated.
 
         Workspace and entity_type come from the URL path parameters.'
+      examples:
+      - data:
+          target_id: llama-2-7b
+          training_options:
+            learning_rate: 0.01
+        name: my-config
     EntityUpdate:
       properties:
         new_name:
@@ -11657,6 +11682,10 @@ components:
           type: object
           title: Data
           description: Updated entity-specific data
+          examples:
+          - target_id: llama-2-7b
+            training_options:
+              learning_rate: 0.02
         expected_db_version:
           title: Expected Db Version
           description: Optional database version for optimistic locking. Update only
@@ -11667,6 +11696,11 @@ components:
       - data
       title: EntityUpdate
       description: Schema for updating an entity.
+      examples:
+      - data:
+          target_id: llama-2-7b
+          training_options:
+            learning_rate: 0.02
     EnvironmentMetadataContent:
       properties:
         format:
@@ -15069,6 +15103,9 @@ components:
       type: object
       title: HelixSecretUpdateRequest
       description: Request body for updating a platform secret's metadata.
+      examples:
+      - description: Updated secret description
+        value: new-secret-value
     HuggingfaceStorageConfig:
       properties:
         read_chunk_size:
@@ -20200,6 +20237,11 @@ components:
       title: UpdateModelDeploymentConfigRequest
       description: Request model for updating a ModelDeploymentConfig (creates new
         version).
+      examples:
+      - engine: nim
+        executor_config:
+          gpu: 1
+        model_spec: {}
     UpdateModelDeploymentRequest:
       properties:
         config:

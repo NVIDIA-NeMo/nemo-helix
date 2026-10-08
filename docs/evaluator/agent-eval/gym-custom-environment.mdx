@@ -164,7 +164,13 @@ nemo evaluator agent-evaluate \
 
 Submit the runner object rather than the spec file. The runner carries the evaluation and a
 `GymPlacement` carries the deployment, so the configuration is written once and
-`evaluator.submit` returns a job handle that polls itself:
+`evaluator.submit` returns a job handle that polls itself.
+
+<Warning>
+
+In NeMo Helix 0.7, `GymRuntimeConfig` does not expose the YAML `hydra_params` fields used above for `policy_base_url`, `policy_api_key`, and `policy_model_name`. If your custom environment needs per-job model endpoint overrides, submit the YAML spec with the CLI. Use the Python SDK path only when the model connection is already provided by the environment package or deployment defaults.
+
+</Warning>
 
 ```python
 from nemo_evaluator.api.schemas import TasksetRef

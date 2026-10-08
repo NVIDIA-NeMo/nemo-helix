@@ -24,9 +24,9 @@ dependencies = [
   # The broker sandbox provider imports the wire contract at module scope. Cheap to depend on
   # directly: nemo-sandboxed-gym's base install is Pydantic alone -- its server, OpenSandbox and Ray
   # pieces are extras -- so this adds request/response models, not a web stack.
-  # Workspace member for now; becomes an exact PyPI pin once published, per the note on
-  # `[tool.bundle-package]` in packages/nemo_helix/pyproject.toml.
-  "nemo-sandboxed-gym",
+  # Published on its own version line; see `[tool.bundle-package-published]` in
+  # packages/nemo_helix/pyproject.toml. The workspace resolves it from source.
+  "nemo-sandboxed-gym==0.1.0",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
   "jsonpath-ng>=1.7.0",
