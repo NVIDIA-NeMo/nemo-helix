@@ -8,6 +8,7 @@ description: ""
 
 | Option | Description |
 |--------|-------------|
+| `--context, -c` | The name of the context to use. Overrides the current context in the config file. |
 | `--base-url` | Base URL for the NeMo Helix API |
 | `--output-format, --output, -f <CHOICE>` | Output format for how results are printed. [possible values: table, json, yaml, markdown, csv, raw, code] |
 | `--no-truncate` | Don't truncate long values in table/markdown/csv output |
@@ -20,7 +21,7 @@ description: ""
 
 | Category | Commands | Description |
 |----------|----------|-------------|
-| Setup | `setup`, `auth`, `services`, `skills` | Set up and run local platform components |
+| Setup | `setup`, `auth`, `config`, `services`, `skills` | Set up and run local platform components |
 | CLI functions | `chat`, `docs`, `wait`, `agent`, `plugins` | Interactive, documentation, and agent-oriented workflows |
 | Core plugins | `files`, `inference`, `jobs`, `models`, `secrets`, `workspaces` | Core platform resources |
 | Functional plugins | `agents`, `data-designer`, `guardrail`, `auditor`, `anonymizer`, `evaluator`, `customization`, `insights`, `safe-synthesizer`, `experiments`, `intake` | Functional service and plugin commands |
