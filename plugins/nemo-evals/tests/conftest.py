@@ -6,11 +6,17 @@
 from __future__ import annotations
 
 import math
+import pickle
 import tempfile
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from nemo_evals.api.schemas import MetricInline
+from nemo_evals.config import get_config
+from nemo_evals.shared.metric_bundles.bundles import bundle_metric
+from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
+from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
@@ -206,6 +212,26 @@ class FakeSecretsClient(AsyncSecretsClient):
         if key not in self._secrets:
             raise NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "/")))
         return FakeAccessResponse(HelixSecretAccessResponse(name=name, workspace=key[0], value=self._secrets[key]))
+
+
+@pytest.fixture
+def allow_cloudpickle_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run as a deployment whose operator has enabled cloudpickle metrics."""
+    monkeypatch.setattr(get_config(), "allow_insecure_cloudpickle_metrics", True)
+
+
+class _Detonator:
+    def __reduce__(self):
+        return (pytest.fail, ("a cloudpickle metric payload was deserialized",))
+
+
+@pytest.fixture
+def detonating_cloudpickle_metric() -> dict:
+    """A cloudpickle ``MetricInline`` whose payload fails the test if anything deserializes it."""
+    bundle = bundle_metric(ExactMatchMetric(reference="a", candidate="a"), CloudpickleMetricBundlePackager())
+    payload = CloudpickleMetricPayload.from_blob(pickle.dumps(_Detonator()))
+    detonating = bundle.model_copy(update={"payload": payload})
+    return MetricInline.model_validate_json(detonating.model_dump_json()).model_dump(mode="json")
 
 
 @pytest.fixture

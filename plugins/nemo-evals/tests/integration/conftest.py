@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 
 import pytest
 import yaml
+from nemo_evals.shared.metric_bundles.cloudpickle import ALLOW_CLOUDPICKLE_METRICS_ENV_VAR
 from nhx.testing import igw_mock_provider_mode
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -165,6 +166,16 @@ def _igw_mock_prefix() -> Iterator[None]:
         yield
 
 
+#: These harness platforms are single-user dev deployments that opt in to cloudpickle metrics, so the
+#: custom-metric tests can run. Workers read the opt-in from executor env, not the config file.
+CLOUDPICKLE_METRICS_JOB_ENV = {ALLOW_CLOUDPICKLE_METRICS_ENV_VAR: "true"}
+
+
+@pytest.fixture(autouse=True)
+def _cloudpickle_metrics_enabled(allow_cloudpickle_metrics: None) -> None:
+    """Match the harness platforms' opt-in in the test process, where sync jobs hydrate metrics."""
+
+
 def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabled: bool = False) -> Path:
     """Write a self-contained subprocess-backend platform config under ``work_root``.
 
@@ -184,6 +195,7 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
         "ttl_seconds_before_active": 60,
         "ttl_seconds_active": 3600,
         "ttl_seconds_after_finished": 300,
+        "env": CLOUDPICKLE_METRICS_JOB_ENV,
     }
     config = {
         "platform": {"runtime": "none", "base_url": base_url},
@@ -206,6 +218,7 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
             "executor_defaults": {"subprocess": subprocess_executor_config},
         },
         "secrets": {"allow_key_creation": True},
+        "evaluator": {"allow_insecure_cloudpickle_metrics": True},
         "files": {"default_storage_config": {"type": "local", "path": str(work_root / "files")}},
     }
     config_path = work_root / "subprocess-platform.yaml"
@@ -296,6 +309,7 @@ def _materialize_docker_config(work_root: Path, *, base_url: str) -> Path:
         "ttl_seconds_before_active": 60,
         "ttl_seconds_active": 3600,
         "ttl_seconds_after_finished": 300,
+        "env": CLOUDPICKLE_METRICS_JOB_ENV,
     }
     config = {
         "platform": {"runtime": "docker", "base_url": base_url},
@@ -308,6 +322,7 @@ def _materialize_docker_config(work_root: Path, *, base_url: str) -> Path:
             "executor_defaults": {"docker": docker_executor_config},
         },
         "secrets": {"allow_key_creation": True},
+        "evaluator": {"allow_insecure_cloudpickle_metrics": True},
         "files": {"default_storage_config": {"type": "local", "path": str(work_root / "files")}},
     }
     config_path = work_root / "docker-platform.yaml"

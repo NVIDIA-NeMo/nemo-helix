@@ -110,6 +110,9 @@ jobs:
       ttl_seconds_before_active: 60
       ttl_seconds_active: 3600
       ttl_seconds_after_finished: 300
+      # Job workers read the cloudpickle opt-in from here, not from `evaluator:` below. Change both together.
+      env:
+        NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "false"
       storage:
         # Additional volume for E2E tests
         additional_volume_mounts:
@@ -122,9 +125,15 @@ jobs:
       ttl_seconds_before_active: 60
       ttl_seconds_active: 3600
       ttl_seconds_after_finished: 300
+      # Job workers read the cloudpickle opt-in from here, not from `evaluator:` below. Change both together.
+      env:
+        NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "false"
 
 evals:
   recreate_existing_system_entities: True
+  # Cloudpickle metrics run caller-supplied Python with service credentials. To enable them, set this
+  # and NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS in jobs.executor_defaults.<backend>.env above.
+  allow_insecure_cloudpickle_metrics: false
 
 safe_synthesizer: {}
 

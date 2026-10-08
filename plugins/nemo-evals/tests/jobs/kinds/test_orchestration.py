@@ -102,12 +102,10 @@ def test_worker_rejects_invalid_canonical_json_before_runtime(tmp_path, invalid)
     """Reject missing task kinds and duplicate metrics before the worker creates runtime files."""
     from nemo_evals.jobs.metric_resolution import to_inline
     from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-    from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+    from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
     from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
-    metric = to_inline(
-        bundle_metric(ExactMatchMetric(reference="yes", candidate="yes"), CloudpickleMetricBundlePackager())
-    )
+    metric = to_inline(bundle_metric(ExactMatchMetric(reference="yes", candidate="yes"), HybridMetricBundlePackager()))
     config = {
         "tasks": [
             {

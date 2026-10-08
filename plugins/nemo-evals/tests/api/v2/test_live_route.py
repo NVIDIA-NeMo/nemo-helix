@@ -23,7 +23,7 @@ from nemo_evals.api.v2 import live as live_routes
 from nemo_evals.entities import MetricBundleEntity
 from nemo_evals.jobs import metric_resolution
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import EntityClient
@@ -327,7 +327,7 @@ def _judge_metric(secret: str | None) -> dict[str, Any]:
         scores=[RangeScore(name="helpfulness", minimum=1, maximum=5, parser=JSONScoreParser(json_path="helpfulness"))],
         job_type=SupportedJobTypes.OFFLINE,
     )
-    bundle = bundle_metric(metric, CloudpickleMetricBundlePackager())
+    bundle = bundle_metric(metric, HybridMetricBundlePackager())
     return MetricInline.model_validate_json(bundle.model_dump_json()).model_dump(mode="json")
 
 
@@ -409,7 +409,7 @@ def test_one_failing_metric_does_not_hide_the_others(client: TestClient) -> None
     # string does not, so this metric fails while the exact-match beside it succeeds.
     broken = ToolCallingMetric(reference="{{item.not_tool_calls}}")
     broken_inline = MetricInline.model_validate_json(
-        bundle_metric(broken, CloudpickleMetricBundlePackager()).model_dump_json()
+        bundle_metric(broken, HybridMetricBundlePackager()).model_dump_json()
     ).model_dump(mode="json")
 
     resp = client.post(
@@ -491,7 +491,7 @@ def test_stored_metric_reference_is_resolved_and_scored(monkeypatch: pytest.Monk
     """
     bundle = bundle_metric(
         ExactMatchMetric(reference="{{item.expected}}", candidate="{{sample.output_text}}"),
-        CloudpickleMetricBundlePackager(),
+        HybridMetricBundlePackager(),
     )
     payload = bundle.model_dump_json().encode()
     entity = MetricBundleEntity(
@@ -542,9 +542,7 @@ def test_targeted_run_keeps_sibling_scores_when_one_metric_fails(
     monkeypatch.setattr(benchmark_execution, "make_inference_request", fake_inference)
 
     broken = MetricInline.model_validate_json(
-        bundle_metric(
-            ToolCallingMetric(reference="{{item.expected}}"), CloudpickleMetricBundlePackager()
-        ).model_dump_json()
+        bundle_metric(ToolCallingMetric(reference="{{item.expected}}"), HybridMetricBundlePackager()).model_dump_json()
     ).model_dump(mode="json")
 
     resp = client.post(
@@ -589,3 +587,55 @@ def test_failed_target_generation_is_not_reported_as_metric_errors(
     assert resp.status_code == 502, resp.text
     assert "target generation failed" in resp.text
     assert "503 Service Unavailable" in resp.text
+
+
+def test_inline_cloudpickle_metric_is_rejected_by_default(detonating_cloudpickle_metric: dict[str, Any]) -> None:
+    with TestClient(_build_app()) as client:
+        resp = client.post(
+            _BASE,
+            json={
+                "dataset": [{"expected": "Paris", "output": "Paris"}],
+                "metrics": [detonating_cloudpickle_metric],
+                "field_mapping": {"output": "output"},
+            },
+        )
+
+    assert resp.status_code == 422
+    assert "cloudpickle metrics are disabled on this deployment" in resp.json()["detail"]
+
+
+def test_stored_cloudpickle_metric_is_rejected_by_default(
+    monkeypatch: pytest.MonkeyPatch, detonating_cloudpickle_metric: dict[str, Any]
+) -> None:
+    """A cloudpickle metric stored before the deployment disabled them is refused when referenced."""
+    bundle = MetricInline.model_validate(detonating_cloudpickle_metric)
+    entity = MetricBundleEntity(
+        name="stored-custom",
+        workspace="default",
+        metric_type=bundle.metric_type,
+        outputs=bundle.outputs,
+        payload_kind="cloudpickle",
+        bundle_ref="default/metric-bundles#stored-custom.json",
+        payload_digest=bundle.payload.digest,
+    )
+    monkeypatch.setattr(
+        metric_resolution,
+        "client_from_platform",
+        lambda *_args, **_kw: _FakeBundleFiles(bundle.model_dump_json().encode()),
+        raising=True,
+    )
+    app = _build_app()
+    app.dependency_overrides[get_entity_client] = lambda: _FakeBundleEntities(entity)
+
+    with TestClient(app) as client:
+        resp = client.post(
+            _BASE,
+            json={
+                "dataset": [{"expected": "Paris", "output": "Paris"}],
+                "metrics": ["default/stored-custom"],
+                "field_mapping": {"output": "output"},
+            },
+        )
+
+    assert resp.status_code == 422
+    assert "cloudpickle metrics are disabled on this deployment" in resp.json()["detail"]
