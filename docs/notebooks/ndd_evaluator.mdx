@@ -15,7 +15,7 @@ description: ""
 
 ```text
  ┌───────────────────────────────┐ ┌─────────────────────────────┐
- │ Nemo Data Designer │ │ Nemo Evaluator │
+ │ Nemo Data Designer │ │ NeMo Helix Evals │
  │ +------------------------+ │ │ +-----------------------+ │
  │ | Nurse Triage Note |───┼───────▶│ | LLM predicts ESI | │
  │ +------------------------+ │ │ +-----------------------+ │
@@ -436,7 +436,7 @@ def show_example_triage_notes(filtered_df, num_examples=5):
 show_example_triage_notes(filtered_df, num_examples=3)
 ```
 
-## **Step 2**: 📊 Nemo Evaluator
+## **Step 2**: 📊 NeMo Helix Evals
 
 We evaluate the model on filtered triage notes to see if it predicts the correct ESI level.
 

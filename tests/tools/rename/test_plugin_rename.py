@@ -192,6 +192,45 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn("class Evaluator:", (self.repo / "types.py").read_text())
         self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
 
+    def test_evals_preserves_published_release_notes_and_updates_current_notes(self) -> None:
+        original = "NeMo Evaluator: nemo evaluator, nemo_evaluator_sdk, docs/evaluator/index.mdx\n"
+        published = [
+            "docs/about/release-notes/release-0.6.0.mdx",
+            "docs/about/release-notes/release-older.md",
+        ]
+        for path in published:
+            self.write(path, original)
+        current = self.write("docs/about/release-notes/current-release.mdx", original)
+
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for path in published:
+            self.assertEqual((self.repo / path).read_text(), original)
+        self.assertEqual(
+            current.read_text(),
+            "NeMo Helix Evals: nemo evals, nhx_evals_sdk, docs/evals/index.mdx\n",
+        )
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
+    def test_evals_handles_notebook_product_spelling_without_renaming_classes(self) -> None:
+        notebook = self.write(
+            "docs/notebooks/ndd_evaluator.mdx",
+            "## **Step 2**: 📊 Nemo Evaluator\n"
+            "│ Nemo Evaluator │\n"
+            "NeMo Evaluator SDK\n"
+            "from nemo_evaluator.sdk import Evaluator, FilesetRef\n",
+        )
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            notebook.read_text(),
+            "## **Step 2**: 📊 NeMo Helix Evals\n"
+            "│ NeMo Helix Evals │\n"
+            "NeMo Helix Evals SDK\n"
+            "from nemo_evals.sdk import Evaluator, FilesetRef\n",
+        )
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
     def test_evals_renames_skill_paths_and_service_identity_fixtures(self) -> None:
         platform_skill = "packages/nemo_helix_ext/src/nemo_helix_ext/skills"
         assistant_skills = (

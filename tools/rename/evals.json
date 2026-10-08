@@ -4,6 +4,7 @@
     "tools/rename/**",
     "tests/tools/rename/**",
     ".agents/skills/release-test-scope/references/*-example-report.md",
+    "docs/about/release-notes/release-*",
     "docs/evals/upgrading-from-evaluator.mdx",
     ".codex/**",
     ".npm-cache/**",
@@ -19,6 +20,7 @@
     "replacements": {
       "NeMo Evaluator Plugin": "NeMo Helix Evals Plugin",
       "NeMo Evaluator": "NeMo Helix Evals",
+      "Nemo Evaluator": "NeMo Helix Evals",
       "Evaluator Plugin": "Evals Plugin",
       "Evaluator plugin": "Evals plugin",
       "evaluator plugin": "evals plugin",
