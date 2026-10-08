@@ -431,6 +431,8 @@ evaluator:
 
 If you define an executor profile under `jobs.executors` with its own `env`, add the variable there too: a profile's `env` replaces the default `env` rather than merging with it. Without it, jobs on that profile fail with the same `disabled on this deployment` error.
 
+The API setting is the access control. Leaving some executor profiles opted out does not restrict who can run cloudpickle metrics: anyone submitting a job chooses its profile, so once the API setting is on, any submitter can pick an opted-in profile.
+
 To run the job locally in the CLI process instead, set `NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS=true` in that shell.
 
 Users cannot grant this to their own jobs: secret environment names that start with `NHX_` or `NEMO_EVALS_` are rejected at submission.

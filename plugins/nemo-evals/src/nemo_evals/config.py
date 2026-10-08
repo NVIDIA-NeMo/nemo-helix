@@ -118,7 +118,8 @@ class EvaluatorConfig(NemoConfig):
         "workspace. Enable only where every principal allowed to create metrics or submit evaluator jobs "
         "is trusted to run code as the service. Job workers do not read the platform config file: set "
         "`NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS` in each job backend's "
-        "`jobs.executor_defaults.<backend>.env` as well.",
+        "`jobs.executor_defaults.<backend>.env` as well. This setting is the access control: submitters "
+        "choose their job's executor profile, so opting in only some profiles restricts nothing.",
     )
 
 
