@@ -12,7 +12,7 @@ import type {
   CustomizationDatasetValidationResult,
 } from '@studio/hooks/useCustomizationDatasetValidation';
 import type { GymEnvironmentManifest } from '@studio/hooks/useGymEnvironmentManifest';
-import type { CustomizationBackend } from '@studio/util/customizationBackend';
+import { CustomizationBackend } from '@studio/util/customizationBackend';
 import {
   CUSTOMIZER_SCHEMA_LABELS,
   type CustomizerSchemaDetection,
@@ -125,7 +125,7 @@ export const methodsForVariant = (variant: CustomizerSchemaVariant): TrainingTyp
 };
 
 const draftSchema = z.object({
-  backend: z.enum(['automodel', 'unsloth', 'rl']),
+  backend: z.nativeEnum(CustomizationBackend),
   job: z.record(z.unknown()),
   rationale: z.array(z.string()).default([]),
   needs_from_user: z.array(z.string()).default([]),
