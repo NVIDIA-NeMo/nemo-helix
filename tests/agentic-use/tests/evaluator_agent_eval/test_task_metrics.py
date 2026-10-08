@@ -14,7 +14,7 @@ from evaluator_agent_eval.runner import score_evaluator_rows
 from evaluator_agent_eval.schemas import CapturedAgentAttempt
 from evaluator_agent_eval.task_config import AgenticUseTaskConfig, load_agentic_use_task_config
 from evaluator_agent_eval.task_metric_utils import extract_marker_json_object
-from nemo_evaluator_sdk.metrics.base import Metric
+from nhx_evals_sdk.metrics.base import Metric
 
 
 def _load_task_metrics(task_name: str) -> ModuleType:
@@ -31,15 +31,15 @@ def _load_task_metrics(task_name: str) -> ModuleType:
 def test_surface_discovery_metric_normalizes_required_term_success(evaluator_task_dir: Path, agent_log_dir: Path):
     (agent_log_dir / "final_message.txt").write_text(
         """
-Use packages/nemo_evaluator_sdk with Evaluator, ExactMatchMetric, and run_sync.
+Use packages/nhx_evals_sdk with Evaluator, ExactMatchMetric, and run_sync.
 
 ```python
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path("packages/nemo_evaluator_sdk/src").resolve()))
+sys.path.insert(0, str(Path("packages/nhx_evals_sdk/src").resolve()))
 
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
 
 rows = [
     {"question": "2+2?", "expected": "4", "prediction": "4"},
@@ -78,16 +78,16 @@ result = Evaluator().run_sync(
 def test_surface_discovery_metric_accepts_async_invocation(evaluator_task_dir: Path, agent_log_dir: Path):
     (agent_log_dir / "final_message.txt").write_text(
         """
-Use packages/nemo_evaluator_sdk with Evaluator, ExactMatchMetric, and run.
+Use packages/nhx_evals_sdk with Evaluator, ExactMatchMetric, and run.
 
 ```python
 from pathlib import Path
 import asyncio
 import sys
 
-sys.path.insert(0, str(Path("packages/nemo_evaluator_sdk/src").resolve()))
+sys.path.insert(0, str(Path("packages/nhx_evals_sdk/src").resolve()))
 
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
 
 rows = [
     {"question": "2+2?", "expected": "4", "prediction": "4"},
@@ -130,14 +130,14 @@ asyncio.run(main())
 def test_surface_discovery_metric_selects_complete_snippet(evaluator_task_dir: Path, agent_log_dir: Path):
     (agent_log_dir / "final_message.txt").write_text(
         """
-Use packages/nemo_evaluator_sdk with Evaluator, ExactMatchMetric, and run_sync.
+Use packages/nhx_evals_sdk with Evaluator, ExactMatchMetric, and run_sync.
 
 ```python
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
 ```
 
 ```python
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
 
 rows = [
     {"question": "2+2?", "expected": "4", "prediction": "4"},
@@ -176,7 +176,7 @@ result = Evaluator().run_sync(
 def test_surface_discovery_metric_rejects_prose_only_answer(evaluator_task_dir: Path, agent_log_dir: Path):
     (agent_log_dir / "final_message.txt").write_text(
         (
-            "Use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric. "
+            "Use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric. "
             "Create the two-row dataset and call Evaluator().run_sync(...) with the expected templates."
         ),
         encoding="utf-8",
@@ -213,7 +213,7 @@ allowed = ["standalone_sdk"]
 forbidden = ["cli", "plugin_sdk", "legacy_service"]
 
 [evaluator.expected]
-required_terms = ["packages/nemo_evaluator_sdk", "Evaluator", "run_sync", "ExactMatchMetric", "2+2?", "Capital of France?", "0.5"]
+required_terms = ["packages/nhx_evals_sdk", "Evaluator", "run_sync", "ExactMatchMetric", "2+2?", "Capital of France?", "0.5"]
 """.strip(),
         encoding="utf-8",
     )
@@ -223,9 +223,9 @@ required_terms = ["packages/nemo_evaluator_sdk", "Evaluator", "run_sync", "Exact
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path("packages/nemo_evaluator_sdk/src").resolve()))
+sys.path.insert(0, str(Path("packages/nhx_evals_sdk/src").resolve()))
 
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
 
 rows = [
     {"question": "2+2?", "expected": "4", "prediction": "4"},
@@ -240,7 +240,7 @@ result.print_summary()
         encoding="utf-8",
     )
     (agent_log_dir / "final_message.txt").write_text(
-        "Wrote workspace/solution.py using packages/nemo_evaluator_sdk; the summary has aggregate score 0.5.",
+        "Wrote workspace/solution.py using packages/nhx_evals_sdk; the summary has aggregate score 0.5.",
         encoding="utf-8",
     )
     artifacts = AgentArtifacts.from_dir(agent_log_dir, workspace_dir=workspace_dir)
@@ -276,14 +276,14 @@ allowed = ["standalone_sdk"]
 forbidden = ["cli", "plugin_sdk", "legacy_service"]
 
 [evaluator.expected]
-required_terms = ["packages/nemo_evaluator_sdk", "Evaluator", "run_sync", "ExactMatchMetric", "2+2?", "Capital of France?", "0.5"]
+required_terms = ["packages/nhx_evals_sdk", "Evaluator", "run_sync", "ExactMatchMetric", "2+2?", "Capital of France?", "0.5"]
 """.strip(),
         encoding="utf-8",
     )
     (task_dir / "instruction.md").write_text("Run exact match.", encoding="utf-8")
     (workspace_dir / "solution.py").write_text(
         """
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
 
 # This mentions run_sync but does not perform the required evaluation.
 print("not the expected row scores")
@@ -292,7 +292,7 @@ print("0.5")
         encoding="utf-8",
     )
     (agent_log_dir / "final_message.txt").write_text(
-        "Wrote workspace/solution.py using packages/nemo_evaluator_sdk for 2+2? and Capital of France?.",
+        "Wrote workspace/solution.py using packages/nhx_evals_sdk for 2+2? and Capital of France?.",
         encoding="utf-8",
     )
     artifacts = AgentArtifacts.from_dir(agent_log_dir, workspace_dir=workspace_dir)
@@ -327,13 +327,13 @@ allowed = ["standalone_sdk"]
 forbidden = ["cli", "plugin_sdk", "legacy_service"]
 
 [evaluator.expected]
-required_terms = ["packages/nemo_evaluator_sdk", "Evaluator", "run_sync", "ExactMatchMetric", "2+2?", "Capital of France?", "0.5"]
+required_terms = ["packages/nhx_evals_sdk", "Evaluator", "run_sync", "ExactMatchMetric", "2+2?", "Capital of France?", "0.5"]
 """.strip(),
         encoding="utf-8",
     )
     (task_dir / "instruction.md").write_text("Run exact match.", encoding="utf-8")
     (agent_log_dir / "final_message.txt").write_text(
-        "I would use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric.",
+        "I would use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric.",
         encoding="utf-8",
     )
     artifacts = AgentArtifacts.from_dir(agent_log_dir, workspace_dir=workspace_dir)
@@ -369,13 +369,13 @@ allowed = ["standalone_sdk"]
 forbidden = ["cli", "plugin_sdk", "legacy_service"]
 
 [evaluator.expected]
-required_terms = ["packages/nemo_evaluator_sdk", "Evaluator", "run_sync", "ExactMatchMetric", "2+2?", "Capital of France?", "0.5"]
+required_terms = ["packages/nhx_evals_sdk", "Evaluator", "run_sync", "ExactMatchMetric", "2+2?", "Capital of France?", "0.5"]
 """.strip(),
         encoding="utf-8",
     )
     (workspace_dir / "solution.py").write_text(
         """
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
 
 # Mentions run_sync / ExactMatchMetric but prints the wrong summary.
 print("not the expected summary")
@@ -385,7 +385,7 @@ print("not the expected summary")
     module = _load_task_metrics("evaluator-standalone-sdk-simple-exact-match")
     result = await module.ExactMatchEvaluationMetric().compute_scores(
         {
-            "output_text": "packages/nemo_evaluator_sdk Evaluator run_sync ExactMatchMetric 2+2? Capital of France? 0.5",
+            "output_text": "packages/nhx_evals_sdk Evaluator run_sync ExactMatchMetric 2+2? Capital of France? 0.5",
             "workspace_dir": str(workspace_dir),
             "task_dir": str(task_dir),
             "final_answer_extracted": True,
@@ -451,11 +451,11 @@ forbidden = ["cli", "plugin_sdk", "legacy_service"]
 
 [evaluator.expected]
 required_terms = [
-  "packages/nemo_evaluator_sdk",
+  "packages/nhx_evals_sdk",
   "Evaluator",
   "run_sync",
   "Agent",
-  "nemo_evaluator_sdk.values.agents",
+  "nhx_evals_sdk.values.agents",
   "AgentFormat.GENERIC",
   "ExactMatchMetric",
   "response_path",
@@ -471,7 +471,7 @@ required_terms = [
     (task_dir / "instruction.md").write_text("Configure an agent target.", encoding="utf-8")
     (agent_log_dir / "final_message.txt").write_text(
         """
-Use packages/nemo_evaluator_sdk with Evaluator.run_sync, Agent, AgentFormat.GENERIC, and ExactMatchMetric.
+Use packages/nhx_evals_sdk with Evaluator.run_sync, Agent, AgentFormat.GENERIC, and ExactMatchMetric.
 The metadata identifies candidate_agent_runtime and candidate_agent_model.
 
 ```python
@@ -479,9 +479,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 import json
 
-from nemo_evaluator_sdk import Evaluator, ExactMatchMetric
-from nemo_evaluator_sdk.enums import AgentFormat
-from nemo_evaluator_sdk.values.agents import Agent
+from nhx_evals_sdk import Evaluator, ExactMatchMetric
+from nhx_evals_sdk.enums import AgentFormat
+from nhx_evals_sdk.values.agents import Agent
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -561,8 +561,8 @@ def test_agent_target_metric_reads_workspace_python_artifact(tmp_path: Path, age
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir()
     (workspace_dir / "agent_target_exact_match.py").write_text(
-        "from nemo_evaluator_sdk import Evaluator\n"
-        "from nemo_evaluator_sdk.values.agents import Agent\n"
+        "from nhx_evals_sdk import Evaluator\n"
+        "from nhx_evals_sdk.values.agents import Agent\n"
         "Evaluator().run_sync(target=Agent(response_path='$.answer', trajectory_path='$.trajectory'))\n",
         encoding="utf-8",
     )
@@ -590,7 +590,7 @@ forbidden = ["cli", "plugin_sdk", "legacy_service"]
 
 [evaluator.expected]
 required_terms = [
-  "packages/nemo_evaluator_sdk",
+  "packages/nhx_evals_sdk",
   "Metric",
   "type",
   "compute_scores",
@@ -609,10 +609,10 @@ required_terms = [
     (task_dir / "instruction.md").write_text("Author a surface-adherence metric.", encoding="utf-8")
     (agent_log_dir / "final_message.txt").write_text(
         """
-Use packages/nemo_evaluator_sdk and implement a Metric-compatible class with compute_scores and score_names.
+Use packages/nhx_evals_sdk and implement a Metric-compatible class with compute_scores and score_names.
 
 ```python
-from nemo_evaluator_sdk.values.results import MetricResult, MetricScore
+from nhx_evals_sdk.values.results import MetricResult, MetricScore
 
 
 class SurfaceAdherenceMetric:
@@ -661,7 +661,7 @@ def test_surface_adherence_metric_reads_workspace_python_artifact(tmp_path: Path
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir()
     (workspace_dir / "surface_adherence_metric.py").write_text(
-        "from nemo_evaluator_sdk.values.results import MetricResult, MetricScore\n"
+        "from nhx_evals_sdk.values.results import MetricResult, MetricScore\n"
         "class SurfaceAdherenceMetric:\n"
         "    async def compute_scores(self, item, sample):\n"
         "        return MetricResult(scores=[MetricScore(name='surface_adherence', value=1.0)])\n",

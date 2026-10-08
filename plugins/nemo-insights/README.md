@@ -23,6 +23,31 @@ uv sync
 
 The plugin is installed by default through the root workspace's `enabled-plugins` group.
 
+## Install analyst dependencies for PyPI installations
+
+PyPI does not accept Git dependencies in wheel metadata, so `nemo-helix[all]`
+does not install `insight-agent` and `trace-ingest`. For a `uv tool install`
+installation, include both when installing Helix before running Insights analysis:
+
+```bash
+uv tool install --force \
+  --with "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137" \
+  --with "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest" \
+  "nemo-helix[all]"
+```
+
+For a virtual environment, install both pinned requirements in the environment
+that runs the analyst:
+
+```bash
+uv pip install \
+  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137" \
+  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest"
+```
+
+Source checkouts and the platform images install these pinned dependencies through
+the workspace's `insights` group.
+
 ## CLI
 
 Submit analysis through NeMo Helix. Replace `<run-name>` with the name

@@ -35,7 +35,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SKIP_AUTH_CHECK_SUBCOMMANDS = frozenset(
-    {"agent", "auth", "config", "setup", "quickstart", "cluster-info", "skills", "docs", "services", "plugins"}
+    {
+        "auth",
+        "config",
+        "describe",
+        "setup",
+        "quickstart",
+        "cluster-info",
+        "skills",
+        "docs",
+        "services",
+        "plugins",
+    }
 )
 # Create the main CLI app with custom help formatting
 app = typer.Typer(
@@ -173,7 +184,6 @@ def main(
             "-c",
             help="The name of the context to use. Overrides the current context in the config file.",
             rich_help_panel="Global Options",
-            hidden=True,
         ),
     ] = None,
     base_url: Annotated[
@@ -215,15 +225,6 @@ def main(
             "--verbose",
             "-v",
             help="Enable verbose messaging. This only impacts logs that are visible, it doesn't change any data outputs.",
-            rich_help_panel="Global Options",
-        ),
-    ] = None,
-    agent_mode: Annotated[
-        bool | None,
-        typer.Option(
-            "--agent-mode",
-            "-A",
-            help="Enable agent-friendly output mode with extra context for coding agents.",
             rich_help_panel="Global Options",
         ),
     ] = None,
@@ -275,15 +276,7 @@ def main(
     if ctx.obj is None:
         ctx.obj = CLIContext()
 
-    # Resolve agent mode: explicit flag > env var > default False
-    import os
-
-    if agent_mode is None:
-        env_val = os.environ.get("NHX_AGENT_MODE", "").lower()
-        agent_mode = env_val in ("1", "true", "yes")
-    ctx.obj.agent_mode = agent_mode
-
-    # Capture command name + agent mode for the command_invoked telemetry event, wire
+    # Capture command name for the command_invoked telemetry event, wire
     # the per-invocation opt-out, and print the first-run notice. Best effort inside.
     from nemo_helix_ext.cli.telemetry import runtime as telemetry_runtime
 
@@ -297,8 +290,6 @@ def main(
         overrides["base_url"] = base_url
     if output_format is not None:
         overrides["output_format"] = cast(ConfigOutputFormat, output_format)
-    elif agent_mode:
-        overrides["output_format"] = "markdown"
     if timestamp_format is not None:
         overrides["timestamp_format"] = timestamp_format
     if no_truncate is not None:

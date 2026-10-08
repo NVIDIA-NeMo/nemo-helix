@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Garak API
+# garak API
 
 This package provides a small subset of the [garak](https://github.com/NVIDIA/garak) library which does not require a full garak install.
 

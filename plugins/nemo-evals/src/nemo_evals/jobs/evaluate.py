@@ -1,0 +1,522 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""SDK-backed evaluator job for the evals plugin scaffold."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated, Any, ClassVar, Self, TypeAlias
+
+# Imported for their registration side effects: each module registers its
+# payload kind in the bundle registry so MetricBundle payloads validate.
+import nemo_evals.shared.metric_bundles.cloudpickle  # noqa: F401
+import nemo_evals.shared.metric_bundles.inline  # noqa: F401
+from nemo_evals.api.schemas import MetricInline
+from nemo_evals.filesets import FilesetRef, download_dataset, download_dataset_sync
+from nemo_evals.jobs.agent_spec import target_agent_identity
+from nemo_evals.jobs.metric_resolution import (
+    resolve_metrics_to_inline,
+    to_runtime_bundle,
+    unresolved_model_refs,
+)
+from nemo_evals.jobs.publication import publish_row_eval_result
+from nemo_evals.jobs.publication_spec import RowPublicationSpec
+from nemo_evals.jobs.result_persistence import persist_evaluate_result
+from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY, RunOutcome, report_run_outcome, row_eval_outcome
+from nemo_evals.jobs.token_usage import report_row_evaluation_usage
+from nemo_evals.jobs.utils import async_client_from_sync_client, job_evaluator, run_with_isolated_async_client
+from nemo_evals.metric_refs import MetricRefOrInline
+from nemo_evals.shared.metric_bundles.bundles import unbundle_metric
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nhx_evals_sdk.execution.config import resolve_params
+from nhx_evals_sdk.metrics.protocol import Metric
+from nhx_evals_sdk.metrics.utils import metric_type_name
+from nhx_evals_sdk.values import (
+    Agent,
+    AgentBase,
+    FieldMapping,
+    Model,
+    RunConfig,
+    RunConfigOnline,
+    RunConfigOnlineModel,
+)
+from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult
+from nhx_evals_sdk.values.results import EvaluationResult
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
+
+TargetSpec = Model | Agent
+MetricSpec: TypeAlias = Annotated[list[MetricRefOrInline], Field(min_length=1)]
+# Canonical spec carries inline metrics only (refs resolved) — still the wire DTO,
+# so the runtime MetricBundle never surfaces as a public schema.
+ResolvedMetricSpec: TypeAlias = Annotated[list[MetricInline], Field(min_length=1)]
+EvaluationArtifactResult: TypeAlias = EvaluationResult | BenchmarkEvaluationResult
+InlineDataset: TypeAlias = Annotated[list[dict[str, object]], Field(min_length=1)]
+DatasetSpec: TypeAlias = InlineDataset | FilesetRef
+
+DEFAULT_RESULT_NAME = "evaluation-results"
+DEFAULT_FILE_NAME = "evaluation-results.json"
+ARTIFACTS_RESULT_NAME = "artifacts"
+AGGREGATE_SCORES_RESULT_NAME = "aggregate-scores"
+ROW_SCORES_RESULT_NAME = "row-scores"
+RUN_METADATA_RESULT_NAME = "run-metadata"
+AGGREGATE_SCORES_FILE_NAME = "aggregate-scores.json"
+ROW_SCORES_FILE_NAME = "row-scores.jsonl"
+RUN_METADATA_FILE_NAME = "run-metadata.json"
+RESULT_IGNORE_PATTERNS = ["cache.db", "cache/"]
+
+
+@dataclass(frozen=True)
+class EvaluationResultFiles:
+    """Filesystem layout for an evals SDK result."""
+
+    full_result: Path
+    aggregate_scores: Path
+    row_scores: Path
+    run_metadata: Path
+    artifacts_dir: Path
+
+
+@dataclass(frozen=True)
+class EvaluationRunResult:
+    """Named output from running the SDK evaluator and writing its artifacts."""
+
+    result: EvaluationArtifactResult
+    started_at: datetime
+    metrics: list[Metric]
+    artifact_url: str
+    output: dict[str, object]
+    outcome: RunOutcome
+
+
+def _resolve_run_dataset(
+    dataset: DatasetSpec,
+    *,
+    ctx: JobContext,
+    client: NemoClient,
+) -> InlineDataset | Path:
+    """Resolve an evals plugin dataset through the sync runtime client."""
+    if not isinstance(dataset, FilesetRef):
+        return dataset
+
+    destination = str(ctx.storage.persistent / "dataset")
+    return download_dataset_sync(
+        client=client,
+        dataset=dataset,
+        destination=destination,
+    )
+
+
+def _resolve_run_dataset_async(
+    dataset: DatasetSpec,
+    *,
+    ctx: JobContext,
+    async_client: AsyncNemoClient,
+) -> InlineDataset | Path:
+    """Resolve an evals plugin dataset through the async runtime client."""
+    if not isinstance(dataset, FilesetRef):
+        return dataset
+
+    destination = str(ctx.storage.persistent / "dataset")
+    return run_with_isolated_async_client(
+        async_client,
+        lambda client: download_dataset(client=client, dataset=dataset, destination=destination),
+    )
+
+
+class _EvaluateSpecCommon(BaseModel):
+    """Fields shared by the submitter input and the canonical (resolved) spec.
+
+    ``EvaluateInputSpec`` and ``EvaluateSpec`` are siblings rather than a
+    subtype pair: they differ only in their ``metrics`` field (refs allowed vs.
+    fully resolved), and a mutable field can't be narrowed across inheritance
+    without violating invariance.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: DatasetSpec = Field(
+        description="Inline dataset rows or a persisted FilesetRef dataset source to evaluate.",
+    )
+    params: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = Field(
+        default=None, description="Optional evals SDK execution parameters."
+    )
+    target: TargetSpec | None = Field(default=None, description="Optional model or agent target for online evaluation.")
+    prompt_template: str | dict[str, Any] | None = Field(
+        default=None, description="Optional prompt template for online target generation."
+    )
+    field_mapping: FieldMapping | None = Field(
+        default=None, description="Optional mapping from canonical evaluator fields to dataset columns."
+    )
+    publication: RowPublicationSpec | None = Field(
+        default=None,
+        description="Where the completed run publishes its results, beyond its own result artifacts. "
+        "Omit to publish nowhere.",
+    )
+
+    @model_validator(mode="after")
+    def validate_params_for_target(self) -> Self:
+        self.params = resolve_params(self.params, self.target)
+        return self
+
+    @model_validator(mode="after")
+    def _require_resolvable_publication_identity(self) -> Self:
+        # Publishing needs an agent name and only some targets carry one. Rejecting here makes it a
+        # 422 on submit rather than a failure discovered after the evaluation has already run — and
+        # without it a target that names nothing publishes every trajectory under an empty name.
+        intake = self.publication.intake if self.publication is not None else None
+        if intake is None or intake.agent_name is not None:
+            return self
+        if target_agent_identity(self.target)[0] is None:
+            source = "an offline evaluation" if self.target is None else f"a {type(self.target).__name__} target"
+            raise ValueError(
+                f"`publication.intake.agent_name` is required: it cannot be derived from {source}. "
+                "Supply the name the published trajectories should be recorded under."
+            )
+        return self
+
+
+class EvaluateInputSpec(_EvaluateSpecCommon):
+    """Submitter-facing SDK evaluation input for the evals plugin job."""
+
+    metrics: MetricSpec = Field(
+        description="Metrics to evaluate, given as inline metrics and/or references to stored metrics.",
+    )
+
+
+class EvaluateSpec(_EvaluateSpecCommon):
+    """Canonical SDK evaluation spec with platform model and metric references resolved."""
+
+    metrics: ResolvedMetricSpec = Field(description="Inline metrics with all references resolved.")
+
+    @model_validator(mode="after")
+    def reject_unresolved_metric_model_refs(self) -> Self:
+        unresolved_refs = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in self.metrics])
+        if unresolved_refs:
+            raise ValueError(
+                "EvaluateSpec metric models must be resolved before compile/run: " + ", ".join(unresolved_refs)
+            )
+        return self
+
+
+class _EvaluateJobBase(NemoJob):
+    """Run evals SDK metrics against inline rows or FilesetRef datasets."""
+
+    name: ClassVar[str] = "evaluate"
+    description: ClassVar[str] = "Run evals SDK metrics against inline rows or FilesetRef datasets."
+    container: ClassVar[str] = "cpu-tasks"
+    input_spec_schema: ClassVar[type[BaseModel] | None] = EvaluateInputSpec
+    spec_schema: ClassVar[type[BaseModel] | None] = EvaluateSpec
+    job_collection_path: ClassVar[str | None] = "/evaluate/jobs"
+    generate_legacy_verbs: ClassVar[bool] = False
+
+    @classmethod
+    async def compile(
+        cls,
+        *,
+        workspace: str,
+        spec: BaseModel,
+        entity_client: object,
+        job_name: str | None,
+        async_sdk: AsyncHelixClient | None,
+        profile: str | None = None,
+        options: dict | None = None,
+    ) -> HelixJobSpec:
+        """Compile canonical spec to a plugin-native evaluator job."""
+        del workspace, entity_client, job_name, async_sdk, options
+        from nemo_evals.jobs.compiler import compile_evaluate_job
+
+        canonical_spec = spec if isinstance(spec, EvaluateSpec) else EvaluateSpec.model_validate(spec.model_dump())
+        canonical_spec.params = resolve_params(canonical_spec.params, canonical_spec.target)
+        return compile_evaluate_job(canonical_spec, profile=profile)
+
+    @staticmethod
+    def _write_result_files(
+        result: EvaluationArtifactResult, persistent_dir: Path, *, run_id: str | None, started_at: datetime
+    ) -> EvaluationResultFiles:
+        """Write full, aggregate, row-level and run-metadata evaluator artifacts."""
+        result_payload = result.model_dump(mode="json")
+        full_result_path = persistent_dir / DEFAULT_FILE_NAME
+        full_result_path.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
+
+        artifacts_dir = persistent_dir / ARTIFACTS_RESULT_NAME
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        aggregate_path = artifacts_dir / AGGREGATE_SCORES_FILE_NAME
+        aggregate_path.write_text(result.aggregate_scores.model_dump_json(indent=2), encoding="utf-8")
+        row_scores_path = artifacts_dir / ROW_SCORES_FILE_NAME
+        with row_scores_path.open("w", encoding="utf-8") as f:
+            for row_score in result.row_scores:
+                f.write(row_score.model_dump_json() + "\n")
+
+        # `EvaluationResult` has nowhere to carry timings, so the run identity Intake publishes
+        # under is written beside the scores. A re-publish must reuse these: `session_id` is
+        # `{run_id}:{trial id}` and the span key includes `start_time`, so minting either afresh
+        # writes a second trajectory instead of replacing the first.
+        run_metadata_path = artifacts_dir / RUN_METADATA_FILE_NAME
+        run_metadata_path.write_text(
+            json.dumps({"run_id": run_id, "started_at": started_at.isoformat()}, indent=2),
+            encoding="utf-8",
+        )
+
+        return EvaluationResultFiles(
+            full_result=full_result_path,
+            aggregate_scores=aggregate_path,
+            row_scores=row_scores_path,
+            run_metadata=run_metadata_path,
+            artifacts_dir=artifacts_dir,
+        )
+
+    @classmethod
+    async def to_spec(
+        cls,
+        input_spec: BaseModel,
+        *,
+        workspace: str,
+        entity_client: object,
+        async_sdk: AsyncHelixClient | None,
+        is_local: bool,
+    ) -> BaseModel:
+        """Resolve submitter-facing model and metric references into the canonical evaluation spec."""
+        del is_local
+        submit_spec = (
+            input_spec.model_copy(deep=True)
+            if isinstance(input_spec, EvaluateInputSpec)
+            else EvaluateInputSpec.model_validate_json(input_spec.model_dump_json())
+        )
+        entity_client = entity_client if isinstance(entity_client, EntityClient) else None
+        metrics = await resolve_metrics_to_inline(
+            submit_spec.metrics,
+            workspace=workspace,
+            entity_client=entity_client,
+            async_client=async_sdk,
+        )
+        return EvaluateSpec(
+            metrics=metrics,
+            dataset=submit_spec.dataset,
+            params=resolve_params(submit_spec.params, submit_spec.target),
+            target=submit_spec.target,
+            prompt_template=submit_spec.prompt_template,
+            field_mapping=submit_spec.field_mapping,
+            publication=submit_spec.publication,
+        )
+
+    def _run_evaluator(
+        self,
+        spec: EvaluateSpec,
+        *,
+        ctx: JobContext,
+        dataset: InlineDataset | Path,
+    ) -> EvaluationRunResult:
+        """Run the SDK evaluator and save the result files."""
+        # Stamped here because the row evaluator records no timing at all and `EvaluationResult` has
+        # nowhere to put it. Publication needs a start time that is a function of the run, not of
+        # when it was published, or re-ingest duplicates spans instead of replacing them.
+        started_at = datetime.now(UTC)
+        evaluator = job_evaluator()
+        params = resolve_params(spec.params, spec.target)
+        metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
+        if isinstance(spec.target, Model):
+            if not isinstance(params, RunConfigOnlineModel):
+                raise TypeError("model target requires RunConfigOnlineModel")
+            result = evaluator.run_sync(
+                metrics=metrics,
+                dataset=dataset,
+                config=params,
+                target=spec.target,
+                field_mapping=spec.field_mapping,
+                prompt_template=spec.prompt_template,
+            )
+        elif isinstance(spec.target, AgentBase):
+            if type(params) is not RunConfigOnline:
+                raise TypeError("agent target requires RunConfigOnline")
+            if spec.prompt_template is None:
+                raise ValueError("agent target requires prompt_template")
+            result = evaluator.run_sync(
+                metrics=metrics,
+                dataset=dataset,
+                config=params,
+                target=spec.target,
+                field_mapping=spec.field_mapping,
+                prompt_template=spec.prompt_template,
+            )
+        else:
+            if type(params) is not RunConfig:
+                raise TypeError("offline evaluation requires RunConfig")
+            result = evaluator.run_sync(
+                metrics=metrics,
+                dataset=dataset,
+                config=params,
+                target=None,
+                field_mapping=spec.field_mapping,
+                prompt_template=None,
+            )
+        report_row_evaluation_usage(result, ctx.usage)
+        result_files = self._write_result_files(
+            result, ctx.storage.persistent, run_id=ctx.job_id, started_at=started_at
+        )
+        artifact = ctx.results.save(DEFAULT_RESULT_NAME, result_files.full_result)
+        ctx.results.save(AGGREGATE_SCORES_RESULT_NAME, result_files.aggregate_scores)
+        ctx.results.save(ROW_SCORES_RESULT_NAME, result_files.row_scores)
+        ctx.results.save(RUN_METADATA_RESULT_NAME, result_files.run_metadata)
+        ctx.results.save(ARTIFACTS_RESULT_NAME, result_files.artifacts_dir, ignore_patterns=RESULT_IGNORE_PATTERNS)
+
+        outcome = row_eval_outcome(result)
+        if outcome.failed:
+            logger.error(outcome.message)
+        output: dict[str, object] = {
+            "status": "failed" if outcome.failed else "completed",
+            "artifact": artifact.model_dump(),
+            STATUS_DETAILS_KEY: outcome.details(),
+        }
+        if outcome.failed:
+            output["reason"] = outcome.message
+        return EvaluationRunResult(
+            result=result,
+            started_at=started_at,
+            metrics=metrics,
+            artifact_url=artifact.artifact_url,
+            output=output,
+            outcome=outcome,
+        )
+
+    @staticmethod
+    def _record_outcome(
+        run: EvaluationRunResult,
+        *,
+        spec: EvaluateSpec,
+        ctx: JobContext,
+        async_client: AsyncNemoClient | None,
+    ) -> None:
+        report_run_outcome(run.outcome, ctx=ctx, async_client=async_client)
+        # Persist the queryable result record (aggregate scores); per-row detail lives in the fileset
+        # bundle referenced by `artifact`. Best-effort: the authoritative output (result artifacts) is
+        # already saved above, so a persistence failure must not fail an otherwise-successful eval —
+        # log and continue.
+        try:
+            persist_evaluate_result(
+                run.result,
+                target=spec.target,
+                dataset_ref=spec.dataset.root if isinstance(spec.dataset, FilesetRef) else None,
+                metric_types=[metric_type_name(metric) for metric in run.metrics],
+                ctx=ctx,
+                bundle_ref=run.artifact_url,
+                async_client=async_client,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to persist evaluate result record; the result artifacts are unaffected",
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _publish_result(
+        result: EvaluationArtifactResult,
+        *,
+        spec: EvaluateSpec,
+        ctx: JobContext,
+        started_at: datetime,
+        intake: AsyncIntakeClient | None,
+        output: dict[str, object],
+    ) -> None:
+        """Publish the result if the spec requested it, mutating ``output`` with the outcome."""
+
+        # Publication runs last, after the artifacts and the queryable record are both durable, so a
+        # failed publish costs a re-publish rather than a re-run. It is also the only step here that
+        # can fail the job (when `required`).
+        publication = spec.publication.intake if spec.publication is not None else None
+        if publication is not None:
+            outcome = publish_row_eval_result(
+                result,
+                spec=publication,
+                target=spec.target,
+                run_id=ctx.job_id,
+                started_at=started_at,
+                workspace=ctx.workspace,
+                intake=intake,
+            )
+            output["publication"] = outcome.model_dump(exclude_none=True)
+
+    def _run_sync(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        client: NemoClient,
+    ) -> dict:
+        """Run the evaluator job locally through sync typed clients."""
+        spec = EvaluateSpec.model_validate(config)
+        dataset = _resolve_run_dataset(spec.dataset, ctx=ctx, client=client)
+        run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
+        with async_client_from_sync_client(client) as async_client:
+            self._record_outcome(
+                run,
+                spec=spec,
+                ctx=ctx,
+                async_client=async_client,
+            )
+            self._publish_result(
+                run.result,
+                spec=spec,
+                ctx=ctx,
+                started_at=run.started_at,
+                intake=AsyncIntakeClient.from_client(async_client),
+                output=run.output,
+            )
+        return run.output
+
+
+class EvaluateJob(_EvaluateJobBase):
+    """Public/local row-evaluation job that runs through sync typed clients."""
+
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        client: NemoClient,
+    ) -> dict:
+        """Run the evaluator job locally through sync typed clients."""
+        return self._run_sync(config, ctx=ctx, client=client)
+
+
+class AsyncEvaluateJob(_EvaluateJobBase):
+    """Task-container variant that runs row evaluation through async typed clients."""
+
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        async_client: AsyncNemoClient,
+    ) -> dict:
+        """Run the evaluator job in a task container through async typed clients."""
+        spec = EvaluateSpec.model_validate(config)
+        dataset = _resolve_run_dataset_async(spec.dataset, ctx=ctx, async_client=async_client)
+        run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
+        self._record_outcome(
+            run,
+            spec=spec,
+            ctx=ctx,
+            async_client=async_client,
+        )
+        self._publish_result(
+            run.result,
+            spec=spec,
+            ctx=ctx,
+            started_at=run.started_at,
+            intake=AsyncIntakeClient.from_client(async_client),
+            output=run.output,
+        )
+        return run.output

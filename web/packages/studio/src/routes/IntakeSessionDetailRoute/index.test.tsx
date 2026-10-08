@@ -8,11 +8,13 @@ import {
   mockSessionById,
   mockSpanById,
   mockSpansPage,
+  mockTraceById,
   mockTracesPage,
 } from '@studio/mocks/intake/telemetry';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { IntakeSessionDetailRoute } from '@studio/routes/IntakeSessionDetailRoute';
+import { getAgentDetailRoute } from '@studio/routes/utils';
 import { mockFeatureFlags } from '@studio/tests/util/mockFeatureFlags';
 import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
@@ -163,6 +165,24 @@ describe('IntakeSessionDetailRoute', () => {
     expect(within(traceSummary).getByText('1,754')).toBeInTheDocument();
     expect(within(traceSummary).queryByText('47')).not.toBeInTheDocument();
     expect(sessionDetailRequests).toEqual(['session-agent-run-001']);
+  });
+
+  it('links the trace agent from the trace summary header', async () => {
+    const trace = mockTraceById('trace-agent-run-001');
+    expect(trace).toBeDefined();
+    server.use(
+      http.get(mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'), () =>
+        HttpResponse.json({ ...trace!, agent_name: 'react-agent' })
+      )
+    );
+
+    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
+
+    const traceSummary = await screen.findByTestId('session-summary-header');
+    expect(await within(traceSummary).findByRole('link', { name: 'react-agent' })).toHaveAttribute(
+      'href',
+      getAgentDetailRoute('default', 'react-agent')
+    );
   });
 
   it('navigates session to trace to span and back to the session summary', async () => {

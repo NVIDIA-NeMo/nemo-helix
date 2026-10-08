@@ -30,3 +30,15 @@ def test_contract_job_input_validates(fixture_name: str) -> None:
     assert spec.integrations.mlflow is not None
     assert spec.integrations.mlflow.tracking_uri == "http://mlflow:5000"
     assert spec.integrations.mlflow.name == "run-001"
+
+
+def test_nemotron_moe_lora_job_input_validates() -> None:
+    """The Nemotron MoE LoRA layout the customizer skill recommends is accepted at submit."""
+    path = FIXTURES_DIR / "nemotron_moe_sft_lora.json"
+    spec = AutomodelJobInput.model_validate(json.loads(path.read_text()))
+    assert spec.training.lora is not None
+    assert spec.training.lora.exclude_modules == ["*.out_proj"]
+    assert spec.parallelism.num_gpus_per_node == 4
+    assert spec.parallelism.expert_parallel_size == 4
+    assert spec.parallelism.tensor_parallel_size == 1
+    assert spec.schedule.max_steps is None

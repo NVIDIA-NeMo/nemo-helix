@@ -6,7 +6,7 @@
 from math import nan
 
 from evaluator_agent_eval.surfaces import contains_nonnegated_substring
-from nemo_evaluator_sdk.values.results import MetricResult, MetricScore
+from nhx_evals_sdk.values.results import MetricResult, MetricScore
 
 LEGACY_SURFACE = "legacy_service"
 LEGACY_TEXT_PATTERNS = ("services/", "services\\")
@@ -71,7 +71,7 @@ class SurfaceAdherenceMetric:
 
 
 class LegacySurfaceAvoidanceMetric:
-    """Penalize legacy Evaluator service evidence separately from raw success."""
+    """Penalize legacy Evals service evidence separately from raw success."""
 
     def __init__(
         self,

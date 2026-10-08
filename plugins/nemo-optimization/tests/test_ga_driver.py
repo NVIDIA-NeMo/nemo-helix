@@ -8,8 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
-from nemo_evaluator_sdk.metrics.protocol import MetricOutput
 from nemo_optimization.backends.ga.config import parse_ga_prompt_optimizer_config
 from nemo_optimization.backends.ga.driver import GaPromptOptimizerError, _child_prompt, run_ga_prompt_optimization
 from nemo_optimization.backends.ga.fitness import assign_generation_fitness, rank_valid_individuals
@@ -21,6 +19,8 @@ from nemo_optimization.backends.ga.oracle_feedback import (
 )
 from nemo_optimization.backends.ga.transform import PromptTransformError
 from nemo_optimization.candidate import CandidateEvaluationError, CandidateEvaluationResult
+from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
+from nhx_evals_sdk.metrics.protocol import MetricOutput
 
 
 def test_ga_prompt_optimizer_runs_prompt_only_and_writes_artifacts(tmp_path: Path) -> None:

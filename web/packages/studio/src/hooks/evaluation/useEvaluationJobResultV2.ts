@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEvaluatorListEvaluateJobResults } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { useEvalsListEvaluateJobResults } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { useQuery } from '@tanstack/react-query';
 
 export interface AggregateScores {
@@ -13,7 +13,7 @@ export const useEvaluationJobResultV2 = (workspace: string, jobName: string) => 
     data: resultsPage,
     isLoading: isLoadingMetadata,
     error: metadataError,
-  } = useEvaluatorListEvaluateJobResults(workspace, jobName, {
+  } = useEvalsListEvaluateJobResults(workspace, jobName, {
     query: {
       enabled: !!workspace && !!jobName,
     },

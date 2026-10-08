@@ -94,6 +94,7 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
       {isGrpoJob(customization) ? (
         <>
           <GrpoRewardPanel
+            jobStatus={customization.status}
             reward={buildRewardChartData(metrics)}
             metrics={getGrpoSummaryTiles(metrics, isTerminalStatus)}
             progress={getGrpoProgressTiles(telemetry, runState)}
@@ -103,6 +104,7 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
       ) : (
         <>
           <TrainingLossPanel
+            jobStatus={customization.status}
             trainLoss={metrics?.metrics?.train_loss}
             valLoss={metrics?.metrics?.val_loss}
             maxSteps={maxXAxisValue}

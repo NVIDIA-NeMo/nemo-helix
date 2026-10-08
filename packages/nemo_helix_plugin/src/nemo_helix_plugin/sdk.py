@@ -25,9 +25,9 @@ class NemoPluginSDKResources(Generic[SyncHelixT, SyncResourceT, AsyncHelixT, Asy
     receives the owning :class:`AsyncNemoClient`. ``nemo.sdk`` entry points expose
     these factories so ``client.<plugin>`` resolves the plugin's resource namespace,
     except where ``<plugin>`` is already a typed service-client property of the
-    client (``agents``, ``auditor``, ``evaluator``, ``data_designer``,
+    client (``agents``, ``garak``, ``evaluator``, ``data_designer``,
     ``agent_hardener``). Build those resources explicitly, e.g.
-    ``AuditorPluginResource(client)``.
+    ``GarakPluginResource(client)``.
     """
 
     sync_resource: Callable[[SyncHelixT], SyncResourceT] | None = None

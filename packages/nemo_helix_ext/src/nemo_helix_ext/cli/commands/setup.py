@@ -2440,7 +2440,7 @@ def setup_command(
             "--skills-from",
             help=(
                 "Comma-separated list of skill sources to install from "
-                "(e.g. 'nemo-helix,nemo-evaluator-plugin'). Use 'nemo-helix' "
+                "(e.g. 'nemo-helix,nemo-evals-plugin'). Use 'nemo-helix' "
                 "for the built-in set. Default: all sources. "
                 "Only applied when --install-skills is set."
             ),

@@ -93,6 +93,10 @@ def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
     assert "COPY packages/nhx_sandbox /tmp/nhx_sandbox" in harbor_target
     assert "uv pip install /tmp/nhx_sandbox" in harbor_target
     assert "sandboxed_gym" not in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_environment.py" in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_cleanup.py" in harbor_target
+    assert 'nemo-extensions" > "${site}/nemo-extensions.pth"' in harbor_target
+    assert "from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment" in harbor_target
 
 
 def test_harbor_runner_requirements_match_the_catalog() -> None:

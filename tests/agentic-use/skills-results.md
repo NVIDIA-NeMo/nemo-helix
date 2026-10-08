@@ -11,15 +11,15 @@ Results across two runs. First batch had 7 infra failures (agent ran as root) wh
 
 | Eval | Baseline | With Skills | Time | Skills Invoked |
 |------|----------|-------------|------|----------------|
-| auditor-config-crud-cli | 0.0 (1:12) | **1.0** | 5:08 | nemo-auditor |
-| auditor-default-job-cli | - | **1.0** | 2:29 | nemo-auditor |
-| auditor-target-crud-cli | - | **1.0** | 3:19 | nemo-auditor |
+| garak-config-crud-cli | 0.0 (1:12) | **1.0** | 5:08 | nemo-garak |
+| garak-default-job-cli | - | **1.0** | 2:29 | nemo-garak |
+| garak-target-crud-cli | - | **1.0** | 3:19 | nemo-garak |
 | auth-authorization-cli | - | **1.0** | 4:40 | nemo-auth |
 | data-designer-config-cli | - | **1.0** | 2:28 | nemo-secrets, nemo-inference-providers |
 | entities-basic-cli | - | **1.0** | 2:24 | nemo-entities |
 | evaluator-academic-benchmark-cli | - | 0.0 | 10:28 | (genuine failure) |
-| evaluator-llm-judge-cli | - | **1.0** | 7:43 | nemo-evaluator, nemo-files, nemo-secrets |
-| evaluator-simple-job-cli | 0.0 (1:10) | **1.0** | 4:11 | nemo-evaluator, nemo-files, nemo-auth |
+| evaluator-llm-judge-cli | - | **1.0** | 7:43 | nemo-evals, nemo-files, nemo-secrets |
+| evaluator-simple-job-cli | 0.0 (1:10) | **1.0** | 4:11 | nemo-evals, nemo-files, nemo-auth |
 | files-crud-cli | 0.0 (3:05) | **1.0** | 4:34 | nemo-files |
 | files-upload-dataset-cli | - | **1.0** | 3:07 | nemo-files |
 | guardrails-content-safety-cli | 1.0 (3:24) | **1.0** | 2:08 | nemo-guardrails |
@@ -35,7 +35,7 @@ Results across two runs. First batch had 7 infra failures (agent ran as root) wh
 
 ## Key Findings
 
-1. **Skills dramatically improve pass rate**: Where we have baselines, skills turned 0.0 failures into 1.0 passes (auditor-config-crud, evaluator-simple-job, files-crud, guardrails-custom-config, inference-provider-reg, secrets-crud)
+1. **Skills dramatically improve pass rate**: Where we have baselines, skills turned 0.0 failures into 1.0 passes (garak-config-crud, evaluator-simple-job, files-crud, guardrails-custom-config, inference-provider-reg, secrets-crud)
 2. **Skill invocation requires instruction hints**: The agent reliably invokes skills when the instruction.md says "You have skills available for X. Use them before exploring --help."
 3. **Root user bug**: Harbor's agent setup re-installs Claude Code as root. Fixed by adding `exec runuser -u harbor` to all ENTRYPOINT scripts.
 
@@ -47,8 +47,8 @@ Results across two runs. First batch had 7 infra failures (agent ran as root) wh
 | nemo-inference-providers | Provider setup + update-status | data-designer-config, guardrails-custom-config, inference-provider-reg, inference-mockllm |
 | nemo-inference-gateway | Chat completions, provider gateway, mock providers | inference-chat-completions, inference-mockllm |
 | nemo-guardrails | Guardrail config + self-check rails | guardrails-content-safety, guardrails-custom-config |
-| nemo-auditor | Audit configs, targets, jobs, probes | auditor-config-crud, auditor-default-job, auditor-target-crud |
-| nemo-evaluator | Metrics, sync/async evals, benchmarks | evaluator-llm-judge, evaluator-simple-job |
+| garak | Audit configs, targets, jobs, probes | garak-config-crud, garak-default-job, garak-target-crud |
+| nemo-evals | Metrics, sync/async evals, benchmarks | evaluator-llm-judge, evaluator-simple-job |
 | nemo-files | Filesets, upload/download, datasets | files-crud, files-upload-dataset, evaluator-llm-judge, evaluator-simple-job |
 | nemo-entities | Entity CRUD (model, dataset types) | entities-basic |
 | nemo-auth | Workspaces + member management | auth-authorization, workspace-basic, evaluator-simple-job |

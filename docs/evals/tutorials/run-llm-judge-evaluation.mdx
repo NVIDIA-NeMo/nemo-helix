@@ -1,0 +1,843 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Evaluate Response Quality with LLM-as-a-Judge"
+description: ""
+---
+{/* @nemo-nb: process */}
+{/* @nemo-nb: skip-test */}
+
+
+<a id="evaluate-run-llm-judge-evaluation"></a>
+
+**LLM-as-a-Judge** is a technique where you use a large language model to evaluate the outputs of another model. Instead of relying solely on automated metrics or manual review, you prompt a capable LLM to score responses based on criteria you define, such as helpfulness, accuracy, or tone.
+
+This tutorial shows you how to build, validate, and iterate on LLM judge metrics using [HelpSteer2](https://huggingface.co/datasets/nvidia/HelpSteer2), NVIDIA's human-annotated dataset. By comparing your judge's scores against human annotations, you can measure how well your judge aligns with human judgment and improve it through prompt iteration.
+
+**What you will learn:**
+
+- Create and test LLM judge metrics
+- Load rows from a registered fileset into evals SDK requests
+- Validate judge accuracy against human annotations
+- Iterate on prompts to improve correlation with humans
+- Visualize score distributions with histograms and percentiles
+
+**Quality dimensions evaluated:**
+
+| Dimension | Description | Scale |
+|-----------|-------------|-------|
+| Helpfulness | How well the response addresses the user's need | 0-4 |
+| Correctness | Factual accuracy of the information | 0-4 |
+| Coherence | Logical flow and structure | 0-4 |
+| Complexity | Sophistication and depth of the response | 0-4 |
+| Verbosity | Appropriate level of detail | 0-4 |
+
+<Tip>
+
+This tutorial takes approximately **20 minutes** to complete.
+
+</Tip>
+## Prerequisites
+
+1. Install and start NeMo Helix using the [Setup guide](/documentation/get-started).
+
+For PyPI installs, use the `nemo-helix` wrapper package. If you are working from a source checkout, run `make bootstrap` from the repository root instead.
+
+```bash
+pip install "nemo-helix[all]"
+nemo setup
+```
+
+2. Install the Python libraries used in this tutorial:
+
+```bash
+pip install pandas scipy matplotlib
+```
+
+---
+
+## Key Concepts
+
+Before you begin, here is a quick overview of the resources you will use:
+
+- **Evaluator resource**: The plugin SDK resource built with `Evaluator.from_client(client)`. Use it to run metrics locally or submit durable platform jobs.
+- **Metric**: An inline Python object that defines how to score model outputs. In this tutorial, we create LLM judge metrics that prompt a model to rate responses.
+- **Fileset**: A dataset registered with NeMo Helix. The evals plugin SDK accepts fileset references directly, so this tutorial passes the registered HelpSteer2 split to evaluations as a `FilesetRef`.
+- **Workspace**: A workspace that isolates your resources. Secrets, filesets, and jobs belong to a workspace.
+- **Job**: A durable remote platform task created with `evaluator.submit(...)`.
+- **Evaluation**: The process of scoring model outputs using one or more metrics. Use `evaluator.submit(...)` for durable jobs, or `nhx_evals_sdk.Evaluator` for local in-process execution
+
+---
+
+## 1. Create a Workspace and Initialize the SDK
+
+Create a dedicated workspace for this tutorial to keep your resources isolated from other projects, and make it the default workspace for your current CLI context:
+
+```bash
+nemo workspaces create llm-as-judge-tutorial
+nemo config set --workspace llm-as-judge-tutorial
+```
+
+If the workspace already exists from a previous run, the create command reports a conflict; continue with the second command. To return to your original workspace after the tutorial, run `nemo config set --workspace default`.
+
+Create a client from your current CLI context. It connects to the deployment and workspace saved in the context, using the credentials from `nemo auth login`. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+
+```python
+from nemo_evals.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+# Create a NemoClient from the current CLI context.
+client = NemoClient.from_config()
+WORKSPACE = client.resolve_workspace()
+evaluator = Evaluator.from_client(client)
+
+# Verify evals plugin connectivity.
+print(f"Using workspace '{WORKSPACE}' at {client.base_url}")
+print(evaluator.plugin_status())
+```
+
+---
+
+## 2. Create Secrets
+
+Create a platform secret for remote jobs and keep the same API key available in your local environment for local runs.
+
+Get your `NVIDIA_API_KEY` to access the models on NVIDIA Build:
+
+- [NVIDIA Build API Key](https://build.nvidia.com/settings/api-keys)
+    - Steps: click "Generate API Key"
+
+```python
+import os
+
+# Export NVIDIA_API_KEY before running this tutorial.
+# For quick local testing only:
+# os.environ["NVIDIA_API_KEY"] = "<your-nvidia-api-key>"
+NVIDIA_BUILD_API_KEY_ENV = "NVIDIA_API_KEY"
+
+nvidia_api_key = os.getenv(NVIDIA_BUILD_API_KEY_ENV)
+if not nvidia_api_key:
+    raise ValueError(f"{NVIDIA_BUILD_API_KEY_ENV} is not set")
+
+try:
+    from pydantic import SecretStr
+    from nemo_helix_plugin.client.errors import ConflictError
+    from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+    nvidia_api_key_secret = client.secrets.create_secret(
+        body=HelixSecretCreateRequest(name="nvidia-api-key", value=SecretStr(nvidia_api_key)),
+    ).data()
+    print("Created secret: nvidia-api-key")
+except ConflictError:
+    print("Secret 'nvidia-api-key' already exists, retrieving...")
+    nvidia_api_key_secret = client.secrets.get_secret(name="nvidia-api-key").data()
+    print("Retrieved existing secret: nvidia-api-key")
+
+print(
+    f"NVIDIA_API_KEY secret reference: {nvidia_api_key_secret.workspace}/{nvidia_api_key_secret.name}"
+)
+```
+
+<Note>
+
+Local runs resolve `Model(api_key_secret=SecretRef(root="NVIDIA_API_KEY"))` from your local environment. Remote jobs run in the platform job runtime, so they use the platform secret name created above.
+
+</Note>
+---
+
+## 3. Configure the Judge Models
+
+Import the evals SDK types and configure judge models for local and remote execution. The judge is the LLM that evaluates responses.
+
+This tutorial uses `nvidia/nemotron-3.5-lightning-30b-a3b` from NVIDIA Build.
+
+```python
+from nhx_evals_sdk import RunConfig, LLMJudgeMetric
+from nhx_evals_sdk.values import (
+    InferenceParams,
+    JSONScoreParser,
+    Model,
+    RangeScore,
+    SecretRef,
+)
+from nemo_evals.sdk import FilesetRef
+
+JUDGE_MODEL_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+JUDGE_MODEL_NAME = "nvidia/nemotron-3.5-lightning-30b-a3b"
+
+# `nhx_evals_sdk.Evaluator` resolves this name from your local environment.
+LOCAL_JUDGE_MODEL = Model(
+    url=JUDGE_MODEL_URL,
+    name=JUDGE_MODEL_NAME,
+    api_key_secret=SecretRef(root=NVIDIA_BUILD_API_KEY_ENV),
+)
+
+# Remote evaluator.submit() resolves this value from the platform secret.
+REMOTE_JUDGE_MODEL = Model(
+    url=JUDGE_MODEL_URL,
+    name=JUDGE_MODEL_NAME,
+    api_key_secret=SecretRef(root=nvidia_api_key_secret.name),
+)
+```
+
+<Tip>
+
+When using hosted APIs, keep `parallelism` low to avoid rate-limit errors. You can increase it for locally deployed models.
+
+</Tip>
+---
+
+## 4. Register and Load the Dataset
+
+Register [HelpSteer2](https://huggingface.co/datasets/nvidia/HelpSteer2) as a fileset. The fileset remains the durable dataset registration.
+
+```python
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.metadata import DatasetMetadataContent, FilesetMetadata
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+
+DATASET_NAME = "helpsteer2-eval"
+DATASET_SPLIT_PATH = "validation.jsonl.gz"
+
+try:
+    fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            description="NVIDIA HelpSteer2 dataset for quality evaluation",
+            purpose=FilesetPurpose.DATASET,
+            storage=HuggingfaceStorageConfig(
+                type=StorageConfigType.HUGGINGFACE,
+                repo_id="nvidia/HelpSteer2",
+                repo_type="dataset",
+            ),
+            metadata=FilesetMetadata(
+                dataset=DatasetMetadataContent(
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "prompt": {"type": "string"},
+                            "response": {"type": "string"},
+                            "helpfulness": {"type": "number"},
+                            "correctness": {"type": "number"},
+                            "coherence": {"type": "number"},
+                            "complexity": {"type": "number"},
+                            "verbosity": {"type": "number"},
+                        },
+                        "required": ["prompt", "response"],
+                        "additionalProperties": True,
+                    }
+                )
+            ),
+        ),
+    ).data()
+    print(f"Registered HelpSteer2 fileset: {fileset.workspace}/{fileset.name}")
+except ConflictError:
+    fileset = client.files.get_fileset(name=DATASET_NAME).data()
+    print(f"{fileset.workspace}/{fileset.name} dataset already registered")
+```
+
+<Note>
+
+HelpSteer2 contains prompt-response pairs with human ratings for helpfulness, correctness, coherence, complexity, and verbosity. Each rating is on a 0-4 scale. We'll use these human scores as ground truth to validate our LLM judge.
+
+</Note>
+Create a fileset reference for the validation split. The evals SDK resolves the selected fileset path when it runs, so you do not need to download the split into memory yourself:
+
+```python
+dataset_ref = FilesetRef(root=f"{fileset.workspace}/{fileset.name}").with_fragment(
+    DATASET_SPLIT_PATH
+)
+
+print(f"Using dataset reference: {dataset_ref.root}")
+```
+
+---
+
+## 5. Create an Initial Helpfulness Metric
+
+Now let's create our first LLM judge metric. We'll start with a simple prompt for the helpfulness dimension, then improve it based on validation results.
+
+A metric definition includes:
+
+- **Model**: Which LLM to use as the judge
+- **Prompt template**: Instructions for the judge, with `{{item...}}` fields filled from your dataset rows
+- **Score definition**: The name, scale, and how to parse the judge's output
+
+```python
+
+def create_helpfulness_metric(prompt_template: str, judge_model: Model) -> LLMJudgeMetric:
+    """Create a helpfulness metric with the given system prompt."""
+    score = RangeScore(
+        name="helpfulness",
+        description="How well does the response help the user?",
+        minimum=0,
+        maximum=4,
+        parser=JSONScoreParser(json_path="helpfulness"),
+    )
+
+    return LLMJudgeMetric(
+        model=judge_model,
+        scores=[score],
+        prompt_template={
+            "messages": [
+                {"role": "system", "content": prompt_template},
+                {
+                    "role": "user",
+                    "content": (
+                        "User prompt: {{item.prompt}}\n\n"
+                        "Assistant response: {{item.response}}\n\n"
+                        "Rate this response."
+                    ),
+                },
+            ],
+        },
+        inference=InferenceParams(temperature=0.0, max_tokens=32768),
+        ignore_request_failure=True,
+    )
+
+# Version 1: A basic, minimal prompt.
+PROMPT_V1 = """You are an evaluator. Rate the response's helpfulness from 0-4.
+Respond with JSON only: {"helpfulness": <0-4>}"""
+
+metric_v1_local = create_helpfulness_metric(PROMPT_V1, LOCAL_JUDGE_MODEL)
+metric_v1_remote = create_helpfulness_metric(PROMPT_V1, REMOTE_JUDGE_MODEL)
+
+```
+
+<Tip>
+
+Use low temperature for evaluation tasks. Low or zero temperature produces outputs with less variability, which is critical for reproducible scoring. This ensures the same response gets the same score across runs, making it easier to validate your judge and compare prompt versions.
+
+</Tip>
+---
+
+## 6. Test with Local Evaluation
+
+Before running a durable job, test your metric with a few examples using `nhx_evals_sdk.Evaluator`. It runs locally in-process and returns results immediately, which is useful for prompt iteration.
+
+```python
+from nhx_evals_sdk import Evaluator as LocalEvaluator
+
+quick_test_result = LocalEvaluator().run_sync(
+    metrics=[metric_v1_local],
+    dataset=[
+        {
+            "prompt": "What is the capital of France?",
+            "response": "The capital of France is Paris. It serves as France's political, economic, and cultural center.",
+        },
+        {
+            "prompt": "How do I make scrambled eggs?",
+            "response": "Eggs.",
+        },
+    ],
+    config=RunConfig(parallelism=1),
+)
+
+def score_value(row_score, score_name: str) -> float | None:
+    """Return one named score from an evaluator row result."""
+    for metric_result in row_score.metrics.values():
+        scores = getattr(metric_result, "scores", metric_result)
+        for score in scores:
+            if score.name == score_name:
+                try:
+                    return float(score.value)
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+print("Quick test results:")
+for row in quick_test_result.row_scores:
+    helpfulness = score_value(row, "helpfulness")
+    print(f" Row {row.row_index}: helpfulness = {helpfulness}")
+
+```
+
+**Expected output:**
+
+```text
+Quick test results:
+ Row 0: helpfulness = 4.0
+ Row 1: helpfulness = 0.0
+```
+
+The first response is comprehensive and helpful, while the second is unhelpfully brief. If your judge produces reasonable scores here, you're ready to run a larger evaluation.
+
+---
+
+## 7. Run Evaluation and Validate Against Ground Truth
+
+Now let's evaluate a larger sample and compare the judge's predictions against human annotations. This tells us how well our judge aligns with human judgment.
+
+```python
+sample_config = RunConfig(
+    parallelism=1,
+    limit_samples=5,
+)
+
+def wait_for_job(label: str, job):
+    """Wait for a remote evaluator job and download its result."""
+    try:
+        status = job.get_job_status()
+        print(f"{label} initial status: {status.status}")
+
+        job.wait_until_done()
+        result = job.get_result()
+    except Exception:
+        try:
+            print(f"{label} failure status: {job.get_job_status()}")
+        except Exception as status_error:
+            print(f"{label} status retrieval failed: {status_error!r}")
+        raise
+
+    print(f"{label} job finished successfully!")
+    print(result.aggregate_scores.scores)
+    return result
+
+job_v1 = evaluator.submit(
+    metric=metric_v1_remote,
+    dataset=dataset_ref,
+    config=sample_config,
+)
+print(f"Job submitted: {job_v1.name}")
+```
+
+Monitor the job and download the result when it completes:
+
+```python
+result_v1 = wait_for_job("Prompt V1", job_v1)
+```
+
+### Extract Scores
+
+Row-level results contain the original dataset item, captured requests, and extracted metric scores:
+
+```python
+import numpy as np
+
+def extract_dimension_scores(result, dimension: str):
+    """Return judge scores, human scores, and failure count for one dimension."""
+    judge_scores = []
+    human_scores = []
+    failed_rows = 0
+
+    for row in result.row_scores:
+        judge_score = score_value(row, dimension)
+        human_score = row.item.get(dimension)
+
+        if judge_score is None or human_score is None:
+            failed_rows += 1
+            continue
+
+        judge_scores.append(judge_score)
+        human_scores.append(float(human_score))
+
+    print(f"Total skipped rows: {failed_rows}")
+    return np.array(judge_scores), np.array(human_scores)
+
+judge_scores, human_scores = extract_dimension_scores(result_v1, "helpfulness")
+print(f"Evaluated: {len(judge_scores)} samples")
+```
+
+### Calculate Correlation with Human Annotations
+
+To measure judge quality, we compare its scores against human annotations using three metrics:
+
+| Metric | What it measures | Interpretation |
+|--------|------------------|----------------|
+| **Pearson r** | Linear correlation | Higher = scores move together proportionally |
+| **Spearman rho** | Rank correlation | Higher = judge ranks responses similarly to humans |
+| **MAE** | Mean Absolute Error | Lower = predictions closer to ground truth |
+
+```python
+from scipy import stats
+
+def correlation_summary(human_scores, judge_scores):
+    """Return Pearson, Spearman, and MAE for valid score arrays."""
+    if len(human_scores) < 2 or len(judge_scores) < 2:
+        return np.nan, np.nan, np.nan
+
+    pearson, _ = stats.pearsonr(human_scores, judge_scores)
+    spearman, _ = stats.spearmanr(human_scores, judge_scores)
+    mae = abs(human_scores - judge_scores).mean()
+    return pearson, spearman, mae
+
+pearson_v1, spearman_v1, mae_v1 = correlation_summary(human_scores, judge_scores)
+
+print("\n=== Prompt V1 Results ===")
+print(f"Pearson r: {pearson_v1:.3f} (>0.6 is good)")
+print(f"Spearman rho: {spearman_v1:.3f} (>0.6 is good)")
+print(f"MAE: {mae_v1:.2f} (<0.5 is good)")
+```
+
+If your V1 results show low correlation, that is expected. The basic prompt often produces scores that don't align well with human judgment. We'll improve this in the next step.
+
+---
+
+## 8. Improve the Prompt and Compare
+
+The basic prompt may lack specificity. Let's create an improved version that aligns with HelpSteer2's annotation guidelines, which define helpfulness as "the overall helpfulness of the response to the prompt."
+
+```python
+# Version 2: Prompt aligned with HelpSteer2 annotation guidelines.
+PROMPT_V2 = """You are evaluating the HELPFULNESS of an AI assistant's response.
+
+Helpfulness measures the overall utility of the response in addressing the user's needs.
+Rate on a 0-4 integer scale:
+
+0 - The response fails to address the user's request, provides irrelevant information, or could cause harm.
+1 - The response partially addresses the request but has significant gaps, errors, or misunderstandings.
+2 - The response addresses the core request adequately but may lack detail, clarity, or completeness.
+3 - The response fully addresses the request with appropriate detail and is genuinely useful.
+4 - The response excellently addresses the request, providing comprehensive and well-structured information that fully satisfies the user's needs.
+
+Focus on whether the response helps the user accomplish their goal, not on style or verbosity.
+A shorter response that directly solves the problem can score higher than a longer one that misses the point.
+
+Respond with JSON only: {"helpfulness": <0-4>}"""
+
+metric_v2_local = create_helpfulness_metric(PROMPT_V2, LOCAL_JUDGE_MODEL)
+metric_v2_remote = create_helpfulness_metric(PROMPT_V2, REMOTE_JUDGE_MODEL)
+```
+
+Run evaluation with the improved prompt:
+
+```python
+job_v2 = evaluator.submit(
+    metric=metric_v2_remote,
+    dataset=dataset_ref,
+    config=sample_config,
+)
+print(f"Job submitted: {job_v2.name}")
+
+result_v2 = wait_for_job("Prompt V2", job_v2)
+
+judge_scores_v2, human_scores_v2 = extract_dimension_scores(result_v2, "helpfulness")
+print(f"Evaluated: {len(judge_scores_v2)} samples")
+```
+
+### Compare Both Versions
+
+```python
+# Calculate metrics for V2.
+pearson_v2, spearman_v2, mae_v2 = correlation_summary(human_scores_v2, judge_scores_v2)
+
+# Side-by-side comparison.
+print("\n=== Prompt Comparison ===")
+print(f"{'Metric':<12} {'Pearson':<12} {'Spearman':<12} {'MAE':<8}")
+print("-" * 44)
+print(f"{'Prompt V1':<12} {pearson_v1:<12.3f} {spearman_v1:<12.3f} {mae_v1:<8.2f}")
+print(f"{'Prompt V2':<12} {pearson_v2:<12.3f} {spearman_v2:<12.3f} {mae_v2:<8.2f}")
+
+if pearson_v2 > pearson_v1:
+    best_prompt = PROMPT_V2
+    print("\nPrompt V2 shows better correlation with human judgments!")
+else:
+    best_prompt = PROMPT_V1
+    print("\nPrompt V1 performs better; simpler prompts can work well.")
+```
+
+<Note>
+
+More complex prompts do not always perform better. The best prompt depends on the model, task, and how well it aligns with the original annotation guidelines. If your V1 prompt outperforms V2, that's a valid result. Use what works best for your use case.
+
+</Note>
+---
+
+## 9. Visualize Score Distributions
+
+Visualizations help you understand *how* your judge differs from humans. Does it tend to score higher? Lower? Cluster around certain values?
+
+```python
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+
+# Human scores distribution.
+axes[0].hist(
+    human_scores,
+    bins=range(6),
+    align="left",
+    alpha=0.7,
+    color="green",
+    edgecolor="black",
+)
+axes[0].set_xlabel("Score")
+axes[0].set_ylabel("Count")
+axes[0].set_title("Human Annotations")
+axes[0].set_xticks(range(5))
+
+# Judge V1 distribution.
+axes[1].hist(
+    judge_scores,
+    bins=range(6),
+    align="left",
+    alpha=0.7,
+    color="blue",
+    edgecolor="black",
+)
+axes[1].set_xlabel("Score")
+axes[1].set_title(f"Judge V1 (r={pearson_v1:.2f})")
+axes[1].set_xticks(range(5))
+
+# Judge V2 distribution.
+axes[2].hist(
+    judge_scores_v2,
+    bins=range(6),
+    align="left",
+    alpha=0.7,
+    color="orange",
+    edgecolor="black",
+)
+axes[2].set_xlabel("Score")
+axes[2].set_title(f"Judge V2 (r={pearson_v2:.2f})")
+axes[2].set_xticks(range(5))
+
+plt.suptitle("Helpfulness Score Distributions")
+plt.tight_layout()
+plt.savefig("score_distributions.png", dpi=150)
+plt.show()
+
+print("Saved visualization to score_distributions.png")
+```
+
+<Tip>
+
+If you run this tutorial as a headless script instead of a notebook, configure a non-interactive Matplotlib backend before importing `pyplot`:
+
+```python
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+```
+
+In that mode, save the figure with `plt.savefig(...)` and skip `plt.show()`.
+
+</Tip>
+*The code above generates a chart showing score distributions. Your results will vary depending on the model used and the specific samples evaluated.*
+
+### Percentile Analysis
+
+Percentiles reveal how scores are distributed across the range:
+
+```python
+import pandas as pd
+
+for name, scores in [
+    ("Human", human_scores),
+    ("Judge V1", judge_scores),
+    ("Judge V2", judge_scores_v2),
+]:
+    p25 = pd.Series(scores).quantile(0.25)
+    p50 = pd.Series(scores).quantile(0.50)
+    p75 = pd.Series(scores).quantile(0.75)
+    p90 = pd.Series(scores).quantile(0.90)
+
+    print(f"\n{name} percentiles:")
+    print(
+        f" 25th: {p25:.1f} | 50th (median): {p50:.1f} | 75th: {p75:.1f} | 90th: {p90:.1f}"
+    )
+```
+
+<Tip>
+
+If your judge's distribution looks very different from humans, such as always scoring 3-4 while humans use the full range, adjust your prompt to calibrate the scoring criteria.
+
+</Tip>
+---
+
+---
+
+## 10. Clean Up
+
+To delete the workspace, you must first delete all resources within it. Delete jobs first, then filesets, secrets, and the workspace.
+
+```python
+from nemo_helix_plugin.client.errors import NotFoundError
+
+# Delete remote evaluation jobs. Local SDK results are in-memory
+# objects and do not create platform jobs.
+for job_name in [job_v1.name, job_v2.name]:
+    try:
+        client.jobs.delete_job(name=job_name, workspace=WORKSPACE)
+    except Exception:
+        pass
+
+# Delete fileset and secret.
+try:
+    client.files.delete_fileset(name=DATASET_NAME, workspace=WORKSPACE)
+except NotFoundError:
+    pass
+
+try:
+    client.secrets.delete_secret(name=nvidia_api_key_secret.name, workspace=WORKSPACE)
+except NotFoundError:
+    pass
+
+# Now delete the workspace.
+client.workspaces.delete_workspace(name=WORKSPACE)
+print("Cleanup complete!")
+```
+
+<Note>
+
+Workspaces cannot be deleted while they contain resources. The code above deletes resources in dependency order.
+
+</Note>
+---
+
+## Troubleshooting
+
+### Connection refused or "Cannot connect to host"
+
+Check that your current CLI context points at the deployment you expect:
+
+```bash
+nemo config view
+```
+
+If you're using a local deployment, the platform might not be running. Start it with:
+
+```bash
+nemo services run
+```
+
+Wait for all services to be healthy before running the tutorial. Check health status with:
+
+```bash
+curl -s http://localhost:8080/health/ready
+```
+
+### Workspace already exists
+
+If you're re-running the tutorial and want to start fresh, delete the existing workspace first:
+
+```python
+client.workspaces.delete_workspace(name=WORKSPACE)
+```
+
+### Local NVIDIA Build authentication fails
+
+Local evaluator runs resolve `api_key_secret` from environment variables. For NVIDIA Build, make sure `NVIDIA_API_KEY` is exported in the environment where the notebook or Python process is running:
+
+```python
+import os
+
+assert os.environ["NVIDIA_API_KEY"]
+```
+
+The local model should use the environment variable name:
+
+```python
+LOCAL_JUDGE_MODEL = Model(
+    url=JUDGE_MODEL_URL,
+    name=JUDGE_MODEL_NAME,
+    api_key_secret=SecretRef(root="NVIDIA_API_KEY"),
+)
+```
+
+Remote jobs should use the platform secret name instead:
+
+```python
+REMOTE_JUDGE_MODEL = Model(
+    url=JUDGE_MODEL_URL,
+    name=JUDGE_MODEL_NAME,
+    api_key_secret=SecretRef(root=nvidia_api_key_secret.name),
+)
+```
+
+### Job stuck in "pending" or "running" for too long
+
+Check the job status from the job resource:
+
+```python
+status = job_v1.get_job_status()
+print(f"Status: {status.status}")
+print(f"Details: {status.status_details}")
+```
+
+Remote jobs can report `progress: 100.0` and all samples processed before the platform job status changes to `completed`. Wait for `job.wait_until_done()` to return before downloading results or treating the job as terminal.
+
+Common causes:
+
+- Judge model not deployed or unreachable
+- Remote job is using a missing platform secret
+- Rate limiting from external APIs
+
+### Low correlation with human annotations
+
+If your Pearson r is below 0.4:
+
+- **Refine your prompt**: Add more specific scoring criteria and examples
+- **Check score distribution**: If the judge clusters around one value, the prompt may be too vague
+- **Try a different model**: Larger judge models often correlate better with humans
+- **Verify data alignment**: Ensure ground truth rows match evaluation results
+
+### JSON parsing errors in scores
+
+If scores show `None` or the job fails with parsing errors:
+
+- Verify the prompt explicitly asks for JSON output
+- Check that `json_path` in the parser matches the key in your expected JSON
+- Lower the temperature to reduce malformed outputs
+- Add "Respond with JSON only" to your system prompt
+
+### Hugging Face dataset access issues
+
+For gated or private datasets, create a secret with your Hugging Face token:
+
+```python
+from pydantic import SecretStr
+from nemo_helix_plugin.files.metadata import DatasetMetadataContent, FilesetMetadata
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_helix_plugin.schema import SecretRef
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(name="hf-token", value=SecretStr("hf_your_token_here")),
+)
+client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="my-dataset",
+        purpose=FilesetPurpose.DATASET,
+        storage=HuggingfaceStorageConfig(
+            type=StorageConfigType.HUGGINGFACE,
+            repo_id="org/dataset",
+            repo_type="dataset",
+            token_secret=SecretRef(root="hf-token"),
+        ),
+    ),
+)
+```
+
+---
+
+## Summary
+
+In this tutorial, you learned how to:
+
+1. **Create LLM judge metrics** that prompt a model to score responses
+2. **Use registered fileset references** for plugin SDK execution
+3. **Test quickly with local evaluation** before running durable jobs
+4. **Validate against ground truth** by comparing with human annotations
+5. **Iterate on prompts** to improve correlation
+6. **Visualize distributions** to understand scoring patterns
+
+**Key takeaway**: Prompt engineering matters for judge accuracy. Always validate your judge against human-labeled data when available, and iterate on your prompts to maximize alignment with human judgment.
+
+---
+
+## Next Steps
+
+- **Experiment with rubric scores**: Use [categorical rubrics](/documentation/evaluate-models/metrics/llm-as-a-judge) instead of numeric ranges for more interpretable criteria
+- **Try different judge models**: Larger models often correlate better with human judgment
+- **Explore other evaluation types**: [RAG evaluation](/documentation/evaluate-models/metrics/rag-metrics) or [agentic evaluation](/documentation/evaluate-models/metrics/agentic-metrics)
+
+## Related
+
+- [LLM-as-a-Judge Reference](/documentation/evaluate-models/metrics/llm-as-a-judge) - Complete guide to judge configuration
+- [SDK Resources](/documentation/evaluate-models/sdk-resources) - Evals plugin SDK resource reference
+- [Manage Metrics](/documentation/evaluate-models/metrics/manage-metrics) - Using evals SDK metric objects

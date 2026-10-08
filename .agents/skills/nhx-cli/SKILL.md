@@ -33,7 +33,7 @@ Plugin and service code must **not import `nemo_helix_ext`** — plugins only de
 | Category | Location | Description |
 |----------|----------|-------------|
 | **Core resource groups** | `commands/<group>.py` (`files`, `inference/`, `jobs`, `models`, `secrets`, `workspaces`, hidden `adapters`, `iam`, `projects`) | Hand-written on typed clients, registered in `commands/manifest_registry.py` |
-| **Plugin-hosted groups** | owning package, `nemo.cli` entry point (`guardrail` → `plugins/nemo-guardrails`, `intake`/`experiments` → `services/intake`, `insights`, `agents`, `auditor`, ...) | Appear only when the package is installed |
+| **Plugin-hosted groups** | owning package, `nemo.cli` entry point (`guardrail` → `plugins/nemo-guardrails`, `intake`/`experiments` → `services/intake`, `insights`, `agents`, `garak`, ...) | Appear only when the package is installed |
 | **Generated job/function verbs** | `nemo_helix_plugin/commands.py` | `submit`/`explain`/`run` for every `NemoJob`/`NemoFunction` a plugin registers |
 | **Setup / use cases** | `commands/setup.py`, `commands/use_cases/`, `commands/auth.py`, `commands/config.py` | Wizards and workflows (`chat`, `wait`, ...) |
 | **Services** | `commands/services/`, `commands/quickstart/` | Run the platform locally (imports server packages by design) |
@@ -167,8 +167,8 @@ Conventions that keep the surface consistent:
 - **Errors**: let `nemo_helix_plugin.client.errors` propagate; `@handle_errors` maps them (API errors,
   including 404 and connection failures → exit 3; usage and client-side validation → exit 2). Raise
   `click.BadParameter` for bad input and `click.ClickException` for expected failures.
-- **Warnings**: decorate commands with `@collect_warnings` so `add_warning` (pagination, truncation) and
-  agent-mode hints are printed.
+- **Warnings**: decorate commands with `@collect_warnings` so `add_warning` (pagination, truncation)
+  warnings are printed.
 
 ### Register the group
 

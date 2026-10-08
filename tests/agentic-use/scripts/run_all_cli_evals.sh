@@ -38,9 +38,9 @@ DRY_RUN=false
 
 # All 19 eval base names (each has a standard and -easy variant)
 EVAL_BASES=(
-    auditor-config-crud-cli
-    auditor-default-job-cli
-    auditor-target-crud-cli
+    garak-config-crud-cli
+    garak-default-job-cli
+    garak-target-crud-cli
     auth-authorization-cli
     data-designer-config-cli
     entities-basic-cli

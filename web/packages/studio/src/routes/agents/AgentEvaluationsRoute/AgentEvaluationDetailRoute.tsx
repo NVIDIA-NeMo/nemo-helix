@@ -10,7 +10,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
-import { evaluatorCancelAgentEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-agent-eval-jobs-routes';
+import { evalsCancelAgentEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-jobs-routes';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -126,7 +126,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
     if (!jobName) return;
     setIsCancelling(true);
     try {
-      await evaluatorCancelAgentEvaluateJob(workspace, jobName);
+      await evalsCancelAgentEvaluateJob(workspace, jobName);
       toast.success('Job cancelled');
       setCancelModalOpen(false);
       void queryClient.invalidateQueries({ queryKey: ['agent-eval-job', workspace, jobName] });
@@ -205,7 +205,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
               </Badge>
             </Flex>
           }
-          slotDescription="Agent evaluation via nemo-evaluator. Scores aggregate per metric across the evaluated tasks."
+          slotDescription="Agent evaluation via nemo-evals. Scores aggregate per metric across the evaluated tasks."
         />
 
         <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">

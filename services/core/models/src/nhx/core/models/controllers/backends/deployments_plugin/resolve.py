@@ -90,6 +90,8 @@ def resolve_model_source(
         parts = str(model_entity.fileset).removeprefix("hf://").removeprefix("fileset://").split("/", 1)
         if len(parts) == 2:
             return parts[0], parts[1], revision
+        if len(parts) == 1 and parts[0] and model_entity.workspace:
+            return model_entity.workspace, parts[0], revision
     return namespace, name, revision
 
 

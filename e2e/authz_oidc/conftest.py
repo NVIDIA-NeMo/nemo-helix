@@ -294,7 +294,7 @@ def _provision(platform: Platform) -> None:
     alice = platform.token("alice")
     deadline = time.monotonic() + _PROVISION_TIMEOUT
     while time.monotonic() < deadline:
-        ok = platform.request("GET", f"/apis/auditor/v2/workspaces/{WS_A}/targets", token=alice).status_code == 200
+        ok = platform.request("GET", f"/apis/garak/v2/workspaces/{WS_A}/targets", token=alice).status_code == 200
         revoked = platform.request("GET", "/apis/entities/v2/workspaces", token=alice).status_code == 403
         if ok and revoked:
             return

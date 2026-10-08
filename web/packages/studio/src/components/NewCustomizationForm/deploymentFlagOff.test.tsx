@@ -57,18 +57,20 @@ vi.mock('@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource', () => (
   ensureUnboundDeploymentConfig: mockCreateUnboundConfig,
 }));
 
-const emptyValidation = {
+const validValidation = {
   isPending: false,
   discoveryError: null,
   format: { ok: true, fileErrors: [] },
-  schema: null,
+  schema: { variant: 'sft-prompt-completion', label: 'SFT prompt/completion' },
   schemaExpectedCopy: '',
   schemaMismatchedFiles: [],
   schemaShape: '',
   completeness: { ok: true, skipped: false, errors: [] },
   encoding: { ok: true, fileErrors: [] },
-  hasTraining: false,
+  hasTraining: true,
   hasValidation: false,
+  unmatchedRootJson: [],
+  unmatchedRootJsonValid: true,
   autoSplitNotice: false,
   training: [],
   validation: [],
@@ -107,7 +109,7 @@ describe('NewCustomizationForm with deployments disabled', () => {
       isLoading: false,
     });
     mockUseParams({ [ROUTE_PARAMS.workspace]: 'default' });
-    vi.mocked(useCustomizationDatasetValidation).mockReturnValue(emptyValidation);
+    vi.mocked(useCustomizationDatasetValidation).mockReturnValue(validValidation);
   });
 
   it.each([

@@ -36,7 +36,6 @@ from nhx.core.entities.api.v2.utils import (
     add_workspace_filtering,
     bindings_cache_delete,
     get_accessible_workspaces,
-    raise_if_workspace_inaccessible,
     require_workspace_access,
 )
 from nhx.core.entities.app.repository import WorkspaceRepositoryInterface
@@ -343,15 +342,15 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
-    accessible_workspaces = await get_accessible_workspaces(repository)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
+        accessible_workspaces = await get_accessible_workspaces(repository)
         # Build combined filter for workspace access and user's filter
         query_workspace = ALL_WORKSPACES
         effective_filter = add_workspace_filtering(accessible_workspaces, filter, field="workspace")
     else:
-        raise_if_workspace_inaccessible(
-            accessible_workspaces,
+        accessible_workspaces = await require_workspace_access(
+            repository,
             workspace,
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )

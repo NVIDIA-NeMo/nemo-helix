@@ -21,6 +21,17 @@ MODEL_REF_PATTERN_DESCRIPTION = (
     "(lowercase, digits, hyphens, and temporarily @ . + _; no leading/trailing or consecutive hyphens). "
     "If one slash, both sides must be non-empty."
 )
+
+# Same shape as model refs; a bare name resolves in the request workspace.
+FILESET_REF_MIN_LEN = 2
+FILESET_REF_MAX_LEN = MODEL_REF_MAX_LEN
+FILESET_REF_PATTERN = MODEL_REF_PATTERN
+FILESET_REF_PATTERN_DESCRIPTION = (
+    "Either a fileset name or 'workspace/fileset_name'. A bare name is resolved in the request "
+    "workspace (the platform default workspace is named 'default'). Each segment is 2-63 characters: "
+    "lowercase letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens, and it "
+    "cannot end with a hyphen."
+)
 _MODEL_REF_RE = re.compile(MODEL_REF_PATTERN)
 
 

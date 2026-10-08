@@ -32,11 +32,11 @@ forbidden = ["cli", "plugin_sdk", "legacy_service"]
 
 [evaluator.expected]
 required_terms = [
-  "packages/nemo_evaluator_sdk",
+  "packages/nhx_evals_sdk",
   "Evaluator",
   "run_sync",
   "Agent",
-  "nemo_evaluator_sdk.values.agents",
+  "nhx_evals_sdk.values.agents",
   "AgentFormat.GENERIC",
   "ExactMatchMetric",
   "response_path",

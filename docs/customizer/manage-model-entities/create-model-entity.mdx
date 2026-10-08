@@ -29,15 +29,15 @@ customization = Customization.from_client(client)
 try:
     model = client.models.create_model(
         body=CreateModelEntityRequest(
-            name="qwen3-1.7b",
-            fileset="default/qwen3-1.7b",  # Reference: workspace/fileset-name
-            description="Qwen3 1.7B base model for customization",
+            name="nemotron-3-5-lightning-30b-a3b",
+            fileset="default/nemotron-3-5-lightning-30b-a3b",  # Reference: workspace/fileset-name
+            description="Nemotron 3.5 Lightning 30B A3B base model for customization",
         ),
     ).data()
     print(f"Created Model Entity: {model.name}")
 except ConflictError:
     print("Model Entity already exists")
-    model = client.models.get_model(name="qwen3-1.7b").data()
+    model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 ```
 
 <Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
@@ -47,10 +47,10 @@ except ConflictError:
 ```json
 {
   "id": "model-abc123def456",
-  "name": "qwen3-1.7b",
+  "name": "nemotron-3-5-lightning-30b-a3b",
   "workspace": "default",
-  "description": "Qwen3 1.7B base model for customization",
-  "fileset": "default/qwen3-1.7b",
+  "description": "Nemotron 3.5 Lightning 30B A3B base model for customization",
+  "fileset": "default/nemotron-3-5-lightning-30b-a3b",
   "spec": null,
   "adapters": [],
   "created_at": "2026-02-09T10:30:00Z",
@@ -73,7 +73,7 @@ import time
 # Poll until spec is populated
 print("Waiting for model spec to be auto-populated...")
 while True:
-    model = client.models.get_model(name="qwen3-1.7b").data()
+    model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
     if model.spec:
         break
     print(" Still waiting...")
@@ -92,14 +92,14 @@ print(f" Attention Heads: {model.spec.num_attention_heads}")
 ```json
 {
   "spec": {
-    "family": "qwen",
-    "base_num_parameters": 1720574976,
-    "hidden_size": 2048,
-    "num_layers": 28,
-    "num_attention_heads": 16,
-    "num_kv_heads": 8,
-    "vocab_size": 151936,
-    "context_size": 40960
+    "family": "nemotron_h",
+    "base_num_parameters": 31577937344,
+    "hidden_size": 2688,
+    "num_layers": 52,
+    "num_attention_heads": 32,
+    "num_kv_heads": 2,
+    "vocab_size": 131072,
+    "context_size": 262144
   }
 }
 ```
@@ -112,7 +112,7 @@ print(f" Attention Heads: {model.spec.num_attention_heads}")
 Before using in a customization job, verify everything is set up correctly:
 
 ```python
-model = client.models.get_model(name="qwen3-1.7b").data()
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 # Verification checks
 assert model.spec is not None, "Model spec not yet populated - wait longer"
@@ -134,10 +134,15 @@ from nemo_automodel_plugin.schema import AutomodelJobInput
 
 # Create a customization job using the Model Entity
 spec = AutomodelJobInput(
-    model="default/qwen3-1.7b",  # Created above
+    model="default/nemotron-3-5-lightning-30b-a3b",  # Created above
     dataset={"training": "default/my-training-dataset"},
-    training={"training_type": "sft", "finetuning_type": "lora"},
+    training={
+        "training_type": "sft",
+        "finetuning_type": "lora",
+        "lora": {"rank": 16, "alpha": 32, "exclude_modules": ["*.out_proj"]},
+    },
     schedule={"epochs": 1},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
 )
 job = customization.automodel.jobs.create(spec=spec, workspace="default", name="my-lora-job")
 ```
@@ -156,7 +161,7 @@ After a customization job completes, the output depends on the fine-tuning regim
 For LoRA jobs, you can list adapters attached to a model:
 
 ```python
-model = client.models.get_model(name="qwen3-1.7b").data()
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 if model.adapters:
     print(f"Adapters attached to {model.name}:")

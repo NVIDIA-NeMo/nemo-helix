@@ -95,6 +95,17 @@ class HelixSecretCreateRequest(BaseModel):
 class HelixSecretUpdateRequest(BaseModel):
     """Request body for updating a platform secret's metadata."""
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "description": "Updated secret description",
+                    "value": "new-secret-value",
+                }
+            ]
+        }
+    )
+
     description: str | None = Field(default=None, description="An optional description of the secret")
     value: SecretStr | None = Field(default=None, description="The new secret value")
 

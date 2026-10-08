@@ -12,6 +12,13 @@ import { parseFilesetUri } from '@studio/hooks/useCustomizationFiles/utils';
 export interface DatasetFileDiscoveryResult {
   training: FilesetFileOutput[];
   validation: FilesetFileOutput[];
+  /**
+   * Root-level .json files that matched no training/validation pattern and were
+   * not promoted by the Customizer fallback. Native Unsloth with
+   * apply_chat_template disabled can treat these as training data; all other
+   * consumers ignore them.
+   */
+  unmatchedRootJson: FilesetFileOutput[];
   hasRequiredFiles: boolean;
   isPending: boolean;
   /**
@@ -34,12 +41,15 @@ interface PartitionedFiles {
   training: FilesetFileOutput[];
   validation: FilesetFileOutput[];
   unmatchedRootJsonl: FilesetFileOutput[];
+  /** Root-level .json files that matched no training/validation pattern. */
+  unmatchedRootJson: FilesetFileOutput[];
 }
 
 export const partitionDatasetFiles = (files: FilesetFileOutput[]): PartitionedFiles => {
   const training: FilesetFileOutput[] = [];
   const validation: FilesetFileOutput[] = [];
   const unmatchedRootJsonl: FilesetFileOutput[] = [];
+  const unmatchedRootJson: FilesetFileOutput[] = [];
   const trainingRule = CUSTOMIZATION_DATASET_DISCOVERY[CustomizationFileType.Training];
   const validationRule = CUSTOMIZATION_DATASET_DISCOVERY[CustomizationFileType.Validation];
 
@@ -67,10 +77,14 @@ export const partitionDatasetFiles = (files: FilesetFileOutput[]): PartitionedFi
     } else if (filename.endsWith('.jsonl')) {
       // Only .jsonl is eligible for the lone-root fallback (matches customizer).
       unmatchedRootJsonl.push(f);
+    } else if (filename.endsWith('.json')) {
+      // .json files that matched no pattern: not used by the Customizer fallback
+      // but can be claimed as training by native Unsloth (apply_chat_template off).
+      unmatchedRootJson.push(f);
     }
   }
 
-  return { training, validation, unmatchedRootJsonl };
+  return { training, validation, unmatchedRootJsonl, unmatchedRootJson };
 };
 
 /**
@@ -99,7 +113,8 @@ export const useDatasetFileDiscovery = ({
   });
 
   const files = filesResponse ?? [];
-  const { training, validation, unmatchedRootJsonl } = partitionDatasetFiles(files);
+  const { training, validation, unmatchedRootJsonl, unmatchedRootJson } =
+    partitionDatasetFiles(files);
 
   // Customizer fallback (preparation.py:324-336): when no train/val patterns
   // matched at all, ALL unmatched root .jsonl files are claimed as training.
@@ -113,6 +128,7 @@ export const useDatasetFileDiscovery = ({
   return {
     training: finalTraining,
     validation,
+    unmatchedRootJson,
     hasRequiredFiles: finalTraining.length > 0,
     isPending: enabled && isPending,
     error: error ?? null,

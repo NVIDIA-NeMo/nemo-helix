@@ -1,53 +1,33 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { resolveKeyPath } from '@nemo/common/src/utils/file';
-import { logger } from '@nemo/common/src/utils/logger';
-import {
-  evaluatorCreateEvaluateJob,
-  evaluatorDeleteEvaluateJob,
-  evaluatorGetEvaluateJob,
-  evaluatorListEvaluateJobResults,
-} from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import {
-  type EvaluateJobRequest,
-  type MetricInline,
-  HelixJobStatus,
-} from '@nemo/sdk/generated/evaluator/schema';
-import { buildEvalJobName } from '@studio/components/evaluation/submitEvaluationJob';
+import { evalsRunEvaluateLiveEvaluation } from '@nemo/sdk/generated/evals/evals-plugin-live-evaluation-route';
+import type { LiveScoreRequest, MetricInline } from '@nemo/sdk/generated/evals/schema';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { buildMetricBundles } from '@studio/routes/evaluation/EvaluationNewRoute/buildEvaluationSpec';
 import {
+  composeGenerationPrompt,
   type EvaluationFormValues,
   type DatasetBindings,
   toFieldMapping,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
+import { getModelInferenceGatewayUrl } from '@studio/util/models';
 import { useCallback, useRef, useState } from 'react';
-import { useAuth } from 'react-oidc-context';
-
-const TERMINAL_STATUSES: string[] = [
-  HelixJobStatus.completed,
-  HelixJobStatus.error,
-  HelixJobStatus.cancelled,
-];
-
-const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 120_000;
 
 export interface LiveTestResult {
   /** What the model actually answered, so a bad score can be read against it. */
   output: string;
   scores: { name: string; value: number; label?: string }[];
+  /** Metrics that failed while their siblings scored. */
+  errors: { metric: string; message: string }[];
 }
 
 export type LiveTestState =
   | { status: 'idle' }
-  | { status: 'busy'; label: string; output?: string }
+  | { status: 'busy'; label: string }
   | { status: 'done'; result: LiveTestResult }
   | { status: 'error'; message: string };
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
@@ -59,26 +39,28 @@ const statusOf = (error: unknown): number | undefined => {
   return typeof responseStatus === 'number' ? responseStatus : undefined;
 };
 
-/** The server's own explanation, which carries what a bare status code cannot --
- *  a gateway 502 wraps the upstream reason, e.g. "Backend returned 404: Function
- *  ... Not found for account". */
+/** The server's own explanation, which already names the culprit: "target
+ *  generation failed: ..." for the model under test, "llm-judge: ..." per failed
+ *  metric. A 422 carries FastAPI's list of ``{msg}`` instead of a string. */
 const detailOf = (error: unknown): string | undefined => {
   const record = asRecord(error);
   const body = asRecord(record?.error) ?? asRecord(asRecord(record?.response)?.data);
-  const candidate = body?.detail ?? body?.message ?? record?.message;
+  const raw = body?.detail ?? body?.message ?? record?.message;
+  const candidate = Array.isArray(raw)
+    ? raw
+        .map((entry) => asRecord(entry)?.msg)
+        .filter((msg): msg is string => typeof msg === 'string')
+        .join('; ')
+    : raw;
   if (typeof candidate !== 'string' || !candidate.trim()) return undefined;
   return candidate.length > 240 ? `${candidate.slice(0, 240)}…` : candidate;
 };
 
-/** Names the model that failed. The live test calls two different models, and
- *  "returned 503" is not actionable without knowing which one to swap. */
-const describeModelFailure = (role: string, modelRef: string, error: unknown): string => {
+const describeFailure = (error: unknown): string => {
   const status = statusOf(error);
-  const raw = detailOf(error);
-  const detail = status && raw?.startsWith(`${status} `) ? raw.slice(`${status} `.length) : raw;
-  const subject = `${role} (${bareModelName(modelRef)})`;
-  if (status) return `${subject} returned ${status}.${detail ? ` ${detail}` : ''}`;
-  return `Could not reach ${subject}.${detail ? ` ${detail}` : ''}`;
+  const detail = detailOf(error);
+  if (status) return `The live test failed (${status}).${detail ? ` ${detail}` : ''}`;
+  return `Could not reach the evaluator.${detail ? ` ${detail}` : ''}`;
 };
 
 const bareModelName = (modelRef: string): string =>
@@ -97,58 +79,21 @@ const rubricLabel = (
   return score.rubric.find((item) => item.value === value)?.label;
 };
 
-/** The aggregate-scores artifact is a LIST of per-score statistics, not a nested
- *  record. Verified against a live run: {"scores":[{"name":"exact-match.exact-match",
- *  "mean":1.0,"count":1,...}]}. Over a single live-test row the mean IS the row's
- *  score. (Note useEvaluationJobResultV2 types this as a nested record, which does
- *  not match what the API returns.) */
-const flattenScores = (payload: {
-  scores?: { name?: string; mean?: number | null }[];
-}): { name: string; value: number }[] =>
-  (payload.scores ?? [])
-    .filter((score) => typeof score.name === 'string')
-    .map((score) => ({ name: score.name as string, value: score.mean ?? Number.NaN }));
-
 /**
- * Scores one row, in two phases.
+ * Scores one row through the evaluator's ``evaluate/live`` route, which
+ * generates the response and scores it in-process: no job, nothing persisted.
  *
- * Inference is issued by Studio rather than by the job, because a 502 from the
- * model endpoint is the common failure today and inside a job it costs three
- * retries with backoff before surfacing as an opaque job error -- and with
- * `ignore_request_failure` on it would surface as a NaN score and a SUCCEEDING
- * job. Calling directly fails immediately, names the status code, and creates no
- * job at all on the failure path.
- *
- * Scoring then runs OFFLINE against the generated answer: `build_offline_sample`
- * reads `row.output` and synthesises `sample.output_text`, so the metric
- * templates are identical to a real online run.
- *
- * The job is deleted once read. A live test is an affordance, not a run of record.
+ * The request is built the way a real run's is -- same target, prompt template,
+ * field mapping and metrics -- so the live test exercises what the user
+ * configured rather than a bare chat call.
  */
 export function useLiveTest() {
   const workspace = useWorkspaceFromPath();
-  const auth = useAuth();
   const [state, setState] = useState<LiveTestState>({ status: 'idle' });
   /** Guards against a superseded run overwriting a newer one's state. */
   const runRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
-  const discardJob = useCallback(
-    (name: string) => {
-      // Fire and forget: the score is already read, and a failed cleanup must not
-      // present as a failed live test.
-      void evaluatorDeleteEvaluateJob(workspace, name).catch((error) => {
-        logger.error(`Dry run: could not delete ephemeral job ${name}: ${String(error)}`);
-      });
-    },
-    [workspace]
-  );
-
-  /** Bumping the run id makes every later `superseded()` check bail, which stops
-   *  the poll loop without unwinding it. Deletion is left to the run's own
-   *  `finally`: cancelling while the create call is still in flight has no job
-   *  name to delete yet, so a cancel that deleted from here would miss exactly
-   *  the job it is supposed to clean up. */
   const cancel = useCallback(() => {
     runRef.current += 1;
     abortRef.current?.abort();
@@ -175,130 +120,48 @@ export function useLiveTest() {
         return;
       }
 
-      setState({ status: 'busy', label: 'Generating a response…' });
+      setState({ status: 'busy', label: 'Generating and scoring a response…' });
 
-      let output: string;
-      try {
-        const completion = await createChatCompletion({
-          model: bareModelName(values.model),
-          workspace,
-          messages: [{ role: 'user', content: input }],
-          accessToken: auth.user?.access_token,
-          signal: controller.signal,
-        });
-        output = ('choices' in completion ? completion.choices[0]?.message?.content : null) ?? '';
-        if (!output) {
-          setState({
-            status: 'error',
-            message: `The model being evaluated (${bareModelName(values.model)}) returned an empty response.`,
-          });
-          return;
-        }
-      } catch (error) {
-        if (superseded()) return;
-        setState({
-          status: 'error',
-          message: describeModelFailure('The model being evaluated', values.model, error),
-        });
-        return;
-      }
-
-      if (superseded()) return;
-
-      // Pre-flight the judge for the same reason we generate here rather than in
-      // the job: inside the job a judge 502/429 costs the full retry budget and
-      // then surfaces as "Job exited with code 1", with the real status buried in
-      // stderr. One trivial call names it immediately and creates no job.
-      // Verified live: unavailable models return 502 (upstream 404) and an
-      // exhausted account returns 429.
-      if (values.body.metrics['llm-judge']) {
-        setState({ status: 'busy', label: 'Checking the judge model…', output });
-        try {
-          await createChatCompletion({
-            model: bareModelName(values.body.judgeModel),
-            workspace,
-            messages: [{ role: 'user', content: 'ping' }],
-            max_tokens: 1,
-            accessToken: auth.user?.access_token,
-            signal: controller.signal,
-          });
-        } catch (error) {
-          if (superseded()) return;
-          setState({
-            status: 'error',
-            message: describeModelFailure('The judge model', values.body.judgeModel, error),
-          });
-          return;
-        }
-      }
-
-      if (superseded()) return;
-      setState({ status: 'busy', label: 'Scoring the row…', output });
-
-      const name = buildEvalJobName('livetest');
-      const request: EvaluateJobRequest = {
-        name,
-        spec: {
-          // Inline single row, offline: no target, so nothing re-runs inference.
-          dataset: [{ ...row, output }],
-          metrics: buildMetricBundles(values, bindings, workspace) as unknown as MetricInline[],
-          field_mapping: { ...(toFieldMapping(values.fieldMapping) ?? {}), output: 'output' },
+      const fieldMapping = toFieldMapping(values.fieldMapping);
+      const request: LiveScoreRequest = {
+        dataset: [row],
+        metrics: buildMetricBundles(values, bindings, workspace) as unknown as MetricInline[],
+        target: {
+          url: getModelInferenceGatewayUrl(workspace, values.model),
+          name: bareModelName(values.model),
         },
+        prompt_template: composeGenerationPrompt(bindings),
+        ...(fieldMapping ? { field_mapping: fieldMapping } : {}),
       };
 
-      // Named outside the try so `finally` can delete it on every exit --
-      // success, error, timeout, cancel, or supersession by a newer run.
-      let created: string | null = null;
-
       try {
-        const job = await evaluatorCreateEvaluateJob(workspace, request);
-        created = job.name;
-
-        const deadline = Date.now() + POLL_TIMEOUT_MS;
-        let status: string | undefined;
-        while (Date.now() < deadline) {
-          if (superseded()) return;
-          await sleep(POLL_INTERVAL_MS);
-          const polled = await evaluatorGetEvaluateJob(workspace, job.name);
-          status = polled.status ?? undefined;
-          if (status && TERMINAL_STATUSES.includes(status)) break;
-        }
-
-        if (superseded()) return;
-
-        if (status !== HelixJobStatus.completed) {
-          setState({
-            status: 'error',
-            message:
-              status === HelixJobStatus.error
-                ? 'Scoring failed. Both models responded, so check the metric configuration.'
-                : 'Scoring did not finish in time.',
-          });
-          return;
-        }
-
-        const results = await evaluatorListEvaluateJobResults(workspace, job.name);
-        const aggregate = results?.data?.find((entry) => entry.name === 'aggregate-scores');
-        const scores = (
-          aggregate?.download_url
-            ? flattenScores(await (await fetch(aggregate.download_url)).json())
-            : []
-        ).map((score) => ({ ...score, label: rubricLabel(values, score.name, score.value) }));
-
-        if (superseded()) return;
-        // Read before delete: once the score is in hand the job has no further use.
-        setState({ status: 'done', result: { output, scores } });
-      } catch (error) {
+        const response = await evalsRunEvaluateLiveEvaluation(
+          workspace,
+          request,
+          controller.signal
+        );
         if (superseded()) return;
         setState({
-          status: 'error',
-          message: `Could not score the row: ${String((error as Error)?.message ?? error)}`,
+          status: 'done',
+          result: {
+            output: response.output ?? '',
+            scores: response.metrics.flatMap((metric) =>
+              (metric.scores ?? []).map((score) => {
+                const value = score.mean ?? Number.NaN;
+                return { name: score.name, value, label: rubricLabel(values, score.name, value) };
+              })
+            ),
+            errors: response.metrics.flatMap((metric) =>
+              metric.error ? [{ metric: metric.metric, message: metric.error }] : []
+            ),
+          },
         });
-      } finally {
-        if (created) discardJob(created);
+      } catch (error) {
+        if (superseded()) return;
+        setState({ status: 'error', message: describeFailure(error) });
       }
     },
-    [workspace, auth.user?.access_token, discardJob]
+    [workspace]
   );
 
   return { state, run, cancel };

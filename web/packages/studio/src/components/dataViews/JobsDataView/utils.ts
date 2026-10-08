@@ -5,7 +5,7 @@ import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants'
 import {
   CUSTOMIZER_ENABLED,
   DATA_DESIGNER_ENABLED,
-  EVALUATOR_ENABLED,
+  EVALS_ENABLED,
   SAFE_SYNTHESIZER_ENABLED,
 } from '@studio/constants/environment';
 import {
@@ -38,7 +38,7 @@ const SOURCE_DETAIL_ROUTE: Record<
     getRoute: getGenerateJobRoute,
   },
   [JOB_SOURCE.EVALUATOR_METRICS]: {
-    enabled: EVALUATOR_ENABLED,
+    enabled: EVALS_ENABLED,
     getRoute: getEvaluationResultDetailsRoute,
   },
 };

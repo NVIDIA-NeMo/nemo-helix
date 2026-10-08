@@ -42,7 +42,7 @@ def detect_surfaces(
     haystack = "\n".join(part for part in [soft_text, hard_text] if part)
 
     observed: list[SurfaceName] = []
-    if "packages/nemo_evaluator_sdk" in haystack or "nemo_evaluator_sdk" in haystack:
+    if "packages/nhx_evals_sdk" in haystack or "nhx_evals_sdk" in haystack:
         observed.append("standalone_sdk")
     if _command_contains(evidence.command_argvs, ["nemo", "evaluation"]) or contains_nonnegated_substring(
         soft_text, "nemo evaluation"

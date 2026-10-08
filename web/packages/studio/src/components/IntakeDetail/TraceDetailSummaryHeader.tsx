@@ -9,6 +9,7 @@ import type {
   HighlightMetric,
   HighlightMetricDetail,
 } from '@studio/components/IntakeDetail/IntakeComponents/keyValueTypes';
+import { TraceAgentLink } from '@studio/components/IntakeDetail/IntakeComponents/TraceAgentLink';
 import {
   buildSessionHighlightMetrics,
   buildTraceHighlightMetrics,
@@ -80,9 +81,11 @@ const dateValue = (value: string) => (
 );
 
 interface SummaryTelemetry {
+  workspace: string;
   started_at: string;
   ended_at?: string;
   status: Session['status'];
+  agent_name?: string;
 }
 
 interface SummaryHeaderProps {
@@ -103,6 +106,16 @@ const SummaryHeader: FC<SummaryHeaderProps> = ({ telemetry, metrics }) => {
         />
         {started ? <TraceSummaryMetricItem label="Started" value={dateValue(started)} /> : null}
         {ended ? <TraceSummaryMetricItem label="Ended" value={dateValue(ended)} /> : null}
+        {telemetry.agent_name ? (
+          <TraceSummaryMetricItem
+            label="Agent"
+            value={
+              <Text kind="title/xs" className="whitespace-nowrap text-primary">
+                <TraceAgentLink workspace={telemetry.workspace} agentName={telemetry.agent_name} />
+              </Text>
+            }
+          />
+        ) : null}
       </Flex>
       <div className="ml-auto flex max-w-full flex-nowrap items-start gap-4 overflow-x-auto">
         {metrics.map((metric) => (

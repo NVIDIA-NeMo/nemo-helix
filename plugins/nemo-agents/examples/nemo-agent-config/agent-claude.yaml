@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+config_format: nemo-agents-spec-v1
+name: claude-example
+
+instructions:
+  system:
+    content: You are a concise test assistant.
+
+default_harness: claude
+
+harnesses:
+  claude:
+    kind: claude
+    model:
+      provider: anthropic
+      model: anthropic/claude-sonnet-4-5
+    settings:
+      permission_mode: dontAsk
+
+skills:
+  paths: []
+
+mcp:
+  servers: {}
+
+tools:
+  blocked: []
+
+environment:
+  workspace: ./workspace
+  artifacts: ./artifacts
+
+telemetry:
+  enabled: false
+  provider: relay
+  output_dir: ./artifacts/relay
+  project: test-agent

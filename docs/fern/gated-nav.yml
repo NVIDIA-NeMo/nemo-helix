@@ -96,12 +96,12 @@
   contents:
   - page: Monitor
     path: ../../studio/monitor.mdx
-- section: evaluator
+- section: evals
   contents:
   - page: Job Management
-    path: ../../evaluator/metrics/job-management.mdx
+    path: ../../evals/metrics/job-management.mdx
   - page: Metric Results
-    path: ../../evaluator/metrics/results.mdx
+    path: ../../evals/metrics/results.mdx
 - section: example-applications
   contents:
   - page: About

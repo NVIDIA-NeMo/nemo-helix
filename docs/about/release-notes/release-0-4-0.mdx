@@ -119,7 +119,7 @@ available as a legacy path.
 
 ### Agent Evaluation
 
-- The evaluator SDK adds Fabric runtime support, Docker Compose sandboxing,
+- The evals SDK adds Fabric runtime support, Docker Compose sandboxing,
   native agent-eval aggregation, pass-at-k scoring, typed run metadata, and
   task/taskset revisions.
 - Agent evaluations can publish results to Intake so Experiments and Insights
@@ -188,8 +188,7 @@ For self-managed Kubernetes, start with
 From an existing local checkout:
 
 ```bash
-git fetch
-git checkout main
+git pull
 make bootstrap
 source .venv/bin/activate
 nemo setup

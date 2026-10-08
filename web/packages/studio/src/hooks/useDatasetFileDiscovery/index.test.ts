@@ -19,6 +19,7 @@ describe('partitionDatasetFiles', () => {
       training: [],
       validation: [],
       unmatchedRootJsonl: [],
+      unmatchedRootJson: [],
     });
   });
 
@@ -78,10 +79,13 @@ describe('partitionDatasetFiles', () => {
     expect(paths(result.unmatchedRootJsonl).sort()).toEqual(['a.jsonl', 'b.jsonl']);
   });
 
-  it('does NOT park .json (non-jsonl) root files in the unmatched bucket', () => {
-    // The lone-root fallback is .jsonl-only; .json without train/val pattern is ignored.
+  it('parks unmatched root .json (non-jsonl) files in unmatchedRootJson, not unmatchedRootJsonl', () => {
+    // .json files without a train/val pattern are not eligible for the
+    // Customizer lone-root fallback (.jsonl-only), but are captured separately
+    // so native Unsloth can claim them when apply_chat_template is disabled.
     const result = partitionDatasetFiles([file('thing.json')]);
     expect(result.unmatchedRootJsonl).toEqual([]);
+    expect(paths(result.unmatchedRootJson)).toEqual(['thing.json']);
   });
 
   it('ignores files with non-dataset extensions', () => {

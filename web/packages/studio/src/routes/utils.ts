@@ -17,8 +17,8 @@ import {
   DATA_DESIGNER_ENABLED,
   DATASETS_ENABLED,
   DEPLOYMENTS_ENABLED,
-  EVALUATOR_BENCHMARKS_ENABLED,
-  EVALUATOR_ENABLED,
+  EVALS_BENCHMARKS_ENABLED,
+  EVALS_ENABLED,
   EXPERIMENT_ENABLED,
   FILESET_DETAILS_ENABLED,
   GUARDRAILS_ENABLED,
@@ -83,10 +83,10 @@ export const gateModelEvaluationFormRoutes = (routes: RouteObject | RouteObject[
   gateRoutes(MODEL_EVALUATION_FORM_ENABLED, routes);
 
 export const gateEvaluationRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(EVALUATOR_ENABLED, routes);
+  gateRoutes(EVALS_ENABLED, routes);
 
 export const gateEvaluationBenchmarksRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(EVALUATOR_ENABLED && EVALUATOR_BENCHMARKS_ENABLED, routes);
+  gateRoutes(EVALS_ENABLED && EVALS_BENCHMARKS_ENABLED, routes);
 
 export const gateExperimentRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(EXPERIMENT_ENABLED, routes);

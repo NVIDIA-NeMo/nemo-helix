@@ -6,7 +6,7 @@
 Registered under the ``nemo.cli`` entry-point group.  The platform
 discovers this class and mounts it as ``nemo agents <command>``.
 
-**Local commands (no platform required):**
+**Local commands:**
 
 These run against a local agent config and work without a running NeMo Helix
 instance.
@@ -74,10 +74,8 @@ from nemo_agents_plugin.entities import (
     ethos_fileset_name,
     supports_image_entrypoint,
 )
-from nemo_agents_plugin.leaderboard.cli import register_leaderboard_commands
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_agents_plugin.usage.cli import register_usage_commands
 from nemo_helix_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
 from nemo_helix_ext.cli.core.help_formatter import NhxGroup
 from nemo_helix_ext.ui.prompts import is_interactive
@@ -132,6 +130,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job import NemoJob
 from pydantic import BaseModel, ValidationError
 from typer.main import get_command as _typer_get_command
 
@@ -187,7 +186,10 @@ _COMPUTE_SPEC_LIST_COLUMNS = [
 ]
 
 
-_AGENT_CLI_PANEL = "Platform agents"
+_AGENT_CLI_PANEL = "Additional commands from plugins"
+# POC agent-improvement jobs stay registered (service routes, job discovery) but
+# are kept out of `nemo agents` help until the workflow is ready for users.
+_HIDDEN_JOBS = frozenset({"evaluate-suite", "analyze", "optimize-skills"})
 
 
 @dataclass(frozen=True)
@@ -296,12 +298,13 @@ class AgentsCLI(NemoCLI):
         )
 
         _register_local_commands(app)
-        _register_package_command(app)
         _register_platform_commands(app)
         _register_environment_commands(app)
-        register_leaderboard_commands(app)
-        register_usage_commands(app)
         return app
+
+    def update_job_cli(self, job_cls: type[NemoJob], group: typer.Typer) -> None:
+        if job_cls.name in _HIDDEN_JOBS:
+            group.info.hidden = True
 
 
 # ---------------------------------------------------------------------------
@@ -439,31 +442,7 @@ def _register_local_commands(app: typer.Typer) -> None:
                 typer.echo(f"Error: server command {cmd[0]!r} was not found.", err=True)
             raise typer.Exit(code=1)
 
-
-# Note: job commands such as ``evaluate`` are auto-generated from ``agents.*``
-# ``nemo.jobs`` entry points. ``optimize`` is a sibling plugin's ``nemo.cli.agents``
-# contribution, mounted alongside the other ``nemo.cli.agents`` entries in ``AgentsCLI.get_cli``.
-
-
-# ---------------------------------------------------------------------------
-# Packaging command — no platform required
-# ---------------------------------------------------------------------------
-
-_PACKAGE_PANEL = "Packaging (no platform required)"
-
-
-def _register_package_command(app: typer.Typer) -> None:
-    """Register the unified ``package`` command onto *app*.
-
-    Single command whose flags select how far the render → validate → build
-    → publish pipeline runs:
-
-    * ``--no-build``               stop after render (Dockerfile + .dockerignore only)
-    * default                      render → validate → build
-    * ``--publish --registry ...`` render → validate → build → publish
-    """
-
-    @app.command(rich_help_panel=_PACKAGE_PANEL)
+    @app.command(rich_help_panel="Local commands")
     def package(
         agent: Path = typer.Option(
             ...,
@@ -711,6 +690,11 @@ def _register_package_command(app: typer.Typer) -> None:
         typer.echo(f"Published: {remote}")
 
 
+# Note: job commands such as ``evaluate`` are auto-generated from ``agents.*``
+# ``nemo.jobs`` entry points. ``optimize`` is a sibling plugin's ``nemo.cli.agents``
+# contribution, mounted alongside the other ``nemo.cli.agents`` entries in ``AgentsCLI.get_cli``.
+
+
 def _validate_package_flags(
     *,
     no_build: bool,
@@ -926,7 +910,7 @@ def _package_render_only(
 def _register_platform_commands(app: typer.Typer) -> None:
     """Register Agent Resources commands (require a running cluster) onto *app*."""
 
-    @app.command(rich_help_panel="Deployed agent interaction (requires running cluster)")
+    @app.command(rich_help_panel="Deployed agent interaction")
     def chat(
         typer_ctx: typer.Context,
         input: Optional[str] = typer.Option(
@@ -993,7 +977,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         help="Discover and manage persisted deployed-agent sessions.",
         no_args_is_help=True,
     )
-    app.add_typer(sessions_app, rich_help_panel="Deployed agent interaction (requires running cluster)")
+    app.add_typer(sessions_app, rich_help_panel="Deployed agent interaction")
 
     @sessions_app.command(name="list")
     @collect_warnings
@@ -1075,7 +1059,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         )
         typer.echo(f"Session '{name}' closed.")
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def create(
         typer_ctx: typer.Context,
         name: str = typer.Option(..., "--name", "-n", help="Agent name."),
@@ -1106,7 +1090,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         )
         typer.echo(json.dumps(resp, indent=2))
 
-    @app.command(name="list", rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(name="list", rich_help_panel="Agent Resources")
     @collect_warnings
     def list_agents(
         ctx: typer.Context,
@@ -1132,7 +1116,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             all_pages=all_pages,
         )
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def get(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
@@ -1145,7 +1129,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         client = _agents_client(base_url, workspace)
         _print_entity(typer_ctx, client, "get_agent", {"workspace": workspace, "name": name}, output_format)
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def delete(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
@@ -1160,7 +1144,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         _delete_agent_entity(agent_name=name, workspace=workspace, base_url=base_url)
         typer.echo(f"Agent '{name}' deleted.")
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def deploy(
         typer_ctx: typer.Context,
         agent: str = typer.Option(..., "--agent", "-a", help="Name of the agent to deploy."),
@@ -1281,7 +1265,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         success = _wait_for_deployment(client, workspace, deployment_name, timeout=timeout)
         raise typer.Exit(code=0 if success else 1)
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def redeploy(
         typer_ctx: typer.Context,
         agent: str = typer.Option(..., "--agent", "-a", help="Name of the deployed agent to rebuild."),
@@ -1518,7 +1502,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         success = _wait_for_deployment(client, workspace, deployment_name, timeout=timeout)
         raise typer.Exit(code=0 if success else 1)
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def logs(
         typer_ctx: typer.Context,
         name: Optional[str] = typer.Argument(
@@ -1616,7 +1600,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         _print_log(log_path, tail=tail, follow=follow)
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def undeploy(
         typer_ctx: typer.Context,
         name: Optional[str] = typer.Argument(None, help="Deployment name to remove."),
@@ -1661,7 +1645,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     # deployments sub-group
     deps_app = typer.Typer(name="deployments", help="Manage agent deployments.", no_args_is_help=True)
-    app.add_typer(deps_app, rich_help_panel="Agent Resources (requires running cluster)")
+    app.add_typer(deps_app, rich_help_panel="Agent Resources")
 
     @deps_app.command(name="list")
     @collect_warnings
@@ -1828,7 +1812,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
     Bodies are the ``*Inline`` shapes (see ``entities.py``); create takes a
     ``--spec-file`` (JSON/YAML) or an inline ``--spec`` JSON string.
     """
-    _PANEL = "Agent Resources (requires running cluster)"
+    _PANEL = "Agent Resources"
 
     # -- environment-specs ---------------------------------------------------
     espec_app = typer.Typer(name="environment-specs", help="Manage agent environment specs.", no_args_is_help=True)

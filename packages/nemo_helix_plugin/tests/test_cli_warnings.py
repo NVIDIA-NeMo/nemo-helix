@@ -4,9 +4,7 @@
 """Tests for collecting and printing CLI warnings."""
 
 import pytest
-import typer
 from nemo_helix_plugin.cli_warnings import add_warning, collect_warnings, print_warnings
-from typer.testing import CliRunner
 
 
 class TestPrintWarnings:
@@ -201,52 +199,3 @@ class TestAddWarningWithList:
         my_func()
         captured = capsys.readouterr()
         assert captured.err == ""
-
-
-class _HintState:
-    """Stand-in CLI state that records which command asked for hints."""
-
-    def __init__(self, hints: list[str]) -> None:
-        self.hints = hints
-        self.command_paths: list[str] = []
-
-    def get_agent_hints(self, command_path: str) -> list[str]:
-        self.command_paths.append(command_path)
-        return self.hints
-
-
-def _app_with_warning() -> typer.Typer:
-    app = typer.Typer()
-    group = typer.Typer()
-    app.add_typer(group, name="widgets")
-
-    @group.command("list")
-    @collect_warnings
-    def list_widgets(ctx: typer.Context) -> None:
-        add_warning("Use --no-truncate to see full values.")
-
-    return app
-
-
-class TestAgentHints:
-    """Agent hints come from the CLI state and print after the command's warnings."""
-
-    def test_asks_the_state_for_the_command_path_without_the_program_name(self) -> None:
-        state = _HintState(["Run: nemo docs widgets"])
-        result = CliRunner().invoke(_app_with_warning(), ["widgets", "list"], obj=state, prog_name="nemo")
-        assert result.exit_code == 0, result.output
-        assert state.command_paths == ["widgets list"]
-        assert result.stderr.index("Warnings:") < result.stderr.index("AGENT HINTS:")
-        assert "Run: nemo docs widgets" in result.stderr
-
-    def test_no_heading_when_the_state_has_no_hints(self) -> None:
-        result = CliRunner().invoke(_app_with_warning(), ["widgets", "list"], obj=_HintState([]))
-        assert result.exit_code == 0, result.output
-        assert "AGENT HINTS:" not in result.stderr
-
-    @pytest.mark.parametrize("obj", [None, object()], ids=["no_state", "state_without_hints"])
-    def test_states_without_hints_still_print_warnings(self, obj: object | None) -> None:
-        result = CliRunner().invoke(_app_with_warning(), ["widgets", "list"], obj=obj)
-        assert result.exit_code == 0, result.output
-        assert "Use --no-truncate to see full values." in result.stderr
-        assert "AGENT HINTS:" not in result.stderr

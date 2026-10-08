@@ -91,7 +91,7 @@ it says.
 
 ## Step 5: Evaluate against labeled emails
 
-This example ships two eval configs, both in the evaluator SDK's format:
+This example ships two eval configs, both in the evals SDK's format:
 
 | File                             | Shape                                                | Scores                           |
 | -------------------------------- | ---------------------------------------------------- | -------------------------------- |
@@ -111,7 +111,7 @@ them yourself.
 > requires a dataset file, and bakes a `dataset:` reference into whatever config
 > you upload — a task-driven config has neither, since its inputs live in
 > `tasks[]`. The submission layer and the runner both handle the task shape
-> (`nemo evaluator agent-evaluate` scores it end to end); only the upload form
+> (`nemo evals agent-evaluate` scores it end to end); only the upload form
 > rejects it. Run it from the CLI, as below.
 
 Upload the dataset once, so the config can reference it:
@@ -141,13 +141,13 @@ spec["params"] = {"parallelism": 4, "request_timeout": 300, "max_retries": 5, "i
 print(json.dumps(spec, indent=2))
 EOF
 
-nemo evaluator evaluate --spec-file /tmp/esec-eval-spec.json
+nemo evals evaluate --spec-file /tmp/esec-eval-spec.json
 ```
 
-Note this is `nemo evaluator evaluate`, not `nemo agents evaluate` — the
-latter takes a NAT-format eval YAML, and these configs are evaluator SDK specs.
+Note this is `nemo evals evaluate`, not `nemo agents evaluate` — the
+latter takes a NAT-format eval YAML, and these configs are evals SDK specs.
 The task-driven config runs the same way through
-`nemo evaluator agent-evaluate`, whose spec wraps its tasks in an `agent`
+`nemo evals agent-evaluate`, whose spec wraps its tasks in an `agent`
 target instead.
 
 Each row carries the agent's real input — an `emails` array plus a `user_message` —

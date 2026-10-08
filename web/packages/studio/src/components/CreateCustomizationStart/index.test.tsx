@@ -13,6 +13,7 @@ import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { MemoryRouter } from 'react-router';
 import type { Mock } from 'vitest';
 
 // The fileset read is covered in filesetParquetRows.test.ts; here it only has to produce
@@ -43,28 +44,138 @@ const serveRows = (rows: () => Promise<Record<string, unknown>[]>) => {
 const serveDefaultRows = () =>
   serveRows(() => Promise.resolve(Array.from({ length: ROW_SUPPLY }, () => ({ ...HF_ROW }))));
 
+/**
+ * The conflict banner and the reuse note both link to the fileset they name, so these
+ * renders need a router — outside `TestProviders`, because the note is a toast and the
+ * mock toaster renders it from there rather than from the component's own subtree.
+ */
 const renderStart = (onContinue: Mock = vi.fn()) =>
   render(
-    <TestProviders>
-      <CreateCustomizationStart workspace={DEFAULT_WORKSPACE} onContinue={onContinue} />
-    </TestProviders>
+    <MemoryRouter>
+      <TestProviders>
+        <CreateCustomizationStart workspace={DEFAULT_WORKSPACE} onContinue={onContinue} />
+      </TestProviders>
+    </MemoryRouter>
   );
 
 const continueButton = () => screen.getByRole('button', { name: /continue/i });
 
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 
-/** 409s the named fileset on create, and serves `storage` when it is fetched back. */
-const nameAlreadyTaken = (name: string, storage: Record<string, unknown>) => [
-  http.post(FILESETS_URL, async ({ request }) => {
-    const body = (await request.json()) as { name: string };
-    if (body.name !== name) return HttpResponse.json({ name: body.name });
-    return new HttpResponse(null, { status: 409 });
-  }),
-  http.get(`${FILESETS_URL}/:name`, ({ params }) =>
-    HttpResponse.json({ name: params.name, workspace: DEFAULT_WORKSPACE, storage })
-  ),
-];
+interface FakeFileset {
+  purpose: string;
+  storage: Record<string, unknown>;
+  files: Map<string, string>;
+}
+
+/** A converted-rows file holding exactly what every recipe's `convertRow` emits. */
+const convertedJsonl = (rows = 3) =>
+  Array.from({ length: rows }, () => JSON.stringify({ prompt: 'p', completion: 'c' })).join('\n') +
+  '\n';
+
+/**
+ * An in-memory files service: creates 409 on a name already held, reads 404 when nothing
+ * holds it, and uploads land where a later read can see them.
+ *
+ * The default handler in `mocks/handlers/filesets` answers every read with a generic
+ * fileset, which cannot express "this name is free" — and free-vs-taken is the whole
+ * subject of these tests. Modelling the store also lets a recipe be run twice against one
+ * workspace and have the second run see what the first left behind.
+ */
+const useFilesetStore = (seed: Record<string, Partial<FakeFileset>> = {}) => {
+  const filesets = new Map<string, FakeFileset>(
+    Object.entries(seed).map(([name, fileset]) => [
+      name,
+      {
+        purpose: fileset.purpose ?? 'dataset',
+        storage: fileset.storage ?? { type: 'local' },
+        files: fileset.files ?? new Map(),
+      },
+    ])
+  );
+
+  const asOutput = (name: string, fileset: FakeFileset) => ({
+    id: `${DEFAULT_WORKSPACE}/${name}`,
+    name,
+    workspace: DEFAULT_WORKSPACE,
+    description: '',
+    purpose: fileset.purpose,
+    storage: fileset.storage,
+    metadata: {},
+    custom_fields: {},
+    project: DEFAULT_WORKSPACE,
+    created_at: '2026-10-07T00:00:00Z',
+    updated_at: '2026-10-07T00:00:00Z',
+  });
+
+  server.use(
+    http.post(FILESETS_URL, async ({ request }) => {
+      const body = (await request.json()) as {
+        name: string;
+        purpose?: string;
+        storage?: Record<string, unknown>;
+      };
+      if (filesets.has(body.name)) return new HttpResponse(null, { status: 409 });
+      const created: FakeFileset = {
+        purpose: body.purpose ?? 'dataset',
+        storage: body.storage ?? { type: 'local' },
+        files: new Map(),
+      };
+      filesets.set(body.name, created);
+      return HttpResponse.json(asOutput(body.name, created));
+    }),
+    http.get(`${FILESETS_URL}/:name`, ({ params }) => {
+      const name = String(params.name);
+      const fileset = filesets.get(name);
+      if (!fileset) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json(asOutput(name, fileset));
+    }),
+    http.delete(`${FILESETS_URL}/:name`, ({ params }) => {
+      const name = String(params.name);
+      const fileset = filesets.get(name);
+      if (!fileset) return new HttpResponse(null, { status: 404 });
+      filesets.delete(name);
+      return HttpResponse.json(asOutput(name, fileset));
+    }),
+    http.get(`${FILESETS_URL}/:name/files`, ({ params }) => {
+      const fileset = filesets.get(String(params.name));
+      if (!fileset) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json({
+        data: [...fileset.files].map(([path, body]) => ({
+          file_ref: path,
+          file_url: path,
+          path,
+          size: body.length,
+        })),
+      });
+    }),
+    http.put(`${FILESETS_URL}/:name/-/:path`, async ({ params, request }) => {
+      const fileset = filesets.get(String(params.name));
+      if (!fileset) return new HttpResponse(null, { status: 404 });
+      const path = decodeURIComponent(String(params.path));
+      fileset.files.set(path, await request.text());
+      return HttpResponse.json({ path });
+    }),
+    http.get(`${FILESETS_URL}/:name/-/:path`, ({ params }) => {
+      const fileset = filesets.get(String(params.name));
+      const body = fileset?.files.get(decodeURIComponent(String(params.path)));
+      if (body === undefined) return new HttpResponse(null, { status: 404 });
+      return new HttpResponse(body);
+    })
+  );
+
+  return filesets;
+};
+
+/** A fileset that setup should accept as its own finished work. */
+const reusableDataset = (storage: Record<string, unknown> = { type: 'local' }): FakeFileset => ({
+  purpose: 'dataset',
+  storage,
+  files: new Map([
+    ['training.jsonl', convertedJsonl()],
+    ['validation.jsonl', convertedJsonl()],
+  ]),
+});
 
 const provisionSelectedTemplate = async (onContinue: Mock) => {
   const user = userEvent.setup();
@@ -79,6 +190,9 @@ describe('CreateCustomizationStart', () => {
     mockUseNavigate(vi.fn());
     mockUseParams({ [ROUTE_PARAMS.workspace]: DEFAULT_WORKSPACE });
     serveDefaultRows();
+    // Start every test from an empty workspace. Tests that need something already in
+    // place call `useFilesetStore` again with a seed, which takes precedence.
+    useFilesetStore();
   });
 
   it('offers every way in at once', () => {
@@ -230,12 +344,11 @@ describe('CreateCustomizationStart', () => {
      */
     it('refuses to reuse a source fileset pointing at a different repo', async () => {
       const { dataset } = CUSTOMIZATION_TEMPLATES[0];
-      server.use(
-        ...nameAlreadyTaken(dataset.sourceFilesetName, {
-          type: 'huggingface',
-          repo_id: 'someone/else',
-        })
-      );
+      useFilesetStore({
+        [dataset.sourceFilesetName]: {
+          storage: { type: 'huggingface', repo_id: 'someone/else' },
+        },
+      });
       const onContinue = vi.fn();
 
       await provisionSelectedTemplate(onContinue);
@@ -244,18 +357,240 @@ describe('CreateCustomizationStart', () => {
       expect(onContinue).not.toHaveBeenCalled();
     });
 
-    /** External storage rejects writes, so the uploads below would fail opaquely. */
+    /** External storage rejects writes, so the uploads would fail opaquely. */
     it('refuses to upload into a converted fileset backed by external storage', async () => {
       const { dataset } = CUSTOMIZATION_TEMPLATES[0];
-      server.use(
-        ...nameAlreadyTaken(dataset.name, { type: 'huggingface', repo_id: dataset.hfRepoId })
-      );
+      useFilesetStore({
+        [dataset.name]: { storage: { type: 'huggingface', repo_id: dataset.hfRepoId } },
+      });
       const onContinue = vi.fn();
 
       await provisionSelectedTemplate(onContinue);
 
-      expect(await screen.findByText(/cannot be written to/i)).toBeInTheDocument();
+      expect(await screen.findByText(/does not accept uploads/i)).toBeInTheDocument();
       expect(onContinue).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The reported dead end. A fileset created with no explicit storage lands on the
+     * deployment's default backend, which is S3 on a hosted install — so the recipe was
+     * rejecting the very fileset its own previous run had created, and every user after
+     * the first in a shared workspace was blocked.
+     */
+    it('reuses its own S3-backed fileset rather than calling S3 unwritable', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      useFilesetStore({ [dataset.name]: reusableDataset({ type: 's3', bucket: 'training-data' }) });
+      const onContinue = vi.fn();
+
+      await provisionSelectedTemplate(onContinue);
+
+      await waitFor(() =>
+        expect(onContinue).toHaveBeenCalledWith(expect.objectContaining({ optionId: 'template' }))
+      );
+      expect(screen.queryByText(/does not accept uploads/i)).not.toBeInTheDocument();
+    });
+
+    it('reuses a compatible fileset without downloading the dataset again', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      useFilesetStore({ [dataset.name]: reusableDataset() });
+      const onContinue = vi.fn();
+
+      await provisionSelectedTemplate(onContinue);
+
+      await waitFor(() => expect(onContinue).toHaveBeenCalled());
+      const [[selection]] = onContinue.mock.calls;
+      expect(selection.initialValues.automodel.dataset.training).toBe(
+        `${DEFAULT_WORKSPACE}/${dataset.name}`
+      );
+      // The download is the expensive part, and reuse exists to skip it.
+      expect(rowsOptions).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Which fileset the job trains on is the point of the recipe, so a silent reuse is
+     * not good enough — and it has to survive the hand-over, which navigates away.
+     */
+    it('says which existing fileset it reused', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      useFilesetStore({ [dataset.name]: reusableDataset() });
+
+      await provisionSelectedTemplate(vi.fn());
+
+      const note = await screen.findByText(/reused the existing dataset/i);
+      expect(note).toHaveTextContent(`${DEFAULT_WORKSPACE}/${dataset.name}`);
+      expect(
+        screen.getByRole('link', { name: `${DEFAULT_WORKSPACE}/${dataset.name}` })
+      ).toBeInTheDocument();
+    });
+
+    /** Running the same recipe twice in the same workspace has to work both times. */
+    it('succeeds on a second run in the same workspace', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      const filesets = useFilesetStore();
+
+      const first = vi.fn();
+      const { unmount } = renderStart(first);
+      const user = userEvent.setup();
+      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await user.click(continueButton());
+      await waitFor(() => expect(first).toHaveBeenCalled(), { timeout: 10_000 });
+      expect(filesets.get(dataset.name)?.files.has('training.jsonl')).toBe(true);
+      unmount();
+
+      const second = vi.fn();
+      await provisionSelectedTemplate(second);
+      await waitFor(() =>
+        expect(second).toHaveBeenCalledWith(expect.objectContaining({ optionId: 'template' }))
+      );
+      expect(screen.queryByText(/already exists/i)).not.toBeInTheDocument();
+    });
+
+    it('treats a half-written fileset as a conflict rather than reusing it', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      useFilesetStore({
+        [dataset.name]: {
+          files: new Map([['training.jsonl', convertedJsonl()]]),
+        },
+      });
+      const onContinue = vi.fn();
+
+      await provisionSelectedTemplate(onContinue);
+
+      expect(await screen.findByText(/missing validation.jsonl/i)).toBeInTheDocument();
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+
+    it('treats a fileset holding other rows as a conflict rather than reusing it', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      useFilesetStore({
+        [dataset.name]: {
+          files: new Map([
+            ['training.jsonl', `${JSON.stringify({ text: 'something else' })}\n`],
+            ['validation.jsonl', convertedJsonl()],
+          ]),
+        },
+      });
+      const onContinue = vi.fn();
+
+      await provisionSelectedTemplate(onContinue);
+
+      expect(await screen.findByText(/not the prompt\/completion pairs/i)).toBeInTheDocument();
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+
+    /** Waiting out a multi-megabyte download only to be told it cannot land is the dead end. */
+    it('reports a conflict before downloading anything', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      useFilesetStore({
+        [dataset.name]: { storage: { type: 'huggingface', repo_id: dataset.hfRepoId } },
+      });
+
+      await provisionSelectedTemplate(vi.fn());
+
+      expect(await screen.findByText(/does not accept uploads/i)).toBeInTheDocument();
+      expect(rowsOptions).not.toHaveBeenCalled();
+    });
+
+    it('offers a way out of a conflict, and links to what is in the way', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      useFilesetStore({
+        [dataset.name]: { storage: { type: 'huggingface', repo_id: dataset.hfRepoId } },
+      });
+
+      await provisionSelectedTemplate(vi.fn());
+
+      await screen.findByText(/does not accept uploads/i);
+      expect(
+        screen.getByRole('link', { name: `${DEFAULT_WORKSPACE}/${dataset.name}` })
+      ).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /open fileset/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /create under a different name/i })
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /replace it/i })).toBeInTheDocument();
+    });
+
+    it('builds the dataset under a free name when asked to', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      const filesets = useFilesetStore({
+        [dataset.name]: { storage: { type: 'huggingface', repo_id: dataset.hfRepoId } },
+      });
+      const onContinue = vi.fn();
+      const user = userEvent.setup();
+
+      await provisionSelectedTemplate(onContinue);
+      await user.click(
+        await screen.findByRole('button', { name: /create under a different name/i })
+      );
+
+      await waitFor(() => expect(onContinue).toHaveBeenCalled(), { timeout: 10_000 });
+      const [[selection]] = onContinue.mock.calls;
+      expect(selection.initialValues.automodel.dataset.training).toBe(
+        `${DEFAULT_WORKSPACE}/${dataset.name}-2`
+      );
+      // The fileset that was in the way is left exactly as it was found.
+      expect(filesets.get(dataset.name)?.storage).toEqual({
+        type: 'huggingface',
+        repo_id: dataset.hfRepoId,
+      });
+    });
+
+    it('rebuilds the dataset in place when the user confirms a replace', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      const filesets = useFilesetStore({
+        [dataset.name]: { storage: { type: 'huggingface', repo_id: dataset.hfRepoId } },
+      });
+      const onContinue = vi.fn();
+      const user = userEvent.setup();
+
+      await provisionSelectedTemplate(onContinue);
+      await user.click(await screen.findByRole('button', { name: /replace it/i }));
+      await user.click(await screen.findByRole('button', { name: /delete and rebuild/i }));
+
+      await waitFor(() => expect(onContinue).toHaveBeenCalled(), { timeout: 10_000 });
+      expect(filesets.get(dataset.name)?.storage).toEqual({ type: 'local' });
+      expect(filesets.get(dataset.name)?.files.has('validation.jsonl')).toBe(true);
+    });
+
+    /**
+     * Replace cannot be atomic — the files API has no swap — so the delete is held until
+     * the rebuilt rows are in memory and only the create and uploads remain. Deleting up
+     * front meant a failed download left the user with neither the old fileset nor a new
+     * one, and nothing here can put it back.
+     */
+    it('keeps the fileset it is replacing until the new data is ready', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      const filesets = useFilesetStore({
+        [dataset.name]: { storage: { type: 'huggingface', repo_id: dataset.hfRepoId } },
+      });
+      serveRows(() => Promise.reject(new Error('No dataset file matched the recipe pattern.')));
+      const onContinue = vi.fn();
+      const user = userEvent.setup();
+
+      await provisionSelectedTemplate(onContinue);
+      await user.click(await screen.findByRole('button', { name: /replace it/i }));
+      await user.click(await screen.findByRole('button', { name: /delete and rebuild/i }));
+
+      expect(await screen.findByText(/No dataset file matched/i)).toBeInTheDocument();
+      expect(filesets.has(dataset.name)).toBe(true);
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+
+    it('does not delete anything until the replace is confirmed', async () => {
+      const { dataset } = CUSTOMIZATION_TEMPLATES[0];
+      const filesets = useFilesetStore({
+        [dataset.name]: { storage: { type: 'huggingface', repo_id: dataset.hfRepoId } },
+      });
+      const user = userEvent.setup();
+
+      await provisionSelectedTemplate(vi.fn());
+      await user.click(await screen.findByRole('button', { name: /replace it/i }));
+      await user.click(await screen.findByRole('button', { name: /cancel/i }));
+
+      expect(filesets.get(dataset.name)?.storage).toEqual({
+        type: 'huggingface',
+        repo_id: dataset.hfRepoId,
+      });
     });
 
     /**

@@ -30,7 +30,7 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.schema import Value
-from pydantic import BaseModel, Field, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 _FILESET_NAME_RE = re.compile(FILESET_NAME_PATTERN)
 
@@ -290,6 +290,30 @@ class HelixJobListTaskResponse(Value):
 
 class CreateHelixJobRequest(BaseModel):
     """Request model for creating a new platform job."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "hello-world",
+                    "spec": {},
+                    "platform_spec": {
+                        "steps": [
+                            {
+                                "name": "run",
+                                "executor": {
+                                    "provider": "cpu",
+                                    "container": {"image": "python:3.11"},
+                                },
+                                "config": {},
+                            }
+                        ]
+                    },
+                    "source": "api-reference",
+                }
+            ]
+        }
+    )
 
     name: Optional[str] = None
     description: Optional[str] = None

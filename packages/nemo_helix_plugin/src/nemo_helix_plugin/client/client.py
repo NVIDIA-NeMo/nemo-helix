@@ -716,10 +716,10 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         return self._resource_client(AgentsClient, AsyncAgentsClient)
 
     @property
-    def auditor(self) -> NemoClient | AsyncNemoClient:
-        from nemo_helix_plugin.auditor.client import AsyncAuditorClient, AuditorClient
+    def garak(self) -> NemoClient | AsyncNemoClient:
+        from nemo_helix_plugin.garak.client import AsyncGarakClient, GarakClient
 
-        return self._resource_client(AuditorClient, AsyncAuditorClient)
+        return self._resource_client(GarakClient, AsyncGarakClient)
 
     @property
     def guardrail(self) -> NemoClient | AsyncNemoClient:
@@ -728,8 +728,8 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         return self._resource_client(GuardrailClient, AsyncGuardrailClient)
 
     @property
-    def evaluator(self) -> NemoClient | AsyncNemoClient:
-        from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+    def evals(self) -> NemoClient | AsyncNemoClient:
+        from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
 
         return self._resource_client(EvaluatorClient, AsyncEvaluatorClient)
 

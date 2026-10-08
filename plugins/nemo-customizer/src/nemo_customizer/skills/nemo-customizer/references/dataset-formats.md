@@ -24,6 +24,8 @@ Automodel detects schema from the **first JSONL line** (`DatasetSchema` in `serv
 
 **Conversion preference:** CHAT if `AutoTokenizer(...).chat_template` or model `spec.is_chat` / `spec.chat_template` → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it.
 
+**Why CHAT for chat models:** SFT (and CUSTOM) rows train as plain text, `prompt + completion`, with no chat template and no end-of-sequence token. A chat model trained that way barely changes through `/v1/chat/completions`, and `/v1/completions` output runs past the answer. Put the exact user prompt you will send at inference in the `user` turn.
+
 Retrieval Stage 1 already emits Automodel EMBEDDING `training.jsonl`. Do not convert those rows to CHAT `messages`.
 
 For **CUSTOM**, placeholders in `prompt_template` must match column names exactly (two placeholders).
@@ -71,7 +73,7 @@ CHAT SFT eval rows must use the **same CHAT `messages` shape** as training. Do n
 | Training JSONL | Eval dataset | Eval `prompt_template` | Metric reference |
 |----------------|--------------|------------------------|------------------|
 | `messages` (single- or multi-turn) | Same fileset split (`validation.jsonl`) | `messages[:-1]` — exclude final assistant label — see `post-training-eval.md` | `{{ item.messages[-1].content }}` |
-| EMBEDDING (`query` / `pos_doc` / `neg_doc`) | Frozen Stage 1 `eval_beir` fileset (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`) | N/A — `nemo evaluator retrieve-eval` | nDCG@k / Recall@k in `eval_results.json` |
+| EMBEDDING (`query` / `pos_doc` / `neg_doc`) | Frozen Stage 1 `eval_beir` fileset (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`) | N/A — `nemo evals retrieve-eval` | nDCG@k / Recall@k in `eval_results.json` |
 
 LoRA inference and eval use the **provider** gateway on the **base** entity (`/provider/<name>/-/v1`, `model: default--<adapter>`). Base model uses the model-entity path. Full SFT / merged checkpoints use the **output** model entity's model-entity URL — deploy first. See `post-training-eval.md` and the **Using the adapter** / **Using the fine-tuned model** sections in `reporting.md`.
 

@@ -11,11 +11,8 @@ import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getEntityNameError, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
-import { evaluatorCreateEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import type {
-  AgentEvaluateJobRequest,
-  EvaluateJobRequest,
-} from '@nemo/sdk/generated/evaluator/schema';
+import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import type { AgentEvaluateJobRequest, EvaluateJobRequest } from '@nemo/sdk/generated/evals/schema';
 import { deleteEvaluation, useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import {
   createExperiment,
@@ -774,7 +771,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
           parallelism: formData.parallelism,
         };
         const created = isDatasetEvalSpec(spec)
-          ? await evaluatorCreateEvaluateJob(
+          ? await evalsCreateEvaluateJob(
               workspace,
               buildDatasetEvalRequestBody(spec, selections, null) as EvaluateJobRequest
             )
@@ -949,8 +946,8 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
             <>
               {agentProp ? (
                 <Text kind="body/regular/md">
-                  Run evaluation via NeMo Evaluator&apos;s built-in runner. Evaluator also supports
-                  Harbor and Gym as runners.{' '}
+                  Run evaluation via NeMo Helix Evals&apos;s built-in runner. Evaluator also
+                  supports Harbor and Gym as runners.{' '}
                   <Anchor
                     kind="inline"
                     textKind="body/regular/md"

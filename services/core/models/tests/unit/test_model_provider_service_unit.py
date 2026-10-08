@@ -847,14 +847,56 @@ async def test_delete_provider_deletes_exclusively_served_user_model_entity(mode
 
 
 @pytest.mark.asyncio
-async def test_delete_deployment_provider_deletes_exclusively_served_model_entity(
+async def test_delete_deployment_provider_unlinks_exclusively_served_model_entity(
     model_provider_service, mock_entity_client
 ):
-    """Deleting a deployment provider deletes a model when no other provider serves it."""
+    """Deleting a deployment provider keeps its model even when no other provider serves it."""
     model_entity = _create_model_entity(
         name="deployed-model",
         workspace="ws",
         model_providers=["ws/deployment-provider"],
+    )
+    provider_entity = create_provider_entity(
+        name="deployment-provider",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        model_deployment_id="ws/deployment",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/deployed-model", served_model_name="deployed-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"deployed-model": model_entity})
+    mock_entity_client.update.return_value = model_entity
+    mock_entity_client.delete.return_value = None
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="ws", name="deployment-provider")
+    )
+
+    assert result is True
+    mock_entity_client.update.assert_called_once()
+    updated_model = mock_entity_client.update.call_args[0][0]
+    assert updated_model.model_providers == []
+    mock_entity_client.delete.assert_called_once_with(
+        ModelProviderEntity,
+        "deployment-provider",
+        workspace="ws",
+        expected_db_version=provider_entity.db_version,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_provider_keeps_already_unlinked_model_entity(
+    model_provider_service, mock_entity_client
+):
+    """Deleting a deployment provider keeps a model the deployment teardown already unlinked."""
+    model_entity = _create_model_entity(
+        name="deployed-model",
+        workspace="ws",
+        fileset="ws/deployed-model-weights",
+        model_providers=[],
     )
     provider_entity = create_provider_entity(
         name="deployment-provider",
@@ -876,20 +918,12 @@ async def test_delete_deployment_provider_deletes_exclusively_served_model_entit
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    assert mock_entity_client.delete.call_args_list == [
-        call(
-            ModelProviderEntity,
-            "deployment-provider",
-            workspace="ws",
-            expected_db_version=provider_entity.db_version,
-        ),
-        call(
-            Model,
-            "deployed-model",
-            workspace="ws",
-            expected_db_version=model_entity.db_version,
-        ),
-    ]
+    mock_entity_client.delete.assert_called_once_with(
+        ModelProviderEntity,
+        "deployment-provider",
+        workspace="ws",
+        expected_db_version=provider_entity.db_version,
+    )
 
 
 @pytest.mark.asyncio

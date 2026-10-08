@@ -9,7 +9,7 @@
  */
 import { customFetch as agentsFetch } from '../../generated/fetchers/agents';
 import { customFetch as dataDesignerFetch } from '../../generated/fetchers/data-designer';
-import { customFetch as evaluatorFetch } from '../../generated/fetchers/evaluator';
+import { customFetch as evalsFetch } from '../../generated/fetchers/evals';
 import { customFetch as platformFetch } from '../../generated/fetchers/platform';
 import { customFetch as safeSynthesizerFetch } from '../../generated/fetchers/safe-synthesizer';
 import type { Fetcher } from './types';
@@ -20,5 +20,5 @@ export const defaultFetchers: Partial<Record<string, Fetcher>> = {
   'data-designer': dataDesignerFetch,
   agents: agentsFetch,
   'safe-synthesizer': safeSynthesizerFetch,
-  evaluator: evaluatorFetch,
+  evals: evalsFetch,
 };

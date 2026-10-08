@@ -1,0 +1,251 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "NeMo garak NeMo Helix SDK Resources"
+description: ""
+---
+<a id="garak-nhx-sdk-resources"></a>
+
+The NeMo garak plugin mounts a Python SDK surface on the `NemoClient` through `GarakPluginResource(client)`.
+This page documents that surface: how to manage audit configurations and targets in the entity store, and how to run an audit in-process using the local execution path.
+
+The CRUD methods exposed on `garak.configs` and `garak.targets` are 1:1 mirrors of the [audit configuration](/documentation/vulnerability-scanning/configurations) and [audit target](/documentation/vulnerability-scanning/targets) lifecycle and use the same `AuditConfig` and `AuditTarget` pydantic schemas the entity store persists.
+
+## GarakPluginResource
+
+The `GarakPluginResource` is the sync SDK object for working with the NeMo garak plugin.
+It is built explicitly from a `NemoClient` instance:
+
+```python
+from nemo_garak.sdk import GarakPluginResource
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+garak = GarakPluginResource(client)
+```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
+| Method or property | Description | Returns |
+|--------------------|-------------|---------|
+| `plugin_status()` | Returns garak plugin health information from the service. | `dict[str, object]` |
+| `configs` | Sub-resource for `AuditConfig` CRUD operations. | `_ConfigResource` |
+| `targets` | Sub-resource for `AuditTarget` CRUD operations. | `_TargetResource` |
+| `submit()` | Submits a K8s audit job and returns a handle for polling and artifact download. | `GarakJobResource` |
+| `list_jobs(workspace, page, page_size)` | Lists submitted audit jobs in the workspace. | `dict` |
+| `get_job(job_name, workspace)` | Fetches a single audit job by name. | `dict` |
+| `run()` | Runs one audit locally, in-process, against a configured target. | `dict` |
+
+### `configs` sub-resource
+
+Five CRUD methods for `AuditConfig` entities. The full field reference is in [Configuration Schema](/documentation/vulnerability-scanning/configurations/schema).
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `create(*, workspace, name, description=None, system=None, run=None, plugins=None, reporting=None)` | Persists a new `AuditConfig`. Sub-blocks default to their `AuditSystemData` / `AuditRunData` / `AuditPluginsData` / `AuditReportData` defaults when omitted. | `AuditConfig` |
+| `list(*, workspace, page=1, page_size=20, sort="-created_at")` | Lists audit configurations in `workspace`. | `dict` with `data`, `pagination`, `sort` keys |
+| `get(*, workspace, name)` | Retrieves a single audit configuration. | `AuditConfig` |
+| `update(*, workspace, name, description=None, system=None, run=None, plugins=None, reporting=None)` | Replaces a configuration's fields. The PUT semantics replace every sub-block; omitted sub-blocks reset to their defaults. | `AuditConfig` |
+| `delete(*, workspace, name)` | Deletes a configuration. | `None` |
+
+### `targets` sub-resource
+
+Five CRUD methods for `AuditTarget` entities. The full field reference is in [Target Schema](/documentation/vulnerability-scanning/targets/schema).
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `create(*, workspace, name, type, model, options=None, description=None)` | Persists a new `AuditTarget`. `type` is a garak generator class (for example `nim.NVOpenAIChat`), `model` is the provider's model identifier, `options` is the generator-specific options dict. | `AuditTarget` |
+| `list(*, workspace, page=1, page_size=20, sort="-created_at")` | Lists audit targets in `workspace`. | `dict` with `data`, `pagination`, `sort` keys |
+| `get(*, workspace, name)` | Retrieves a single audit target. | `AuditTarget` |
+| `update(*, workspace, name, type, model, options=None, description=None)` | Replaces a target's fields. | `AuditTarget` |
+| `delete(*, workspace, name)` | Deletes a target. | `None` |
+
+### `submit()` arguments
+
+`submit()` posts an audit job to the K8s executor and returns an `GarakJobResource` handle.
+Call `.wait_until_done()` on the handle to block until the job completes, then `.download_artifacts()` to fetch the garak reports.
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `config` | `AuditConfig \| str` | Yes | An inline `AuditConfig` instance or a name string referencing one in the entity store. Bare names resolve against `workspace`; qualified names such as `"prod/quick-scan"` override the workspace. |
+| `target` | `AuditTarget \| str` | Yes | An inline `AuditTarget` instance or a name string, with the same resolution rules as `config`. |
+| `workspace` | `str \| None` | No | Workspace to submit the job into. Defaults to `"default"`. |
+| `max_probe_retries` | `int` | No | Number of times to retry a failing garak probe before marking it as failed. Defaults to `0`. |
+| `fail_job_on_retries_exhausted` | `bool` | No | When `True` (the default), the job fails if any probe exhausts its retries. Set to `False` to treat retry-exhausted probes as warnings. |
+
+### `GarakJobResource`
+
+The object returned by `submit()`. Use it to poll status, stream logs, and download artifacts.
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `name` | The unique job name assigned by the platform. | `str` |
+| `get_job()` | Fetches the full job dict (name, status, workspace, …). | `dict[str, object]` |
+| `get_job_status()` | Fetches only the current platform status string. | `HelixJobStatus \| None` |
+| `check_if_complete(raise_if_not_complete=False)` | Returns `True` if the job is `completed`. Raises `RuntimeError` when `raise_if_not_complete=True` and the job is not done. | `bool` |
+| `wait_until_done()` | Blocks until the job reaches a terminal status. Streams log entries from the audit task while polling. Raises `RuntimeError` on a terminal failure. | `None` |
+| `get_logs()` | Pages through all structured log entries produced by the audit task. | `list[dict[str, str]]` |
+| `download_artifacts(path=None)` | Downloads and extracts the garak report tarball. Raises `RuntimeError` if the job has not completed. `path` overrides the output directory (defaults to a directory named after the job). | `Path` |
+
+### Submit and wait for an audit job
+
+```python
+# Submit the job using persisted entity name strings.
+job = garak.submit(
+    config="quick-scan",
+    target="nemotron-3.5-lightning-30b",
+    workspace="default",
+)
+print(f"Job submitted: {job.name}")
+
+# Block until garak finishes (raises RuntimeError on failure).
+job.wait_until_done()
+
+# Download the garak reports to ./my-reports/<job-name>/.
+artifacts_dir = job.download_artifacts(path="./my-reports")
+print(f"Reports saved to: {artifacts_dir}")
+```
+
+You can also check status without blocking:
+
+```python
+if not job.check_if_complete():
+    print(f"Still running: {job.get_job_status()}")
+```
+
+### `run()` arguments
+
+`run()` invokes [garak](https://github.com/NVIDIA/garak) locally, in-process, against a configured target.
+The work happens entirely on the host running the SDK call — there is no remote job submission.
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `config` | `AuditConfig \\| str` | Yes | An inline `AuditConfig` instance or a name string referencing one in the entity store. A bare name such as `"quick-scan"` resolves against the `workspace` argument; a qualified name such as `"prod/quick-scan"` always uses the workspace prefix. |
+| `target` | `AuditTarget \\| str` | Yes | An inline `AuditTarget` instance or a name string, with the same resolution rules as `config`. |
+| `workspace` | `str \\| None` | No | Workspace used both as the entity-lookup fallback and as the scope for the local `JobContext`. Defaults to `"default"`. |
+
+### `run()` return value
+
+`run()` returns a dict with the following keys:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `status` | `str` | `"completed"` when every probe succeeds, `"partial"` when at least one probe succeeds and at least one fails, or `"failed"` when no probe completes. |
+| `probes_total` | `int` | Number of probes selected for the run. Present for `completed` and `partial` results. |
+| `probes_complete` | `int` | Number of probes that completed successfully. Present for `completed` and `partial` results. |
+| `probes_failed` | `int` | Number of probes that exhausted their retries. Present for `completed` and `partial` results. |
+| `error` | `str` | Failure reason. Present only when `status` is `"failed"`. |
+| `results` | `dict[str, dict]` | One entry per produced report artifact. Each value is a `ResultRef` (`{"name": str, "artifact_url": str}`). For local runs, `artifact_url` is a `file://` URL under the scheduler's temporary results directory. |
+
+The `results` dict can contain up to three keys, each present only if the corresponding file was produced:
+
+- `report-jsonl` — line-delimited JSON probe-by-probe report.
+- `report-html` — rendered HTML summary.
+- `report-hitlog-jsonl` — line-delimited JSON of every detected hit (failure).
+
+### Run an audit locally
+
+```python
+from nemo_garak.entities import (
+    AuditSystemData,
+    AuditRunData,
+    AuditPluginsData,
+    AuditReportData,
+)
+
+# Persist a configuration.
+config = garak.configs.create(
+    workspace="default",
+    name="quick-scan",
+    description="Bounded scan using one probe and one generation.",
+    system=AuditSystemData(lite=True, parallel_attempts=4),
+    run=AuditRunData(generations=1),
+    plugins=AuditPluginsData(probe_spec="goodside.Tag", detector_spec="auto"),
+    reporting=AuditReportData(report_prefix="quick-scan"),
+)
+
+# Persist a target.
+target = garak.targets.create(
+    workspace="default",
+    name="nemotron-3.5-lightning-30b",
+    type="nim.NVOpenAIChat",
+    model="nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    options={
+        "nim": {
+            "nhx_uri_spec": {
+                "inference_gateway": {"workspace": "default", "provider": "nvidia-inference-api"},
+            },
+        },
+    },
+)
+
+# Run locally — name strings resolve via the entity store.
+result = garak.run(config="quick-scan", target="nemotron-3.5-lightning-30b", workspace="default")
+
+print(f"Audit status: {result['status']}")
+if result["status"] == "failed":
+    print(f"Audit failed: {result.get('error', 'unknown error')}")
+else:
+    print(result["probes_complete"], result["probes_failed"])
+    for name, ref in result["results"].items():
+        print(f"  {name}: {ref['artifact_url']}")
+```
+
+Alternatively, pass inline `AuditConfig` and `AuditTarget` instances directly — useful for ad-hoc runs that should not be persisted:
+
+```python
+result = garak.run(config=config, target=target, workspace="default")
+```
+
+## AsyncGarakPluginResource
+
+The `AsyncGarakPluginResource` provides the same surface for an `AsyncNemoClient`.
+Async methods must be awaited.
+
+```python
+from nemo_garak.sdk import AsyncGarakPluginResource
+from nemo_helix_plugin.client.client import AsyncNemoClient
+
+client = AsyncNemoClient.from_config()
+async_garak = AsyncGarakPluginResource(client)
+```
+
+| Method or property | Description | Returns |
+|--------------------|-------------|---------|
+| `plugin_status()` | Returns garak plugin health information from the service. | `dict[str, object]` |
+| `configs` | Sub-resource for `AuditConfig` CRUD operations. | `_AsyncConfigResource` |
+| `targets` | Sub-resource for `AuditTarget` CRUD operations. | `_AsyncTargetResource` |
+| `submit()` | Submits a K8s audit job and returns an async handle for polling and artifact download. | `AsyncGarakJobResource` |
+| `list_jobs(workspace, page, page_size)` | Lists submitted audit jobs in the workspace. | `dict` |
+| `get_job(job_name, workspace)` | Fetches a single audit job by name. | `dict` |
+| `run()` | Runs one audit locally, in-process, against a configured target. | `dict` |
+
+`AsyncGarakPluginResource.submit()` returns an `AsyncGarakJobResource` with the same methods as `GarakJobResource` [above](#garakjobresource), all awaitable.
+`AsyncGarakPluginResource.run()` and the async `configs` / `targets` sub-resource methods accept the same arguments as their sync counterparts. Because the local execution path is synchronous (garak runs in a subprocess), the async `run()` dispatches the scheduler call through `asyncio.to_thread` so the caller's event loop is not blocked.
+
+```python
+import asyncio
+
+async def main() -> None:
+    # Submit and wait.
+    job = await async_garak.submit(
+        config="quick-scan",
+        target="nemotron-3.5-lightning-30b",
+        workspace="default",
+    )
+    await job.wait_until_done()
+    artifacts_dir = await job.download_artifacts()
+    print(f"Reports saved to: {artifacts_dir}")
+
+    # Or run locally (no jobs-service submission).
+    result = await async_garak.run(
+        config="quick-scan",
+        target="nemotron-3.5-lightning-30b",
+        workspace="default",
+    )
+    for name, ref in result["results"].items():
+        print(f"  {name}: {ref['artifact_url']}")
+
+asyncio.run(main())
+```

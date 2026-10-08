@@ -4,8 +4,8 @@
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getErrorMessage } from '@nemo/common/src/utils/error';
 import { logger } from '@nemo/common/src/utils/logger';
-import { useEvaluatorCreateEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import type { EvaluateJobRequest, MetricInline } from '@nemo/sdk/generated/evaluator/schema';
+import { useEvalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import type { EvaluateJobRequest, MetricInline } from '@nemo/sdk/generated/evals/schema';
 import {
   createEvalConfigFileset,
   isConflictError,
@@ -35,7 +35,7 @@ export function useCreateEvaluation() {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const toast = useToast();
-  const { mutateAsync: createEvaluateJob, isPending } = useEvaluatorCreateEvaluateJob();
+  const { mutateAsync: createEvaluateJob, isPending } = useEvalsCreateEvaluateJob();
 
   const createEvaluation = async (
     values: EvaluationFormValues,

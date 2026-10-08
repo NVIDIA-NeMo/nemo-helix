@@ -40,6 +40,7 @@ dependencies = [
     "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
     "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
     "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+    "nemo-fabric-adapters-nooa>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'",
     # Remote Agent only needs its HTTP client; the service is deployed independently.
     "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
     # Fabric's Hermes adapter intentionally excludes the harness. Platform manages
@@ -63,10 +64,11 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 [project.entry-points."nemo.jobs"]
 "agents.evaluate" = "nemo_agents_plugin.jobs.evaluate_agent:EvaluateAgentJob"
 "agents.execute" = "nemo_agents_plugin.jobs.execute:ExecuteAgentJob"
-# POC: agent-improvement workflow
+# POC: agent-improvement workflow (hidden from `nemo agents` help; see AgentsCLI.update_job_cli)
 "agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
 "agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
 "agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
+
 "agents.package-agent" = "nemo_agents_plugin.jobs.package_agent:PackageAgentJob"
 
 [project.entry-points."nemo.controllers"]
@@ -77,15 +79,16 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_exporter"
 
 [project.optional-dependencies]
-all = ["nemo-agents-plugin[claude,codex,deepagents]"]
 claude = ["nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0"]
 codex = ["nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0"]
 deepagents = ["nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0"]
+nooa = ["nemo-fabric-adapters-nooa[harness]>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'"]
 # Moved to [project] dependencies; kept so older install instructions resolve.
 container = []
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-httpserver>=1.0.0",
     "httpx>=0.27",
     "fastapi>=0.115",
     "jinja2>=3.1",

@@ -76,7 +76,7 @@ export const ArtifactFilesPanel: FC<ArtifactFilesPanelProps> = ({
 
   return (
     <>
-      <Stack gap="density-md">
+      <Stack gap="density-md" className="max-h-[380px] overflow-y-auto">
         {items.map((item) => (
           <ArtifactItemRows
             key={`${item.resultName}|${item.workspace}/${item.fileset}#${item.objectPath}`}

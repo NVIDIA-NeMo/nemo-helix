@@ -18,6 +18,7 @@ from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, PreviewReq
 from nemo_anonymizer_plugin.functions.preview import (
     FailedRecordsFrame,
     LogFrame,
+    ModelDownloadFrame,
     PreviewDatasetFrame,
     PreviewFrame,
     TraceDatasetFrame,
@@ -43,6 +44,7 @@ HelixResourceClientT = TypeVar("HelixResourceClientT", NemoClient, AsyncNemoClie
 _PREVIEW_FRAME_ADAPTER = TypeAdapter(PreviewFrame)
 _KNOWN_PREVIEW_FRAME_KINDS = {
     "log",
+    "model_download",
     "preview_dataset",
     "trace_dataset",
     "failed_records",
@@ -128,6 +130,10 @@ class _PreviewFrameCollector:
         match preview_frame:
             case LogFrame():
                 self._accept_log(preview_frame)
+            case ModelDownloadFrame():
+                # Surface the download progress message to SDK/CLI callers (Studio
+                # consumes the structured model_download frame directly).
+                logger.info(preview_frame.message)
             case PreviewDatasetFrame():
                 self.dataset = pd.DataFrame(preview_frame.records).convert_dtypes(dtype_backend="pyarrow")
             case TraceDatasetFrame():

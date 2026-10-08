@@ -28,7 +28,7 @@ Each service has a dedicated markdown file documenting flows that primarily use 
 | [evaluator.md](evaluator.md) | Evaluator | 5 | Medium |
 | [customizer.md](customizer.md) | Customizer | 6 | Medium |
 | [guardrails.md](guardrails.md) | Guardrails | 2 | Medium |
-| [auditor.md](auditor.md) | Auditor | 4 | Medium |
+| [garak.md](garak.md) | garak | 4 | Medium |
 | [data-designer.md](data-designer.md) | Data Designer | 3 | Medium |
 | [safe-synthesizer.md](safe-synthesizer.md) | Safe Synthesizer | 1 | Low |
 | [intake.md](intake.md) | Intake | 4 | Low |
@@ -72,8 +72,8 @@ Each flow includes:
 - Chat Completions via IGW (inference)
 - MockLLM Provider in IGW (inference)
 - Basic Content Safety Check (guardrails)
-- Auditor Target CRUD Operations (auditor)
-- Auditor Config CRUD Operations (auditor)
+- garak Target CRUD Operations (garak)
+- garak Config CRUD Operations (garak)
 - Data Designer - Configure Models (data-designer)
 - Intake Entry Submission (intake)
 
@@ -83,7 +83,7 @@ Each flow includes:
 - Zero-Config LLM-as-a-Judge (evaluator)
 - Academic Benchmark Evaluation (evaluator)
 - Tool Calling Evaluation (evaluator)
-- Run Default Audit Job (auditor)
+- Run Default Audit Job (garak)
 - Preview Synthetic Data (data-designer)
 - List and Filter Entries (intake)
 
@@ -94,7 +94,7 @@ Each flow includes:
 - Knowledge Distillation (customizer)
 - Chat-Format Dataset Customization (customizer)
 - Guardrails with Custom Configuration (guardrails)
-- Custom Audit with Selected Probes (auditor)
+- Custom Audit with Selected Probes (garak)
 - Full Batch Generation Job (data-designer)
 - Export Task to Files Service (intake)
 - Customized Model Inference via IGW (cross-service)

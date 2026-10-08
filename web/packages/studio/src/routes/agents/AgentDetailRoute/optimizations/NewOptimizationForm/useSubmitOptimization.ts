@@ -14,7 +14,7 @@ import {
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizeConfig';
 import { studyRowsQueryOptions } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useStudyRowCount';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
+import { getAgentOptimizationsTabRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
@@ -27,7 +27,7 @@ export interface UseSubmitOptimizationParams {
 
 /**
  * The submit path behind {@link NewOptimizationForm}: stage the selected evaluation's data beside
- * a generated optimize config, start the study, and open it.
+ * a generated optimize config, start the study, and return to the jobs table.
  *
  * Rejects with a user-facing message on any failure; the form shows it beside the run button.
  */
@@ -65,7 +65,7 @@ export const useSubmitOptimization = ({
       void queryClient.invalidateQueries({
         queryKey: getAgentOptimizationListRunStrategyJobsQueryKey(workspace),
       });
-      if (job.name) navigate(getAgentOptimizationDetailRoute(workspace, job.name));
+      navigate(getAgentOptimizationsTabRoute(workspace, agentName));
     },
     [workspace, agentName, evals, toast, navigate, queryClient]
   );

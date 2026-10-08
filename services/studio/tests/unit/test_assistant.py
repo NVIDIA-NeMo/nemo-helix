@@ -1037,7 +1037,10 @@ async def test_stream_claude_hides_startup_oserror(monkeypatch: pytest.MonkeyPat
     assert session_id not in assistant._session_streams
 
 
-def test_mcp_initialize_and_tools_list(service_client: TestClient):
+def test_mcp_initialize_and_tools_list(monkeypatch: pytest.MonkeyPatch):
+    service_client = service_client_with_feature_flags(
+        monkeypatch, {"customizer_enabled": False, "model_compare_enabled": False}
+    )
     session_id = str(uuid.uuid4())
 
     initialize_response = service_client.post(
@@ -1111,6 +1114,14 @@ def test_assistant_destinations_accept_current_and_legacy_feature_flags(feature_
 
     assert "assistant" in enabled_destinations
     assert "dashboard" in enabled_destinations
+
+
+def test_evals_feature_flags_gate_assistant_destinations():
+    disabled = studio_links.enabled_destinations({"evals_enabled": False})
+    assert "evaluation" not in disabled
+    enabled = studio_links.enabled_destinations({"evals_enabled": True, "evals_benchmarks_enabled": True})
+    assert "evaluation" in enabled
+    assert "evaluation_benchmarks" in enabled
 
 
 def test_build_studio_system_prompt_preserves_empty_enabled_destinations():
@@ -2561,10 +2572,8 @@ def test_public_mcp_route_is_mounted_before_static_fallback():
     assert delete_response.headers["allow"] == "POST"
 
 
-def test_assistant_routes_are_available_by_default():
-    client = TestClient(StudioService().app)
-
-    response = client.post("/v2/assistant/sessions")
+def test_assistant_routes_are_available_by_default(service_client: TestClient):
+    response = service_client.post("/v2/assistant/sessions")
 
     assert response.status_code == 200
     uuid.UUID(response.json()["session_id"])

@@ -8,7 +8,7 @@ labels: [NeMo]
 ## NeMo Helix Gym Host Container
 
 This container runs NeMo Gym environments inside a sandbox provisioned by the
-NeMo Evaluator. It includes NeMo Gym and the sandbox host runtime, and
+NeMo Helix Evals. It includes NeMo Gym and the sandbox host runtime, and
 prefetches first-party Gym component environments when available.
 
 ### Resources

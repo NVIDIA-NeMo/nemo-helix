@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
-import { evaluatorCreateEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   createExperiment,
@@ -25,11 +25,9 @@ import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
-vi.mock('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes', async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes')
-  >()),
-  evaluatorCreateEvaluateJob: vi.fn(),
+vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/evals/evals-plugin-jobs-routes')>()),
+  evalsCreateEvaluateJob: vi.fn(),
 }));
 
 vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
@@ -146,7 +144,7 @@ const renderModal = () =>
 beforeEach(() => {
   mockListApis();
   vi.mocked(filesDownloadFile).mockResolvedValue(parquetFile(PARQUET.twoRows));
-  vi.mocked(evaluatorCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
+  vi.mocked(evalsCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
   vi.mocked(createExperiment).mockResolvedValue({
     id: 'grp_new',
     name: 'model-update-tests',
@@ -174,8 +172,8 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
-    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
-    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
     expect(spec.spec).toMatchObject({ dataset: expect.stringMatching(/#dataset\.parquet$/) });
     const datasetUpload = vi
       .mocked(filesUploadFile)
@@ -216,8 +214,8 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
-    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
-    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
     expect(spec.spec).toMatchObject({
       dataset: `${DEFAULT_WORKSPACE}/generated#output/*.parquet`,
     });
@@ -242,7 +240,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
 
     expect(screen.getByLabelText('Add Dataset')).toBeInTheDocument();
     expect(await screen.findByText('Add a dataset')).toBeVisible();
-    expect(evaluatorCreateEvaluateJob).not.toHaveBeenCalled();
+    expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
 
   it('still shows the picked file after stepping back and forward', async () => {
@@ -299,8 +297,8 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
-    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
-    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
     expect(spec.spec).toMatchObject({ dataset: expect.stringMatching(/#dataset\.parquet$/) });
     expect(filesUploadFile).toHaveBeenCalledWith(
       DEFAULT_WORKSPACE,
@@ -329,8 +327,8 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
-    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
-    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
     expect(spec.spec).toMatchObject({ dataset: expect.stringMatching(/#dataset\/\*\.parquet$/) });
     expect(
       vi
@@ -370,6 +368,6 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
     expect(await screen.findByText('Add a dataset')).toBeVisible();
-    expect(evaluatorCreateEvaluateJob).not.toHaveBeenCalled();
+    expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
 });

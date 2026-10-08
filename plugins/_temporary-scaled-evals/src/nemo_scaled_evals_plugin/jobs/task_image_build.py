@@ -24,6 +24,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 from nemo_scaled_evals_plugin.jobs.naming import task_image_build_job_name
 from nemo_scaled_evals_plugin.jobs.specs import TaskImageBuildSpec
 from pydantic import BaseModel
+from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
 
 
@@ -139,13 +140,31 @@ def resolve_executor(
     return executor if resources is None else executor.model_copy(update={"resources": resources})
 
 
-def resolve_secret_environment() -> list[EnvironmentVariable] | None:
-    """Reference deployment secrets needed by isolated Platform Job containers."""
-    refs = {
+def _shared_secret_refs() -> dict[str, str]:
+    """Map each environment variable every Platform Job needs to the Platform Secret that holds it."""
+    return {
         "PGPASSWORD": settings.platform_jobs_postgres_password_secret,
         "CREDENTIALS_ENCRYPTION_KEY": settings.platform_jobs_credentials_encryption_key_secret,
         "TASK_IMAGE_REGISTRY_AUTH_JSON": settings.platform_jobs_registry_auth_secret,
     }
+
+
+def resolve_secret_environment() -> list[EnvironmentVariable] | None:
+    """Reference deployment secrets needed by isolated Platform Job containers."""
+    return _secret_environment(_shared_secret_refs())
+
+
+def resolve_evaluation_secret_environment(runtime: str) -> list[EnvironmentVariable] | None:
+    """Secrets for evaluation Jobs: the shared set plus credentials only ``runtime`` needs."""
+    refs = _shared_secret_refs()
+    if runtime == HARBOR_OPENSANDBOX_RUNTIME:
+        refs["OPENSANDBOX_API_KEY"] = settings.platform_jobs_opensandbox_api_key_secret
+
+    return _secret_environment(refs)
+
+
+def _secret_environment(refs: dict[str, str]) -> list[EnvironmentVariable] | None:
+    """Turn variable-to-secret refs into Job environment entries, skipping unconfigured secrets."""
     environment = [
         EnvironmentVariable(name=name, from_secret=EnvironmentVariableFromSecret(name=secret))
         for name, secret in refs.items()

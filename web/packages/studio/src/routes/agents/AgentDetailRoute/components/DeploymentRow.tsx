@@ -9,6 +9,7 @@ import { type AgentSpecSource, githubCommitUrl } from '@studio/api/agents/useAge
 import {
   deploymentModeLabel,
   deploymentStatusColor,
+  deploymentUrl,
   shortRevision,
 } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { useState, type FC } from 'react';
@@ -50,6 +51,7 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
   onViewLogs,
 }) => {
   const [isErrorExpanded, setIsErrorExpanded] = useState(false);
+  const url = deploymentUrl(deployment);
 
   return (
     <Flex align="start" gap="2" className={`px-4 py-3 ${isFirst ? '' : 'border-t border-base'}`}>
@@ -60,9 +62,9 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
       />
       <Stack gap="0" className="min-w-0 flex-1">
         <Text kind="body/semibold/sm">{deployment.name}</Text>
-        {deployment.endpoint && (
+        {url && (
           <Text kind="body/regular/xs" className="truncate text-secondary">
-            {deployment.endpoint}
+            {url}
           </Text>
         )}
         {/* An agent has many images over its life; without this the row gives no way

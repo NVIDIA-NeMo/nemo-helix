@@ -13,6 +13,7 @@ Explore the model families and sizes supported by NVIDIA NeMo Customizer.
 
 For information on setting up model entities for customization, see the [Manage Model Entities](/documentation/customizer-reference/manage-model-entities/overview) guide.
 For fine-tuning and deployment tutorials, see the [Tutorials](/documentation/customizer-reference/tutorials) guide.
+For starting hyperparameters per model, see [Start from a Reference Recipe](/documentation/customizer-reference/manage-customization-jobs/training-configuration#reference-recipes).
 
 </Note>
 ## Before You Start
@@ -26,14 +27,14 @@ If downloading models hosted on Hugging Face, create a secret with your Hugging 
 
 <Cards>
 
+<Card title="Nemotron Models" href="/documentation/customizer-reference/models/llama-nemotron">
+
+View the available Nemotron models from NVIDIA, including Nemotron 3.5 Lightning, Nemotron 3 Nano and Super, and Llama Nemotron variants.
+
+</Card>
 <Card title="Llama Models" href="/documentation/customizer-reference/models/llama">
 
 View the available Llama models from Meta, ranging from 8 billion to 70 billion parameters.
-
-</Card>
-<Card title="Llama Nemotron Models" href="/documentation/customizer-reference/models/llama-nemotron">
-
-View the available Llama Nemotron models from NVIDIA, including Nano and Super variants for efficient and advanced instruction tuning.
 
 </Card>
 <Card title="Phi Models" href="/documentation/customizer-reference/models/phi">
@@ -76,13 +77,13 @@ The following models support both chat and completion model training.
 
 | Model | Train a Chat Model with Tool Calling | Fine-tuning Options | Sequence Packing[^1] | Inference with NIM | Reasoning |
 |--|--|--|--|--|--|
+| [nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16) | No | Full SFT, LoRA | No | Supported (only Full SFT) | Yes |
+| [nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16) | No | LoRA | No | Supported | Yes |
+| [nvidia/NVIDIA-Nemotron-Nano-9B-v2](https://huggingface.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2) | No | Full SFT, LoRA | No | Supported | Yes |
+| [nvidia/Llama-3.1-Nemotron-Nano-8B-v1](https://huggingface.co/nvidia/Llama-3.1-Nemotron-Nano-8B-v1) | No | Full SFT, LoRA | Yes | Supported | Yes |
 | [meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) | Yes | Full SFT, LoRA | Yes | Supported | No |
 | [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) | Yes | Full SFT, LoRA | Yes | Supported | No |
 | [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) | Yes | Full SFT, LoRA | Yes | Supported | No |
-| [nvidia/Llama-3.1-Nemotron-Nano-8B-v1](https://huggingface.co/nvidia/Llama-3.1-Nemotron-Nano-8B-v1) | No | Full SFT, LoRA | Yes | Supported | Yes |
-| [nvidia/NVIDIA-Nemotron-Nano-9B-v2](https://huggingface.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2) | No | Full SFT, LoRA | No | Supported | Yes |
-| [nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16) | No | Full SFT, LoRA | No | Supported (only Full SFT) | Yes |
-| [nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16) | No | LoRA | No | Supported | Yes |
 | [microsoft/phi-4](https://huggingface.co/microsoft/phi-4) | No | Full SFT, LoRA | No | Supported | No |
 | [openai/gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) | Yes | Full SFT, LoRA | LoRA with prompt-completion data | Supported | Yes |
 | [Qwen/Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) | No | Full SFT, LoRA | No | Supported | Yes |

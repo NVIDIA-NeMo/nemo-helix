@@ -13,7 +13,7 @@ export const AgentHardenerManifestListRoute: FC = () => {
   const workspace = useWorkspace();
   useBreadcrumbs({
     items: [
-      { href: getAgentHardenerRunListRoute(workspace), slotLabel: 'Agent Hardener' },
+      { href: getAgentHardenerRunListRoute(workspace), slotLabel: 'Agent Hardening' },
       { slotLabel: 'Manifests' },
     ],
   });

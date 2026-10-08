@@ -83,7 +83,7 @@ export interface BuildQuickstartSampleStepsOptions extends QuickstartSampleFeatu
  * and the point of this panel is the sandbox workspace the reader is currently in.
  *
  * The evaluate step is deliberately ungated: its "View results" destination is the agent page's
- * Evaluations tab, which `AgentDetailRoute` renders unconditionally — `EVALUATOR_ENABLED` gates
+ * Evaluations tab, which `AgentDetailRoute` renders unconditionally — `EVALS_ENABLED` gates
  * the standalone evaluator routes this panel never links to.
  */
 export const buildQuickstartSampleSteps = ({
@@ -167,10 +167,10 @@ export const buildQuickstartSampleSteps = ({
       cli: {
         title: 'Evaluate the agent',
         description: 'Run your own evaluation or view results from a sample evaluation run.',
-        // There is no `submit` subcommand; nemo-evaluator has a regression test
+        // There is no `submit` subcommand; nemo-evals has a regression test
         // asserting that form never ships again. Matches EntityEmptyState/registry.ts.
         commands: [
-          continued('nemo evaluator evaluate', "--spec-file '<spec>.json'", `--workspace ${ws}`),
+          continued('nemo evals evaluate', "--spec-file '<spec>.json'", `--workspace ${ws}`),
         ],
       },
     },

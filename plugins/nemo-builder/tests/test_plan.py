@@ -27,7 +27,7 @@ def _one_repository(image: PlannedImage) -> Destination:
 class TestResolve:
     def test_names_are_deterministic_from_the_request(self) -> None:
         plan = BuildPlan.resolve(_set(_spec("a"), _spec("b")), workspace="ws")
-        assert plan.job_name == "demo-3"
+        assert plan.job_name == "builder-demo-3"
         assert [image.name for image in plan.images] == ["demo-3.a", "demo-3.b"]
 
     def test_an_unnamed_spec_is_named_after_the_set(self) -> None:

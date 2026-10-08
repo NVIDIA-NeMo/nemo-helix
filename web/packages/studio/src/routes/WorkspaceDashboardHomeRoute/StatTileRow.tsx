@@ -7,7 +7,7 @@ import { Grid } from '@nvidia/foundations-react-core';
 import {
   AGENTS_ENABLED,
   CUSTOMIZER_ENABLED,
-  EVALUATOR_ENABLED,
+  EVALS_ENABLED,
   EXPERIMENT_ENABLED,
   OPTIMIZER_ENABLED,
 } from '@studio/constants/environment';
@@ -32,7 +32,7 @@ export interface StatTileRowProps {
    */
   agentsEnabled?: boolean;
   optimizerEnabled?: boolean;
-  evaluatorEnabled?: boolean;
+  evalsEnabled?: boolean;
   experimentEnabled?: boolean;
   customizerEnabled?: boolean;
 }
@@ -60,14 +60,14 @@ export const StatTileRow: FC<StatTileRowProps> = ({
   workspace,
   agentsEnabled = AGENTS_ENABLED,
   optimizerEnabled = OPTIMIZER_ENABLED,
-  evaluatorEnabled = EVALUATOR_ENABLED,
+  evalsEnabled = EVALS_ENABLED,
   experimentEnabled = EXPERIMENT_ENABLED,
   customizerEnabled = CUSTOMIZER_ENABLED,
 }) => {
   const counts = useDashboardStatCounts(workspace, {
     agents: agentsEnabled,
     insights: optimizerEnabled,
-    testCases: evaluatorEnabled,
+    testCases: evalsEnabled,
     experiments: experimentEnabled,
     customModels: customizerEnabled,
   });
@@ -91,7 +91,7 @@ export const StatTileRow: FC<StatTileRowProps> = ({
     },
     {
       key: 'test-cases',
-      enabled: evaluatorEnabled,
+      enabled: evalsEnabled,
       label: 'Test Cases',
       icon: <ENTITY_ICONS.evaluationResults className="size-4" />,
       to: getEvaluationResultsRoute(workspace),

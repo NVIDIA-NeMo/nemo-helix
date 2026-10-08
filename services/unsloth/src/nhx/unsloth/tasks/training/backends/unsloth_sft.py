@@ -192,165 +192,166 @@ def train_sft(
         f"cuda_visible={os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}"
     )
 
-    # ── Model loading ──────────────────────────────────────────────────
-    resolved_model = model_path or spec.model.name
-    model_kwargs = build_model_load_kwargs(spec, resolved_model)
-    # Unsloth's `dtype` kwarg accepts `None` (auto) or a torch dtype. Map
-    # the JSON-friendly literal to a torch dtype lazily.
-    if spec.model.dtype != "auto":
-        import torch
-
-        dtype_map = {
-            "bfloat16": torch.bfloat16,
-            "float16": torch.float16,
-            "float32": torch.float32,
-        }
-        model_kwargs["dtype"] = dtype_map[spec.model.dtype]
-
-    model, tokenizer = FastLanguageModel.from_pretrained(**model_kwargs)
-
-    # ── Adapter ────────────────────────────────────────────────────────
-    if spec.training.finetuning_type == "lora":
-        assert spec.training.lora is not None  # validated by UnslothJobInput
-        # use_gradient_checkpointing accepts True / False / "unsloth"; map
-        # the JSON literal back.
-        gc_value: bool | str
-        if spec.training.use_gradient_checkpointing == "unsloth":
-            gc_value = "unsloth"
-        elif spec.training.use_gradient_checkpointing == "true":
-            gc_value = True
-        else:
-            gc_value = False
-        model = FastLanguageModel.get_peft_model(
-            model,
-            **build_peft_kwargs(spec, gradient_checkpointing=gc_value),
-        )
-    # All-weights FT: leave `model` as-is. `build_model_load_kwargs` passed
-    # `full_finetuning=True`, so `from_pretrained` routed through Unsloth's
-    # `FastModel.from_pretrained` and returned an un-wrapped HF model with every
-    # parameter trainable (4-/8-bit were already rejected by the spec validator
-    # for `finetuning_type='all_weights'`).
-
-    # ── Dataset ────────────────────────────────────────────────────────
-    resolved_train_path = dataset_path or spec.dataset.path
-    train_ds = _load_training_dataset(
-        path=resolved_train_path,
-        text_field=spec.dataset.text_field,
-        apply_chat_template=spec.dataset.apply_chat_template,
-        tokenizer=tokenizer,
-        load_dataset=load_dataset,
-        Dataset=Dataset,
-        split="train",
-    )
-    eval_ds = None
-    resolved_validation_path = validation_path or spec.dataset.validation_path
-    if resolved_validation_path:
-        eval_ds = _load_training_dataset(
-            path=resolved_validation_path,
-            text_field=spec.dataset.text_field,
-            apply_chat_template=spec.dataset.apply_chat_template,
-            tokenizer=tokenizer,
-            load_dataset=load_dataset,
-            Dataset=Dataset,
-            split="validation",
-        )
-
-    # ── SFTConfig ───────────────────────────────────────────────────
-    bf16 = spec.hardware.precision == "bf16"
-    fp16 = spec.hardware.precision == "fp16"
-
-    # Prefer identifiers from the passed JobContext; the in-process UnslothJob.run()
-    # path may not have the Job Controller env vars set. Fall back to env-derived
-    # values for fields JobContext doesn't carry (step/task).
-    job_ctx = NHXJobContext.from_env()
-    if ctx.job_id:
-        job_ctx = replace(job_ctx, job_id=ctx.job_id, workspace=ctx.workspace)
-
-    report_to, integration_kwargs, integration_env = apply_integrations_to_sft_config(
-        integrations=spec.integrations,
-        job_ctx=job_ctx,
-        output_name=spec.output.name,
-        workspace_path=output_dir,
-        model_name=spec.model.name,
-    )
-    for key, value in integration_env.items():
-        os.environ[key] = value
-
-    args_kwargs: dict[str, Any] = {
-        "output_dir": str(output_dir),
-        "per_device_train_batch_size": spec.batch.per_device_train_batch_size,
-        "gradient_accumulation_steps": spec.batch.gradient_accumulation_steps,
-        "learning_rate": spec.optimizer.learning_rate,
-        "weight_decay": spec.optimizer.weight_decay,
-        "optim": spec.optimizer.optim,
-        "adam_beta1": spec.optimizer.adam_beta1,
-        "adam_beta2": spec.optimizer.adam_beta2,
-        "adam_epsilon": spec.optimizer.adam_epsilon,
-        "max_grad_norm": spec.optimizer.max_grad_norm,
-        "label_smoothing_factor": spec.optimizer.label_smoothing_factor,
-        "lr_scheduler_type": spec.schedule.lr_scheduler_type,
-        "warmup_steps": spec.schedule.warmup_steps,
-        "logging_steps": spec.schedule.logging_steps,
-        "seed": spec.schedule.seed,
-        "bf16": bf16,
-        "fp16": fp16,
-        "report_to": list(report_to),
-        # SFT-specific — belong on SFTConfig in trl>=0.13, not on SFTTrainer.
-        "dataset_text_field": spec.dataset.text_field,
-        "max_length": spec.model.max_seq_length,
-        "packing": spec.dataset.packing,
-    }
-    # Optional knobs: only set when provided so trl/transformers keep their defaults.
-    if spec.optimizer.neftune_noise_alpha is not None:
-        args_kwargs["neftune_noise_alpha"] = spec.optimizer.neftune_noise_alpha
-    if spec.schedule.lr_scheduler_kwargs is not None:
-        args_kwargs["lr_scheduler_kwargs"] = spec.schedule.lr_scheduler_kwargs
-    if spec.schedule.warmup_ratio is not None:
-        args_kwargs["warmup_ratio"] = spec.schedule.warmup_ratio
-    # epochs always set (defaults to 1); max_steps, when present, caps/overrides it (trl semantics).
-    args_kwargs["num_train_epochs"] = spec.schedule.epochs
-    if spec.schedule.max_steps is not None:
-        args_kwargs["max_steps"] = spec.schedule.max_steps
-    if spec.schedule.save_steps is not None:
-        args_kwargs["save_steps"] = spec.schedule.save_steps
-        args_kwargs["save_strategy"] = "steps"
-    else:
-        args_kwargs["save_strategy"] = "epoch"
-    eval_steps = spec.schedule.eval_steps
-    if eval_ds is not None and eval_steps is None:
-        eval_steps = compute_default_eval_steps(
-            num_train_samples=len(train_ds),
-            per_device_train_batch_size=spec.batch.per_device_train_batch_size,
-            gradient_accumulation_steps=spec.batch.gradient_accumulation_steps,
-            max_steps=spec.schedule.max_steps,
-        )
-        logger.info(
-            "Default eval_steps=%s (validation data present, schedule.eval_steps unset)",
-            eval_steps,
-        )
-    if eval_ds is not None and eval_steps is not None:
-        args_kwargs["eval_steps"] = eval_steps
-        args_kwargs["eval_strategy"] = "steps"
-
-    args_kwargs.update(integration_kwargs)
-
-    args = SFTConfig(**args_kwargs)
-
     progress = progress_callback or _create_progress_callback(spec.schedule.progress_reporting)
-    from nhx.unsloth.tasks.training.backends.hf_trainer_callback import (
-        create_hf_trainer_progress_callback,
-    )
-
-    trainer = SFTTrainer(
-        model=model,
-        processing_class=tokenizer,
-        train_dataset=train_ds,
-        eval_dataset=eval_ds,
-        args=args,
-        callbacks=[create_hf_trainer_progress_callback(progress)],
-    )
     try:
-        train_result = trainer.train()
+        with progress.reporter.training_wall_clock():
+            # ── Model loading ──────────────────────────────────────────────
+            resolved_model = model_path or spec.model.name
+            model_kwargs = build_model_load_kwargs(spec, resolved_model)
+            # Unsloth's `dtype` kwarg accepts `None` (auto) or a torch dtype. Map
+            # the JSON-friendly literal to a torch dtype lazily.
+            if spec.model.dtype != "auto":
+                import torch
+
+                dtype_map = {
+                    "bfloat16": torch.bfloat16,
+                    "float16": torch.float16,
+                    "float32": torch.float32,
+                }
+                model_kwargs["dtype"] = dtype_map[spec.model.dtype]
+
+            model, tokenizer = FastLanguageModel.from_pretrained(**model_kwargs)
+
+            # ── Adapter ────────────────────────────────────────────────────────
+            if spec.training.finetuning_type == "lora":
+                assert spec.training.lora is not None  # validated by UnslothJobInput
+                # use_gradient_checkpointing accepts True / False / "unsloth"; map
+                # the JSON literal back.
+                gc_value: bool | str
+                if spec.training.use_gradient_checkpointing == "unsloth":
+                    gc_value = "unsloth"
+                elif spec.training.use_gradient_checkpointing == "true":
+                    gc_value = True
+                else:
+                    gc_value = False
+                model = FastLanguageModel.get_peft_model(
+                    model,
+                    **build_peft_kwargs(spec, gradient_checkpointing=gc_value),
+                )
+            # All-weights FT: leave `model` as-is. `build_model_load_kwargs` passed
+            # `full_finetuning=True`, so `from_pretrained` routed through Unsloth's
+            # `FastModel.from_pretrained` and returned an un-wrapped HF model with every
+            # parameter trainable (4-/8-bit were already rejected by the spec validator
+            # for `finetuning_type='all_weights'`).
+
+            # ── Dataset ────────────────────────────────────────────────────────
+            resolved_train_path = dataset_path or spec.dataset.path
+            train_ds = _load_training_dataset(
+                path=resolved_train_path,
+                text_field=spec.dataset.text_field,
+                apply_chat_template=spec.dataset.apply_chat_template,
+                tokenizer=tokenizer,
+                load_dataset=load_dataset,
+                Dataset=Dataset,
+                split="train",
+            )
+            eval_ds = None
+            resolved_validation_path = validation_path or spec.dataset.validation_path
+            if resolved_validation_path:
+                eval_ds = _load_training_dataset(
+                    path=resolved_validation_path,
+                    text_field=spec.dataset.text_field,
+                    apply_chat_template=spec.dataset.apply_chat_template,
+                    tokenizer=tokenizer,
+                    load_dataset=load_dataset,
+                    Dataset=Dataset,
+                    split="validation",
+                )
+
+            # ── SFTConfig ───────────────────────────────────────────────────
+            bf16 = spec.hardware.precision == "bf16"
+            fp16 = spec.hardware.precision == "fp16"
+
+            # Prefer identifiers from the passed JobContext; the in-process UnslothJob.run()
+            # path may not have the Job Controller env vars set. Fall back to env-derived
+            # values for fields JobContext doesn't carry (step/task).
+            job_ctx = NHXJobContext.from_env()
+            if ctx.job_id:
+                job_ctx = replace(job_ctx, job_id=ctx.job_id, workspace=ctx.workspace)
+
+            report_to, integration_kwargs, integration_env = apply_integrations_to_sft_config(
+                integrations=spec.integrations,
+                job_ctx=job_ctx,
+                output_name=spec.output.name,
+                workspace_path=output_dir,
+                model_name=spec.model.name,
+            )
+            for key, value in integration_env.items():
+                os.environ[key] = value
+
+            args_kwargs: dict[str, Any] = {
+                "output_dir": str(output_dir),
+                "per_device_train_batch_size": spec.batch.per_device_train_batch_size,
+                "gradient_accumulation_steps": spec.batch.gradient_accumulation_steps,
+                "learning_rate": spec.optimizer.learning_rate,
+                "weight_decay": spec.optimizer.weight_decay,
+                "optim": spec.optimizer.optim,
+                "adam_beta1": spec.optimizer.adam_beta1,
+                "adam_beta2": spec.optimizer.adam_beta2,
+                "adam_epsilon": spec.optimizer.adam_epsilon,
+                "max_grad_norm": spec.optimizer.max_grad_norm,
+                "label_smoothing_factor": spec.optimizer.label_smoothing_factor,
+                "lr_scheduler_type": spec.schedule.lr_scheduler_type,
+                "warmup_steps": spec.schedule.warmup_steps,
+                "logging_steps": spec.schedule.logging_steps,
+                "seed": spec.schedule.seed,
+                "bf16": bf16,
+                "fp16": fp16,
+                "report_to": list(report_to),
+                # SFT-specific — belong on SFTConfig in trl>=0.13, not on SFTTrainer.
+                "dataset_text_field": spec.dataset.text_field,
+                "max_length": spec.model.max_seq_length,
+                "packing": spec.dataset.packing,
+            }
+            # Optional knobs: only set when provided so trl/transformers keep their defaults.
+            if spec.optimizer.neftune_noise_alpha is not None:
+                args_kwargs["neftune_noise_alpha"] = spec.optimizer.neftune_noise_alpha
+            if spec.schedule.lr_scheduler_kwargs is not None:
+                args_kwargs["lr_scheduler_kwargs"] = spec.schedule.lr_scheduler_kwargs
+            if spec.schedule.warmup_ratio is not None:
+                args_kwargs["warmup_ratio"] = spec.schedule.warmup_ratio
+            # epochs always set (defaults to 1); max_steps, when present, caps/overrides it (trl semantics).
+            args_kwargs["num_train_epochs"] = spec.schedule.epochs
+            if spec.schedule.max_steps is not None:
+                args_kwargs["max_steps"] = spec.schedule.max_steps
+            if spec.schedule.save_steps is not None:
+                args_kwargs["save_steps"] = spec.schedule.save_steps
+                args_kwargs["save_strategy"] = "steps"
+            else:
+                args_kwargs["save_strategy"] = "epoch"
+            eval_steps = spec.schedule.eval_steps
+            if eval_ds is not None and eval_steps is None:
+                eval_steps = compute_default_eval_steps(
+                    num_train_samples=len(train_ds),
+                    per_device_train_batch_size=spec.batch.per_device_train_batch_size,
+                    gradient_accumulation_steps=spec.batch.gradient_accumulation_steps,
+                    max_steps=spec.schedule.max_steps,
+                )
+                logger.info(
+                    "Default eval_steps=%s (validation data present, schedule.eval_steps unset)",
+                    eval_steps,
+                )
+            if eval_ds is not None and eval_steps is not None:
+                args_kwargs["eval_steps"] = eval_steps
+                args_kwargs["eval_strategy"] = "steps"
+
+            args_kwargs.update(integration_kwargs)
+
+            args = SFTConfig(**args_kwargs)
+
+            from nhx.unsloth.tasks.training.backends.hf_trainer_callback import (
+                create_hf_trainer_progress_callback,
+            )
+
+            trainer = SFTTrainer(
+                model=model,
+                processing_class=tokenizer,
+                train_dataset=train_ds,
+                eval_dataset=eval_ds,
+                args=args,
+                callbacks=[create_hf_trainer_progress_callback(progress)],
+            )
+            train_result = trainer.train()
     finally:
         progress.close()
 

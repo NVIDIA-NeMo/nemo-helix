@@ -1,0 +1,153 @@
+<!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# garak Service Agentic Flows
+
+The garak service provides model safety testing, bias detection, and adversarial robustness evaluation using tools like garak for red-teaming.
+
+**PIC**: Paul Parkanzky
+**Priority**: Medium
+
+---
+
+## Flows
+
+| # | Flow Name | Complexity | MCP Eval | CLI Eval | Description | Source |
+|---|-----------|------------|----------|----------|-------------|--------|
+| 22 | garak Target CRUD Operations | 2 | No | `garak-target-crud-cli` | Create, list, get, update, and delete a garak target. Targets define the model endpoint to audit (e.g., build.nvidia.com, local NIM, NeMo NIM Proxy). | POR |
+| 23 | garak Config CRUD Operations | 2 | No | `garak-config-crud-cli` | Create, list, get, update, and delete a garak configuration. Configs define which probes to run during an audit. | POR |
+| 24 | Run Default Audit Job | 3 | No | `garak-default-job-cli` | Create a target, use the built-in "default" audit config, run an audit job. Monitor job status and retrieve basic results/logs. | POR |
+| 25 | Custom Audit with Selected Probes | 4 | No | `garak-custom-probes-cli` | Create a custom audit config selecting specific probes (e.g., 3 targeted probes instead of default). Run audit job, retrieve detailed results and hit logs. | POR |
+
+---
+
+## Flow Details
+
+### 22. garak Target CRUD Operations
+
+**Complexity**: 2 (Simple)
+
+**Operations**:
+- Create target pointing to model endpoint
+- List all targets
+- Get target by ID
+- Update target configuration
+- Delete target
+
+**Target Types**:
+- build.nvidia.com endpoints
+- Local NIM deployments
+- NeMo NIM Proxy
+- Custom model endpoints
+
+**Prerequisites**:
+- NeMo Helix running
+- Workspace exists
+- Model endpoint accessible
+
+**Success Criteria**:
+- Target created with correct endpoint
+- Target appears in list
+- Target can be updated
+- Target can be deleted
+
+---
+
+### 23. garak Config CRUD Operations
+
+**Complexity**: 2 (Simple)
+
+**Operations**:
+- Create audit configuration with probe selection
+- List all configurations
+- Get configuration by ID
+- Update probe selection
+- Delete configuration
+
+**Configuration Options**:
+- Probe selection (specific probes or categories)
+- Run parameters
+- Output format
+
+**Prerequisites**:
+- NeMo Helix running
+- Workspace exists
+
+**Success Criteria**:
+- Config created with selected probes
+- Config appears in list
+- Config can be updated
+- Config can be deleted
+
+---
+
+### 24. Run Default Audit Job
+
+**Complexity**: 3 (Moderate)
+
+**Operations**:
+1. Create target for model to audit
+2. Use built-in "default" audit config
+3. Launch audit job
+4. Monitor job status
+5. Retrieve results and logs
+
+**Default Config Includes**:
+- Standard safety probes
+- Common jailbreak attempts
+- Basic bias detection
+
+**Prerequisites**:
+- Target configured
+- Model accessible
+
+**Success Criteria**:
+- Audit job runs to completion
+- Results contain probe findings
+- Logs available for review
+- No false positives on safe model
+
+---
+
+### 25. Custom Audit with Selected Probes
+
+**Complexity**: 4 (Complex)
+
+**Operations**:
+1. Create custom audit config
+2. Select specific probes (e.g., 3 targeted probes)
+3. Create target
+4. Run audit job with custom config
+5. Retrieve detailed results
+6. Review hit logs
+
+**Probe Categories**:
+- Jailbreak attempts
+- Bias detection
+- Toxicity generation
+- Information leakage
+- Adversarial inputs
+
+**Prerequisites**:
+- Understanding of available probes
+- Target model configured
+
+**Success Criteria**:
+- Only selected probes run
+- Results contain detailed findings
+- Hit logs show specific vulnerabilities
+- Audit scope matches configuration
+
+---
+
+## Documentation References
+
+- Audit overview: docs/garak/index.mdx
+- SDK resources: docs/garak/sdk-resources.mdx
+- Targets: docs/garak/targets/index.mdx
+- Inference Gateway routing: docs/garak/targets/inference-gateway.mdx
+- Target schema: docs/garak/targets/schema.mdx
+- Configs: docs/garak/configs/index.mdx
+- Selecting probes: docs/garak/configs/probes.mdx
+- Config schema: docs/garak/configs/schema.mdx
+- Run an audit locally: docs/garak/tutorials/run-audit-locally.mdx

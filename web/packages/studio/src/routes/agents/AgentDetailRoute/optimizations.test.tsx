@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// This file covers the launch-modal path; the in-tab form flag defaults on, so pin it off here.
 vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
+  vi.stubEnv('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', 'false');
 });
 
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
@@ -98,7 +100,9 @@ describe('AgentDetailRoute optimizations tab', () => {
     expect(
       await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT })
     ).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: /Parameter sweep/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('radio', { name: /Hyper-parameter optimization/ })
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('New optimization')).not.toBeInTheDocument();
   });
 

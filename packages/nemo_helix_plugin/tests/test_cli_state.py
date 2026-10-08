@@ -216,7 +216,7 @@ class TestResolveOutputFormat:
         assert state.calls == 0
 
     def test_delegates_to_state_when_flag_omitted(self) -> None:
-        """Agent mode, the global flag, preferences, and the non-TTY rule all live in the state."""
+        """The global flag, preferences, and the non-TTY rule all live in the state."""
         assert resolve_output_format(_typer_context_with_obj(_FormatState("markdown"))) == "markdown"
 
     def test_without_state_uses_table_on_a_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:

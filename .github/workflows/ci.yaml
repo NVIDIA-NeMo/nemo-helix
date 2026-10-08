@@ -47,6 +47,7 @@ jobs:
       test: ${{ steps.changes.outputs.test }}
       deps: ${{ steps.changes.outputs.deps }}
       fabric: ${{ steps.changes.outputs.fabric }}
+      agents-harnesses: ${{ steps.changes.outputs.agents-harnesses }}
       harbor-integration: ${{ steps.changes.outputs.harbor-integration }}
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
       evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
@@ -194,7 +195,7 @@ jobs:
         run: |
           make docker-print TARGET=docker-cpu
           make docker-print TARGET=docker-gpu
-          make docker-print TARGET=docker-auditor
+          make docker-print TARGET=docker-garak
           make docker-print TARGET=docker-python-base
           make docker-print TARGET=nhx-automodel-gpu-wheels
           make docker-print TARGET=nhx-automodel
@@ -363,8 +364,8 @@ jobs:
           path: ${{ runner.temp }}/fastembed-cache
           key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
 
-  build-auditor-test-image:
-    name: Build auditor test image
+  build-garak-test-image:
+    name: Build garak test image
     needs: [changes]
     if: >
       !cancelled() && (
@@ -420,11 +421,11 @@ jobs:
 
       - name: Print Docker bake graph
         shell: bash
-        run: make docker-print TARGET=docker-auditor
+        run: make docker-print TARGET=docker-garak
 
-      - name: Build auditor image
+      - name: Build garak image
         shell: bash
-        run: make docker-build TARGET=docker-auditor
+        run: make docker-build TARGET=docker-garak
 
   build-safe-synthesizer-test-image:
     name: Build Safe Synthesizer test image
@@ -1190,8 +1191,8 @@ jobs:
       # Installs the published nemo-fabric wheels (+ codex/claude/deepagents adapters) from the lock.
       # Linux is where jobs actually execute the runtime, and it validates that the manylinux
       # nemo-fabric-runtime wheel installs on the runner's glibc.
-      - name: Install nemo-evaluator-sdk[fabric] from the lock
-        run: uv sync --frozen --package nemo-evaluator-sdk --extra fabric
+      - name: Install nhx-evals-sdk[fabric] from the lock
+        run: uv sync --frozen --package nhx-evals-sdk --extra fabric
       # Import the Fabric SDK surface that agent_eval/runtimes/fabric/runtime.py depends on, so the
       # published package is exercised for real instead of only via the hermetic fake-nemo_fabric tests.
       - name: Import the Fabric SDK surface the runtime uses
@@ -1229,13 +1230,13 @@ jobs:
         run: |
           uv pip install --python .venv/bin/python pytest pytest-asyncio
           uv run --frozen --no-sync pytest \
-            packages/nemo_evaluator_sdk/tests/agent_eval/test_fabric_surface.py -v
+            packages/nhx_evals_sdk/tests/agent_eval/test_fabric_surface.py -v
 
-  # Installs only nemo-evaluator-sdk (no workspace/extras/dev) and imports
+  # Installs only nhx-evals-sdk (no workspace/extras/dev) and imports
   # agent_eval.runtimes.harbor.runtime. Catches undeclared deps (workspace sync hides them)
   # and broken lazy barrels that pull in the metric/execution stack.
   evaluator-sdk-closure-smoke:
-    name: Evaluator SDK dependency-closure smoke (Linux, py${{ matrix.python-version }})
+    name: Evals SDK dependency-closure smoke (Linux, py${{ matrix.python-version }})
     needs: [changes]
     if: >
       !cancelled() &&
@@ -1259,21 +1260,21 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Install nemo-evaluator-sdk with no extras and no dev group
-        run: uv sync --frozen --package nemo-evaluator-sdk --no-dev
+      - name: Install nhx-evals-sdk with no extras and no dev group
+        run: uv sync --frozen --package nhx-evals-sdk --no-dev
       # pytest is not in the package-only sync; install the runner only (do not add SDK deps).
       # WHY BOTH THIS JOB AND THE UNIT TEST:
       # - Unit-test CI syncs the whole workspace: a sibling package may already
       #   provide httpx, so an undeclared SDK dep still imports — green here, broken for consumers
-      #   who only installed nemo-evaluator-sdk.
-      # - This job: `uv sync --package nemo-evaluator-sdk --no-dev` (no extras/siblings) so that
+      #   who only installed nhx-evals-sdk.
+      # - This job: `uv sync --package nhx-evals-sdk --no-dev` (no extras/siblings) so that
       #   undeclared-dep case fails, then runs test_lazy_public_api (laziness assertions; one source
       #   of truth — no duplicated heredoc probe).
       - name: Run lazy-import closure unit test under the stripped install
         run: |
           uv pip install --python .venv/bin/python pytest
           uv run --frozen --no-sync pytest \
-            packages/nemo_evaluator_sdk/tests/test_lazy_public_api.py::test_agent_eval_import_does_not_pull_the_execution_stack -v
+            packages/nhx_evals_sdk/tests/test_lazy_public_api.py::test_agent_eval_import_does_not_pull_the_execution_stack -v
 
   python-integration-test:
     name: Python integration tests
@@ -1378,7 +1379,7 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Run evaluator integration tests
         run: >-
-          uv run --frozen pytest plugins/nemo-evaluator/tests/integration
+          uv run --frozen pytest plugins/nemo-evals/tests/integration
           -m integration -n 4 --dist loadgroup -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
@@ -1396,16 +1397,16 @@ jobs:
           )
         timeout-minutes: 10
         run: |
-          uv sync --frozen --package nemohelix --package nemo-evaluator-plugin --extra harbor
+          uv sync --frozen --package nemohelix --package nemo-evals-plugin --extra harbor
           # Preserve the Harbor extra when the fixture launches `uv run nemo services run`.
           export UV_NO_SYNC=1
           uv run --frozen --no-sync pytest \
-            plugins/nemo-evaluator/tests/integration/test_harbor_taskset.py -v -n 0 \
+            plugins/nemo-evals/tests/integration/test_harbor_taskset.py -v -n 0 \
             --basetemp="$RUNNER_TEMP/harbor-taskset" \
             --junitxml="$RUNNER_TEMP/harbor-taskset.xml" -o junit_logging=all
         env:
           RUN_AGENT_EVAL_INTEGRATION: "1"
-          NEMO_PLUGIN_SERVICES_ALLOWLIST: evaluator
+          NEMO_PLUGIN_SERVICES_ALLOWLIST: evals
           NEMO_PLUGIN_CONTROLLERS_ALLOWLIST: ""
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload Harbor integration diagnostics
@@ -2146,6 +2147,127 @@ jobs:
           retention-days: 7
           path: web/packages/studio/playwright-report/
 
+  agents-nooa-tests:
+    name: NOOA adapter integration tests
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
+        needs.changes.outputs.agents-harnesses == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run NOOA integration tests
+        run: make test-agents-nooa
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
+  agents-claude-tests:
+    name: Claude Code adapter integration tests
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
+        needs.changes.outputs.agents-harnesses == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run Claude Code integration tests
+        run: make test-agents-claude
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
+  agents-codex-tests:
+    name: Codex adapter integration tests
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
+        needs.changes.outputs.agents-harnesses == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run Codex integration tests
+        run: make test-agents-codex
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
+  agents-hermes-tests:
+    name: Hermes adapter integration tests
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.deps == 'true' ||
+        needs.changes.outputs.agents-harnesses == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run Hermes integration tests
+        run: make test-agents-hermes
+        env:
+          ADAPTER_PYTHON: ${{ github.workspace }}/.venv-hermes/bin/python
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
   deployments-openshell-tests:
     # The openshell extra is a platform-restricted manylinux_2_39 wheel that the
     # shared unit-test job does not install, so the OpenShell backend tests skip
@@ -2406,6 +2528,10 @@ jobs:
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
+      - agents-nooa-tests
+      - agents-claude-tests
+      - agents-codex-tests
+      - agents-hermes-tests
       - fabric-wheel-smoke
       - evaluator-sdk-closure-smoke
       # Enable if you want this required

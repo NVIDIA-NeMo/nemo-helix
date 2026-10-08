@@ -2,17 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import {
   customizationJob1,
   grpoCustomizationJob,
 } from '@studio/mocks/customizer/customization-jobs';
+import { server } from '@studio/mocks/node';
 import { XL_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import type { CustomizationJob } from '@studio/util/customizationBackend';
 import { getBaseModel } from '@studio/util/customizations';
 import { render, screen, waitForElementToBeRemoved } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 
 const renderOverview = async (job: CustomizationJob = customizationJob1) => {
   render(
@@ -26,6 +30,45 @@ const renderOverview = async (job: CustomizationJob = customizationJob1) => {
 };
 
 describe('CustomizationOverview', () => {
+  it.each([
+    [HelixJobStatus.created, 'Training metrics are not available yet', 'after training starts'],
+    [HelixJobStatus.pending, 'Training metrics are not available yet', 'after training starts'],
+    [HelixJobStatus.active, 'Training metrics are not available yet', 'after training starts'],
+    [HelixJobStatus.error, 'Training metrics are unavailable', 'job failed'],
+    [HelixJobStatus.cancelled, 'Training metrics are unavailable', 'job was stopped'],
+    [HelixJobStatus.completed, 'No training metrics were reported', 'job completed'],
+    [HelixJobStatus.paused, 'Training metrics are not available yet', 'job is paused'],
+  ] as const)('explains an empty loss chart for a %s job', async (status, title, description) => {
+    server.use(
+      http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name`, () =>
+        HttpResponse.json({
+          ...customizationJob1,
+          status,
+          status_details: { metrics: { train_loss: [], val_loss: [] } },
+        })
+      )
+    );
+    await renderOverview();
+    expect(screen.getByText(title)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(description))).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('No training data available')).not.toBeInTheDocument();
+  });
+
+  it('describes empty GRPO chart series as reward metrics', async () => {
+    server.use(
+      http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name`, () =>
+        HttpResponse.json({
+          ...grpoCustomizationJob,
+          status: HelixJobStatus.active,
+          status_details: {},
+        })
+      )
+    );
+    await renderOverview(grpoCustomizationJob);
+    expect(screen.getByText(/Reward metrics are not available yet/)).toBeInTheDocument();
+  });
+
   it('summarizes the training results as stat tiles', async () => {
     await renderOverview();
 
@@ -127,7 +170,7 @@ describe('CustomizationOverview — GRPO', () => {
     // Both curves reach the chart — the series would otherwise fall back to the empty frame.
     expect(screen.getByRole('button', { name: 'Training reward' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Validation reward' })).toBeInTheDocument();
-    expect(screen.queryByText('No reward data available')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Reward metrics are/)).not.toBeInTheDocument();
 
     expect(screen.queryByText('Training loss')).not.toBeInTheDocument();
     expect(screen.queryByText('Final Training Loss')).not.toBeInTheDocument();
@@ -174,7 +217,7 @@ describe('CustomizationOverview — GRPO', () => {
     // The chart has no tile of its own, so this raw key appears exactly once.
     expect(screen.getByText('train_gen_tokens_per_sample/mean')).toBeInTheDocument();
     expect(screen.getByText('Training step time')).toBeInTheDocument();
-    expect(screen.queryByText('No data to compare')).not.toBeInTheDocument();
+    expect(screen.queryByText('No training metrics to compare')).not.toBeInTheDocument();
 
     // Drift keeps its tile but gets no chart, and `kl_penalty` — a flat zero under the default
     // `ref_policy_kl_penalty=0` — is reported by the run but rendered nowhere.

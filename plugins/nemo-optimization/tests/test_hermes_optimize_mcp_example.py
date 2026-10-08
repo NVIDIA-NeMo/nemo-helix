@@ -19,8 +19,8 @@ import pytest
 import yaml
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from nemo_evaluator_sdk.agent_eval.metrics import ToolCallCountMetric
 from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
+from nhx_evals_sdk.agent_eval.metrics import ToolCallCountMetric
 
 #: The Hermes adapter is an optional harness, not a platform dependency. It is pinned
 #: `python_version < '3.14'` in the pyprojects that ship it, so it is genuinely absent on 3.14 --

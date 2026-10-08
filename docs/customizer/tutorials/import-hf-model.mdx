@@ -18,7 +18,7 @@ Use this tutorial to learn how to import a private Hugging Face model into NeMo 
 - Completed the [Quickstart](/documentation/get-started) to install and deploy NeMo Helix locally.
 - Installed the Python SDK and any tutorial packages you need in your environment.
 - A Hugging Face token with access to the private or gated model repository.
-- A Hugging Face model with a compatible architecture. This tutorial uses `google/gemma-2-2b-it` as an example, but success depends on architectural compatibility.
+- A private or gated Hugging Face model with a compatible architecture. The job settings in this tutorial assume a small dense model (about 2B parameters) on one GPU; for larger or MoE models, [start from a reference recipe](/documentation/customizer-reference/manage-customization-jobs/training-configuration#reference-recipes).
 - Sufficient GPU memory for the model and LoRA training job.
 
 <Note>
@@ -46,10 +46,8 @@ This tutorial uses the typed NeMo Helix clients: `client.files`, `client.models`
 
 **Solution**: Use modern transformer architectures instead:
 
-- Llama models (3.1, 3.2, 3.3 series)
 - Nemotron models
-- Phi models
-- Gemma models (used in this tutorial)
+- Other architectures listed in the Model Catalog
 
 For a complete list of tested models, see the [Model Catalog](/documentation/customizer-reference/models/model-catalog).
 
@@ -136,8 +134,8 @@ hf_secret = create_or_get_secret("hf-token", os.getenv("HF_TOKEN"), "HF_TOKEN")
 Create a Hugging Face-backed fileset for the private model, then register a Model Entity that points to that fileset. Model files are downloaded by the platform when training or deployment needs them.
 
 ```python
-HF_REPO_ID = "google/gemma-2-2b-it"
-MODEL_NAME = "gemma-2-2b-it"
+HF_REPO_ID = "<your-org>/<your-private-model>"  # Private or gated repository your token can read
+MODEL_NAME = "my-private-model"
 model_storage = HuggingfaceStorageConfig(
     repo_id=HF_REPO_ID,
     repo_type="model",

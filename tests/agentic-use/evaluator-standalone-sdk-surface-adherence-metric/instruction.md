@@ -3,13 +3,13 @@
 
 # Add A Custom Surface-Adherence Metric
 
-Use the local standalone Evaluator SDK to draft and exercise a custom metric that scores whether observed Evaluator surfaces stay within a task's allowed surfaces.
+Use the local standalone Evals SDK to draft and exercise a custom metric that scores whether observed Evaluator surfaces stay within a task's allowed surfaces.
 
-Use only `packages/nemo_evaluator_sdk` and SDK-level APIs in your answer. Do not propose the `nemo` CLI, plugin SDK APIs, or any `services/*` implementation path.
+Use only `packages/nhx_evals_sdk` and SDK-level APIs in your answer. Do not propose the `nemo` CLI, plugin SDK APIs, or any `services/*` implementation path.
 
 Your final answer must include:
 
-- The package/path `packages/nemo_evaluator_sdk`.
+- The package/path `packages/nhx_evals_sdk`.
 - A directly runnable Python snippet defining a zero-argument metric class compatible with the SDK `Metric` protocol, including a `type` property.
 - The API symbols `compute_scores`, `score_names`, `MetricResult`, and `MetricScore`.
 - Score names `surface_adherence` and `surface_violation_count`.

@@ -15,7 +15,7 @@ dependencies = [
     "nemo-agents-plugin",
     "nemo-helix-plugin",
     "nemo-helix",
-    "nemo-evaluator-sdk",
+    "nhx-evals-sdk",
     "matplotlib>=3.8.0",
     "numpy>=1.26.0",
     "optuna>=4.0.0",
@@ -57,7 +57,7 @@ nemo-agent-optimization-plugin = { workspace = true }
 nemo-agents-plugin = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 nemo-helix = { workspace = true }
-nemo-evaluator-sdk = { workspace = true }
+nhx-evals-sdk = { workspace = true }
 
 [dependency-groups]
 dev = [

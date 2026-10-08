@@ -59,85 +59,88 @@ navigation:
             path: ../../agents/plugins.mdx
       - section: Evaluate Agents & Models
         slug: evaluate-models
-        path: ../../evaluator/index.mdx
+        path: ../../evals/index.mdx
         contents:
+          - page: Upgrade guidance
+            slug: upgrading-from-evaluator
+            path: ../../evals/upgrading-from-evaluator.mdx
           - page: Evaluation Approaches
             slug: dataset-driven-vs-task-driven-evaluation
-            path: ../../evaluator/evaluation-approaches.mdx
+            path: ../../evals/evaluation-approaches.mdx
           - section: Agent Evaluation
             slug: agent-eval
-            path: ../../evaluator/agent-eval/index.mdx
+            path: ../../evals/agent-eval/index.mdx
             contents:
               - page: Quickstart
                 slug: quickstart
-                path: ../../evaluator/agent-eval/quickstart.mdx
+                path: ../../evals/agent-eval/quickstart.mdx
               - page: Evaluate a Deployed Agent over HTTP
                 slug: evaluate-deployed-agent
-                path: ../../evaluator/agent-eval/evaluate-deployed-agent.mdx
+                path: ../../evals/agent-eval/evaluate-deployed-agent.mdx
               - page: Evaluate a Harbor Task Suite
                 slug: harbor-runner
-                path: ../../evaluator/agent-eval/harbor-runner.mdx
+                path: ../../evals/agent-eval/harbor-runner.mdx
               - page: Run a NeMo Fabric Agent inside Harbor
                 slug: harbor-fabric-agent
-                path: ../../evaluator/agent-eval/harbor-fabric-agent.mdx
+                path: ../../evals/agent-eval/harbor-fabric-agent.mdx
               - page: Evaluate a NeMo Gym Environment
                 slug: gym-runner
-                path: ../../evaluator/agent-eval/gym-runner.mdx
+                path: ../../evals/agent-eval/gym-runner.mdx
               - page: Run a Custom NeMo Gym Environment
                 slug: gym-custom-environment
-                path: ../../evaluator/agent-eval/gym-custom-environment.mdx
+                path: ../../evals/agent-eval/gym-custom-environment.mdx
               - page: Configure Sandboxed Gym for Evaluator
                 slug: gym-sandbox-configuration
-                path: ../../evaluator/agent-eval/gym-sandbox-configuration.mdx
+                path: ../../evals/agent-eval/gym-sandbox-configuration.mdx
               - page: Evaluate with a NeMo Fabric Harness
                 slug: fabric-runner
-                path: ../../evaluator/agent-eval/fabric-runner.mdx
+                path: ../../evals/agent-eval/fabric-runner.mdx
               - page: Score by Component
                 slug: score-by-component
-                path: ../../evaluator/agent-eval/score-by-component.mdx
+                path: ../../evals/agent-eval/score-by-component.mdx
               - page: Targets and Runners
                 slug: targets-and-runners
-                path: ../../evaluator/agent-eval/targets-and-runners.mdx
+                path: ../../evals/agent-eval/targets-and-runners.mdx
               - page: Writing Metrics
                 slug: writing-metrics
-                path: ../../evaluator/agent-eval/writing-metrics.mdx
+                path: ../../evals/agent-eval/writing-metrics.mdx
               - page: Reading Results
                 slug: reading-results
-                path: ../../evaluator/agent-eval/reading-results.mdx
+                path: ../../evals/agent-eval/reading-results.mdx
           - section: Tutorials
-            path: ../../evaluator/tutorials/index.mdx
+            path: ../../evals/tutorials/index.mdx
             contents:
               - page: Run LLM-as-a-Judge Evaluation
-                path: ../../evaluator/tutorials/run-llm-judge-evaluation.mdx
+                path: ../../evals/tutorials/run-llm-judge-evaluation.mdx
               - page: Define and Run Custom Python Metrics
-                path: ../../evaluator/tutorials/define-run-custom-python-metrics.mdx
+                path: ../../evals/tutorials/define-run-custom-python-metrics.mdx
           - page: Experiments
             slug: experiments
-            path: ../../evaluator/experiments.mdx
+            path: ../../evals/experiments.mdx
           - page: SDK Resources
-            path: ../../evaluator/sdk-resources.mdx
+            path: ../../evals/sdk-resources.mdx
           - page: Manage Tasks & Tasksets
             slug: manage-tasks-tasksets
-            path: ../../evaluator/manage-tasks-tasksets.mdx
+            path: ../../evals/manage-tasks-tasksets.mdx
           - section: Metrics
-            path: ../../evaluator/metrics/index.mdx
+            path: ../../evals/metrics/index.mdx
             contents:
               - page: Manage Metrics
-                path: ../../evaluator/metrics/manage-metrics.mdx
+                path: ../../evals/metrics/manage-metrics.mdx
               - page: LLM-as-a-Judge
-                path: ../../evaluator/metrics/llm-as-a-judge.mdx
+                path: ../../evals/metrics/llm-as-a-judge.mdx
               - page: RAG Metrics
-                path: ../../evaluator/metrics/rag.mdx
+                path: ../../evals/metrics/rag.mdx
               - page: Similarity Metrics
-                path: ../../evaluator/metrics/similarity.mdx
+                path: ../../evals/metrics/similarity.mdx
               - page: Agentic Metrics
-                path: ../../evaluator/metrics/agentic.mdx
+                path: ../../evals/metrics/agentic.mdx
               - page: Bring Your Own Metric
-                path: ../../evaluator/metrics/remote.mdx
+                path: ../../evals/metrics/remote.mdx
               - page: Agent Configuration
-                path: ../../evaluator/metrics/agent-configuration.mdx
+                path: ../../evals/metrics/agent-configuration.mdx
               - page: Model Configuration
-                path: ../../evaluator/metrics/model-configuration.mdx
+                path: ../../evals/metrics/model-configuration.mdx
       - section: Fine-tune Models
         slug: customizer-reference
         path: ../../customizer/index.mdx
@@ -191,6 +194,9 @@ navigation:
               - page: Dataset Format
                 path: ../../customizer/models/data-format.mdx
                 slug: dataset-format
+              - page: Nemotron
+                path: ../../customizer/models/llama-nemotron.mdx
+                slug: llama-nemotron
               - page: Embedding
                 path: ../../customizer/models/embedding.mdx
                 slug: embedding
@@ -200,9 +206,6 @@ navigation:
               - page: Llama
                 path: ../../customizer/models/llama.mdx
                 slug: llama
-              - page: Llama Nemotron
-                path: ../../customizer/models/llama-nemotron.mdx
-                slug: llama-nemotron
               - page: Mistral
                 path: ../../customizer/models/mistral.mdx
                 slug: mistral
@@ -351,29 +354,29 @@ navigation:
           - page: Observability
             path: ../../guardrails/observability.mdx
       - section: Vulnerability Scanning
-        path: ../../auditor/index.mdx
+        path: ../../garak/index.mdx
         contents:
           - section: Tutorials
-            path: ../../auditor/tutorials/index.mdx
+            path: ../../garak/tutorials/index.mdx
             contents:
               - page: Run an Audit Locally
-                path: ../../auditor/tutorials/run-audit-locally.mdx
+                path: ../../garak/tutorials/run-audit-locally.mdx
           - page: SDK Resources
-            path: ../../auditor/sdk-resources.mdx
+            path: ../../garak/sdk-resources.mdx
           - section: Configurations
-            path: ../../auditor/configs/index.mdx
+            path: ../../garak/configs/index.mdx
             contents:
               - page: Selecting Probes
-                path: ../../auditor/configs/probes.mdx
+                path: ../../garak/configs/probes.mdx
               - page: Schema
-                path: ../../auditor/configs/schema.mdx
+                path: ../../garak/configs/schema.mdx
           - section: Targets
-            path: ../../auditor/targets/index.mdx
+            path: ../../garak/targets/index.mdx
             contents:
               - page: Inference Gateway
-                path: ../../auditor/targets/inference-gateway.mdx
+                path: ../../garak/targets/inference-gateway.mdx
               - page: Schema
-                path: ../../auditor/targets/schema.mdx
+                path: ../../garak/targets/schema.mdx
       - section: Studio
         path: ../../studio/index.mdx
         contents:
@@ -577,8 +580,9 @@ navigation:
                 path: ../../troubleshooting/customizer.mdx
               - page: Data Designer
                 path: ../../troubleshooting/data-designer.mdx
-              - page: Evaluator
-                path: ../../troubleshooting/evaluator.mdx
+              - page: Evals
+                slug: evals
+                path: ../../troubleshooting/evals.mdx
               - page: Guardrails
                 path: ../../troubleshooting/guardrails.mdx
               - page: Studio

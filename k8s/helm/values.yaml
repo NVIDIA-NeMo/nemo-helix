@@ -598,8 +598,8 @@ baseHelixConfig: |
       type: local
       path: /vol/files
 
-  # -- auditor is the configuration specific to the Auditor service
-  auditor: {}
+  # -- garak is the configuration specific to the Garak service
+  garak: {}
 
   # -- data_designer is the configuration specific to the Data Designer service
   data_designer:
@@ -638,8 +638,8 @@ baseHelixConfig: |
   safe_synthesizer:
     container_image: nhx-safe-synthesizer-tasks
 
-  # -- evaluator is the configuration specific to the Evaluator service
-  evaluator: {}
+  # -- evals is the configuration specific to the Evals service
+  evals: {}
 
   # -- guardrails is the configuration specific to the Guardrails service
   guardrails: {}

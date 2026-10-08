@@ -19,9 +19,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextvars import ContextVar
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
 
-import typer
 from rich.console import Console
 
 _warnings_context: ContextVar[list[str | None]] = ContextVar("warnings")
@@ -56,9 +55,6 @@ def collect_warnings(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator that collects warnings and prints them at the end.
 
-    When the ``nemo`` CLI runs in agent mode, the command's agent hints are
-    printed after the warnings.
-
     Usage:
         @collect_warnings
         def my_command():
@@ -73,10 +69,8 @@ def collect_warnings(func: Callable[_P, _R]) -> Callable[_P, _R]:
         try:
             return func(*args, **kwargs)
         finally:
-            agent_hints = _get_agent_hints(args, kwargs)
             _warnings_context.reset(token)
             print_warnings(warnings)
-            _print_agent_hints(agent_hints)
 
     return wrapper
 
@@ -101,29 +95,3 @@ def add_warning(warning: str | list[str | None] | None) -> None:
     except LookupError:
         # Not inside a collect_warnings context, ignore
         pass
-
-
-def _get_agent_hints(args: tuple[Any, ...], kwargs: dict[str, Any]) -> list[str]:
-    """Ask the CLI state for the hints of the invoked command, extracting ctx from command args."""
-    ctx = next((arg for arg in args if isinstance(arg, typer.Context)), None)
-    if ctx is None:
-        ctx = kwargs.get("ctx")
-    # Hints are optional: a command driven outside ``nemo`` (or with a test
-    # stand-in state) has no ``get_agent_hints`` and prints none.
-    get_agent_hints = getattr(getattr(ctx, "obj", None), "get_agent_hints", None)
-    if ctx is None or get_agent_hints is None:
-        return []
-    # "nemo workspaces list" -> "workspaces list"
-    parts = ctx.command_path.split(None, 1)
-    return get_agent_hints(parts[1] if len(parts) > 1 else "")
-
-
-def _print_agent_hints(hints: list[str]) -> None:
-    """Print agent hints to stderr under their own heading."""
-    if not hints:
-        return
-    error_console = Console(stderr=True)
-    error_console.print()
-    error_console.print("[bold bright_green]AGENT HINTS:[/]")
-    for hint in hints:
-        error_console.print(f"  {hint}")

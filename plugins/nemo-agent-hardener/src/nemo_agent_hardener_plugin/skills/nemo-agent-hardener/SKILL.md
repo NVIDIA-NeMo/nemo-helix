@@ -18,7 +18,7 @@ triggers:
   - war-game a LangGraph Dockerfile project
   - war-game validation_failed result
 not-for:
-  - auditor (use for a one-shot garak scan without hardening)
+  - garak (use for a one-shot garak scan without hardening)
   - guardrails-plugin (use to author guardrails directly, without a war-game)
   - nemo-try-agent (use to chat with a deployed agent)
   - nemo-status (use for a read-only platform dashboard)
@@ -128,7 +128,7 @@ nemo agent-hardener init --project-dir ./my-agent --name my-agent --harness lang
 
 Stop honestly: Agent Hardener refuses these at `init` by design. They run behind a compiled gateway
 with no in-process interception point, so a guardrail could never actually block a tool call.
-Suggest the `auditor` skill for scan-only coverage.
+Suggest the `garak` skill for scan-only coverage.
 
 ## 3. Interview — Studio or CLI?
 
