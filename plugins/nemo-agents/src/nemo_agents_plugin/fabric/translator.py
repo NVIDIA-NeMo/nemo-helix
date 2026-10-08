@@ -22,6 +22,7 @@ HARNESS_ADAPTER_IDS = {
     "deepagents": "nvidia.fabric.langchain.deepagents",
     "hermes": "nvidia.fabric.hermes",
     "remote-agent": "nvidia.fabric.remote-agent",
+    "pi": "nvidia.fabric.pi",
 }
 
 # A harness kind carrying this prefix is already a fully-qualified Fabric
@@ -33,6 +34,12 @@ HARNESS_ADAPTER_IDS = {
 FABRIC_ADAPTER_ID_PREFIX = "nvidia.fabric."
 
 PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NHX_BASE_URL", "NHX_WORKSPACE")
+
+# In-image path where the Fabric Dockerfile stages the NeMo Relay Pi extension
+# (see container/template.py PI_RELAY_EXTENSION_PATH). The Pi adapter hard-requires
+# harness.settings["relay_extension_path"] when Relay telemetry is enabled, so a
+# Relay-enabled Pi agent defaults to the staged copy unless the config set a path.
+PI_RELAY_EXTENSION_PATH = "/opt/pi-relay-extension"
 
 
 class FabricTranslationError(ValueError):
@@ -50,6 +57,9 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
     }
     _validate_untranslated_shared_fields(config)
 
+    runtime_payload = config.runtime.model_dump(exclude_none=True)
+    _default_relay_runtime_artifacts(runtime_payload, config, harness)
+
     fabric_config = fabric.FabricConfig(
         metadata=fabric.MetadataConfig(name=config.name, description=config.description or None),
         harness=fabric.HarnessConfig(
@@ -59,7 +69,7 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
         ),
         models={key: fabric.ModelConfig(**payload) for key, payload in model_payloads.items()},
         instructions=_instructions_config(config),
-        runtime=fabric.RuntimeConfig(**config.runtime.model_dump(exclude_none=True)),
+        runtime=fabric.RuntimeConfig(**runtime_payload),
         environment=_environment_config(config, runtime_env),
         skills=_skills_config(config),
         mcp=_mcp_config(config),
@@ -230,11 +240,46 @@ def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig
     if provider != "relay":
         raise FabricTranslationError(f"Unsupported telemetry provider {provider!r}. Only 'relay' is supported.")
 
+    _default_relay_extension_path(fabric_config)
+
     fabric_config.enable_relay(
         project=telemetry.project,
         output_dir=telemetry.output_dir,
         observability=_relay_observability_config(config, model),
     )
+
+
+def _default_relay_runtime_artifacts(
+    runtime_payload: dict[str, Any], config: AgentConfig, harness: HarnessConfig
+) -> None:
+    """Default ``runtime.artifacts`` for a Relay-enabled Pi harness when unset.
+
+    Fabric creates the runtime-owned Relay config under ``runtime.artifacts``, so a
+    Relay-enabled Pi agent needs it set or Pi startup fails. Default it to
+    ``./artifacts/pi`` while preserving an explicitly configured value; a no-op for
+    other harnesses and for telemetry-disabled Pi agents.
+    """
+    telemetry = config.telemetry
+    if not telemetry.enabled or (telemetry.provider or "relay") != "relay":
+        return
+    if _adapter_id_for_harness(harness) != HARNESS_ADAPTER_IDS["pi"]:
+        return
+    runtime_payload.setdefault("artifacts", "./artifacts/pi")
+
+
+def _default_relay_extension_path(fabric_config: Any) -> None:
+    """Point a Pi harness at the image-staged Relay extension when none is set.
+
+    The Pi adapter raises ``pi_relay_extension_not_found`` if Relay telemetry is
+    active without ``harness.settings["relay_extension_path"]``. The Fabric image
+    stages the extension at ``PI_RELAY_EXTENSION_PATH``, so default to it while
+    preserving an explicitly configured path. Only the Pi adapter consumes this
+    setting, so defaulting it is a no-op for the other harnesses.
+    """
+    harness = fabric_config.harness
+    if harness.adapter_id != HARNESS_ADAPTER_IDS["pi"]:
+        return
+    harness.settings.setdefault("relay_extension_path", PI_RELAY_EXTENSION_PATH)
 
 
 def _telemetry_agent_name(config: AgentConfig) -> str:
