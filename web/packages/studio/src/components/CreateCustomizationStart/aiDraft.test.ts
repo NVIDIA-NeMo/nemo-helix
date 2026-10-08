@@ -196,6 +196,23 @@ describe('validateDraft', () => {
       );
     });
 
+    it("sets unsloth's chat template from the dataset's format, as the form does", () => {
+      const draft: CustomizationDraft = {
+        backend: 'unsloth',
+        job: {
+          model: { name: 'x' },
+          dataset: { path: 'x', apply_chat_template: false },
+          training: { finetuning_type: 'lora' },
+          output: { name: 'chat-run' },
+        },
+        rationale: [],
+        needs_from_user: [],
+      };
+      const { values, config } = expectValid(validate(draft));
+      expect(values.unsloth.dataset.apply_chat_template).toBe(true);
+      expect(JSON.parse(config).spec.dataset.apply_chat_template).toBe(true);
+    });
+
     it('keeps an unsloth merged save', () => {
       const draft: CustomizationDraft = {
         backend: 'unsloth',
