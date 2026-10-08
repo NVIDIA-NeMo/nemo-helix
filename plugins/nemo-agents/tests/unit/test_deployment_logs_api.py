@@ -148,7 +148,11 @@ def test_logs_fetches_external_backend_lines(client: TestClient, monkeypatch: py
     body = resp.json()
     assert body["total_lines"] == 2
     cursor = module._decode_external_cursor(body["next_offset"])
-    assert cursor == ("2026-05-19T21:00:01Z", "2026-05-19T21:00:01Z request served", 1)
+    assert cursor == (
+        "2026-05-19T21:00:01Z",
+        module._external_line_hash("2026-05-19T21:00:01Z request served"),
+        1,
+    )
     assert body["data"][0]["timestamp"] == "2026-05-19T21:00:00.123456Z"
     assert body["data"][0]["message"] == "pod started"
     assert body["data"][1]["message"] == "request served"
@@ -182,8 +186,8 @@ async def test_stream_external_logs_resumes_from_exact_line_cursor() -> None:
     )
     parsed = [_parse_event(event) for event in events]
     assert [module._decode_external_cursor(event_id) for event_id, _payload in parsed if event_id] == [
-        ("2026-05-19T21:00:00Z", "2026-05-19T21:00:00Z first new line", 1),
-        ("2026-05-19T21:00:01Z", "2026-05-19T21:00:01Z second new line", 1),
+        ("2026-05-19T21:00:00Z", module._external_line_hash("2026-05-19T21:00:00Z first new line"), 1),
+        ("2026-05-19T21:00:01Z", module._external_line_hash("2026-05-19T21:00:01Z second new line"), 1),
     ]
     assert [payload["message"] for _event_id, payload in parsed if payload is not None] == [
         "first new line",

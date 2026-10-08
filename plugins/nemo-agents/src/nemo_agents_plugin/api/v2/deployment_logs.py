@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -233,40 +234,52 @@ def _parse_last_event_id(value: str | None) -> int | None:
     return offset if offset >= 0 else None
 
 
-_EXTERNAL_CURSOR_PREFIX = "v1:"
+_EXTERNAL_CURSOR_PREFIX = "v2:"
+_LEGACY_EXTERNAL_CURSOR_PREFIX = "v1:"
+
+
+def _external_line_hash(raw: str) -> str:
+    return hashlib.sha256(raw.rstrip("\n").encode("utf-8", errors="replace")).hexdigest()
 
 
 def _external_line_identity(raw: str) -> tuple[str, str]:
-    """Return the timestamp and exact text identity for an external log line."""
+    """Return a bounded timestamp+hash identity for an external log line."""
     line = raw.rstrip("\n")
     parsed = _parse_line(line)
-    return parsed.timestamp, line
+    return parsed.timestamp, _external_line_hash(line)
 
 
 def _encode_external_cursor(raw: str, occurrence: int) -> str:
     """Return an opaque, per-line external-log cursor safe for SSE ids."""
-    timestamp, line = _external_line_identity(raw)
-    payload = json.dumps({"ts": timestamp, "line": line, "n": occurrence}, separators=(",", ":"))
+    timestamp, line_hash = _external_line_identity(raw)
+    payload = json.dumps({"ts": timestamp, "h": line_hash, "n": occurrence}, separators=(",", ":"))
     encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
     return f"{_EXTERNAL_CURSOR_PREFIX}{encoded}"
 
 
 def _decode_external_cursor(cursor: str) -> tuple[str, str, int] | None:
     """Decode an external-log cursor, returning None for legacy cursors."""
-    if not cursor.startswith(_EXTERNAL_CURSOR_PREFIX):
+    if cursor.startswith(_EXTERNAL_CURSOR_PREFIX):
+        encoded = cursor[len(_EXTERNAL_CURSOR_PREFIX) :]
+        hash_field = "h"
+    elif cursor.startswith(_LEGACY_EXTERNAL_CURSOR_PREFIX):
+        encoded = cursor[len(_LEGACY_EXTERNAL_CURSOR_PREFIX) :]
+        hash_field = "line"
+    else:
         return None
-    encoded = cursor[len(_EXTERNAL_CURSOR_PREFIX) :]
     padded = encoded + "=" * (-len(encoded) % 4)
     try:
         payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         return None
-    timestamp = payload.get("ts")
-    line = payload.get("line")
-    occurrence = payload.get("n")
-    if not isinstance(timestamp, str) or not isinstance(line, str) or not isinstance(occurrence, int):
+    if not isinstance(payload, dict):
         return None
-    return timestamp, line, occurrence
+    timestamp = payload.get("ts")
+    line_hash = payload.get(hash_field)
+    occurrence = payload.get("n")
+    if not isinstance(timestamp, str) or not isinstance(line_hash, str) or not isinstance(occurrence, int):
+        return None
+    return timestamp, line_hash, occurrence
 
 
 def _external_line_cursors(lines: list[str]) -> list[str]:
@@ -287,10 +300,10 @@ def _last_external_cursor_index(lines: list[str], cursor: str | None) -> int:
         return 0
     decoded = _decode_external_cursor(cursor)
     if decoded is not None:
-        timestamp, line, wanted_occurrence = decoded
+        timestamp, line_hash, wanted_occurrence = decoded
         occurrence = 0
         for index, candidate in enumerate(lines):
-            if _external_line_identity(candidate) != (timestamp, line):
+            if _external_line_identity(candidate) != (timestamp, line_hash):
                 continue
             occurrence += 1
             if occurrence == wanted_occurrence:
@@ -301,8 +314,8 @@ def _last_external_cursor_index(lines: list[str], cursor: str | None) -> int:
     # raw-line cursor from an earlier server version. Prefer the first match to
     # avoid skipping later lines with the same timestamp.
     for index, line in enumerate(lines):
-        timestamp, text = _external_line_identity(line)
-        if cursor in (timestamp, text):
+        timestamp, line_hash = _external_line_identity(line)
+        if cursor in (timestamp, line_hash, line):
             return index + 1
     return 0
 
