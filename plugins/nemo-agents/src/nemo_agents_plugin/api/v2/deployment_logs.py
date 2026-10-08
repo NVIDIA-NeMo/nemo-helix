@@ -42,7 +42,7 @@ from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.entities import AgentDeployment
-from nemo_agents_plugin.runner.registry import get_runner_backend
+from nemo_agents_plugin.runner.registry import get_runner_registry
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from pydantic import BaseModel, Field
@@ -96,7 +96,7 @@ async def _resolve_log_path(
 ) -> Path:
     # Auth first — entity lookup scopes to the caller's workspace.
     try:
-        await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+        deployment = await entity_client.get(AgentDeployment, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -104,7 +104,7 @@ async def _resolve_log_path(
         ) from exc
     from nemo_agents_plugin.runner.backend import ExternalLog, LocalLog, NotYetAvailable
 
-    location = get_runner_backend().get_log_location(workspace, name)
+    location = get_runner_registry().backend_for(deployment.deployment_mode).get_log_location(workspace, name)
     if isinstance(location, LocalLog):
         return location.path
     if isinstance(location, NotYetAvailable):
@@ -127,14 +127,14 @@ async def _resolve_external_log_getter(
 ):  # noqa: ANN202 — structural runner-backend hook
     """Return a container log fetcher when the runner backend supports one."""
     try:
-        await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+        deployment = await entity_client.get(AgentDeployment, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Deployment {name!r} not found in workspace {workspace!r}.",
         ) from exc
 
-    backend = get_runner_backend()
+    backend = get_runner_registry().backend_for(deployment.deployment_mode)
     return getattr(backend, "get_logs", None)
 
 
@@ -158,6 +158,7 @@ async def _resolve_external_logs(
     try:
         log_result = await get_logs(workspace=workspace, name=name, tail=tail)
     except Exception as exc:
+        logger.exception("Failed to read deployment logs for '%s/%s'", workspace, name)
         raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
     lines = [line.rstrip("\n") for line in list(getattr(log_result, "lines", []) or [])]
     cursors = _external_line_cursors(lines)
@@ -345,6 +346,7 @@ async def _stream_external_log_lines(
     name: str,
     start_cursor: str | None,
     initial_lines: list[str] | None = None,
+    is_deployment_present: Callable[[], Awaitable[bool]] | None = None,
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[str]:
     """Poll external substrate logs and yield SSE events after a log-line cursor."""
@@ -355,6 +357,8 @@ async def _stream_external_log_lines(
     last_keepalive = asyncio.get_running_loop().time()
     while True:
         if is_disconnected is not None and await is_disconnected():
+            return
+        if is_deployment_present is not None and not await is_deployment_present():
             return
         if pending_lines is None:
             log_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
@@ -429,9 +433,18 @@ async def stream_deployment_logs(
     last_event_id = request.headers.get("last-event-id")
     get_logs = await _resolve_external_log_getter(workspace, name, entity_client)
     if get_logs is not None:
+
+        async def _is_deployment_present() -> bool:
+            try:
+                await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+            except NemoEntityNotFoundError:
+                return False
+            return True
+
         try:
             initial_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
         except Exception as exc:
+            logger.exception("Failed to open deployment log stream for '%s/%s'", workspace, name)
             raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
         initial_lines = [line.rstrip("\n") for line in list(getattr(initial_result, "lines", []) or [])]
         return StreamingResponse(
@@ -441,6 +454,7 @@ async def stream_deployment_logs(
                 name=name,
                 start_cursor=last_event_id,
                 initial_lines=initial_lines,
+                is_deployment_present=_is_deployment_present,
                 is_disconnected=request.is_disconnected,
             ),
             media_type="text/event-stream",

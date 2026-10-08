@@ -728,6 +728,11 @@ class DeploymentsRunnerBackend(RunnerBackend):
             task = self._executor_registry_task
         try:
             registry = await task
+        except asyncio.CancelledError:
+            async with self._executor_registry_lock:
+                if self._executor_registry_task is task:
+                    self._executor_registry_task = None
+            raise
         except Exception:
             async with self._executor_registry_lock:
                 if self._executor_registry_task is task:
@@ -1013,7 +1018,13 @@ class DeploymentsRunnerBackend(RunnerBackend):
         entities = self._entity_client()
         try:
             deployment = await entities.get(Deployment, name=name, workspace=workspace)
+            deployment_config = await entities.get(
+                DeploymentConfig, name=deployment.deployment_config, workspace=workspace
+            )
         except NemoEntityNotFoundError:
+            return LogResult(lines=[])
+        if deployment_config.labels.get("nemo.agents/deployment") != name:
+            logger.warning("Refusing to read non-agent deployment logs for '%s/%s'", workspace, name)
             return LogResult(lines=[])
         try:
             backend = (await self._registry()).resolve(deployment.executor)

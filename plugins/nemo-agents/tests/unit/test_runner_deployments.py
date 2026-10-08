@@ -953,7 +953,12 @@ async def test_registry_initialization_is_shared_across_concurrent_log_requests(
 async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.LogCaptureFixture) -> None:
     backend = _backend()
     entities = AsyncMock()
-    entities.get = AsyncMock(return_value=Deployment(name="dep", workspace="default", deployment_config="dep"))
+    entities.get = AsyncMock(
+        side_effect=[
+            Deployment(name="dep", workspace="default", deployment_config="dep"),
+            DeploymentConfig(name="dep", workspace="default", labels={"nemo.agents/deployment": "dep"}),
+        ]
+    )
     backend._entities = entities
     registry = MagicMock()
     registry.resolve.side_effect = KeyError("missing")

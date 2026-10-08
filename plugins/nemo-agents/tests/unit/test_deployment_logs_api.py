@@ -15,6 +15,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.api.v2 import deployment_logs as module
+from nemo_agents_plugin.entities import AgentDeployment
+
+
+def _registry_for(backend):  # noqa: ANN001, ANN202 — lightweight structural test double
+    return type("_Registry", (), {"backend_for": staticmethod(lambda _mode: backend)})()
 
 
 @pytest.fixture
@@ -39,7 +44,7 @@ def fake_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             ),
         },
     )()
-    monkeypatch.setattr(module, "get_runner_backend", lambda: backend)
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(backend))
     return log_path
 
 
@@ -53,7 +58,7 @@ def client(fake_log: Path) -> Iterator[TestClient]:  # noqa: ARG001 — fixture 
     # the path-resolution and tail behavior. A separate test asserts the
     # 404 from a missing entity.
     fake_client = AsyncMock()
-    fake_client.get = AsyncMock(return_value=object())
+    fake_client.get = AsyncMock(return_value=AgentDeployment(name="test", workspace="default"))
     app.dependency_overrides[module.get_entity_client] = lambda: fake_client
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
@@ -92,7 +97,7 @@ def test_logs_returns_404_when_log_not_yet_available(client: TestClient, monkeyp
         (),
         {"get_log_location": staticmethod(lambda _workspace, _name: NotYetAvailable())},
     )()
-    monkeypatch.setattr(module, "get_runner_backend", lambda: backend)
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(backend))
     resp = client.get("/apis/agents/v2/workspaces/default/deployments/missing/logs")
     assert resp.status_code == 404
 
@@ -110,7 +115,7 @@ def test_logs_returns_404_with_hint_for_external_log_backend(
             "get_log_location": staticmethod(lambda _workspace, _name: ExternalLog(hint="Run: docker logs abc123")),
         },
     )()
-    monkeypatch.setattr(module, "get_runner_backend", lambda: backend)
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(backend))
     resp = client.get("/apis/agents/v2/workspaces/default/deployments/missing/logs")
     assert resp.status_code == 404
     assert "docker logs abc123" in resp.json()["detail"]
@@ -137,7 +142,7 @@ def test_logs_fetches_external_backend_lines(client: TestClient, monkeypatch: py
                 ]
             )
 
-    monkeypatch.setattr(module, "get_runner_backend", lambda: _RemoteBackend())
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(_RemoteBackend()))
     resp = client.get("/apis/agents/v2/workspaces/default/deployments/test/logs?tail=2")
     assert resp.status_code == 200
     body = resp.json()
@@ -256,12 +261,12 @@ def test_logs_workspace_namespacing_separates_same_named_deployments(
         return LocalLog(path=target) if target is not None else NotYetAvailable()
 
     backend = type("_PerWorkspaceBackend", (), {"get_log_location": staticmethod(_resolve)})()
-    monkeypatch.setattr(module, "get_runner_backend", lambda: backend)
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(backend))
 
     app = FastAPI()
     app.include_router(module.router, prefix="/apis/agents/v2/workspaces/{workspace}")
     fake_client = AsyncMock()
-    fake_client.get = AsyncMock(return_value=object())
+    fake_client.get = AsyncMock(return_value=AgentDeployment(name="test", workspace="default"))
     app.dependency_overrides[module.get_entity_client] = lambda: fake_client
 
     with TestClient(app, raise_server_exceptions=False) as c:
