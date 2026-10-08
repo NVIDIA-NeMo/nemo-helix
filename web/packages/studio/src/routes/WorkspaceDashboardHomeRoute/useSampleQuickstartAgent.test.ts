@@ -29,8 +29,10 @@ const deployment = (suffix: string, status: string) => ({
   status,
 });
 
+const refetchAgent = vi.fn();
+
 const mockAgent = (data: unknown, isFetched = true) =>
-  vi.mocked(useAgentsGetAgent).mockReturnValue({ data, isFetched } as never);
+  vi.mocked(useAgentsGetAgent).mockReturnValue({ data, isFetched, refetch: refetchAgent } as never);
 
 const mockDeployments = (deployments: unknown[], isFetched = true) =>
   vi.mocked(useAgentsListDeployments).mockReturnValue({
@@ -44,6 +46,11 @@ const sampleStateFromHook = () =>
 const sampleAgentFromHook = () => {
   const sample = sampleStateFromHook();
   return sample.state === 'ready' ? sample.agent : undefined;
+};
+
+const sampleRetryFromHook = () => {
+  const sample = sampleStateFromHook();
+  return sample.state === 'error' ? sample.retry : undefined;
 };
 
 /** The `query` options the hook handed to a mocked SDK hook on its last render. */
@@ -129,20 +136,28 @@ describe('useSampleQuickstartAgent', () => {
       expect(lastQueryOptions(useAgentsListDeployments).enabled).toBe(false);
     });
 
-    it('fetches nothing when disabled, and reports the sample unavailable', () => {
+    it('fetches nothing when disabled, and reports it as disabled', () => {
       const { result } = renderHook(() => useSampleQuickstartAgent('some-workspace', false));
 
-      expect(result.current).toEqual({ state: 'unavailable' });
+      expect(result.current).toEqual({ state: 'disabled' });
       expect(lastQueryOptions(useAgentsGetAgent).enabled).toBe(false);
       expect(lastQueryOptions(useAgentsListDeployments).enabled).toBe(false);
     });
   });
 
   describe('a missing agent', () => {
-    it('is unavailable once the lookup settles without one (404, 403, 5xx alike)', () => {
+    it('is an error once the lookup settles without one (404, 403, 5xx alike)', () => {
       mockAgent(undefined, true);
 
-      expect(sampleStateFromHook()).toEqual({ state: 'unavailable' });
+      expect(sampleStateFromHook()).toEqual({ state: 'error', retry: expect.any(Function) });
+    });
+
+    it('retries by refetching the agent', async () => {
+      mockAgent(undefined, true);
+
+      await sampleRetryFromHook()?.();
+
+      expect(refetchAgent).toHaveBeenCalledTimes(1);
     });
 
     it('is not retried: a 404 is an answer, not a transient failure', () => {

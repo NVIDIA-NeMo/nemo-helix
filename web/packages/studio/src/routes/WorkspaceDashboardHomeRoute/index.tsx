@@ -10,6 +10,8 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { QuickstartSamplePanel } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel';
+import { QuickstartSamplePanelError } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSamplePanelError';
+import { QuickstartSamplePanelSkeleton } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSamplePanelSkeleton';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
 import { StatTileRow } from '@studio/routes/WorkspaceDashboardHomeRoute/StatTileRow';
 import {
@@ -50,25 +52,31 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
             tabIndex={-1}
           >
             <StatTileRow workspace={workspace} />
-            {sample.state === 'ready' && (
+            {/* Every state but `disabled` is a sample workspace, so the panel's place is held
+                by a skeleton while loading and by an error if the lookup fails. */}
+            {sample.state !== 'disabled' && (
               <Stack gap="density-lg">
                 <Text kind="title/md">Quickstart</Text>
                 <Text kind="body/regular/sm" className="text-secondary">
                   A sample workload with an agent and dataset already loaded. Inspect what shipped,
                   or run any step yourself.
                 </Text>
-                <QuickstartSamplePanel
-                  workspace={workspace}
-                  agent={sample.agent}
-                  // `default` is the workspace every user shares; the sample is a sandbox.
-                  onSwitchWorkspace={() =>
-                    navigate(getWorkspaceDetailsDefaultRoute(DEFAULT_WORKSPACE))
-                  }
-                />
+                {sample.state === 'ready' && (
+                  <QuickstartSamplePanel
+                    workspace={workspace}
+                    agent={sample.agent}
+                    // `default` is the workspace every user shares; the sample is a sandbox.
+                    onSwitchWorkspace={() =>
+                      navigate(getWorkspaceDetailsDefaultRoute(DEFAULT_WORKSPACE))
+                    }
+                  />
+                )}
+                {sample.state === 'loading' && <QuickstartSamplePanelSkeleton />}
+                {sample.state === 'error' && <QuickstartSamplePanelError onRetry={sample.retry} />}
               </Stack>
             )}
-            {/* Not while loading: it would flash, then swap for the sample panel. */}
-            {sample.state === 'unavailable' && (
+            {/* Never a fallback for a failed sample lookup, which shows its own error above. */}
+            {sample.state === 'disabled' && (
               <QuickstartSection
                 workspace={workspace}
                 onDismiss={() => getStartedRef.current?.focus()}
