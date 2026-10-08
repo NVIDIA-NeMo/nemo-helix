@@ -32,6 +32,7 @@ nemo [GLOBAL OPTIONS] COMMAND [ARGS]...
 
 **Global Options:**
 
+* `--context, -c`: The name of the context to use. Overrides the current context in the config file.
 * `--base-url`: Base URL for the NeMo Helix API
 * `--output-format, --output, -f <CHOICE>`: Output format for how results are printed. [possible values: table, json, yaml, markdown, csv, raw, code]
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output
@@ -412,6 +413,179 @@ nemo auth access-keys rotate [OPTIONS] JTI
 **Options:**
 
 * `--grace-period-seconds <INTEGER RANGE>`: Grace period in seconds for the rotated-out key. Defaults to the server's `rotation_grace_period_seconds` config (default 48h) when omitted, and is capped by `max_rotation_grace_period_seconds`.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+### nemo config
+
+Manage NeMo Helix CLI configuration.
+
+**Examples:**
+
+```shell
+# Connect the current context to a remote deployment.
+nemo config set --base-url https://nhx.example.com
+# Keep contexts separate.
+nemo config set --context staging --base-url https://nhx.staging.example.com
+nemo config set --context production --base-url https://nhx.example.com --activate
+# Configure a local TLS endpoint.
+nemo config set --context local-tls --base-url https://localhost:8443 --certificate-authority /path/to/ca.crt
+# Switch the current context and inspect its configuration.
+nemo config use-context staging
+nemo config view
+# Delete a context without deleting its cluster or user records.
+nemo config delete-context staging
+```
+
+NHX_BASE_URL and NHX_CURRENT_CONTEXT override saved configuration.
+
+**Usage:**
+
+```shell
+nemo config [OPTIONS] [COMMAND] [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `view`: Display the configuration file.
+* `set`: Set configuration values in the current or specified...
+* `current-context`: Display the effective current context name.
+* `use-context`: Set the current context in the configuration file.
+* `delete-context`: Delete a context from the configuration file.
+
+#### nemo config view
+
+Display the configuration file.
+
+By default, this shows only the current context and its referenced cluster and user.
+Use --all-contexts to show the full configuration.
+
+**Usage:**
+
+```shell
+nemo config view [OPTIONS]
+```
+
+**Options:**
+
+* `--all-contexts`: Show all contexts, clusters, and users
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for config. [possible values: json, yaml, raw]
+
+#### nemo config set
+
+Set configuration values in the current or specified context.
+
+If no config file exists, creates one. Without --context, uses the effective
+current context, or 'default' when no current context is selected.
+If the saved config has no current context, the next written context becomes
+current automatically. Otherwise, creating additional contexts does not switch
+the current context; use --activate or use-context.
+At least one option must be provided.
+
+**Examples:**
+
+```shell
+nemo config set --base-url https://api.example.com
+nemo config set --context staging --base-url https://nhx.staging.example.com
+nemo config set --context production --base-url https://nhx.example.com --activate
+nemo config set --context local-tls --base-url https://localhost:8443 --certificate-authority /path/to/ca.crt
+nemo config set --workspace my-workspace --output-format json
+nemo config set --api-key YOUR_API_KEY
+nemo config set --api-key -        # prompts for API key securely
+nemo config set --access-token YOUR_ACCESS_TOKEN
+nemo config set --access-token -   # prompts for access token securely
+```
+
+**Usage:**
+
+```shell
+nemo config set [OPTIONS]
+```
+
+**Options:**
+
+* `--base-url`: NeMo Helix API base URL
+* `--certificate-authority`: Path to a PEM certificate authority bundle for the cluster
+* `--api-key`: API key for authentication
+* `--access-token`: OAuth access token for authentication
+* `--workspace, -w`: Default workspace
+* `--output-format, -f <CHOICE>`: Default output format [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--timestamp-format <CHOICE>`: Timestamp display format [possible values: relative, iso8601]
+* `--truncate, --no-truncate`: Truncate long output values
+* `--context`: Context name to create or modify (user-defined label; default: current context)
+* `--activate`: Set this context as the current context
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo config current-context
+
+Display the effective current context name.
+
+For full context details, use: nemo config view
+
+**Usage:**
+
+```shell
+nemo config current-context [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo config use-context
+
+Set the current context in the configuration file.
+
+**Usage:**
+
+```shell
+nemo config use-context [OPTIONS] CONTEXT_NAME
+```
+
+**Arguments:**
+
+* `<CONTEXT_NAME>`: Context name to use
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo config delete-context
+
+Delete a context from the configuration file.
+
+By default this follows kubectl's convention and deletes only the context;
+referenced cluster and user records are kept.
+
+**Usage:**
+
+```shell
+nemo config delete-context [OPTIONS] CONTEXT_NAME
+```
+
+**Arguments:**
+
+* `<CONTEXT_NAME>`: Context name to delete
+
+**Options:**
+
+* `--prune-orphans`: Also delete cluster and user records no longer referenced by any context
 
 **Help:**
 

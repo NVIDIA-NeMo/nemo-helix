@@ -173,7 +173,6 @@ def main(
             "-c",
             help="The name of the context to use. Overrides the current context in the config file.",
             rich_help_panel="Global Options",
-            hidden=True,
         ),
     ] = None,
     base_url: Annotated[

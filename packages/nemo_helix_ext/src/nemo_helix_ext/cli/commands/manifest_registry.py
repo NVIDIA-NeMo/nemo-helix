@@ -20,7 +20,6 @@ TOP_LEVEL_ENTRIES = (
         name="config",
         panel="Setup",
         kind="group",
-        hidden=True,
     ),
     TopLevelEntry(
         import_path="nemo_helix_ext.cli.commands.setup:setup_command",
