@@ -42,6 +42,7 @@ from nhx_evals_sdk.execution.scoring import (
 )
 from nhx_evals_sdk.execution.values import EvaluationError, EvaluationPhase
 from nhx_evals_sdk.inference import InferenceMetricBase
+from nhx_evals_sdk.logging_utils import escape_log_value
 from nhx_evals_sdk.metrics.protocol import (
     Metric,
     MetricResult,
@@ -294,7 +295,7 @@ async def resolve_target_structured_output_mode(
         api_key=model.api_key,
     )
     structured_hook.set_mode(mode)
-    log.info("Structured output mode selected for target %s: %s", model.name, mode.value)
+    log.info("Structured output mode selected for target %s: %s", escape_log_value(model.name), mode.value)
 
 
 def _maybe_set_default_max_tokens(

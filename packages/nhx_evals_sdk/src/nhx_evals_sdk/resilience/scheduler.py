@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Deque, ParamSpec, TypeVar
 
 import anyio
+from nhx_evals_sdk.logging_utils import escape_log_value
 from nhx_evals_sdk.resilience.classifier import classify_exception
 from nhx_evals_sdk.resilience.config import ResilienceConfig
 from nhx_evals_sdk.resilience.policy import (
@@ -113,7 +114,11 @@ class ResilienceScheduler:
         last_failure_class: FailureClass | None = None
         _logger.debug(
             "Resilience operation started",
-            extra={"endpoint_key": endpoint_key, "max_attempts": max_attempts, "deadline_at": deadline_at},
+            extra={
+                "endpoint_key": escape_log_value(endpoint_key),
+                "max_attempts": max_attempts,
+                "deadline_at": deadline_at,
+            },
         )
         controller = await self._get_controller(endpoint_key)
         async with controller.lock:
@@ -162,7 +167,7 @@ class ResilienceScheduler:
                 _logger.info(
                     "Resilience retry scheduled",
                     extra={
-                        "endpoint_key": endpoint_key,
+                        "endpoint_key": escape_log_value(endpoint_key),
                         "attempt": attempt,
                         "failure_class": classified.failure_class.value,
                         "wait_seconds": wait_seconds,
@@ -182,7 +187,7 @@ class ResilienceScheduler:
                 _logger.debug(
                     "Resilience operation completed",
                     extra={
-                        "endpoint_key": endpoint_key,
+                        "endpoint_key": escape_log_value(endpoint_key),
                         "attempts_used": attempt,
                         "last_failure_class": last_failure_class.value if last_failure_class else None,
                         "endpoint_limit": controller.state.limit,
@@ -366,7 +371,7 @@ class ResilienceScheduler:
                     _logger.info(
                         "Resilience endpoint limit decreased",
                         extra={
-                            "endpoint_key": state.key,
+                            "endpoint_key": escape_log_value(state.key),
                             "failure_class": failure_class.value,
                             "previous_limit": previous_limit,
                             "new_limit": state.limit,
@@ -404,7 +409,7 @@ class ResilienceScheduler:
                     _logger.info(
                         "Resilience endpoint limit increased",
                         extra={
-                            "endpoint_key": state.key,
+                            "endpoint_key": escape_log_value(state.key),
                             "previous_limit": previous_limit,
                             "new_limit": state.limit,
                             "success_window": self._config.success_window,

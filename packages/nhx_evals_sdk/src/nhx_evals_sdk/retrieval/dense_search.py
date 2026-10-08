@@ -11,6 +11,7 @@ import math
 
 import httpx
 import numpy as np
+from nhx_evals_sdk.logging_utils import escape_log_value
 from nhx_evals_sdk.retrieval.beir import BeirDataset
 from nhx_evals_sdk.retrieval.nim_embeddings import NimEmbeddingClient
 from nhx_evals_sdk.retrieval.nim_ranking import NimRankingClient
@@ -112,7 +113,7 @@ async def dense_search(
             for document_id in document_ids
         }
     logger.info(
-        f"dense search {embeddings.model.name}: {len(document_ids)} passages, {len(query_ids)} queries, "
+        f"dense search {escape_log_value(embeddings.model.name)}: {len(document_ids)} passages, {len(query_ids)} queries, "
         f"batch_size={batch_size}, in_flight={in_flight}"
     )
     owns_client = client is None
@@ -186,7 +187,7 @@ async def _encode_batches(
     if not batches:
         return []
     n_batches = len(batches)
-    model_name = embeddings.model.name
+    model_name = escape_log_value(embeddings.model.name)
     logger.info(
         f"encoding {model_name}: {len(texts)} texts in {n_batches} batches "
         f"(batch_size={batch_size}, in_flight={in_flight})"
@@ -209,7 +210,7 @@ async def _encode_batches(
             except Exception as error:
                 logger.error(
                     f"encode {model_name} failed batch {index + 1}/{n_batches} "
-                    f"offset={offset} n={len(batch)} chars={chars}: {error}"
+                    f"offset={offset} n={len(batch)} chars={chars}: {escape_log_value(str(error))}"
                 )
                 raise
             async with completed_lock:
@@ -257,7 +258,10 @@ def _score(
     # Rank of each id in lexicographic order, so score ties break on document id.
     document_rank = np.argsort(np.argsort(np.asarray(document_ids), kind="stable")).astype(np.int32)
     chunk = max(1, _SCORE_BLOCK_CELLS // n_documents)
-    logger.info(f"scoring {model_name}: {n_queries} queries x {n_documents} passages, top_k={k}, query_chunk={chunk}")
+    log_model_name = escape_log_value(model_name)
+    logger.info(
+        f"scoring {log_model_name}: {n_queries} queries x {n_documents} passages, top_k={k}, query_chunk={chunk}"
+    )
 
     results: dict[str, dict[str, float]] = {}
     progress_every = max(1, math.ceil(math.ceil(n_queries / chunk) * 0.1))
@@ -278,7 +282,7 @@ def _score(
             results[query_id] = {document_ids[index]: float(row_scores[index]) for index in ordered}
         if number % progress_every == 0 or len(results) == n_queries:
             logger.info(
-                f"scored {model_name} {len(results)}/{n_queries} queries ({100 * len(results) / n_queries:.0f}%)"
+                f"scored {log_model_name} {len(results)}/{n_queries} queries ({100 * len(results) / n_queries:.0f}%)"
             )
     return results
 

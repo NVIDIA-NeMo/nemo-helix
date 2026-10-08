@@ -11,6 +11,7 @@ from jsonschema.validators import validator_for
 from pydantic import BaseModel, Field, field_validator
 
 from nhx_evals_sdk.inference import InferenceFn, PreprocessRequest, deep_merge
+from nhx_evals_sdk.logging_utils import escape_log_value
 from nhx_evals_sdk.session import session_cache, session_lock
 from nhx_evals_sdk.values import Model
 
@@ -288,7 +289,7 @@ async def _probe_structured_output_mode(
                 _logger.warning(
                     "Structured output probe for %s hit the %d-token budget, so support for %s "
                     "could not be determined; enforcement may be dropped for this run.",
-                    model.name,
+                    escape_log_value(model.name),
                     _PROBE_MAX_TOKENS,
                     mode.value,
                 )

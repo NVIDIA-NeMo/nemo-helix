@@ -16,6 +16,7 @@ from pydantic import BaseModel, PrivateAttr
 
 from nhx_evals_sdk.constants import PLACEHOLDER_INFERENCE_API_KEY
 from nhx_evals_sdk.enums import ModelFormat
+from nhx_evals_sdk.logging_utils import escape_log_value
 from nhx_evals_sdk.resilience.api import run_with_resilience
 from nhx_evals_sdk.resilience.classifier import endpoint_identity
 from nhx_evals_sdk.resilience.scheduler import ResilienceCancelledError
@@ -353,7 +354,11 @@ async def make_inference_request(
 
     endpoint_key = endpoint_identity(base_url, model_id=model_id, auth_identity=inference_client.api_key)
     try:
-        log.info("Making request to %s: %s", base_url, {"model": model_id, **request})
+        log.info(
+            "Making request to %s: %s",
+            escape_log_value(base_url),
+            escape_log_value(str({"model": model_id, **request})),
+        )
 
         requests_log = requests_log_var.get([])
         if extra_query:
@@ -375,10 +380,14 @@ async def make_inference_request(
         return completion.model_dump()
 
     except openai.APIConnectionError as e:
-        log.warning(f"Error connecting to inference server at {base_url}, cause: {e.__cause__}")
+        log.warning(
+            "Error connecting to inference server at %s, cause: %s",
+            escape_log_value(base_url),
+            escape_log_value(str(e.__cause__)),
+        )
         raise RuntimeError(f"Error connecting to inference server at {base_url}") from e
     except openai.RateLimitError as e:
-        log.warning(f"Rate limit exceeded when issuing inference requests for {model_id}")
+        log.warning("Rate limit exceeded when issuing inference requests for %s", escape_log_value(model_id))
         raise RuntimeError(f"Rate limit exceeded when issuing inference requests for {model_id}") from e
     except openai.BadRequestError as e:
         if "guided_json is unsupported" in str(e):
@@ -386,7 +395,7 @@ async def make_inference_request(
         raise ClientInferenceError(e, f"base_url: {base_url}, model_id: {model_id}")
     except openai.APIStatusError as e:
         exception = ClientInferenceError(e, f"base_url: {base_url}, model_id: {model_id}")
-        log.warning(exception)
+        log.warning("%s", escape_log_value(str(exception)))
         raise exception
     except ResilienceCancelledError:
         # Preserve cancellation semantics for callers coordinating task/group shutdown.
@@ -395,7 +404,7 @@ async def make_inference_request(
         # TODO: it maybe is sharing too much information to expose this error if it
         # ends up propagating back to the user
         # RRA: Better to err on sharing too much information than too little.
-        log.exception(f"Unexpected error making completion request to {model_id}")
+        log.exception("Unexpected error making completion request to %s", escape_log_value(model_id))
         raise RuntimeError(f"Unexpected error making completion request to {model_id}") from e
     finally:
         if not client:
