@@ -3,11 +3,13 @@
 
 import {
   LogFrameLevel,
+  ModelDownloadFrameStatus,
   type Done,
   type Error as ErrorFrame,
   type FailedRecordsFrame,
   type Heartbeat,
   type LogFrame,
+  type ModelDownloadFrame,
   type PreviewDatasetFrame,
   type PreviewRequest,
   type TraceDatasetFrame,
@@ -18,6 +20,7 @@ import { readLineDelimitedStream } from '@studio/util/lineStream';
 
 export type PreviewFrame =
   | LogFrame
+  | ModelDownloadFrame
   | PreviewDatasetFrame
   | TraceDatasetFrame
   | FailedRecordsFrame
@@ -26,6 +29,7 @@ export type PreviewFrame =
   | ErrorFrame;
 
 const LOG_LEVELS: readonly string[] = Object.values(LogFrameLevel);
+const DOWNLOAD_STATUSES: readonly string[] = Object.values(ModelDownloadFrameStatus);
 
 const asRecordList = (value: unknown): Record<string, unknown>[] =>
   Array.isArray(value)
@@ -59,6 +63,15 @@ export const parsePreviewFrame = (line: string): PreviewFrame | undefined => {
         level: LOG_LEVELS.includes(String(level))
           ? (level as LogFrame['level'])
           : LogFrameLevel.info,
+        message: typeof message === 'string' ? message : '',
+      };
+    }
+    case 'model_download': {
+      const { status, message } = frame;
+      if (!DOWNLOAD_STATUSES.includes(String(status))) return undefined;
+      return {
+        kind,
+        status: status as ModelDownloadFrame['status'],
         message: typeof message === 'string' ? message : '',
       };
     }
