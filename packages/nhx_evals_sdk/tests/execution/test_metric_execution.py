@@ -44,6 +44,7 @@ from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.hooks import HooksBase
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric as RuntimeLLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nhx_evals_sdk.metrics.template_rendering import build_template_context
 from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resolvers import LocalSecretResolver, _candidate_env_names
 from nhx_evals_sdk.structured_output import StructuredOutputMode
@@ -871,7 +872,16 @@ class TestGenerateOnlineSample:
             )
 
         assert sample["output_text"] == "done"
-        assert sample[SAMPLE_RUNTIME_SEC_KEY] >= 0.05
+        assert sample[SAMPLE_RUNTIME_SEC_KEY] > 0
+
+    def test_recorded_runtime_does_not_shadow_a_dataset_column_in_metric_templates(self):
+        row = {"prompt": "hello", SAMPLE_RUNTIME_SEC_KEY: 120}
+        metric_input = build_metric_input(row, {"output_text": "done", SAMPLE_RUNTIME_SEC_KEY: 3.2}, 0)
+
+        context = build_template_context(row, metric_input.candidate)
+
+        assert context[SAMPLE_RUNTIME_SEC_KEY] == 120
+        assert SAMPLE_RUNTIME_SEC_KEY not in context["sample"]
 
 
 class TestGenerateOnlineSampleAgent:

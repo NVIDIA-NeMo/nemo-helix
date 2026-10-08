@@ -3,15 +3,16 @@
 
 """Sample payload adapters for evals SDK execution."""
 
-import math
 from collections.abc import Mapping
 from typing import Any
 
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
+from nhx_evals_sdk.metrics.utils import as_finite_float
 
 _CANDIDATE_SAMPLE_FIELDS = frozenset({"output_text", "response", "trajectory", "evidence"})
 
 SAMPLE_RUNTIME_SEC_KEY = "runtime_sec"
+_SAMPLE_FIELDS_HIDDEN_FROM_METRICS = frozenset({SAMPLE_RUNTIME_SEC_KEY})
 
 
 def build_offline_sample(row: dict[str, Any]) -> dict[str, Any]:
@@ -43,7 +44,8 @@ def build_metric_input(row: dict[str, Any], sample: dict[str, Any], index: int |
     metadata = {
         key: value
         for key, value in sample.items()
-        if key not in _CANDIDATE_SAMPLE_FIELDS or (key == "output_text" and not isinstance(output_text, str))
+        if key not in _SAMPLE_FIELDS_HIDDEN_FROM_METRICS
+        and (key not in _CANDIDATE_SAMPLE_FIELDS or (key == "output_text" and not isinstance(output_text, str)))
     }
     return MetricInput(
         row=DatasetRow(row_index=index, data=row),
@@ -58,8 +60,6 @@ def build_metric_input(row: dict[str, Any], sample: dict[str, Any], index: int |
 
 
 def sample_runtime_sec(sample: Mapping[str, Any]) -> float | None:
-    """Seconds the target took to produce this sample, when the generation recorded it."""
-    value = sample.get(SAMPLE_RUNTIME_SEC_KEY)
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value < 0:
-        return None
-    return float(value)
+    """Seconds the target spent on its successful attempt, excluding queue wait, failed attempts, and backoff."""
+    seconds = as_finite_float(sample.get(SAMPLE_RUNTIME_SEC_KEY))
+    return seconds if seconds is not None and seconds >= 0 else None
