@@ -6,6 +6,7 @@ import { automodelDraft, INPUTS } from '@studio/components/CreateCustomizationSt
 import {
   ERROR_INPUTS_NOT_READY,
   ERROR_NO_TOOL_CALL,
+  ERROR_TRUNCATED,
   MAX_RETRIES,
   useDescribeWithAi,
 } from '@studio/components/CreateCustomizationStart/useDescribeWithAi';
@@ -109,6 +110,30 @@ describe('useDescribeWithAi', () => {
     await act(() => result.current.generate(INPUTS));
 
     expect(result.current.requestError).toMatch(/larger context/);
+  });
+
+  it('stops at a reply cut off by the output limit instead of retrying it', async () => {
+    mutateAsync.mockResolvedValue({
+      choices: [
+        {
+          finish_reason: 'length',
+          message: {
+            tool_calls: [
+              {
+                type: 'function',
+                function: { name: DRAFT_TOOL_NAME, arguments: '{"backend":"automodel","job":{' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const { result, onDraft } = setUp();
+    await act(() => result.current.generate(INPUTS));
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(result.current.validation).toEqual({ status: 'invalid', errors: [ERROR_TRUNCATED] });
+    expect(onDraft).toHaveBeenLastCalledWith(null);
   });
 
   it('keeps a request failure apart from a bad draft', async () => {
