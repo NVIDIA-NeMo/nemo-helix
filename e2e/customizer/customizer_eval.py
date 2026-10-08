@@ -53,8 +53,8 @@ def lora_model_field(workspace: str, adapter: str) -> str:
 
 
 def _build_target(base_url: str, workspace: str, deployment_name: str, model_field: str):
-    from nemo_evaluator_sdk.enums import ModelFormat
-    from nemo_evaluator_sdk.values.models import Model
+    from nhx_evals_sdk.enums import ModelFormat
+    from nhx_evals_sdk.values.models import Model
 
     return Model(
         url=provider_route_url(base_url, workspace, deployment_name),
@@ -64,7 +64,7 @@ def _build_target(base_url: str, workspace: str, deployment_name: str, model_fie
 
 
 def _build_config(max_tokens: int, parallelism: int, limit_samples: int | None, enable_thinking: bool):
-    from nemo_evaluator_sdk.values import InferenceParams, RunConfigOnlineModel
+    from nhx_evals_sdk.values import InferenceParams, RunConfigOnlineModel
 
     inference_kwargs: dict[str, Any] = {"max_tokens": max_tokens, "temperature": 0}
     if not enable_thinking:
@@ -78,15 +78,15 @@ def _build_config(max_tokens: int, parallelism: int, limit_samples: int | None, 
 
 def _metric(kind: MetricKind):
     if kind == "f1":
-        from nemo_evaluator_sdk.metrics.f1 import F1Metric
+        from nhx_evals_sdk.metrics.f1 import F1Metric
 
         return F1Metric(reference=CHAT_REFERENCE_TEMPLATE)
     if kind == "exact_match":
-        from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
+        from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
         return ExactMatchMetric(reference=CHAT_REFERENCE_TEMPLATE)
     if kind == "rouge":
-        from nemo_evaluator_sdk.metrics.rouge import ROUGEMetric
+        from nhx_evals_sdk.metrics.rouge import ROUGEMetric
 
         return ROUGEMetric(reference=CHAT_REFERENCE_TEMPLATE)
     raise ValueError(f"Unknown metric kind: {kind!r} (expected 'f1', 'exact_match', or 'rouge')")
@@ -105,7 +105,7 @@ def score_rows(
     limit_samples: int | None = None,
     enable_thinking: bool = False,
 ) -> float:
-    from nemo_evaluator_sdk import Evaluator
+    from nhx_evals_sdk import Evaluator
 
     for index, row in enumerate(rows):
         assert_chat_row(row, index=index)
