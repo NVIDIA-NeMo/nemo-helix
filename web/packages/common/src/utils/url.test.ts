@@ -38,7 +38,9 @@ describe('isUnroutableHost', () => {
 describe('resolveBrowserBaseUrl', () => {
   it('returns the env value when routable', () => {
     expect(resolveBrowserBaseUrl('http://localhost:8080')).toBe('http://localhost:8080');
-    expect(resolveBrowserBaseUrl('https://api.svc.example.com')).toBe('https://api.svc.example.com');
+    expect(resolveBrowserBaseUrl('https://api.svc.example.com')).toBe(
+      'https://api.svc.example.com'
+    );
   });
 
   it('falls back to window.location.origin when env value is not browser-routable', () => {

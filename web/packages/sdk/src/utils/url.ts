@@ -19,8 +19,7 @@ export const isUnroutableHost = (url: string): boolean => {
     const isDotlessNonLocalhost =
       host !== 'localhost' && !host.includes('.') && !host.includes(':');
     const isKubernetesServiceDnsName =
-      host === KUBERNETES_SERVICE_DNS_SUFFIX ||
-      host.endsWith(`.${KUBERNETES_SERVICE_DNS_SUFFIX}`);
+      host === KUBERNETES_SERVICE_DNS_SUFFIX || host.endsWith(`.${KUBERNETES_SERVICE_DNS_SUFFIX}`);
     return isWildcardHost || isKubernetesServiceDnsName || isDotlessNonLocalhost;
   } catch {
     return false;
