@@ -14,6 +14,14 @@ describe('QuickstartSamplePanelSkeleton', () => {
     );
   });
 
+  it('announces the loading state from outside the busy panel', () => {
+    render(<QuickstartSamplePanelSkeleton intakeEnabled agentOptimizationsEnabled />);
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Loading the sample agent');
+    expect(screen.getByTestId('quickstart-sample-panel-skeleton')).not.toContainElement(status);
+  });
+
   it('reserves a row for each of the four steps', () => {
     render(<QuickstartSamplePanelSkeleton intakeEnabled agentOptimizationsEnabled />);
 
