@@ -217,15 +217,6 @@ def main(
             rich_help_panel="Global Options",
         ),
     ] = None,
-    agent_mode: Annotated[
-        bool | None,
-        typer.Option(
-            "--agent-mode",
-            "-A",
-            help="Enable agent-friendly output mode with extra context for coding agents.",
-            rich_help_panel="Global Options",
-        ),
-    ] = None,
     no_auto_refresh: Annotated[
         bool,
         typer.Option(
@@ -274,15 +265,7 @@ def main(
     if ctx.obj is None:
         ctx.obj = CLIContext()
 
-    # Resolve agent mode: explicit flag > env var > default False
-    import os
-
-    if agent_mode is None:
-        env_val = os.environ.get("NHX_AGENT_MODE", "").lower()
-        agent_mode = env_val in ("1", "true", "yes")
-    ctx.obj.agent_mode = agent_mode
-
-    # Capture command name + agent mode for the command_invoked telemetry event, wire
+    # Capture command name for the command_invoked telemetry event, wire
     # the per-invocation opt-out, and print the first-run notice. Best effort inside.
     from nemo_helix_ext.cli.telemetry import runtime as telemetry_runtime
 
@@ -296,8 +279,6 @@ def main(
         overrides["base_url"] = base_url
     if output_format is not None:
         overrides["output_format"] = cast(ConfigOutputFormat, output_format)
-    elif agent_mode:
-        overrides["output_format"] = "markdown"
     if timestamp_format is not None:
         overrides["timestamp_format"] = timestamp_format
     if no_truncate is not None:

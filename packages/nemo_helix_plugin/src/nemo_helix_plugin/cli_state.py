@@ -91,10 +91,6 @@ class CLIState(Protocol):
 
     def get_no_truncate(self, override: bool | None = None) -> bool: ...
 
-    def get_agent_hints(self, command_path: str) -> list[str]:
-        """Hints printed after a command in agent mode; called by :func:`~nemo_helix_plugin.cli_warnings.collect_warnings`."""
-        ...
-
 
 def cli_state(typer_ctx: typer.Context) -> CLIState:
     """Return the ``nemo`` CLI state for *typer_ctx*.
@@ -178,12 +174,11 @@ def resolve_output_format(typer_ctx: typer.Context, explicit: ListOutputFormat |
     Resolution order, the same for core and plugin commands:
 
     1. The command's ``--output-format`` flag.
-    2. Agent mode forces ``markdown``.
-    3. The global ``nemo --output-format`` flag, then the context preference.
-    4. A ``table`` result becomes ``json`` when stdout is not a TTY, so piped
+    2. The global ``nemo --output-format`` flag, then the context preference.
+    3. A ``table`` result becomes ``json`` when stdout is not a TTY, so piped
        output is parseable.
 
-    Steps 2-4 belong to the CLI state. Without one (a plugin app driven outside
+    Steps 2-3 belong to the CLI state. Without one (a plugin app driven outside
     ``nemo``), the fallback is ``table`` on a TTY and ``json`` otherwise.
     """
     if explicit is not None:
