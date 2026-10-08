@@ -142,14 +142,14 @@ def test_logs_fetches_external_backend_lines(client: TestClient, monkeypatch: py
     assert resp.status_code == 200
     body = resp.json()
     assert body["total_lines"] == 2
-    assert body["next_offset"] == 2
+    assert body["next_offset"] == "2026-05-19T21:00:01Z"
     assert body["data"][0]["timestamp"] == "2026-05-19T21:00:00.123456Z"
     assert body["data"][0]["message"] == "pod started"
     assert body["data"][1]["message"] == "request served"
 
 
-async def test_stream_external_logs_resumes_from_line_count() -> None:
-    """External log streaming uses the initial response next_offset as a line-count cursor."""
+async def test_stream_external_logs_resumes_from_timestamp_cursor() -> None:
+    """External log streaming uses the initial response next_offset as a timestamp cursor."""
     from nemo_deployments_plugin.backends.base import LogResult
 
     calls = 0
@@ -170,12 +170,12 @@ async def test_stream_external_logs_resumes_from_line_count() -> None:
             get_logs,
             workspace="default",
             name="test",
-            start_offset=1,
+            start_cursor="2026-05-19T21:00:00Z",
         ),
         n=2,
     )
     parsed = [_parse_event(event) for event in events]
-    assert [event_id for event_id, _payload in parsed] == [2, 3]
+    assert [event_id for event_id, _payload in parsed] == ["2026-05-19T21:00:01Z", "2026-05-19T21:00:02Z"]
     assert [payload["message"] for _event_id, payload in parsed if payload is not None] == [
         "first new line",
         "second new line",
@@ -269,13 +269,13 @@ def test_logs_404_when_deployment_not_in_workspace(fake_log: Path) -> None:  # n
 # --- SSE streaming (id cursor / Last-Event-ID resume / termination) ---------
 
 
-def _parse_event(raw: str) -> tuple[int | None, dict | None]:
+def _parse_event(raw: str) -> tuple[str | None, dict | None]:
     """Split a raw SSE event into (id, parsed-data) — keepalives return (None, None)."""
-    event_id: int | None = None
+    event_id: str | None = None
     payload: dict | None = None
     for field in raw.strip().split("\n"):
         if field.startswith("id:"):
-            event_id = int(field[len("id:") :].strip())
+            event_id = field[len("id:") :].strip()
         elif field.startswith("data:"):
             payload = json.loads(field[len("data:") :].strip())
     return event_id, payload
@@ -313,7 +313,7 @@ async def test_stream_emits_byte_offset_ids_from_start(tmp_path: Path) -> None:
 
     assert [pl["message"] for _eid, pl in data_events] == ["alpha", "beta"]
     # id is the byte offset after each line: len("alpha\n")=6, +len("beta\n")=11.
-    assert [eid for eid, _pl in data_events] == [6, 11]
+    assert [eid for eid, _pl in data_events] == ["6", "11"]
 
 
 async def test_stream_resumes_from_last_event_id_without_gaps(tmp_path: Path) -> None:

@@ -74,8 +74,8 @@ class DeploymentLogsResponse(BaseModel):
 
     data: list[LogLine]
     total_lines: int = Field(description="Number of lines actually returned.")
-    next_offset: int = Field(
-        description="Byte offset just past the returned tail; pass as Last-Event-ID to resume the stream without gaps.",
+    next_offset: int | str = Field(
+        description="Resume cursor; pass as Last-Event-ID to continue the stream without gaps.",
     )
 
 
@@ -162,10 +162,8 @@ async def _resolve_external_logs(
     if lines is None:
         return None
     parsed = [_parse_line(line) for line in lines]
-    # External substrate logs do not expose byte offsets. For streaming, use a
-    # line-count cursor: the client sends this next_offset as Last-Event-ID and
-    # the poller emits only later lines.
-    return DeploymentLogsResponse(data=parsed, total_lines=len(parsed), next_offset=len(parsed))
+    next_offset = _external_line_cursor(lines[-1]) if lines else ""
+    return DeploymentLogsResponse(data=parsed, total_lines=len(parsed), next_offset=next_offset)
 
 
 _TAIL_READ_BLOCK = 8192
@@ -234,6 +232,24 @@ def _parse_last_event_id(value: str | None) -> int | None:
     return offset if offset >= 0 else None
 
 
+def _external_line_cursor(raw: str) -> str:
+    """Return the external-log resume cursor for a raw substrate log line."""
+    line = raw.rstrip("\n")
+    parsed = _parse_line(line)
+    return parsed.timestamp or line
+
+
+def _last_external_cursor_index(lines: list[str], cursor: str | None) -> int:
+    """Return the index just after the last line matching an external cursor."""
+    if not cursor:
+        return len(lines)
+    for index in range(len(lines) - 1, -1, -1):
+        line = lines[index].rstrip("\n")
+        if _external_line_cursor(line) == cursor or line == cursor:
+            return index + 1
+    return 0
+
+
 def _open_at(path: Path, start_offset: int | None):  # noqa: ANN202 — TextIO handle
     """Open the log and seek to the resume point.
 
@@ -271,25 +287,24 @@ async def _stream_external_log_lines(
     *,
     workspace: str,
     name: str,
-    start_offset: int | None,
+    start_cursor: str | None,
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[str]:
-    """Poll external substrate logs and yield SSE events after a line-count cursor."""
+    """Poll external substrate logs and yield SSE events after a log-line cursor."""
     poll_interval = 0.5
     keepalive_interval = 15.0
-    seen = start_offset or 0
+    cursor = start_cursor
     last_keepalive = asyncio.get_running_loop().time()
     while True:
         if is_disconnected is not None and await is_disconnected():
             return
         log_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
-        lines = list(getattr(log_result, "lines", []) or [])
-        if seen > len(lines):
-            seen = 0  # log buffer rotated/truncated; replay the current buffer
-        for index, line in enumerate(lines[seen:], start=seen + 1):
+        lines = [line.rstrip("\n") for line in list(getattr(log_result, "lines", []) or [])]
+        start = _last_external_cursor_index(lines, cursor)
+        for line in lines[start:]:
             payload = _parse_line(line).model_dump()
-            yield f"id: {index}\ndata: {json.dumps(payload)}\n\n"
-            seen = index
+            cursor = _external_line_cursor(line)
+            yield f"id: {cursor}\ndata: {json.dumps(payload)}\n\n"
             last_keepalive = asyncio.get_running_loop().time()
         now = asyncio.get_running_loop().time()
         if now - last_keepalive >= keepalive_interval:
@@ -348,7 +363,7 @@ async def stream_deployment_logs(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> StreamingResponse:
     """SSE tail-follow of deployment logs; resumes via ``Last-Event-ID``."""
-    start_offset = _parse_last_event_id(request.headers.get("last-event-id"))
+    last_event_id = request.headers.get("last-event-id")
     get_logs = await _resolve_external_log_getter(workspace, name, entity_client)
     if get_logs is not None:
         return StreamingResponse(
@@ -356,7 +371,7 @@ async def stream_deployment_logs(
                 get_logs,
                 workspace=workspace,
                 name=name,
-                start_offset=start_offset,
+                start_cursor=last_event_id,
                 is_disconnected=request.is_disconnected,
             ),
             media_type="text/event-stream",
@@ -366,6 +381,7 @@ async def stream_deployment_logs(
             },
         )
 
+    start_offset = _parse_last_event_id(last_event_id)
     path = await _resolve_log_path(workspace, name, entity_client)
     return StreamingResponse(
         _stream_log_lines(path, start_offset, request.is_disconnected),
