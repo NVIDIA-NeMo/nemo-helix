@@ -40,6 +40,9 @@ def _settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "harbor_opensandbox_egress_verification", "default_action")
     monkeypatch.setattr(settings, "harbor_opensandbox_cleanup_timeout_seconds", 30)
     monkeypatch.setattr(settings, "sandbox_k8s_task_image_reference_mode", "digest")
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "nvcr.io, docker.io, registry.example.com")
+    monkeypatch.setattr(settings, "task_image_allowed_repositories", "")
+    monkeypatch.setattr(settings, "task_image_hosted_mode", False)
 
 
 def _spec(**overrides: Any) -> LaunchSpec:
@@ -89,14 +92,100 @@ def test_preflight_accepts_supported_evaluation() -> None:
     backend.preflight(_spec())
 
 
-@pytest.mark.parametrize("compose", ["environment/docker-compose.yaml", "compose.yml"])
-def test_staged_preflight_rejects_compose(tmp_path: Path, compose: str) -> None:
-    _write_task(tmp_path)
-    (tmp_path / compose).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / compose).write_text("services: {}\n")
+COMPOSE_SERVICES: dict[str, Any] = {
+    "volumes": ["shared"],
+    "services": [
+        {
+            "name": "db",
+            "image": "docker.io/library/postgres:16",
+            "ports": [5432],
+            "readiness": {"exec": ["pg_isready"]},
+            "volume_mounts": [{"name": "shared", "mount_path": "/shared"}],
+        },
+        {"name": "seed", "image": "registry.example.com/seed:1", "run_once": True},
+    ],
+    "main": {"entrypoint": ["/app/start.sh"], "env": {"DB": "db:5432"}},
+}
 
-    with pytest.raises(ValueError, match="single-container"):
+
+def _compose_profile(compose_services: Any = None, environment: Any = None) -> dict[str, Any]:
+    if environment is None:
+        environment = {"kwargs": {"compose_services": compose_services or COMPOSE_SERVICES}}
+    return {"harbor_config": yaml.safe_dump({"agents": [{"name": "oracle"}], "environment": environment})}
+
+
+def _write_compose(task_dir: Path, services: Sequence[str], name: str = "environment/docker-compose.yaml") -> None:
+    (task_dir / name).parent.mkdir(parents=True, exist_ok=True)
+    (task_dir / name).write_text(yaml.safe_dump({"services": {service: {"image": "x"} for service in services}}))
+
+
+@pytest.mark.parametrize("compose", ["environment/docker-compose.yaml", "environment/compose.yml"])
+def test_staged_preflight_rejects_compose_without_profile_services(tmp_path: Path, compose: str) -> None:
+    _write_task(tmp_path)
+    _write_compose(tmp_path, ["main", "db"], compose)
+
+    with pytest.raises(ValueError, match="environment.kwargs.compose_services"):
         backend.preflight_staged_task(tmp_path, ["pypi.org"])
+
+
+def test_staged_preflight_accepts_compose_services_matching_the_task(tmp_path: Path) -> None:
+    _write_task(tmp_path)
+    _write_compose(tmp_path, ["main", "db", "seed"])
+    compose_services = backend.profile_compose_services(_compose_profile())
+
+    backend.preflight_staged_task(tmp_path, ["pypi.org"], compose_services)
+
+
+@pytest.mark.parametrize(
+    ("task_services", "message"),
+    [
+        (["main", "db"], r"not in docker-compose.yaml: \['seed'\]"),
+        (["main", "db", "seed", "cache"], r"missing \['cache'\]"),
+    ],
+)
+def test_staged_preflight_rejects_profile_written_for_another_task(
+    tmp_path: Path, task_services: list[str], message: str
+) -> None:
+    _write_task(tmp_path)
+    _write_compose(tmp_path, task_services)
+    compose_services = backend.profile_compose_services(_compose_profile())
+
+    with pytest.raises(ValueError, match=message):
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], compose_services)
+
+
+@pytest.mark.parametrize(
+    ("allowed", "repositories", "message"),
+    [
+        ("nvcr.io, docker.io", "", r"'seed'.*registry 'registry.example.com' is not approved"),
+        ("", "", r"'db'.*no approved registries"),
+        ("docker.io, registry.example.com", "docker.io/library/*", r"'seed'.*repository .* is not approved"),
+    ],
+)
+def test_staged_preflight_applies_task_image_policy_to_service_images(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, allowed: str, repositories: str, message: str
+) -> None:
+    monkeypatch.setattr(settings, "task_image_allowed_registries", allowed)
+    monkeypatch.setattr(settings, "task_image_allowed_repositories", repositories)
+    _write_task(tmp_path)
+    _write_compose(tmp_path, ["main", "db", "seed"])
+    compose_services = backend.profile_compose_services(_compose_profile())
+
+    with pytest.raises(ValueError, match=message):
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], compose_services)
+
+
+@pytest.mark.parametrize("compose", [None, "docker-compose.yaml"])
+def test_staged_preflight_rejects_compose_services_for_single_container_task(
+    tmp_path: Path, compose: str | None
+) -> None:
+    # A compose file at the task root isn't read by the environment, so it doesn't make a Compose task.
+    _write_task(tmp_path)
+    if compose:
+        _write_compose(tmp_path, ["main", "db", "seed"], compose)
+
+    with pytest.raises(ValueError, match="task has no compose file"):
+        backend.preflight_staged_task(tmp_path, [], backend.profile_compose_services(_compose_profile()))
 
 
 def test_staged_preflight_rejects_task_egress_outside_operator_allowlist(tmp_path: Path) -> None:
@@ -149,7 +238,12 @@ def test_staged_preflight_rejects_separate_verifier_without_pinned_image(
     _write_task(tmp_path, SEPARATE_VERIFIER)
 
     with pytest.raises(IncompatibleTaskError, match="verifier_image_digest"):
-        backend.preflight_staged_task(tmp_path, ["pypi.org"], **verifier)
+        backend.preflight_staged_task(
+            tmp_path,
+            ["pypi.org"],
+            verifier_image_ref=verifier.get("verifier_image_ref"),
+            verifier_image_digest=verifier.get("verifier_image_digest"),
+        )
 
 
 def test_staged_preflight_rejects_multistep_separate_verifier(tmp_path: Path) -> None:
@@ -331,6 +425,52 @@ def test_render_merges_profile_agents_with_substitution(tmp_path: Path) -> None:
     )
 
     assert config["agents"] == [{"name": "claude-code"}]
+
+
+def test_render_passes_profile_compose_services_to_the_environment(tmp_path: Path) -> None:
+    config = backend.render_harbor_config(
+        "agents: []\n", _spec(harbor_config=_compose_profile()), task_path=tmp_path, jobs_dir="j", trusted_hosts=[]
+    )
+
+    kwargs = config["environment"]["kwargs"]
+    assert config["environment"]["import_path"] == backend.NEMO_OPENSANDBOX_IMPORT_PATH
+    assert kwargs["compose_services"]["services"][0]["readiness"] == {"exec": ["pg_isready"]}
+    assert kwargs["compose_services"]["main"] == COMPOSE_SERVICES["main"]
+    assert kwargs["metadata"][cleanup.EVALUATION_METADATA_KEY] == "ev_os1"
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"import_path": "evil:Env", "kwargs": {"compose_services": COMPOSE_SERVICES}},
+        {"kwargs": {"compose_services": COMPOSE_SERVICES, "api_key": "x"}},
+        {"kwargs": {"trusted_allowed_hosts": ["*"]}},
+        {"kwargs": "compose_services"},
+        5,
+    ],
+)
+def test_render_rejects_profile_environment_beyond_compose_services(tmp_path: Path, environment: Any) -> None:
+    spec = _spec(harbor_config=_compose_profile(environment=environment))
+
+    with pytest.raises(ValueError, match="may only set environment.kwargs.compose_services"):
+        backend.render_harbor_config("agents: []\n", spec, task_path=tmp_path, jobs_dir="j", trusted_hosts=[])
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"services": [{"name": "db", "image": "postgres:16"}]}, "services.0.image"),
+        ({"services": [{"name": "db", "image": "docker.io/x", "privileged": True}]}, "privileged"),
+        ({"services": [{"name": "main", "image": "docker.io/x"}]}, "task container"),
+        ({"main": {"add_capabilities": ["NET_ADMIN"]}}, "add_capabilities"),
+        ({"volumes": []}, "not declared"),
+    ],
+)
+def test_render_rejects_invalid_compose_services(tmp_path: Path, change: dict[str, Any], message: str) -> None:
+    spec = _spec(harbor_config=_compose_profile({**COMPOSE_SERVICES, **change}))
+
+    with pytest.raises(ValueError, match=message):
+        backend.render_harbor_config("agents: []\n", spec, task_path=tmp_path, jobs_dir="j", trusted_hosts=[])
 
 
 def test_connection_env_aliases_platform_names_and_env_file(tmp_path: Path) -> None:

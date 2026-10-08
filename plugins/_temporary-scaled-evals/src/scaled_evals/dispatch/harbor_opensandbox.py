@@ -35,6 +35,7 @@ import yaml
 from nhx_sandbox.opensandbox_policy import canonical_egress_target
 from tomlkit.items import InlineTable, Table
 
+from scaled_evals.api.build.task_image_identity import TaskImageIdentityError, validate_task_image_request
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSION, HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.credentials import merged_env_file
@@ -78,6 +79,12 @@ from scaled_evals.harbor_opensandbox_cleanup import (
     validate_selector,
 )
 from scaled_evals.harbor_opensandbox_cleanup import connection_env as _sdk_connection_env
+from scaled_evals.harbor_opensandbox_services import (
+    COMPOSE_FILENAMES,
+    MAIN_SERVICE,
+    ComposeServices,
+    parse_compose_services,
+)
 from scaled_evals.models.runtime import LaunchHandle, LaunchSpec, RuntimeStatus
 
 LOG = logging.getLogger(__name__)
@@ -98,8 +105,6 @@ _TEMPLATE_ENVIRONMENT_KWARGS = frozenset(
 )
 # Top-level Harbor config keys this backend sets; an evaluation profile that sets any of them is rejected.
 _BACKEND_OWNED_TOP_LEVEL = ("environment", "datasets", "tasks", "jobs_dir", "job_name")
-# File names that mark a multi-container (Compose) task, which one sandbox per trial can't run.
-_COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml")
 
 # (argv, env, timeout_s) -> completed process. Injected in tests so nothing is spawned.
 CleanupRunner = Callable[[Sequence[str], Mapping[str, str], float], subprocess.CompletedProcess[str]]
@@ -226,18 +231,76 @@ def uses_separate_verifier(document: Mapping[str, Any]) -> bool:
     return False
 
 
+def _compose_file(task_dir: Path) -> Path | None:
+    """The task's Compose file, or None for a single-container task."""
+    # Only environment/: that's where NemoOpenSandboxEnvironment (like Harbor) looks.
+    for name in COMPOSE_FILENAMES:
+        candidate = task_dir / "environment" / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _compose_service_names(compose_file: Path) -> set[str]:
+    """The services a Compose file defines, other than ``main`` (the sandbox itself)."""
+    try:
+        document = yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"task {compose_file.name} is not valid YAML: {exc}") from exc
+    services = document.get("services") if isinstance(document, Mapping) else None
+    if not isinstance(services, Mapping):
+        raise ValueError(f"task {compose_file.name} has no services mapping")
+    return {str(name) for name in services} - {MAIN_SERVICE}
+
+
+def _check_compose_services(task_dir: Path, compose_services: ComposeServices | None) -> None:
+    """Fail unless the profile's compose services and the task's Compose file go together.
+
+    OpenSandbox runs no Compose, so a Compose task runs only when the evaluation profile lists
+    its services with prebuilt images. The list must name exactly the task's services, so a
+    profile written for another task fails here instead of mid-trial.
+    """
+    compose_file = _compose_file(task_dir)
+    if compose_file is None:
+        if compose_services is not None:
+            raise ValueError(
+                "the evaluation profile sets environment.kwargs.compose_services, but the task has no compose file"
+            )
+        return
+    if compose_services is None:
+        raise ValueError(
+            f"the task ships {compose_file.name}; {HARBOR_OPENSANDBOX_RUNTIME} runs its services only "
+            "when the evaluation profile lists them under environment.kwargs.compose_services"
+        )
+
+    expected = _compose_service_names(compose_file)
+    listed = set(compose_services.names())
+    if listed != expected:
+        details = []
+        if expected - listed:
+            details.append(f"missing {sorted(expected - listed)}")
+        if listed - expected:
+            details.append(f"not in {compose_file.name}: {sorted(listed - expected)}")
+        raise ValueError(f"compose_services does not match the task's {compose_file.name}: {'; '.join(details)}")
+
+    # Service images run in the task's pod, so they get the task image registry policy.
+    for service in compose_services.services:
+        try:
+            validate_task_image_request(service.image)
+        except TaskImageIdentityError as exc:
+            raise ValueError(f"compose service {service.name!r}: {exc}") from exc
+
+
 def preflight_staged_task(
     task_dir: Path,
     trusted_hosts: Sequence[str],
+    compose_services: ComposeServices | None = None,
     *,
     verifier_image_ref: str | None = None,
     verifier_image_digest: str | None = None,
 ) -> None:
-    """Checks that need the staged task tree: compose, the separate verifier image, and task-declared egress."""
-    # Each trial gets exactly one sandbox, so multi-container (Compose) tasks can't run.
-    for name in _COMPOSE_FILENAMES:
-        if (task_dir / "environment" / name).exists() or (task_dir / name).exists():
-            raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} runs single-container tasks; the task ships {name}")
+    """Checks that need the staged task tree: compose services, the separate verifier image, and task-declared egress."""
+    _check_compose_services(task_dir, compose_services)
 
     task_toml = task_dir / "task.toml"
     if not task_toml.is_file():
@@ -322,22 +385,59 @@ def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str |
     return verifier_bound
 
 
-def _profile_overrides(profile_config: Mapping[str, Any]) -> dict[str, Any]:
-    """Render the evaluation's Harbor profile into config overrides, rejecting keys this backend owns."""
+def _profile_overrides(profile_config: Mapping[str, Any]) -> tuple[dict[str, Any], ComposeServices | None]:
+    """Render the evaluation's Harbor profile into config overrides and its compose services.
+
+    Keys this backend owns are rejected. The one exception is
+    ``environment.kwargs.compose_services``, which is validated and returned separately.
+    """
     # The profile is YAML text with $VARIABLES, filled from the profile's own env values.
     template_text, profile_env = _normalize_harbor_profile_config(profile_config)
     if not template_text:
-        return {}
+        return {}, None
     rendered = string.Template(template_text).safe_substitute(profile_env)
     loaded = yaml.safe_load(rendered) or {}
     if not isinstance(loaded, dict):
         raise ValueError("Harbor profile config must be a mapping")
 
+    compose_services = _pop_compose_services(loaded)
+
     # Profiles tune agents, retries and timeouts; they can't touch what this backend sets.
     owned = [key for key in _BACKEND_OWNED_TOP_LEVEL if key in loaded]
     if owned:
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} sets {', '.join(owned)} itself; remove it from the profile")
-    return loaded
+    return loaded, compose_services
+
+
+def _pop_compose_services(profile: dict[str, Any]) -> ComposeServices | None:
+    """Remove the profile's ``environment`` block and return its validated compose services, if any.
+
+    ``environment.kwargs.compose_services`` is the only part of ``environment`` a profile may set.
+    """
+    environment = profile.pop("environment", None)
+    if environment is None:
+        return None
+
+    kwargs = environment.get("kwargs") if isinstance(environment, Mapping) else None
+    if (
+        not isinstance(environment, Mapping)
+        or set(environment) != {"kwargs"}
+        or not isinstance(kwargs, Mapping)
+        or set(kwargs) != {"compose_services"}
+    ):
+        raise ValueError(
+            f"{HARBOR_OPENSANDBOX_RUNTIME} sets environment itself; a profile may only set "
+            "environment.kwargs.compose_services"
+        )
+    try:
+        return parse_compose_services(kwargs["compose_services"])
+    except ValueError as exc:
+        raise ValueError(f"invalid environment.kwargs.compose_services: {exc}") from exc
+
+
+def profile_compose_services(profile_config: Mapping[str, Any]) -> ComposeServices | None:
+    """The compose services an evaluation profile declares, validated; None when it declares none."""
+    return _profile_overrides(profile_config)[1]
 
 
 def ownership_metadata(spec: LaunchSpec) -> dict[str, str]:
@@ -379,7 +479,8 @@ def render_harbor_config(
         template.pop(key, None)
 
     # Profile values override the template. Then set the per-evaluation job fields.
-    config = _deep_merge_harbor_config(template, _profile_overrides(spec.harbor_config))
+    profile, compose_services = _profile_overrides(spec.harbor_config)
+    config = _deep_merge_harbor_config(template, profile)
     config["job_name"] = spec.evaluation_id
     config["jobs_dir"] = jobs_dir
     config["n_attempts"] = spec.n_attempts
@@ -401,6 +502,10 @@ def render_harbor_config(
             "metadata": ownership_metadata(spec),
         },
     }
+    if compose_services is not None:
+        config["environment"]["kwargs"]["compose_services"] = compose_services.model_dump(
+            mode="json", by_alias=True, exclude_defaults=True
+        )
     return config
 
 
@@ -481,12 +586,14 @@ def make_harbor_opensandbox_submitter(
         if not staged:
             raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} task pack contains no Harbor task tree")
 
-        # Checks that need the task files: no Compose tasks, a verifier image for a separate
-        # verifier, and no task egress beyond the operator allowlist.
+        # Checks that need the task files: Compose services match the profile, a verifier image for
+        # a separate verifier, and no task egress beyond the operator allowlist.
         trusted_hosts = trusted_allowed_hosts()
+        compose_services = profile_compose_services(spec.harbor_config)
         preflight_staged_task(
             task_dir,
             trusted_hosts,
+            compose_services,
             verifier_image_ref=spec.verifier_image_ref,
             verifier_image_digest=spec.verifier_image_digest,
         )
@@ -555,6 +662,9 @@ def make_harbor_opensandbox_submitter(
             "task_image_digest": spec.image_digest,
             "verifier_image_ref": verifier_image_ref,
             "verifier_image_digest": spec.verifier_image_digest if verifier_image_ref else None,
+            "compose_services": (
+                {s.name: s.image for s in compose_services.services} if compose_services is not None else None
+            ),
             "network_policy": spec.network_policy,
             "trusted_allowed_hosts": trusted_hosts,
             "egress_verification": settings.harbor_opensandbox_egress_verification,
