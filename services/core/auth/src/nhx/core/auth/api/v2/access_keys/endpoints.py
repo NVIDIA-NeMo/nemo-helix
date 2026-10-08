@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import logging
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
+    AccessKeyWorkspaceBoundKeysError,
 )
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyReversibleStatus
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -24,19 +26,30 @@ from nhx.common.config import get_auth_config
 from nhx.common.entities import EntityConflictError
 from nhx.common.service.dependencies import get_nemo_client
 from nhx.core.auth.app.access_keys import (
+    AccessKeyForbiddenError,
     AccessKeyNotFoundError,
     AccessKeyRegistry,
     AccessKeyStateConflictError,
+    AdminOverride,
     PersistentAccessKeyIssuer,
     get_access_key_registry,
+    resolve_workspace_id,
+    resolve_workspace_name,
 )
 
 from . import schemas
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Scoped Access Keys"])
 
 _ACCESS_KEY_DISABLED_CODE = "access_keys_disabled"
 _ACCESS_KEY_DISABLED_DETAIL = "Scoped Access Keys are not enabled"
+_ACCESS_KEY_WORKSPACE_BOUND_KEYS_CODE = "workspace_bound_keys_exist"
+_ACCESS_KEY_WORKSPACE_BOUND_KEYS_DETAIL = (
+    "The service account already has live keys bound to workspaces, and this key would grant them "
+    "roles outside those workspaces. Set acknowledge_workspace_bound_keys to confirm."
+)
 _AccessKeyJTI = Annotated[
     str,
     Path(
@@ -71,11 +84,20 @@ _ACCESS_KEY_CREATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": schemas.AccessKeyErrorResponse,
     },
     403: {
-        "description": "Service-bound Scoped Access Keys require HelixAdmin",
+        "description": (
+            "Service-bound Scoped Access Keys require HelixAdmin, or Admin of every bound workspace for a "
+            "service account with no access outside them"
+        ),
         "model": schemas.AccessKeyErrorResponse,
     },
     404: _ACCESS_KEY_DISABLED_ERROR_RESPONSE,
-    409: _ACCESS_KEY_CONFLICT_ERROR_RESPONSE,
+    409: {
+        "description": (
+            "Concurrent access-key update conflict, or (code workspace_bound_keys_exist) the service account "
+            "has workspace-bound keys and the request needs acknowledge_workspace_bound_keys"
+        ),
+        "model": schemas.AccessKeyErrorResponse,
+    },
     501: _ACCESS_KEY_NOT_IMPLEMENTED_ERROR_RESPONSE,
 }
 _ACCESS_KEY_LIFECYCLE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -97,24 +119,87 @@ _ACCESS_KEY_ROTATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         "description": "Scoped Access Key rotation error",
         "model": schemas.AccessKeyErrorResponse,
     },
+    403: {
+        "description": (
+            "Rotating a service-bound key requires HelixAdmin, or Admin of every bound workspace for a "
+            "service account with no access outside them"
+        ),
+        "model": schemas.AccessKeyErrorResponse,
+    },
     404: _ACCESS_KEY_DISABLED_OR_NOT_FOUND_ERROR_RESPONSE,
     409: _ACCESS_KEY_STATE_CONFLICT_ERROR_RESPONSE,
     501: _ACCESS_KEY_NOT_IMPLEMENTED_ERROR_RESPONSE,
 }
 
 
-async def _is_platform_admin(auth_client: AuthClient) -> bool:
-    # Only human HelixAdmins may create or manage service-bound Scoped Access Keys — the
-    # same invariant AccessKeyIssuerService._target_principal enforces for creation. A
-    # service-account principal must never qualify here, even if it were ever (mis)granted
-    # the HelixAdmin role, since that would let a service credential manage other
-    # service-bound credentials, including its own.
-    if auth_client.principal.effective_principal.is_service_identity():
-        return False
-    # Deny (rather than has_role's own default-allow) when auth is globally disabled: there is
-    # no real identity to check "is HelixAdmin" against, so we don't silently grant this
-    # highly privileged, service-account-impersonating capability.
-    return auth_client.auth_enabled and await auth_client.has_role("system", "HelixAdmin")
+def _service_key_admin_check(
+    auth_client: AuthClient,
+    workspaces_client: AsyncWorkspacesClient,
+    workspace_names: dict[str, str | None] | None = None,
+) -> AdminOverride:
+    """Build the per-request check for managing service-bound Scoped Access Keys.
+
+    Only humans may create or manage service-bound keys, matching
+    AccessKeyIssuerService._target_principal. A service account never qualifies, even if
+    granted HelixAdmin or workspace Admin, so it can't manage service credentials. A
+    HelixAdmin qualifies for any key; a workspace Admin only for keys bound to workspaces
+    they are all Admin of. The HelixAdmin role is resolved once per request, however many
+    workspaces are checked, and so is each workspace's Admin check: keys bound to overlapping
+    sets of workspaces (as when listing) share the lookups for the workspaces they have in common.
+
+    ``workspace_names`` (workspace ID -> current name, None if gone or invisible) is a per-request
+    cache shared with the issuer: a name it already read, e.g. while listing the caller's
+    workspaces, isn't looked up again here. The name is still confirmed to map to the ID after
+    the role check.
+    """
+    names: dict[str, str | None] = workspace_names if workspace_names is not None else {}
+    is_helix_admin: bool | None = None
+    # workspace_id -> result. Per request, like the HelixAdmin role above. Failed lookups raise
+    # instead and aren't cached.
+    admin_of: dict[str, bool] = {}
+
+    async def is_admin_of(workspace_id: str) -> bool:
+        if workspace_id not in admin_of:
+            admin_of[workspace_id] = await check_admin_of(workspace_id)
+        return admin_of[workspace_id]
+
+    async def check_admin_of(workspace_id: str) -> bool:
+        # Keys are bound to workspace IDs, but has_role takes a name. Resolve the ID's current
+        # name, check the role, then confirm the name still maps to the ID: IDs are unique, so a
+        # match means the same workspace held the name throughout the role check, and a workspace
+        # deleted and recreated under the same name never qualifies. A workspace that is gone (or
+        # unreadable by the caller) fails closed; a transient lookup failure is a 503, like a
+        # failed has_role.
+        if workspace_id not in names:
+            names[workspace_id] = await resolve_workspace_name(workspaces_client, workspace_id)
+        name = names[workspace_id]
+        if name is None:
+            return False
+        if not await auth_client.has_role(name, "Admin"):
+            return False
+        return await resolve_workspace_id(workspaces_client, name) == workspace_id
+
+    async def can_administer(workspace_ids: Sequence[str]) -> bool:
+        """Whether the caller is a human HelixAdmin, or Admin of every bound workspace."""
+        nonlocal is_helix_admin
+        if auth_client.principal.effective_principal.is_service_identity():
+            return False
+        # Deny (rather than has_role's default-allow) when auth is disabled: there is no real
+        # identity to check.
+        if not auth_client.auth_enabled:
+            return False
+        if is_helix_admin is None:
+            is_helix_admin = await auth_client.has_role("system", "HelixAdmin")
+        if is_helix_admin:
+            return True
+        if not workspace_ids:
+            return False
+        for workspace_id in workspace_ids:
+            if not await is_admin_of(workspace_id):
+                return False
+        return True
+
+    return can_administer
 
 
 def get_workspaces_client(
@@ -137,13 +222,16 @@ def get_access_key_issuer(
     registry: AccessKeyRegistry = Depends(get_access_key_registry),
     workspaces_client: AsyncWorkspacesClient = Depends(get_workspaces_client),
 ) -> PersistentAccessKeyIssuer:
+    # One per request, shared by the Admin check and the issuer (see _service_key_admin_check).
+    workspace_names: dict[str, str | None] = {}
     return PersistentAccessKeyIssuer(
         get_auth_config(),
         auth_client.principal.effective_principal,
         registry,
         workspaces_client,
-        admin_override=lambda: _is_platform_admin(auth_client),
+        admin_override=_service_key_admin_check(auth_client, workspaces_client, workspace_names),
         caller_scope=_caller_access_key_scope(auth_client),
+        workspace_names=workspace_names,
     )
 
 
@@ -190,13 +278,14 @@ async def create_access_key(
         if request.service_account_id is not None:
             if not get_auth_config().access_keys.enabled:
                 raise AccessKeyFeatureDisabledError("Scoped Access Keys are not enabled")
-            # Delegates to the issuer's own memoized admin check (rather than calling
-            # _is_platform_admin(auth_client) directly here) so this pre-check and
-            # create_async's defense-in-depth re-check share one PDP has_role round trip.
-            if not await issuer.is_platform_admin():
+            # Delegates to the issuer's memoized admin check and cached workspace lookups (rather
+            # than calling _service_key_admin_check(...) directly here) so this pre-check and
+            # create_async's defense-in-depth re-check share the PDP has_role and workspace
+            # round trips.
+            if not await issuer.can_create_bound_key([bound.workspace for bound in request.bound_workspaces or []]):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only HelixAdmin can create service-bound Scoped Access Keys",
+                    detail="Service-bound Scoped Access Keys require HelixAdmin or Admin of every bound workspace",
                 )
             return await issuer.create_async(request, allow_service_account=True)
         return await issuer.create_async(request)
@@ -204,6 +293,15 @@ async def create_access_key(
         return _disabled_response()
     except AccessKeyOperationNotImplementedError as exc:
         raise _not_implemented(exc) from exc
+    except AccessKeyWorkspaceBoundKeysError as exc:
+        # The specifics (account and workspace names) stay in the server log; the response is generic.
+        logger.info("Refused service-bound Scoped Access Key that widens workspace-bound keys: %s", exc)
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": _ACCESS_KEY_WORKSPACE_BOUND_KEYS_DETAIL, "code": _ACCESS_KEY_WORKSPACE_BOUND_KEYS_CODE},
+        )
+    except AccessKeyForbiddenError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except AccessKeyValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except EntityConflictError as exc:
@@ -290,6 +388,8 @@ async def rotate_access_key(
         return _disabled_response()
     except AccessKeyOperationNotImplementedError as exc:
         raise _not_implemented(exc) from exc
+    except AccessKeyForbiddenError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except AccessKeyValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except AccessKeyNotFoundError as exc:

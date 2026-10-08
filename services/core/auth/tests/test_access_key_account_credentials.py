@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,7 +12,11 @@ from nhx.common.entities import EntityNotFoundError
 from nhx.core.auth.app.access_key_credentials import AccessKeyCredentialAdapter
 from nhx.core.auth.app.access_keys import AccessKeyRegistry
 from nhx.core.auth.entities import AccessKeyEntity
-from nhx.core.entities.app.repository import AccountCredentialStore, AccountIdentityStore
+from nhx.core.entities.app.repository import (
+    AccountCredentialStore,
+    AccountIdentityStore,
+    AccountIdentityUnavailableError,
+)
 from nhx.core.entities.app.repository.sqlalchemy.base import Base
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -98,3 +103,327 @@ async def test_missing_new_and_legacy_records_fail_closed(credential_backend) ->
     registry = AccessKeyRegistry(legacy_client, adapter)
 
     assert await registry.is_active("ak_missing", "alice") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bound_workspace", "expected"),
+    [("team-a", False), (None, True), ("team-b", True)],
+)
+async def test_credential_store_service_key_counts_as_access_outside_workspace(
+    credential_backend, bound_workspace: str | None, expected: bool
+) -> None:
+    adapter, owner_account_id = credential_backend
+    entity_client = AsyncMock()
+    registry = AccessKeyRegistry(entity_client, adapter)
+    service_key = _key("ak_service").model_copy(
+        update={"principal": "service-account:otel-collector", "entity_type": "SERVICE_ACCOUNT"}
+    )
+    await registry.add(
+        service_key,
+        owner_principal="alice",
+        owner_account_id=owner_account_id,
+        bound_workspace_ids=[f"ws-{bound_workspace}"] if bound_workspace else [],
+    )
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+
+    assert (
+        await registry.has_service_account_access_outside_workspaces(
+            "service-account:otel-collector", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+        )
+        is expected
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested_ids", "expected"),
+    [(["ws-old"], False), (["ws-new"], True), (["ws-old", "ws-other"], False), (["ws-other"], True)],
+)
+async def test_credential_store_key_bound_to_an_earlier_workspace_of_the_same_name_counts_as_outside(
+    credential_backend, requested_ids: list[str], expected: bool
+) -> None:
+    adapter, owner_account_id = credential_backend
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client, adapter)
+    service_key = _key("ak_service").model_copy(
+        update={"principal": "service-account:otel-collector", "entity_type": "SERVICE_ACCOUNT"}
+    )
+    await registry.add(
+        service_key,
+        owner_principal="alice",
+        owner_account_id=owner_account_id,
+        bound_workspace_ids=["ws-old"],
+    )
+
+    assert (
+        await registry.has_service_account_access_outside_workspaces(
+            "service-account:otel-collector", workspace_ids=requested_ids, workspace_names=["team-a"]
+        )
+        is expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_credential_store_round_trips_every_bound_workspace(credential_backend) -> None:
+    adapter, owner_account_id = credential_backend
+    registry = AccessKeyRegistry(AsyncMock(), adapter)
+    service_key = _key("ak_service").model_copy(
+        update={"principal": "service-account:otel-collector", "entity_type": "SERVICE_ACCOUNT"}
+    )
+    await registry.add(
+        service_key,
+        owner_principal="alice",
+        owner_account_id=owner_account_id,
+        bound_workspace_ids=["ws-team-a", "ws-team-b"],
+    )
+
+    assert (await adapter.get("ak_service")).bound_workspace_ids == ["ws-team-a", "ws-team-b"]
+
+
+@pytest.mark.asyncio
+async def test_credential_store_check_includes_revoked_keys_and_ignores_unknown_accounts(credential_backend) -> None:
+    adapter, owner_account_id = credential_backend
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client, adapter)
+    assert not await registry.has_service_account_access_outside_workspaces(
+        "service-account:never-issued", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+    )
+
+    service_key = _key("ak_service").model_copy(
+        update={"principal": "service-account:otel-collector", "entity_type": "SERVICE_ACCOUNT"}
+    )
+    await registry.add(service_key, owner_principal="alice", owner_account_id=owner_account_id)
+    await adapter.credential_store.revoke("access_key", "ak_service")
+
+    assert await registry.has_service_account_access_outside_workspaces(
+        "service-account:otel-collector", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+    )
+
+
+async def _add_team_b_service_keys(registry: AccessKeyRegistry, adapter: AccessKeyCredentialAdapter) -> None:
+    """Three service-bound keys of another tenant, all newer than the keys the tests list."""
+    bob = await adapter.identity_store.resolve_or_materialize(
+        issuer="https://idp.example.com", subject="bob", subject_claim="sub", account_type="user"
+    )
+    for index in range(3):
+        await registry.add(
+            _key(f"ak_team_b_{index}").model_copy(
+                update={
+                    "principal": f"service-account:team-b/svc{index}",
+                    "entity_type": "SERVICE_ACCOUNT",
+                    "created_at": NOW + timedelta(hours=index + 1),
+                }
+            ),
+            owner_principal="bob",
+            owner_account_id=bob.account_id,
+            bound_workspace_ids=["ws-b"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_credential_store_listing_does_not_page_other_tenants_service_keys_through_a_non_admin(
+    credential_backend,
+) -> None:
+    adapter, alice_account_id = credential_backend
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client, adapter)
+    # alice's key is the oldest row, so other tenants' newer keys would crowd it off page 1.
+    await registry.add(_key("ak_alice"), owner_principal="alice", owner_account_id=alice_account_id)
+    await _add_team_b_service_keys(registry, adapter)
+    admin_override = AsyncMock(return_value=False)
+
+    listed = await registry.list_for_principal(
+        "alice", page=1, page_size=2, owner_account_id=alice_account_id, admin_override=admin_override
+    )
+
+    assert [key.jti for key in listed.data] == ["ak_alice"]
+    assert not listed.has_more
+    # Nothing of team-b's was fetched, so nothing needed an admin check.
+    admin_override.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_credential_store_listing_keeps_service_keys_the_caller_created_for_workspaces_they_administer(
+    credential_backend,
+) -> None:
+    adapter, alice_account_id = credential_backend
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client, adapter)
+    await registry.add(_key("ak_alice"), owner_principal="alice", owner_account_id=alice_account_id)
+    for jti, workspace in (("ak_team_a", "team-a"), ("ak_team_c", "team-c")):
+        await registry.add(
+            _key(jti).model_copy(
+                update={"principal": f"service-account:{workspace}/svc", "entity_type": "SERVICE_ACCOUNT"}
+            ),
+            owner_principal="alice",
+            owner_account_id=alice_account_id,
+            bound_workspace_ids=[f"ws-{workspace}"],
+        )
+    await _add_team_b_service_keys(registry, adapter)
+
+    # alice administers team-a but no longer team-c.
+    listed = await registry.list_for_principal(
+        "alice",
+        page=1,
+        page_size=100,
+        owner_account_id=alice_account_id,
+        admin_override=AsyncMock(side_effect=lambda workspace_ids: list(workspace_ids) == ["ws-team-a"]),
+    )
+
+    assert sorted(key.jti for key in listed.data) == ["ak_alice", "ak_team_a"]
+
+
+@pytest.mark.asyncio
+async def test_credential_store_listing_for_a_helix_admin_includes_other_tenants_service_keys(
+    credential_backend,
+) -> None:
+    adapter, alice_account_id = credential_backend
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client, adapter)
+    await registry.add(_key("ak_alice"), owner_principal="alice", owner_account_id=alice_account_id)
+    await _add_team_b_service_keys(registry, adapter)
+
+    listed = await registry.list_for_principal(
+        "alice", page=1, page_size=100, include_service_accounts=True, owner_account_id=alice_account_id
+    )
+
+    assert sorted(key.jti for key in listed.data) == [
+        "ak_alice",
+        "ak_team_b_0",
+        "ak_team_b_1",
+        "ak_team_b_2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_credential_store_listing_includes_co_admins_service_keys_bound_to_administered_workspaces(
+    credential_backend,
+) -> None:
+    adapter, alice_account_id = credential_backend
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client, adapter)
+    await registry.add(_key("ak_alice"), owner_principal="alice", owner_account_id=alice_account_id)
+    # bob's keys bound to team-b (which alice administers), plus one bound only to team-c (which she doesn't).
+    await _add_team_b_service_keys(registry, adapter)
+    bob = await adapter.identity_store.resolve_or_materialize(
+        issuer="https://idp.example.com", subject="bob", subject_claim="sub", account_type="user"
+    )
+    await registry.add(
+        _key("ak_team_c").model_copy(
+            update={"principal": "service-account:team-c/svc", "entity_type": "SERVICE_ACCOUNT"}
+        ),
+        owner_principal="bob",
+        owner_account_id=bob.account_id,
+        bound_workspace_ids=["ws-c"],
+    )
+    admin_override = AsyncMock(side_effect=lambda workspace_ids: set(workspace_ids) <= {"ws-b"})
+
+    listed = await registry.list_for_principal(
+        "alice",
+        page=1,
+        page_size=100,
+        owner_account_id=alice_account_id,
+        admin_override=admin_override,
+        service_key_workspace_ids=["ws-b"],
+    )
+
+    assert sorted(key.jti for key in listed.data) == ["ak_alice", "ak_team_b_0", "ak_team_b_1", "ak_team_b_2"]
+    assert all(key.bound_workspace_ids == ["ws-b"] for key in listed.data if key.jti != "ak_alice")
+    # team-c's key was never fetched, so only team-b's keys needed an admin check.
+    assert [call.args[0] for call in admin_override.await_args_list] == [["ws-b"]] * 3
+
+
+@pytest.mark.asyncio
+async def test_credential_store_listing_drops_administered_workspace_keys_admin_override_rejects(
+    credential_backend,
+) -> None:
+    adapter, alice_account_id = credential_backend
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client, adapter)
+    await registry.add(_key("ak_alice"), owner_principal="alice", owner_account_id=alice_account_id)
+    await _add_team_b_service_keys(registry, adapter)
+
+    listed = await registry.list_for_principal(
+        "alice",
+        page=1,
+        page_size=100,
+        owner_account_id=alice_account_id,
+        admin_override=AsyncMock(return_value=False),
+        service_key_workspace_ids=["ws-b"],
+    )
+
+    assert [key.jti for key in listed.data] == ["ak_alice"]
+
+
+@pytest.mark.asyncio
+async def test_any_for_service_account_is_false_for_an_account_that_was_never_issued_a_key(credential_backend) -> None:
+    adapter, _ = credential_backend
+
+    assert await adapter.any_for_service_account("service-account:never-issued", lambda _record: True) is False
+
+
+@pytest.mark.asyncio
+async def test_any_for_service_account_fails_closed_for_a_disabled_identity(credential_backend) -> None:
+    adapter, _ = credential_backend
+    adapter.identity_store.get_active_identity = AsyncMock(side_effect=AccountIdentityUnavailableError("disabled"))
+
+    assert await adapter.any_for_service_account("service-account:team-a/otel", lambda _record: False) is True
+
+
+@pytest.mark.asyncio
+async def test_credential_store_widening_check_reports_live_bound_keys_only(credential_backend) -> None:
+    adapter, owner_account_id = credential_backend
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client, adapter)
+    for jti, workspace in (("ak_team_a", "team-a"), ("ak_team_b", "team-b")):
+        await registry.add(
+            _key(jti).model_copy(
+                update={"principal": "service-account:otel-collector", "entity_type": "SERVICE_ACCOUNT"}
+            ),
+            owner_principal="alice",
+            owner_account_id=owner_account_id,
+            bound_workspace_ids=[f"ws-{workspace}"],
+        )
+    await adapter.credential_store.revoke("access_key", "ak_team_b")
+
+    # Granting roles in team-b widens the live team-a key; the revoked team-b key doesn't count.
+    assert await registry.workspace_bound_keys_widened_by("service-account:otel-collector", ["ws-team-b"]) == [
+        "ws-team-a"
+    ]
+    assert await registry.workspace_bound_keys_widened_by("service-account:otel-collector", ["ws-team-a"]) is None
+    # A key that grants nothing widens nothing.
+    assert await registry.workspace_bound_keys_widened_by("service-account:otel-collector", []) is None
+
+
+@pytest.mark.asyncio
+async def test_is_service_account_disabled_only_for_an_inactive_identity(credential_backend) -> None:
+    adapter, owner_account_id = credential_backend
+    registry = AccessKeyRegistry(AsyncMock(), adapter)
+    # Never issued a key: unknown, not disabled.
+    assert await registry.is_service_account_disabled("service-account:otel-collector") is False
+
+    await registry.add(
+        _key("ak_service").model_copy(
+            update={"principal": "service-account:otel-collector", "entity_type": "SERVICE_ACCOUNT"}
+        ),
+        owner_principal="alice",
+        owner_account_id=owner_account_id,
+    )
+    assert await registry.is_service_account_disabled("service-account:otel-collector") is False
+
+    adapter.identity_store.get_active_identity = AsyncMock(side_effect=AccountIdentityUnavailableError("disabled"))
+    assert await registry.is_service_account_disabled("service-account:otel-collector") is True
+
+
+@pytest.mark.asyncio
+async def test_is_service_account_disabled_is_false_without_a_credential_store() -> None:
+    assert await AccessKeyRegistry(AsyncMock()).is_service_account_disabled("service-account:otel") is False

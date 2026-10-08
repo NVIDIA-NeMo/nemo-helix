@@ -20,14 +20,17 @@ from nemo_helix_plugin.auth.access_keys.client import AccessKeyIssuerClient, Acc
 from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
+    AccessKeyWorkspaceBoundKeysError,
 )
 from nemo_helix_plugin.auth.access_keys.types import (
+    AccessKeyBoundWorkspace,
     AccessKeyCreateRequest,
     AccessKeyWorkspaceGrant,
 )
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.oidc import OidcClientName, TokenRefreshKind, refresh_client
 from rich.console import Console
+from rich.markup import escape
 
 from nemo_helix_ext.auth.helpers import (
     AuthError,
@@ -104,6 +107,8 @@ def _parse_access_key_scope(value: str | None) -> list[str] | None:
 
 def _parse_access_key_workspace_grants(
     values: list[str] | None,
+    *,
+    param_hint: str = "--workspace",
 ) -> list[AccessKeyWorkspaceGrant] | None:
     if values is None:
         return None
@@ -117,13 +122,13 @@ def _parse_access_key_workspace_grants(
         if not workspace:
             raise typer.BadParameter(
                 f"Invalid workspace grant {value!r}: workspace name must not be empty.",
-                param_hint="--workspace",
+                param_hint=param_hint,
             )
         if separator and not roles:
             # 'team-a:' with no roles is likely a typo, not a request for the default role.
             raise typer.BadParameter(
                 f"Invalid workspace grant {value!r}: specify at least one role after ':'.",
-                param_hint="--workspace",
+                param_hint=param_hint,
             )
         grants.append(
             AccessKeyWorkspaceGrant(
@@ -132,6 +137,42 @@ def _parse_access_key_workspace_grants(
             )
         )
     return grants
+
+
+def _parse_access_key_bound_workspaces(values: list[str] | None) -> list[AccessKeyBoundWorkspace] | None:
+    """Parse '<workspace>:<role1>,<role2>' values; the roles are required, none is assumed."""
+    if values is None:
+        return None
+    for value in values:
+        if ":" not in value:
+            raise typer.BadParameter(
+                f"Invalid bound workspace {value!r}: specify the roles as '<workspace>:<role1>,<role2>'.",
+                param_hint="--bound-workspace",
+            )
+    grants = _parse_access_key_workspace_grants(values, param_hint="--bound-workspace") or []
+    return [AccessKeyBoundWorkspace(workspace=grant.workspace, roles=grant.roles) for grant in grants]
+
+
+def _confirm_widening_workspace_bound_keys(exc: AccessKeyWorkspaceBoundKeysError) -> None:
+    """Warn that the new key extends the account's workspace-bound keys, and ask to proceed.
+
+    Exits without creating the key when the user declines, and fails when there is no terminal to
+    ask on, so a script has to opt in with --yes.
+    """
+    # Imported here so other auth commands don't load prompt_toolkit.
+    from nemo_helix_ext.ui.prompts import UserCancelled, is_interactive, prompt_confirm
+
+    if not is_interactive():
+        raise AuthError(f"{exc} Re-run with --yes to create the key anyway.") from exc
+    console = Console(stderr=True)
+    console.print(f"[yellow]Warning:[/yellow] {escape(str(exc))}", highlight=False)
+    try:
+        proceed = prompt_confirm("Create the key anyway?", default=False)
+    except UserCancelled:
+        proceed = False
+    if not proceed:
+        console.print("Cancelled; no key was created.")
+        raise typer.Exit(1)
 
 
 def is_auth_disabled(base_url: str, *, http_client: httpx.Client, timeout: float = 3.0) -> bool:
@@ -880,7 +921,22 @@ def create_access_key(
         str | None,
         typer.Option(
             "--service-account",
-            help="Bind the key to a non-human service account (HelixAdmin only).",
+            help=(
+                "Bind the key to a non-human service account (HelixAdmin, or a workspace Admin together "
+                "with --bound-workspace, for an account named '<workspace>/<name>' after a bound workspace)."
+            ),
+        ),
+    ] = None,
+    bound_workspace: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--bound-workspace",
+            help=(
+                "Bind a service-account key to a workspace so its Admins can create and manage it, formatted "
+                "'<workspace>:<role1>,<role2>': the roles the key's service account gets there (none is "
+                "granted implicitly). Requires --service-account and cannot be combined with --workspace. "
+                "Repeat to bind several workspaces; managing the key then takes Admin of all of them."
+            ),
         ),
     ] = None,
     scope: Annotated[
@@ -908,24 +964,45 @@ def create_access_key(
             help=(
                 "Grant the key's principal workspace membership, formatted '<workspace>' or "
                 "'<workspace>:<role1>,<role2>' (role defaults to Editor). Repeat for multiple workspaces. "
-                "Replaces a separate 'nemo workspaces members create' call."
+                "Replaces a separate 'nemo workspaces members create' call. Not allowed with "
+                "--bound-workspace, which grants its own roles."
             ),
         ),
     ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help=(
+                "With --service-account: create the key without asking when the account already has keys "
+                "bound to workspaces and this key grants it roles outside them."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Create a user-bound or service-bound Scoped Access Key."""
+    if yes and service_account is None:
+        raise typer.BadParameter("--yes only applies together with --service-account.", param_hint="--yes")
     expires_in_was_set, parsed_expires_in = _parse_access_key_expires_in(expires_in)
     request = AccessKeyCreateRequest(
         name=name,
         description=description,
         service_account_id=service_account,
+        bound_workspaces=_parse_access_key_bound_workspaces(bound_workspace),
         scope=_parse_access_key_scope(scope),
         rotates=rotate,
         workspaces=_parse_access_key_workspace_grants(workspace),
+        **({"acknowledge_workspace_bound_keys": True} if yes else {}),
         **({"expires_in_seconds": parsed_expires_in} if expires_in_was_set else {}),
     )
+    issuer = _access_key_issuer(ctx)
     try:
-        created = _access_key_issuer(ctx).create(request)
+        try:
+            created = issuer.create(request)
+        except AccessKeyWorkspaceBoundKeysError as exc:
+            _confirm_widening_workspace_bound_keys(exc)
+            created = issuer.create(request.model_copy(update={"acknowledge_workspace_bound_keys": True}))
     except AccessKeyFeatureDisabledError as exc:
         _raise_access_key_disabled(exc)
     except AccessKeyOperationNotImplementedError as exc:
@@ -946,7 +1023,8 @@ def list_access_keys(
     """List Scoped Access Keys owned by the currently authenticated user.
 
     HelixAdmins also see every service-bound Scoped Access Key, not just the
-    ones they personally created.
+    ones they personally created; workspace Admins also see the service-bound
+    keys bound to workspaces they administer, whoever created them.
     """
     try:
         listed = _access_key_issuer(ctx).list(page=page, page_size=page_size)
@@ -966,6 +1044,7 @@ def list_access_keys(
             Column("description", None),
             Column("entity_type", None),
             Column("principal", None),
+            Column("bound_workspaces", None),
             Column("status", None),
             Column("issuer", None),
             Column("audiences", None),
@@ -987,7 +1066,7 @@ def revoke_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to revoke.")],
 ) -> None:
-    """Revoke a Scoped Access Key owned by the currently authenticated user."""
+    """Revoke a Scoped Access Key you own, or a service-bound key you administer."""
     try:
         result = _access_key_issuer(ctx).revoke(jti)
     except AccessKeyFeatureDisabledError as exc:
@@ -1006,7 +1085,7 @@ def suspend_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to suspend.")],
 ) -> None:
-    """Temporarily suspend a Scoped Access Key owned by the current user.
+    """Temporarily suspend a Scoped Access Key you own, or a service-bound key you administer.
 
     Unlike revocation, suspension is reversible until the key expires.
     """
@@ -1028,7 +1107,7 @@ def unsuspend_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to unsuspend.")],
 ) -> None:
-    """Restore a suspended Scoped Access Key owned by the current user."""
+    """Restore a suspended Scoped Access Key you own, or a service-bound key you administer."""
     try:
         result = _access_key_issuer(ctx).unsuspend(jti)
     except AccessKeyFeatureDisabledError as exc:

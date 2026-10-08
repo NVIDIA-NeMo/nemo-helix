@@ -201,7 +201,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccessKeyErrorResponse'
         '403':
-          description: Service-bound Scoped Access Keys require HelixAdmin
+          description: Service-bound Scoped Access Keys require HelixAdmin, or Admin
+            of every bound workspace for a service account with no access outside
+            them
           content:
             application/json:
               schema:
@@ -213,7 +215,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccessKeyErrorResponse'
         '409':
-          description: Concurrent access-key update conflict
+          description: Concurrent access-key update conflict, or (code workspace_bound_keys_exist)
+            the service account has workspace-bound keys and the request needs acknowledge_workspace_bound_keys
           content:
             application/json:
               schema:
@@ -361,6 +364,14 @@ paths:
                 $ref: '#/components/schemas/AccessKeyRotateResponse'
         '400':
           description: Scoped Access Key rotation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '403':
+          description: Rotating a service-bound key requires HelixAdmin, or Admin
+            of every bound workspace for a service account with no access outside
+            them
           content:
             application/json:
               schema:
@@ -8699,6 +8710,36 @@ components:
       type: object
       title: APIEndpointData
       description: Data about an inference endpoint.
+    AccessKeyBoundWorkspace:
+      properties:
+        workspace:
+          type: string
+          pattern: ^\s*\S.*$
+          title: Workspace
+          description: Workspace name. Must not be blank.
+        roles:
+          items:
+            type: string
+          contains:
+            pattern: ^\s*\S.*$
+          type: array
+          minContains: 1
+          title: Roles
+          description: Roles to grant the key's service account in the workspace.
+            Required.
+      type: object
+      required:
+      - workspace
+      - roles
+      title: AccessKeyBoundWorkspace
+      description: 'A workspace a service-bound key is bound to, with the roles its
+        service account gets there.
+
+
+        Unlike a plain grant, the roles are required: binding a key to a workspace
+        never grants a
+
+        role implicitly.'
     AccessKeyCreateRequest:
       properties:
         name:
@@ -8726,12 +8767,42 @@ components:
         service_account_id:
           title: Service Account Id
           description: Optional non-human service account to bind the key to. Service-bound
-            keys can only be created by a HelixAdmin and authenticate as service-account:<id>.
+            keys can be created by a HelixAdmin, or by an Admin of every workspace
+            named in `bound_workspaces` for a service account named `<workspace>/<name>`
+            after one of them, and authenticate as service-account:<id>.
           nullable: true
           type: string
           maxLength: 240
           minLength: 1
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$
+        bound_workspaces:
+          title: Bound Workspaces
+          description: Workspaces to bind a service-bound key to, each with the roles
+            the key's service account gets there (no role is granted implicitly).
+            Requires service_account_id and cannot be combined with `workspaces`.
+            A key bound to several workspaces is managed by someone who is Admin of
+            all of them, or by a HelixAdmin. A caller who is not a HelixAdmin must
+            be Admin of every bound workspace, must name the service account `<workspace>/<name>`
+            after one of them, and can only use a service account whose existing keys
+            and role bindings are all within these workspaces (checked when the key
+            is created or rotated, not continuously). The key is bound to each workspace's
+            ID, so if a bound workspace is deleted and recreated under the same name,
+            only a HelixAdmin can manage the key.
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AccessKeyBoundWorkspace'
+          type: array
+          minItems: 1
+        acknowledge_workspace_bound_keys:
+          type: boolean
+          title: Acknowledge Workspace Bound Keys
+          description: Confirm creating a service-bound key for an account that already
+            has live keys bound to workspaces, when the new key grants roles in a
+            workspace outside those a live key is bound to. Roles belong to the service
+            account, so those keys gain the new roles too, while being managed by
+            the bound workspaces' Admins. Without it, such a request fails with 409
+            and code `workspace_bound_keys_exist`.
+          default: false
         scope:
           items:
             type: string
@@ -8789,6 +8860,23 @@ components:
           title: Entity Type
           description: Whether the key is bound to a user or a non-human service account.
           default: USER
+        bound_workspaces:
+          items:
+            type: string
+          type: array
+          title: Bound Workspaces
+          description: Current names of the workspaces a service-bound key is bound
+            to, aligned with `bound_workspace_ids`; a workspace that no longer exists,
+            or that the caller can't see, is shown by its ID. Empty for personal and
+            unbound keys.
+        bound_workspace_ids:
+          items:
+            type: string
+          type: array
+          title: Bound Workspace Ids
+          description: 'IDs of the workspaces a service-bound key is bound to. The
+            key stays bound to these IDs: a workspace deleted and recreated under
+            the same name has a new ID and doesn''t manage the key.'
         status:
           type: string
           enum:
@@ -8865,10 +8953,13 @@ components:
         code:
           title: Code
           description: Set to access_keys_disabled when the Scoped Access Key feature
-            is disabled.
+            is disabled, or to workspace_bound_keys_exist when creating the key needs
+            acknowledge_workspace_bound_keys.
           nullable: true
           type: string
-          const: access_keys_disabled
+          enum:
+          - access_keys_disabled
+          - workspace_bound_keys_exist
       type: object
       required:
       - detail
@@ -8919,6 +9010,23 @@ components:
           title: Entity Type
           description: Whether the key is bound to a user or a non-human service account.
           default: USER
+        bound_workspaces:
+          items:
+            type: string
+          type: array
+          title: Bound Workspaces
+          description: Current names of the workspaces a service-bound key is bound
+            to, aligned with `bound_workspace_ids`; a workspace that no longer exists,
+            or that the caller can't see, is shown by its ID. Empty for personal and
+            unbound keys.
+        bound_workspace_ids:
+          items:
+            type: string
+          type: array
+          title: Bound Workspace Ids
+          description: 'IDs of the workspaces a service-bound key is bound to. The
+            key stays bound to these IDs: a workspace deleted and recreated under
+            the same name has a new ID and doesn''t manage the key.'
         status:
           type: string
           enum:

@@ -23,6 +23,15 @@ class AccessKeyFeatureDisabledError(RuntimeError):
     """Raised when Scoped Access Keys are disabled in platform config."""
 
 
+class AccessKeyWorkspaceBoundKeysError(RuntimeError):
+    """Raised when creating a service-bound key needs acknowledge_workspace_bound_keys.
+
+    The service account already has live keys bound to workspaces, and the new key would grant the
+    account roles outside them, which those keys would get too. Resend the request with
+    acknowledge_workspace_bound_keys=True to proceed.
+    """
+
+
 class AccessKeyIssuer(Protocol):
     """Scoped Access Key implementation interface shared by service and client implementations."""
 

@@ -11,6 +11,7 @@ from nemo_helix_plugin.auth.access_keys.client import AccessKeyIssuerClient, Acc
 from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
+    AccessKeyWorkspaceBoundKeysError,
 )
 from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyCreateRequest,
@@ -192,3 +193,33 @@ def test_access_key_issuer_client_propagates_not_found_as_http_error() -> None:
         issuer.revoke("ak_" + "0" * 32)
     assert exc_info.value.status_code == 404
     assert "was not found" in exc_info.value.detail
+
+
+def test_access_key_issuer_client_translates_workspace_bound_keys_conflict_to_domain_error() -> None:
+    response = httpx.Response(
+        409,
+        json={"detail": "Service account 'otel' already has live keys", "code": "workspace_bound_keys_exist"},
+        request=httpx.Request("POST", "https://cluster.example.com/apis/auth/v2/access-keys"),
+    )
+    client = _AccessKeysClientStub()
+    client.create_access_key.side_effect = NemoHTTPError(response)
+
+    issuer = AccessKeyIssuerClient(client.as_client())
+
+    with pytest.raises(AccessKeyWorkspaceBoundKeysError, match="already has live keys"):
+        issuer.create(AccessKeyCreateRequest(service_account_id="otel"))
+
+
+def test_access_key_issuer_client_propagates_other_conflicts_as_http_error() -> None:
+    response = httpx.Response(
+        409,
+        json={"detail": "Concurrent conflict; retry."},
+        request=httpx.Request("POST", "https://cluster.example.com/apis/auth/v2/access-keys"),
+    )
+    client = _AccessKeysClientStub()
+    client.create_access_key.side_effect = NemoHTTPError(response)
+
+    issuer = AccessKeyIssuerClient(client.as_client())
+
+    with pytest.raises(NemoHTTPError):
+        issuer.create(AccessKeyCreateRequest())

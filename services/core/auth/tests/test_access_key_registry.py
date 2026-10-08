@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 import pytest
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse, AccessKeyEntityType
 from nhx.common.auth.token_claims import TokenClaims
-from nhx.common.entities import EntityConflictError, EntityNotFoundError
+from nhx.common.entities import ALL_WORKSPACES, EntityConflictError, EntityNotFoundError
 from nhx.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyRegistry, AccessKeyStateConflictError
-from nhx.core.auth.entities import AccessKeyEntity
+from nhx.core.auth.entities import AccessKeyEntity, RoleBindingEntity
 
 NOW = datetime(2026, 8, 4, 18, 0, tzinfo=UTC)
 
@@ -21,6 +21,7 @@ def _record(
     principal: str = "alice@example.com",
     revoked: bool = False,
     service_account: bool = False,
+    bound_workspace_ids: list[str] | None = None,
 ):
     return AccessKeyEntity(
         name=jti,
@@ -29,6 +30,7 @@ def _record(
         description="CI build automation",
         principal=principal,
         subject_principal="service-account:otel-collector" if service_account else None,
+        bound_workspace_ids=bound_workspace_ids or [],
         entity_type="SERVICE_ACCOUNT" if service_account else "USER",
         issued_at=NOW,
         expires_at=datetime(2030, 1, 1, tzinfo=UTC),
@@ -231,7 +233,7 @@ async def test_registry_lists_principals_keys_with_status_across_pages() -> None
 
 
 @pytest.mark.asyncio
-async def test_registry_lists_all_service_accounts_when_include_service_accounts() -> None:
+async def test_registry_lists_every_service_account_when_include_service_accounts() -> None:
     entity_client = AsyncMock()
     entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
     registry = AccessKeyRegistry(entity_client)
@@ -245,6 +247,507 @@ async def test_registry_lists_all_service_accounts_when_include_service_accounts
             {"data.entity_type": {"$eq": "SERVICE_ACCOUNT"}},
         ]
     }
+
+
+@pytest.mark.asyncio
+async def test_registry_list_fetches_only_the_callers_records_unless_include_service_accounts() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client)
+
+    await registry.list_for_principal(
+        "alice@example.com", page=1, page_size=100, admin_override=AsyncMock(return_value=True)
+    )
+
+    assert entity_client.list.await_args.kwargs["filter_operation"].to_dict() == {
+        "data.principal": {"$eq": "alice@example.com"}
+    }
+
+
+@pytest.mark.asyncio
+async def test_registry_list_keeps_a_service_key_only_when_admin_override_accepts_its_workspace() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(
+        data=[
+            _record(jti="ak_personal"),
+            _record(jti="ak_team_a", service_account=True, bound_workspace_ids=["ws-team-a"]),
+            _record(jti="ak_team_b", service_account=True, bound_workspace_ids=["ws-team-b"]),
+            _record(jti="ak_legacy", service_account=True),
+        ],
+        pagination=SimpleNamespace(total_pages=1),
+    )
+    registry = AccessKeyRegistry(entity_client)
+    admin_override = AsyncMock(side_effect=lambda workspace_ids: list(workspace_ids) == ["ws-team-a"])
+
+    listed = await registry.list_for_principal(
+        "alice@example.com", page=1, page_size=100, admin_override=admin_override
+    )
+
+    assert [(key.jti, key.bound_workspace_ids) for key in listed.data] == [
+        ("ak_personal", []),
+        ("ak_team_a", ["ws-team-a"]),
+    ]
+    # The registry reports IDs in both fields; the issuer later maps bound_workspaces to current names.
+    assert listed.data[1].bound_workspaces == ["ws-team-a"]
+    assert [call.args[0] for call in admin_override.await_args_list] == [["ws-team-a"], ["ws-team-b"], []]
+
+
+@pytest.mark.asyncio
+async def test_registry_list_hides_every_service_key_without_admin_override() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(
+        data=[
+            _record(jti="ak_personal"),
+            _record(jti="ak_team_a", service_account=True, bound_workspace_ids=["ws-team-a"]),
+        ],
+        pagination=SimpleNamespace(total_pages=1),
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    listed = await registry.list_for_principal("alice@example.com", page=1, page_size=100)
+
+    assert [key.jti for key in listed.data] == ["ak_personal"]
+
+
+@pytest.mark.asyncio
+async def test_registry_list_for_admin_includes_every_service_key_without_consulting_admin_override() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(
+        data=[
+            _record(
+                jti="ak_team_a", principal="bob@example.com", service_account=True, bound_workspace_ids=["ws-team-a"]
+            )
+        ],
+        pagination=SimpleNamespace(total_pages=1),
+    )
+    registry = AccessKeyRegistry(entity_client)
+    admin_override = AsyncMock(return_value=False)
+
+    listed = await registry.list_for_principal(
+        "admin@example.com", page=1, page_size=100, include_service_accounts=True, admin_override=admin_override
+    )
+
+    assert [(key.jti, key.bound_workspace_ids) for key in listed.data] == [("ak_team_a", ["ws-team-a"])]
+    admin_override.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_registry_list_fetches_service_keys_bound_to_candidate_workspaces_in_one_clause() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client)
+
+    await registry.list_for_principal(
+        "alice@example.com",
+        page=1,
+        page_size=100,
+        admin_override=AsyncMock(return_value=True),
+        service_key_workspace_ids=["ws-team-a", "ws-team-b"],
+    )
+
+    assert entity_client.list.await_args.kwargs["filter_operation"].to_dict() == {
+        "$or": [
+            {"data.principal": {"$eq": "alice@example.com"}},
+            {
+                "$and": [
+                    {"data.entity_type": {"$eq": "SERVICE_ACCOUNT"}},
+                    {"data.bound_workspace_ids": {"$elemMatch": {"$in": ["ws-team-a", "ws-team-b"]}}},
+                ]
+            },
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_registry_list_includes_another_owners_service_key_bound_to_an_administered_workspace() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(
+        data=[
+            _record(jti="ak_personal"),
+            # Created by a co-admin of team-a.
+            _record(
+                jti="ak_team_a", principal="bob@example.com", service_account=True, bound_workspace_ids=["ws-team-a"]
+            ),
+            # Bound to team-a and team-c; alice administers only team-a.
+            _record(
+                jti="ak_team_a_c",
+                principal="bob@example.com",
+                service_account=True,
+                bound_workspace_ids=["ws-team-a", "ws-team-c"],
+            ),
+        ],
+        pagination=SimpleNamespace(total_pages=1),
+    )
+    registry = AccessKeyRegistry(entity_client)
+    admin_override = AsyncMock(side_effect=lambda workspace_ids: set(workspace_ids) <= {"ws-team-a"})
+
+    listed = await registry.list_for_principal(
+        "alice@example.com",
+        page=1,
+        page_size=100,
+        admin_override=admin_override,
+        service_key_workspace_ids=["ws-team-a"],
+    )
+
+    assert [key.jti for key in listed.data] == ["ak_personal", "ak_team_a"]
+    assert [call.args[0] for call in admin_override.await_args_list] == [["ws-team-a"], ["ws-team-a", "ws-team-c"]]
+
+
+@pytest.mark.asyncio
+async def test_registry_add_persists_the_bound_workspace() -> None:
+    entity_client = AsyncMock()
+    registry = AccessKeyRegistry(entity_client)
+    key = AccessKeyCreateResponse(
+        jti="ak_example",
+        name="otel",
+        principal="service-account:team-a/otel",
+        entity_type="SERVICE_ACCOUNT",
+        created_at=NOW,
+        expires_at=NOW + timedelta(hours=1),
+        status="ACTIVE",
+        issuer="https://platform.example.com/apis/auth",
+        audiences=["nemo-helix-access-key"],
+        token="secret-token",
+        token_type="Bearer",
+    )
+
+    await registry.add(key, owner_principal="alice@example.com", bound_workspace_ids=["ws-team-a"])
+
+    saved = entity_client.create.await_args.args[0]
+    assert saved.bound_workspace_ids == ["ws-team-a"]
+    assert saved.principal == "alice@example.com"
+    assert saved.subject_principal == "service-account:team-a/otel"
+
+
+def _binding(workspace: str, *, revoked: bool = False) -> RoleBindingEntity:
+    return RoleBindingEntity(
+        name=f"binding-{workspace}",
+        workspace=workspace,
+        principal="service-account:otel-collector",
+        role="Editor",
+        granted_by="admin@example.com",
+        granted_at=NOW,
+        revoked_at=NOW if revoked else None,
+    )
+
+
+def _entity_client_with(*, keys: list[AccessKeyEntity], bindings: list[RoleBindingEntity] | None = None) -> AsyncMock:
+    async def list_entities(entity_type, **_kwargs):
+        data = keys if entity_type is AccessKeyEntity else bindings or []
+        return SimpleNamespace(data=data, pagination=SimpleNamespace(total_pages=1))
+
+    entity_client = AsyncMock()
+    entity_client.list.side_effect = list_entities
+    return entity_client
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bindings", "expected"),
+    [
+        ([], False),
+        ([_binding("team-a")], False),
+        ([_binding("team-b")], True),
+        ([_binding("team-a"), _binding("team-b")], True),
+        ([_binding("team-b", revoked=True)], False),
+    ],
+)
+async def test_registry_detects_service_account_role_bindings_outside_a_workspace(
+    bindings: list[RoleBindingEntity], expected: bool
+) -> None:
+    entity_client = _entity_client_with(
+        keys=[_record(service_account=True, bound_workspace_ids=["ws-team-a"])], bindings=bindings
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    assert (
+        await registry.has_service_account_access_outside_workspaces(
+            "service-account:otel-collector", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+        )
+        is expected
+    )
+
+    binding_call = entity_client.list.await_args_list[-1]
+    assert binding_call.args[0] is RoleBindingEntity
+    assert binding_call.kwargs["workspace"] == ALL_WORKSPACES
+    # No $exists: the entity service only supports it for registered relationships.
+    assert binding_call.kwargs["filter_operation"].to_dict() == {
+        "data.principal": {"$eq": "service-account:otel-collector"}
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("records", "expected"),
+    [
+        ([], False),
+        ([_record(service_account=True, bound_workspace_ids=["ws-team-a"])], False),
+        ([_record(service_account=True)], True),
+        ([_record(service_account=True, bound_workspace_ids=["ws-team-b"])], True),
+        (
+            [
+                _record(jti="ak_a", service_account=True, bound_workspace_ids=["ws-team-a"]),
+                _record(jti="ak_b", service_account=True, bound_workspace_ids=["ws-team-b"]),
+            ],
+            True,
+        ),
+    ],
+)
+async def test_registry_detects_service_account_keys_outside_a_workspace(
+    records: list[AccessKeyEntity], expected: bool
+) -> None:
+    entity_client = _entity_client_with(keys=records)
+    registry = AccessKeyRegistry(entity_client)
+
+    assert (
+        await registry.has_service_account_access_outside_workspaces(
+            "service-account:otel-collector", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+        )
+        is expected
+    )
+
+    assert entity_client.list.await_args_list[0].kwargs["filter_operation"].to_dict() == {
+        "data.subject_principal": {"$eq": "service-account:otel-collector"}
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("key_ids", "requested_ids", "expected"),
+    [
+        (["ws-old"], ["ws-old"], False),
+        # Same name, different workspace: deleting a workspace doesn't revoke its keys.
+        (["ws-old"], ["ws-new"], True),
+        # A key within the requested set is fine, however many workspaces it spans.
+        (["ws-1"], ["ws-1", "ws-2"], False),
+        (["ws-1", "ws-2"], ["ws-1", "ws-2"], False),
+        # A key reaching any workspace beyond the requested set is outside.
+        (["ws-1", "ws-2"], ["ws-1"], True),
+    ],
+)
+async def test_registry_compares_key_workspaces_by_id_against_the_requested_set(
+    key_ids: list[str], requested_ids: list[str], expected: bool
+) -> None:
+    entity_client = _entity_client_with(
+        keys=[
+            _record(
+                service_account=True,
+                bound_workspace_ids=key_ids,
+            )
+        ]
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    assert (
+        await registry.has_service_account_access_outside_workspaces(
+            "service-account:otel-collector",
+            workspace_ids=requested_ids,
+            workspace_names=["team-a"],
+        )
+        is expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_registry_allows_role_bindings_in_any_of_the_requested_workspaces() -> None:
+    entity_client = _entity_client_with(
+        keys=[_record(service_account=True, bound_workspace_ids=["ws-team-a"])],
+        bindings=[_binding("team-a"), _binding("team-b")],
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    assert not await registry.has_service_account_access_outside_workspaces(
+        "service-account:otel-collector",
+        workspace_ids=["ws-team-a", "ws-team-b"],
+        workspace_names=["team-a", "team-b"],
+    )
+    assert await registry.has_service_account_access_outside_workspaces(
+        "service-account:otel-collector", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_registry_service_account_workspace_check_reads_every_page() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.side_effect = [
+        SimpleNamespace(
+            data=[_with_id(_record(service_account=True, bound_workspace_ids=["ws-team-a"]), "entity-1")],
+            pagination=SimpleNamespace(total_pages=2),
+        ),
+        SimpleNamespace(data=[_record(service_account=True)], pagination=SimpleNamespace(total_pages=1)),
+    ]
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.has_service_account_access_outside_workspaces(
+        "service-account:otel-collector", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+    )
+
+    _assert_keyset_scan(entity_client, "data.subject_principal", after_ids=[None, "entity-1"])
+
+
+def _with_id(entity, entity_id: str):
+    entity._id = entity_id
+    return entity
+
+
+def _assert_keyset_scan(entity_client: AsyncMock, field: str, *, after_ids: list[str | None]) -> None:
+    """Each page is the first page after the last ID read, so a row deleted mid-scan can't be skipped."""
+    calls = entity_client.list.await_args_list
+    assert [(call.kwargs["page"], call.kwargs["sort"]) for call in calls] == [(1, "id")] * len(after_ids)
+    for call, after_id in zip(calls, after_ids, strict=True):
+        condition = {field: {"$eq": "service-account:otel-collector"}}
+        expected = condition if after_id is None else {"$and": [condition, {"id": {"$gt": after_id}}]}
+        assert call.kwargs["filter_operation"].to_dict() == expected
+
+
+@pytest.mark.asyncio
+async def test_registry_role_binding_check_pages_by_id() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.side_effect = [
+        # No keys outside the workspace.
+        SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1)),
+        SimpleNamespace(data=[_with_id(_binding("team-a"), "binding-1")], pagination=SimpleNamespace(total_pages=2)),
+        SimpleNamespace(data=[_with_id(_binding("team-b"), "binding-2")], pagination=SimpleNamespace(total_pages=1)),
+    ]
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.has_service_account_access_outside_workspaces(
+        "service-account:otel-collector", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+    )
+
+    binding_calls = entity_client.list.await_args_list[1:]
+    assert [call.args[0] for call in binding_calls] == [RoleBindingEntity, RoleBindingEntity]
+    assert binding_calls[1].kwargs["filter_operation"].to_dict() == {
+        "$and": [{"data.principal": {"$eq": "service-account:otel-collector"}}, {"id": {"$gt": "binding-1"}}]
+    }
+
+
+@pytest.mark.asyncio
+async def test_registry_scan_fails_closed_on_an_entity_without_an_id() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(
+        data=[_record(service_account=True, bound_workspace_ids=["ws-team-a"])],
+        pagination=SimpleNamespace(total_pages=2),
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    with pytest.raises(RuntimeError, match="without an ID"):
+        await registry.has_service_account_access_outside_workspaces(
+            "service-account:otel-collector", workspace_ids=["ws-team-a"], workspace_names=["team-a"]
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("records", "granted", "expected"),
+    [
+        ([], ["ws-team-b"], None),
+        # Unbound keys are already HelixAdmin-managed; nothing to widen.
+        ([_record(service_account=True)], ["ws-team-b"], None),
+        # A key granting nothing widens nothing.
+        ([_record(service_account=True, bound_workspace_ids=["ws-team-a"])], [], None),
+        # A new key granting roles outside the existing key's workspaces widens it.
+        ([_record(service_account=True, bound_workspace_ids=["ws-team-a"])], ["ws-team-b"], ["ws-team-a"]),
+        # A new key confined to the existing key's workspaces doesn't widen it.
+        ([_record(service_account=True, bound_workspace_ids=["ws-team-a"])], ["ws-team-a"], None),
+        (
+            [_record(service_account=True, bound_workspace_ids=["ws-team-a", "ws-team-b"])],
+            ["ws-team-a"],
+            None,
+        ),
+        # A new key reaching a workspace the existing key isn't bound to widens it.
+        (
+            [_record(service_account=True, bound_workspace_ids=["ws-team-a"])],
+            ["ws-team-a", "ws-team-b"],
+            ["ws-team-a"],
+        ),
+        # Same name, different workspace: the old key is bound to the deleted workspace's ID.
+        (
+            [_record(service_account=True, bound_workspace_ids=["ws-old"])],
+            ["ws-team-a"],
+            ["ws-old"],
+        ),
+        # Keys that can no longer authenticate don't count.
+        ([_record(service_account=True, bound_workspace_ids=["ws-team-a"], revoked=True)], ["ws-team-b"], None),
+        (
+            [
+                _record(service_account=True, bound_workspace_ids=["ws-team-a"]).model_copy(
+                    update={"expires_at": datetime(2000, 1, 1, tzinfo=UTC)}
+                )
+            ],
+            ["ws-team-b"],
+            None,
+        ),
+        # Suspended keys can be unsuspended, so they still count.
+        (
+            [
+                _record(service_account=True, bound_workspace_ids=["ws-team-a"]).model_copy(
+                    update={"status": "SUSPENDED"}
+                )
+            ],
+            ["ws-team-b"],
+            ["ws-team-a"],
+        ),
+        # Every affected workspace is reported, sorted.
+        (
+            [
+                _record(jti="ak_b", service_account=True, bound_workspace_ids=["ws-team-b"]),
+                _record(jti="ak_a", service_account=True, bound_workspace_ids=["ws-team-a"]),
+            ],
+            ["ws-team-c"],
+            ["ws-team-a", "ws-team-b"],
+        ),
+    ],
+)
+async def test_registry_reports_workspace_bound_keys_a_new_key_would_widen(
+    records: list[AccessKeyEntity], granted: list[str], expected: list[str] | None
+) -> None:
+    registry = AccessKeyRegistry(_entity_client_with(keys=records))
+
+    assert await registry.workspace_bound_keys_widened_by("service-account:otel-collector", granted) == expected
+
+
+@pytest.mark.asyncio
+async def test_registry_widening_check_returns_none_for_empty_grants_without_reading_keys() -> None:
+    entity_client = _entity_client_with(keys=[_record(service_account=True, bound_workspace_ids=["ws-team-a"])])
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.workspace_bound_keys_widened_by("service-account:otel-collector", []) is None
+    entity_client.list.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_registry_widening_check_reads_every_page() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.side_effect = [
+        SimpleNamespace(
+            data=[_with_id(_record(service_account=True), "entity-1")], pagination=SimpleNamespace(total_pages=2)
+        ),
+        SimpleNamespace(
+            data=[_record(service_account=True, bound_workspace_ids=["ws-team-a"])],
+            pagination=SimpleNamespace(total_pages=1),
+        ),
+    ]
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.workspace_bound_keys_widened_by("service-account:otel-collector", ["ws-team-b"]) == [
+        "ws-team-a"
+    ]
+    _assert_keyset_scan(entity_client, "data.subject_principal", after_ids=[None, "entity-1"])
+
+
+@pytest.mark.asyncio
+async def test_registry_admin_override_receives_the_keys_bound_workspace() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _record(
+        principal="admin-a@example.com", service_account=True, bound_workspace_ids=["ws-team-a"]
+    )
+    registry = AccessKeyRegistry(entity_client)
+    admin_override = AsyncMock(return_value=True)
+
+    assert await registry.revoke("ak_example", "admin-b@example.com", admin_override=admin_override)
+
+    admin_override.assert_awaited_once_with(["ws-team-a"])
 
 
 @pytest.mark.asyncio
