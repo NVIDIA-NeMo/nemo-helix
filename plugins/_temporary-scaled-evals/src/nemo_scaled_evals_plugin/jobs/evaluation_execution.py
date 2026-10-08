@@ -17,7 +17,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     StepLifecycle,
 )
 from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
-from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_executor, resolve_secret_environment
+from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_evaluation_secret_environment, resolve_executor
 from pydantic import BaseModel
 
 
@@ -63,7 +63,7 @@ class EvaluationExecutionJob(NemoJob):
                             limits=ResourcesLimitsSpec(cpu="1", memory="1Gi"),
                         ),
                     ),
-                    environment=resolve_secret_environment(),
+                    environment=resolve_evaluation_secret_environment(canonical.runtime),
                     config=canonical.model_dump(mode="json"),
                     # Without this the platform cannot reap a hung dispatcher:
                     # the step stays active forever and the reconciler keeps

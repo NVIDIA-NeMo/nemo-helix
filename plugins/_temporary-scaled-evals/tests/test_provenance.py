@@ -152,6 +152,88 @@ def test_run_provenance_manifest_schema_round_trips(tmp_path, monkeypatch) -> No
     assert parsed.sbom[1].value == "oci://registry.example/api@sha256:sbom"
 
 
+def _opensandbox_row(*, verification: str = "strict", **overrides):  # noqa: ANN003, ANN202
+    return _row(
+        runtime="harbor_opensandbox",
+        framework_version="0.20.0",
+        network_policy="default_deny",
+        switchyard_profile_id=None,
+        switchyard_config=None,
+        backend_handle={
+            "backend": "harbor_opensandbox",
+            "external_id": "ev_test123",
+            "raw": {
+                "ownership": {"nemo-scaled-evals-deployment": "dev", "nemo-scaled-evals-evaluation": "ev_test123"},
+                "provenance": {
+                    "opensandbox_sdk_version": "0.1.16",
+                    "trusted_allowed_hosts": ["inference.example.test", "pypi.org"],
+                    "egress_verification": verification,
+                },
+            },
+        },
+        **overrides,
+    )
+
+
+def _opensandbox_applied(*hashes: str) -> list[dict[str, str]]:
+    return [
+        {"trial": f"trial-{i}", "sandbox_id": f"sb-{i}", "network_mode": "public", "policy_sha256": sha}
+        for i, sha in enumerate(hashes)
+    ]
+
+
+def test_opensandbox_provenance_records_egress_and_verified_isolation(tmp_path) -> None:  # noqa: ANN001
+    manifest = build_run_provenance_manifest(
+        _opensandbox_row(opensandbox_applied_egress=_opensandbox_applied("1" * 64, "1" * 64)),
+        status="succeeded",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    sandbox = manifest.runtime.sandbox
+    assert sandbox["opensandbox_sdk_version"] == "0.1.16"
+    assert sandbox["egress_allowed_hosts"] == "inference.example.test,pypi.org"
+    assert sandbox["egress_verification"] == "strict"
+    assert json.loads(sandbox["ownership_labels"]) == {
+        "nemo-scaled-evals-deployment": "dev",
+        "nemo-scaled-evals-evaluation": "ev_test123",
+    }
+    assert sandbox["verified_sandboxes"] == "2"
+    assert sandbox["applied_policy_sha256s"] == "1" * 64
+    isolation = manifest.runtime.effective_isolation
+    assert isolation.direct_egress == "scoped"
+    assert isolation.platform_verified is True
+    assert isolation.warnings == []
+
+
+def test_opensandbox_provenance_warns_when_only_default_action_was_verified(tmp_path) -> None:  # noqa: ANN001
+    manifest = build_run_provenance_manifest(
+        _opensandbox_row(verification="default_action", opensandbox_applied_egress=_opensandbox_applied("1" * 64)),
+        status="succeeded",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    isolation = manifest.runtime.effective_isolation
+    assert isolation.platform_verified is True
+    assert any("default action only" in warning for warning in isolation.warnings)
+
+
+@pytest.mark.parametrize("applied", [None, []])
+def test_opensandbox_provenance_is_unverified_without_applied_egress(tmp_path, applied) -> None:  # noqa: ANN001
+    overrides = {} if applied is None else {"opensandbox_applied_egress": applied}
+    manifest = build_run_provenance_manifest(
+        _opensandbox_row(**overrides),
+        status="failed",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    assert manifest.runtime.effective_isolation.direct_egress == "scoped"
+    assert manifest.runtime.effective_isolation.platform_verified is False
+    assert ("verified_sandboxes" in manifest.runtime.sandbox) is (applied is not None)
+
+
 def test_run_provenance_records_managed_harbor_dataset_images(tmp_path) -> None:  # noqa: ANN001
     source_digest = "sha256:" + "a" * 64
     destination_digest = "sha256:" + "b" * 64
