@@ -356,7 +356,8 @@ def load_dataset(base_path: Path, pattern: str | None) -> pa.Table:
 
     if len(tables) == 1:
         return tables[0]
-    return pa.concat_tables(tables, promote_options="default")
+    # Batches written separately (e.g. Data Designer's batch_*.parquet) can infer different types for a column.
+    return pa.concat_tables(tables, promote_options="permissive")
 
 
 def load_dataset_as_dicts(base_path: Path, pattern: str | None) -> list[dict]:
