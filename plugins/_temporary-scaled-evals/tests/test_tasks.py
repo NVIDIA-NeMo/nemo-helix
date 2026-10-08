@@ -335,6 +335,25 @@ def test_finalize_prebuilt_records_verifier_image_without_validation(
     assert verifier_digest == "sha256:" + "b" * 64
 
 
+def test_finalize_rejects_verifier_image_without_digest_when_validation_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "task_image_validation_mode", "disabled")
+
+    response = client.post(
+        "/v1/tasks/task_x/finalize",
+        json={
+            "image_ref": "registry.example.com/bp:dev",
+            "verifier_image_ref": "registry.example.com/bp-verifier:dev",
+        },
+    )
+
+    assert response.status_code == 422
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "invalid_request"
+    assert "verifier_image_digest" in error["message"]
+
+
 def test_finalize_prebuilt_queues_verifier_image_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

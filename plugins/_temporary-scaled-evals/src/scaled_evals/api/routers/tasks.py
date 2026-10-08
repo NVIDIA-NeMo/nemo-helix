@@ -353,6 +353,16 @@ def finalize_task(
             "invalid_request",
             "verifier_image_ref can only be supplied with image_ref when reusing a signed image",
         )
+    # With validation disabled nothing resolves the verifier digest later, and runtimes refuse
+    # a separate verifier without one.
+    if verifier_image is not None and settings.task_image_validation_mode == "disabled":
+        assert body is not None
+        if not body.verifier_image_digest:
+            raise _http_error(
+                422,
+                "invalid_request",
+                "verifier_image_ref requires verifier_image_digest when image validation is disabled",
+            )
 
     if (
         prebuilt_image is None
