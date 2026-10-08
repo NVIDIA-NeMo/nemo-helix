@@ -42,13 +42,15 @@ export const LiveTestPanel: FC = () => {
   const { state, run, cancel } = useLiveTest();
   const busy = state.status === 'busy';
 
-  /** A result describes the row it was run against. Moving off that row, or
-   *  swapping the file, would leave the response and scores sitting under
-   *  previews of something else. ``cancel`` also aborts a run still in flight,
-   *  which is what a dataset change mid-run should do. */
+  /** A result describes the row and config it was run against. Moving off that
+   *  row, swapping the file, or editing anything the request is built from would
+   *  leave the response and scores sitting under something else. ``cancel`` also
+   *  aborts a run still in flight. Serialized so only a real value change, not a
+   *  new object reference, counts as an edit. */
+  const config = JSON.stringify(useWatch({ control, name: ['model', 'fieldMapping', 'body'] }));
   useEffect(() => {
     cancel();
-  }, [rowIndex, dataset, cancel]);
+  }, [rowIndex, dataset, config, cancel]);
 
   /** A label with nothing under it is noise. Each preview appears only once its
    *  field actually resolves against the selected row -- what is missing is
@@ -64,12 +66,7 @@ export const LiveTestPanel: FC = () => {
    *
    *  Create never requires a live test; sharing the resolver only means Test cannot
    *  pass on a config Create would reject. */
-  const modelResponse =
-    state.status === 'done'
-      ? state.result.output
-      : state.status === 'busy'
-        ? (state.output ?? null)
-        : null;
+  const modelResponse = state.status === 'done' ? state.result.output : null;
 
   const runTest = handleSubmit((values) => {
     if (!row) return;
@@ -100,17 +97,21 @@ export const LiveTestPanel: FC = () => {
         <>
           <Stack gap="density-xs">
             <Text kind="label/bold/lg">Score</Text>
-            {state.result.scores.length === 0 ? (
+            {state.result.scores.length === 0 && state.result.errors.length === 0 ? (
               <Text kind="body/regular/md" className="text-secondary">
                 The run produced no scores.
               </Text>
-            ) : (
-              state.result.scores.map((score) => (
-                <Text key={score.name} kind="body/regular/md">
-                  {score.name}: {score.label ?? formatEvaluatorScore(score.value)}
-                </Text>
-              ))
-            )}
+            ) : null}
+            {state.result.scores.map((score) => (
+              <Text key={score.name} kind="body/regular/md">
+                {score.name}: {score.label ?? formatEvaluatorScore(score.value)}
+              </Text>
+            ))}
+            {state.result.errors.map((error) => (
+              <Text key={error.metric} kind="body/regular/md" className="text-feedback-danger">
+                {error.metric}: {error.message}
+              </Text>
+            ))}
           </Stack>
         </>
       ) : null}
