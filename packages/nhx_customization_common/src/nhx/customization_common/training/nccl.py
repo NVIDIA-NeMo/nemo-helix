@@ -11,6 +11,39 @@ logger = logging.getLogger(__name__)
 
 _IB_SYSFS = Path("/sys/class/infiniband")
 
+# PyTorch's process-group timeout is not applied to a blocking ncclCommInitRank.
+# Non-blocking init polls ncclCommGetAsyncError and raises DistBackendError when
+# this elapses, which exits the worker so torchrun returns and the pod fails.
+# 30 minutes matches the distributed timeout used while a large model is loading
+# and peers have not reached the first collective yet.
+_NCCL_COMM_INIT_TIMEOUT_SECONDS = 30 * 60
+
+
+def get_nccl_init_env() -> dict[str, str]:
+    """Return env that aborts a multi-node NCCL join instead of hanging in it.
+
+    A failed cross-node bootstrap blocks inside ``ncclCommInitRank``. Torchrun
+    waits on that worker forever, so the pod stays Running. Non-blocking init
+    turns the same failure into an error once ``TORCH_NCCL_NONBLOCKING_TIMEOUT``
+    elapses. Values already present in the environment are left unchanged.
+    """
+    env: dict[str, str] = {}
+    if not os.environ.get("TORCH_NCCL_USE_COMM_NONBLOCKING"):
+        env["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+    if not os.environ.get("TORCH_NCCL_NONBLOCKING_TIMEOUT"):
+        env["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = str(_NCCL_COMM_INIT_TIMEOUT_SECONDS)
+    if env:
+        timeout = os.environ.get("TORCH_NCCL_NONBLOCKING_TIMEOUT", str(_NCCL_COMM_INIT_TIMEOUT_SECONDS))
+        logger.info("NCCL join fails the job after %ss if nodes cannot connect", timeout)
+    return env
+
+
+def get_multinode_nccl_env() -> dict[str, str]:
+    """NCCL environment for a multi-node Automodel or RL job."""
+    env = get_nccl_init_env()
+    env.update(get_nccl_ib_env())
+    return env
+
 
 def get_nccl_ib_env() -> dict[str, str]:
     """Return NCCL overrides when Mellanox HCAs lack network devices."""

@@ -18,7 +18,7 @@ from typing import Any, Optional, cast
 
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nhx.customization_common.service.context import NHXJobContext
-from nhx.customization_common.training.nccl import get_nccl_ib_env
+from nhx.customization_common.training.nccl import get_multinode_nccl_env
 from nhx.customization_common.training.progress import JobsServiceProgressReporter
 from nhx.rl.app.jobs.training.schemas import (
     CheckpointFormat,
@@ -142,7 +142,7 @@ class NemoRLBackend(TrainingBackend):
             "GPUS_PER_NODE": str(customizer_config.parallelism.num_gpus_per_node),
         }
         if customizer_config.parallelism.num_nodes > 1:
-            env_overrides.update(get_nccl_ib_env())
+            env_overrides.update(get_multinode_nccl_env())
         # MLflow integration (if configured)
         if customizer_config.integrations and customizer_config.integrations.mlflow:
             mlflow_config = customizer_config.integrations.mlflow

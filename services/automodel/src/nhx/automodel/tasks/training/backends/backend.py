@@ -25,7 +25,7 @@ from nhx.automodel.tasks.training.schemas import (
 )
 from nhx.automodel.tasks.training.utils import generate_torchrun_flags_from_env
 from nhx.customization_common.service.context import NHXJobContext
-from nhx.customization_common.training.nccl import get_nccl_ib_env
+from nhx.customization_common.training.nccl import get_multinode_nccl_env
 
 from .checkpoints import (
     ModelType,
@@ -121,7 +121,7 @@ class AutomodelBackend:
             with progress.training_wall_clock():
                 training_env = os.environ.copy()
                 if customizer_config.parallelism.num_nodes > 1:
-                    training_env.update(get_nccl_ib_env())
+                    training_env.update(get_multinode_nccl_env())
                 training_process = subprocess.Popen(
                     command,
                     stdout=subprocess.PIPE,

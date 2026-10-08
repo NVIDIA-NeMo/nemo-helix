@@ -80,7 +80,7 @@ def generate_torchrun_flags_from_env() -> list[str]:
             logger.warning(f"Failed to determine number of GPUs: {e}, using default of 1")
             gpus_per_node = "1"
 
-    return [
+    flags = [
         "--nnodes",
         num_nodes,
         "--nproc_per_node",
@@ -94,3 +94,8 @@ def generate_torchrun_flags_from_env() -> list[str]:
         "--rdzv_endpoint",
         f"{master_addr}:{master_port}",
     ]
+    # Torchrun retries a dead worker 3 times by default. A failed NCCL join
+    # raises in the worker; restarting it leaves the pod Running. Exit instead.
+    if int(num_nodes) > 1:
+        flags.extend(["--max_restarts", "0"])
+    return flags
