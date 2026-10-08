@@ -260,6 +260,7 @@
         "pattern": "service:evaluator\\b",
         "replacement": "service:evals",
         "include": [
+          "services/core/inference-gateway/tests/integration/test_igw_with_auth.py",
           "packages/nhx_common/tests/client_factory/test_client_factory.py",
           "packages/nemo_helix_plugin/tests/test_client_provider.py",
           "packages/nemo_helix_plugin/tests/test_nemo_client_task_auth.py"

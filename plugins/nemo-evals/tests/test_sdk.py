@@ -293,7 +293,7 @@ def test_sync_resource_calls_evaluator_plugin_status() -> None:
     assert resource.plugin_status() == {"plugin": "evaluator", "status": "ok"}
     assert platform.http_client_mock.request.call_args.args == (
         "GET",
-        "http://127.0.0.1:8000/apis/evaluator/v1/healthz",
+        "http://127.0.0.1:8000/apis/evals/v1/healthz",
     )
     assert platform.http_client_mock.request.call_args.kwargs["headers"] == {
         "Authorization": "Bearer sync-platform-token"

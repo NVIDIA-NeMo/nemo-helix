@@ -163,6 +163,8 @@ class PluginRenameTests(unittest.TestCase):
             self.write(f"{root}/evaluator/SKILL.md", "---\nname: evaluator\n---\n")
         identity_test = "packages/nhx_common/tests/client_factory/test_client_factory.py"
         self.write(identity_test, 'client = get_task_nemo_client("evaluator")\nidentity = "service:evaluator"\n')
+        igw_test = "services/core/inference-gateway/tests/integration/test_igw_with_auth.py"
+        self.write(igw_test, 'principal = "service:evaluator"\npermission = "evaluator.create"\n')
         helm_test = "tests/unit/test_helm_clickhouse.py"
         self.write(helm_test, '"api.services={evaluator,guardrails}"\n"api.services=evaluator"\n')
 
@@ -176,6 +178,9 @@ class PluginRenameTests(unittest.TestCase):
         self.assertEqual(
             (self.repo / identity_test).read_text(),
             'client = get_task_nemo_client("evals")\nidentity = "service:evals"\n',
+        )
+        self.assertEqual(
+            (self.repo / igw_test).read_text(), 'principal = "service:evals"\npermission = "evaluator.create"\n'
         )
         self.assertEqual(
             (self.repo / helm_test).read_text(), '"api.services={evals,guardrails}"\n"api.services=evals"\n'
