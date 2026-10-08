@@ -201,7 +201,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccessKeyErrorResponse'
         '403':
-          description: Service-bound Scoped Access Keys require HelixAdmin
+          description: Service-bound Scoped Access Keys require HelixAdmin or Admin
+            of the bound workspace
           content:
             application/json:
               schema:
@@ -8624,12 +8625,28 @@ components:
         service_account_id:
           title: Service Account Id
           description: Optional non-human service account to bind the key to. Service-bound
-            keys can only be created by a HelixAdmin and authenticate as service-account:<id>.
+            keys can be created by a HelixAdmin, or by an Admin of the workspace named
+            in `workspace`, and authenticate as service-account:<id>.
           nullable: true
           type: string
           maxLength: 240
           minLength: 1
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$
+        workspace:
+          title: Workspace
+          description: Workspace to bind a service-bound key to. Requires service_account_id.
+            Admins of this workspace can create and manage the key; the key is granted
+            membership only in this workspace (Editor if the service account is not
+            already a member, unless `workspaces` names another role for it). Required
+            when the caller is not a HelixAdmin. Such callers must also use a service_account_id
+            of the form '<workspace>/<name>' that has no keys or role bindings outside
+            this workspace, including keys bound to an earlier workspace of the same
+            name (checked when the key is created or rotated, not continuously). HelixAdmins
+            are not subject to these account restrictions. If the workspace is deleted
+            and recreated, only a HelixAdmin can manage the key.
+          nullable: true
+          type: string
+          pattern: ^\s*\S.*$
         scope:
           items:
             type: string
@@ -8687,6 +8704,11 @@ components:
           title: Entity Type
           description: Whether the key is bound to a user or a non-human service account.
           default: USER
+        workspace:
+          title: Workspace
+          description: Workspace a service-bound key is bound to, if any.
+          nullable: true
+          type: string
         status:
           type: string
           enum:
@@ -8817,6 +8839,11 @@ components:
           title: Entity Type
           description: Whether the key is bound to a user or a non-human service account.
           default: USER
+        workspace:
+          title: Workspace
+          description: Workspace a service-bound key is bound to, if any.
+          nullable: true
+          type: string
         status:
           type: string
           enum:

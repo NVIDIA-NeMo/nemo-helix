@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
@@ -18,9 +19,12 @@ from nhx.core.entities.app.repository import (
     AccountCredentialStore,
     AccountCredentialType,
     AccountIdentityStore,
+    AccountIdentityUnavailableError,
 )
 
 ACCESS_KEY_CREDENTIAL_TYPE: AccountCredentialType = "access_key"
+SERVICE_ACCOUNT_IDENTITY_ISSUER = "nemo:service-account"
+_SUBJECT_PAGE_SIZE = 500
 
 
 class AccessKeyCredentialAdapter:
@@ -41,7 +45,7 @@ class AccessKeyCredentialAdapter:
         if record.is_service_account():
             subject_principal = record.subject_principal or ""
             identity = await self.identity_store.resolve_or_materialize(
-                issuer="nemo:service-account",
+                issuer=SERVICE_ACCOUNT_IDENTITY_ISSUER,
                 subject=subject_principal.removeprefix(SERVICE_ACCOUNT_PRINCIPAL_PREFIX),
                 subject_claim="service_account_id",
                 account_type="service",
@@ -107,6 +111,39 @@ class AccessKeyCredentialAdapter:
         )
         return [self._entity(record) for record in records], has_more
 
+    async def any_for_service_account(
+        self, service_account_principal: str, predicate: Callable[[AccessKeyEntity], bool]
+    ) -> bool:
+        """Whether any key, in any status, whose subject is ``service_account_principal`` satisfies ``predicate``.
+
+        Stops at the first match. Resolves the service account through the identity store without
+        creating it, so an account that has never been issued a key has none. A disabled identity counts as a match,
+        so a recreated workspace can't take over an account it can't inspect.
+        """
+        try:
+            identity = await self.identity_store.get_active_identity(
+                issuer=SERVICE_ACCOUNT_IDENTITY_ISSUER,
+                subject=service_account_principal.removeprefix(SERVICE_ACCOUNT_PRINCIPAL_PREFIX),
+            )
+        except AccountIdentityUnavailableError:
+            # A disabled service account can't be inspected for its keys; fail closed.
+            return True
+        if identity is None:
+            return False
+        offset = 0
+        while True:
+            records, has_more = await self.credential_store.list_for_subject(
+                ACCESS_KEY_CREDENTIAL_TYPE,
+                identity.account_id,
+                offset=offset,
+                limit=_SUBJECT_PAGE_SIZE,
+            )
+            if any(predicate(self._entity(record)) for record in records):
+                return True
+            if not has_more:
+                return False
+            offset += _SUBJECT_PAGE_SIZE
+
     @staticmethod
     def _metadata(record: AccessKeyEntity) -> dict[str, Any]:
         return {
@@ -115,6 +152,8 @@ class AccessKeyCredentialAdapter:
             "description": record.description,
             "owner_principal": record.principal,
             "subject_principal": record.subject_principal,
+            "bound_workspace": record.bound_workspace,
+            "bound_workspace_id": record.bound_workspace_id,
             "entity_type": record.entity_type,
             "issuer": record.issuer,
             "audiences": list(record.audiences),
@@ -133,6 +172,8 @@ class AccessKeyCredentialAdapter:
             description=AccessKeyCredentialAdapter._optional_string(metadata.get("description")),
             principal=str(metadata["owner_principal"]),
             subject_principal=AccessKeyCredentialAdapter._optional_string(metadata.get("subject_principal")),
+            bound_workspace=AccessKeyCredentialAdapter._optional_string(metadata.get("bound_workspace")),
+            bound_workspace_id=AccessKeyCredentialAdapter._optional_string(metadata.get("bound_workspace_id")),
             entity_type=AccessKeyCredentialAdapter._entity_type(metadata.get("entity_type")),
             issuer=str(metadata["issuer"]),
             audiences=AccessKeyCredentialAdapter._string_list(metadata.get("audiences")),

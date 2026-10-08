@@ -223,7 +223,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         self._ensure_enabled()
         expires_in_seconds = _resolve_expires_in_seconds(self._config, request)
         principal, entity_type = self._target_principal(request, allow_service_account=allow_service_account)
-        return _create_access_key_token(
+        response = _create_access_key_token(
             self._config,
             principal=principal,
             entity_type=entity_type,
@@ -233,6 +233,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             expires_in_seconds=expires_in_seconds,
             now=self._now(),
         )
+        return response.model_copy(update={"workspace": request.workspace})
 
     async def create_async(
         self, request: AccessKeyCreateRequest, *, allow_service_account: bool = False
@@ -240,7 +241,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         self._ensure_enabled()
         expires_in_seconds = _resolve_expires_in_seconds(self._config, request)
         principal, entity_type = self._target_principal(request, allow_service_account=allow_service_account)
-        return await _create_access_key_token_async(
+        response = await _create_access_key_token_async(
             self._config,
             principal=principal,
             entity_type=entity_type,
@@ -250,14 +251,15 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             expires_in_seconds=expires_in_seconds,
             now=self._now(),
         )
+        return response.model_copy(update={"workspace": request.workspace})
 
     def _target_principal(
         self, request: AccessKeyCreateRequest, *, allow_service_account: bool
     ) -> tuple[Principal, AccessKeyEntityType]:
         # A service-account caller can never mint Scoped Access Keys, for itself or for any
         # other service account: that would let a compromised or over-delegated service
-        # credential renew its own (or another service's) access indefinitely. Only human
-        # HelixAdmins may create service-bound keys.
+        # credential renew its own (or another service's) access indefinitely. Only authorized
+        # human administrators may create service-bound keys.
         if self._principal.is_service_identity():
             if self._principal.is_privileged():
                 raise AccessKeyValidationError("Scoped Access Keys cannot be created for service principals")
@@ -265,7 +267,9 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         if request.service_account_id is None:
             return self._principal, "USER"
         if not allow_service_account:
-            raise AccessKeyValidationError("Service-bound Scoped Access Keys require HelixAdmin")
+            raise AccessKeyValidationError(
+                "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace"
+            )
         return Principal(id=f"{SERVICE_ACCOUNT_PRINCIPAL_PREFIX}{request.service_account_id}"), "SERVICE_ACCOUNT"
 
     def list(self, *, page: int = 1, page_size: int = 100) -> AccessKeyListResponse:  # noqa: ARG002

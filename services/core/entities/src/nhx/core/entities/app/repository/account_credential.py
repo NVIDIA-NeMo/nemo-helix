@@ -287,6 +287,34 @@ class AccountCredentialStore:
             rows = list((await session.scalars(query)).all())
         return [self._record(row) for row in rows[:limit]], len(rows) > limit
 
+    async def list_for_subject(
+        self,
+        credential_type: AccountCredentialType,
+        subject_account_id: str,
+        *,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[AccountCredentialRecord], bool]:
+        """List credentials of any status whose subject is ``subject_account_id``.
+
+        Returns the page and whether more rows follow.
+        """
+        query = (
+            select(DBAccountCredential)
+            .where(
+                DBAccountCredential.credential_type == credential_type,
+                DBAccountCredential.subject_account_id == subject_account_id,
+            )
+            # id breaks issued_at ties so offset paging is stable; callers use this to scan every
+            # row for a security check, where a skipped row would fail open.
+            .order_by(DBAccountCredential.issued_at.desc(), DBAccountCredential.id)
+            .offset(offset)
+            .limit(limit + 1)
+        )
+        async with self.session_maker() as session:
+            rows = list((await session.scalars(query)).all())
+        return [self._record(row) for row in rows[:limit]], len(rows) > limit
+
     async def revoke_for_account(self, account_id: str, *, revoked_by: str | None = None) -> int:
         now = _utcnow()
         async with self.session_maker() as session:

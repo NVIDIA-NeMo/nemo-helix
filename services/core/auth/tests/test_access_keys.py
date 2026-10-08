@@ -7,11 +7,13 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, PropertyMock, call, patch
 
+import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.auth.access_keys.issuer import AccessKeyOperationNotImplementedError
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse
+from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
 from nhx.common.api.common import PaginatedResult, PaginationData
@@ -39,6 +41,8 @@ class InMemoryAccessKeyRegistry:
     def __init__(self):
         self.keys = {}
         self.owners = {}
+        self.bound = {}
+        self.bound_ids = {}
         self.revoked = set()
         self.suspended = set()
         # jti -> grace_period_expires_at for keys rotated out via begin_rotation.
@@ -60,12 +64,30 @@ class InMemoryAccessKeyRegistry:
         self.add_error = None
         self.add_commits_before_error = False
         self.discarded = set()
+        # principal -> workspaces it holds an active role binding in, independent of any key.
+        self.bindings = {}
+        # Runs once right after the next add() persists, to simulate a concurrent request
+        # landing between the pre-insert confinement check and the insert.
+        self.after_add = None
 
-    async def add(self, key, *, owner_principal=None, owner_account_id=None):
+    async def add(
+        self,
+        key,
+        *,
+        owner_principal=None,
+        owner_account_id=None,
+        bound_workspace=None,
+        bound_workspace_id=None,
+    ):
         if self.add_error is not None and not self.add_commits_before_error:
             raise self.add_error
         self.keys[key.jti] = key
         self.owners[key.jti] = owner_principal or key.principal
+        self.bound[key.jti] = bound_workspace
+        self.bound_ids[key.jti] = bound_workspace_id
+        if self.after_add is not None:
+            after_add, self.after_add = self.after_add, None
+            after_add(self)
         if self.add_error is not None:
             raise self.add_error
 
@@ -85,7 +107,7 @@ class InMemoryAccessKeyRegistry:
         if key is None:
             return None
         if key.entity_type == "SERVICE_ACCOUNT":
-            if admin_override is not None and await admin_override():
+            if admin_override is not None and await admin_override(self.bound.get(jti), self.bound_ids.get(jti)):
                 return key
         elif self.owners[jti] == principal:
             return key
@@ -99,20 +121,23 @@ class InMemoryAccessKeyRegistry:
         page_size,
         include_service_accounts=False,
         owner_account_id=None,
+        admin_override=None,
     ):
         from nemo_helix_plugin.auth.access_keys.types import AccessKeyListResponse, AccessKeyMetadataResponse
 
         # Sort newest-first then by jti to match the real registry's `sort="-issued_at"`.
-        owned = sorted(
-            [
-                (jti, key)
-                for jti, key in self.keys.items()
-                if self.owners[jti] == principal
-                and key.entity_type != "SERVICE_ACCOUNT"
-                or (include_service_accounts and key.entity_type == "SERVICE_ACCOUNT")
-            ],
-            key=lambda item: (-item[1].created_at.timestamp(), item[0]),
-        )
+        visible = []
+        for jti, key in self.keys.items():
+            if key.entity_type == "SERVICE_ACCOUNT":
+                if include_service_accounts or (
+                    self.owners[jti] == principal
+                    and admin_override is not None
+                    and await admin_override(self.bound.get(jti), self.bound_ids.get(jti))
+                ):
+                    visible.append((jti, key))
+            elif self.owners[jti] == principal:
+                visible.append((jti, key))
+        owned = sorted(visible, key=lambda item: (-item[1].created_at.timestamp(), item[0]))
         start = (page - 1) * page_size
         selected = owned[start : start + page_size]
         return AccessKeyListResponse(
@@ -121,6 +146,7 @@ class InMemoryAccessKeyRegistry:
                     key.model_dump(exclude={"token", "token_type"})
                     | {
                         "status": self._status(jti, key),
+                        "workspace": self.bound.get(jti),
                         "grace_period_expires_at": (
                             self.rotating.get(jti) if self._status(jti, key) == "ROTATING" else None
                         ),
@@ -130,6 +156,18 @@ class InMemoryAccessKeyRegistry:
             ],
             has_more=start + page_size < len(owned),
         )
+
+    async def has_service_account_access_outside_workspace(
+        self, service_account_principal, workspace, workspace_id=None
+    ):
+        def is_outside(jti):
+            if self.bound.get(jti) != workspace:
+                return True
+            return workspace_id is not None and self.bound_ids.get(jti) != workspace_id
+
+        return any(
+            key.principal == service_account_principal and is_outside(jti) for jti, key in self.keys.items()
+        ) or any(bound != workspace for bound in self.bindings.get(service_account_principal, ()))
 
     async def revoke(self, jti, principal, *, admin_override=None):
         key = await self._may_manage(jti, principal, admin_override=admin_override)
@@ -204,6 +242,8 @@ class InMemoryAccessKeyRegistry:
             status=self._status(jti, key),
             grace_period_expires_at=self.rotating.get(jti),
             rotation_successor_jti=self.rotating_successor.get(jti),
+            bound_workspace=self.bound.get(jti),
+            bound_workspace_id=self.bound_ids.get(jti),
         )
 
     async def get_rotatable(self, jti, principal, *, admin_override=None):
@@ -272,11 +312,17 @@ def access_key_workspaces_client():
     # than a callable returning a list. Default to "no prior members" so tests that don't
     # care about prior state don't need to configure this every time.
     client.list_workspace_members.return_value = _members_response([])
+    client.get_workspace.return_value = SimpleNamespace(data=lambda: SimpleNamespace(id="ws-id"))
     return client
 
 
 @pytest.fixture
-def client(tmp_path, access_key_workspaces_client):
+def access_key_registry():
+    return InMemoryAccessKeyRegistry()
+
+
+@pytest.fixture
+def client(tmp_path, access_key_workspaces_client, access_key_registry):
     config = AuthConfig(
         enabled=True,
         token_signing=TokenSigningConfig(
@@ -304,8 +350,7 @@ def client(tmp_path, access_key_workspaces_client):
 
     app = FastAPI()
     app.include_router(router)
-    registry = InMemoryAccessKeyRegistry()
-    app.dependency_overrides[get_access_key_registry] = lambda: registry
+    app.dependency_overrides[get_access_key_registry] = lambda: access_key_registry
     app.dependency_overrides[get_workspaces_client] = lambda: access_key_workspaces_client
 
     token = auth_client_context.set(
@@ -1008,7 +1053,10 @@ def test_create_service_access_key_requires_platform_admin(client):
         )
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
+    assert (
+        response.json()["detail"]
+        == "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace"
+    )
     has_role.assert_awaited_once_with("system", "HelixAdmin")
 
 
@@ -1029,7 +1077,10 @@ def test_service_account_principal_cannot_create_or_manage_service_bound_keys_ev
         auth_client_context.reset(service_account_token)
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
+    assert (
+        response.json()["detail"]
+        == "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace"
+    )
     # The service-account identity check short-circuits before any PDP role lookup.
     has_role.assert_not_awaited()
 
@@ -1051,7 +1102,10 @@ def test_privileged_service_principal_cannot_create_service_bound_keys_even_with
         auth_client_context.reset(service_token)
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
+    assert (
+        response.json()["detail"]
+        == "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace"
+    )
     has_role.assert_not_awaited()
 
 
@@ -1085,6 +1139,607 @@ def test_platform_admin_creates_and_manages_service_access_key(client):
         assert listed.status_code == 200
         assert listed.json()["data"][0]["principal"] == "service-account:otel-collector"
         assert client.delete(f"/v2/access-keys/{created['jti']}").status_code == 200
+
+
+def _has_role_for(*granted: tuple[str, str]):
+    async def has_role(self, workspace_id, role):
+        return (workspace_id, role) in granted
+
+    return has_role
+
+
+def test_workspace_admin_creates_and_manages_workspace_bound_service_key(client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        )
+        assert response.status_code == 200
+        created = response.json()
+        assert created["principal"] == "service-account:team-a/otel-collector"
+        assert created["workspace"] == "team-a"
+
+        listed = client.get("/v2/access-keys")
+        assert [key["workspace"] for key in listed.json()["data"]] == ["team-a"]
+        rotated = client.post(f"/v2/access-keys/{created['jti']}/rotate")
+        assert rotated.status_code == 200
+        assert rotated.json()["new_key"]["workspace"] == "team-a"
+        assert client.delete(f"/v2/access-keys/{rotated.json()['new_key']['jti']}").status_code == 200
+
+
+def test_recreated_workspace_admin_cannot_manage_key_bound_to_the_old_workspace(client, access_key_workspaces_client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        ).json()
+
+    # team-a is deleted and recreated: same name, new ID.
+    access_key_workspaces_client.get_workspace.return_value = SimpleNamespace(
+        data=lambda: SimpleNamespace(id="recreated-ws-id")
+    )
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        assert client.get("/v2/access-keys").json()["data"] == []
+        assert client.post(f"/v2/access-keys/{created['jti']}/rotate").status_code == 404
+        assert client.delete(f"/v2/access-keys/{created['jti']}").status_code == 404
+
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        assert client.delete(f"/v2/access-keys/{created['jti']}").status_code == 200
+
+
+def test_recreated_workspace_admin_cannot_take_over_service_account_with_a_key_from_the_old_workspace(
+    client, access_key_workspaces_client, access_key_registry
+):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        old = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        ).json()
+
+    # team-a is deleted and recreated. Deleting a workspace doesn't revoke its keys, so the old
+    # key is still live and would gain the new workspace's membership with the account.
+    access_key_workspaces_client.get_workspace.return_value = SimpleNamespace(
+        data=lambda: SimpleNamespace(id="recreated-ws-id")
+    )
+    access_key_workspaces_client.create_workspace_member.reset_mock()
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 400
+    assert "earlier workspace of the same name" in response.json()["detail"]
+    access_key_workspaces_client.create_workspace_member.assert_not_awaited()
+    assert list(access_key_registry.keys) == [old["jti"]]
+    assert old["jti"] not in access_key_registry.revoked
+
+    # A HelixAdmin is not restricted, and can clean up or reissue the key.
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        assert client.delete(f"/v2/access-keys/{old['jti']}").status_code == 200
+
+
+def test_workspace_replaced_during_role_check_cannot_manage_key_bound_to_the_old_workspace(
+    client, access_key_workspaces_client
+):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        ).json()
+
+    # The ID matches before the role check, then team-a is deleted and recreated while it runs.
+    async def has_role_after_recreation(_self, workspace, role):
+        access_key_workspaces_client.get_workspace.return_value = SimpleNamespace(
+            data=lambda: SimpleNamespace(id="recreated-ws-id")
+        )
+        return (workspace, role) == ("team-a", "Admin")
+
+    with patch.object(AuthClient, "has_role", has_role_after_recreation):
+        assert client.post(f"/v2/access-keys/{created['jti']}/rotate").status_code == 404
+
+
+def _transport_error() -> NemoTransportError:
+    return NemoTransportError(httpx.ConnectError("workspaces service unreachable"))
+
+
+def _workspace_not_found() -> NotFoundError:
+    return NotFoundError(httpx.Response(404, json={"detail": "Workspace 'team-a' not found"}))
+
+
+def test_workspace_bound_key_cannot_be_created_when_the_workspace_does_not_exist(
+    client, access_key_workspaces_client, access_key_registry
+):
+    access_key_workspaces_client.get_workspace.side_effect = _workspace_not_found()
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 400
+    assert "could not be resolved" in response.json()["detail"]
+    assert access_key_registry.keys == {}
+
+
+def test_workspace_bound_key_is_not_created_when_the_admin_check_fails_against_the_resolved_workspace_id(
+    client, access_key_workspaces_client, access_key_registry
+):
+    calls = {"n": 0}
+
+    async def has_role(_self, workspace, role):
+        # Admin by name for the first check; the workspace is "replaced" before the ID recheck.
+        if (workspace, role) != ("team-a", "Admin"):
+            return False
+        calls["n"] += 1
+        return calls["n"] == 1
+
+    with patch.object(AuthClient, "has_role", has_role):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 400
+    assert "require HelixAdmin or Admin of the bound workspace" in response.json()["detail"]
+    assert access_key_registry.keys == {}
+
+
+def test_workspace_bound_key_creation_reports_a_transient_workspace_lookup_failure_as_503(
+    client, access_key_workspaces_client, access_key_registry
+):
+    access_key_workspaces_client.get_workspace.side_effect = _transport_error()
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 503
+    assert access_key_registry.keys == {}
+
+
+def test_managing_a_bound_key_reports_a_transient_workspace_lookup_failure_as_503_not_404(
+    client, access_key_workspaces_client
+):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        ).json()
+
+        access_key_workspaces_client.get_workspace.side_effect = _transport_error()
+        assert client.delete(f"/v2/access-keys/{created['jti']}").status_code == 503
+        assert client.post(f"/v2/access-keys/{created['jti']}/rotate").status_code == 503
+
+        # A workspace that is really gone is a definitive answer: the key is not manageable.
+        access_key_workspaces_client.get_workspace.side_effect = _workspace_not_found()
+        assert client.delete(f"/v2/access-keys/{created['jti']}").status_code == 404
+
+
+def test_workspace_admin_cannot_create_service_key_without_workspace_or_for_another_workspace(client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        no_workspace = client.post("/v2/access-keys", json={"name": "otel", "service_account_id": "otel-collector"})
+        other_workspace = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "otel-collector", "workspace": "team-b"},
+        )
+
+    assert no_workspace.status_code == 403
+    assert other_workspace.status_code == 403
+
+
+def test_workspace_admin_cannot_manage_service_key_bound_to_another_workspace(client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-b", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-b/otel-collector", "workspace": "team-b"},
+        ).json()
+
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        assert client.get("/v2/access-keys").json()["data"] == []
+        assert client.delete(f"/v2/access-keys/{created['jti']}").status_code == 404
+
+
+def test_workspace_admin_cannot_bind_non_namespaced_service_account(client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "platform-ops", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 400
+
+
+def test_workspace_admin_cannot_bind_service_account_with_empty_namespace_suffix(client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 400
+
+
+def test_workspace_admin_cannot_rotate_non_namespaced_service_key_bound_to_their_workspace(client):
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "ops", "service_account_id": "platform-ops", "workspace": "team-a"},
+        ).json()
+
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(f"/v2/access-keys/{created['jti']}/rotate")
+
+    assert response.status_code == 400
+
+
+def test_workspace_admin_suspends_and_unsuspends_workspace_bound_service_key(client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        ).json()
+
+        assert client.post(f"/v2/access-keys/{created['jti']}/suspend").status_code == 200
+        assert [key["status"] for key in client.get("/v2/access-keys").json()["data"]] == ["SUSPENDED"]
+        assert client.post(f"/v2/access-keys/{created['jti']}/unsuspend").status_code == 200
+        assert [key["status"] for key in client.get("/v2/access-keys").json()["data"]] == ["ACTIVE"]
+
+
+def test_workspace_admin_cannot_suspend_or_unsuspend_service_key_bound_to_another_workspace(client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-b", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-b/otel-collector", "workspace": "team-b"},
+        ).json()
+
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        assert client.post(f"/v2/access-keys/{created['jti']}/suspend").status_code == 404
+        assert client.post(f"/v2/access-keys/{created['jti']}/unsuspend").status_code == 404
+
+
+def test_workspace_bound_service_key_is_granted_editor_membership_in_its_workspace(
+    client, access_key_workspaces_client
+):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 200
+    access_key_workspaces_client.create_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        body=CreateWorkspaceMemberRequest(principal="service-account:team-a/otel-collector", roles=["Editor"]),
+    )
+
+
+def test_workspace_bound_service_key_does_not_widen_an_existing_membership_of_its_account(
+    client, access_key_workspaces_client
+):
+    # Memberships belong to the service account, so the default Editor grant would widen every
+    # other key of an account that is already a member (here with Viewer) without anyone asking.
+    access_key_workspaces_client.list_workspace_members.return_value = _members_response(
+        [SimpleNamespace(principal="service-account:team-a/otel-collector", roles=["Viewer"])]
+    )
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel-2", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 200
+    access_key_workspaces_client.create_workspace_member.assert_not_awaited()
+    access_key_workspaces_client.update_workspace_member.assert_not_awaited()
+
+
+def test_workspace_bound_service_key_member_read_failure_is_a_503_without_creating_a_key(
+    client, access_key_workspaces_client, access_key_registry
+):
+    access_key_workspaces_client.list_workspace_members.side_effect = NemoTransportError(
+        httpx.ConnectError("workspace unreachable")
+    )
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel-collector", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 503
+    access_key_workspaces_client.create_workspace_member.assert_not_awaited()
+    assert not access_key_registry.keys
+
+
+def test_workspace_bound_service_key_still_applies_an_explicit_grant_for_an_existing_member(
+    client, access_key_workspaces_client
+):
+    access_key_workspaces_client.list_workspace_members.return_value = _members_response(
+        [SimpleNamespace(principal="service-account:team-a/otel-collector", roles=["Viewer"])]
+    )
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "otel-2",
+                "service_account_id": "team-a/otel-collector",
+                "workspace": "team-a",
+                "workspaces": [{"workspace": "team-a", "roles": ["Editor"]}],
+            },
+        )
+
+    assert response.status_code == 200
+    access_key_workspaces_client.create_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        body=CreateWorkspaceMemberRequest(principal="service-account:team-a/otel-collector", roles=["Editor"]),
+    )
+
+
+def test_rotating_workspace_bound_service_key_leaves_workspace_memberships_untouched(
+    client, access_key_workspaces_client
+):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "otel",
+                "service_account_id": "team-a/otel-collector",
+                "workspace": "team-a",
+                "workspaces": [{"workspace": "team-a", "roles": ["Viewer"]}],
+            },
+        ).json()
+        access_key_workspaces_client.reset_mock()
+
+        rotated = client.post(f"/v2/access-keys/{created['jti']}/rotate")
+
+    assert rotated.status_code == 200
+    # Same service-account principal, so its Viewer role carries over; rotation must not
+    # re-grant the default Editor role (or any other membership change).
+    access_key_workspaces_client.create_workspace_member.assert_not_awaited()
+    access_key_workspaces_client.update_workspace_member.assert_not_awaited()
+    access_key_workspaces_client.delete_workspace_member.assert_not_awaited()
+
+
+def test_workspace_bound_service_key_honours_an_explicit_role_for_its_workspace(client, access_key_workspaces_client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "otel",
+                "service_account_id": "team-a/otel-collector",
+                "workspace": "team-a",
+                "workspaces": [{"workspace": "team-a", "roles": ["Viewer"]}],
+            },
+        )
+
+    assert response.status_code == 200
+    access_key_workspaces_client.create_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        body=CreateWorkspaceMemberRequest(principal="service-account:team-a/otel-collector", roles=["Viewer"]),
+    )
+
+
+def test_workspace_bound_service_key_rejects_a_grant_outside_its_workspace(client, access_key_workspaces_client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "otel",
+                "service_account_id": "team-a/otel-collector",
+                "workspace": "team-a",
+                "workspaces": [{"workspace": "team-b", "roles": ["Viewer"]}],
+            },
+        )
+
+    assert response.status_code == 422
+    access_key_workspaces_client.create_workspace_member.assert_not_awaited()
+
+
+def test_workspace_admin_cannot_take_over_service_account_provisioned_outside_the_workspace(client):
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        provisioned = client.post(
+            "/v2/access-keys",
+            json={"name": "runner", "service_account_id": "ci/runner", "workspaces": [{"workspace": "prod"}]},
+        )
+    assert provisioned.status_code == 200
+
+    with patch.object(AuthClient, "has_role", _has_role_for(("ci", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "runner", "service_account_id": "ci/runner", "workspace": "ci"},
+        )
+
+    assert response.status_code == 400
+    assert "outside workspace 'ci'" in response.json()["detail"]
+
+
+def test_workspace_admin_cannot_rotate_key_whose_service_account_gained_a_key_outside_the_workspace(client):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel", "workspace": "team-a"},
+        ).json()
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        assert (
+            client.post("/v2/access-keys", json={"name": "other", "service_account_id": "team-a/otel"}).status_code
+            == 200
+        )
+
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(f"/v2/access-keys/{created['jti']}/rotate")
+
+    assert response.status_code == 400
+
+
+def test_workspace_admin_cannot_take_over_service_account_with_a_role_binding_outside_the_workspace(
+    client, access_key_registry
+):
+    access_key_registry.bindings["service-account:team-a/otel"] = {"team-b"}
+
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 400
+    assert "keys or role bindings outside workspace 'team-a'" in response.json()["detail"]
+    assert access_key_registry.keys == {}
+
+
+def test_workspace_admin_cannot_rotate_key_whose_service_account_gained_a_role_binding_outside_the_workspace(
+    client, access_key_registry
+):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel", "workspace": "team-a"},
+        ).json()
+        access_key_registry.bindings["service-account:team-a/otel"] = {"team-a", "team-b"}
+        response = client.post(f"/v2/access-keys/{created['jti']}/rotate")
+
+    assert response.status_code == 400
+    assert list(access_key_registry.keys) == [created["jti"]]
+
+
+def test_create_is_rolled_back_when_outside_access_appears_between_the_check_and_the_insert(
+    client, access_key_registry
+):
+    access_key_registry.after_add = lambda registry: registry.bindings.update({"service-account:team-a/otel": {"prod"}})
+
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 400
+    assert "keys or role bindings outside workspace 'team-a'" in response.json()["detail"]
+    assert set(access_key_registry.keys) == access_key_registry.revoked
+
+
+def test_create_is_rolled_back_when_a_key_from_an_earlier_workspace_appears_between_the_check_and_the_insert(
+    client, access_key_registry
+):
+    def add_key_bound_to_the_earlier_workspace(registry):
+        stale = next(iter(registry.keys.values())).model_copy(update={"jti": "ak_stale"})
+        registry.keys["ak_stale"] = stale
+        registry.owners["ak_stale"] = "someone-else"
+        registry.bound["ak_stale"] = "team-a"
+        registry.bound_ids["ak_stale"] = "ws-before-recreation"
+
+    access_key_registry.after_add = add_key_bound_to_the_earlier_workspace
+
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel", "workspace": "team-a"},
+        )
+
+    assert response.status_code == 400
+    assert "outside workspace 'team-a'" in response.json()["detail"]
+    assert access_key_registry.revoked == set(access_key_registry.keys) - {"ak_stale"}
+
+
+def test_rotation_discards_successor_when_outside_access_appears_between_the_check_and_the_insert(
+    client, access_key_registry
+):
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"))):
+        created = client.post(
+            "/v2/access-keys",
+            json={"name": "otel", "service_account_id": "team-a/otel", "workspace": "team-a"},
+        ).json()
+        access_key_registry.after_add = lambda registry: registry.bindings.update(
+            {"service-account:team-a/otel": {"prod"}}
+        )
+        response = client.post(f"/v2/access-keys/{created['jti']}/rotate")
+
+    assert response.status_code == 400
+    assert len(access_key_registry.discarded) == 1
+    assert list(access_key_registry.keys) == [created["jti"]]
+    assert created["jti"] not in access_key_registry.revoked
+
+
+def test_helix_admin_is_not_rolled_back_when_outside_access_appears_after_the_insert(client, access_key_registry):
+    access_key_registry.after_add = lambda registry: registry.bindings.update({"service-account:ci/runner": {"prod"}})
+
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "runner", "service_account_id": "ci/runner", "workspace": "ci"},
+        )
+
+    assert response.status_code == 200
+
+
+def test_listing_falls_back_to_own_keys_when_the_admin_role_check_fails(client):
+    personal = client.post("/v2/access-keys", json={"name": "personal"}).json()
+
+    with patch.object(
+        AuthClient, "has_role", new_callable=AsyncMock, side_effect=HTTPException(status_code=503, detail="PDP down")
+    ):
+        response = client.get("/v2/access-keys")
+
+    assert response.status_code == 200
+    assert [key["jti"] for key in response.json()["data"]] == [personal["jti"]]
+
+
+def test_listing_hides_only_service_keys_whose_workspace_check_fails(client):
+    personal = client.post("/v2/access-keys", json={"name": "personal"}).json()
+    with patch.object(AuthClient, "has_role", _has_role_for(("team-a", "Admin"), ("team-b", "Admin"))):
+        for name, workspace in (("a1", "team-a"), ("a2", "team-a"), ("b1", "team-b")):
+            created = client.post(
+                "/v2/access-keys",
+                json={"name": name, "service_account_id": f"{workspace}/{name}", "workspace": workspace},
+            )
+            assert created.status_code == 200
+        team_b_key = next(key for key in client.get("/v2/access-keys").json()["data"] if key["workspace"] == "team-b")
+
+    pdp_calls: list[tuple[str, str]] = []
+
+    async def has_role(_self, workspace, role):
+        pdp_calls.append((workspace, role))
+        if (workspace, role) == ("team-a", "Admin"):
+            raise HTTPException(status_code=503, detail="PDP unavailable")
+        return (workspace, role) == ("team-b", "Admin")
+
+    with patch.object(AuthClient, "has_role", has_role):
+        response = client.get("/v2/access-keys")
+
+    # The failed team-a check hides team-a's keys but not the personal key or team-b's.
+    assert response.status_code == 200
+    assert {key["jti"] for key in response.json()["data"]} == {personal["jti"], team_b_key["jti"]}
+    # And it is not retried for each of team-a's keys.
+    assert pdp_calls.count(("team-a", "Admin")) == 1
+
+
+def test_listing_does_not_mask_a_failure_listing_the_keys_themselves(client, access_key_registry):
+    access_key_registry.list_for_principal = AsyncMock(
+        side_effect=HTTPException(status_code=502, detail="entity service unavailable")
+    )
+
+    with patch.object(AuthClient, "has_role", _has_role_for()):
+        response = client.get("/v2/access-keys")
+
+    assert response.status_code == 502
+    access_key_registry.list_for_principal.assert_awaited_once()
+
+
+def test_helix_admin_can_create_bound_key_for_service_account_with_keys_elsewhere(client):
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        assert client.post("/v2/access-keys", json={"name": "a", "service_account_id": "ci/runner"}).status_code == 200
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "b", "service_account_id": "ci/runner", "workspace": "ci"},
+        )
+
+    assert response.status_code == 200
+
+
+def test_workspace_binding_requires_service_account_id(client):
+    response = client.post("/v2/access-keys", json={"name": "personal", "workspace": "team-a"})
+
+    assert response.status_code == 422
 
 
 def test_demoted_platform_admin_lists_personal_key_but_not_service_key(client):
@@ -1132,8 +1787,7 @@ def test_platform_admin_can_revoke_service_key_created_by_a_different_admin(clie
             )
         )
         try:
-            # Listing stays scoped to the caller's own keys (see PersistentAccessKeyIssuer.list_async);
-            # a HelixAdmin manages another admin's service-bound key by its jti directly.
+            # A HelixAdmin can discover and manage another administrator's service-bound key.
             revoked = client.delete(f"/v2/access-keys/{created['jti']}")
         finally:
             auth_client_context.reset(other_admin_token)
@@ -1611,7 +2265,10 @@ def test_access_key_lifecycle_openapi_documents_error_responses(client):
     assert create_responses["400"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AccessKeyErrorResponse"
     }
-    assert create_responses["403"]["description"] == "Service-bound Scoped Access Keys require HelixAdmin"
+    assert (
+        create_responses["403"]["description"]
+        == "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace"
+    )
     assert create_responses["403"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AccessKeyErrorResponse"
     }
@@ -1756,6 +2413,7 @@ def test_list_access_keys_returns_current_principals_persisted_keys(client):
             "name": "ci-intake",
             "principal": "alice@example.com",
             "entity_type": "USER",
+            "workspace": None,
             "created_at": created["created_at"],
             "expires_at": created["expires_at"],
             "grace_period_expires_at": None,

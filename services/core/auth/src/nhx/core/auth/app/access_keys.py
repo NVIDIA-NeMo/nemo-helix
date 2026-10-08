@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Literal, TypeVar
+from typing import Literal, Protocol, TypeVar
 
 from fastapi import Depends, HTTPException
 from nemo_helix_plugin.auth.access_keys.issuer import AccessKeyFeatureDisabledError
@@ -22,6 +22,7 @@ from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyStatus,
     AccessKeyWorkspaceGrant,
 )
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
@@ -34,11 +35,11 @@ from nhx.common.auth.access_keys import (
 from nhx.common.auth.models import Principal
 from nhx.common.auth.token_claims import TokenClaims
 from nhx.common.config import AuthConfig
-from nhx.common.entities import EntityClient, EntityConflictError, EntityNotFoundError
+from nhx.common.entities import ALL_WORKSPACES, EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.common.service.dependencies import get_entity_client
 from nhx.core.auth.app.access_key_credentials import AccessKeyCredentialAdapter
 from nhx.core.auth.app.account_resolution import get_account_session_maker
-from nhx.core.auth.entities import AccessKeyEntity
+from nhx.core.auth.entities import AccessKeyEntity, RoleBindingEntity
 from nhx.core.entities.app.repository import (
     AccountCredentialConflictError,
     AccountCredentialStore,
@@ -46,7 +47,29 @@ from nhx.core.entities.app.repository import (
 )
 
 ACCESS_KEY_WORKSPACE = "system"
+_OUTSIDE_ACCESS_MESSAGE = (
+    "Service account '{account_id}' already has keys or role bindings outside workspace '{workspace}', "
+    "or a key bound to an earlier workspace of the same name; "
+    "only a HelixAdmin can create or rotate keys for it"
+)
 logger = logging.getLogger(__name__)
+
+
+async def resolve_workspace_id(workspaces_client: AsyncWorkspacesClient, workspace: str) -> str | None:
+    """The workspace's current ID, or None if it doesn't exist or the caller can't read it.
+
+    Any other client failure (transport error, 5xx) is raised as a 503 rather than read as "gone":
+    callers treat None as a definitive answer, and a transient outage must not turn into a
+    spurious 403/404 or a client-error 400.
+    """
+    try:
+        return (await workspaces_client.get_workspace(name=workspace)).data().id
+    except (NotFoundError, PermissionDeniedError):
+        return None
+    except NemoClientError as exc:
+        logger.warning("Failed to read workspace '%s'", workspace, exc_info=True)
+        raise HTTPException(status_code=503, detail=f"Workspace '{workspace}' could not be read; retry") from exc
+
 
 # Bounds retries of a lifecycle mutation's optimistic-lock update against version
 # bumps from concurrent, unrelated writes (chiefly is_active's last_used_at updates
@@ -68,15 +91,22 @@ class _Retry:
 
 _RETRY = _Retry()
 
+
 # Service-bound keys are machine-to-machine credentials owned by the platform, not
 # by the creating individual. Every lifecycle operation therefore
-# uses this callback to require a current HelixAdmin, including when the caller
-# originally created the key.
-AdminOverride = Callable[[], Awaitable[bool]]
+# uses this callback to require a current administrator, including when the caller
+# originally created the key. It takes the key's bound workspace (None if unbound): a
+# HelixAdmin qualifies for any key, a workspace Admin only for keys bound to that workspace.
+# The workspace's ID, recorded when the key was bound, lets the check reject a key whose workspace
+# was deleted and recreated under the same name.
+class AdminOverride(Protocol):
+    def __call__(self, workspace: str | None, workspace_id: str | None = None) -> Awaitable[bool]:
+        """Whether the caller may manage keys bound to ``workspace`` (and ``workspace_id``, if given)."""
+        ...
 
 
 def _memoize_admin_override(admin_override: AdminOverride | None) -> AdminOverride | None:
-    """Cache a single admin_override result for the lifetime of one lifecycle call.
+    """Cache admin_override results (per workspace) for the lifetime of one lifecycle call.
 
     _get_owned() may be invoked twice within one revoke()/suspend()/unsuspend() call
     (initial read, then a re-read after a losing optimistic-lock race). Without this,
@@ -84,13 +114,14 @@ def _memoize_admin_override(admin_override: AdminOverride | None) -> AdminOverri
     """
     if admin_override is None:
         return None
-    result: bool | None = None
+    results: dict[tuple[str | None, str | None], bool] = {}
 
-    async def cached() -> bool:
-        nonlocal result
-        if result is None:
-            result = await admin_override()
-        return result
+    async def cached(workspace: str | None, workspace_id: str | None = None) -> bool:
+        """Return the memoized admin_override result for this workspace and ID."""
+        key = (workspace, workspace_id)
+        if key not in results:
+            results[key] = await admin_override(workspace, workspace_id)
+        return results[key]
 
     return cached
 
@@ -120,6 +151,8 @@ class AccessKeyRegistry:
         *,
         owner_principal: str | None = None,
         owner_account_id: str | None = None,
+        bound_workspace: str | None = None,
+        bound_workspace_id: str | None = None,
     ) -> None:
         owner = owner_principal or key.principal
         record = AccessKeyEntity(
@@ -129,6 +162,8 @@ class AccessKeyRegistry:
             description=key.description,
             principal=owner,
             subject_principal=key.principal if key.principal != owner else None,
+            bound_workspace=bound_workspace,
+            bound_workspace_id=bound_workspace_id,
             entity_type=key.entity_type,
             issuer=key.issuer,
             audiences=key.audiences,
@@ -161,11 +196,12 @@ class AccessKeyRegistry:
         page_size: int,
         include_service_accounts: bool = False,
         owner_account_id: str | None = None,
+        admin_override: AdminOverride | None = None,
     ) -> AccessKeyListResponse:
-        # Service-bound keys are platform-owned, not creator-owned: a
-        # HelixAdmin other than the creator can already revoke/suspend one via
-        # _get_owned's admin_override, so listing must surface every service-bound key
-        # to any current admin rather than only the one who happened to create it.
+        # include_service_accounts (a current HelixAdmin) surfaces every service-bound key, not just
+        # the ones the caller created. Otherwise only the caller's own records are fetched, so other
+        # tenants' service-bound keys can never crowd the caller's keys out of a page, and a
+        # service-bound one is kept only while admin_override still accepts its bound workspace.
         # EntityBase fields (all fields on AccessKeyEntity besides the base name/workspace/etc.)
         # live in the data JSON column, so filter_operation needs the same `data.` prefix
         # that _convert_filter_obj_to_filter_str applies for the filter_obj shorthand.
@@ -190,12 +226,13 @@ class AccessKeyRegistry:
             page_size=page_size,
         )
         records = result.data
-        if not include_service_accounts:
-            records = [record for record in records if record.entity_type != "SERVICE_ACCOUNT"]
         credential_has_more = False
         if self._credential_adapter is not None and owner_account_id is not None:
             credential_records, credential_has_more = await self._credential_adapter.list_for_owner(
                 owner_account_id,
+                # Keys the caller created, service-bound ones included, are already covered by the
+                # owner match. Only a HelixAdmin pulls in other owners' service keys: asking for them
+                # on behalf of every caller would page every tenant's service keys through each list.
                 include_service_accounts=include_service_accounts,
                 offset=(page - 1) * page_size,
                 limit=page_size,
@@ -208,11 +245,82 @@ class AccessKeyRegistry:
         # During the dual-store migration window, a page can exceed page_size:
         # both stores already applied the requested offset and limit, so trimming
         # here would permanently hide a fetched row without a merged cursor.
+        visible_records = []
+        for record in records:
+            if (
+                record.is_service_account()
+                and not include_service_accounts
+                and (
+                    admin_override is None
+                    or not await admin_override(record.bound_workspace, record.bound_workspace_id)
+                )
+            ):
+                continue
+            visible_records.append(record)
         # Short non-admin pages after Python filtering are intentional: favor never hiding valid keys over exact pagination; no fix needed.
         return AccessKeyListResponse(
-            data=[self._metadata(record) for record in records],
+            data=[self._metadata(record) for record in visible_records],
             has_more=credential_has_more or page < result.pagination.total_pages,
         )
+
+    async def has_service_account_access_outside_workspace(
+        self, service_account_principal: str, workspace: str, workspace_id: str | None = None
+    ) -> bool:
+        """Whether this service account has a key or an active role binding outside ``workspace``.
+
+        Keys are checked in any status, in both the entity store and, when configured, the
+        credential store. Role bindings catch access granted without a key, e.g. membership a
+        HelixAdmin or another workspace's Admin pre-provisioned for the principal. Bindings compare
+        by name only: deleting a workspace deletes its bindings, so none can outlive the workspace.
+
+        With ``workspace_id``, a key bound to a different workspace ID also counts as outside, even
+        under the same name: deleting a workspace doesn't revoke its keys, so a recreated workspace
+        must not take over an account whose old key is still live. Without it, only names compare.
+        """
+
+        def is_outside(record: AccessKeyEntity) -> bool:
+            if record.bound_workspace != workspace:
+                return True
+            return workspace_id is not None and record.bound_workspace_id != workspace_id
+
+        if self._credential_adapter is not None and await self._credential_adapter.any_for_service_account(
+            service_account_principal, is_outside
+        ):
+            return True
+        page = 1
+        while True:
+            result = await self._entity_client.list(
+                AccessKeyEntity,
+                workspace=ACCESS_KEY_WORKSPACE,
+                filter_operation=ComparisonOperation(
+                    operator=FilterOperator.EQ, field="data.subject_principal", value=service_account_principal
+                ),
+                page=page,
+                page_size=100,
+            )
+            if any(is_outside(record) for record in result.data):
+                return True
+            if page >= result.pagination.total_pages:
+                break
+            page += 1
+        page = 1
+        while True:
+            result = await self._entity_client.list(
+                RoleBindingEntity,
+                workspace=ALL_WORKSPACES,
+                # Revoked bindings are filtered in Python below: the entity service only supports
+                # $exists for registered relationships, not plain fields like revoked_at.
+                filter_operation=ComparisonOperation(
+                    operator=FilterOperator.EQ, field="data.principal", value=service_account_principal
+                ),
+                page=page,
+                page_size=100,
+            )
+            if any(binding.revoked_at is None and binding.workspace != workspace for binding in result.data):
+                return True
+            if page >= result.pagination.total_pages:
+                return False
+            page += 1
 
     async def _retry_on_conflict(
         self,
@@ -511,9 +619,10 @@ class AccessKeyRegistry:
         record = await self._get(jti)
         if record.is_service_account():
             # Service-bound keys belong to the platform, not to the administrator who
-            # created them. Require the caller to be a *current* HelixAdmin for every
-            # lifecycle operation, including when that caller is the recorded creator.
-            if admin_override is not None and await admin_override():
+            # created them. Require the caller to be a *current* administrator of the
+            # bound workspace (or a HelixAdmin) for every lifecycle operation, including
+            # when that caller is the recorded creator.
+            if admin_override is not None and await admin_override(record.bound_workspace, record.bound_workspace_id):
                 return record
         elif record.principal == principal:
             return record
@@ -551,6 +660,7 @@ class AccessKeyRegistry:
             description=record.description,
             principal=record.subject_principal or record.principal,
             entity_type=record.entity_type,
+            workspace=record.bound_workspace,
             # Report lifecycle status against the published expiration instant.
             # Clock-skew leeway applies only while authenticating the JWT.
             status=effective_status,
@@ -713,8 +823,8 @@ class PersistentAccessKeyIssuer:
         self._workspaces_client = workspaces_client
         self.principal = principal.id
         self.account_id = principal.account_id
-        # Lets any current HelixAdmin revoke or suspend a service-bound key;
-        # see AdminOverride. Memoized for the lifetime of this issuer
+        # Lets a current HelixAdmin, or an Admin of the bound workspace, manage a
+        # service-bound key; see AdminOverride. Memoized for the lifetime of this issuer
         # instance (one per request, see get_access_key_issuer) so that an endpoint-level
         # pre-check (is_platform_admin) and create_async's own defense-in-depth re-check
         # share a single PDP has_role round trip instead of each paying for one.
@@ -724,13 +834,69 @@ class PersistentAccessKeyIssuer:
         self._caller_scope = frozenset(caller_scope) if caller_scope is not None else None
 
     async def is_platform_admin(self) -> bool:
-        """Whether the caller is a current HelixAdmin.
+        """Whether the caller is a current HelixAdmin."""
+        return await self.can_administer(None)
 
-        Backed by the same memoized admin_override create_async consults, so callers that
-        need to gate on HelixAdmin status before invoking create_async (to return 403
-        instead of create_async's 400) do not trigger a second PDP round trip.
+    async def can_administer(self, workspace: str | None, workspace_id: str | None = None) -> bool:
+        """Whether the caller is a HelixAdmin or an Admin of ``workspace``.
+
+        Uses the memoized admin_override, so gating before create_async costs no extra PDP call.
         """
-        return self._admin_override is not None and await self._admin_override()
+        return self._admin_override is not None and await self._admin_override(workspace, workspace_id)
+
+    async def _get_workspace_id(self, workspace: str | None) -> str | None:
+        """The bound workspace's current ID. Fails closed: a missing or unreadable workspace can't be bound.
+
+        A transient lookup failure surfaces as a 503 (see resolve_workspace_id), not a validation error.
+        """
+        if workspace is None:
+            return None
+        workspace_id = await resolve_workspace_id(self._workspaces_client, workspace)
+        if workspace_id is None:
+            raise AccessKeyValidationError(f"Workspace '{workspace}' could not be resolved")
+        return workspace_id
+
+    async def _require_namespaced_service_account(
+        self, workspace: str | None, workspace_id: str | None, service_account_id: str | None
+    ) -> None:
+        """Confine a workspace Admin to service accounts that belong to their workspace.
+
+        The JWT authenticates as service-account:<id> everywhere that principal has access, so a
+        workspace Admin may only use an id namespaced under the bound workspace that no key
+        outside that workspace already uses (e.g. one a HelixAdmin provisioned with access to
+        other workspaces, which a newly created workspace of the same name must not take over).
+        ``workspace_id`` extends that to a key bound to an earlier workspace of the same name,
+        whose live key a recreated workspace must not inherit access for. HelixAdmins are
+        unrestricted. Applies to create and rotate alike.
+        """
+        if workspace is None or await self.is_platform_admin():
+            return
+        prefix = f"{workspace}/"
+        account_id = service_account_id or ""
+        if not (account_id.startswith(prefix) and len(account_id) > len(prefix)):
+            raise AccessKeyValidationError(
+                f"Workspace Admins must use a service_account_id namespaced under the workspace ('{workspace}/<name>')"
+            )
+        if await self._registry.has_service_account_access_outside_workspace(
+            f"{SERVICE_ACCOUNT_PRINCIPAL_PREFIX}{account_id}", workspace, workspace_id
+        ):
+            raise AccessKeyValidationError(_OUTSIDE_ACCESS_MESSAGE.format(account_id=account_id, workspace=workspace))
+
+    async def _confinement_violated_after_insert(
+        self, workspace: str | None, workspace_id: str | None, service_account_id: str | None
+    ) -> bool:
+        """Re-run the outside-access check once the new key's record exists.
+
+        _require_namespaced_service_account runs before the record is written, so a key or role
+        binding that a HelixAdmin (or another workspace's Admin) adds for the same service account
+        in between would slip past it. Checking again after the insert closes that window for
+        whichever request commits second. Always False for HelixAdmins and unbound keys.
+        """
+        if workspace is None or service_account_id is None or await self.is_platform_admin():
+            return False
+        return await self._registry.has_service_account_access_outside_workspace(
+            f"{SERVICE_ACCOUNT_PRINCIPAL_PREFIX}{service_account_id}", workspace, workspace_id
+        )
 
     def _enforce_caller_scope(self, request: AccessKeyCreateRequest) -> None:
         """Reject a scope-restricted caller minting a key broader than its own access."""
@@ -758,12 +924,43 @@ class PersistentAccessKeyIssuer:
             raise AccessKeyValidationError(
                 "rotates cannot be combined with service_account_id; rotation is only supported for personal keys"
             )
+        bound_workspace_id: str | None = None
         if allow_service_account:
             # Defense-in-depth, mirroring the admin_override re-check that revoke/suspend/
             # unsuspend apply for service-bound keys: don't rely solely on the caller having
-            # verified HelixAdmin status before setting this flag (see AdminOverride).
-            if not await self.is_platform_admin():
-                raise AccessKeyValidationError("Service-bound Scoped Access Keys require HelixAdmin")
+            # verified admin status before setting this flag (see AdminOverride).
+            if not await self.can_administer(request.workspace):
+                raise AccessKeyValidationError(
+                    "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace"
+                )
+            bound_workspace_id = await self._get_workspace_id(request.workspace)
+            # The check above resolved the workspace by name; repeat it against the ID just read so
+            # a workspace recreated in between can't be bound on the old workspace's Admin check.
+            if bound_workspace_id is not None and not await self.can_administer(request.workspace, bound_workspace_id):
+                raise AccessKeyValidationError(
+                    "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace"
+                )
+            await self._require_namespaced_service_account(
+                request.workspace, bound_workspace_id, request.service_account_id
+            )
+            if (
+                request.workspace is not None
+                and not any(grant.workspace == request.workspace for grant in request.workspaces or [])
+                # Memberships belong to the service account, not the key, so a default grant would
+                # widen every other key of an account that already has a role here (e.g. Viewer).
+                and await self._is_not_a_member(
+                    request.workspace, f"{SERVICE_ACCOUNT_PRINCIPAL_PREFIX}{request.service_account_id}"
+                )
+            ):
+                # A workspace-bound key's account is always a member of its own workspace.
+                request = request.model_copy(
+                    update={
+                        "workspaces": [
+                            *(request.workspaces or []),
+                            AccessKeyWorkspaceGrant(workspace=request.workspace),
+                        ]
+                    }
+                )
         if request.rotates is not None:
             # Fail fast on an invalid rotation target instead of minting an orphan key.
             old_record = await self._registry.get_for_rotation(
@@ -787,6 +984,8 @@ class PersistentAccessKeyIssuer:
                 key,
                 owner_principal=self.principal,
                 owner_account_id=self.account_id,
+                bound_workspace=request.workspace,
+                bound_workspace_id=bound_workspace_id,
             )
         except Exception:
             logger.warning(
@@ -795,6 +994,13 @@ class PersistentAccessKeyIssuer:
                 exc_info=True,
             )
             raise
+        if await self._confinement_violated_after_insert(
+            request.workspace, bound_workspace_id, request.service_account_id
+        ):
+            await self._revoke_after_failed_creation(key.jti, "service_account_confinement_violated")
+            raise AccessKeyValidationError(
+                _OUTSIDE_ACCESS_MESSAGE.format(account_id=request.service_account_id, workspace=request.workspace)
+            )
         logger.info(
             "Scoped Access Key created",
             extra={
@@ -883,6 +1089,17 @@ class PersistentAccessKeyIssuer:
                 raise
         return attempted
 
+    async def _is_not_a_member(self, workspace: str, principal: str) -> bool:
+        """Whether the principal has no role in workspace yet; an unreadable member list is a 503."""
+        try:
+            return await self._get_member_roles(workspace, principal) is None
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail=f"Members of workspace '{workspace}' could not be read; retry"
+            ) from exc
+
     async def _get_member_roles(self, workspace: str, principal: str) -> list[str] | None:
         """Return a principal's current roles in workspace, or None if not yet a member.
 
@@ -933,28 +1150,67 @@ class PersistentAccessKeyIssuer:
                     exc_info=True,
                 )
 
+    def _listing_admin_override(self) -> AdminOverride | None:
+        """The admin_override for listing: a failed check hides that service-bound key.
+
+        Listing must not fail outright because one workspace's role or ID lookup did. A key whose
+        check failed is treated as not administered, and not asked about again in this listing.
+        """
+        admin_override = self._admin_override
+        if admin_override is None:
+            return None
+        failed: set[tuple[str | None, str | None]] = set()
+
+        async def check(workspace: str | None, workspace_id: str | None = None) -> bool:
+            if (workspace, workspace_id) in failed:
+                return False
+            try:
+                return await admin_override(workspace, workspace_id)
+            # The PDP and workspace lookups report outages as HTTPException; anything else, such as
+            # a missing PDP URL, is a misconfiguration that should still fail the request.
+            except HTTPException:
+                logger.warning(
+                    "Admin check failed while listing Scoped Access Keys; "
+                    "hiding the service-bound keys bound to this workspace from the list",
+                    extra={"actor_principal": self.principal, "workspace": workspace},
+                    exc_info=True,
+                )
+                failed.add((workspace, workspace_id))
+                return False
+
+        return check
+
     async def list_async(self, *, page: int = 1, page_size: int = 100) -> AccessKeyListResponse:
         self._ensure_enabled()
-        # A current HelixAdmin sees every service-bound key, not just the ones they
-        # personally created, mirroring the admin_override check lifecycle operations
-        # already apply (see AccessKeyRegistry.list_for_principal). If the PDP role check
-        # itself fails (e.g. unreachable), degrade to the caller's own keys rather than
-        # failing listing outright for every user.
+        # A current HelixAdmin sees every service-bound key, while a workspace Admin also sees
+        # the service-bound keys they created for workspaces they still administer, mirroring
+        # the admin_override check lifecycle operations already apply (see
+        # AccessKeyRegistry.list_for_principal). If the PDP role check itself fails (e.g.
+        # unreachable), degrade to the caller's own keys rather than failing listing outright
+        # for every user. Only that check is guarded: a failure listing the keys themselves
+        # must still surface.
         try:
             include_service_accounts = await self.is_platform_admin()
         except HTTPException:
             logger.warning(
                 "HelixAdmin check failed while listing Scoped Access Keys; "
-                "falling back to listing only the caller's own keys",
+                "falling back to the caller's own personal keys (service-bound keys are hidden from this list)",
                 extra={"actor_principal": self.principal},
                 exc_info=True,
             )
-            include_service_accounts = False
+            return await self._registry.list_for_principal(
+                self.principal,
+                page=page,
+                page_size=page_size,
+                include_service_accounts=False,
+                owner_account_id=self.account_id,
+            )
         return await self._registry.list_for_principal(
             self.principal,
             page=page,
             page_size=page_size,
             include_service_accounts=include_service_accounts,
+            admin_override=self._listing_admin_override(),
             owner_account_id=self.account_id,
         )
 
@@ -1016,10 +1272,16 @@ class PersistentAccessKeyIssuer:
         allow_service_account = old_record.entity_type == "SERVICE_ACCOUNT"
         if allow_service_account:
             # Mirrors create_async's defense-in-depth re-check: don't rely solely on
-            # the caller having verified HelixAdmin status upstream (see AdminOverride).
-            if not await self.is_platform_admin():
-                raise AccessKeyValidationError("Service-bound Scoped Access Keys require HelixAdmin")
+            # the caller having verified admin status upstream (see AdminOverride).
+            if not await self.can_administer(old_record.bound_workspace, old_record.bound_workspace_id):
+                raise AccessKeyValidationError(
+                    "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace"
+                )
             service_account_id = (old_record.subject_principal or "").removeprefix(SERVICE_ACCOUNT_PRINCIPAL_PREFIX)
+            # can_administer above already confirmed the workspace still has the ID the key was bound to.
+            await self._require_namespaced_service_account(
+                old_record.bound_workspace, old_record.bound_workspace_id, service_account_id
+            )
         else:
             service_account_id = None
         # Preserve the original key's lifetime characteristic (finite duration, restarted
@@ -1041,6 +1303,7 @@ class PersistentAccessKeyIssuer:
             name=old_record.key_name,
             description=old_record.description,
             service_account_id=service_account_id,
+            workspace=old_record.bound_workspace,
             # Keep the original scope; map empty (unscoped) to None since an explicit
             # empty scope is rejected.
             scope=old_record.scope or None,
@@ -1054,6 +1317,8 @@ class PersistentAccessKeyIssuer:
                 new_key,
                 owner_principal=self.principal,
                 owner_account_id=self.account_id,
+                bound_workspace=old_record.bound_workspace,
+                bound_workspace_id=old_record.bound_workspace_id,
             )
         except Exception:
             try:
@@ -1082,6 +1347,15 @@ class PersistentAccessKeyIssuer:
                 exc_info=True,
             )
             raise
+        if await self._confinement_violated_after_insert(
+            old_record.bound_workspace, old_record.bound_workspace_id, service_account_id
+        ):
+            await self._discard_orphaned_successor(
+                new_key.jti, context="successor Scoped Access Key rejected by the post-insert confinement check"
+            )
+            raise AccessKeyValidationError(
+                _OUTSIDE_ACCESS_MESSAGE.format(account_id=service_account_id, workspace=old_record.bound_workspace)
+            )
         if grace_period_seconds is None:
             grace_period_seconds = self._config.access_keys.rotation_grace_period_seconds
         try:

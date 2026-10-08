@@ -52,6 +52,11 @@ class AccessKeyEntity(EntityBase):
     # user-bound keys and is the creating administrator for service-bound keys.
     principal: str
     subject_principal: str | None = None
+    # Workspace a service-bound key is bound to; its Admins may manage the key.
+    bound_workspace: str | None = None
+    # ID of that workspace when the key was bound; a recreated workspace of the same name has a
+    # different ID and no longer administers the key.
+    bound_workspace_id: str | None = None
     entity_type: AccessKeyEntityType = "USER"
     issuer: str
     audiences: list[str]

@@ -767,21 +767,26 @@ async def test_service_account_access_key_uses_non_privileged_machine_identity(t
         now=lambda: 1785280000,
     )
     created = await issuer.create_async(
-        AccessKeyCreateRequest(service_account_id="otel-collector", expires_in_seconds=None),
+        AccessKeyCreateRequest(
+            service_account_id="team-a/otel-collector",
+            workspace="team-a",
+            expires_in_seconds=None,
+        ),
         allow_service_account=True,
     )
     claims = jwt.decode(created.token, options={"verify_signature": False})
     jwks = {"keys": [await public_jwk_from_private_key_pem_async(config)]}
     validated = await validate_access_key_token(config, created.token, jwks_override=jwks)
 
-    assert created.principal == "service-account:otel-collector"
+    assert created.principal == "service-account:team-a/otel-collector"
     assert created.entity_type == "SERVICE_ACCOUNT"
-    assert claims["sub"] == "service-account:otel-collector"
+    assert created.workspace == "team-a"
+    assert claims["sub"] == "service-account:team-a/otel-collector"
     assert claims["nhx_access_key"]["entity_type"] == "SERVICE_ACCOUNT"
     assert "email" not in claims
     assert "groups" not in claims
     assert validated is not None
-    assert validated.subject == "service-account:otel-collector"
+    assert validated.subject == "service-account:team-a/otel-collector"
 
 
 async def test_validate_access_key_token_rejects_service_entity_type_for_user_subject(tmp_path):
