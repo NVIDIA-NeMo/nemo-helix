@@ -66,7 +66,7 @@ from scaled_evals.dispatch.sandbox_k8s import (
     summarize_harbor_result,
 )
 from scaled_evals.harbor_opensandbox_cleanup import (
-    APPLIED_EGRESS_FILENAME,
+    APPLIED_EGRESS_GLOB,
     BENCHMARK_RUN_METADATA_KEY,
     DEPLOYMENT_METADATA_KEY,
     EVALUATION_METADATA_KEY,
@@ -485,11 +485,12 @@ def make_harbor_opensandbox_submitter(
 
 
 def collect_applied_egress(job_dir: Path) -> list[dict[str, Any]]:
-    """Read the per-trial records ``NemoOpenSandboxEnvironment`` wrote after verification."""
-    # Harbor gives each trial its own directory under the job dir. Only sandboxes that passed
+    """Read the per-sandbox records ``NemoOpenSandboxEnvironment`` wrote after verification."""
+    # Harbor gives each trial its own directory under the job dir, holding one record per sandbox:
+    # the agent's, plus the verifier's when it runs separately. Only sandboxes that passed
     # verification have a record; unreadable ones are skipped so one bad file can't hide the rest.
     records: list[dict[str, Any]] = []
-    for path in sorted(job_dir.glob(f"*/{APPLIED_EGRESS_FILENAME}")):
+    for path in sorted(job_dir.glob(f"*/{APPLIED_EGRESS_GLOB}")):
         try:
             record = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -501,6 +502,7 @@ def collect_applied_egress(job_dir: Path) -> list[dict[str, Any]]:
             {
                 "trial": path.parent.name,
                 "sandbox_id": record.get("sandbox_id"),
+                "role": record.get("role"),
                 "network_mode": record.get("network_mode"),
                 "policy_sha256": record.get("policy_sha256"),
             }

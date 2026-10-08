@@ -41,7 +41,7 @@ from nhx_sandbox.opensandbox_policy import (
     verify_applied_egress,
 )
 
-from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_FILENAME
+from scaled_evals.harbor_opensandbox_cleanup import applied_egress_filename
 
 # Sandbox metadata label marking which NeMo component manages the sandbox.
 MANAGED_BY_METADATA_KEY = "nemo-managed-by"
@@ -183,19 +183,24 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
         return sandbox
 
     def _record_applied_egress(self, sandbox_id: str | None, policy: EgressPolicy) -> None:
-        """Write the verified policy and its hash into the trial directory for the supervisor."""
+        """Write the verified policy and its hash into the trial directory for the supervisor.
+
+        The agent and a separate verifier share the trial directory, so each sandbox writes its own file.
+        """
         payload = to_opensandbox_policy(policy)
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         record = {
             "sandbox_id": sandbox_id,
             "session_id": self.session_id,
+            "role": _sandbox_role(self.session_id),
             "network_mode": self._network_policy.network_mode.value,
             "policy_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
             "policy": payload,
         }
+        filename = applied_egress_filename(sandbox_id or self.session_id)
         try:
             self.trial_paths.trial_dir.mkdir(parents=True, exist_ok=True)
-            (self.trial_paths.trial_dir / APPLIED_EGRESS_FILENAME).write_text(json.dumps(record, indent=2))
+            (self.trial_paths.trial_dir / filename).write_text(json.dumps(record, indent=2))
         except OSError:
             self.logger.warning("Could not record the applied egress policy", exc_info=True)
 
@@ -242,6 +247,18 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
         from opensandbox.models.sandboxes import SandboxFilter  # ty: ignore[unresolved-import]
 
         return {**sdk, "SandboxManager": SandboxManager, "SandboxFilter": SandboxFilter}
+
+
+def _sandbox_role(session_id: str) -> str:
+    """Return ``agent`` or ``verifier`` for a sandbox, from the session ID Harbor gave it.
+
+    Harbor 0.20 doesn't pass the role to the environment. It names the agent's session
+    ``<trial>__env`` and a separate verifier's ``<trial>__verifier__<key>``, shortened to end in a
+    hash when too long.
+    """
+    if session_id.endswith("__env") and "__verifier__" not in session_id:
+        return "agent"
+    return "verifier"
 
 
 def _sandbox_id(sandbox: Any) -> str | None:
