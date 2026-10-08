@@ -22,6 +22,7 @@ import {
 } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import { queryClient } from '@studio/api/queryClient';
+import { useTriggerInsightsRun } from '@studio/api/useTriggerInsightsRun';
 import { saveAnalysisConfig } from '@studio/routes/agents/AgentDetailRoute/analysis/saveAnalysisConfig';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { type FC, useEffect, useState } from 'react';
@@ -42,6 +43,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
   const [enabled, setEnabled] = useState(false);
   const [defaultModel, setDefaultModel] = useState('');
   const [fastModel, setFastModel] = useState('');
+  const triggerRun = useTriggerInsightsRun(workspace);
 
   const {
     data: config,
@@ -96,6 +98,20 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
     }
   };
 
+  const handleRunNow = () => {
+    if (!agent) return;
+    triggerRun.mutate(agent, {
+      onSuccess: ({ status, jobName, message }) => {
+        if (status === 'started') {
+          toast.success(`Queued analysis run "${jobName}".`);
+        } else {
+          toast.error(message ?? 'Failed to start the analysis run.');
+        }
+      },
+      onError: (runError) => toast.error(runError.message),
+    });
+  };
+
   if (!agent) return null;
 
   return (
@@ -124,14 +140,27 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
             </LoadingButton>
           </Flex>
         ) : (
-          <Button
-            kind="secondary"
-            size="small"
-            onClick={() => setEditing(true)}
-            disabled={isLoading}
-          >
-            Edit
-          </Button>
+          <Flex gap="density-sm">
+            <LoadingButton
+              kind="secondary"
+              color="neutral"
+              size="small"
+              height={28}
+              onClick={handleRunNow}
+              loading={triggerRun.isPending}
+              disabled={!config}
+            >
+              Run analysis now
+            </LoadingButton>
+            <Button
+              kind="secondary"
+              size="small"
+              onClick={() => setEditing(true)}
+              disabled={isLoading}
+            >
+              Edit
+            </Button>
+          </Flex>
         )
       }
     >

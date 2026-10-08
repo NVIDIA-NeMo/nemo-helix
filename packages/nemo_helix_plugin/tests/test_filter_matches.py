@@ -318,3 +318,119 @@ class TestNativeSemanticsEdgeCases:
         )
         with pytest.raises(ValueError, match="Unknown logical operator"):
             evaluate(op, Entity(name="x"))
+
+
+class TestElemMatch:
+    META = [{"key": "owner", "value": "alice"}, {"key": "team", "value": "eval"}, {"key": "level", "value": 3}]
+
+    def match(self, criteria, meta=None):
+        op = cmp(FilterOperator.ELEM_MATCH, "data.meta", criteria)
+        return evaluate(op, Entity(data={"meta": self.META if meta is None else meta}))
+
+    def test_matches_when_one_element_satisfies_every_criterion(self):
+        assert self.match({"key": "owner", "value": "alice"}) is True
+
+    def test_criteria_split_across_elements_do_not_match(self):
+        assert self.match({"key": "team", "value": "alice"}) is False
+
+    @pytest.mark.parametrize(
+        "value_criterion,expected",
+        [
+            ({"$startsWith": "al"}, True),
+            ({"$endsWith": "ice"}, True),
+            ({"$startsWith": "AL"}, False),
+            ({"$like": "LIC"}, True),
+            ({"$in": ["bob", "alice"]}, True),
+            ({"$nin": ["alice"]}, False),
+            ({"$startsWith": "al", "$endsWith": "x"}, False),
+        ],
+    )
+    def test_field_operators_apply_to_that_element_field(self, value_criterion, expected):
+        assert self.match({"key": "owner", "value": value_criterion}) is expected
+
+    @pytest.mark.parametrize("value_criterion,expected", [({"$gt": 2}, True), ({"$gte": 4}, False)])
+    def test_range_operators_compare_numbers(self, value_criterion, expected):
+        assert self.match({"key": "level", "value": value_criterion}) is expected
+
+    @pytest.mark.parametrize(
+        "criteria,members,expected",
+        [
+            ({"$startsWith": "ws/task-a#"}, ["ws/task-a#d1"], True),
+            ({"$startsWith": "ws/task-a#"}, ["other-ws/task-a#d1"], False),
+            ({"$endsWith": "#d1"}, ["ws/task-a#d1"], True),
+            ({"$eq": 3}, ["red", 3], True),
+            ({"$startsWith": "ws/"}, [{"ref": "ws/task-a#d1"}], False),
+        ],
+    )
+    def test_operator_criteria_apply_to_scalar_elements(self, criteria, members, expected):
+        assert self.match(criteria, members) is expected
+
+    @pytest.mark.parametrize("meta", [None, {"key": "owner", "value": "alice"}, ["owner", "alice"]])
+    def test_field_criteria_skip_non_array_fields_and_scalar_elements(self, meta):
+        op = cmp(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": "alice"})
+        assert evaluate(op, Entity(data={"meta": meta})) is False
+
+    def test_absent_field_does_not_match(self):
+        assert evaluate(cmp(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner"}), Entity()) is False
+
+    @pytest.mark.parametrize(
+        "criteria",
+        [
+            {},
+            [],
+            "owner",
+            {"key": {"nested": 1}},
+            {"key": ["a"]},
+            {"": "x"},
+            {"key": "owner", "$eq": "x"},
+            {"key": {"$elemMatch": {"a": 1}}},
+            {"$contains": "x"},
+            {"$in": []},
+            {"$startsWith": ""},
+            {"key": {}},
+            {"value": {"$gt": None}},
+        ],
+    )
+    def test_rejects_malformed_criteria(self, criteria):
+        with pytest.raises(ValueError, match=r"\$elemMatch|\$startsWith"):
+            self.match(criteria)
+
+
+class TestStartsAndEndsWith:
+    @pytest.mark.parametrize(
+        "operator,value,expected",
+        [
+            (FilterOperator.STARTS_WITH, "Llama", True),
+            (FilterOperator.STARTS_WITH, "llama", False),
+            (FilterOperator.ENDS_WITH, "-2", True),
+            (FilterOperator.ENDS_WITH, "llama-2", False),
+        ],
+    )
+    def test_matches_case_sensitively(self, operator, value, expected):
+        assert evaluate(cmp(operator, "name", value), Entity(name="Llama-2")) is expected
+
+    @pytest.mark.parametrize("operator", [FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH])
+    def test_absent_or_none_does_not_match(self, operator):
+        assert evaluate(cmp(operator, "name", "x"), Entity(name=None)) is False
+
+    @pytest.mark.parametrize("operator", [FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH])
+    @pytest.mark.parametrize("value", ["", 3, None])
+    def test_rejects_non_string_operands(self, operator, value):
+        with pytest.raises(ValueError, match="non-empty string"):
+            evaluate(cmp(operator, "name", value), Entity(name="x"))
+
+
+class TestHasKey:
+    def test_matches_a_key_with_dots_as_one_key(self):
+        op = cmp(FilterOperator.HAS_KEY, "data.tags", "v1.2")
+        assert evaluate(op, Entity(data={"tags": {"v1.2": 1}})) is True
+        assert evaluate(op, Entity(data={"tags": {"v1": {"2": 1}}})) is False
+
+    @pytest.mark.parametrize("tags", [None, {"stable": None}, ["stable"]])
+    def test_absent_null_or_non_object_does_not_match(self, tags):
+        assert evaluate(cmp(FilterOperator.HAS_KEY, "data.tags", "stable"), Entity(data={"tags": tags})) is False
+
+    @pytest.mark.parametrize("value", ["", 3, None, 'has"quote'])
+    def test_rejects_non_string_or_quoted_operands(self, value):
+        with pytest.raises(ValueError, match="non-empty string"):
+            evaluate(cmp(FilterOperator.HAS_KEY, "data.tags", value), Entity(data={"tags": {}}))

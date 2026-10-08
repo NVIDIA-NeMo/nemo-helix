@@ -188,6 +188,53 @@ class TestEntityCRUD:
         assert result["group_counts"] == {"insight-a": 2, "insight-b": 1}
         assert len(result["data"]) == 1
 
+    async def test_list_entities_filters_on_an_element_of_an_object_array(self, client: AsyncClient, ctx):
+        """``$elemMatch`` selects by key and value on the same array element."""
+        entities = {
+            "alice-smoke": [{"key": "owner", "value": "alice"}, {"key": "suite", "value": "smoke"}],
+            "bob-alice": [{"key": "owner", "value": "bob"}, {"key": "suite", "value": "alice"}],
+            "no-metadata": None,
+        }
+        for name, metadata in entities.items():
+            response = await client.post(
+                "/apis/entities/v2/workspaces/default/entities/elem_match_case",
+                json={"name": name, "data": {} if metadata is None else {"metadata": metadata}},
+            )
+            assert response.status_code == 201
+
+        response = await client.get(
+            "/apis/entities/v2/workspaces/default/entities/elem_match_case",
+            params={"filter": json.dumps({"data.metadata": {"$elemMatch": {"key": "owner", "value": "alice"}}})},
+        )
+
+        assert response.status_code == 200
+        assert [item["name"] for item in response.json()["data"]] == ["alice-smoke"]
+
+    @pytest.mark.parametrize(
+        "filter_query",
+        [
+            {"data.tasks": {"$elemMatch": "x"}},
+            {"data.metadata": {"$elemMatch": {"key": {"$contains": "x"}}}},
+            {"data.tags": {"$hasKey": ""}},
+            {"name": {"$startsWith": 3}},
+        ],
+    )
+    async def test_list_entities_rejects_malformed_operator_operands(self, client: AsyncClient, ctx, filter_query):
+        response = await client.get(
+            "/apis/entities/v2/workspaces/default/entities/elem_match_case",
+            params={"filter": json.dumps(filter_query)},
+        )
+
+        assert response.status_code == 400, response.text
+
+    async def test_list_entities_rejects_malformed_bracket_operand(self, client: AsyncClient, ctx):
+        response = await client.get(
+            "/apis/entities/v2/workspaces/default/entities/elem_match_case",
+            params={"filter[data.tasks][$elemMatch]": "x"},
+        )
+
+        assert response.status_code == 400, response.text
+
     @pytest.mark.parametrize("count_by", ["name", ""])
     async def test_list_entities_rejects_unsupported_count_field(self, client: AsyncClient, ctx, count_by: str):
         response = await client.get(

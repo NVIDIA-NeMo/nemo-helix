@@ -4,6 +4,7 @@
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
 import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import {
   agentsFromTrajectories,
   isQualifiedModelRef,
@@ -19,11 +20,18 @@ vi.mock('@nemo/sdk/generated/insights/insights-analysis-configs', async (importO
   insightsGetAnalysisConfig: vi.fn(),
 }));
 
-vi.mock('@nemo/sdk/generated/insights/insights-analysis-runs', () => ({
+vi.mock('@nemo/sdk/generated/insights/insights-analysis-runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/insights/insights-analysis-runs')>()),
   insightsCreateAnalysisRun: vi.fn(),
 }));
 
+vi.mock('@studio/api/agents/agentEthos', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/api/agents/agentEthos')>()),
+  readAgentEthos: vi.fn(),
+}));
+
 const getConfig = vi.mocked(insightsGetAnalysisConfig);
+const readEthos = vi.mocked(readAgentEthos);
 const createRun = vi.mocked(insightsCreateAnalysisRun);
 
 const config = (overrides: Record<string, unknown> = {}) => ({
@@ -151,6 +159,38 @@ describe('triggerInsightsRun', () => {
     const result = await triggerInsightsRun('default', 'email-security-triage');
 
     expect(result).toMatchObject({ status: 'error', message: 'Failed to get analysis config.' });
+  });
+
+  it('sends the agent ethos with the run', async () => {
+    getConfig.mockResolvedValue(config());
+    readEthos.mockResolvedValue('# Ethos');
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
+    });
+
+    const result = await triggerInsightsRun('default', 'email-security-triage');
+
+    expect(result.status).toBe('started');
+    expect(readEthos).toHaveBeenCalledWith('default', 'email-security-triage');
+    expect(createRun).toHaveBeenCalledWith(
+      'default',
+      expect.objectContaining({ ethos: '# Ethos' })
+    );
+  });
+
+  it('runs without ethos when the agent has none', async () => {
+    getConfig.mockResolvedValue(config());
+    readEthos.mockResolvedValue(undefined);
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
+    });
+
+    const result = await triggerInsightsRun('default', 'email-security-triage');
+
+    expect(result.status).toBe('started');
+    expect(createRun.mock.calls[0][1]).not.toHaveProperty('ethos');
   });
 
   it('surfaces a job creation failure as an error', async () => {

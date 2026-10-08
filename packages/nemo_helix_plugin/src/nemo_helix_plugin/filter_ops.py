@@ -9,9 +9,12 @@ engine (parse_json_filter, parse_bracket_filter, etc.) lives in nhx.common.api.f
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, NamedTuple
 
 from pydantic import BaseModel
+
+#: A value an ``$elemMatch`` criterion can compare against.
+ElemMatchScalar = str | int | float | bool | None
 
 
 class FilterOperator(str, Enum):
@@ -27,6 +30,10 @@ class FilterOperator(str, Enum):
     IN = "$in"
     NIN = "$nin"
     CONTAINS = "$contains"
+    ELEM_MATCH = "$elemMatch"
+    HAS_KEY = "$hasKey"
+    STARTS_WITH = "$startsWith"
+    ENDS_WITH = "$endsWith"
 
     # Logical operators
     OR = "$or"
@@ -35,6 +42,97 @@ class FilterOperator(str, Enum):
 
     # Relationship operators
     EXISTS = "$exists"
+
+
+class ElemMatchCondition(NamedTuple):
+    """One comparison inside ``$elemMatch``: element field ``key`` (``None`` for the element itself)."""
+
+    key: str | None
+    operator: FilterOperator
+    value: Any
+
+
+#: Comparisons allowed inside ``$elemMatch``; several on one target combine with AND.
+ELEM_MATCH_OPERATORS = frozenset(
+    {
+        FilterOperator.EQ,
+        FilterOperator.IN,
+        FilterOperator.NIN,
+        FilterOperator.LIKE,
+        FilterOperator.LT,
+        FilterOperator.LTE,
+        FilterOperator.GT,
+        FilterOperator.GTE,
+        FilterOperator.STARTS_WITH,
+        FilterOperator.ENDS_WITH,
+    }
+)
+
+_STRING_OPERATORS = frozenset({FilterOperator.LIKE, FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH})
+
+
+def _is_scalar(value: Any) -> bool:
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def validate_string_operand(operator: FilterOperator, value: Any, *, allow_quotes: bool = True) -> str:
+    """Return ``value`` as the non-empty string operand ``operator`` needs, or raise ``ValueError``."""
+    if not isinstance(value, str) or not value or (not allow_quotes and '"' in value):
+        quotes = "" if allow_quotes else " without double quotes"
+        raise ValueError(f"{operator.value} requires a non-empty string{quotes}")
+    return value
+
+
+def _operator_conditions(key: str | None, operators: Dict[str, Any]) -> List[ElemMatchCondition]:
+    target = f"'{key}'" if key is not None else "the element"
+    if not operators:
+        raise ValueError(f"$elemMatch needs at least one operator for {target}")
+    conditions = []
+    for name, operand in operators.items():
+        try:
+            operator = FilterOperator(name)
+        except ValueError:
+            raise ValueError(f"Unknown operator {name!r} in $elemMatch") from None
+        if operator not in ELEM_MATCH_OPERATORS:
+            raise ValueError(f"{name} is not supported inside $elemMatch")
+        if operator in (FilterOperator.IN, FilterOperator.NIN):
+            if not isinstance(operand, list) or not operand or not all(_is_scalar(item) for item in operand):
+                raise ValueError(f"{name} for {target} in $elemMatch requires a non-empty list of scalars")
+        elif operator in _STRING_OPERATORS:
+            validate_string_operand(operator, operand)
+        elif operator == FilterOperator.EQ:
+            if not _is_scalar(operand):
+                raise ValueError(f"{name} for {target} in $elemMatch requires a string, number, boolean, or null")
+        elif operand is None or not _is_scalar(operand):
+            raise ValueError(f"{name} for {target} in $elemMatch requires a string, number, or boolean")
+        conditions.append(ElemMatchCondition(key, operator, operand))
+    return conditions
+
+
+def parse_elem_match_criteria(value: Any) -> List[ElemMatchCondition]:
+    """Parse ``$elemMatch`` criteria into conditions that one array element must all satisfy.
+
+    Two forms: ``{field: value-or-operators}`` matches object elements, a bare value meaning ``$eq``;
+    ``{operator: operand}`` matches scalar elements. Raises ``ValueError`` on anything else.
+    """
+    if not isinstance(value, dict) or not value:
+        raise ValueError("$elemMatch requires a non-empty object of element fields or operators")
+    keys_are_operators = [isinstance(key, str) and key.startswith("$") for key in value]
+    if all(keys_are_operators):
+        return _operator_conditions(None, value)
+    if any(keys_are_operators):
+        raise ValueError("$elemMatch takes either element field names or operators, not both")
+    conditions: List[ElemMatchCondition] = []
+    for key, criterion in value.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("$elemMatch element field names must be non-empty strings")
+        if isinstance(criterion, dict):
+            conditions.extend(_operator_conditions(key, criterion))
+        elif _is_scalar(criterion):
+            conditions.append(ElemMatchCondition(key, FilterOperator.EQ, criterion))
+        else:
+            raise ValueError(f"$elemMatch value for '{key}' must be a string, number, boolean, null, or operators")
+    return conditions
 
 
 class FilterRepository(ABC):
@@ -79,6 +177,34 @@ class FilterRepository(ABC):
         array-valued fields may leave it unimplemented.
         """
         raise NotImplementedError("$contains not supported by this repository")
+
+    def elem_match(self, field: str, conditions: List[ElemMatchCondition]) -> Any:
+        """Match rows where one element of the array at ``field`` satisfies every condition.
+
+        Optional — repositories that don't support array-valued fields may leave it unimplemented.
+        """
+        raise NotImplementedError("$elemMatch not supported by this repository")
+
+    def starts_with(self, field: str, prefix: str) -> Any:
+        """Match rows where ``field`` starts with ``prefix`` (case-sensitive).
+
+        Optional — repositories may leave it unimplemented.
+        """
+        raise NotImplementedError("$startsWith not supported by this repository")
+
+    def ends_with(self, field: str, suffix: str) -> Any:
+        """Match rows where ``field`` ends with ``suffix`` (case-sensitive).
+
+        Optional — repositories may leave it unimplemented.
+        """
+        raise NotImplementedError("$endsWith not supported by this repository")
+
+    def has_key(self, field: str, key: str) -> Any:
+        """Match rows where the object at ``field`` has ``key`` with a non-null value.
+
+        Optional — repositories that don't support object-valued fields may leave it unimplemented.
+        """
+        raise NotImplementedError("$hasKey not supported by this repository")
 
     @abstractmethod
     def and_op(self, operations: List[Any]) -> Any:
@@ -144,6 +270,16 @@ class ComparisonOperation(FilterOperation):
             return repository.nin(self.field, self.value)
         elif self.operator == FilterOperator.CONTAINS:
             return repository.contains(self.field, self.value)
+        elif self.operator == FilterOperator.ELEM_MATCH:
+            return repository.elem_match(self.field, parse_elem_match_criteria(self.value))
+        elif self.operator == FilterOperator.HAS_KEY:
+            return repository.has_key(
+                self.field, validate_string_operand(self.operator, self.value, allow_quotes=False)
+            )
+        elif self.operator == FilterOperator.STARTS_WITH:
+            return repository.starts_with(self.field, validate_string_operand(self.operator, self.value))
+        elif self.operator == FilterOperator.ENDS_WITH:
+            return repository.ends_with(self.field, validate_string_operand(self.operator, self.value))
         elif self.operator == FilterOperator.EXISTS:
             raise NotImplementedError(
                 "$exists requires a relationship-aware repository (use the entities service parser)"

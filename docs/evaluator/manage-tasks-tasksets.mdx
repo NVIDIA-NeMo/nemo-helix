@@ -320,6 +320,73 @@ canonical order and reordering the same members publishes nothing.
 
 Deleting a taskset does not delete its member tasks — a taskset only holds references.
 
+## Filter tasks and tasksets
+
+Both `list()` methods take filter arguments, so you can find tasks and tasksets by what they
+contain rather than paging through everything in a workspace. Arguments combine with AND.
+
+```python
+# Tasks annotated with suite=geography
+page = tasks.list(metadata={"suite": "geography"})
+
+# Evaluator tasks that use a stored metric, and carry the "blessed" tag
+page = tasks.list(kind="evaluator", metric="answer-exact-match", tag="blessed")
+
+# Case-insensitive substring search on an evaluator task's intent
+page = tasks.list(intent_contains="capital city")
+
+# Tasksets that include capital-of-france at any revision
+page = tasksets.list(task="capital-of-france")
+
+# Case-insensitive substring search on a taskset's description
+page = tasksets.list(description_contains="geography")
+```
+
+| Resource | Argument | Matches |
+|----------|----------|---------|
+| Tasks | `kind` | Task kind: `evaluator` or `harbor`. |
+| Tasks | `native_task_id` | A Harbor task's native task ID. |
+| Tasks | `intent_contains` | Evaluator tasks whose `intent` contains the text (case-insensitive). |
+| Tasks | `metric` | Tasks that use the stored metric `workspace/name`. |
+| Tasksets | `task` | Tasksets with the member task `workspace/name` at any revision, or `workspace/name#<digest>` at that revision only. |
+| Tasksets | `description_contains` | Tasksets whose `description` contains the text (case-insensitive). |
+| Both | `tag` | Records carrying the revision tag, such as `blessed` or `v1.2`. |
+| Both | `metadata` | Records whose metadata has every given key with the given value. |
+
+The async resources take the same arguments.
+
+Keep these rules in mind:
+
+- **Metadata matches one annotation.** `metadata={"suite": "geography"}` matches only an annotation
+  whose key is `suite` and whose value is `geography`. A key and value on different annotations
+  don't match.
+- **Bare references use the request's workspace.** `metric="answer-exact-match"` and
+  `task="capital-of-france"` match `default/...` when listing in `default`, as references do
+  everywhere else.
+- **Members are matched by name or by digest, never by tag.** Because stored taskset members are
+  pinned to a digest, a `#tag` fragment can never match and returns `400`. Use `workspace/name` to
+  match any revision.
+
+### Filter over REST
+
+The REST endpoints accept the same filters through the standard `filter` parameter. See
+[Filtering](/documentation/get-started/core-concepts/filtering) for the bracket, text, and JSON
+forms.
+
+| Endpoint | Field | Operators | Example |
+|----------|-------|-----------|---------|
+| `GET /tasks` | `kind`, `native_task_id`, `intent` | Any | `?filter[intent][$like]=capital` |
+| `GET /tasks` | `metrics` | `$eq`, `$in` | `?filter[metrics]=default/answer-exact-match` |
+| `GET /tasksets` | `description` | Any | `?filter[description][$like]=geography` |
+| `GET /tasksets` | `tasks` | `$eq`, `$in` | `?filter[tasks]=default/capital-of-france` |
+| Both | `tags` | `$eq`, `$in` | `?filter[tags][$in]=blessed,v1.2` |
+| Both | `metadata.<key>` | `$eq`, `$in`, `$nin`, `$like`, `$startsWith`, `$endsWith`, `$lt`, `$lte`, `$gt`, `$gte` | `?filter[metadata.suite]=geography` or `?filter[metadata][suite][$startsWith]=geo` |
+| Both | `name`, `created_at`, `updated_at` | Any | `?filter[created_at][$gte]=2026-01-01` |
+
+Bracket values arrive as strings. To match a non-string metadata value, such as a number or a
+boolean, use a JSON filter such as `?filter={"metadata.verified": true}`. The SDK always sends
+JSON.
+
 ## Run an evaluation over a taskset
 
 An agent evaluation is submitted with an `AgentEvalInputSpec`, whose `tasks` field is either an
@@ -464,7 +531,7 @@ The SDK resources are a thin client over the Evaluator plugin REST API, mounted 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/tasks` | List tasks (paginated). |
+| `GET` | `/tasks` | List tasks (paginated, [filterable](#filter-over-rest)). |
 | `POST` | `/tasks/{name}` | Create a task and publish revision 1. |
 | `PUT` | `/tasks/{name}` | Replace a task's content and publish; creates it if absent. |
 | `GET` | `/tasks/{name}` | Retrieve a task's current content. |
@@ -472,7 +539,7 @@ The SDK resources are a thin client over the Evaluator plugin REST API, mounted 
 | `GET` | `/tasks/{name}/revisions/{revision}` | Retrieve content as of a digest or tag. |
 | `PUT` | `/tasks/{name}/tags/{tag}?revision=` | Point a tag at an existing revision. |
 | `DELETE` | `/tasks/{name}` | Delete a task and all of its revisions. |
-| `GET` | `/tasksets` | List tasksets (paginated). |
+| `GET` | `/tasksets` | List tasksets (paginated, [filterable](#filter-over-rest)). |
 | `POST` | `/tasksets/{name}` | Create a taskset and publish revision 1. |
 | `PUT` | `/tasksets/{name}` | Replace a taskset's membership and publish; creates it if absent. |
 | `GET` | `/tasksets/{name}` | Retrieve a taskset's current membership. |
@@ -500,6 +567,9 @@ The SDK resources are a thin client over the Evaluator plugin REST API, mounted 
 | Missing or duplicate task reference (taskset) | `422` | Members must exist, and must resolve to distinct tasks. |
 | Reserved or malformed tag name | `422` | `latest` cannot be moved by hand; a digest-shaped tag is refused. |
 | Retrieving or deleting an unknown name or revision | `404` | Applies to both records and revisions. |
+| Listing with an unknown filter field | `400` | Includes `kind` on `/tasksets`, which have no kind. |
+| Listing with an unsupported operator on `metrics`, `tasks`, `tags`, or `metadata` | `400` | `metrics`, `tasks`, and `tags` accept only `$eq`, and `$in` with at least one value; `metadata.<key>` accepts the comparisons listed under [Filter over REST](#filter-over-rest). |
+| Listing tasksets with a `tasks` filter pinned by tag | `400` | Members are stored pinned to a digest, so a tag could never match. |
 | `TasksetRef` pinning a revision that no longer resolves | job fails | Expansion refuses rather than falling back to the current revision. |
 | `DELETE` on a task a taskset pins | `204` | Not prevented; the taskset's reference dangles and fails on read. |
 

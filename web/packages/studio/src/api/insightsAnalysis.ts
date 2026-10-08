@@ -4,6 +4,7 @@
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
 import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import { AxiosError } from 'axios';
 
 export type InsightsTriggerStatus = 'started' | 'not-enabled' | 'error';
@@ -112,11 +113,14 @@ export const triggerInsightsRun = async (
     };
   }
 
+  const ethos = await readAgentEthos(workspace, agent);
+
   try {
     const response = await insightsCreateAnalysisRun(workspace, {
       agent,
       default_model: defaultModel,
       fast_model: fastModel,
+      ...(ethos ? { ethos } : {}),
     });
     if (!response.job) {
       return {
