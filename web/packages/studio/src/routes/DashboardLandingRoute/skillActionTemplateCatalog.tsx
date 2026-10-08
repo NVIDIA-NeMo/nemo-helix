@@ -111,7 +111,7 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-eval-history skill to review previous evaluation runs and summarize the most important changes or failures.',
     icon: <BarChart3 size={18} />,
-    requiredFeatureFlags: ['evaluatorEnabled'],
+    requiredFeatureFlags: ['evalsEnabled'],
   },
   'nemo-evals': {
     title: 'Run model evaluations',
@@ -119,7 +119,7 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-evals skill to create or run an evaluation, then summarize the metric results and any follow-up recommendations.',
     icon: <BarChart3 size={18} />,
-    requiredFeatureFlags: ['evaluatorEnabled'],
+    requiredFeatureFlags: ['evalsEnabled'],
   },
   'nemo-evals-plugin': {
     title: 'Use evals plugin',
@@ -127,7 +127,7 @@ export const SKILL_ACTION_TEMPLATES = {
     prompt:
       'Use the nemo-evals-plugin skill to inspect or update evals plugin jobs, SDK specs, or plugin-owned evals skills.',
     icon: <BarChart3 size={18} />,
-    requiredFeatureFlags: ['evaluatorEnabled'],
+    requiredFeatureFlags: ['evalsEnabled'],
   },
   'nemo-files': {
     title: 'Manage filesets',

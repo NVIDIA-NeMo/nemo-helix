@@ -109,7 +109,7 @@ describe('StatTileRow', () => {
     const { container } = renderStatTileRow({
       agentsEnabled: false,
       optimizerEnabled: false,
-      evaluatorEnabled: false,
+      evalsEnabled: false,
       experimentEnabled: false,
       customizerEnabled: false,
     });

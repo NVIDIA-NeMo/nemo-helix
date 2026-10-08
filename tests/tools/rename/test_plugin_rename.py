@@ -152,6 +152,46 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn("NeMo Evaluator to NeMo Helix Evals", result.stdout)
         self.assertEqual((self.repo / "README.md").read_text(), "NeMo Evaluator")
 
+    def test_evals_renames_flags_and_inline_config_but_preserves_upgrade_and_release_history(self) -> None:
+        inputs = {
+            "web/packages/studio/env/.env.fastapi": "VITE_FF_EVALUATOR_ENABLED=STUDIO_UI_VITE_FF_EVALUATOR_ENABLED\n",
+            "web/packages/studio/env/.env.dev.local.sample": "VITE_FF_EVALUATOR_BENCHMARKS_ENABLED='preview'\n",
+            "web/packages/studio/src/constants/environment.ts": "export const EVALUATOR_ENABLED = featureFlags.evaluatorEnabled !== false;\n"
+            "export const EVALUATOR_BENCHMARKS_ENABLED = featureFlags.evaluatorBenchmarksEnabled !== false;\n",
+            "services/studio/src/nhx/studio/env_mappings.py": 'marker="STUDIO_UI_VITE_FF_EVALUATOR_ENABLED", config_path="studio.feature_flags.evaluator_enabled"\n'
+            'config_path="studio.feature_flags.evaluator_benchmarks_enabled"\n',
+            "k8s/helm/values.yaml": "  # -- evaluator is the configuration specific to the Evals service\n"
+            "  evaluator: {sandboxed_gym_default: true}\n",
+            "packages/nhx_platform/config/override.yaml": 'NEMO_PLUGIN_SERVICES_ALLOWLIST: "models,evaluator,studio"\n',
+        }
+        for path, contents in inputs.items():
+            self.write(path, contents)
+        preserved = {
+            ".agents/skills/release-test-scope/references/0.6.0-example-report.md": "nemo evaluator; docs/evaluator/index.mdx; nemo_evaluator_sdk\n",
+            "docs/evals/upgrading-from-evaluator.mdx": "Rename VITE_FF_EVALUATOR_ENABLED to VITE_FF_EVALS_ENABLED; nemo evaluator to nemo evals.\n",
+        }
+        for path, contents in preserved.items():
+            self.write(path, contents)
+        self.write("types.py", 'class Evaluator: pass\npermission = "evaluator.create"\nkind = "EVALUATOR"\n')
+
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for path, contents in inputs.items():
+            actual = (self.repo / path).read_text()
+            self.assertNotIn("EVALUATOR_", actual)
+            self.assertNotIn("evaluatorEnabled", actual)
+            self.assertNotIn("evaluator_benchmarks_enabled", actual)
+        config = (self.repo / "k8s/helm/values.yaml").read_text()
+        self.assertIn("evals: {sandboxed_gym_default: true}", config)
+        self.assertIn("# -- evals is the configuration", config)
+        self.assertIn('"models,evals,studio"', (self.repo / "packages/nhx_platform/config/override.yaml").read_text())
+        for path, contents in preserved.items():
+            self.assertEqual((self.repo / path).read_text(), contents)
+        self.assertIn('kind = "EVALUATOR"', (self.repo / "types.py").read_text())
+        self.assertIn('permission = "evaluator.create"', (self.repo / "types.py").read_text())
+        self.assertIn("class Evaluator:", (self.repo / "types.py").read_text())
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
     def test_evals_renames_skill_paths_and_service_identity_fixtures(self) -> None:
         platform_skill = "packages/nemo_helix_ext/src/nemo_helix_ext/skills"
         assistant_skills = (
@@ -269,7 +309,7 @@ class PluginRenameTests(unittest.TestCase):
             self.repo / "web/packages/studio/src/routes/DashboardLandingRoute/skillActionTemplateCatalog.tsx"
         ).read_text()
         self.assertIn("Work with evals jobs", catalog)
-        self.assertIn("'evaluatorEnabled'", catalog)
+        self.assertIn("'evalsEnabled'", catalog)
         service = (self.repo / "plugins/nemo-evals/src/nemo_evals/service.py").read_text()
         self.assertIn('tag="Evals Plugin Jobs Routes"', service)
         self.assertIn('namespace="evaluator"', service)

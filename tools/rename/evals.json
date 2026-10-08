@@ -3,11 +3,14 @@
   "exclude": [
     "tools/rename/**",
     "tests/tools/rename/**",
+    ".agents/skills/release-test-scope/references/*-example-report.md",
+    "docs/evals/upgrading-from-evaluator.mdx",
     ".codex/**",
     ".npm-cache/**",
     "**/*.swp"
   ],
   "notes": [
+    "Deployment owners must migrate their own evals configuration, sandbox overrides, Studio feature flags, and external identity/source filters; see docs/evals/upgrading-from-evaluator.mdx. The tool preserves that guide and historical release examples.",
     "Permissions, entity type names, and task-kind discriminators are preserved. Job sources rename from nemo-evaluator to nemo-evals, including agent-evaluate and retrieve-eval; existing jobs are not migrated and no longer appear in source-filtered lists.",
     "MR compatibility note: old cloudpickle metric bundles and compiled jobs may reference removed Python modules; this rename provides no compatibility aliases or data migration.",
     "Review the diff, regenerate lockfiles with uv, run make update-sdk, and test SDK imports, plugin discovery, CLI, API routes and unchanged authorization before publishing. Verification checks only configured rules."
@@ -43,7 +46,15 @@
       "_apis_evaluator_": "_apis_evals_",
       "nemo evaluator": "nemo evals",
       "NEMO_EVALUATOR_": "NEMO_EVALS_",
-      "NHX_EVALUATOR_": "NHX_EVALS_"
+      "NHX_EVALUATOR_": "NHX_EVALS_",
+      "VITE_FF_EVALUATOR_": "VITE_FF_EVALS_",
+      "EVALUATOR_BENCHMARKS_ENABLED": "EVALS_BENCHMARKS_ENABLED",
+      "EVALUATOR_ENABLED": "EVALS_ENABLED",
+      "evaluatorBenchmarksEnabled": "evalsBenchmarksEnabled",
+      "evaluatorEnabled": "evalsEnabled",
+      "evaluator_benchmarks_enabled": "evals_benchmarks_enabled",
+      "evaluator_enabled": "evals_enabled",
+      "# -- evaluator is the configuration specific to": "# -- evals is the configuration specific to"
     },
     "paths": {
       "plugins/nemo-evaluator/src/nemo_evaluator": "plugins/nemo-evals/src/nemo_evals",
@@ -204,7 +215,7 @@
         ]
       },
       {
-        "pattern": "^(\\s*)evaluator:(?=\\s*(?:\\{\\}|$))",
+        "pattern": "^(\\s*)evaluator:(?=\\s*(?:\\{|$))",
         "replacement": "\\1evals:",
         "include": [
           "packages/nhx_platform/config/**",
@@ -217,7 +228,7 @@
         ]
       },
       {
-        "pattern": "(NEMO_PLUGIN_SERVICES_ALLOWLIST(?:=|:\\s*))evaluator\\b",
+        "pattern": "(NEMO_PLUGIN_SERVICES_ALLOWLIST(?:=|:\\s*)[^\\n]*?)(?<![\\w-])evaluator\\b",
         "replacement": "\\1evals"
       },
       {

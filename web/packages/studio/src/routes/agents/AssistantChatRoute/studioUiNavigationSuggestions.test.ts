@@ -14,7 +14,7 @@ describe('getStudioUiNavigationSuggestion', () => {
       dataDesignerEnabled: true,
       datasetsEnabled: true,
       deploymentsEnabled: true,
-      evaluatorEnabled: true,
+      evalsEnabled: true,
       guardrailsEnabled: true,
       inferenceProviderEnabled: true,
       intakeEnabled: true,

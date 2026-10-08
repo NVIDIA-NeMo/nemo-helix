@@ -18,6 +18,15 @@ provides:
 - **Evaluator skill** published through the plugin entry point for
   evaluator-specific guidance and troubleshooting.
 
+## Upgrading an existing deployment
+
+Follow the [upgrade guidance](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/upgrading-from-evaluator)
+before replacing an existing deployment. Drain jobs, preserve configuration and
+sandbox overrides under `evals`, **rename all Studio feature-flag overrides**, and
+update external service-identity and job-source filters. Existing classes, types,
+permissions, and entity kinds retain their names. Older jobs remain stored in the
+core Jobs service but do not appear in lists filtered by the new sources.
+
 ## Registered plugin interfaces
 
 | Surface | Entry point | Behavior |

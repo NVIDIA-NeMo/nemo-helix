@@ -638,7 +638,7 @@ baseHelixConfig: |
   safe_synthesizer:
     container_image: nhx-safe-synthesizer-tasks
 
-  # -- evaluator is the configuration specific to the Evals service
+  # -- evals is the configuration specific to the Evals service
   evals: {}
 
   # -- guardrails is the configuration specific to the Guardrails service

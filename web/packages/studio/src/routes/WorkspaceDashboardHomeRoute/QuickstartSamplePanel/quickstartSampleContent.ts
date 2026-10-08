@@ -83,7 +83,7 @@ export interface BuildQuickstartSampleStepsOptions extends QuickstartSampleFeatu
  * and the point of this panel is the sandbox workspace the reader is currently in.
  *
  * The evaluate step is deliberately ungated: its "View results" destination is the agent page's
- * Evaluations tab, which `AgentDetailRoute` renders unconditionally — `EVALUATOR_ENABLED` gates
+ * Evaluations tab, which `AgentDetailRoute` renders unconditionally — `EVALS_ENABLED` gates
  * the standalone evaluator routes this panel never links to.
  */
 export const buildQuickstartSampleSteps = ({

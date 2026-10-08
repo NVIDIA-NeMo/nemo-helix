@@ -8,7 +8,7 @@ import {
   CUSTOMIZER_ENABLED,
   DATASETS_ENABLED,
   DEPLOYMENTS_ENABLED,
-  EVALUATOR_ENABLED,
+  EVALS_ENABLED,
   EXPERIMENT_ENABLED,
   INTAKE_ENABLED,
   OPTIMIZER_ENABLED,
@@ -45,7 +45,7 @@ export interface QuickstartSectionProps {
    * how the section degrades as individual panels/actions are disabled.
    */
   agentsEnabled?: boolean;
-  evaluatorEnabled?: boolean;
+  evalsEnabled?: boolean;
   optimizerEnabled?: boolean;
   intakeEnabled?: boolean;
   experimentEnabled?: boolean;
@@ -71,7 +71,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
   workspace,
   onDismiss,
   agentsEnabled = AGENTS_ENABLED,
-  evaluatorEnabled = EVALUATOR_ENABLED,
+  evalsEnabled = EVALS_ENABLED,
   optimizerEnabled = OPTIMIZER_ENABLED,
   intakeEnabled = INTAKE_ENABLED,
   experimentEnabled = EXPERIMENT_ENABLED,
@@ -101,7 +101,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
           href: getAgentsListRoute(workspace),
         },
         {
-          enabled: evaluatorEnabled,
+          enabled: evalsEnabled,
           icon: <ENTITY_ICONS.evaluationResults className="size-4" />,
           label: 'Evaluate Performance',
           href: getEvaluationResultsRoute(workspace),

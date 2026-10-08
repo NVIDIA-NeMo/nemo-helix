@@ -107,6 +107,13 @@ filtered by the new sources. This is an intentional breaking change.
 The profile also moves `docs/evaluator` to `docs/evals` and updates Fern source
 paths. Troubleshooting moves to the explicit `evals` navigation slug, with redirects
 from the previous `evaluator` URL; other published navigation slugs are preserved.
+It also renames the Studio Evals feature flags across typed definitions,
+runtime markers, configuration keys, route gates, and environment samples.
+Deployment owners must update their own overrides; follow the
+[upgrade guidance](../../docs/evals/upgrading-from-evaluator.mdx), especially for
+sandbox defaults and feature flags. Historical release example reports and the
+upgrade guide are excluded so version-specific URLs and old-to-new instructions
+are preserved on subsequent runs.
 It renames the web SDK service
 configuration, generation scripts, OpenAPI tags, and corresponding consumer
 imports together; regenerate the ignored SDK output before building Studio.

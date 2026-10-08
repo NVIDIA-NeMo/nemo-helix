@@ -453,6 +453,21 @@ class TestStaticFilesPath:
 class TestStudioConfigEnvReplacements:
     """Tests for StudioConfig.env_replacements property."""
 
+    @pytest.mark.parametrize("enabled", [False, True, "preview"])
+    def test_evals_flags_reach_runtime_markers(self, monkeypatch: pytest.MonkeyPatch, enabled: bool | str):
+        from nhx.common import config as common_config
+
+        monkeypatch.setattr(
+            common_config.Configuration,
+            "get_global_settings_from_env",
+            lambda: {"studio": {"feature_flags": {"evals_enabled": enabled, "evals_benchmarks_enabled": enabled}}},
+        )
+        replacements = StudioConfig().env_replacements
+        expected = str(enabled)
+        assert replacements["STUDIO_UI_VITE_FF_EVALS_ENABLED"] == expected
+        assert replacements["STUDIO_UI_VITE_FF_EVALS_BENCHMARKS_ENABLED"] == expected
+        assert not any("FF_EVALUATOR_" in marker for marker in replacements)
+
     def test_env_replacements_returns_dict(self):
         """Test that env_replacements returns a dict."""
         config = StudioConfig()
