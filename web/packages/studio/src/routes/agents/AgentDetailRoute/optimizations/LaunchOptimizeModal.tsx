@@ -10,7 +10,7 @@ import { useLaunchOptimizeStudy } from '@studio/api/agents/useLaunchOptimizeStud
 import { BundleSourcePicker } from '@studio/components/BundleSourcePicker';
 import { useBundleSource } from '@studio/components/BundleSourcePicker/useBundleSource';
 import { optimizeConfigSpec } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizeConfigSpec';
-import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
+import { getAgentOptimizationsTabRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, useMemo } from 'react';
 import { useNavigate } from 'react-router';
@@ -47,7 +47,7 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
         queryKey: getAgentOptimizationListRunStrategyJobsQueryKey(workspace),
       });
       onClose();
-      if (job.name) navigate(getAgentOptimizationDetailRoute(workspace, job.name));
+      navigate(getAgentOptimizationsTabRoute(workspace, agentName));
     },
   });
 

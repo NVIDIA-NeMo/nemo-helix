@@ -17,6 +17,7 @@ import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useLocation } from 'react-router';
 
 /** Contents of the files in the fileset the test picks, keyed by path. */
 const filesetContents = new Map<string, string>();
@@ -33,7 +34,6 @@ const agentName = 'hermes';
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 const UPLOAD_URL = `${FILESETS_URL}/:name/-/*`;
 const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
-
 const OVERLAY = `optimizer:
   numeric:
     enabled: true
@@ -101,6 +101,11 @@ const mockFileset = (files: Record<string, string>) => {
   );
 };
 
+const LocationSearch = () => <div data-testid="location-search">{useLocation().search}</div>;
+
+const jobsTable = () =>
+  screen.findByText('?tab=optimizations', { selector: '[data-testid="location-search"]' });
+
 const renderModal = () =>
   renderRoute(undefined, {
     history: getAgentDetailRoute(workspace, agentName),
@@ -108,10 +113,17 @@ const renderModal = () =>
       {
         path: ROUTES.workspace.agentDetail,
         element: (
-          <LaunchOptimizeModal open onClose={vi.fn()} workspace={workspace} agentName={agentName} />
+          <>
+            <LaunchOptimizeModal
+              open
+              onClose={vi.fn()}
+              workspace={workspace}
+              agentName={agentName}
+            />
+            <LocationSearch />
+          </>
         ),
       },
-      { path: ROUTES.workspace.agentOptimizationDetail, element: <div>Study detail page</div> },
     ],
   });
 
@@ -145,7 +157,7 @@ describe('LaunchOptimizeModal', () => {
     await waitFor(() => expect(startButton(dialog)).toBeEnabled());
     fireEvent.click(startButton(dialog));
 
-    expect(await screen.findByText('Study detail page')).toBeInTheDocument();
+    expect(await jobsTable()).toBeInTheDocument();
     expect(uploaded.sort()).toEqual(['dataset.json', 'optimize.yaml']);
     expect(submitted).toHaveLength(1);
     expect(submitted[0]?.spec).toMatchObject({
@@ -226,7 +238,7 @@ describe('LaunchOptimizeModal', () => {
     expect(
       await within(dialog).findByText(/Profile default is not configured/)
     ).toBeInTheDocument();
-    expect(screen.queryByText('Study detail page')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toBeEmptyDOMElement();
   });
 
   describe('from a fileset', () => {
@@ -240,7 +252,7 @@ describe('LaunchOptimizeModal', () => {
       await waitFor(() => expect(startButton(dialog)).toBeEnabled());
       await user.click(startButton(dialog));
 
-      expect(await screen.findByText('Study detail page')).toBeInTheDocument();
+      expect(await jobsTable()).toBeInTheDocument();
       expect(uploaded).toEqual([]);
       expect(submitted).toHaveLength(1);
       expect(submitted[0]?.spec).toMatchObject({
