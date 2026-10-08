@@ -361,15 +361,18 @@ async def list_entities(
         query_workspace = workspace
         effective_filter = filter
 
-    entities, total = await repository.list_entities(
-        workspace=query_workspace,
-        entity_type=entity_type,
-        page=page,
-        page_size=page_size,
-        sort=sort,
-        filter_op=effective_filter,
-        relationship_child_workspaces=accessible_workspaces,
-    )
+    try:
+        entities, total = await repository.list_entities(
+            workspace=query_workspace,
+            entity_type=entity_type,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+            filter_op=effective_filter,
+            relationship_child_workspaces=accessible_workspaces,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     group_counts = None
     if count_by is not None:
         try:

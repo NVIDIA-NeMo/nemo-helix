@@ -485,6 +485,9 @@ def test_entity_prefix_suffix_and_object_key_filters(entity_store_client: Entiti
         assert names_matching({"name": {"$endsWith": "-pins"}}) == {f"{prefix}-pins"}
         assert names_matching({"name": {"$endsWith": "-PINS"}}) == set()
         assert names_matching({"created_at": {"$startsWith": "20"}}) == set(rows)
+        has_exact_member = {"data.tasks": {"$contains": "ws/task_a#d1"}}
+        assert names_matching(has_exact_member) == {f"{prefix}-pins"}
+        assert names_matching({"$not": has_exact_member}) == {f"{prefix}-near", f"{prefix}-none"}
         assert names_matching({"data.tags": {"$hasKey": "v1.2"}}) == {f"{prefix}-pins"}
         assert names_matching({"data.tags": {"$hasKey": "v1"}}) == {f"{prefix}-near"}
     finally:

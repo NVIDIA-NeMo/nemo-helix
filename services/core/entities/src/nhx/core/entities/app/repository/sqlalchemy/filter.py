@@ -109,18 +109,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
 
         return value
 
-    @staticmethod
-    def _escape_like(text: str) -> str:
-        for ch in ("\\", "%", "_"):
-            text = text.replace(ch, f"\\{ch}")
-        return text
-
     def _cast_json_to_raw_text(self, column: Any) -> Any:
         """Cast a JSON column element to its raw serialized text, quotes and all.
 
         Unlike ``_cast_json_to_text``, this keeps JSON's surrounding double quotes. Use it when the
-        quotes carry meaning — e.g. matching a quote-delimited array element (``$contains``) or comparing
-        against the literal ``"null"``/``"true"``/``"false"`` tokens both backends render.
+        quotes carry meaning — e.g. comparing against the literal ``"null"``/``"true"``/``"false"``
+        tokens both backends render.
         """
         return cast(column, String)
 
@@ -249,21 +243,13 @@ class SQLAlchemyFilterRepository(FilterRepository):
         return self._field_compare(field, FilterOperator.ENDS_WITH, suffix)
 
     def contains(self, field: str, value: Any) -> Any:
-        """Array membership: true when the JSON array at ``field`` contains scalar ``value``.
-
-        Portable across SQLite (JSON) and PostgreSQL (JSONB) without a dialect branch: the
-        array element serializes as a quote-delimited token (e.g. ``"g1"``) in both backends'
-        text rendering, so we match that token in the serialized array text. Quoting makes it
-        collision-safe against prefixes (``"g1"`` does not match ``["g10"]``). ``value`` is
-        coerced to text and LIKE wildcards are escaped, so only exact elements match.
-
-        Intended for array-valued JSON fields (e.g. ``data.experiment_ids``); values are
-        assumed to be JSON scalars without embedded double quotes (entity ids qualify).
-        """
-        column, is_json = self._get_column(field)
+        """Array membership: some scalar element of the JSON array at ``field`` is ``$eq`` to ``value``."""
+        array, is_json = self._get_column(field)
         if not is_json:
             raise ValueError(f"$contains requires a JSON array field, got non-JSON field '{field}'")
-        return self._cast_json_to_raw_text(column).like(f'%"{self._escape_like(str(value))}"%', escape="\\")
+        return self._any_element_matches(
+            array, FilterOperator.CONTAINS, [ElemMatchCondition(None, FilterOperator.EQ, value)]
+        )
 
     def has_key(self, field: str, key: str) -> Any:
         column, is_json = self._get_column(field)
@@ -286,7 +272,10 @@ class SQLAlchemyFilterRepository(FilterRepository):
         array, is_json = self._get_column(field)
         if not is_json:
             raise ValueError(f"$elemMatch requires a JSON array field, got non-JSON field '{field}'")
-        elements = self._array_elements(array, FilterOperator.ELEM_MATCH)
+        return self._any_element_matches(array, FilterOperator.ELEM_MATCH, conditions)
+
+    def _any_element_matches(self, array: Any, operator: FilterOperator, conditions: List[ElemMatchCondition]) -> Any:
+        elements = self._array_elements(array, operator)
         element_type = elements.c.type if self._dialect_name == "sqlite" else func.json_typeof(elements.c.value)
         if conditions[0].key is None:
             is_target = element_type.not_in(["object", "array"])

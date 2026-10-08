@@ -157,6 +157,10 @@ CASES = [
     ("contains_tags_blue", C(FilterOperator.CONTAINS, "data.tags", "blue")),
     ("contains_tags_absent", C(FilterOperator.CONTAINS, "data.tags", "nope")),
     ("not_contains_tags_red", NOT(C(FilterOperator.CONTAINS, "data.tags", "red"))),
+    # Row 2 holds 'x"ws/task_a#d1', whose serialized text contains '"ws/task_a#d1"'.
+    ("contains_skips_escaped_quote_near_miss", C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1")),
+    # Rows 4 and 5 have no members field; under $not they match on both databases.
+    ("not_contains_missing_field", NOT(C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1"))),
     (
         "and_contains_tags",
         AND(C(FilterOperator.CONTAINS, "data.tags", "blue"), C(FilterOperator.EQ, "data.tier", "free")),
@@ -283,6 +287,8 @@ def test_element_operators_reject_unknown_dialect(op):
         (C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "level", "value": {"$gt": 2}}), {2}),
         (C(FilterOperator.STARTS_WITH, "name", "Llama"), {2}),
         (C(FilterOperator.ENDS_WITH, "data.tier", "ree"), {1, 5}),
+        (C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1"), {1}),
+        (NOT(C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1")), {2, 3, 4, 5}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "v1.2"), {1}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "v1"), {2}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "latest"), {1, 2}),
