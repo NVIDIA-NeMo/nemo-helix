@@ -9,7 +9,9 @@ import {
 } from '@nemo/sdk/generated/insights/insights-analysis-configs';
 import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
+import type { InsightsTriggerResult } from '@studio/api/insightsAnalysis';
 import { queryClient } from '@studio/api/queryClient';
+import { useTriggerInsightsRun } from '@studio/api/useTriggerInsightsRun';
 import { AnalysisConfigPanel } from '@studio/routes/agents/AgentDetailRoute/analysis/AnalysisConfigPanel';
 import {
   AnalysisConfigPartialSaveError,
@@ -31,6 +33,10 @@ vi.mock('@nemo/sdk/generated/insights/insights-analysis-configs', () => ({
 
 vi.mock('@studio/api/queryClient', () => ({
   queryClient: { invalidateQueries: vi.fn() },
+}));
+
+vi.mock('@studio/api/useTriggerInsightsRun', () => ({
+  useTriggerInsightsRun: vi.fn(),
 }));
 
 vi.mock(
@@ -64,6 +70,22 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
 const useConfig = vi.mocked(useInsightsGetAnalysisConfig);
 const save = vi.mocked(saveAnalysisConfig);
 const invalidateQueries = vi.mocked(queryClient.invalidateQueries);
+const mutateRun = vi.fn();
+
+const mockTriggerRun = ({
+  isPending = false,
+  result,
+}: { isPending?: boolean; result?: InsightsTriggerResult } = {}) => {
+  mutateRun.mockImplementation(
+    (_agent: string, options?: { onSuccess?: (data: InsightsTriggerResult) => void }) => {
+      if (result) options?.onSuccess?.(result);
+    }
+  );
+  vi.mocked(useTriggerInsightsRun).mockReturnValue({
+    mutate: mutateRun,
+    isPending,
+  } as unknown as ReturnType<typeof useTriggerInsightsRun>);
+};
 
 const config = (overrides: Partial<AnalysisConfig> = {}): AnalysisConfig => ({
   id: 'insights-analysis-config-1',
@@ -107,6 +129,7 @@ beforeEach(() => {
   toast = createToastMock();
   vi.mocked(useToast).mockReturnValue(toast);
   invalidateQueries.mockResolvedValue(undefined);
+  mockTriggerRun();
 });
 
 describe('AnalysisConfigPanel', () => {
@@ -176,5 +199,56 @@ describe('AnalysisConfigPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByLabelText('Default model')).toHaveValue('');
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('queues an analysis run for the agent and reports the job', async () => {
+    const user = userEvent.setup();
+    useConfig.mockReturnValue(queryResult(config()));
+    mockTriggerRun({
+      result: { agent: 'email-security-triage', status: 'started', jobName: 'analysis-run-1' },
+    });
+
+    renderPanel('email-security-triage');
+
+    await user.click(screen.getByRole('button', { name: 'Run analysis now' }));
+
+    expect(mutateRun).toHaveBeenCalledWith('email-security-triage', expect.anything());
+    expect(toast.success).toHaveBeenCalledWith('Queued analysis run "analysis-run-1".');
+  });
+
+  it('reports why a run did not start', async () => {
+    const user = userEvent.setup();
+    useConfig.mockReturnValue(queryResult(config()));
+    mockTriggerRun({
+      result: {
+        agent: 'email-security-triage',
+        status: 'error',
+        message: 'Could not reach the Jobs service.',
+      },
+    });
+
+    renderPanel('email-security-triage');
+
+    await user.click(screen.getByRole('button', { name: 'Run analysis now' }));
+
+    expect(toast.error).toHaveBeenCalledWith('Could not reach the Jobs service.');
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('disables Run analysis now while a run is pending', () => {
+    useConfig.mockReturnValue(queryResult(config()));
+    mockTriggerRun({ isPending: true });
+
+    renderPanel('email-security-triage');
+
+    expect(screen.getByRole('button', { name: /Run analysis now/ })).toBeDisabled();
+  });
+
+  it('disables Run analysis now when the agent has no analysis config', () => {
+    useConfig.mockReturnValue(queryResult(undefined));
+
+    renderPanel('email-security-triage');
+
+    expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeDisabled();
   });
 });
