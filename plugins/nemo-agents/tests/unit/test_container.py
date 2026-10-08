@@ -1985,7 +1985,6 @@ def package_cli():
     must be invoked explicitly (matching real ``nemo agents package`` usage).
     """
     import typer
-    from nemo_agents_plugin.cli import _register_package_command
     from typer.testing import CliRunner
 
     app = typer.Typer(no_args_is_help=True)
@@ -1994,7 +1993,6 @@ def package_cli():
     def _root() -> None:
         pass
 
-    _register_package_command(app)
     return app, CliRunner()
 
 
