@@ -113,8 +113,10 @@ async def dense_search(
             for document_id in document_ids
         }
     logger.info(
-        f"dense search {escape_log_value(embeddings.model.name)}: {len(document_ids)} passages, {len(query_ids)} queries, "
-        f"batch_size={batch_size}, in_flight={in_flight}"
+        escape_log_value(
+            f"dense search {embeddings.model.name}: {len(document_ids)} passages, {len(query_ids)} queries, "
+            f"batch_size={batch_size}, in_flight={in_flight}"
+        )
     )
     owns_client = client is None
     if client is None:
@@ -189,8 +191,10 @@ async def _encode_batches(
     n_batches = len(batches)
     model_name = escape_log_value(embeddings.model.name)
     logger.info(
-        f"encoding {model_name}: {len(texts)} texts in {n_batches} batches "
-        f"(batch_size={batch_size}, in_flight={in_flight})"
+        escape_log_value(
+            f"encoding {model_name}: {len(texts)} texts in {n_batches} batches "
+            f"(batch_size={batch_size}, in_flight={in_flight})"
+        )
     )
     semaphore = asyncio.Semaphore(in_flight)
     progress_every = max(10, math.ceil(n_batches * 0.05))
