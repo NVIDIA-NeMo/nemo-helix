@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
@@ -39,6 +40,8 @@ from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
 from nemo_helix_plugin.functions.frames import Done, Error, FrameModel, Heartbeat
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 LogLevel = Literal["debug", "info", "warning", "error"]
 
@@ -140,15 +143,20 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
                     "Downloading PII detector model (~1.7G, first run only); subsequent runs load from cache."
                 )
                 yield ModelDownloadFrame(status="started", message=download_message)
-                yield LogFrame(level="info", message=download_message)
                 try:
-                    await anyio.to_thread.run_sync(prewarm_gliner_cache, str(async_sdk.base_url))
-                except Exception as exc:
+                    await anyio.to_thread.run_sync(
+                        prewarm_gliner_cache, str(async_sdk.base_url), abandon_on_cancel=True
+                    )
+                except Exception:
                     # The download runs after the first frame is sent, so the framework
                     # can no longer turn this into an HTTP error — surface it as an
                     # in-stream Error frame instead of letting the stream die silently.
-                    yield LogFrame(level="error", message=f"Failed to download the PII detector model: {exc}")
-                    yield Error(message=str(exc), details={"type": type(exc).__name__})
+                    # Log the real exception internally; keep its text (which can carry a
+                    # filesystem path or connection detail) out of the client-facing frames.
+                    logger.exception("GLiNER PII detector model download failed")
+                    failure_message = "Failed to download the PII detector model."
+                    yield LogFrame(level="error", message=failure_message)
+                    yield Error(message=failure_message, details={"type": "ModelDownloadError"})
                     return
                 yield ModelDownloadFrame(status="complete", message="PII detector model ready.")
 

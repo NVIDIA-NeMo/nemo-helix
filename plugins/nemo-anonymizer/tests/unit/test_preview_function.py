@@ -150,9 +150,17 @@ async def test_preview_function_emits_error_frame_when_model_download_fails(
         )
     ]
 
+    # A started model_download frame, an error log, then the Error frame. There is no
+    # duplicate info LogFrame for the started message (callers get it from the
+    # model_download frame itself).
     kinds = [frame.model_dump()["kind"] for frame in frames]
-    assert kinds == ["model_download", "log", "log", "error"]
-    assert "files unreachable" in frames[-1].model_dump()["message"]
+    assert kinds == ["model_download", "log", "error"]
+    # The raw exception text (which may carry a path/connection detail) must NOT leak
+    # into the client-facing frames; a fixed message + reason code is sent instead.
+    error_frame = frames[-1].model_dump()
+    assert "files unreachable" not in error_frame["message"]
+    assert error_frame["message"] == "Failed to download the PII detector model."
+    assert error_frame["details"]["type"] == "ModelDownloadError"
 
 
 @pytest.mark.asyncio
