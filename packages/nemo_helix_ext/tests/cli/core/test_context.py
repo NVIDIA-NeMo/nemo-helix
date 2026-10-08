@@ -37,15 +37,8 @@ def test_cli_context_implements_the_plugin_cli_state_protocol():
 
 def test_plugin_resolve_output_format_follows_cli_context_rules():
     """The shared resolver must give plugin commands the same answer core commands get."""
-    typer_ctx = cast(typer.Context, SimpleNamespace(obj=CLIContext(agent_mode=True)))
+    typer_ctx = cast(typer.Context, SimpleNamespace(obj=CLIContext(overrides={"output_format": "markdown"})))
     assert resolve_output_format(typer_ctx) == "markdown"
-
-
-def test_agent_hints_only_in_agent_mode():
-    assert CLIContext().get_agent_hints("workspaces list") == []
-    assert CLIContext(agent_mode=True).get_agent_hints("workspaces list") == [
-        "To learn more about workspaces, run: nemo docs get-started/concepts/workspaces",
-    ]
 
 
 def test_context_instances_are_independent():
