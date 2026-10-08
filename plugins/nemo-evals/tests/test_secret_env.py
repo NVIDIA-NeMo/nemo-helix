@@ -9,6 +9,7 @@ import pytest
 from nemo_evals.jobs.secret_env import JobEnvSecretSource, build_task_environment
 from nhx_evals_sdk.resolver_protocols import MissingSecretError
 from nhx_evals_sdk.values.common import SecretRef
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
 
 def test_two_secrets_under_one_env_name_are_refused_naming_both() -> None:
@@ -61,3 +62,11 @@ def test_submitter_secrets_cannot_set_evaluator_or_platform_config(env_name: str
 def test_other_plugins_env_names_stay_available_to_secrets() -> None:
     environment = build_task_environment([("NEMO_AGENTS_IGW_API_KEY", "igw-key")])
     assert "NEMO_AGENTS_IGW_API_KEY" in [variable.name for variable in environment]
+
+
+def test_secret_env_errors_reject_the_submission_rather_than_failing_the_server() -> None:
+    """The job API maps HelixJobCompilationError to 422; any other compile error becomes an opaque 500."""
+    with pytest.raises(HelixJobCompilationError):
+        build_task_environment([("nemo_evals_allow_insecure_cloudpickle_metrics", "ws/self-grant")])
+    with pytest.raises(HelixJobCompilationError):
+        build_task_environment([("OPENAI_API_KEY", "team-a/key"), ("OPENAI_API_KEY", "team-b/key")])

@@ -34,7 +34,11 @@ from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundle
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nhx_evals_sdk.values import Model, SecretRef
+from nhx_evals_sdk.values.common import SupportedJobTypes
+from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.job import NemoJob
@@ -261,6 +265,33 @@ def test_worker_refuses_cloudpickle_metric_when_its_executor_is_not_opted_in(
 
     assert job.status == "error", job.status_details
     assert DISABLED_MESSAGE in _task_log(job)
+
+
+def test_submitter_cannot_grant_their_worker_the_opt_in_through_a_secret(
+    opted_in: httpx.Client, tmp_path: Path
+) -> None:
+    """A judge's key env name derives from its secret's name, and config matches env names case-insensitively."""
+    secret = "nemo-evals-allow-insecure-cloudpickle-metrics"
+    created = opted_in.post(f"/apis/secrets/v2/workspaces/{WORKSPACE}/secrets", json={"name": secret, "value": "true"})
+    assert created.status_code in (200, 201, 409), created.text
+    judge = LLMJudgeMetric(
+        model=Model(
+            url="http://judge.invalid/v1/chat/completions", name="judge", api_key_secret=SecretRef(root=secret)
+        ),
+        scores=[RangeScore(name="q", minimum=0, maximum=1, parser=JSONScoreParser(json_path="q"))],
+        job_type=SupportedJobTypes.OFFLINE,
+    )
+    judge_metric = MetricInline.model_validate_json(
+        bundle_metric(judge, InlineMetricBundlePackager()).model_dump_json()
+    ).model_dump(mode="json")
+    spec = EvaluateInputSpec.model_validate(
+        {"metrics": [_cloudpickle_metric(tmp_path / "m.log"), judge_metric], "dataset": [{"output": "blue"}]}
+    ).model_dump(mode="json")
+
+    response = _submit(opted_in, EvaluateJob, spec, profile="cloudpickle-off")
+
+    assert response.status_code == 422, response.text
+    assert "'nemo_evals_allow_insecure_cloudpickle_metrics' is reserved" in response.text
 
 
 # ---- opted out after storing cloudpickle metrics --------------------------------------------------
