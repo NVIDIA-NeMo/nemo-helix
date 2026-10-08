@@ -68,9 +68,9 @@ config = AnonymizerConfig(
 )
 
 model_configs = [
-    # The PII entity detector runs in-process on GLiNER2 inside the Anonymizer
-    # plugin (weights are pulled through the Files cache on first use), so it is
-    # no longer configured here. These entries cover the remaining LLM roles.
+    # The Anonymizer plugin manages a default PII entity detector, so it is not
+    # configured here (you may override it with a ModelConfig, but that is
+    # optional). These entries cover the remaining LLM roles.
     ModelConfig(alias="gpt-oss-120b", provider=MODEL_PROVIDER, model="openai/gpt-oss-120b"),
     ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3.5-lightning-30b-a3b"),
 ]

@@ -131,8 +131,8 @@ class _PreviewFrameCollector:
             case LogFrame():
                 self._accept_log(preview_frame)
             case ModelDownloadFrame():
-                # The plugin no longer sends a duplicate LogFrame for the download;
-                # surface the progress message to SDK/CLI callers here instead.
+                # Surface the download progress message to SDK/CLI callers (Studio
+                # consumes the structured model_download frame directly).
                 logger.info(preview_frame.message)
             case PreviewDatasetFrame():
                 self.dataset = pd.DataFrame(preview_frame.records).convert_dtypes(dtype_backend="pyarrow")

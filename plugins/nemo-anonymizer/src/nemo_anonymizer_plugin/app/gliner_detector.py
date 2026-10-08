@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 # The upstream-pinned GLiNER2 checkpoint is imported from the library so a bump
@@ -55,6 +57,33 @@ _FILES_HF_ENDPOINT_SUFFIX = "/apis/files/v2/hf"
 #: Service principal used for the pull-through download (mirrors the model
 #: weight-puller's ``service:models`` convention).
 _GLINER_HF_TOKEN = "service:anonymizer"
+
+#: Serializes concurrent first-use cache prewarm + align (the preview path runs
+#: ``prewarm_gliner_cache`` off-thread, so two cold previews can race the align).
+_prewarm_lock = threading.Lock()
+
+
+@contextmanager
+def _hf_hub_offline() -> Iterator[None]:
+    """Temporarily force ``HF_HUB_OFFLINE=1`` for the duration of the block.
+
+    The GLiNER child runtime inherits a snapshot of the parent environment at
+    ``subprocess.Popen`` time (upstream copies ``os.environ`` synchronously while
+    starting the runtime), and its bare ``snapshot_download`` has no
+    ``local_files_only`` lever — so the only way to make it load the pre-cached
+    weights without re-resolving against public HuggingFace is this env var. We
+    set it only around the synchronous runtime start and restore the prior value
+    afterward, so the long-lived parent process environment is left unchanged.
+    """
+    previous = os.environ.get("HF_HUB_OFFLINE")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("HF_HUB_OFFLINE", None)
+        else:
+            os.environ["HF_HUB_OFFLINE"] = previous
 
 
 def _files_hf_endpoint(base_url: str) -> str:
@@ -256,18 +285,26 @@ def prewarm_gliner_cache(base_url: str, *, on_download_start: Callable[[], None]
     """
     if is_gliner_cached():
         return
-    if on_download_start is not None:
-        on_download_start()
+    # Serialize concurrent first-use prewarms: the preview path runs this call
+    # off-thread, so two cold previews can both pass the check above and race in
+    # _align_fileset_cache_to_upstream_repo (one's shutil.rmtree(dst) deleting a
+    # folder the other is copying into or loading from). The lock + the re-check
+    # inside collapse the second caller to a no-op once the first has aligned.
+    with _prewarm_lock:
+        if is_gliner_cached():
+            return
+        if on_download_start is not None:
+            on_download_start()
 
-    fileset_snapshot = snapshot_download(
-        repo_id=f"{GLINER_FILESET_WORKSPACE}/{GLINER_FILESET_NAME}",
-        revision=GLINER_MODEL_REVISION,
-        endpoint=_files_hf_endpoint(base_url),
-        token=_GLINER_HF_TOKEN,
-        cache_dir=str(_hf_hub_cache_dir()),
-    )
-    del fileset_snapshot  # we align by repo-folder, not by the returned snapshot path
-    _align_fileset_cache_to_upstream_repo()
+        fileset_snapshot = snapshot_download(
+            repo_id=f"{GLINER_FILESET_WORKSPACE}/{GLINER_FILESET_NAME}",
+            revision=GLINER_MODEL_REVISION,
+            endpoint=_files_hf_endpoint(base_url),
+            token=_GLINER_HF_TOKEN,
+            cache_dir=str(_hf_hub_cache_dir()),
+        )
+        del fileset_snapshot  # we align by repo-folder, not by the returned snapshot path
+        _align_fileset_cache_to_upstream_repo()
 
 
 def ensure_gliner_weights(sdk: SyncHelixClient, *, on_download_start: Callable[[], None] | None = None) -> None:
@@ -313,10 +350,10 @@ def build_gliner_anonymizer(
     from anonymizer.notebooks._runtime import _ensure_runtime, _runtime_lock
 
     # Weights are cached; keep the isolated server offline so it loads from cache
-    # instead of re-resolving the pinned repo against public HuggingFace.
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-
-    with _runtime_lock:
+    # instead of re-resolving the pinned repo against public HuggingFace. Scope
+    # the env var to the synchronous runtime start (the child captures it at
+    # spawn) so the long-lived parent environment is not mutated process-wide.
+    with _runtime_lock, _hf_hub_offline():
         runtime = _ensure_runtime("cpu")
         configuration = build_notebook_model_configuration(
             model_configs=model_configs_yaml,
