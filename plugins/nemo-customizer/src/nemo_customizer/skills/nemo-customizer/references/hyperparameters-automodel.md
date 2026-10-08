@@ -264,7 +264,7 @@ Apply user overrides to `/tmp/job.json` before submit. For **batch / GPU count /
 
 | Symptom / goal | Try first |
 |----------------|-----------|
-| CUDA OOM | **`batch-sizing.md` tuning loop:** halve `micro_batch_size`, then `global_batch_size`, then `max_seq_length`; use TP > 1 only if the model does not fit one ≥48 GB GPU |
+| CUDA OOM | **`batch-sizing.md` tuning loop:** halve `micro_batch_size`, then `global_batch_size`, then `max_seq_length`; use TP > 1 only if the model does not fit one ≥48 GB GPU. MoE with `expert_parallel_size` > 1 needs TP 1: add GPUs and raise `expert_parallel_size`, or set `training.activation_checkpointing: true` |
 | Slow / low GPU use | **`batch-sizing.md`:** step toward high-util column or double `micro`+GBS until ~35–40 GiB; multi-GPU data parallel if model fits one GPU |
 | Underfitting | More `epochs`, slightly higher `learning_rate`, higher LoRA `rank` (≤ 32 for NIM/vLLM deploy) |
 | Overfitting | Fewer `epochs`, lower `learning_rate`, higher `weight_decay`, smaller `rank` |

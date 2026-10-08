@@ -42,7 +42,7 @@ All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automo
 
 **Nemotron gotchas**
 
-- **H100 only.** Nemotron customization is supported on NVIDIA H100 GPUs. Check `nemo jobs list-execution-profiles -f json` for an H100 profile before you submit, and set `training.execution_profile` if the default GPU profile is not H100. If the platform has no H100s, tell the user rather than submitting.
+- **Hopper or Blackwell only.** Nemotron customization is supported on NVIDIA Hopper or Blackwell era GPUs (H100, H200, B100, B200). Check `nemo jobs list-execution-profiles -f json` for a Hopper or Blackwell profile before you submit, and set `training.execution_profile` if the default GPU profile is neither. If the platform has no such GPUs, tell the user rather than submitting.
 - Train the **BF16** checkpoint. Automodel `r0.6.0` dequantizes FP8 and GPT-OSS MXFP4 base checkpoints, but not ModelOpt NVFP4 (`…-NVFP4`). Use NVFP4 for inference only.
 - Set `lora.exclude_modules: ["*.out_proj"]`. Mamba `out_proj` runs through a fused kernel that LoRA cannot wrap.
 - MoE layout: `parallelism.expert_parallel_size` equal to the GPU count, `tensor_parallel_size: 1` (`hyperparameters-automodel.md` § `parallelism`).

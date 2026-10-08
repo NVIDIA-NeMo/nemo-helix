@@ -262,7 +262,7 @@ TP can be configured via `parallelism.tensor_parallel_size` in the [training con
 
 <Note>
 
-As of release 25.10.0, more Automodel model families support tensor parallelism greater than 1 for LoRA through the multi-GPU LoRA patch. Previous releases supported only `TP=1` for those models. MoE models such as Nemotron 3.5 Lightning scale with `parallelism.expert_parallel_size` instead, and require `tensor_parallel_size` 1.
+Many Automodel model families support tensor parallelism greater than 1 for LoRA. MoE models such as Nemotron 3.5 Lightning scale with `parallelism.expert_parallel_size` instead, and require `tensor_parallel_size` 1.
 
 </Note>
 
