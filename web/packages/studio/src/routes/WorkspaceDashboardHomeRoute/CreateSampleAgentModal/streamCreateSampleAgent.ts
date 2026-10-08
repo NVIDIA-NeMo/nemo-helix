@@ -7,6 +7,7 @@ import {
   type SampleAgentResponse,
   type SampleAgentStreamEvent,
 } from '@nemo/sdk/generated/agents/schema';
+import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { asRecord } from '@studio/util/guards';
 import { readLineDelimitedStream } from '@studio/util/lineStream';
@@ -65,12 +66,11 @@ export const streamCreateSampleAgent = async (
 ): Promise<SampleAgentResponse> => {
   let response: Response;
   try {
-    response = await fetch(`${PLATFORM_BASE_URL}${SAMPLE_AGENT_PATH}`, {
+    response = await platformFetch(`${PLATFORM_BASE_URL}${SAMPLE_AGENT_PATH}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        'X-Source': 'NeMo Studio',
       },
       body: JSON.stringify(request),
       signal,

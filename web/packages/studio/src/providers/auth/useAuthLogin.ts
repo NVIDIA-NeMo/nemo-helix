@@ -1,7 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { AUTH_AUTHORITY, AUTH_CLIENT_ID } from '@studio/constants/environment';
+import {
+  AUTH_AUTHORITY,
+  AUTH_CLIENT_ID,
+  BASE_URL,
+  PLATFORM_BASE_URL,
+} from '@studio/constants/environment';
+import {
+  clearExplicitLogoutAutoLoginSuppression,
+  isExplicitLogoutAutoLoginSuppressed,
+  useWebSession,
+} from '@studio/providers/auth/useWebSession';
 import { useEffect, useState } from 'react';
 import { hasAuthParams, useAuth } from 'react-oidc-context';
 import { useLocation } from 'react-router';
@@ -16,19 +26,47 @@ import { useLocation } from 'react-router';
 export const useAuthAutoLogin = (): { isAuthPending: boolean } => {
   const auth = useAuth();
   const [hasAttemptedLogin, setHasAttemptedLogin] = useState(false);
+  const [isExplicitLogoutSuppressed, setIsExplicitLogoutSuppressed] = useState(
+    isExplicitLogoutAutoLoginSuppressed
+  );
   const location = useLocation();
+  const webSession = useWebSession();
+  const hasOidcAuthParams = hasAuthParams();
   const isE2E = typeof window !== 'undefined' && window.localStorage.getItem('e2e_test') === 'true';
-  const isAuthEnabled = !!(AUTH_CLIENT_ID && AUTH_AUTHORITY);
+  const isDirectPublicAuthEnabled =
+    webSession.authEnabled && Boolean(AUTH_CLIENT_ID && AUTH_AUTHORITY);
+  const isAuthEnabled = webSession.isServerSession
+    ? webSession.authEnabled
+    : isDirectPublicAuthEnabled;
+  const isAuthenticated = webSession.isServerSession
+    ? webSession.isAuthenticated
+    : auth.isAuthenticated;
+  const isAuthenticationLoading =
+    webSession.isLoading || (!webSession.isServerSession && auth.isLoading);
+  const shouldSuppressServerSessionLogin = webSession.isServerSession && isExplicitLogoutSuppressed;
   const shouldAttemptLogin =
     isAuthEnabled &&
+    !shouldSuppressServerSessionLogin &&
     !hasAttemptedLogin &&
-    !hasAuthParams() &&
-    !auth?.isAuthenticated &&
+    !hasOidcAuthParams &&
+    !isAuthenticated &&
     !auth?.activeNavigator &&
-    !auth?.isLoading &&
+    !isAuthenticationLoading &&
+    !webSession.isError &&
     !isE2E;
 
   useEffect(() => {
+    if (webSession.serverSessionClient && shouldAttemptLogin) {
+      const studioBasePath = BASE_URL.replace(/\/+$/, '');
+      const returnTo = `${studioBasePath}${location.pathname}${location.search}${location.hash}`;
+      const params = new URLSearchParams({
+        client: webSession.serverSessionClient,
+        return_to: returnTo,
+      });
+      window.location.assign(`${PLATFORM_BASE_URL}/apis/auth/v2/login?${params.toString()}`);
+      setHasAttemptedLogin(true);
+      return;
+    }
     if (shouldAttemptLogin) {
       auth.signinRedirect({
         state: {
@@ -38,10 +76,32 @@ export const useAuthAutoLogin = (): { isAuthPending: boolean } => {
       });
       setHasAttemptedLogin(true);
     }
-  }, [auth, location, shouldAttemptLogin]);
+  }, [auth, location, shouldAttemptLogin, webSession.serverSessionClient]);
+
+  useEffect(() => {
+    if (
+      isExplicitLogoutSuppressed &&
+      (hasOidcAuthParams ||
+        isAuthenticated ||
+        (!webSession.isLoading && !webSession.isServerSession))
+    ) {
+      clearExplicitLogoutAutoLoginSuppression();
+      setIsExplicitLogoutSuppressed(false);
+    }
+  }, [
+    hasOidcAuthParams,
+    isAuthenticated,
+    isExplicitLogoutSuppressed,
+    webSession.isLoading,
+    webSession.isServerSession,
+  ]);
 
   // Hide the UI when auth is enabled but the user is not authenticated and we're not handling a callback
-  const isAuthPending = isAuthEnabled && !auth?.isAuthenticated && !hasAuthParams() && !isE2E;
+  const isAuthPending =
+    !isE2E &&
+    !hasOidcAuthParams &&
+    !shouldSuppressServerSessionLogin &&
+    (webSession.isLoading || webSession.isError || (isAuthEnabled && !isAuthenticated));
 
   return { isAuthPending };
 };

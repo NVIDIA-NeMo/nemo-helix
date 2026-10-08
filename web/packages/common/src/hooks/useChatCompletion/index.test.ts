@@ -7,12 +7,22 @@ import type { Stream } from 'openai/streaming.mjs';
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
+  openAIConstructor: vi.fn(),
+  platformFetch: vi.fn(),
 }));
 
 vi.mock('openai', () => ({
   default: class MockOpenAI {
+    constructor(options: unknown) {
+      mocks.openAIConstructor(options);
+    }
+
     chat = { completions: { create: mocks.create } };
   },
+}));
+
+vi.mock('@nemo/sdk/src/utils/platformRequest', () => ({
+  platformFetch: mocks.platformFetch,
 }));
 
 const completion: ChatCompletion = {
@@ -37,6 +47,7 @@ const completion: ChatCompletion = {
 describe('createChatCompletion', () => {
   beforeEach(() => {
     mocks.create.mockReset();
+    mocks.openAIConstructor.mockReset();
   });
 
   it('returns an immediate JSON completion when a streamed request is blocked', async () => {
@@ -82,5 +93,36 @@ describe('createChatCompletion', () => {
     });
 
     expect(result).toBe(stream);
+  });
+
+  it('omits authorization headers when no explicit access token is provided', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mocks.create.mockResolvedValue({ choices: [] });
+
+    await createChatCompletion({
+      baseURL: 'http://localhost/no-explicit-auth/v1',
+      model: 'default/guarded-model',
+      messages: [{ role: 'user', content: 'Tell me about bananas.' }],
+      stream: false,
+    });
+
+    expect(mocks.create.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Authorization');
+    warn.mockRestore();
+  });
+
+  it('constructs OpenAI clients with the shared platform fetch boundary', async () => {
+    mocks.create.mockResolvedValue({ choices: [] });
+
+    await createChatCompletion({
+      baseURL: 'http://localhost/shared-fetch/v1',
+      accessToken: 'test-token',
+      model: 'default/guarded-model',
+      messages: [{ role: 'user', content: 'Tell me about bananas.' }],
+      stream: false,
+    });
+
+    expect(mocks.openAIConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({ fetch: mocks.platformFetch })
+    );
   });
 });

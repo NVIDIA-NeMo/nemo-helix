@@ -5,6 +5,8 @@ import { User } from 'oidc-client-ts';
 import { useMemo } from 'react';
 import { useAuth } from 'react-oidc-context';
 
+import { useWebSession } from './useWebSession';
+
 export type AuthProfile = {
   name: string;
   email: string;
@@ -32,9 +34,19 @@ export const getUserAuthProfile = (user: User): AuthProfile => ({
 export const useAuthProfile = (): AuthProfile | undefined => {
   const auth = useAuth();
   const user = auth?.user;
+  const { isServerSession, session } = useWebSession();
 
   return useMemo(() => {
+    if (isServerSession) {
+      if (!session) return undefined;
+      const name = session.email || session.id;
+      return {
+        name,
+        email: session.email || session.id,
+        workspace: name.split('@')[0],
+      };
+    }
     if (!user) return undefined;
     return getUserAuthProfile(user);
-  }, [user]);
+  }, [isServerSession, session, user]);
 };

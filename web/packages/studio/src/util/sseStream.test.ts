@@ -83,12 +83,32 @@ describe('streamSse', () => {
 
     expect(received.map((e) => e.data)).toEqual(['{"m":1}', '{"m":2}']);
     // First request carries the auth header and no resume cursor.
-    const firstHeaders = fetchMock.mock.calls[0][1].headers as Record<string, string>;
-    expect(firstHeaders.Authorization).toBe('Bearer tok');
-    expect(firstHeaders['Last-Event-ID']).toBeUndefined();
+    const firstHeaders = new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers);
+    expect(firstHeaders.get('Authorization')).toBe('Bearer tok');
+    expect(firstHeaders.has('Last-Event-ID')).toBe(false);
     // Reconnect resumes from the last delivered id.
-    const secondHeaders = fetchMock.mock.calls[1][1].headers as Record<string, string>;
-    expect(secondHeaders['Last-Event-ID']).toBe('6');
+    const secondHeaders = new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers);
+    expect(secondHeaders.get('Last-Event-ID')).toBe('6');
+  });
+
+  it('passes credentials through to fetch for cookie-backed streams', async () => {
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValue(sseResponse('id: 1\ndata: {"m":1}\n\n'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    await streamSse('https://example/stream', {
+      signal: controller.signal,
+      credentials: 'include',
+      headers: new Headers({ 'X-Source': 'NeMo Studio' }),
+      onEvent: () => controller.abort(),
+    });
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const headers = new Headers(request.headers);
+    expect(request.credentials).toBe('include');
+    expect(headers.get('X-Source')).toBe('NeMo Studio');
+    expect(headers.get('Accept')).toBe('text/event-stream');
   });
 
   it('sends initialLastEventId on the first connect to bridge a tail handoff', async () => {
@@ -103,8 +123,8 @@ describe('streamSse', () => {
       onEvent: () => controller.abort(),
     });
 
-    const firstHeaders = fetchMock.mock.calls[0][1].headers as Record<string, string>;
-    expect(firstHeaders['Last-Event-ID']).toBe('40');
+    const firstHeaders = new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers);
+    expect(firstHeaders.get('Last-Event-ID')).toBe('40');
   });
 
   it('does not retry on a fatal 4xx status', async () => {
