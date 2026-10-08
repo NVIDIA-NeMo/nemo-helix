@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import {
@@ -8,6 +9,7 @@ import {
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
@@ -81,7 +83,12 @@ export const DataDesignerJobsDataView: FC = () => {
     );
   };
 
-  const { data: dataDesignerResponse, isLoading } = useDataDesignerListCreateJobs(
+  const {
+    data: dataDesignerResponse,
+    isLoading,
+    error,
+    refetch,
+  } = useDataDesignerListCreateJobs(
     workspace,
     {
       sort: getSortParam(dataViewState.sorting.state) as DataDesignerJobsSortField,
@@ -99,7 +106,8 @@ export const DataDesignerJobsDataView: FC = () => {
     {
       query: {
         placeholderData: keepPreviousData,
-        refetchInterval: JOB_POLLING_INTERVAL_MS,
+        refetchInterval: (query) =>
+          query.state.status === 'error' ? false : JOB_POLLING_INTERVAL_MS,
         refetchOnMount: 'always',
       },
     }
@@ -218,9 +226,29 @@ export const DataDesignerJobsDataView: FC = () => {
           DataViewRoot: {
             data: jobs,
             totalCount: totalResults,
-            requestStatus: isLoading && !dataDesignerResponse ? 'loading' : undefined,
+            requestStatus: error
+              ? 'error'
+              : isLoading && !dataDesignerResponse
+                ? 'loading'
+                : undefined,
           },
           DataViewTableContent: {
+            renderErrorState: () => (
+              <ErrorPanel
+                errorMessage={getErrorMessage(
+                  error ?? new Error('Failed to load Data Designer jobs')
+                )}
+                attributes={{
+                  ErrorMessage: {
+                    slotFooter: (
+                      <Button kind="secondary" onClick={() => refetch()}>
+                        Retry
+                      </Button>
+                    ),
+                  },
+                }}
+              />
+            ),
             renderEmptyState: () =>
               hasActiveFilters ? (
                 <EntityEmptyState
