@@ -12,6 +12,7 @@ from sqlalchemy import (
     JSON,
     ColumnElement,
     DateTime,
+    Float,
     String,
     and_,
     case,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     false,
     func,
     literal,
+    literal_column,
     not_,
     or_,
     select,
@@ -145,18 +147,16 @@ class SQLAlchemyFilterRepository(FilterRepository):
 
     _STRING_OPS = frozenset({FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH})
 
-    def _compare(
-        self, element: Any, is_json: bool, operator: FilterOperator, value: Any, *, null_never_matches: bool = False
-    ) -> Any:
-        """One comparison against a column, or against a JSON field or array element when ``is_json``.
+    def _compare(self, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
+        """One comparison against a column, or against a JSON field when ``is_json``.
 
-        A missing or null JSON value renders as the text ``null``; with ``null_never_matches`` (always,
-        for ``$startsWith``/``$endsWith``) it matches no comparison other than ``$eq``.
+        A missing or null JSON value renders as the text ``null``; it never satisfies
+        ``$startsWith``/``$endsWith``.
         """
         if operator == FilterOperator.EQ:
             return self._json_eq(element, value) if is_json else element == value
         comparison = self._non_eq_compare(element, is_json, operator, value)
-        if is_json and (null_never_matches or operator in self._STRING_OPS):
+        if is_json and operator in self._STRING_OPS:
             return and_(not_(self._json_eq(element, None)), comparison)
         return comparison
 
@@ -283,14 +283,48 @@ class SQLAlchemyFilterRepository(FilterRepository):
             is_target = element_type == "object"
         # SQLite may evaluate a comparison before the type check, and raises on a key lookup into a
         # scalar; NULL out non-target elements first.
-        element = type_coerce(case((is_target, elements.c.value)), JSON)
-        matches = [
-            self._compare(
-                element if c.key is None else element[c.key], True, c.operator, c.value, null_never_matches=True
-            )
-            for c in conditions
-        ]
+        target = case((is_target, elements.c.value))
+        matches = []
+        for condition in conditions:
+            text, is_number = self._element_text(elements, target, condition.key)
+            matches.append(self._compare_text(text, is_number, condition.operator, condition.value))
         return select(literal(1)).select_from(elements).where(is_target, *matches).exists()
+
+    def _element_text(self, elements: Any, target: Any, key: str | None) -> tuple[Any, Any]:
+        """An array element (or its ``key`` field) as decoded text, plus whether it is a JSON number."""
+        if self._dialect_name == "sqlite":
+            raw = target if key is None else type_coerce(target, JSON)[key].as_string()
+            kind = elements.c.type if key is None else func.typeof(raw)
+            return cast(raw, String), kind.in_(["integer", "real"])
+        if key is None:
+            return target.op("#>>")(literal_column("'{}'::text[]")), func.json_typeof(elements.c.value) == "number"
+        element = type_coerce(target, JSON)
+        return element[key].as_string(), func.json_typeof(element[key]) == "number"
+
+    def _compare_text(self, text: Any, is_number: Any, operator: FilterOperator, value: Any) -> Any:
+        """One comparison against decoded element text; null or missing (SQL NULL) matches only ``$eq`` null."""
+        if operator == FilterOperator.EQ:
+            if value is None:
+                return text.is_(None)
+            if isinstance(value, bool):
+                return text.in_(["1", "true"] if value else ["0", "false"])
+            return text == str(value)
+        if operator == FilterOperator.LIKE:
+            comparison = text.ilike(f"%{value}%")
+        elif operator == FilterOperator.STARTS_WITH:
+            comparison = func.substr(text, 1, len(value)) == value
+        elif operator == FilterOperator.ENDS_WITH:
+            comparison = func.substr(text, func.length(text) - len(value) + 1) == value
+        elif operator in (FilterOperator.IN, FilterOperator.NIN):
+            values = [str(v) for v in value]
+            comparison = text.in_(values) if operator == FilterOperator.IN else text.not_in(values)
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            # Cast only numbers: PostgreSQL raises casting other text to a float.
+            numeric = cast(case((is_number, text)), Float)
+            comparison = and_(is_number, getattr(numeric, self._ORDERED_OPS[operator])(value))
+        else:
+            comparison = getattr(text, self._ORDERED_OPS[operator])(str(value))
+        return and_(text.is_not(None), comparison)
 
     def and_op(self, operations: List[Any]) -> Any:
         """Logical AND."""

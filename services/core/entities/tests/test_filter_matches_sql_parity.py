@@ -55,6 +55,15 @@ SEED = [
             "meta": [{"key": "owner", "value": "alice"}, {"key": "team", "value": "eval"}],
             "members": ["ws/task_a#d1", "ws/task-b#d2"],
             "tag_map": {"latest": 2, "v1.2": 1},
+            # Strings JSON escapes, plain and keyed; "n" is a string here and a number in row 2.
+            "escaped": [
+                'a"b',
+                "café",
+                '"quoted"',
+                "back\\slash",
+                {"key": "city", "value": "café"},
+                {"key": "n", "value": "abc"},
+            ],
         },
     ),
     dict(
@@ -70,6 +79,7 @@ SEED = [
             # and the prefix after an escaped quote inside an element.
             "members": ["other-ws/task_a#d1", "ws/taskXa#d1", 'x"ws/task_a#d1'],
             "tag_map": {"latest": 1, "v1": 1},
+            "escaped": [{"key": "n", "value": 5}, "plain"],
         },
     ),
     # "redish" is a deliberate prefix near-miss for "red" — quote-delimited matching must exclude it.
@@ -161,6 +171,16 @@ CASES = [
     ("contains_skips_escaped_quote_near_miss", C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1")),
     # Rows 4 and 5 have no members field; under $not they match on both databases.
     ("not_contains_missing_field", NOT(C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1"))),
+    ("contains_escaped_quote", C(FilterOperator.CONTAINS, "data.escaped", 'a"b')),
+    ("contains_non_ascii", C(FilterOperator.CONTAINS, "data.escaped", "café")),
+    ("contains_value_wrapped_in_quotes", C(FilterOperator.CONTAINS, "data.escaped", '"quoted"')),
+    ("contains_backslash", C(FilterOperator.CONTAINS, "data.escaped", "back\\slash")),
+    ("elem_match_keyed_non_ascii", C(FilterOperator.ELEM_MATCH, "data.escaped", {"key": "city", "value": "café"})),
+    (
+        "elem_match_numeric_gt_skips_strings",
+        C(FilterOperator.ELEM_MATCH, "data.escaped", {"key": "n", "value": {"$gt": 2}}),
+    ),
+    ("elem_match_scalar_numeric_gt_on_strings", C(FilterOperator.ELEM_MATCH, "data.escaped", {"$gt": 2})),
     (
         "and_contains_tags",
         AND(C(FilterOperator.CONTAINS, "data.tags", "blue"), C(FilterOperator.EQ, "data.tier", "free")),
@@ -289,6 +309,10 @@ def test_element_operators_reject_unknown_dialect(op):
         (C(FilterOperator.ENDS_WITH, "data.tier", "ree"), {1, 5}),
         (C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1"), {1}),
         (NOT(C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1")), {2, 3, 4, 5}),
+        (C(FilterOperator.CONTAINS, "data.escaped", 'a"b'), {1}),
+        (C(FilterOperator.CONTAINS, "data.escaped", "café"), {1}),
+        (C(FilterOperator.CONTAINS, "data.escaped", '"quoted"'), {1}),
+        (C(FilterOperator.ELEM_MATCH, "data.escaped", {"key": "n", "value": {"$gt": 2}}), {2}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "v1.2"), {1}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "v1"), {2}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "latest"), {1, 2}),
