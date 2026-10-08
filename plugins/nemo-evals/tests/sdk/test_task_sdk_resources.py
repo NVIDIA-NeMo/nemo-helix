@@ -386,3 +386,42 @@ async def test_ready_input_rejects_preparation_options(monkeypatch, asynchronous
     prepare.assert_not_called()
     write.assert_not_called()
     assert recorder.requests == []
+
+
+def test_sync_list_sends_kind_and_typed_metadata_as_a_json_filter() -> None:
+    """JSON rather than ``filter[...]`` brackets, so a boolean metadata value is not stringified."""
+    resource, recorder = _sync_resource(_page([]))
+
+    resource.list(kind="harbor", metadata={"owner": "alice", "verified": True})
+
+    params = recorder.requests[0].url.params
+    assert json.loads(params["filter"]) == {"kind": "harbor", "metadata.owner": "alice", "metadata.verified": True}
+
+
+def test_sync_list_omits_filter_when_unfiltered() -> None:
+    resource, recorder = _sync_resource(_page([]))
+
+    resource.list()
+
+    assert "filter" not in recorder.requests[0].url.params
+
+
+async def test_async_list_sends_kind_and_metadata_filter() -> None:
+    resource, recorder = _async_resource(_page([]))
+
+    await resource.list(kind="evaluator", metadata={"suite": "smoke"})
+
+    assert json.loads(recorder.requests[0].url.params["filter"]) == {"kind": "evaluator", "metadata.suite": "smoke"}
+
+
+def test_sync_list_sends_harbor_id_intent_metric_and_tag_filters() -> None:
+    resource, recorder = _sync_resource(_page([]))
+
+    resource.list(native_task_id="hello-world", intent_contains="math", metric="default/judge", tag="v1.2")
+
+    assert json.loads(recorder.requests[0].url.params["filter"]) == {
+        "native_task_id": "hello-world",
+        "intent": {"$like": "math"},
+        "metrics": "default/judge",
+        "tags": "v1.2",
+    }

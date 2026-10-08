@@ -146,9 +146,41 @@ client.files.client.list_filesets(query_params={"filter": json.dumps({"purpose":
 | `$gte` | Greater than or equal | `{"created_at": {"$gte": "2025-01-01"}}` |
 | `$in` | Value in set | `{"status": {"$in": ["active", "pending"]}}` |
 | `$nin` | Value not in set | `{"status": {"$nin": ["deleted"]}}` |
+| `$startsWith` | Starts with the value (case-sensitive) | `{"name": {"$startsWith": "llama"}}` |
+| `$endsWith` | Ends with the value (case-sensitive) | `{"name": {"$endsWith": "-instruct"}}` |
+| `$contains` | Array has the element | `{"data.tags": {"$contains": "red"}}` |
+| `$elemMatch` | Array has one element matching every condition | `{"data.metadata": {"$elemMatch": {"key": "suite", "value": "geography"}}}` |
+| `$hasKey` | Object has the key with a non-null value | `{"data.tags": {"$hasKey": "v1.2"}}` |
 | `$and` | Logical AND | `{"$and": [{"name": "a"}, {"status": "active"}]}` |
 | `$or` | Logical OR | `{"$or": [{"name": "a"}, {"name": "b"}]}` |
 | `$not` | Logical NOT | `{"$not": {"status": "draft"}}` |
+
+### Array and object operators
+
+`$contains`, `$elemMatch`, and `$hasKey` operate on JSON array or object fields, such as an
+entity's `data.*` fields. They and `$startsWith`/`$endsWith` have no text-syntax form, and in
+bracket notation the `$` is required: `?filter[data.tags][$hasKey]=v1.2`.
+
+`$elemMatch` needs **one** element to satisfy every condition. It takes one of two forms:
+
+- **Object elements:** `{"key": "suite", "value": "geography"}` matches an element with both. A
+  value can also be an operator object, such as `{"key": "owner", "value": {"$startsWith": "al"}}`.
+  Against `[{"key": "suite", "value": "math"}, {"key": "owner", "value": "geography"}]`,
+  `{"key": "suite", "value": "geography"}` does not match, because no single element has both.
+- **Plain elements:** an operator object on its own, such as `{"$startsWith": "default/task-a#"}`,
+  matches an array of strings or numbers.
+
+Inside `$elemMatch` you can use `$eq`, `$in`, `$nin`, `$like`, `$lt`, `$lte`, `$gt`, `$gte`,
+`$startsWith`, and `$endsWith`, each comparing the same way it does on a field. Several on one
+value must all hold.
+
+- `$hasKey` treats the whole value as one key, so `v1.2` is not read as a `v1` → `2` path.
+- For `$elemMatch` and `$hasKey`, a missing field, or one that is not an array or object, never
+  matches. Under `$not`, it always matches.
+
+Services often wrap these in named filters that are easier to use. For example, the Evaluator's
+`filter[metadata.suite]=geography` becomes the `$elemMatch` above. See
+[Filter tasks and tasksets](/documentation/evaluate-models/manage-tasks-tasksets#filter-tasks-and-tasksets).
 
 ## Nested fields
 

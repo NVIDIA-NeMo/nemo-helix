@@ -253,3 +253,77 @@ def test_cannot_move_latest_by_hand(client: TestClient) -> None:
 
 def test_list_revisions_missing_taskset_returns_404(client: TestClient) -> None:
     assert client.get(f"{_BASE}/nope/revisions").status_code == 404
+
+
+def _with_metadata(body: dict, **metadata: object) -> dict:
+    return {**body, "metadata": [{"key": key, "value": value} for key, value in metadata.items()]}
+
+
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"filter[metadata.owner]": "alice"}, {"alice-smoke"}),
+        ({"filter[metadata][suite]": "smoke"}, {"alice-smoke", "bob-smoke"}),
+        ({"filter[metadata.owner][$in]": "alice,bob"}, {"alice-smoke", "bob-smoke"}),
+        ({"filter[metadata.suite]": "alice"}, set()),
+    ],
+)
+def test_list_filters_by_metadata(client: TestClient, params: dict[str, str], expected: set[str]) -> None:
+    client.post(f"{_BASE}/alice-smoke", json=_with_metadata(_body(), owner="alice", suite="smoke"))
+    client.post(f"{_BASE}/bob-smoke", json=_with_metadata(_body(), owner="bob", suite="smoke"))
+    client.post(f"{_BASE}/untagged", json=_body())
+
+    response = client.get(_BASE, params=params)
+
+    assert response.status_code == 200, response.text
+    assert {taskset["name"] for taskset in response.json()["data"]} == expected
+
+
+def test_list_rejects_a_kind_filter(client: TestClient) -> None:
+    """Tasksets have no kind; only tasks do."""
+    assert client.get(_BASE, params={"filter[kind]": "harbor"}).status_code == 400
+
+
+def _member_digest(ref: str) -> str:
+    return hashlib.sha256(ref.encode()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"filter[tasks]": "task-a"}, {"both"}),
+        ({"filter[tasks]": "default/task-b"}, {"both", "only-b"}),
+        ({"filter[tasks]": f"default/task-a#{_member_digest('default/task-a')}"}, {"both"}),
+        ({"filter[tasks]": f"default/task-a#{'0' * 64}"}, set()),
+        ({"filter[tasks]": "elsewhere/task-a"}, set()),
+        ({"filter[tasks][$in]": "task-a,task-b"}, {"both", "only-b"}),
+        ({"filter[tags]": "v1.2"}, {"only-b"}),
+        ({"filter[description][$like]": "regression"}, {"only-b"}),
+    ],
+)
+def test_list_filters_by_member_tag_and_description(
+    client: TestClient, params: dict[str, str], expected: set[str]
+) -> None:
+    """A bare member ref matches any pinned revision of that task in the path workspace."""
+    client.post(f"{_BASE}/both", json=_body(members=["task-a", "task-b"]))
+    client.post(f"{_BASE}/only-b", json=_body(description="Nightly regression set.", members=["task-b"], tags=["v1.2"]))
+
+    response = client.get(_BASE, params=params)
+
+    assert response.status_code == 200, response.text
+    assert {taskset["name"] for taskset in response.json()["data"]} == expected
+
+
+def test_list_rejects_a_member_filter_pinned_by_tag(client: TestClient) -> None:
+    """Stored members are pinned by digest, so a ``#tag`` member filter could never match."""
+    assert client.get(_BASE, params={"filter[tasks]": "default/task-a#latest"}).status_code == 400
+
+
+def test_raw_data_filters_on_members_are_not_rewritten(client: TestClient) -> None:
+    """Only the translated member match takes the path workspace; a raw ``data.tasks`` filter is passed as given."""
+    client.post(f"{_BASE}/only-b", json=_body(members=["task-b"]))
+
+    response = client.get(_BASE, params={"filter[data.tasks][$like]": "b#"})
+
+    assert response.status_code == 200, response.text
+    assert {taskset["name"] for taskset in response.json()["data"]} == {"only-b"}
