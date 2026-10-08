@@ -59,6 +59,8 @@ def test_harbor_020_is_selectable_with_immutable_release_evidence() -> None:
     assert release["git_tag_object_sha"] == "f75477f2ad0b04fad199b0cb80689cc23a06c72d"
     assert release["git_commit_sha"] == "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc"
     assert release["wheel_sha256"] == ("4b7e48223aea2384cdb8c9eff35eaebd482fc9b1ec09f8193a121c47356ff19a")
+    assert release["extras"] == ["opensandbox"]
+    assert "opensandbox-import" in CATALOG["validation"]["checks"]
 
 
 def test_unsupported_version_lists_supported_choices() -> None:

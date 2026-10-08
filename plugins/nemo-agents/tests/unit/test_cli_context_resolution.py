@@ -13,7 +13,7 @@ remote, secured, multi-workspace platform:
 - **Workspace** resolves through the active CLI context (``nemo config
   use-context`` / ``$NHX_WORKSPACE``) when ``--workspace`` is omitted, instead
   of silently acting on ``default`` — with an explicit ``--workspace`` still
-  winning and ``default`` preserved when no CLI state is installed.
+  winning and ``default`` preserved when the CLI state has no workspace.
 - **Auth** headers from the shared context (the ``Authorization: Bearer``
   token behind ``nemo auth login``) are attached to every platform HTTP call,
   so agents commands are not rejected 401/403 on a secured cluster.
@@ -22,12 +22,15 @@ remote, secured, multi-workspace platform:
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from typing import Any
+from typing import Any, TypeVar
 from unittest.mock import patch
 
 import httpx
 from nemo_agents_plugin.cli import AgentsCLI
+from nemo_helix_plugin.client.client import NemoClient
 from typer.testing import CliRunner
+
+ClientT = TypeVar("ClientT", bound=NemoClient)
 
 
 def _install_mock_transport(handler) -> AbstractContextManager[Any]:
@@ -108,6 +111,17 @@ class _FakeCLIContext:
     def get_base_url(self, default: str | None = None) -> str | None:
         return str(self._sdk.cluster.base_url)
 
+    def typed_client(self, client_cls: type[ClientT], timeout: float | httpx.Timeout | None = None) -> ClientT:
+        headers = self._sdk.user.get_client_config().get("default_headers")
+        default_headers = (
+            {str(key): str(value) for key, value in headers.items()} if isinstance(headers, dict) else None
+        )
+        return client_cls(
+            base_url=str(self._sdk.cluster.base_url),
+            default_headers=default_headers,
+            timeout=timeout,
+        )
+
     def get_output_format(self, override: str | None = None, *, apply_non_tty_default: bool = True) -> str:
         return override or "json"
 
@@ -181,7 +195,7 @@ def test_commands_use_the_cli_state_client_when_it_offers_one() -> None:
     )
 
     class _StateWithClients(_FakeCLIContext):
-        def typed_client(self, client_cls: type[NemoClient], timeout: float = 60.0) -> Any:
+        def typed_client(self, client_cls: type[NemoClient], timeout: float | httpx.Timeout | None = None) -> Any:
             return client_cls.from_client(shared)
 
     result = CliRunner().invoke(AgentsCLI().get_cli(), ["list"], obj=_StateWithClients(token=None))
@@ -191,16 +205,17 @@ def test_commands_use_the_cli_state_client_when_it_offers_one() -> None:
     assert captured[0].headers.get("authorization") == "Bearer shared-token"
 
 
-def test_base_url_defaults_to_localhost_without_context() -> None:
-    """Backwards compatibility: no context and no flag -> localhost:8080."""
+def test_platform_commands_require_cli_state() -> None:
+    """Platform calls use the CLI-owned client instead of creating a local fallback client."""
     captured: list[httpx.Request] = []
     app = AgentsCLI().get_cli()
     with _install_mock_transport(_capturing(captured)):
         result = CliRunner().invoke(app, ["list"])
 
-    assert result.exit_code == 0, result.stdout + (result.stderr or "")
-    assert captured[0].url.host == "localhost"
-    assert captured[0].url.port == 8080
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RuntimeError)
+    assert "No NeMo Helix CLI state" in str(result.exception)
+    assert captured == []
 
 
 def test_resolved_target_is_echoed_to_stderr_only() -> None:
@@ -238,12 +253,12 @@ def test_auth_header_attached_from_context() -> None:
     assert captured[0].headers.get("authorization") == "Bearer secret-token"
 
 
-def test_no_auth_header_without_context() -> None:
-    """No context -> no auth header (unauthenticated local dev keeps working)."""
+def test_no_auth_header_without_token() -> None:
+    """A CLI state with no token sends no auth header."""
     captured: list[httpx.Request] = []
     app = AgentsCLI().get_cli()
     with _install_mock_transport(_capturing(captured)):
-        result = CliRunner().invoke(app, ["list"])
+        result = CliRunner().invoke(app, ["list"], obj=_FakeCLIContext(token=None))
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     assert "authorization" not in captured[0].headers
@@ -315,17 +330,17 @@ def test_workspace_flag_overrides_active_context_workspace(monkeypatch) -> None:
     assert _workspace_from(captured[0]) == "flag-ws"
 
 
-def test_workspace_defaults_without_cli_state(monkeypatch) -> None:
-    """No CLI state and no flag -> ``default``, preserving direct/unit invocation."""
+def test_workspace_defaults_when_cli_state_has_no_workspace(monkeypatch) -> None:
+    """No configured workspace and no flag -> ``default``."""
     monkeypatch.delenv("NHX_WORKSPACE", raising=False)
-    _, captured = _invoke_capturing(["list"])
+    _, captured = _invoke_capturing(["list"], obj=_FakeCLIContext(workspace=None))
     assert _workspace_from(captured[0]) == "default"
 
 
-def test_workspace_falls_back_to_env_without_cli_state(monkeypatch) -> None:
-    """``$NHX_WORKSPACE`` applies when no CLI state object is installed."""
+def test_workspace_falls_back_to_env_when_cli_state_has_no_workspace(monkeypatch) -> None:
+    """``$NHX_WORKSPACE`` applies when the CLI state has no configured workspace."""
     monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
-    _, captured = _invoke_capturing(["list"])
+    _, captured = _invoke_capturing(["list"], obj=_FakeCLIContext(workspace=None))
     assert _workspace_from(captured[0]) == "env-ws"
 
 

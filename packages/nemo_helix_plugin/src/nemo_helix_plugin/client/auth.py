@@ -13,10 +13,9 @@ discovery) and :mod:`~.oidc_factory` (provider caching, config persistence).
 from __future__ import annotations
 
 import asyncio
-import inspect
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Generator
-from typing import Protocol, cast, runtime_checkable
+from typing import Protocol
 
 import httpx
 
@@ -25,22 +24,44 @@ import httpx
 # ---------------------------------------------------------------------------
 
 
-@runtime_checkable
 class TokenProvider(Protocol):
     """Sync protocol for objects that can supply an access token."""
 
     def get_access_token(self) -> str: ...
 
 
-@runtime_checkable
 class AsyncTokenProvider(Protocol):
     """Async protocol for objects that can supply an access token."""
 
-    async def get_access_token(self) -> str: ...
+    async def get_access_token_async(self) -> str: ...
+
+
+class AsyncClientTokenProvider(Protocol):
+    """Async client auth provider normalized for per-request token resolution."""
+
+    def set_http_client(self, http_client: httpx.AsyncClient) -> None: ...
+
+    async def get_access_token_async(self) -> str: ...
+
+    async def get_access_token_or_none_async(self) -> str | None: ...
 
 
 class ServicePrincipalTokenProvider(ABC):
     """Token provider that authenticates the local client as a platform service."""
+
+    @abstractmethod
+    def get_access_token(self) -> str:
+        """Return a valid access token for the service principal."""
+
+    async def get_access_token_async(self) -> str:
+        return await asyncio.to_thread(self.get_access_token)
+
+    def set_http_client(self, http_client: httpx.AsyncClient) -> None:
+        _ = http_client
+        return None
+
+    async def get_access_token_or_none_async(self) -> str:
+        return await self.get_access_token_async()
 
     @property
     @abstractmethod
@@ -66,31 +87,49 @@ class StaticToken:
     def get_access_token(self) -> str:
         return self._token
 
+    def set_http_client(self, http_client: httpx.AsyncClient) -> None:
+        _ = http_client
+        return None
+
     async def get_access_token_async(self) -> str:
         return self._token
 
-
-# ---------------------------------------------------------------------------
-# Token resolution
-# ---------------------------------------------------------------------------
+    async def get_access_token_or_none_async(self) -> str:
+        return self._token
 
 
-async def resolve_token_async(provider: TokenProvider | AsyncTokenProvider) -> str:
-    """Get an access token from *provider* without blocking the event loop.
+class AsyncFromSyncTokenProvider:
+    """Async adapter for sync token providers used by async clients."""
 
-    Three cases, in priority order:
+    def __init__(self, provider: TokenProvider) -> None:
+        self._provider = provider
 
-    1. Provider has ``get_access_token_async()`` (e.g. OIDCTokenProvider) — use it.
-    2. ``get_access_token()`` is a coroutine function — await it.
-    3. ``get_access_token()`` is sync — run in a thread, since it may perform IO
-       such as a token refresh.
-    """
-    get_async = getattr(provider, "get_access_token_async", None)
-    if get_async is not None and callable(get_async):
-        return await get_async()
-    if inspect.iscoroutinefunction(provider.get_access_token):
-        return await provider.get_access_token()
-    return await asyncio.to_thread(cast(TokenProvider, provider).get_access_token)
+    def set_http_client(self, http_client: httpx.AsyncClient) -> None:
+        _ = http_client
+        return None
+
+    async def get_access_token_async(self) -> str:
+        return await asyncio.to_thread(self._provider.get_access_token)
+
+    async def get_access_token_or_none_async(self) -> str:
+        return await self.get_access_token_async()
+
+
+class AsyncClientTokenProviderAdapter:
+    """Adapt an async token provider to the full async-client auth contract."""
+
+    def __init__(self, provider: AsyncTokenProvider) -> None:
+        self._provider = provider
+
+    def set_http_client(self, http_client: httpx.AsyncClient) -> None:
+        _ = http_client
+        return None
+
+    async def get_access_token_async(self) -> str:
+        return await self._provider.get_access_token_async()
+
+    async def get_access_token_or_none_async(self) -> str:
+        return await self.get_access_token_async()
 
 
 # ---------------------------------------------------------------------------
@@ -101,32 +140,23 @@ async def resolve_token_async(provider: TokenProvider | AsyncTokenProvider) -> s
 class TokenProviderAuth(httpx.Auth):
     """Applies a :class:`TokenProvider`'s bearer token at the transport layer.
 
-    ``NemoClient.send()`` sets ``Authorization`` itself, but raw calls made
-    through the exposed ``_client`` transport (plugin SDK resources) never
-    reach ``send()``. Installing this on the httpx
-    client keeps those requests authenticated.
-
-    Requests that already carry an ``Authorization`` header are left alone, so
-    ``send()`` and per-call header overrides stay authoritative.
+    This is for explicit proxy or legacy transports that authenticate every
+    request made through that transport. ``NemoClient`` keeps its default
+    transport neutral and resolves auth into per-request headers instead.
     """
 
-    def __init__(self, provider: TokenProvider | AsyncTokenProvider) -> None:
+    def __init__(self, provider: TokenProvider) -> None:
         self._provider = provider
 
     def sync_auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         if "Authorization" not in request.headers:
-            token = self._provider.get_access_token()
-            if inspect.isawaitable(token):
-                raise TypeError(
-                    "Async token provider used on a synchronous transport; "
-                    "use AsyncNemoClient with an AsyncTokenProvider."
-                )
-            request.headers["Authorization"] = f"Bearer {token}"
+            request.headers["Authorization"] = f"Bearer {self._provider.get_access_token()}"
         yield request
 
     async def async_auth_flow(self, request: httpx.Request) -> AsyncGenerator[httpx.Request, httpx.Response]:
         if "Authorization" not in request.headers:
-            request.headers["Authorization"] = f"Bearer {await resolve_token_async(self._provider)}"
+            token = await asyncio.to_thread(self._provider.get_access_token)
+            request.headers["Authorization"] = f"Bearer {token}"
         yield request
 
 

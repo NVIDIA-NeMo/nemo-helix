@@ -20,7 +20,6 @@ from nemo_agent_optimization_plugin.schemas.strategies import (
     OptimizationStrategy,
     OptimizationStrategyList,
 )
-from nemo_agents_plugin import cli_context
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoTransportError
 from typer.main import get_command
 from typer.testing import CliRunner
@@ -229,35 +228,12 @@ def test_a_rejected_request_is_reported_and_exits_nonzero(monkeypatch: pytest.Mo
     assert "token expired" in result.stderr
 
 
-def test_the_listing_builds_a_client_for_the_resolved_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Covers the plumbing the stubbed tests skip; the request itself is tested in test_client.py."""
-    captured: dict[str, Any] = {}
+def test_the_listing_requires_cli_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI state owns platform client construction; this helper has no local fallback."""
+    monkeypatch.setattr(cli_module, "resolve_base_url", lambda: "http://platform")
 
-    class _StubClient:
-        def __init__(self, **kwargs: Any) -> None:
-            captured.update(kwargs)
-
-        def __enter__(self) -> "_StubClient":
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            captured["closed"] = True
-
-        def list_strategies(self) -> Any:
-            return SimpleNamespace(data=lambda: OptimizationStrategyList.model_validate(_LISTING))
-
-    monkeypatch.setattr(cli_module, "AgentOptimizationClient", _StubClient)
-    monkeypatch.setattr(cli_context, "resolve_base_url", lambda: "http://platform")
-    monkeypatch.setattr(cli_context, "resolve_context_headers", lambda: {"Authorization": "Bearer token"})
-
-    strategies, target = cli_module._remote_strategies()
-
-    assert [s.name for s in strategies] == ["legacy"]
-    assert target == "http://platform"
-    assert captured["base_url"] == "http://platform"
-    assert captured["default_headers"] == {"Authorization": "Bearer token"}
-    # The client is used as a context manager, so its connection pool is released.
-    assert captured["closed"] is True
+    with pytest.raises(RuntimeError, match="No NeMo Helix CLI state"):
+        cli_module._remote_strategies()
 
 
 def test_under_nemo_the_listing_uses_the_cli_shared_client(monkeypatch: pytest.MonkeyPatch) -> None:

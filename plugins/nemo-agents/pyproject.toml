@@ -40,6 +40,8 @@ dependencies = [
     "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
     "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
     "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+    # Remote Agent only needs its HTTP client; the service is deployed independently.
+    "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
     # Fabric's Hermes adapter intentionally excludes the harness. Platform manages
     # the compatible Hermes Agent installation separately.
     "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",

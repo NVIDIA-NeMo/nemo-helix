@@ -15,6 +15,7 @@ import httpx
 import pytest
 import yaml
 from nemo_helix_ext.auth.helpers import NHXOIDCConfig
+from nemo_helix_ext.auth.token_provider import OIDCTokenProvider
 from nemo_helix_ext.client.bootstrap import (
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_RETRY_POLICY,
@@ -25,7 +26,6 @@ from nemo_helix_ext.client.bootstrap import (
     resolve_timeout,
 )
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
-from nemo_helix_plugin.client.auth import TokenProviderAuth
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.endpoint import get
 from nemo_helix_plugin.client.types import RetryPolicy
@@ -42,16 +42,14 @@ def probe() -> Probe:
 
 
 def _wire(client: NemoClient) -> list[httpx.Request]:
-    """Swap the transport for a recorder that answers every request, keeping the builder's auth hook."""
+    """Swap the transport for a recorder that answers every request."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return httpx.Response(200, json={"ok": True})
 
-    client._http = httpx.Client(
-        transport=httpx.MockTransport(handler), auth=client._http.auth, headers=client._http.headers
-    )
+    client._http = httpx.Client(transport=httpx.MockTransport(handler))
     return seen
 
 
@@ -87,6 +85,10 @@ def _oauth_config(tmp_path: Path, **kwargs) -> Path:
 
 def _api_key_config(tmp_path: Path) -> Path:
     return _write_config(tmp_path, user={"type": "api-key", "api_key": "nvapi-secret"})
+
+
+def _no_auth_config(tmp_path: Path) -> Path:
+    return _write_config(tmp_path, user={"type": "no-auth"})
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +129,7 @@ def test_direct_builders_apply_the_connect_cap_to_the_transport_and_per_request(
         assert built._timeout == expected
 
 
-@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
 def test_config_builders_apply_the_connect_cap(_discover, tmp_path: Path) -> None:
     config = _oauth_config(tmp_path)
 
@@ -144,7 +146,7 @@ def test_config_builders_apply_the_connect_cap(_discover, tmp_path: Path) -> Non
 # ---------------------------------------------------------------------------
 
 
-@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
 def test_sync_builders_close_the_transport_they_built(_discover, tmp_path: Path) -> None:
     """Nobody else holds the httpx client a builder creates, so close() must release its pool."""
     for client in (
@@ -159,7 +161,7 @@ def test_sync_builders_close_the_transport_they_built(_discover, tmp_path: Path)
 
 
 @pytest.mark.asyncio
-@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
 async def test_async_builders_close_the_transport_they_built(_discover, tmp_path: Path) -> None:
     for client in (
         build_async_nemo_client(config_path=_api_key_config(tmp_path)),
@@ -238,15 +240,111 @@ def test_direct_builder_prefers_the_env_ca_bundle(tmp_path: Path, monkeypatch: p
 # ---------------------------------------------------------------------------
 
 
-@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
-def test_oauth_builder_installs_the_provider_on_both_layers(_discover, tmp_path: Path) -> None:
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
+def test_oauth_builder_installs_provider_but_leaves_transport_neutral(_discover, tmp_path: Path) -> None:
     client = build_nemo_client(config_path=_oauth_config(tmp_path))
 
     assert isinstance(client, NemoClient)
     assert client._auth is not None
-    assert isinstance(client._http.auth, TokenProviderAuth)
+    assert client._http.auth is None
     assert client.workspace == "ws"
     assert client.base_url.rstrip("/") == "http://localhost:8080"
+
+
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
+def test_oauth_builder_passes_the_final_transport_to_discovery(discover, tmp_path: Path) -> None:
+    client = build_nemo_client(config_path=_oauth_config(tmp_path))
+
+    assert discover.call_args.kwargs["http_client"] is client._http
+
+
+def test_oauth_builder_reuses_discovery_transport_and_attaches_auth(tmp_path: Path) -> None:
+    token = _jwt(time.time() + 3600)
+    config = _write_config(tmp_path, user={"type": "oauth", "token": token, "refresh_token": "r"})
+    requests: list[httpx.Request] = []
+    built_clients: list[httpx.Client] = []
+    original_client = httpx.Client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/apis/auth/discovery":
+            return httpx.Response(
+                200,
+                json={
+                    "auth_enabled": True,
+                    "oidc": {
+                        "client_id": "nhx-client-id",
+                        "token_endpoint": "https://idp/token",
+                    },
+                },
+            )
+        return httpx.Response(200, json={"ok": True})
+
+    def client_factory(*args, **kwargs) -> httpx.Client:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        client = original_client(*args, **kwargs)
+        built_clients.append(client)
+        return client
+
+    with patch("nemo_helix_ext.client.bootstrap.httpx.Client", side_effect=client_factory):
+        client = build_nemo_client(config_path=config)
+        shared_transport = client._http
+        client.send(probe())
+        client.close()
+
+    assert built_clients == [shared_transport]
+    assert shared_transport.is_closed
+    assert [request.url.path for request in requests] == [
+        "/apis/auth/discovery",
+        "/apis/test/v2/probe",
+    ]
+    assert "Authorization" not in requests[0].headers
+    assert requests[1].headers["Authorization"] == f"Bearer {token}"
+
+
+@pytest.mark.asyncio
+async def test_async_oauth_builder_reuses_discovery_transport_and_attaches_auth(tmp_path: Path) -> None:
+    token = _jwt(time.time() + 3600)
+    config = _write_config(tmp_path, user={"type": "oauth", "token": token, "refresh_token": "r"})
+    requests: list[httpx.Request] = []
+    built_clients: list[httpx.AsyncClient] = []
+    original_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/apis/auth/discovery":
+            return httpx.Response(
+                200,
+                json={
+                    "auth_enabled": True,
+                    "oidc": {
+                        "client_id": "nhx-client-id",
+                        "token_endpoint": "https://idp/token",
+                    },
+                },
+            )
+        return httpx.Response(200, json={"ok": True})
+
+    def client_factory(*args, **kwargs) -> httpx.AsyncClient:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        client = original_client(*args, **kwargs)
+        built_clients.append(client)
+        return client
+
+    with patch("nemo_helix_ext.client.bootstrap.httpx.AsyncClient", side_effect=client_factory):
+        client = build_async_nemo_client(config_path=config)
+        shared_transport = client._http
+        await client.send(probe())
+        await client.close()
+
+    assert built_clients == [shared_transport]
+    assert shared_transport.is_closed
+    assert [request.url.path for request in requests] == [
+        "/apis/auth/discovery",
+        "/apis/test/v2/probe",
+    ]
+    assert "Authorization" not in requests[0].headers
+    assert requests[1].headers["Authorization"] == f"Bearer {token}"
 
 
 def test_oauth_builder_uses_discovered_cli_client_and_bearer_source(tmp_path: Path) -> None:
@@ -258,15 +356,15 @@ def test_oauth_builder_uses_discovered_cli_client_and_bearer_source(tmp_path: Pa
         token_endpoint="https://idp/token",
     )
 
-    with patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=oidc):
+    with patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=oidc):
         client = build_nemo_client(config_path=_oauth_config(tmp_path))
 
-    assert client._auth is not None
+    assert isinstance(client._auth, OIDCTokenProvider)
     assert client._auth.client_id == "cli-client"
     assert client._auth.bearer_token_source == "id_token"
 
 
-@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
 def test_oauth_builder_sends_the_stored_token_on_the_wire(_discover, tmp_path: Path) -> None:
     token = _jwt(time.time() + 3600)
     config = _write_config(tmp_path, user={"type": "oauth", "token": token, "refresh_token": "r"})
@@ -278,16 +376,16 @@ def test_oauth_builder_sends_the_stored_token_on_the_wire(_discover, tmp_path: P
     assert seen[0].headers["Authorization"] == f"Bearer {token}"
 
 
-@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
-def test_async_oauth_builder_installs_the_provider_on_both_layers(_discover, tmp_path: Path) -> None:
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
+def test_async_oauth_builder_installs_provider_but_leaves_transport_neutral(_discover, tmp_path: Path) -> None:
     client = build_async_nemo_client(config_path=_oauth_config(tmp_path))
 
     assert isinstance(client, AsyncNemoClient)
     assert client._auth is not None
-    assert isinstance(client._http.auth, TokenProviderAuth)
+    assert client._http.auth is None
 
 
-@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
 def test_api_key_builder_sends_the_key_as_a_bearer_header(_discover, tmp_path: Path) -> None:
     client = build_nemo_client(config_path=_api_key_config(tmp_path))
     seen = _wire(client)
@@ -297,7 +395,27 @@ def test_api_key_builder_sends_the_key_as_a_bearer_header(_discover, tmp_path: P
     assert seen[0].headers["Authorization"] == "Bearer nvapi-secret"
 
 
-@patch("nemo_helix_ext.client.bootstrap.discover_nhx_config", return_value=_OIDC)
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
+def test_no_auth_builder_does_not_use_oauth_discovery(discover, tmp_path: Path) -> None:
+    build_nemo_client(config_path=_no_auth_config(tmp_path))
+
+    discover.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
+async def test_async_no_auth_builder_does_not_create_sync_discovery_client(discover, tmp_path: Path) -> None:
+    with patch("nemo_helix_ext.client.bootstrap.httpx.Client") as sync_client_cls:
+        client = build_async_nemo_client(config_path=_no_auth_config(tmp_path))
+
+    try:
+        discover.assert_not_called()
+        sync_client_cls.assert_not_called()
+    finally:
+        await client.close()
+
+
+@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
 def test_config_builder_workspace_override_wins(_discover, tmp_path: Path) -> None:
     client = build_nemo_client(config_path=_api_key_config(tmp_path), workspace="other")
 

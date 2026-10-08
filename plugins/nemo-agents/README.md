@@ -49,18 +49,21 @@ executes it through the selected harness.
 ### Harness installation matrix
 
 The base Agents plugin installs Fabric, Relay support, and the Claude, Codex,
-DeepAgents, and Hermes adapter implementations. It does not install the
+DeepAgents, Hermes, and Remote Agent adapter implementations. It does not install the
 third-party harness packages. Choose an extra when the harness should share the
 Platform environment:
 
 | Harness selection | `nemo-helix` package expression | Plugin expression (source or local wheel) | Harness packages installed |
 |---|---|---|---|
 | Adapters only | `nemo-helix[nemo-agents-plugin]` | `nemo-agents-plugin` | None |
+| Remote Agent | `nemo-helix[nemo-agents-plugin]` | `nemo-agents-plugin` | None; connects to an independently deployed service |
 | Claude Code | `nemo-helix[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` | Claude Agent SDK and NeMo Relay CLI |
 | Codex | `nemo-helix[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` | OpenAI Codex and NeMo Relay CLI |
 | DeepAgents | `nemo-helix[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` | LangChain Deep Agents |
 | All installable harnesses | `nemo-helix[nemo-agents-plugin-claude,nemo-agents-plugin-codex,nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[all]` | Claude Code, Codex, and DeepAgents |
 | Hermes | `nemo-helix[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
+
+Remote Agent requires no harness extra. See the [Remote Agent example](examples/nemo-agent-config/README.md#remote-agent) for endpoint configuration and limitations.
 
 Install the Agents plugin and one harness with its namespaced Platform extra.
 For example, install DeepAgents with:

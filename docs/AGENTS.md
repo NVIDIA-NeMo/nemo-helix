@@ -47,4 +47,4 @@ These are generated; edit the source and regenerate:
 
 ## API reference
 
-The REST API reference is rendered natively by Fern from a docs-only filtered OpenAPI spec. `docs/fern/openapi/openapi.yaml` is a symlink to the generated repo-root `openapi/openapi.yaml`, and `npm run prepare:openapi` writes `docs/fern/openapi/openapi.public.yaml` for Fern. `docs/fern/generators.yml` must point at the public filtered spec, surfaced by the `- api: API Reference` nav node. No `<swagger-ui>` embed.
+The REST API reference is rendered natively by Fern from the generated OpenAPI spec. `docs/fern/openapi/openapi.yaml` is a symlink to the generated repo-root `openapi/openapi.yaml`. `docs/fern/generators.yml` must point at that spec, surfaced by the `- api: API Reference` nav node. No `<swagger-ui>` embed.

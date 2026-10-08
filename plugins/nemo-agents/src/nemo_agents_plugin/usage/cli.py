@@ -19,11 +19,6 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from nemo_agents_plugin.cli_context import (
-    resolve_base_url,
-    resolve_context_headers,
-    shared_cli_client,
-)
 from nemo_agents_plugin.usage import compute, render
 from nemo_agents_plugin.usage import parser as parser_module
 from nemo_agents_plugin.usage.models import (
@@ -34,7 +29,7 @@ from nemo_agents_plugin.usage.models import (
 from nemo_agents_plugin.usage.sources.fileset import FilesetDownloadError, FilesetRefError, fileset_path
 from nemo_agents_plugin.usage.sources.local import UsageSourceError, local_path
 from nemo_helix_plugin.cli_options import WorkspaceOption
-from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.cli_state import resolve_base_url, resolve_cli_workspace, shared_cli_client
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.refs import FilesetRef, LocalDir, classify_output_target
 
@@ -143,9 +138,10 @@ def _resolve_and_score(
         # Path-shaped but missing — clearer error than a fileset 404.
         raise UsageSourceError(f"local path does not exist: {candidate}")
 
-    # Only fileset refs contact the platform, so resolve/announce the target
-    # (and attach auth) here rather than for purely-local reads above.
-    client = _build_sdk(base_url=resolve_base_url())
+    # Only fileset refs contact the platform, so announce the target and
+    # attach auth here rather than for purely-local reads above.
+    resolve_base_url()
+    client = shared_cli_client(NemoClient)
     with fileset_path(FilesetRef(ref), client=client, workspace=workspace) as path:
         report = parser_module.parse_path(path)
         report = _rewrite_source_dirs(report, original_ref=ref, staged_root=path)
@@ -189,23 +185,6 @@ def _rewrite_task_source(
         return task.model_copy(update={"source_dir": original_ref.rstrip("/")})
     new_src = original_ref.rstrip("/") if str(rel) == "." else f"{original_ref.rstrip('/')}/{rel}"
     return task.model_copy(update={"source_dir": new_src})
-
-
-def _build_sdk(*, base_url: str) -> NemoClient:
-    """Construct a typed platform client for fileset downloads.
-
-    Under ``nemo`` this is the CLI's shared client, so fileset downloads use
-    the same base URL, auth, and token refresh as every other command.
-    Outside ``nemo`` (no CLI state), *base_url* — the value already resolved
-    by ``resolve_base_url`` — is used with any auth header the context offers.
-    """
-    shared = shared_cli_client(NemoClient)
-    if shared is not None:
-        return shared
-    headers = resolve_context_headers()
-    if headers:
-        return NemoClient(base_url=base_url, default_headers=headers)
-    return NemoClient(base_url=base_url)
 
 
 def _score_report(

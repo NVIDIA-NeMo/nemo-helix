@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 # CI type-checks this plugin via ty extra-paths without installing nemo-agents deps.
 from nemo_fabric import (
@@ -125,6 +125,39 @@ class FabricRuntimeTimeoutError(FabricRuntimeExecutionError):
     """Raised when a Fabric runtime invocation times out."""
 
 
+class FabricStreamingOptions(TypedDict, total=False):
+    launch_collector: bool
+
+
+def fabric_streaming_options(config: FabricConfig) -> FabricStreamingOptions:
+    """Use the remote service's shared collector for Remote Agent streaming."""
+    harness = config.harness
+    if harness is None or harness.adapter_id != "nvidia.fabric.remote-agent":
+        return {}
+    if harness.settings.get("relay_streaming") is not True:
+        raise FabricRuntimeStartError("Remote Agent streaming requires harness.settings.relay_streaming: true.")
+    if harness.settings.get("api_type", "openai-responses") not in {"openai-responses", "openai-completions"}:
+        raise FabricRuntimeStartError("Remote Agent streaming requires openai-responses or openai-completions.")
+    relay = config.relay
+    observability = relay.observability if relay is not None else None
+    atof = observability.atof if observability is not None else None
+    atof_config = atof if isinstance(atof, dict) else atof.model_dump() if atof is not None else {}
+    sinks = atof_config.get("sinks") or []
+    collectors = [sink for sink in sinks if sink.get("name") == "nemo-fabric-stream"]
+    if (
+        atof is None
+        or not atof_config.get("enabled")
+        or len(collectors) != 1
+        or collectors[0].get("type") != "stream"
+        or not str(collectors[0].get("url", "")).startswith(("http://", "https://"))
+    ):
+        raise FabricRuntimeStartError(
+            "Remote Agent streaming requires telemetry.atof.enabled: true and one HTTP(S) "
+            "stream sink named nemo-fabric-stream pointing to the shared collector."
+        )
+    return {"launch_collector": False}
+
+
 def _timeout_error_message(timeout_seconds: float | None) -> str:
     if timeout_seconds is None:
         return "Fabric runtime invocation timed out."
@@ -227,6 +260,7 @@ async def _one_shot_runtime(
                     base_dir=request.base_dir,
                     overrides=request.overrides,
                     streaming=streaming,
+                    **(fabric_streaming_options(request.fabric_config) if streaming else {}),
                 )
                 runtime = await stack.enter_async_context(runtime)
             except FabricError as error:

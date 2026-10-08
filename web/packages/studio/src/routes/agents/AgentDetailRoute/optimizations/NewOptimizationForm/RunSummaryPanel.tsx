@@ -3,7 +3,6 @@
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { Badge, Banner, Card, Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import type { OptimizationTarget } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
 import {
   formatRange,
   type OptimizationBudget,
@@ -25,7 +24,7 @@ export interface RunSummaryPanelProps {
   intent: OptimizationIntent;
   budget: OptimizationBudget;
   searchSpace: SearchParameter[];
-  target?: OptimizationTarget;
+  rows?: number;
   blockingReason?: string;
   submitError?: string;
   isSubmitting: boolean;
@@ -43,13 +42,12 @@ export interface RunSummaryPanelProps {
 export const RunSummaryPanel: FC<RunSummaryPanelProps> = ({
   budget,
   searchSpace,
-  target,
+  rows,
   blockingReason,
   submitError,
   isSubmitting,
   onRun,
 }) => {
-  const rows = target?.evaluation.test_case_count;
   const agentRuns = rows === undefined ? undefined : budget.trials * rows;
 
   return (
@@ -75,7 +73,7 @@ export const RunSummaryPanel: FC<RunSummaryPanelProps> = ({
         </Flex>
         <Text kind="body/regular/xs" color="secondary">
           {rows === undefined
-            ? 'Agent runs are unknown until the evaluation reports its test-case count.'
+            ? "Agent runs are unknown until the evaluation's rows are counted."
             : `${budget.trials} trials × ${rows} rows.`}{' '}
           Trials run against the deployed agent — nothing is overwritten until you promote one.
         </Text>

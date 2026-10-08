@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { JOB_NAME_MAX_LENGTH } from '@studio/components/evaluation/submitEvaluationJob';
 import {
   type BudgetId,
   type IntentId,
@@ -11,14 +12,21 @@ import { z } from 'zod';
 
 /** Entity-naming contract: the literal typed value is never rewritten, and the sanitized name is
  *  what reaches submit — so a cosmetic deviation is a preview concern, not a validation error.
- *  Only input `sanitizeEntityName` cannot salvage becomes an issue. */
+ *  Only input `sanitizeEntityName` cannot salvage becomes an issue, or a name too long for the
+ *  study's job, whose output fileset is named after it. */
 const nameSchema = z
   .string()
   .superRefine((value, ctx) => {
-    if (sanitizeEntityName(value) === undefined) {
+    const sanitized = sanitizeEntityName(value);
+    if (sanitized === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: value ? 'Name must contain at least one letter or number.' : 'Name is required.',
+      });
+    } else if (sanitized.length > JOB_NAME_MAX_LENGTH) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Name must be ${JOB_NAME_MAX_LENGTH} characters or fewer.`,
       });
     }
   })
@@ -47,7 +55,6 @@ export const optimizationFormSchema = z.object({
   intent: z.enum(['accuracy', 'brevity', 'creativity', 'cost']),
   budget: z.enum(['quick', 'standard', 'thorough']),
   experimentId: z.string().min(1, 'Pick an evaluation to score trials against.'),
-  judgeModel: z.string().min(1, 'Pick a judge model to score trials with.'),
   searchSpace: z.array(searchParameterSchema).min(1, 'Sweep at least one parameter.'),
 });
 
@@ -58,7 +65,6 @@ export type OptimizationFormValues = {
   intent: IntentId;
   budget: BudgetId;
   experimentId: string;
-  judgeModel: string;
   searchSpace: SearchParameter[];
 };
 

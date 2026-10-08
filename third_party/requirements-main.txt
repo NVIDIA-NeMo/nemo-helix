@@ -1271,6 +1271,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
     #   nemo-evaluator-sdk
+    #   nemo-fabric-adapters-remote-agent
     #   nemo-fabric-runtime
     #   nemo-helix
     #   nemo-helix-ext
@@ -2043,6 +2044,7 @@ nemo-fabric-adapter-contract==0.4.0 ; (platform_machine == 'arm64' and sys_platf
     #   nemo-fabric-adapters-common
     #   nemo-fabric-adapters-deepagents
     #   nemo-fabric-adapters-hermes
+    #   nemo-fabric-adapters-remote-agent
     #   nemo-helix
     #   nemo-insights-plugin
 nemo-fabric-adapters-claude==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -2062,6 +2064,7 @@ nemo-fabric-adapters-common==0.4.0 ; (platform_machine == 'arm64' and sys_platfo
     #   nemo-fabric-adapters-codex
     #   nemo-fabric-adapters-deepagents
     #   nemo-fabric-adapters-hermes
+    #   nemo-fabric-adapters-remote-agent
     #   nemo-helix
     #   nemo-insights-plugin
 nemo-fabric-adapters-deepagents==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -2071,6 +2074,11 @@ nemo-fabric-adapters-deepagents==0.4.0 ; (platform_machine == 'arm64' and sys_pl
     #   nemo-helix
 nemo-fabric-adapters-hermes==0.4.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:07d8acbeb6db3db9c2f5a9043d374e43704643158df59617ac395346eb6e4144
+    # via
+    #   nemo-agents-plugin
+    #   nemo-helix
+nemo-fabric-adapters-remote-agent==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:05404ec6e757106d0163b34f0a9cae2a15916c6a3f7703b3373153303ec9bb32
     # via
     #   nemo-agents-plugin
     #   nemo-helix
@@ -2470,6 +2478,7 @@ opentelemetry-exporter-otlp-proto-http==1.43.0 ; (platform_machine == 'arm64' an
     # via
     #   nhx-common
     #   opentelemetry-exporter-otlp
+    #   wandb
 opentelemetry-exporter-prometheus==0.64b0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:96fec79be9527cb9dc994d7e663051df35161eb936fe2d41954725e4595abbc1 \
     --hash=sha256:9979a15f8d007d442bc7a6e16f4cbde5e8e0c5e99689887ceb5f33da251f0655
@@ -2554,6 +2563,7 @@ opentelemetry-sdk==1.43.0 ; (platform_machine == 'arm64' and sys_platform == 'da
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-exporter-prometheus
     #   opentelemetry-processor-baggage
+    #   wandb
 opentelemetry-semantic-conventions==0.64b0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:72f76fb2d1582d9d033dd1fcd84532e961e6ff3d90d24ba6fabc72975a83864c \
     --hash=sha256:ea77e85e354b8f604ddbe5f3d9135216f982fa4d77e5859ac30f6d8a50505aa6
@@ -3629,9 +3639,7 @@ sentencepiece==0.2.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin'
 sentry-sdk==2.66.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:86002793161d9a95ef04bdd8d442e9bfece5d989b755f05d6360215094a7aff6 \
     --hash=sha256:f882fb08710c5f8bfc603aafa3e901b384009a19cc3f76a572b863392ee81cdc
-    # via
-    #   fastapi-cloud-cli
-    #   wandb
+    # via fastapi-cloud-cli
 setuptools==83.0.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:025bccbbf0fa05b6192bc64ae1e7b16e001fd6d6d4d5de03c97b1c1ade523bef \
     --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3
@@ -4246,13 +4254,13 @@ validators==0.35.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     --hash=sha256:992d6c48a4e77c81f1b4daba10d16c3a9bb0dbb79b3a19ea847ff0928e70497a \
     --hash=sha256:e8c947097eae7892cb3d26868d637f79f47b4a0554bc6b80065dfe5aac3705dd
     # via ngcsdk
-wandb==0.29.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:095b17df32ead3b459069b460665cea1d1781c63ad649be042894bc8e4c17b0b \
-    --hash=sha256:217236c7347cd9c9c9e0332d5cf6d7342ca47d9d81faf2bcd1674d72988870c3 \
-    --hash=sha256:2bdb72ba809192a1a170830bea1071804d762769448f3ceb822b41160b9f6098 \
-    --hash=sha256:44981b504427ba312e0823fa62c02ff96fb9740a83e4657e693e3e2097cde603 \
-    --hash=sha256:c9efa966c3bf7b7a80bf461e4856546f0592cbb6a47e6f292db4d8e7270dab73 \
-    --hash=sha256:fdfd8845539302d2e3a880bc3d2586c2fd2da9515939cbc69e173d88f9e8c024
+wandb==0.30.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:1f2cc20c033f1650d387ca073177e629f1e2a1b5c4be393698e3db4752b9cf3a \
+    --hash=sha256:72b564712e85e10d78d37ccdaef4a908d28cbb39240c9c00fa4dde567150c764 \
+    --hash=sha256:bad9412f137d02303bf178513e0109f4fed37a6c817604085a1a4151047d8790 \
+    --hash=sha256:e7dc3b0b1567f6a121d8f7a58131b5d085861139a653ef8bed1569c9be796721 \
+    --hash=sha256:f2d7de3c2019204f493f3f9e9166071c2be36f74140af2e1409b4de0fd84c454 \
+    --hash=sha256:f4f908ace761db42d239d100230df0b77eb9684924d962a762bba176d829a236
     # via
     #   nhx-rl
     #   nhx-unsloth

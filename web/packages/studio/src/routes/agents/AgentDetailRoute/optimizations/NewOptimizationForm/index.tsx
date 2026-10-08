@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { Button, FormField, Stack, Stepper, Text, TextInput } from '@nvidia/foundations-react-core';
+import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { BudgetSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/BudgetSection';
 import { EvaluationSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/EvaluationSection';
 import {
@@ -15,6 +17,7 @@ import { IntentSection } from '@studio/routes/agents/AgentDetailRoute/optimizati
 import { buildOptimizationName } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationName';
 import { optimizationTargets } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
 import { RunSummaryPanel } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/RunSummaryPanel';
+import { useStudyRowCount } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useStudyRowCount';
 import {
   budgetById,
   intentById,
@@ -30,14 +33,11 @@ export interface NewOptimizationFormProps {
   agentName?: string;
   evals: AgentEvaluationRow[];
   isEvalsPending: boolean;
-  /** Returns to the studies table; also the target of the breadcrumb above the header. */
+  /** Returns to the strategy picker; the target of the back button above the header. */
   onBack: () => void;
   /**
-   * Starts the study from the validated answers.
-   *
-   * Left unset for now, which is what holds the run button closed: generating the optimize config,
-   * staging the evaluation's rows, and creating the job are the submit path, and they land
-   * separately. Wiring this up is the whole of that change at this call site.
+   * Starts the study from the validated answers. A rejection is shown beside the run button, so
+   * its message should be one a user can act on. Left unset, the run button stays closed.
    */
   onSubmit?: (values: OptimizationFormOutput) => Promise<void>;
 }
@@ -46,8 +46,8 @@ export interface NewOptimizationFormProps {
  * Configure a numeric HPO study for one agent.
  *
  * Renders in place of the studies table rather than in a modal: the form carries a run summary
- * beside it, which does not survive a dialog's width, and its own breadcrumb is what returns to
- * the list.
+ * beside it, which does not survive a dialog's width, and its own back button is what returns to
+ * the strategy picker it was chosen from.
  *
  * The user answers three questions — what to tune for, what to score against, how many trials.
  * Nothing here asks for a config path or a fileset; those are derived on submit.
@@ -59,6 +59,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   onBack,
   onSubmit,
 }) => {
+  const workspace = useWorkspaceFromPath();
   const targets = useMemo(() => optimizationTargets(evals), [evals]);
 
   const methods = useForm<OptimizationFormValues, unknown, OptimizationFormOutput>({
@@ -69,7 +70,6 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
       intent: DEFAULT_INTENT,
       budget: 'standard',
       experimentId: '',
-      judgeModel: '',
       searchSpace: intentById(DEFAULT_INTENT).parameters,
     },
   });
@@ -95,7 +95,6 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   const budget = budgetById(watch('budget'));
   const searchSpace = watch('searchSpace');
   const experimentId = watch('experimentId');
-  const judgeModel = watch('judgeModel');
 
   // Regenerate when the intent changes, since the intent is part of the name — and when the agent
   // finally resolves, which is what leaves the initial name empty.
@@ -116,6 +115,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   }, [experimentId, targets, setValue]);
 
   const target = targets.find((candidate) => candidate.experimentId === experimentId);
+  const { rowCount, error: rowsError } = useStudyRowCount(workspace, target);
 
   const nameError = touchedFields.name ? errors.name?.message : undefined;
 
@@ -123,19 +123,24 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
     ? 'No agent selected.'
     : !experimentId
       ? 'Pick an evaluation to score trials against.'
-      : !judgeModel
-        ? 'Pick a judge model to score trials with.'
-        : nameError
-          ? 'Fix the name before running.'
-          : errors.searchSpace
-            ? 'Fix the search space before running.'
-            : !onSubmit
-              ? 'Running a study from here is not available yet.'
-              : undefined;
+      : nameError
+        ? 'Fix the name before running.'
+        : errors.searchSpace
+          ? 'Fix the search space before running.'
+          : !onSubmit
+            ? 'Running a study from here is not available yet.'
+            : undefined;
+
+  const [submitError, setSubmitError] = useState<string | undefined>();
 
   const submit = handleSubmit(async (values) => {
     if (!onSubmit) return;
-    await onSubmit(values);
+    setSubmitError(undefined);
+    try {
+      await onSubmit(values);
+    } catch (error) {
+      setSubmitError(getErrorMessage(error as Error, 'Could not start the optimization.'));
+    }
   });
 
   return (
@@ -143,7 +148,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
       <Stack gap="density-xl" className="w-full">
         <Button kind="tertiary" className="w-fit px-0" onClick={onBack}>
           <ChevronLeft className="size-4" aria-hidden />
-          Optimizations
+          Back
         </Button>
 
         <Stack gap="density-sm">
@@ -188,11 +193,11 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             <Stepper
               layout="vertical"
               aria-label="Optimization setup"
-              activeStep={experimentId && judgeModel ? 3 : 1}
+              activeStep={experimentId ? 3 : 1}
               items={[
                 {
                   slotHeading: 'What are you tuning for?',
-                  slotDescription: 'Pick one — it sets the objective and the parameters we sweep',
+                  slotDescription: 'Pick one — it sets the parameters we sweep',
                   slotSuccessIndicator: 1,
                   slotContent: <IntentSection />,
                 },
@@ -222,8 +227,13 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             intent={intent}
             budget={budget}
             searchSpace={searchSpace}
-            target={target}
+            rows={rowCount}
             blockingReason={blockingReason}
+            submitError={
+              rowsError && submitError && rowsError !== submitError
+                ? `${rowsError} ${submitError}`
+                : (rowsError ?? submitError)
+            }
             isSubmitting={isSubmitting}
             onRun={() => void submit()}
           />

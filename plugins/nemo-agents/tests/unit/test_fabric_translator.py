@@ -77,6 +77,24 @@ def _example_yaml_config() -> dict[str, Any]:
 
 
 class TestTranslateAgentConfig:
+    @pytest.mark.parametrize("kind", ["remote-agent", "nvidia.fabric.remote-agent"])
+    @pytest.mark.parametrize("api_type", ["openai-responses", "openai-completions", "anthropic-messages"])
+    def test_remote_agent_keeps_endpoint_in_harness_settings(self, kind: str, api_type: str) -> None:
+        example_path = Path(__file__).parents[2] / "examples/nemo-agent-config/agent-remote.yaml"
+        config = load_agent_config(example_path)
+        config.harnesses["remote-agent"].kind = kind
+        config.harnesses["remote-agent"].settings["api_type"] = api_type
+
+        translated = translate_agent_config(config)
+
+        assert translated.harness is not None
+        assert translated.harness.adapter_id == "nvidia.fabric.remote-agent"
+        assert translated.harness.resolution == "preinstalled"
+        assert translated.harness.settings["base_url"] == "https://agent.example.com/v1"
+        assert translated.harness.settings["api_type"] == api_type
+        assert translated.models["default"].base_url is None
+        assert translated.models["default"].api_key_env == "REMOTE_AGENT_API_KEY"
+
     @pytest.mark.parametrize("harness_override", [False, True])
     def test_forwards_model_sampling_parameters(self, harness_override: bool) -> None:
         payload = _example_yaml_config()
@@ -317,6 +335,7 @@ class TestTranslateAgentConfig:
             ("codex", "nvidia.fabric.codex"),
             ("deepagents", "nvidia.fabric.langchain.deepagents"),
             ("hermes", "nvidia.fabric.hermes"),
+            ("pi", "nvidia.fabric.pi"),
         ],
     )
     def test_supported_harness_kinds_translate_to_adapter_ids(
@@ -464,6 +483,42 @@ class TestTranslateAgentConfig:
         with pytest.raises(FabricTranslationError, match="no models.default is configured"):
             translate_agent_config(config)
 
+    def test_relay_defaults_pi_runtime_artifacts_when_unset(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # Fabric creates the runtime-owned Relay config under runtime.artifacts, so a
+        # Relay-enabled Pi agent must have it set or Pi startup fails.
+        assert fabric_config.runtime.artifacts == "./artifacts/pi"
+
+    def test_relay_preserves_explicit_pi_runtime_artifacts(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        payload["runtime"] = {"artifacts": "./custom/artifacts"}
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # An explicitly configured runtime.artifacts is never overwritten.
+        assert fabric_config.runtime.artifacts == "./custom/artifacts"
+
+    def test_relay_runtime_artifacts_default_only_applies_to_pi(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # A non-Pi Relay harness (hermes here) does not get the Pi artifacts default.
+        assert fabric_config.runtime.artifacts is None
+
     def test_relay_telemetry_uses_latest_fabric_shape(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())
         payload["telemetry"]["enabled"] = True
@@ -504,6 +559,60 @@ class TestTranslateAgentConfig:
                 ],
             },
         }
+
+    def test_relay_defaults_pi_extension_path_when_unset(self) -> None:
+        from nemo_agents_plugin.fabric.translator import PI_RELAY_EXTENSION_PATH
+
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # The Pi adapter hard-requires relay_extension_path when Relay is active; the
+        # translator defaults it to the image-staged copy so telemetry does not fail.
+        assert fabric_config.harness.settings["relay_extension_path"] == PI_RELAY_EXTENSION_PATH
+
+    def test_relay_preserves_explicit_pi_extension_path(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {
+            "kind": "nvidia.fabric.pi",
+            "settings": {"relay_extension_path": "/custom/pi-extension"},
+        }
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # An explicitly configured path is never overwritten by the default.
+        assert fabric_config.harness.settings["relay_extension_path"] == "/custom/pi-extension"
+
+    def test_relay_extension_default_only_applies_to_pi(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # Only the Pi adapter consumes relay_extension_path; a non-Pi harness (hermes
+        # here) must not have it injected.
+        assert "relay_extension_path" not in fabric_config.harness.settings
+
+    def test_relay_extension_default_skipped_when_telemetry_disabled(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        # telemetry.enabled stays False (the _example default)
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # No Relay, no extension-path default — a plain Pi agent is untouched.
+        assert fabric_config.relay is None
+        assert "relay_extension_path" not in fabric_config.harness.settings
 
     def test_relay_telemetry_prefers_platform_registered_agent_name(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())

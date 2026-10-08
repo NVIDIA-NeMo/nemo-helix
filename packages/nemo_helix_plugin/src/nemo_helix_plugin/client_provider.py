@@ -39,7 +39,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from nemo_helix_plugin.client.auth import TokenProvider
+from nemo_helix_plugin.client.auth import AsyncFromSyncTokenProvider, TokenProvider
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.constants import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
@@ -293,7 +293,7 @@ class DefaultNemoClientProvider:
             return AsyncNemoClient(
                 base_url=base_url,
                 workspace=workspace,
-                auth=_workload_identity_auth(base_url),
+                auth=AsyncFromSyncTokenProvider(_workload_identity_auth(base_url)),
                 default_headers=headers,
             )
 
@@ -331,7 +331,7 @@ class DefaultNemoClientProvider:
             return AsyncNemoClient(
                 base_url=base_url,
                 workspace=workspace,
-                auth=_workload_identity_auth(base_url),
+                auth=AsyncFromSyncTokenProvider(_workload_identity_auth(base_url)),
                 default_headers={_INTERNAL_REQUEST_HEADER: "true"},
             )
         return AsyncNemoClient(

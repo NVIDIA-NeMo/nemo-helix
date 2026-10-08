@@ -4,16 +4,27 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import cast
+from typing import TypeVar, cast
 
+import click
+import httpx
 import pytest
 import typer
 from nemo_helix_plugin.cli_state import (
+    base_url_from_context,
     cli_state,
+    current_cli_state,
+    resolve_base_url,
     resolve_cli_workspace,
+    resolve_context_headers,
     resolve_local_cli_sdks,
     resolve_output_format,
+    shared_cli_client,
+    shared_cli_client_context,
 )
+from nemo_helix_plugin.client.client import NemoClient
+
+ClientT = TypeVar("ClientT", bound=NemoClient)
 
 
 def _typer_context_with_obj(obj: object | None) -> typer.Context:
@@ -134,6 +145,68 @@ class TestCliState:
     def test_raises_outside_the_cli(self) -> None:
         with pytest.raises(RuntimeError, match="run the command through `nemo`"):
             cli_state(_typer_context_with_obj(None))
+
+
+class _AmbientState:
+    def __init__(self) -> None:
+        self.client = NemoClient(
+            base_url="https://platform",
+            default_headers={"Authorization": "Bearer token"},
+            http_client=httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, request=req))),
+        )
+        self.requests: list[tuple[type[NemoClient], float | httpx.Timeout | None]] = []
+
+    def get_base_url(self, default: str | None = None) -> str:
+        return self.client.base_url
+
+    def typed_client(
+        self,
+        client_cls: type[ClientT],
+        timeout: float | httpx.Timeout | None = None,
+    ) -> ClientT:
+        self.requests.append((client_cls, timeout))
+        return client_cls.from_client(self.client)
+
+
+class TestAmbientCliState:
+    def test_resolves_state_from_click_context(self) -> None:
+        state = _AmbientState()
+        with click.Context(click.Command("cmd"), obj=state):
+            assert current_cli_state() is state
+
+    def test_resolves_and_announces_base_url_from_ambient_context(self) -> None:
+        state = _AmbientState()
+        with click.Context(click.Command("cmd"), obj=state):
+            assert base_url_from_context() == "https://platform"
+            assert resolve_base_url() == "https://platform"
+
+    def test_shared_cli_client_uses_state_typed_client(self) -> None:
+        state = _AmbientState()
+        with click.Context(click.Command("cmd"), obj=state):
+            client = shared_cli_client(NemoClient, timeout=12.0)
+
+        assert client.base_url == "https://platform"
+        assert state.requests == [(NemoClient, 12.0)]
+
+    def test_shared_cli_client_requires_ambient_state(self) -> None:
+        with pytest.raises(RuntimeError, match="No NeMo Helix CLI state"):
+            shared_cli_client(NemoClient)
+
+    def test_shared_cli_client_context_yields_without_owning_transport(self) -> None:
+        state = _AmbientState()
+        with click.Context(click.Command("cmd"), obj=state):
+            with shared_cli_client_context(NemoClient) as client:
+                assert client.base_url == "https://platform"
+
+        assert state.requests == [(NemoClient, None)]
+
+    def test_resolve_context_headers_uses_shared_client(self) -> None:
+        state = _AmbientState()
+        with click.Context(click.Command("cmd"), obj=state):
+            assert resolve_context_headers({"X-Request-ID": "req-1"}, url="https://platform/apis") == {
+                "Authorization": "Bearer token",
+                "X-Request-ID": "req-1",
+            }
 
 
 class TestResolveOutputFormat:

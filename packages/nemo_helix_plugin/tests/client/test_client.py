@@ -646,7 +646,10 @@ async def test_to_async_mirrors_the_config_on_its_own_transport() -> None:
         assert isinstance(async_client, AsyncNemoClient)
         assert async_client.base_url == sync_client.base_url
         assert async_client.workspace == "ws"
-        assert async_client._auth is sync_client._auth
+        assert await async_client.request_headers() == {
+            "X-Test": "1",
+            "Authorization": "Bearer token",
+        }
         assert async_client.default_headers == {"X-Test": "1"}
         assert async_client._timeout == upload_timeout
         assert async_client.retry is retry

@@ -37,7 +37,6 @@ from datetime import datetime
 from typing import Protocol
 
 import openai
-from nemo_helix_plugin.client.auth import resolve_token_async
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.client.method import method
@@ -478,7 +477,7 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
             token_provider = auth
 
             async def api_key() -> str:
-                return await resolve_token_async(token_provider)
+                return await token_provider.get_access_token_async()
 
         return openai.AsyncOpenAI(
             base_url=self.get_openai_route_base_url(workspace=workspace),
