@@ -69,6 +69,7 @@ const validValidation = {
   encoding: { ok: true, fileErrors: [] },
   hasTraining: true,
   hasValidation: false,
+  unmatchedRootJson: [],
   autoSplitNotice: false,
   training: [],
   validation: [],

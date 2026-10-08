@@ -27,6 +27,7 @@ const buildValidation = (
   encoding: { ok: true, fileErrors: [] },
   hasTraining: true,
   hasValidation: true,
+  unmatchedRootJson: [],
   autoSplitNotice: false,
   training: [],
   validation: [],

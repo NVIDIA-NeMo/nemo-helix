@@ -140,6 +140,13 @@ export interface CustomizationDatasetValidationResult {
   schemaShape: string;
   hasTraining: boolean;
   hasValidation: boolean;
+  /**
+   * Root-level .json files that matched no training/validation pattern.
+   * Not validated by the main pass (they are not in `training`).
+   * Only native Unsloth with apply_chat_template disabled should treat these
+   * as training; all other consumers can ignore this field.
+   */
+  unmatchedRootJson: FilesetFileOutput[];
   /** Show "customizer will auto-split 10%" notice. */
   autoSplitNotice: boolean;
   /**
@@ -302,6 +309,7 @@ export const useCustomizationDatasetValidation = ({
   const {
     training,
     validation,
+    unmatchedRootJson,
     isPending: isDiscoveryPending,
     error: discoveryError,
   } = useDatasetFileDiscovery({ fileset });
@@ -437,6 +445,7 @@ export const useCustomizationDatasetValidation = ({
     encoding,
     hasTraining,
     hasValidation,
+    unmatchedRootJson,
     autoSplitNotice: hasTraining && !hasValidation,
     training: annotatedTraining,
     validation: annotatedValidation,
