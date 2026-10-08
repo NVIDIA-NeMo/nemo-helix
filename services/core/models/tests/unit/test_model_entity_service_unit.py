@@ -15,11 +15,13 @@ from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput, List
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter
+from nhx.common.entities import ALL_WORKSPACES
 from nhx.common.entities.client import EntityClient, EntityNotFoundError
 from nhx.core.models.api.service.model_entity_service import (
     ModelEntityService,
     _model_to_model_entity,
     _repo_id_matches_trusted,
+    expand_bare_fileset_equality,
 )
 from nhx.core.models.api.v2.models import is_trusted_repo_id
 from nhx.core.models.config import config
@@ -1707,3 +1709,21 @@ async def test_list_model_entities_rejects_untranslated_lora_inside_or(model_ent
     with pytest.raises(ValueError, match="lora_enabled"):
         await model_entity_service.list_model_entities(workspace="default", parsed_filter=parsed_filter)
     mock_entity_client.list.assert_not_called()
+
+
+def test_bare_fileset_filter_matches_the_name_and_the_workspace_name():
+    operation = ComparisonOperation(operator=FilterOperator.EQ, field="data.fileset", value="llama")
+    expanded = expand_bare_fileset_equality(operation, "default")
+    assert isinstance(expanded, LogicalOperation)
+    assert expanded.operator == FilterOperator.OR
+    assert {op.value for op in expanded.operations} == {"llama", "default/llama"}
+
+
+def test_qualified_fileset_filter_stays_exact():
+    operation = ComparisonOperation(operator=FilterOperator.EQ, field="data.fileset", value="default/llama")
+    assert expand_bare_fileset_equality(operation, "default") is operation
+
+
+def test_all_workspaces_fileset_filter_stays_exact():
+    operation = ComparisonOperation(operator=FilterOperator.EQ, field="data.fileset", value="llama")
+    assert expand_bare_fileset_equality(operation, ALL_WORKSPACES) is operation

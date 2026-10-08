@@ -91,6 +91,11 @@ def fileset_ref_field(default: Any, description: str):
     )
 
 
+def stored_fileset_field(default: Any, description: str):
+    """Fileset read back from storage. Create and update requests use ``fileset_ref_field``."""
+    return Field(default, description=f"{description} {FILESET_REF_PATTERN_DESCRIPTION}")
+
+
 # ---------------------------------------------------------------------------
 # Auth context (data-only mirror of nhx.common.auth.AuthContext)
 # ---------------------------------------------------------------------------
@@ -896,7 +901,7 @@ class Adapter(BaseModel):
         description="Optional description of the adapter",
         max_length=1000,
     )
-    fileset: str = fileset_ref_field(
+    fileset: str = stored_fileset_field(
         ...,
         "Fileset where the adapter files are stored.",
     )
@@ -937,7 +942,7 @@ class ModelEntity(ModelEntityBaseModel):
     )
     spec: ModelSpec | None = Field(default=None, description="Detailed specification for the model")
     finetuning_type: FinetuningType | None = Field(None, description="Set for full weight finetuned models")
-    fileset: str | None = fileset_ref_field(
+    fileset: str | None = stored_fileset_field(
         None,
         "A set of checkpoint files, configs, and other auxiliary info associated with this model.",
     )

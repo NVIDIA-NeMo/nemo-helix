@@ -45,6 +45,15 @@ def fileset_ref_field(default: Any, description: str):
     )
 
 
+def stored_fileset_field(default: Any, description: str):
+    """Fileset read back from storage.
+
+    Create and update requests use ``fileset_ref_field``. Rows written earlier can
+    still hold a URL or a ``fileset://`` reference, and those reads must succeed.
+    """
+    return Field(default, description=f"{description} {FILESET_REF_PATTERN_DESCRIPTION}")
+
+
 FilesetRefStr = Annotated[
     str,
     Field(
@@ -1002,7 +1011,7 @@ class Adapter(BaseModel):
         max_length=1000,
     )
 
-    fileset: str = fileset_ref_field(
+    fileset: str = stored_fileset_field(
         ...,
         "Fileset where the adapter files are stored.",
     )
@@ -1051,7 +1060,7 @@ class ModelEntity(ModelEntityBaseModel):
 
     # TODO Replace this with Optional[Union[str, Fileset]] when fileset is accessible outside of the
     # so that a user can inline the fileset definition
-    fileset: Optional[str] = fileset_ref_field(
+    fileset: Optional[str] = stored_fileset_field(
         None,
         "A set of checkpoint files, configs, and other auxiliary info associated with this model.",
     )

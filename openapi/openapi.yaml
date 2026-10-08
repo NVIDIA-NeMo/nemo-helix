@@ -8917,9 +8917,6 @@ components:
           maxLength: 1000
         fileset:
           type: string
-          maxLength: 127
-          minLength: 2
-          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           title: Fileset
           description: 'Fileset where the adapter files are stored. Either a fileset
             name or ''workspace/fileset_name''. A bare name is resolved in the request
@@ -16997,9 +16994,6 @@ components:
             letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
             and it cannot end with a hyphen.'
           type: string
-          maxLength: 127
-          minLength: 2
-          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
         trust_remote_code:
           type: boolean
           title: Trust Remote Code

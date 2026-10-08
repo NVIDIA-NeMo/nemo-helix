@@ -13,6 +13,7 @@ import pytest
 from nhx.common.entities import constants
 from nhx.core.models.constants import FILESET_REF_MAX_LEN, FILESET_REF_MIN_LEN, FILESET_REF_PATTERN
 from nhx.core.models.schemas import (
+    Adapter,
     AdapterEntityFilter,
     ContainerExecutorConfig,
     CreateModelAdapterRequest,
@@ -120,7 +121,6 @@ FILESET_MODELS = [
     UpdateModelEntityRequest,
     CreateModelAdapterRequest,
     UpdateAdapterRequest,
-    ModelEntity,
 ]
 
 VALID_FILESETS = ["ab", "my-fileset", "default/my-fileset", "llama-3.2-3b@v1"]
@@ -183,6 +183,24 @@ def test_fileset_schema_advertises_length_and_pattern(model):
     assert schema["pattern"] == FILESET_REF_PATTERN
     assert schema["minLength"] == FILESET_REF_MIN_LEN
     assert schema["maxLength"] == FILESET_REF_MAX_LEN
+
+
+@pytest.mark.parametrize(
+    "fileset",
+    ["default/my-fileset", "https://huggingface.co/meta/llama", "fileset://default/my-fileset"],
+)
+def test_response_schemas_keep_stored_fileset_values(fileset):
+    assert build_with_fileset(ModelEntity, fileset).fileset == fileset
+    adapter = Adapter(name="my-adapter", workspace="default", fileset=fileset, finetuning_type="lora")
+    assert adapter.fileset == fileset
+
+
+def test_response_fileset_schema_has_no_pattern():
+    for model in (ModelEntity, Adapter):
+        schema = fileset_string_schema(model)
+        assert "pattern" not in schema
+        assert "minLength" not in schema
+        assert "maxLength" not in schema
 
 
 def test_fileset_filters_accept_bool_or_valid_ref():
