@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 
 _SKIP_AUTH_CHECK_SUBCOMMANDS = frozenset(
     {
-        "agent",
         "auth",
         "config",
         "describe",
