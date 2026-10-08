@@ -37,6 +37,49 @@ class FilesetValidationError(ValueError):
     pass
 
 
+_FILESET_FILTER_FIELDS = frozenset({"fileset", "data.fileset"})
+
+
+def expand_bare_fileset_equality(operation: FilterOperation | None, workspace: str) -> FilterOperation | None:
+    """Match a bare fileset name against that name and ``workspace/name``.
+
+    Qualified filters stay exact. Listing across every workspace has no single
+    workspace to qualify with, so those filters stay exact too.
+    """
+    if operation is None or not workspace or workspace == ALL_WORKSPACES:
+        return operation
+    return _expand_bare_fileset_equality(operation, workspace)
+
+
+def _expand_bare_fileset_equality(operation: FilterOperation, workspace: str) -> FilterOperation:
+    if isinstance(operation, ComparisonOperation):
+        value = operation.value
+        if (
+            operation.field in _FILESET_FILTER_FIELDS
+            and operation.operator == FilterOperator.EQ
+            and isinstance(value, str)
+            and "/" not in value
+        ):
+            return LogicalOperation(
+                operator=FilterOperator.OR,
+                operations=[
+                    operation,
+                    ComparisonOperation(
+                        operator=FilterOperator.EQ,
+                        field=operation.field,
+                        value=f"{workspace}/{value}",
+                    ),
+                ],
+            )
+        return operation
+    if isinstance(operation, LogicalOperation):
+        return LogicalOperation(
+            operator=operation.operator,
+            operations=[_expand_bare_fileset_equality(child, workspace) for child in operation.operations],
+        )
+    return operation
+
+
 class InvalidFilterError(ValueError):
     """Exception raised for filter shapes the service can't honor (e.g. nested cross-entity fields)."""
 
@@ -466,7 +509,7 @@ class ModelEntityService:
         result: ListResponse[Model] = await self.entity_client.list(
             Model,
             workspace=workspace,
-            filter_operation=parsed_filter.operation,
+            filter_operation=expand_bare_fileset_equality(parsed_filter.operation, workspace),
             sort=sort,
             page=page,
             page_size=page_size,

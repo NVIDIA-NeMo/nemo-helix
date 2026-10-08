@@ -356,6 +356,10 @@ class TrainingProgressCallback:
                 ", ".join(sorted(self._metrics)),
             )
 
+    @property
+    def reporter(self) -> JobsServiceProgressReporter:
+        return self._reporter
+
     def _resolve_backend(self, backend: str | None) -> str | None:
         return backend if backend is not None else self._default_backend
 

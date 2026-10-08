@@ -8918,8 +8918,11 @@ components:
         fileset:
           type: string
           title: Fileset
-          description: Fileset where the adapter files are stored expected format
-            {workspace}/{fileset_name}
+          description: 'Fileset where the adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -8980,8 +8983,15 @@ components:
           description: Filter by description.
           title: Description
         fileset:
-          description: Filter by fileset reference in the form {workspace}/{fileset_name}.
+          description: 'Filter by fileset reference. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           title: Fileset
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           type: string
         finetuning_type:
           allOf:
@@ -10530,8 +10540,15 @@ components:
           maxLength: 1000
         fileset:
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           title: Fileset
-          description: Location where adapter files are stored - expected format {workspace}/{fileset_name}
+          description: 'Location where adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -10693,8 +10710,15 @@ components:
           maxLength: 1000
         fileset:
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           title: Fileset
-          description: Location where adapter files are stored - expected format {workspace}/{fileset_name}
+          description: 'Location where adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -10845,9 +10869,16 @@ components:
           description: Set for full weight finetuned models
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
         base_model:
           title: Base Model
           description: Link to another model which is used as a base for the current
@@ -16956,8 +16987,12 @@ components:
           description: Set for full weight finetuned models
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
         trust_remote_code:
           type: boolean
@@ -17073,9 +17108,16 @@ components:
         fileset:
           anyOf:
           - type: boolean
-          - type: string
+          - maxLength: 127
+            minLength: 2
+            pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
+            type: string
           description: 'Filter by fileset: true = has a fileset, false = no fileset,
-            string = match fileset reference in the form {workspace}/{fileset_name}.'
+            string = match a fileset reference. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           title: Fileset
         family:
           anyOf:
@@ -20170,8 +20212,15 @@ components:
           type: boolean
         fileset:
           title: Fileset
-          description: Updated fileset for the adapter
+          description: 'Updated fileset for the adapter. Either a fileset name or
+            ''workspace/fileset_name''. A bare name is resolved in the request workspace
+            (the platform default workspace is named ''default''). Each segment is
+            2-63 characters: lowercase letters, digits, hyphens, and temporarily @
+            . + _; no consecutive hyphens, and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
       type: object
       title: UpdateAdapterRequest
       description: Request model for updating Adapter Sub Entity metadata.
@@ -20297,9 +20346,16 @@ components:
           description: Detailed specification for the model
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'

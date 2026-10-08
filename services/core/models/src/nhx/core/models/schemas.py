@@ -16,6 +16,10 @@ from nhx.common.entities.utils import get_random_id
 from nhx.common.entities.values import DatetimeFilter, StringFilter, map_entity_field
 from nhx.common.inference import InferenceParams
 from nhx.core.models.constants import (
+    FILESET_REF_MAX_LEN,
+    FILESET_REF_MIN_LEN,
+    FILESET_REF_PATTERN,
+    FILESET_REF_PATTERN_DESCRIPTION,
     MODEL_REF_MAX_LEN,
     MODEL_REF_PATTERN_DESCRIPTION,
     is_valid_model_ref,
@@ -28,6 +32,36 @@ ENTITY_NAME_CONFIG = ConfigDict(regex_engine="python-re")
 # Request-body config: reject unknown fields so plugin-style params (e.g. executor)
 # sent to a model deployment endpoint fail loudly instead of being silently ignored.
 REQUEST_CONFIG = ConfigDict(regex_engine="python-re", extra="forbid")
+
+
+def fileset_ref_field(default: Any, description: str):
+    """Field for a fileset reference: ``name`` or ``workspace/name``."""
+    return Field(
+        default,
+        description=f"{description} {FILESET_REF_PATTERN_DESCRIPTION}",
+        min_length=FILESET_REF_MIN_LEN,
+        max_length=FILESET_REF_MAX_LEN,
+        pattern=FILESET_REF_PATTERN,
+    )
+
+
+def stored_fileset_field(default: Any, description: str):
+    """Fileset read back from storage.
+
+    Create and update requests use ``fileset_ref_field``. Rows written earlier can
+    still hold a URL or a ``fileset://`` reference, and those reads must succeed.
+    """
+    return Field(default, description=f"{description} {FILESET_REF_PATTERN_DESCRIPTION}")
+
+
+FilesetRefStr = Annotated[
+    str,
+    Field(
+        min_length=FILESET_REF_MIN_LEN,
+        max_length=FILESET_REF_MAX_LEN,
+        pattern=FILESET_REF_PATTERN,
+    ),
+]
 
 
 def get_model_id(prefix: str) -> str:
@@ -954,6 +988,8 @@ class DeletePromptRequest(BaseModel):
 
 
 class Adapter(BaseModel):
+    model_config = ENTITY_NAME_CONFIG
+
     name: str = Field(
         ...,
         description=f"Name of the adapter. Name must be unique in the workspace for all Adapters and match the following regex: {constants.REGEX_WORD_CHARACTER_DOT_DASH_DESCRIPTION}",
@@ -975,9 +1011,9 @@ class Adapter(BaseModel):
         max_length=1000,
     )
 
-    fileset: str = Field(
+    fileset: str = stored_fileset_field(
         ...,
-        description="Fileset where the adapter files are stored expected format {workspace}/{fileset_name}",
+        "Fileset where the adapter files are stored.",
     )
     finetuning_type: FinetuningType = Field(..., description="Type of finetuning (LORA, P_TUNING, etc.)")
     enabled: bool = Field(
@@ -1024,9 +1060,9 @@ class ModelEntity(ModelEntityBaseModel):
 
     # TODO Replace this with Optional[Union[str, Fileset]] when fileset is accessible outside of the
     # so that a user can inline the fileset definition
-    fileset: Optional[str] = Field(
-        default=None,
-        description="A set of checkpoint files, configs, and other auxiliary info associated with this model - expected format {workspace}/{fileset_name}",
+    fileset: Optional[str] = stored_fileset_field(
+        None,
+        "A set of checkpoint files, configs, and other auxiliary info associated with this model.",
     )
     trust_remote_code: bool = Field(
         default=False,
@@ -1088,9 +1124,9 @@ class CreateModelEntityRequest(BaseModel):
     finetuning_type: Optional[FinetuningType] = Field(None, description="Set for full weight finetuned models")
     # TODO Replace this with Optional[Union[str, Fileset]] when fileset is accessible outside of the
     # so that a user can inline the fileset definition
-    fileset: Optional[str] = Field(
-        default=None,
-        description="A set of checkpoint files, configs, and other auxiliary info associated with this model - expected format {workspace}/{fileset_name}",
+    fileset: Optional[str] = fileset_ref_field(
+        None,
+        "A set of checkpoint files, configs, and other auxiliary info associated with this model.",
     )
 
     base_model: Optional[str] = Field(
@@ -1144,9 +1180,9 @@ class CreateModelAdapterRequest(BaseModel):
         max_length=1000,
     )
 
-    fileset: str = Field(
+    fileset: str = fileset_ref_field(
         ...,
-        description="Location where adapter files are stored - expected format {workspace}/{fileset_name}",
+        "Location where adapter files are stored.",
     )
     finetuning_type: FinetuningType = Field(..., description="Type of finetuning (LORA, P_TUNING, etc.)")
     enabled: bool = Field(
@@ -1179,6 +1215,8 @@ class CreateAdapterRequest(CreateModelAdapterRequest):
 class UpdateModelEntityRequest(BaseModel):
     """Request model for updating Model Entity metadata."""
 
+    model_config = ENTITY_NAME_CONFIG
+
     description: Optional[str] = Field(
         default=None,
         description="Optional description of the model",
@@ -1187,9 +1225,9 @@ class UpdateModelEntityRequest(BaseModel):
     spec: Optional[ModelSpec] = Field(default=None, description="Detailed specification for the model")
     # TODO Replace this with Optional[Union[str, Fileset]] when fileset is accessible outside of the
     # so that a user can inline the fileset definition
-    fileset: Optional[str] = Field(
-        default=None,
-        description="A set of checkpoint files, configs, and other auxiliary info associated with this model - expected format {workspace}/{fileset_name}",
+    fileset: Optional[str] = fileset_ref_field(
+        None,
+        "A set of checkpoint files, configs, and other auxiliary info associated with this model.",
     )
     finetuning_type: Optional[FinetuningType] = Field(None, description="Set for full weight finetuned models")
     base_model: Optional[str] = Field(
@@ -1227,6 +1265,8 @@ class UpdateModelEntityRequest(BaseModel):
 class UpdateAdapterRequest(BaseModel):
     """Request model for updating Adapter Sub Entity metadata."""
 
+    model_config = ENTITY_NAME_CONFIG
+
     description: Optional[str] = Field(
         default=None,
         description="Optional description of the adapter",
@@ -1238,9 +1278,9 @@ class UpdateAdapterRequest(BaseModel):
         description="Whether to make this adapter available for inference post training",
     )
 
-    fileset: Optional[str] = Field(
-        default=None,
-        description="Updated fileset for the adapter",
+    fileset: Optional[str] = fileset_ref_field(
+        None,
+        "Updated fileset for the adapter.",
     )
 
 
@@ -1288,6 +1328,8 @@ class FinetuningTypeFilter(Filter):
 class ModelEntityFilter(Filter):
     """Filter for Model Entity queries."""
 
+    model_config = ConfigDict(regex_engine="python-re")
+
     name: StringFilter | str | None = Field(None, description="Filter by name.")
     project: Optional[str] = Field(None, description="Filter by project name.")
     workspace: Optional[str] = Field(None, description="Filter by workspace id.")
@@ -1309,10 +1351,10 @@ class ModelEntityFilter(Filter):
         description="Filter models by whether their deployment config has LoRA enabled.",
     )
     description: StringFilter | str | None = Field(None, description="Filter by description.")
-    fileset: Optional[Union[bool, str]] = Field(
+    fileset: Optional[Union[bool, FilesetRefStr]] = Field(
         None,
         description="Filter by fileset: true = has a fileset, false = no fileset, "
-        "string = match fileset reference in the form {workspace}/{fileset_name}.",
+        f"string = match a fileset reference. {FILESET_REF_PATTERN_DESCRIPTION}",
     )
     family: Annotated[StringFilter | str | None, map_entity_field("data.spec.family")] = Field(
         default=None,
@@ -1329,15 +1371,17 @@ class ModelEntityFilter(Filter):
 class AdapterEntityFilter(Filter):
     """Filter for Adapter list queries."""
 
+    model_config = ConfigDict(regex_engine="python-re")
+
     name: StringFilter | str | None = Field(None, description="Filter by adapter name.")
     model: Annotated[StringFilter | str | None, map_entity_field("data.model")] = Field(
         default=None,
         description="Filter by parent (base) model entity reference in the form {workspace}/{model_name}.",
     )
     description: StringFilter | str | None = Field(None, description="Filter by description.")
-    fileset: Optional[str] = Field(
+    fileset: Optional[str] = fileset_ref_field(
         None,
-        description="Filter by fileset reference in the form {workspace}/{fileset_name}.",
+        "Filter by fileset reference.",
     )
     finetuning_type: Optional[FinetuningType] = Field(None, description="Filter by fine-tuning / PEFT type.")
     enabled: Optional[bool] = Field(

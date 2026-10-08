@@ -25,7 +25,10 @@ For training-specific metrics (loss, validation, checkpoints) see the
 
 import logging
 import os
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
+from types import TracebackType
 from typing import Any, cast
 
 import httpx
@@ -49,6 +52,50 @@ logger = logging.getLogger(__name__)
 _REPORT_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
 
+def utc_iso(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+
+class TrainingWallClock:
+    """Publish training start on enter, and finish plus duration on exit."""
+
+    def __init__(self, reporter: "JobsServiceProgressReporter", clock: Callable[[], float]) -> None:
+        self.reporter = reporter
+        self.clock = clock
+        self.started: float | None = None
+
+    def __enter__(self) -> "TrainingWallClock":
+        started = self.clock()
+        self.started = started
+        # Clear a previous run until this one finishes.
+        self.reporter.training_duration_seconds = None
+        self.reporter.update_task(
+            status="active",
+            status_details={"training_started_at": utc_iso(started)},
+        )
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool:
+        finished = self.clock()
+        started = self.started if self.started is not None else finished
+        duration = finished - started
+        # Keep the number if the status update is dropped.
+        self.reporter.training_duration_seconds = duration
+        self.reporter.update_task(
+            status="active",
+            status_details={
+                "training_finished_at": utc_iso(finished),
+                "training_duration_seconds": duration,
+            },
+        )
+        return False
+
+
 class JobsServiceProgressReporter:
     """Reports high-level progress to the Jobs service."""
 
@@ -63,11 +110,17 @@ class JobsServiceProgressReporter:
         self._is_main_rank = int(os.environ.get("RANK", "0")) == 0
         self._max_steps = 0
         self._num_epochs = 0
+        # None until a training runtime finishes.
+        self.training_duration_seconds: float | None = None
 
         # Gate on real job context, not bare truthiness: from_env() fills missing
         # identifiers with non-empty sentinel defaults, which would otherwise
         # enable reporting (and failing SDK calls) outside a real job run.
         self._enabled = self._is_main_rank and self._job_ctx.is_configured
+
+    def training_wall_clock(self, clock: Callable[[], float] | None = None) -> TrainingWallClock:
+        """Publish the training runtime's start, finish, and duration."""
+        return TrainingWallClock(self, time.time if clock is None else clock)
 
     def configure_progress_tracking(self, max_steps: int, num_epochs: int) -> None:
         """Configure progress tracking at the start of training."""

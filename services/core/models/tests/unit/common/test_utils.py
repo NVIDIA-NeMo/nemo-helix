@@ -558,7 +558,7 @@ def test_get_model_weights_type_no_provider_sft_model():
         name="sft-model",
         parent="models",
         db_version=1,
-        fileset="{workspace}/{name}",
+        fileset="default/sft-model",
         spec=ModelSpec(
             num_parameters=7000000000,
             context_size=4096,
