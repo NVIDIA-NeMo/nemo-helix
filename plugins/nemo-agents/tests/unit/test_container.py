@@ -561,9 +561,7 @@ class TestRenderFabricDockerfile:
         if extra != "nemo-agents-plugin-claude":
             assert "nemo-agents-plugin-claude]==" not in result
 
-    @pytest.mark.parametrize(
-        "kind", ["nooa", "nooa-bench-agent", "nvidia.fabric.nooa", "nvidia.fabric.nooa.bench-agent"]
-    )
+    @pytest.mark.parametrize("kind", ["nooa-bench-agent", "nvidia.fabric.nooa.bench-agent"])
     @pytest.mark.parametrize("version", [None, "3.12", "3.13.12", "3.11", "3.14", "3.130", "invalid"])
     def test_nooa_container_python_version(self, tmp_path: Path, kind: str, version: str | None) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile
@@ -600,6 +598,15 @@ class TestRenderFabricDockerfile:
         else:
             with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
                 render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
+
+    @pytest.mark.parametrize("kind", ["nooa", "nvidia.fabric.nooa"])
+    def test_generic_nooa_kind_does_not_select_harness_dependencies(self, tmp_path: Path, kind: str) -> None:
+        from nemo_agents_plugin.container.template import resolve_fabric_harness_install
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"default_harness: selected\nharnesses:\n  selected:\n    kind: {kind}\n")
+
+        assert resolve_fabric_harness_install(config) == ("nemo-agents-plugin", False, False)
 
     def test_nooa_container_checks_python_environment_override(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -51,6 +51,7 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
     """Translate Platform-owned agent config into a typed in-memory FabricConfig."""
     harness_config = None
     workflow_config = None
+    runtime_payload = config.runtime.model_dump(exclude_none=True)
     if config.workflow is not None:
         if harness_name is not None:
             raise FabricTranslationError("A harness override cannot be used with a workflow config.")
@@ -61,6 +62,7 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
     else:
         selected_harness_name, harness = _select_harness(config, harness_name)
         model = _resolve_model(config, selected_harness_name, harness)
+        _default_relay_runtime_artifacts(runtime_payload, config, harness)
         harness_config = fabric.HarnessConfig(
             adapter_id=_adapter_id_for_harness(harness),
             resolution="preinstalled",
@@ -72,9 +74,6 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
         **_gateway_credential_env(model_payloads),
     }
     _validate_untranslated_shared_fields(config)
-
-    runtime_payload = config.runtime.model_dump(exclude_none=True)
-    _default_relay_runtime_artifacts(runtime_payload, config, harness)
 
     fabric_config = fabric.FabricConfig(
         metadata=fabric.MetadataConfig(name=config.name, description=config.description or None),
@@ -292,7 +291,7 @@ def _default_relay_extension_path(fabric_config: Any) -> None:
     setting, so defaulting it is a no-op for the other harnesses.
     """
     harness = fabric_config.harness
-    if harness.adapter_id != HARNESS_ADAPTER_IDS["pi"]:
+    if harness is None or harness.adapter_id != HARNESS_ADAPTER_IDS["pi"]:
         return
     harness.settings.setdefault("relay_extension_path", PI_RELAY_EXTENSION_PATH)
 
