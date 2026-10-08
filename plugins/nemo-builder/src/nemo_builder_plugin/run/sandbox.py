@@ -29,6 +29,9 @@ BUILD_TIMEOUT_SECONDS = 60 * 60
 #: When a sandbox is ended for it, so it ends even if this step is killed before it can delete it.
 SANDBOX_DEADLINE_SECONDS = BUILD_TIMEOUT_SECONDS + 5 * 60
 
+#: How long a sweep waits for an earlier attempt's sandboxes to go.
+SWEEP_TIMEOUT_SECONDS = 120
+
 #: What a NetworkPolicy selects a sandbox on.
 SANDBOX_LABEL = "nhx.nvidia.com/sandbox"
 

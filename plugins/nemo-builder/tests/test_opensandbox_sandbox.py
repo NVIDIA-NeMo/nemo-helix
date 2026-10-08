@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The OpenSandbox provider, against a fake server. The SDK calls themselves are checked on a cluster."""
+"""The OpenSandbox provider, against a fake server. ``test_opensandbox_sdk.py`` checks the SDK calls behind it."""
 
 from __future__ import annotations
 
 import base64
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -17,7 +17,6 @@ from nemo_builder_plugin.run import opensandbox_sandbox
 from nemo_builder_plugin.run.opensandbox_sandbox import (
     EXECD_TMPDIR,
     KEEPALIVE,
-    CommandResult,
     OpenSandboxProvider,
 )
 from nemo_builder_plugin.run.sandbox import (
@@ -60,16 +59,17 @@ class FakeSandbox:
     def id(self) -> str:
         return "sbx-1"
 
-    def run(self, command: str, *, timeout_seconds: int) -> CommandResult:
+    def run(self, command: str, *, timeout_seconds: int, on_output: Callable[[str], None]) -> int | None:
         assert timeout_seconds > 0
         self.commands.append(command)
         if self._fail_on and self._fail_on in command:
             raise ConnectionError("lost the sandbox")
         if command.startswith("rm -rf"):
             image = next((name for name in self._results if f"/out/{name}" in command), "")
-            return CommandResult(exit_code=1 if image == "unclearable" else 0, output=[])
+            return 1 if image == "unclearable" else 0
         image = command.split("--oci-layout-path=/nhx-work/out/")[1].split()[0]
-        return CommandResult(exit_code=self._results.get(image), output=[f"building {image}\nstep 2"])
+        on_output(f"building {image}\nstep 2")
+        return self._results.get(image)
 
     def applied_egress(self) -> object:
         if isinstance(self._applied, Exception):
@@ -93,14 +93,18 @@ class FakeApi:
         create_fails: bool = False,
         fail_on: str | None = None,
         destroy_fails: bool = False,
-        existing: list[str] | None = None,
+        existing: Mapping[str, str] | None = None,
+        kill_fails: bool = False,
+        killed_stay: bool = False,
         applied: object = APPLIED_AS_GIVEN,
     ) -> None:
         self.created: list[dict[str, Any]] = []
-        self.killed_by: list[dict[str, str]] = []
+        self.killed: list[str] = []
         self.sandbox = FakeSandbox(results or {}, fail_on=fail_on, destroy_fails=destroy_fails, applied=applied)
         self._create_fails = create_fails
-        self._existing = existing or []
+        #: Each existing sandbox's ID, and the job label it carries.
+        self._existing = dict(existing or {})
+        self._kill_fails, self._killed_stay = kill_fails, killed_stay
 
     def create(self, **kwargs: Any) -> FakeSandbox:
         self.created.append(kwargs)
@@ -109,9 +113,16 @@ class FakeApi:
         self.sandbox.given = kwargs["egress"]
         return self.sandbox
 
-    def kill_labelled(self, labels: Mapping[str, str]) -> list[str]:
-        self.killed_by.append(dict(labels))
-        return list(self._existing)
+    def labelled(self, labels: Mapping[str, str]) -> list[str]:
+        assert list(labels) == [JOB_LABEL]
+        return [sandbox_id for sandbox_id, job in self._existing.items() if job == labels[JOB_LABEL]]
+
+    def kill(self, sandbox_id: str) -> None:
+        self.killed.append(sandbox_id)
+        if self._kill_fails:
+            raise ConnectionError("the server answered 404")
+        if not self._killed_stay:
+            del self._existing[sandbox_id]
 
 
 def _sandbox(**overrides: object) -> SandboxSpec:
@@ -276,10 +287,35 @@ class TestEachSandboxFailsAlone:
 
 
 class TestTheSweep:
-    def test_it_kills_what_this_job_left_and_nothing_else(self) -> None:
-        api = FakeApi(existing=["sbx-old"])
+    """An earlier attempt's sandboxes build into this attempt's outputs, so it must not start until those are gone."""
+
+    def test_it_kills_what_this_job_left(self) -> None:
+        api = FakeApi(existing={"sbx-old": job_key("default", "abc"), "sbx-other": job_key("default", "other")})
         _provider(api).sweep()
-        assert api.killed_by == [{JOB_LABEL: job_key("default", "abc")}]
+        assert api.killed == ["sbx-old"]
+
+    def test_nothing_to_sweep_kills_nothing(self) -> None:
+        api = FakeApi()
+        _provider(api).sweep()
+        assert api.killed == []
+
+    def test_a_sandbox_that_cannot_be_killed_but_is_gone_does_not_stop_the_step(self) -> None:
+        """It may have ended at its deadline between being listed and killed."""
+
+        class GoneBeforeItsKill(FakeApi):
+            def kill(self, sandbox_id: str) -> None:
+                del self._existing[sandbox_id]
+                super().kill(sandbox_id)
+
+        api = GoneBeforeItsKill(existing={"sbx-old": job_key("default", "abc")}, kill_fails=True)
+        _provider(api).sweep()
+        assert api.killed == ["sbx-old"]
+
+    def test_a_sandbox_that_will_not_go_stops_the_step(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        api = FakeApi(existing={"sbx-old": job_key("default", "abc")}, killed_stay=True)
+        monkeypatch.setattr(opensandbox_sandbox, "SWEEP_TIMEOUT_SECONDS", 0)
+        with pytest.raises(RuntimeError, match="still there: sbx-old"):
+            _provider(api).sweep()
 
 
 class _Secrets:
@@ -293,7 +329,7 @@ class _Secrets:
 
 
 class TestTheKey:
-    """Read by this step's ServiceAccount, so it reaches no other pod, and never through the step's env."""
+    """Read with this step's ServiceAccount, never through the step's env."""
 
     def test_it_is_read_from_the_named_secret_in_this_namespace(self) -> None:
         api = _Secrets({"api-key": base64.b64encode(b"tenant-key\n").decode()})

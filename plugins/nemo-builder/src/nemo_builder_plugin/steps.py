@@ -109,7 +109,7 @@ class OpenSandboxServer(BaseModel):
         min_length=1,
         description=(
             "Kubernetes Secret in the build namespace holding the tenant's API key under `api-key`. The build step "
-            "reads it with its ServiceAccount, so the key reaches no other pod."
+            "reads it with its ServiceAccount, so it's in neither the step's environment nor the sandbox's."
         ),
     )
 

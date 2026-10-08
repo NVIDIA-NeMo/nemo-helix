@@ -47,8 +47,8 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
-  # The OpenSandbox tenant's key, read only when the sandbox provider is opensandbox: the one pod that reads it is
-  # this step's.
+  # The OpenSandbox tenant's key, read only when the sandbox provider is opensandbox. Jobs doesn't restrict who runs
+  # under this step's profile, so a raw job can read it too (README, Security).
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["opensandbox-builder-api-key"]

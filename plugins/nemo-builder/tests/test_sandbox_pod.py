@@ -329,7 +329,7 @@ class TestTheSweep:
 
     def test_a_pod_that_will_not_go_stops_the_step(self, monkeypatch: pytest.MonkeyPatch) -> None:
         api = _Api(existing={"left-g0": job_key("default", "abc")}, delete=ApiException(status=500))
-        monkeypatch.setattr(pod_sandbox, "_SWEEP_TIMEOUT_SECONDS", 0)
+        monkeypatch.setattr(pod_sandbox, "SWEEP_TIMEOUT_SECONDS", 0)
         with pytest.raises(RuntimeError, match="still there: left-g0"):
             _provider(api).sweep()
 

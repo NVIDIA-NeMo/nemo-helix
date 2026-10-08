@@ -20,6 +20,7 @@ from nemo_builder_plugin.run.sandbox import (
     BUILD_TIMEOUT_SECONDS,
     JOB_LABEL,
     SANDBOX_DEADLINE_SECONDS,
+    SWEEP_TIMEOUT_SECONDS,
     clear_output,
     job_key,
     kaniko_command,
@@ -35,9 +36,6 @@ logger = logging.getLogger(__name__)
 KANIKO_CAPABILITIES = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID"]
 
 RESULT_MARKER = "NHX_IMAGE_RESULT"
-
-#: How long a sweep waits for an earlier attempt's pods to go: a pod of the same name can't be created until then.
-_SWEEP_TIMEOUT_SECONDS = 120
 
 
 def _build_script(group: SandboxGroup) -> str:
@@ -214,7 +212,7 @@ class KubernetesPodProvider:
         logger.info("deleting %d sandbox(es) an earlier attempt left", len(leftovers))
         for name in leftovers:
             _delete_pod(self._api, name=name, namespace=self._namespace)
-        deadline = time.monotonic() + _SWEEP_TIMEOUT_SECONDS
+        deadline = time.monotonic() + SWEEP_TIMEOUT_SECONDS
         while leftovers := self._leftovers():
             if time.monotonic() > deadline:
                 raise RuntimeError(f"an earlier attempt's sandboxes are still there: {', '.join(leftovers)}")

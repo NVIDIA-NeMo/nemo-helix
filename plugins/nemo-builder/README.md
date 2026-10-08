@@ -379,13 +379,16 @@ sequenceDiagram
 3. **`build`** first deletes any sandboxes an earlier attempt of the same job left. Then it creates
    one sandbox per distinct fileset, archive and `context_path`, one at a time, and deletes each
    when it ends. The sandbox runs kaniko
-   once per image with `--no-push`, writing an OCI layout to that image's output directory. The
-   sandbox has:
+   once per image with `--no-push`, writing an OCI layout to that image's output directory. A plain
+   pod sandbox has:
    - no ServiceAccount token, no secret, and no credential in its environment
    - a security context the `baseline` Pod Security Standard admits: root, but with only five
      capabilities, `RuntimeDefault` seccomp and no privilege escalation
    - public DNS resolvers rather than cluster DNS
    - a deadline the kubelet enforces, so it ends even if `build` is killed first
+
+   An [OpenSandbox](#opensandbox) sandbox gets its security context and DNS from the server's
+   template instead, and the server enforces its deadline.
 4. **`push`** treats each layout as untrusted, and checks what crane will read of it: an index with
    exactly one image manifest, and the index, the manifest and every blob it names as regular files,
    not symlinks or FIFOs, under real directories. The registry checks each blob against its digest
@@ -550,7 +553,8 @@ command's exit code as the image's result. The step image carries the SDK, the p
   keeps other tenants' keys out of that namespace.
 - **The tenant's key** in the Secret `sandbox.opensandbox.api_key_secret` names
   (`opensandbox-builder-api-key` by default), under `api-key`, in the build namespace. `build` reads
-  it with its ServiceAccount, which `deploy/builds.yaml` lets read that one Secret.
+  it with its ServiceAccount, which `deploy/builds.yaml` lets read that one Secret. So can a raw job
+  under the `build-control` profile (see [Security](#security)).
 - **A server template that hardens the sandbox.** OpenSandbox takes a sandbox's security context,
   DNS and nodes from its BatchSandbox template, which applies to every sandbox the server creates,
   not from the request; `dns_nameservers` and the fetch profile's `node_selector` don't apply. The
@@ -623,8 +627,8 @@ anything in it, and fails the sandbox's images unless its default is to deny.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
-  `build` stops watching it after an hour, and the kubelet ends it five minutes later; its
-  unfinished images fail.
+  `build` stops watching it after an hour, and the kubelet, or the OpenSandbox server, ends it five
+  minutes later; its unfinished images fail.
 - **`build` gives up on a dropped watch.** If its watch on a plain pod sandbox closes early, the
   sandbox's unfinished images fail. A sandbox whose `build` was killed ends at its deadline, and the
   job's next attempt deletes it before building.
@@ -675,7 +679,15 @@ anything in it, and fails the sandbox's images unless its default is to deny.
   under any of the builder's profiles. Under `build-control` such a job can create any pod in
   `nhx-builds`: it can mount the whole work volume, with every build's contexts and outputs, and
   rewrite a layout another job's push step is about to publish; read any build pod's log; and
-  delete any build pod. Closing it needs Jobs to restrict these profiles to the builder.
+  delete any build pod. With the `opensandbox` provider, it can also read the OpenSandbox tenant's
+  key, and with it create sandboxes without an egress policy, mount any of the work volume, and run
+  commands in any build's sandbox. Closing it needs Jobs to restrict these profiles to the builder.
+- **Anything that reaches an OpenSandbox sandbox can run commands in it.** execd, OpenSandbox's
+  agent in the sandbox, checks no key. `build` reaches it through the server, which checks the
+  tenant's, but any pod that can reach a sandbox's address can run commands in it as root, and
+  rewrite the layout a push step is about to publish. A NetworkPolicy in the build namespace that
+  admits only the OpenSandbox server would close this, on a network plugin that enforces it:
+  Flannel, for one, doesn't.
 - **Nothing restricts a plain pod sandbox's network.** A Dockerfile's `RUN` in one can reach anything
   a pod can: the platform, as any user or service it names, every other Service, and on a cloud
   cluster the node's metadata server. Use the `kubernetes_pod` provider only with Dockerfiles you

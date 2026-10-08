@@ -13,14 +13,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
 from typing import Protocol
 
 from nemo_builder_plugin.run.sandbox import (
     BUILD_TIMEOUT_SECONDS,
     JOB_LABEL,
     SANDBOX_DEADLINE_SECONDS,
+    SWEEP_TIMEOUT_SECONDS,
     Mount,
     clear_output,
     job_key,
@@ -48,17 +48,13 @@ EXECD_TMPDIR = "/opt/opensandbox"
 READY_TIMEOUT_SECONDS = 5 * 60
 
 
-@dataclass(frozen=True, slots=True)
-class CommandResult:
-    exit_code: int | None
-    output: list[str]
-
-
 class RunningSandbox(Protocol):
     @property
     def id(self) -> str: ...
 
-    def run(self, command: str, *, timeout_seconds: int) -> CommandResult: ...
+    def run(self, command: str, *, timeout_seconds: int, on_output: Callable[[str], None]) -> int | None:
+        """Run ``command`` to its end, passing its output to ``on_output`` as it comes. Its exit code, if it has one."""
+        ...
 
     def applied_egress(self) -> object:
         """The egress policy the sandbox reports, with ``default_action`` and its ``egress`` rules."""
@@ -88,9 +84,11 @@ class OpenSandboxApi(Protocol):
         """A running sandbox. If the create fails, whatever it left is deleted before this raises."""
         ...
 
-    def kill_labelled(self, labels: Mapping[str, str]) -> list[str]:
-        """Kill every sandbox carrying ``labels``, and return their IDs."""
+    def labelled(self, labels: Mapping[str, str]) -> list[str]:
+        """The IDs of the sandboxes carrying ``labels``."""
         ...
+
+    def kill(self, sandbox_id: str) -> None: ...
 
 
 class OpenSandboxProvider:
@@ -109,9 +107,24 @@ class OpenSandboxProvider:
         self._egress = build_egress_policy(EgressAllowlist(targets=tuple(sandbox.egress_allow)))
 
     def sweep(self) -> None:
-        killed = self._api.kill_labelled({JOB_LABEL: job_key(self._workspace, self._job_id)})
-        if killed:
-            logger.info("deleted %d sandbox(es) an earlier attempt left: %s", len(killed), ", ".join(killed))
+        """Waits until the server no longer lists an earlier attempt's sandboxes: until then, their builds may still
+        write to the outputs this attempt builds into."""
+        labels = {JOB_LABEL: job_key(self._workspace, self._job_id)}
+        leftovers = self._api.labelled(labels)
+        if not leftovers:
+            return
+        logger.info("deleting %d sandbox(es) an earlier attempt left: %s", len(leftovers), _ids(leftovers))
+        for sandbox_id in leftovers:
+            try:
+                self._api.kill(sandbox_id)
+            except Exception:
+                # It may have ended at its deadline since it was listed: whether it's gone is what counts.
+                logger.warning("sandbox %s could not be deleted", sanitize_for_log(sandbox_id), exc_info=True)
+        deadline = time.monotonic() + SWEEP_TIMEOUT_SECONDS
+        while leftovers := self._api.labelled(labels):
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"an earlier attempt's sandboxes are still there: {_ids(leftovers)}")
+            time.sleep(1)
 
     def build(self, index: int, group: SandboxGroup) -> dict[str, int]:
         logger.info("creating sandbox %d for %d image(s)", index, len(group.images))
@@ -164,21 +177,22 @@ class OpenSandboxProvider:
             if remaining <= 0:
                 logger.error("image %s: the sandbox's hour ran out first", sanitize_for_log(image.image))
                 continue
-            cleared = sandbox.run(clear_output(image), timeout_seconds=min(remaining, 60))
-            if cleared.exit_code != 0:
-                self._log(image.image, cleared)
+            logger.info("image %s:", sanitize_for_log(image.image))
+            if sandbox.run(clear_output(image), timeout_seconds=min(remaining, 60), on_output=_log_output) != 0:
                 logger.error("image %s: its output could not be emptied", sanitize_for_log(image.image))
                 continue
-            built = sandbox.run(kaniko_command(group, image), timeout_seconds=remaining)
-            self._log(image.image, built)
-            if built.exit_code is not None:
-                results[image.image] = built.exit_code
+            code = sandbox.run(kaniko_command(group, image), timeout_seconds=remaining, on_output=_log_output)
+            if code is not None:
+                results[image.image] = code
         return results
 
-    @staticmethod
-    def _log(image: str, result: CommandResult) -> None:
-        # Line by line: sanitizing it all at once would run it into one line.
-        logger.info("image %s, exit code %s:", sanitize_for_log(image), result.exit_code)
-        for message in result.output:
-            for line in message.splitlines():
-                logger.info("  %s", sanitize_for_log(line))
+
+def _log_output(text: str) -> None:
+    """Log a command's output as it comes, rather than hold a whole build's. Line by line: sanitizing it all at once
+    would run it into one line."""
+    for line in text.splitlines():
+        logger.info("  %s", sanitize_for_log(line))
+
+
+def _ids(sandbox_ids: list[str]) -> str:
+    return sanitize_for_log(", ".join(sandbox_ids))

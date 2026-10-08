@@ -9,16 +9,17 @@ The only module that imports ``opensandbox``, the plugin's ``opensandbox`` extra
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import timedelta
 
-from nemo_builder_plugin.run.opensandbox_sandbox import CommandResult
 from nemo_builder_plugin.run.sandbox import Mount
 from nemo_builder_plugin.steps import OpenSandboxServer
 from nhx_sandbox.egress import EgressPolicy
 from nhx_sandbox.opensandbox_policy import to_opensandbox_policy
 from opensandbox.config import ConnectionConfigSync
 from opensandbox.models.execd import RunCommandOpts
+from opensandbox.models.execd_sync import ExecutionHandlersSync
 from opensandbox.models.sandboxes import PVC, NetworkPolicy, SandboxFilter, Volume
 from opensandbox.sync import SandboxManagerSync, SandboxSync
 
@@ -36,10 +37,17 @@ class _Sandbox:
     def id(self) -> str:
         return self._sandbox.id
 
-    def run(self, command: str, *, timeout_seconds: int) -> CommandResult:
-        execution = self._sandbox.commands.run(command, opts=RunCommandOpts(timeout=timedelta(seconds=timeout_seconds)))
-        output = [message.text for message in [*execution.logs.stdout, *execution.logs.stderr]]
-        return CommandResult(exit_code=execution.exit_code, output=output)
+    def run(self, command: str, *, timeout_seconds: int, on_output: Callable[[str], None]) -> int | None:
+        # Passed on as it comes, and not kept: a chatty build's output could exhaust this step's memory.
+        handlers = ExecutionHandlersSync(
+            on_stdout=lambda message: on_output(message.text),
+            on_stderr=lambda message: on_output(message.text),
+            skip_accumulation=True,
+        )
+        execution = self._sandbox.commands.run(
+            command, opts=RunCommandOpts(timeout=timedelta(seconds=timeout_seconds)), handlers=handlers
+        )
+        return execution.exit_code
 
     def applied_egress(self) -> NetworkPolicy:
         return self._sandbox.get_egress_policy()
@@ -110,14 +118,14 @@ class SdkApi:
             )
         except Exception:
             # The SDK tries to kill what a failed create left; this catches what it misses.
-            self.kill_labelled({ATTEMPT_LABEL: attempt})
+            for sandbox_id in self.labelled({ATTEMPT_LABEL: attempt}):
+                self.kill(sandbox_id)
             raise
         return _Sandbox(sandbox)
 
-    def kill_labelled(self, labels: Mapping[str, str]) -> list[str]:
-        manager = SandboxManagerSync.create(connection_config=self._connection)
-        try:
-            ids: list[str] = []
+    def labelled(self, labels: Mapping[str, str]) -> list[str]:
+        ids: list[str] = []
+        with self._manager() as manager:
             page = 1
             while True:
                 # Unfiltered, and matched here: SDK 0.1.16 encodes a filter once more than the server decodes it,
@@ -129,10 +137,17 @@ class SdkApi:
                     if all((info.metadata or {}).get(name) == value for name, value in labels.items())
                 )
                 if not found.pagination.has_next_page:
-                    break
+                    return ids
                 page += 1
-            for sandbox_id in ids:
-                manager.kill_sandbox(sandbox_id)
-            return ids
+
+    def kill(self, sandbox_id: str) -> None:
+        with self._manager() as manager:
+            manager.kill_sandbox(sandbox_id)
+
+    @contextmanager
+    def _manager(self) -> Iterator[SandboxManagerSync]:
+        manager = SandboxManagerSync.create(connection_config=self._connection)
+        try:
+            yield manager
         finally:
             manager.close()
