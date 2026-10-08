@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
-import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
-import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { useAgentOptimizationGetRunStrategyJobStatus } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
-import { Banner, Button, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { ListChecks, ScrollText, SlidersHorizontal } from 'lucide-react';
+import { Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { ListChecks, SlidersHorizontal } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface StudyInProgressProps {
@@ -22,23 +20,15 @@ export interface StudyInProgressProps {
 
 /**
  * What a study shows before its trials exist: the submitted spec, the job's step-by-step
- * progress, and its live logs — all polled until the study reaches a terminal status.
+ * progress — polled until the study reaches a terminal status.
  */
 export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQueued }) => {
-  const { name: jobName, spec, status } = job;
+  const { name: jobName, spec } = job;
 
   const { data: jobStatus } = useAgentOptimizationGetRunStrategyJobStatus(workspace, jobName, {
     query: { enabled: !!workspace && !!jobName, refetchInterval: JOB_POLLING_INTERVAL_MS },
   });
   const steps = jobStatus?.steps ?? [];
-
-  const {
-    data: logs,
-    isLoading: isLoadingLogs,
-    error: logsError,
-    loadProgress,
-    refetch: refetchLogs,
-  } = useJobLogs({ workspace, name: jobName, jobStatus: status, enabled: !!jobName });
 
   return (
     <Stack gap="density-2xl" className="min-h-0 w-full" data-testid="study-in-progress">
@@ -100,34 +90,6 @@ export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQu
           </Stack>
         </Panel>
       )}
-
-      <Panel slotHeading="Logs" slotIcon={<ScrollText />} elevation="high" density="compact">
-        {logsError && logs.length === 0 ? (
-          <Banner
-            kind="inline"
-            status="error"
-            slotActions={
-              <Button kind="secondary" size="small" onClick={() => void refetchLogs()}>
-                Retry
-              </Button>
-            }
-          >
-            Could not load logs for this study.
-          </Banner>
-        ) : (
-          <LogViewer
-            logs={logs}
-            isLoading={isLoadingLogs && logs.length === 0}
-            loadProgress={loadProgress}
-            downloadFilename={`optimize-${jobName}-logs.txt`}
-            emptyMessage={
-              isQueued
-                ? 'Logs appear once the study starts.'
-                : 'Waiting for the study to emit its first log lines...'
-            }
-          />
-        )}
-      </Panel>
     </Stack>
   );
 };
