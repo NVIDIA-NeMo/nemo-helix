@@ -6,7 +6,11 @@
 import pytest
 from nhx.common.config import Configuration, nhx_user_data_dir
 from nhx.common.secrets.encryption import SecretKeyEncryptor, get_base64_encoded_random_bytes
-from nhx.core.secrets.app.encryptor import get_encryptor_by_name, local_key_creation
+from nhx.core.secrets.app.encryptor import (
+    EncryptionProviderNotConfiguredError,
+    get_encryptor_by_name,
+    local_key_creation,
+)
 from nhx.core.secrets.config import SecretsServiceConfig
 
 
@@ -110,7 +114,7 @@ def test_get_encryptor_by_name_empty_raises_when_allow_key_creation_false():
     config = SecretsServiceConfig(allow_key_creation=False)
     Configuration.set_override(config)
     try:
-        with pytest.raises(ValueError, match="No encryptor configuration found"):
+        with pytest.raises(EncryptionProviderNotConfiguredError, match="No encryptor configuration found"):
             get_encryptor_by_name("")
     finally:
         Configuration.clear_override(SecretsServiceConfig)
