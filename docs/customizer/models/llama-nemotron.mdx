@@ -11,7 +11,7 @@ This page provides detailed technical specifications for the Nemotron model fami
 
 <Note>
 
-Customizing Nemotron models is supported on NVIDIA Hopper or Blackwell era GPUs, such as H100, H200, B100, and B200.
+Customizing Nemotron models is supported on NVIDIA Hopper or Blackwell era GPUs, such as H100, H200, B100, and B200. GPU counts on this page assume 80 GB GPUs. GPUs with more memory, such as B200, need fewer; set `expert_parallel_size` to the GPU count for MoE models.
 
 </Note>
 
@@ -29,8 +29,8 @@ Customizing Nemotron models is supported on NVIDIA Hopper or Blackwell era GPUs,
 
 ### Training Options
 
-- **LoRA**: 4x Hopper or Blackwell GPU (80 GB+), tensor parallel size 1, expert parallel size 4, `lora.exclude_modules: ["*.out_proj"]`
-- **Full SFT**: 8x Hopper or Blackwell GPU (80 GB+), tensor parallel size 1, expert parallel size 8
+- **LoRA**: 4x 80GB GPU, tensor parallel size 1, expert parallel size 4, `lora.exclude_modules: ["*.out_proj"]`
+- **Full SFT**: 8x 80GB GPU, tensor parallel size 1, expert parallel size 8
 
 These follow the Automodel reference recipes for this architecture: [LoRA](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft.yaml) and [Full SFT](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_full_sft.yaml).
 
@@ -56,8 +56,8 @@ Train on the BF16 checkpoint. Automodel cannot dequantize the ModelOpt NVFP4 che
 
 ### Training Options
 
-- **LoRA**: 1x Hopper or Blackwell GPU (80 GB+), tensor parallel size 1, pipeline parallel size 1
-- **Full SFT**: 4x Hopper or Blackwell GPU (80 GB+), tensor parallel size 2, pipeline parallel size 1
+- **LoRA**: 1x 80GB GPU, tensor parallel size 1, pipeline parallel size 1
+- **Full SFT**: 4x 80GB GPU, tensor parallel size 2, pipeline parallel size 1
 
 ### Deployment Configuration
 
@@ -85,8 +85,8 @@ Train on the BF16 checkpoint. Automodel cannot dequantize the ModelOpt NVFP4 che
 
 ### Training Options
 
-- **LoRA**: 4x Hopper or Blackwell GPU (80 GB+), tensor parallel size 1, pipeline parallel size 1
-- **Full SFT**: 4x Hopper or Blackwell GPU (80 GB+), tensor parallel size 2, pipeline parallel size 1
+- **LoRA**: 4x 80GB GPU, tensor parallel size 1, pipeline parallel size 1
+- **Full SFT**: 4x 80GB GPU, tensor parallel size 2, pipeline parallel size 1
 
 ### Deployment Configuration
 
@@ -116,8 +116,8 @@ Train on the BF16 checkpoint. Automodel cannot dequantize the ModelOpt NVFP4 che
 
 ### Training Options
 
-- **LoRA**: 2x Hopper or Blackwell GPU (80 GB+), tensor parallel size 1, expert parallel size 2, pipeline parallel size 1
-- **Full SFT**: 8x Hopper or Blackwell GPU (80 GB+), tensor parallel size 1, expert parallel size 8, pipeline parallel size 1
+- **LoRA**: 2x 80GB GPU, tensor parallel size 1, expert parallel size 2, pipeline parallel size 1
+- **Full SFT**: 8x 80GB GPU, tensor parallel size 1, expert parallel size 8, pipeline parallel size 1
 
 <Note>
 
@@ -151,7 +151,7 @@ Deployment for LoRA using NIM is not supported for this model.
 
 ### Training Options
 
-- **LoRA**: 8x Hopper or Blackwell GPU (80 GB+), tensor parallel size 1, expert parallel size 8, pipeline parallel size 1
+- **LoRA**: 8x 80GB GPU, tensor parallel size 1, expert parallel size 8, pipeline parallel size 1
 
 <Note>
 
