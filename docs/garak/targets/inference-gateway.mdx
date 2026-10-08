@@ -11,7 +11,7 @@ description: ""
 
 ## What `nhx_uri_spec` Is
 
-`nhx_uri_spec` is a nested dict placed inside `options.<generator>` that names an Inference Gateway provider. When `GarakPluginResource(client).run(...)` starts, the plugin walks the options tree, looks each `nhx_uri_spec` block up via `sdk.inference.providers.retrieve(...)`, replaces it with a `uri` key whose value is the provider's resolved OpenAI-compatible URL, and hands the rewritten options dict to garak.
+`nhx_uri_spec` is a nested dict placed inside `options.<generator>` that names an Inference Gateway provider. When `GarakPluginResource(client).run(...)` starts, the plugin walks the options tree, looks each `nhx_uri_spec` block up via `client.models.get_provider(...)`, replaces it with a `uri` key whose value is the provider's resolved OpenAI-compatible URL, and hands the rewritten options dict to garak.
 
 The original `AuditTarget` entity stays untouched — only the in-memory copy garak receives is rewritten.
 
@@ -42,7 +42,9 @@ Audit a NIM endpoint registered as the `nvidia-inference-api` provider in the `d
 
 ```python
 from nemo_garak.sdk import GarakPluginResource
+from nemo_helix_plugin.client.client import NemoClient
 
+client = NemoClient.from_config()
 garak = GarakPluginResource(client)
 
 target = garak.targets.create(

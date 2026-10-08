@@ -177,11 +177,12 @@ What it does under the hood:
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModelInferenceConfig
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 
 client = NemoClient.from_config()
 
-client.inference.virtual_models.create_virtual_model(
+VirtualModelsClient.from_client(client).create_virtual_model(
     body=CreateVirtualModelRequest(
         name="routed-agent-model",
         models=[
