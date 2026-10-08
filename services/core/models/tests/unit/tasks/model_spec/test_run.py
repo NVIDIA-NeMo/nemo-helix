@@ -228,7 +228,7 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
 def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: Path) -> None:
     """ONNX-primary filesets keep the task head under alternates/hf, not the root."""
 
-    def _download(**kwargs: Any) -> None:
+    def _download(_files: object, **kwargs: Any) -> None:
         root = Path(kwargs["local_path"])
         hf_dir = root / "alternates" / "hf"
         hf_dir.mkdir(parents=True)
@@ -238,8 +238,8 @@ def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: P
             encoding="utf-8",
         )
 
-    files_sdk = MagicMock()
-    files_sdk.list.return_value = SimpleNamespace(
+    transfer_mock = MagicMock()
+    transfer_mock.list_files.return_value = SimpleNamespace(
         data=[
             SimpleNamespace(path="model.onnx"),
             SimpleNamespace(path="alternates/hf/config.json"),
@@ -247,8 +247,8 @@ def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: P
             SimpleNamespace(path="alternates/last/config.json"),
         ]
     )
-    files_sdk.download.side_effect = _download
-    sdk = SimpleNamespace(files=files_sdk)
+    transfer_mock.download.side_effect = _download
+    client = MagicMock(spec=NemoClient)
 
     model_name = "rel06-rerank-output"
     model_entity = _model_entity(model_name)
@@ -262,13 +262,6 @@ def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: P
     models_client.update_model.side_effect = update_model
     files_client = MagicMock()
     files_client.get_fileset.return_value = _Response(_fileset(tmp_path))
-
-    def client_factory(_sdk: object, client_cls: type[Any]) -> Any:
-        if client_cls is ModelsClient:
-            return models_client
-        if client_cls is FilesClient:
-            return files_client
-        raise AssertionError(f"Unexpected client class: {client_cls}")
 
     inferred_spec = _core_model_spec()
     parallelism_api = types.ModuleType("nhx.core.models.parallelism.api")
@@ -297,9 +290,11 @@ def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: P
                 "nhx.core.models.parallelism.api": parallelism_api,
             },
         ),
-        patch("nhx.core.models.tasks.model_spec.run.client_from_platform", side_effect=client_factory),
+        patch.object(ModelsClient, "from_client", return_value=models_client),
+        patch.object(FilesClient, "from_client", return_value=files_client),
+        patch("nhx.core.models.tasks.model_spec.run.transfer", transfer_mock),
     ):
-        runner = ModelSpecRunner(sdk=sdk, job_ctx=job_ctx)
+        runner = ModelSpecRunner(client=client, job_ctx=job_ctx)
         result = runner.analyze_checkpoint(ModelSpecTaskConfig(workspace="default", name=model_name))
 
     assert result.spec is not None
