@@ -4,7 +4,7 @@
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { useAgentsListDeployments } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsGetAgent, useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
-import { useEvaluatorListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { useEvalsListEvaluateJobs } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
 import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
@@ -14,7 +14,7 @@ import { WorkspaceDashboardHomeRoute } from '@studio/routes/WorkspaceDashboardHo
 import { queryResult } from '@studio/routes/WorkspaceDashboardHomeRoute/testMocks';
 import {
   SAMPLE_AGENT_NAME,
-  SAMPLE_WORKSPACE,
+  SAMPLE_WORKSPACE_PREFIX,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
@@ -36,11 +36,9 @@ vi.mock('@nemo/sdk/generated/insights/insights-insights', async (importOriginal)
   ...(await importOriginal<typeof import('@nemo/sdk/generated/insights/insights-insights')>()),
   useInsightsListInsights: vi.fn(),
 }));
-vi.mock('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes', async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes')
-  >()),
-  useEvaluatorListEvaluateJobs: vi.fn(),
+vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/evals/evals-plugin-jobs-routes')>()),
+  useEvalsListEvaluateJobs: vi.fn(),
 }));
 vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/experiments')>()),
@@ -52,6 +50,7 @@ vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => ({
 }));
 
 const TEST_WORKSPACE = 'test-workspace';
+const SAMPLE_WORKSPACE = `${SAMPLE_WORKSPACE_PREFIX}1a2b3c4d`;
 
 const renderRoute = (workspace = TEST_WORKSPACE) => {
   const dashboardPath = generatePath(ROUTES.workspace.dashboard, { workspace });
@@ -87,7 +86,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
     window.localStorage.clear();
     vi.mocked(useAgentsListAgents).mockReturnValue(queryResult(1));
     vi.mocked(useInsightsListInsights).mockReturnValue(queryResult(4));
-    vi.mocked(useEvaluatorListEvaluateJobs).mockReturnValue(queryResult(120));
+    vi.mocked(useEvalsListEvaluateJobs).mockReturnValue(queryResult(120));
     vi.mocked(useListExperiments).mockReturnValue(queryResult(1));
     vi.mocked(useModelsListModels).mockReturnValue(queryResult(0));
     vi.mocked(useAgentsGetAgent).mockReturnValue({
@@ -116,7 +115,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
   });
 
   it('shows the sample sandbox banner only in the sample workspace', async () => {
-    const { unmount } = renderRoute('sample');
+    const { unmount } = renderRoute(SAMPLE_WORKSPACE);
 
     expect(await screen.findByText(/Sample Sandbox\./)).toBeInTheDocument();
     unmount();
@@ -164,6 +163,18 @@ describe('WorkspaceDashboardHomeRoute', () => {
     expect(vi.mocked(useAgentsListDeployments)).toHaveBeenLastCalledWith(
       TEST_WORKSPACE,
       expect.anything(),
+      expect.objectContaining({ query: expect.objectContaining({ enabled: false }) })
+    );
+  });
+
+  it('treats a bare `sample` workspace as a regular workspace', async () => {
+    renderRoute('sample');
+
+    expect(await screen.findByText('Connect an Agent')).toBeInTheDocument();
+    expect(screen.queryByText(/Sample Sandbox/)).not.toBeInTheDocument();
+    expect(vi.mocked(useAgentsGetAgent)).toHaveBeenLastCalledWith(
+      'sample',
+      SAMPLE_AGENT_NAME,
       expect.objectContaining({ query: expect.objectContaining({ enabled: false }) })
     );
   });
@@ -218,7 +229,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
       );
     });
 
-    it('holds the panel back until the deployments load, rather than showing a placeholder', async () => {
+    it('holds a skeleton until the deployments load, rather than showing a placeholder command', async () => {
       vi.mocked(useAgentsListDeployments).mockReturnValue({
         data: undefined,
         isFetched: false,
@@ -226,30 +237,60 @@ describe('WorkspaceDashboardHomeRoute', () => {
 
       renderRoute(SAMPLE_WORKSPACE);
 
-      expect(await screen.findByText('Agents')).toBeInTheDocument();
+      expect(await screen.findByTestId('quickstart-sample-panel-skeleton')).toBeInTheDocument();
       expect(screen.queryByTestId('quickstart-sample-agent-row')).not.toBeInTheDocument();
       // Nor the regular Quickstart, which would flash and then swap out.
       expect(screen.queryByText('Connect an Agent')).not.toBeInTheDocument();
     });
 
-    it('shows neither Quickstart while the sample agent is still loading', async () => {
+    it('shows the sample panel skeleton, not the regular Quickstart, while the agent loads', async () => {
       vi.mocked(useAgentsGetAgent).mockReturnValue({ data: undefined, isFetched: false } as never);
 
       renderRoute(SAMPLE_WORKSPACE);
 
-      expect(await screen.findByText('Agents')).toBeInTheDocument();
-      expect(screen.queryByText('Quickstart')).not.toBeInTheDocument();
+      expect(await screen.findByTestId('quickstart-sample-panel-skeleton')).toBeInTheDocument();
+      expect(screen.getByText('Quickstart')).toBeInTheDocument();
+      expect(screen.queryByText('Connect an Agent')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Dismiss Quickstart' })).not.toBeInTheDocument();
     });
 
-    it('falls back to the regular Quickstart when there is no sample agent to show', async () => {
-      // Settled without data: a 404 from a hand-made `sample` workspace, a 403, or a 5xx.
-      vi.mocked(useAgentsGetAgent).mockReturnValue({ data: undefined, isFetched: true } as never);
+    it('swaps the skeleton out once the sample agent is ready', async () => {
+      renderRoute(SAMPLE_WORKSPACE);
+
+      expect(await screen.findByTestId('quickstart-sample-agent-row')).toBeInTheDocument();
+      expect(screen.queryByTestId('quickstart-sample-panel-skeleton')).not.toBeInTheDocument();
+    });
+
+    it('shows an error, not the regular Quickstart, when the sample agent cannot be loaded', async () => {
+      // Settled without data: a 404 from an incomplete `nemo setup`, a 403, or a 5xx.
+      vi.mocked(useAgentsGetAgent).mockReturnValue({
+        data: undefined,
+        isFetched: true,
+        refetch: vi.fn(),
+      } as never);
 
       renderRoute(SAMPLE_WORKSPACE);
 
-      expect(await screen.findByText('Connect an Agent')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Dismiss Quickstart' })).toBeInTheDocument();
-      expect(screen.queryByTestId('quickstart-sample-agent-row')).not.toBeInTheDocument();
+      expect(await screen.findByText("Couldn't load the sample agent")).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      expect(screen.queryByText('Connect an Agent')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Dismiss Quickstart' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('quickstart-sample-panel-skeleton')).not.toBeInTheDocument();
+    });
+
+    it('asks for the sample agent again from the error', async () => {
+      const refetch = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(useAgentsGetAgent).mockReturnValue({
+        data: undefined,
+        isFetched: true,
+        refetch,
+      } as never);
+      const user = userEvent.setup();
+
+      renderRoute(SAMPLE_WORKSPACE);
+      await user.click(await screen.findByRole('button', { name: 'Retry' }));
+
+      expect(refetch).toHaveBeenCalledTimes(1);
     });
   });
 });

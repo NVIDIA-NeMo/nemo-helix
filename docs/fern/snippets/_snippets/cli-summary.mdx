@@ -8,19 +8,19 @@ description: ""
 
 | Option | Description |
 |--------|-------------|
+| `--context, -c` | The name of the context to use. Overrides the current context in the config file. |
 | `--base-url` | Base URL for the NeMo Helix API |
 | `--output-format, --output, -f <CHOICE>` | Output format for how results are printed. [possible values: table, json, yaml, markdown, csv, raw, code] |
 | `--no-truncate` | Don't truncate long values in table/markdown/csv output |
 | `--timestamp-format <CHOICE>` | Timestamp format for table/markdown/csv output [possible values: relative, iso8601] |
 | `--verbose, -v` | Enable verbose messaging. This only impacts logs that are visible, it doesn't change any data outputs. |
-| `--agent-mode, -A` | Enable agent-friendly output mode with extra context for coding agents. |
 | `--no-telemetry` | Disable anonymous usage telemetry for this invocation. |
 
 **Commands** are organized into categories:
 
 | Category | Commands | Description |
 |----------|----------|-------------|
-| Setup | `setup`, `auth`, `services`, `skills` | Set up and run local platform components |
-| CLI functions | `chat`, `docs`, `wait`, `agent`, `plugins` | Interactive, documentation, and agent-oriented workflows |
+| Setup | `setup`, `auth`, `config`, `services`, `skills` | Set up and run local platform components |
+| CLI functions | `chat`, `docs`, `describe`, `wait`, `plugins` | Interactive, documentation, and agent-oriented workflows |
 | Core plugins | `files`, `inference`, `jobs`, `models`, `secrets`, `workspaces` | Core platform resources |
-| Functional plugins | `agents`, `data-designer`, `guardrail`, `garak`, `anonymizer`, `evaluator`, `customization`, `insights`, `safe-synthesizer`, `experiments`, `intake` | Functional service and plugin commands |
+| Functional plugins | `agents`, `data-designer`, `guardrail`, `garak`, `anonymizer`, `evals`, `customization`, `insights`, `safe-synthesizer`, `experiments`, `intake` | Functional service and plugin commands |

@@ -144,6 +144,27 @@ def test_permission_namespace_still_fences_other_namespaces(monkeypatch: pytest.
     assert any("outside the service namespace 'legacy'" in e and "renamed.y.read" in e for e in errors)
 
 
+def test_approved_legacy_namespace_applies_without_declaration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A service listed in ``LEGACY_PERMISSION_NAMESPACES`` keeps its legacy ids even if the
+    plugin declares no ``permission_namespace`` (as the evals plugin does)."""
+    monkeypatch.setattr(authz_discovery, "LEGACY_PERMISSION_NAMESPACES", {"renamed": "legacy"})
+    router = APIRouter()
+
+    @router.get("/v2/x")
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[Permission("legacy", "x", "read", "Read x")])
+    async def x() -> None: ...
+
+    class _Svc(NemoService):
+        name = "renamed"
+
+        def get_routers(self) -> list[RouterSpec]:
+            return [RouterSpec(router)]
+
+    contrib, errors, _warnings = _derive_service_contribution(_Svc())
+    assert errors == []
+    assert "legacy.x.read" in contrib.permissions
+
+
 def test_unapproved_permission_namespace_fails_closed() -> None:
     """A plugin cannot claim another service's namespace by declaring it as its
     ``permission_namespace``: only aliases approved in ``LEGACY_PERMISSION_NAMESPACES`` count."""

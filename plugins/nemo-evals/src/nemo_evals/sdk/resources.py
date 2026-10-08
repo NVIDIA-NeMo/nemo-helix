@@ -1,0 +1,453 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""SDK resources for the evals plugin scaffold."""
+
+from __future__ import annotations
+
+from typing import Any, overload
+
+from nemo_evals.api.schemas import TasksetRef
+from nemo_evals.jobs.agent_spec import GymPlacement
+from nemo_evals.sdk._executor import (
+    SubmitTargetSpec,
+    _AsyncEvaluatorPluginExecutor,
+    _SyncEvaluatorPluginExecutor,
+)
+from nemo_evals.sdk.job_resources import (
+    AgentEvaluatorJobResource,
+    AsyncAgentEvaluatorJobResource,
+    AsyncEvaluatorJobResource,
+    EvaluatorJob,
+    EvaluatorJobResource,
+)
+from nemo_evals.sdk.metric_resources import (
+    AsyncEvaluatorMetricsResource,
+    EvaluatorMetricsResource,
+)
+from nemo_evals.sdk.result_resources import (
+    AsyncEvaluatorAgentEvalResultsResource,
+    AsyncEvaluatorEvalResultsResource,
+    EvaluatorAgentEvalResultsResource,
+    EvaluatorEvalResultsResource,
+)
+from nemo_evals.sdk.task_resources import (
+    AsyncEvaluatorTasksResource,
+    EvaluatorTasksResource,
+)
+from nemo_evals.sdk.taskset_resources import (
+    AsyncEvaluatorTasksetsResource,
+    EvaluatorTasksetsResource,
+)
+from nemo_evals.sdk.types import (
+    PluginDatasetInput,
+    RunConfig,
+    RunConfigOnline,
+    RunConfigOnlineModel,
+)
+from nemo_evals.shared.metric_bundles.bundles import MetricBundlePackager
+from nemo_evals.shared.metric_bundles.defaults import resolve_default_metric_bundle_packager
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
+from nhx_evals_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentTaskRunner
+from nhx_evals_sdk.metrics.protocol import Metric
+from nhx_evals_sdk.values import (
+    Agent,
+    FieldMapping,
+    Model,
+    ModelRef,
+)
+
+
+class Evaluator:
+    """Sync evals plugin SDK namespace.
+
+    Build it with :meth:`from_client`; ``client.evals`` is the typed evals service client.
+    """
+
+    def __init__(self, client: EvaluatorClient) -> None:
+        """Store the typed evaluator client used for evals plugin HTTP calls."""
+        self._client = client
+        self._executor = _SyncEvaluatorPluginExecutor(client=self._client, evaluator_client=self._client)
+        self.metrics = EvaluatorMetricsResource(self._client)
+        self.agent_eval_results = EvaluatorAgentEvalResultsResource(self._client)
+        self.eval_results = EvaluatorEvalResultsResource(self._client)
+        self.tasks = EvaluatorTasksResource(self._client)
+        self.tasksets = EvaluatorTasksetsResource(self._client)
+
+    @classmethod
+    def from_client(cls, client: NemoClient) -> Evaluator:
+        return cls(EvaluatorClient.from_client(client))
+
+    def plugin_status(self) -> dict[str, object]:
+        """Return evals plugin health information from the service."""
+        payload = self._client.get_health().data().model_dump(mode="json", exclude_none=True, exclude_unset=True)
+        return {str(key): value for key, value in payload.items()}
+
+    def get_job_resource(self, job_name: str, workspace: str | None = None) -> EvaluatorJobResource:
+        """Get a high-level resource for an existing evals plugin job."""
+        response = self._client.get_evaluate_job(name=job_name, workspace=workspace)
+        return EvaluatorJobResource(
+            job=EvaluatorJob.model_validate(response.data().model_dump(mode="json")),
+            client=self._client,
+            workspace=self._client.resolve_workspace(workspace),
+        )
+
+    @overload
+    def submit(
+        self,
+        *,
+        metric: Metric,
+        dataset: PluginDatasetInput,
+        config: RunConfig | None = None,
+        target: None = None,
+        field_mapping: FieldMapping | None = None,
+        prompt_template: None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> EvaluatorJobResource: ...
+
+    @overload
+    def submit(
+        self,
+        *,
+        metric: Metric,
+        dataset: PluginDatasetInput,
+        config: RunConfigOnlineModel,
+        target: Model | ModelRef,
+        field_mapping: FieldMapping | None = None,
+        prompt_template: str | dict[str, Any] | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> EvaluatorJobResource: ...
+
+    @overload
+    def submit(
+        self,
+        *,
+        metric: Metric,
+        dataset: PluginDatasetInput,
+        config: RunConfigOnline,
+        target: Agent,
+        field_mapping: FieldMapping | None = None,
+        prompt_template: str | dict[str, Any],
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> EvaluatorJobResource: ...
+
+    @overload
+    def submit(
+        self,
+        *,
+        tasks: TasksetRef,
+        target: GymAgentTaskRunner,
+        placement: GymPlacement,
+    ) -> AgentEvaluatorJobResource: ...
+
+    @overload
+    def submit(
+        self,
+        *,
+        tasks: TasksetRef,
+        target: AgentTaskRunner,
+    ) -> AgentEvaluatorJobResource: ...
+
+    @overload
+    def submit(
+        self,
+        *,
+        tasks: TasksetRef,
+        trials: list[AgentEvalTrial],
+    ) -> AgentEvaluatorJobResource: ...
+
+    def submit(
+        self,
+        *,
+        metric: Metric | None = None,
+        dataset: PluginDatasetInput | None = None,
+        tasks: TasksetRef | None = None,
+        trials: list[AgentEvalTrial] | None = None,
+        config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
+        target: SubmitTargetSpec | AgentTaskRunner | None = None,
+        placement: GymPlacement | None = None,
+        field_mapping: FieldMapping | None = None,
+        prompt_template: str | dict[str, Any] | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> EvaluatorJobResource | AgentEvaluatorJobResource:
+        """Submit an evaluation job through the evals plugin executor.
+
+        Two shapes, discriminated by what you supply: ``metric`` + ``dataset`` evaluates rows, and
+        ``tasks`` with either ``target`` or ``trials`` evaluates a stored taskset. Supply a live
+        runner as ``target`` or saved trials for offline rescoring. They are one
+        method because they are one concept — the split is a property of how the work is described
+        today, not of what the caller is asking for.
+
+        ``placement`` says where the platform runs the runner — a staged environment FileSet, the
+        agent instance a sandboxed host routes to — as opposed to what the evaluation is, which is
+        the runner's own config. It is typed per runner kind, so the overloads admit a
+        ``GymPlacement`` only alongside a ``GymAgentTaskRunner``.
+        """
+        if tasks is not None:
+            if metric is not None or dataset is not None:
+                raise TypeError(
+                    "submit() takes either `tasks` (a taskset evaluation) or `metric` + `dataset` "
+                    "(a row evaluation), not both. Drop whichever does not describe this run."
+                )
+            if (target is None) == (trials is None):
+                raise TypeError("submit(tasks=...) requires exactly one of `target` or `trials`.")
+            if target is not None and not isinstance(target, AgentTaskRunner):
+                raise TypeError(
+                    "submit(tasks=...) evaluates a taskset with an agent runner, so `target` must be "
+                    f"an AgentTaskRunner; got {type(target).__name__}. Pass a runner such as "
+                    "GymAgentTaskRunner(config=...)."
+                )
+            # Everything below configures a *row* evaluation. The taskset path cannot honour any of
+            # it, so accepting it silently would run a job that ignores what the caller asked for.
+            row_only = {
+                "config": config,
+                "field_mapping": field_mapping,
+                "prompt_template": prompt_template,
+                "metric_bundle_packager": metric_bundle_packager,
+            }
+            supplied = sorted(name for name, value in row_only.items() if value is not None)
+            if supplied:
+                raise TypeError(
+                    f"submit(tasks=...) does not use {', '.join(supplied)} — those configure a row "
+                    "evaluation. A taskset evaluation is configured by the runner passed as "
+                    "`target`, so supplying them here would have no effect."
+                )
+            if placement is not None and not isinstance(target, GymAgentTaskRunner):
+                # Rejected statically by the overloads; this is for callers without a type checker.
+                raise TypeError(
+                    f"placement=GymPlacement(...) places a GymAgentTaskRunner, not a {type(target).__name__}. "
+                    "Placement is per runner kind, so honouring it here would mean guessing."
+                )
+            return self._executor.submit_agent_eval(tasks=tasks, target=target, trials=trials, placement=placement)
+        if trials is not None:
+            raise TypeError("submit(trials=...) requires `tasks=TasksetRef(...)`.")
+        if placement is not None:
+            raise TypeError(
+                "placement configures a taskset evaluation's runner; a row evaluation has no runner to "
+                "place. Pass `tasks=TasksetRef(...)` with the runner it belongs to."
+            )
+        if metric is None or dataset is None:
+            raise TypeError(
+                "submit() needs either `tasks` + `target` for a taskset evaluation, or `metric` + "
+                "`dataset` for a row evaluation; neither was supplied."
+            )
+        if isinstance(target, AgentTaskRunner):
+            # The mirror of the check above: a runner is only meaningful for a taskset evaluation,
+            # so this is a caller who meant to pass `tasks` and passed a dataset instead. Reaching
+            # the row path with it would fail much deeper, describing the runner as a model endpoint.
+            raise TypeError(
+                f"{type(target).__name__} is an agent runner, which runs a taskset rather than "
+                "rows. Pass `tasks=TasksetRef(...)` instead of `metric` + `dataset`."
+            )
+        return self._executor.submit(
+            metric=metric,
+            dataset=dataset,
+            params=config,
+            target=target,
+            field_mapping=field_mapping,
+            prompt_template=prompt_template,
+            metric_bundle_packager=resolve_default_metric_bundle_packager(
+                metric, metric_bundle_packager, allow_cloudpickle_fallback=False, action="Submitting"
+            ),
+        )
+
+
+class AsyncEvaluator:
+    """Async evals plugin SDK namespace.
+
+    Build it with :meth:`from_client`; ``client.evals`` is the typed evals service client.
+    """
+
+    def __init__(self, client: AsyncEvaluatorClient) -> None:
+        """Store the typed async evaluator client used for evals plugin HTTP calls."""
+        self._client = client
+        self._executor = _AsyncEvaluatorPluginExecutor(client=self._client, evaluator_client=self._client)
+        self.metrics = AsyncEvaluatorMetricsResource(self._client)
+        self.agent_eval_results = AsyncEvaluatorAgentEvalResultsResource(self._client)
+        self.eval_results = AsyncEvaluatorEvalResultsResource(self._client)
+        self.tasks = AsyncEvaluatorTasksResource(self._client)
+        self.tasksets = AsyncEvaluatorTasksetsResource(self._client)
+
+    @classmethod
+    def from_client(cls, async_client: AsyncNemoClient) -> AsyncEvaluator:
+        return cls(AsyncEvaluatorClient.from_client(async_client))
+
+    async def plugin_status(self) -> dict[str, object]:
+        """Return evals plugin health information from the service."""
+        payload = (
+            (await self._client.get_health()).data().model_dump(mode="json", exclude_none=True, exclude_unset=True)
+        )
+        return {str(key): value for key, value in payload.items()}
+
+    async def get_job_resource(self, job_name: str, workspace: str | None = None) -> AsyncEvaluatorJobResource:
+        """Get a high-level async resource for an existing evals plugin job."""
+        response = await self._client.get_evaluate_job(name=job_name, workspace=workspace)
+        return AsyncEvaluatorJobResource(
+            job=EvaluatorJob.model_validate(response.data().model_dump(mode="json")),
+            client=self._client,
+            workspace=self._client.resolve_workspace(workspace),
+        )
+
+    @overload
+    async def submit(
+        self,
+        *,
+        metric: Metric,
+        dataset: PluginDatasetInput,
+        config: RunConfig | None = None,
+        target: None = None,
+        field_mapping: FieldMapping | None = None,
+        prompt_template: None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> AsyncEvaluatorJobResource: ...
+
+    @overload
+    async def submit(
+        self,
+        *,
+        metric: Metric,
+        dataset: PluginDatasetInput,
+        config: RunConfigOnlineModel,
+        target: Model | ModelRef,
+        field_mapping: FieldMapping | None = None,
+        prompt_template: str | dict[str, Any] | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> AsyncEvaluatorJobResource: ...
+
+    @overload
+    async def submit(
+        self,
+        *,
+        metric: Metric,
+        dataset: PluginDatasetInput,
+        config: RunConfigOnline,
+        target: Agent,
+        field_mapping: FieldMapping | None = None,
+        prompt_template: str | dict[str, Any],
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> AsyncEvaluatorJobResource: ...
+
+    @overload
+    async def submit(
+        self,
+        *,
+        tasks: TasksetRef,
+        target: GymAgentTaskRunner,
+        placement: GymPlacement,
+    ) -> AsyncAgentEvaluatorJobResource: ...
+
+    @overload
+    async def submit(
+        self,
+        *,
+        tasks: TasksetRef,
+        target: AgentTaskRunner,
+    ) -> AsyncAgentEvaluatorJobResource: ...
+
+    @overload
+    async def submit(
+        self,
+        *,
+        tasks: TasksetRef,
+        trials: list[AgentEvalTrial],
+    ) -> AsyncAgentEvaluatorJobResource: ...
+
+    async def submit(
+        self,
+        *,
+        metric: Metric | None = None,
+        dataset: PluginDatasetInput | None = None,
+        tasks: TasksetRef | None = None,
+        trials: list[AgentEvalTrial] | None = None,
+        config: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = None,
+        target: SubmitTargetSpec | AgentTaskRunner | None = None,
+        placement: GymPlacement | None = None,
+        field_mapping: FieldMapping | None = None,
+        prompt_template: str | dict[str, Any] | None = None,
+        metric_bundle_packager: MetricBundlePackager | None = None,
+    ) -> AsyncEvaluatorJobResource | AsyncAgentEvaluatorJobResource:
+        """Submit an evaluation job through the evals plugin executor.
+
+        The async counterpart of :meth:`Evaluator.submit`, with the same two shapes and the same
+        argument rules: ``metric`` + ``dataset`` evaluates rows, and ``tasks`` with either
+        ``target`` (a live agent runner) or ``trials`` (saved trials, rescored offline) evaluates a
+        stored taskset. ``placement`` says where the platform runs that runner.
+        """
+        if tasks is not None:
+            if metric is not None or dataset is not None:
+                raise TypeError(
+                    "submit() takes either `tasks` (a taskset evaluation) or `metric` + `dataset` "
+                    "(a row evaluation), not both. Drop whichever does not describe this run."
+                )
+            if (target is None) == (trials is None):
+                raise TypeError("submit(tasks=...) requires exactly one of `target` or `trials`.")
+            if target is not None and not isinstance(target, AgentTaskRunner):
+                raise TypeError(
+                    "submit(tasks=...) evaluates a taskset with an agent runner, so `target` must be "
+                    f"an AgentTaskRunner; got {type(target).__name__}. Pass a runner such as "
+                    "GymAgentTaskRunner(config=...)."
+                )
+            # Everything below configures a *row* evaluation. The taskset path cannot honour any of
+            # it, so accepting it silently would run a job that ignores what the caller asked for.
+            row_only = {
+                "config": config,
+                "field_mapping": field_mapping,
+                "prompt_template": prompt_template,
+                "metric_bundle_packager": metric_bundle_packager,
+            }
+            supplied = sorted(name for name, value in row_only.items() if value is not None)
+            if supplied:
+                raise TypeError(
+                    f"submit(tasks=...) does not use {', '.join(supplied)} — those configure a row "
+                    "evaluation. A taskset evaluation is configured by the runner passed as "
+                    "`target`, so supplying them here would have no effect."
+                )
+            if placement is not None and not isinstance(target, GymAgentTaskRunner):
+                # Rejected statically by the overloads; this is for callers without a type checker.
+                raise TypeError(
+                    f"placement=GymPlacement(...) places a GymAgentTaskRunner, not a {type(target).__name__}. "
+                    "Placement is per runner kind, so honouring it here would mean guessing."
+                )
+            return await self._executor.submit_agent_eval(
+                tasks=tasks, target=target, trials=trials, placement=placement
+            )
+        if trials is not None:
+            raise TypeError("submit(trials=...) requires `tasks=TasksetRef(...)`.")
+        if placement is not None:
+            raise TypeError(
+                "placement configures a taskset evaluation's runner; a row evaluation has no runner to "
+                "place. Pass `tasks=TasksetRef(...)` with the runner it belongs to."
+            )
+        if metric is None or dataset is None:
+            raise TypeError(
+                "submit() needs either `tasks` + `target` for a taskset evaluation, or `metric` + "
+                "`dataset` for a row evaluation; neither was supplied."
+            )
+        if isinstance(target, AgentTaskRunner):
+            # The mirror of the check above: a runner is only meaningful for a taskset evaluation,
+            # so this is a caller who meant to pass `tasks` and passed a dataset instead. Reaching
+            # the row path with it would fail much deeper, describing the runner as a model endpoint.
+            raise TypeError(
+                f"{type(target).__name__} is an agent runner, which runs a taskset rather than "
+                "rows. Pass `tasks=TasksetRef(...)` instead of `metric` + `dataset`."
+            )
+        return await self._executor.submit(
+            metric=metric,
+            dataset=dataset,
+            params=config,
+            target=target,
+            field_mapping=field_mapping,
+            prompt_template=prompt_template,
+            metric_bundle_packager=resolve_default_metric_bundle_packager(
+                metric, metric_bundle_packager, allow_cloudpickle_fallback=False, action="Submitting"
+            ),
+        )
+
+
+evaluator_sdk_resources = NemoPluginSDKResources(
+    sync_resource=Evaluator.from_client,
+    async_resource=AsyncEvaluator.from_client,
+)

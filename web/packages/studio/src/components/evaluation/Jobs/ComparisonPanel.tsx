@@ -4,8 +4,8 @@
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { renderMultipleSelectedValues } from '@nemo/common/src/utils/form';
 import { getColorsFromLength } from '@nemo/common/src/utils/formatters';
-import { useEvaluatorListEvaluateJobResults } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import type { EvaluateJob } from '@nemo/sdk/generated/evaluator/schema';
+import { useEvalsListEvaluateJobResults } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import {
   Flex,
   Panel,
@@ -36,7 +36,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
   const { status } = job ?? {};
   const isPendingStatus = status === 'pending' || status === 'active';
 
-  const { data: resultsPage, isLoading: isLoadingMetadata } = useEvaluatorListEvaluateJobResults(
+  const { data: resultsPage, isLoading: isLoadingMetadata } = useEvalsListEvaluateJobResults(
     workspace,
     jobName,
     {

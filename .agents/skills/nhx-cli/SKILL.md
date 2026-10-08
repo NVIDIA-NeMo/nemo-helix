@@ -169,8 +169,8 @@ Conventions that keep the surface consistent:
 - **Errors**: let `nemo_helix_plugin.client.errors` propagate; `@handle_errors` maps them (API errors,
   including 404 and connection failures → exit 3; usage and client-side validation → exit 2). Raise
   `click.BadParameter` for bad input and `click.ClickException` for expected failures.
-- **Warnings**: decorate commands with `@collect_warnings` so `add_warning` (pagination, truncation) and
-  agent-mode hints are printed.
+- **Warnings**: decorate commands with `@collect_warnings` so `add_warning` (pagination, truncation)
+  warnings are printed.
 
 ### Register the group
 

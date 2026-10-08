@@ -647,18 +647,18 @@ class TestIGWScopeChecks:
 class TestIGWServicePrincipalAccess:
     """Service principals (service:*) are evaluated by the PDP; policy allows these calls.
 
-    The evaluator calls the IGW with X-NHX-Principal-Id: service:evaluator instead of
+    The evaluator calls the IGW with X-NHX-Principal-Id: service:evals instead of
     a user JWT. These tests verify that service principals are allowed through without
     workspace membership and without a Bearer token.
     """
 
-    SERVICE_PRINCIPAL_EVALUATOR = "service:evaluator"
+    SERVICE_PRINCIPAL_EVALUATOR = "service:evals"
 
     def test_service_principal_can_list_openai_models(self, ctx: ClientContext):
         workspace = short_unique_name("igw-svc-l")
 
         _admin_workspaces(ctx).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
-        # Intentionally no workspace membership granted to service:evaluator
+        # Intentionally no workspace membership granted to service:evals
 
         response = ctx.test_client.get(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models",
@@ -678,7 +678,7 @@ class TestIGWServicePrincipalAccess:
             name=model_name,
             mock_response_body=MOCK_CHAT_RESPONSE,
         )
-        # Intentionally no workspace membership granted to service:evaluator
+        # Intentionally no workspace membership granted to service:evals
 
         response = ctx.test_client.post(
             f"/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/chat/completions",

@@ -1,0 +1,248 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Targets and Runners"
+description: "Reference for what an agent-eval run can point at — a Model, a deployed Agent over HTTP, or an AgentTaskRunner (a callable, Harbor, Gym, or your own) — with each target's key fields and when to use it."
+---
+
+`AgentEvaluator().run(target=...)` accepts one of three kinds of target. Whatever you pick, it produces
+**trials**, and trials are scored the same way — so the same tasks and metrics work against any target
+(see [Agent Evaluation](/documentation/evaluate-models/agent-eval) for the model).
+
+## At a glance
+
+| Target | What it is | Extra dependencies | How-to |
+|---|---|---|---|
+| `Model` | a chat/completions LLM endpoint | an inference endpoint + key | — |
+| `GenericAgent` | any HTTP JSON endpoint | none | [Evaluate a Deployed Agent](/documentation/evaluate-models/agent-eval/evaluate-deployed-agent) |
+| `NemoAgentToolkitAgent` | a NeMo Agent Toolkit endpoint | a running NAT workflow | [Evaluate a Deployed Agent](/documentation/evaluate-models/agent-eval/evaluate-deployed-agent) |
+| `CallableAgentTaskRunner` | an in-process async function | none | [Quickstart](/documentation/evaluate-models/agent-eval/quickstart) |
+| `HarborAgentTaskRunner` | a Harbor task suite | `harbor` + Docker | [Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner) |
+| `GymAgentTaskRunner` | a NeMo Gym environment + agent | the `gym` CLI on `PATH` | [NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner) |
+| `FabricAgentRuntime` | a NeMo Fabric harness (Codex, Claude, Hermes, deepagents), on the host or in a sandbox | the `fabric` extra (+ a sandbox provider for `sandbox=`) | [NeMo Fabric Harness](/documentation/evaluate-models/agent-eval/fabric-runner) |
+| *your* `AgentTaskRunner` | anything that turns tasks into trials | up to you | *(this page)* |
+
+The union is `AgentEvalTarget = Model | Agent | AgentTaskRunner`, where `Agent = GenericAgent |
+NemoAgentToolkitAgent`.
+
+## `Model`
+
+A chat/completions endpoint evaluated directly on your tasks — a useful **baseline** (how well does a
+bare model do before you wrap it in an agent?). The evaluator prompts it with each task's
+`instruction`.
+
+| Field | Required | Notes |
+|---|---|---|
+| `url` | yes | endpoint URL (e.g. `.../v1/chat/completions` or `.../v1/completions`) |
+| `name` | yes | model identifier, stamped on trials |
+| `format` | no | **deprecated and ignored** — structured output support is probed from the endpoint during preflight |
+| `api_key_secret` | no | credential reference — `workspace/secret_name` or `secret_name` |
+| `default_headers` | no | non-auth headers applied to every request; authentication goes through `api_key_secret` |
+| `host_url` | no | direct NIM endpoint (`http://host:port`), populated when the target resolves from a `ModelRef` |
+
+```python
+from nhx_evals_sdk.values import Model, SecretRef
+
+target = Model(url="https://integrate.api.nvidia.com/v1/chat/completions", name="nvidia/nemotron-3.5-lightning-30b-a3b",
+               api_key_secret=SecretRef(root="NVIDIA_API_KEY"))
+```
+
+For a local `run()`, `api_key_secret` names an **environment variable** in your process; for a submitted
+job it names a **platform secret** in the workspace.
+
+## `Agent` (HTTP)
+
+A deployed agent reachable over HTTP. Two variants, both authenticated with **`api_key_secret`** — the
+same credential reference `Model` uses: for a local `run()` it names an environment variable, for a
+submitted job a platform secret. Its value is sent as a bearer token on each request.
+
+### `GenericAgent`
+
+Any JSON endpoint. You define the request with a Jinja `body` (rendered against the task inputs) and
+pull the answer out with JSONPath. Full walkthrough:
+[Evaluate a Deployed Agent over HTTP](/documentation/evaluate-models/agent-eval/evaluate-deployed-agent).
+
+| Field | Required | Notes |
+|---|---|---|
+| `url` | yes | endpoint the evaluator POSTs to |
+| `name` | yes | agent identifier, stamped on trials |
+| `format` | no | `AgentFormat.GENERIC` (the default and only value) |
+| `body` | yes | Jinja template for the request payload, rendered against task inputs (e.g. `{{ instruction }}`) |
+| `response_path` | yes | JSONPath selecting the answer from the response |
+| `trajectory_path` | no | JSONPath selecting a trajectory to score |
+| `api_key_secret` | no | credential reference (env var locally, platform secret for a job); its value is sent as a bearer token |
+| `stream` | no | read JSON SSE `data:` frames instead of a single JSON body (default `false`) |
+| `response_aggregation` | no | how streamed `data:` frames combine: `last` keeps the final matched value (default; snapshot-per-frame endpoints), `concat` joins matched string values in order (token-delta endpoints) |
+
+### `NemoAgentToolkitAgent`
+
+A [NeMo Agent Toolkit](https://docs.nvidia.com/nemo/agent-toolkit/latest/index.html) endpoint. It
+speaks NAT's fixed request/response protocol, so you don't hand-write a `body` — point it at the
+workflow's URL.
+
+| Field | Required | Notes |
+|---|---|---|
+| `url` | yes | the NAT workflow endpoint |
+| `name` | yes | agent identifier, stamped on trials |
+| `format` | no | `AgentFormat.NEMO_AGENT_TOOLKIT` (the default and only value) |
+| `nat` | no | `NatAgentConfig` — endpoint / query-param / response-path / aggregation overrides; defaults target `/generate/full` and `concat` token-delta frames into the full response |
+| `api_key_secret` | no | credential reference (env var locally, platform secret for a job); its value is sent as a bearer token |
+
+## `AgentTaskRunner` (callable, Harbor, Gym, or your own)
+
+The most general target: anything implementing the two-method protocol. Both members are
+required — a runner missing either is rejected with `NotImplementedError: unsupported
+agent-eval target type`.
+
+```python
+from collections.abc import Sequence
+
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
+
+class AgentTaskRunner:
+    async def run_tasks(
+        self, tasks: Sequence[AgentEvalTask], config: AgentEvalRunConfig | None = None
+    ) -> Sequence[AgentEvalTrial]:
+        raise NotImplementedError
+
+    def runner_info(self) -> RunnerInfo:
+        raise NotImplementedError
+```
+
+The SDK ships three runners you'll usually reach for first:
+
+- **`CallableAgentTaskRunner`** wraps an `async def agent(task) -> str | AgentOutput | TrialDraft`. The
+  smallest possible target — no Docker, no HTTP. See the
+  [Quickstart](/documentation/evaluate-models/agent-eval/quickstart). Return a `TrialDraft` to attach
+  a trajectory or other evidence (see [Score by Component](/documentation/evaluate-models/agent-eval/score-by-component)).
+- **`HarborAgentTaskRunner`** runs a [Harbor](https://www.harborframework.com) task suite in Docker and
+  scores its verifier reward. Point `agent_import_path` at your own Harbor agent, pass its
+  constructor arguments as `agent_kwargs` (Harbor's `--ak`), and hand it credentials through
+  `env_secrets`, which work both standalone and on the platform. See
+  [Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner).
+- **`GymAgentTaskRunner`** runs a [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) environment and agent,
+  and scores each rollout's reward. See [NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner).
+
+### `GymAgentTaskRunner`
+
+Runs an existing [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) environment against your tasks and
+adapts its rollouts into trials, scoring each rollout's reward. `GymRuntimeConfig` requires `agent`,
+`agent_config`, and `resources_server`; `discover_gym_tasks` builds the tasks from a Gym jsonl
+dataset.
+
+Gym is **not** a dependency of this SDK — it imports Ray at module load, which nemo-helix excludes
+by constraint. Install it into its own environment and put its `bin` on `PATH`.
+
+It can also be submitted as a platform job from the live runner object, via
+`evaluator.submit(tasks=..., target=runner)`, rather than described again as a spec.
+
+Platform job specifications use `GymRunnerTarget`. A submission builds one from two places, split by
+what the setting is *about*:
+
+- **The runner** carries the evaluation — including `env_secrets`, which names environment variables
+  whose values come from a secret reference. That means the same thing wherever the runner runs;
+  only the resolver differs, so a local run resolves it from your environment.
+- **A `GymPlacement`**, passed to `submit`, carries what the deployment decides: `environment` (a
+  staged FileSet, requiring sandboxed execution) and `agent_ref_name` (the agent instance a
+  sandboxed host routes rollouts to). On the target, the agent is one field, `source`, holding the
+  `component`, its `config`, and that `instance`.
+
+```python
+evaluator.submit(tasks=..., target=runner, placement=GymPlacement(environment=...))
+```
+
+The overloads accept a `GymPlacement` only with a `GymAgentTaskRunner`, so a placement cannot be
+paired with a runner that has no use for it.
+
+Full setup, configuration reference, and caveats:
+[Evaluate a NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner).
+For custom packages, see
+[Run a Custom Gym Environment](/documentation/evaluate-models/agent-eval/gym-custom-environment).
+
+### NeMo Fabric runtimes
+
+[NeMo Fabric](https://github.com/nvidia/nemo-fabric) drives an agent *harness* rather than a single
+agent. Which harness runs is chosen entirely by `config["harness"]["adapter_id"]`, so one runtime
+covers several agent frontends:
+
+| `adapter_id` | Harness |
+|---|---|
+| `nvidia.fabric.codex` | Codex CLI (`transport="cli"`) |
+| `nvidia.fabric.claude` | Claude |
+| `nvidia.fabric.hermes` | Hermes SDK (`transport="library"`) |
+| `nvidia.fabric.langchain.deepagents` | LangChain deepagents — **not** installed by this SDK's `fabric` extra (see below) |
+
+Fabric 0.4 also ships Cline, OpenClaw, OpenCode, Qwen Code, and Pi adapters. NeMo Helix does not
+install those; add the matching `nemo-fabric-adapters-*` package yourself to use one.
+
+`FabricAgentRuntime` runs that config on the host by default, capturing an ATIF trajectory. Pass
+`sandbox=<SandboxProvider>` to run the same configuration inside a sandbox instead; `image` and
+`secrets` apply there.
+
+It needs the `fabric` extra, which pulls the Codex, Claude, and Hermes adapters:
+
+```bash
+uv sync --frozen --package nhx-evals-sdk --extra fabric --inexact
+```
+
+The deepagents adapter is deliberately excluded from that extra — it does not support the Relay
+observability configuration Fabric streaming generates — so `nvidia.fabric.langchain.deepagents`
+needs its harness installed separately.
+
+Full setup, the agent-config shape, and the trajectory evidence:
+[Evaluate with a NeMo Fabric Harness](/documentation/evaluate-models/agent-eval/fabric-runner).
+
+### Writing your own
+
+Write your own when your agent doesn't fit those — a bespoke harness, a queue, a replay of stored runs.
+Return one `AgentEvalTrial` per task and identify the runner with `runner_info`; the evaluator scores
+the trials exactly like any other target:
+
+```python
+from nhx_evals_sdk.agent_eval.trials import (
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    AgentOutput,
+    RunnerInfo,
+)
+
+class EchoRunner:
+    async def run_tasks(self, tasks, config=None):
+        return [
+            AgentEvalTrial(
+                id=f"{task.id}:trial",
+                task_id=task.id,
+                status=AgentEvalTrialStatus.COMPLETED,
+                output=AgentOutput(output_text=task.inputs["instruction"]),
+            )
+            for task in tasks
+        ]
+
+    def runner_info(self) -> RunnerInfo:
+        return RunnerInfo(name="echo")
+```
+
+`runner_info` is what records the producer of a run: the result carries it on
+`AgentEvalResult.metadata.target`, so a stored run can be understood after the fact. Return a stable
+short `name` (`"gym"`, `"harbor"`) rather than a class name, and keep secrets out of `config` — it is
+persisted with the run bundle.
+
+## Choosing a target
+
+- Just trying the flow, or you already have the agent in Python → **`CallableAgentTaskRunner`**.
+- The agent is deployed behind HTTP → **`GenericAgent`** (any endpoint) or **`NemoAgentToolkitAgent`**
+  (a NAT workflow).
+- You want a model baseline, no agent → **`Model`**.
+- You have Harbor task datasets → **`HarborAgentTaskRunner`**.
+- You have a NeMo Gym environment → **`GymAgentTaskRunner`**.
+- None of the above fits → implement **`AgentTaskRunner`**.
+
+## Related
+
+<Cards>
+  <Card title="Agent Evaluation (concepts)" href="/documentation/evaluate-models/agent-eval" />
+  <Card title="Evaluate a Deployed Agent over HTTP" href="/documentation/evaluate-models/agent-eval/evaluate-deployed-agent" />
+  <Card title="Score by Component" href="/documentation/evaluate-models/agent-eval/score-by-component" />
+</Cards>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
-import { evaluatorCreateEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   createExperiment,
@@ -24,11 +24,9 @@ import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
-vi.mock('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes', async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import('@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes')
-  >()),
-  evaluatorCreateEvaluateJob: vi.fn(),
+vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/evals/evals-plugin-jobs-routes')>()),
+  evalsCreateEvaluateJob: vi.fn(),
 }));
 
 vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
@@ -136,11 +134,11 @@ const setParallelism = async (user: ReturnType<typeof userEvent.setup>, value: s
 };
 
 const submittedParallelism = () =>
-  vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0]?.[1]?.spec?.params?.parallelism;
+  vi.mocked(evalsCreateEvaluateJob).mock.calls[0]?.[1]?.spec?.params?.parallelism;
 
 beforeEach(() => {
   mockLists();
-  vi.mocked(evaluatorCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
+  vi.mocked(evalsCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
   vi.mocked(createExperiment).mockResolvedValue({
     id: 'grp_new',
     name: 'model-update-tests',
@@ -182,7 +180,7 @@ describe('SubmitEvaluationModal parallel requests', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
-    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     expect(submittedParallelism()).toBe(2);
   });
 
@@ -202,7 +200,7 @@ describe('SubmitEvaluationModal parallel requests', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
-    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     expect(submittedParallelism()).toBe(2);
   });
 });

@@ -110,9 +110,6 @@ class MockCLIState:
     def get_no_truncate(self, override: bool | None = None) -> bool:
         return self.no_truncate if override is None else override
 
-    def get_agent_hints(self, command_path: str) -> list[str]:
-        return []
-
 
 CLIStateFactory = Callable[..., MockCLIState]
 

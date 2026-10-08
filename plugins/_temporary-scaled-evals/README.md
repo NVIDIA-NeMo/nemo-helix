@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # nemo-scaled-evals (Phase 1 ephemeral plugin)
 
-Vendors the scaled-evals control plane into NeMo Helix as an ephemeral plugin so Harbor/Gym scaled evaluation keeps working end-to-end while substrate plugins (builder/registry/sandbox) and the nemo-evaluator API merge land later.
+Vendors the scaled-evals control plane into NeMo Helix as an ephemeral plugin so Harbor/Gym scaled evaluation keeps working end-to-end while substrate plugins (builder/registry/sandbox) and the nemo-evals API merge land later.
 
 Portable behavior is reconciled through standalone scaled-evals `1.13.0`
 (`c64f23e71dc829414ab9279483973a84a17eea8d`). This remains a platform-adapted
@@ -367,4 +367,4 @@ else in the suite would notice.
 - Hosted image-admission canary (stubbed no-op)
 - Hosted auth sidecars (`auth-router` / `preview-router`)
 - Platform image-builder / registry / sandbox plugins (Phase 2)
-- nemo-evaluator API fold (Phase 3)
+- nemo-evals API fold (Phase 3)

@@ -695,7 +695,7 @@ _DOCUMENTED_PLUGIN_CLIS = (
     "garak",
     "customization",
     "data-designer",
-    "evaluator",
+    "evals",
     "experiments",
     "guardrail",
     "insights",

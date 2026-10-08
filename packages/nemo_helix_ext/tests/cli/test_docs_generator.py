@@ -44,7 +44,7 @@ def test_cli_docs_use_supported_plugins_regardless_of_environment(monkeypatch):
         "garak",
         "customization",
         "data-designer",
-        "evaluator",
+        "evals",
         "experiments",
         "guardrail",
         "insights",

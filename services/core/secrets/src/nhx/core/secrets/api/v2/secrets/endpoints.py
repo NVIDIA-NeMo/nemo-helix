@@ -5,6 +5,7 @@ import logging
 import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.config import HelixConfig
@@ -16,23 +17,34 @@ from nhx.common.service.dependencies import get_entity_client, get_platform_conf
 from nhx.core.secrets.api.v2.secrets import schemas
 from nhx.core.secrets.api.v2.secrets.ngc_api_key import get_default_ngc_api_key, is_default_ngc_api_key
 from nhx.core.secrets.app.ctx import SecretsContext
-from nhx.core.secrets.app.encryptor import get_current_encryptor, get_encryptor_by_name
+from nhx.core.secrets.app.encryptor import (
+    EncryptionProviderNotConfiguredError,
+    get_current_encryptor,
+    get_encryptor_by_name,
+)
 from nhx.core.secrets.entities import HelixSecret
 
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
+ENCRYPTION_PROVIDER_NOT_CONFIGURED = "ENCRYPTION_PROVIDER_NOT_CONFIGURED"
+ENCRYPTION_PROVIDER_NOT_CONFIGURED_MESSAGE = "Secret management requires a configured encryption provider."
+
 ## CRUD Endpoints for Platform Secrets ##
 
 
-@router.post("/v2/workspaces/{workspace}/secrets", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/v2/workspaces/{workspace}/secrets",
+    status_code=status.HTTP_201_CREATED,
+    response_model=schemas.HelixSecretResponse,
+)
 async def create_secret(
     workspace: str,
     create_request: schemas.HelixSecretCreateRequest,
     entity_store: EntityClient = Depends(get_entity_client),
     platform_config: HelixConfig = Depends(get_platform_config),
-) -> schemas.HelixSecretResponse:
+) -> schemas.HelixSecretResponse | JSONResponse:
     """Create a new secret."""
     with scoped_app_ctx(SecretsContext(name=create_request.name, namespace=workspace)):
         # Disallow creation of the default NGC API key secret
@@ -62,6 +74,15 @@ async def create_secret(
             encryptor = get_current_encryptor()
             secret._data, secret._encrypted_dek, secret._secret_provider = envelope_encrypt(
                 encryptor, create_request.value.get_secret_value()
+            )
+        except EncryptionProviderNotConfiguredError:
+            logger.warning("Secrets encryption provider is not configured")
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                content={
+                    "error": ENCRYPTION_PROVIDER_NOT_CONFIGURED,
+                    "message": ENCRYPTION_PROVIDER_NOT_CONFIGURED_MESSAGE,
+                },
             )
         except EncryptionError:
             logger.exception("Failed to encrypt secret value")
@@ -139,14 +160,18 @@ async def get_secret(
         return schemas.HelixSecretResponse.from_entity(secret)
 
 
-@router.patch("/v2/workspaces/{workspace}/secrets/{name}", status_code=status.HTTP_200_OK)
+@router.patch(
+    "/v2/workspaces/{workspace}/secrets/{name}",
+    status_code=status.HTTP_200_OK,
+    response_model=schemas.HelixSecretResponse,
+)
 async def update_secret(
     name: str,
     workspace: str,
     patch_request: schemas.HelixSecretUpdateRequest,
     entity_store: EntityClient = Depends(get_entity_client),
     platform_config: HelixConfig = Depends(get_platform_config),
-) -> schemas.HelixSecretResponse:
+) -> schemas.HelixSecretResponse | JSONResponse:
     """Update a secret's metadata."""
     with scoped_app_ctx(SecretsContext(name=name, namespace=workspace)):
         # Disallow updating the default NGC API key secret
@@ -164,10 +189,20 @@ async def update_secret(
         if patch_request.description is not None:
             secret.description = patch_request.description
         if patch_request.value is not None:
-            encryptor = get_encryptor_by_name(secret._secret_provider)
-            secret._data, secret._encrypted_dek, secret._secret_provider = envelope_encrypt(
-                encryptor, patch_request.value.get_secret_value()
-            )
+            try:
+                encryptor = get_encryptor_by_name(secret._secret_provider)
+                secret._data, secret._encrypted_dek, secret._secret_provider = envelope_encrypt(
+                    encryptor, patch_request.value.get_secret_value()
+                )
+            except EncryptionProviderNotConfiguredError:
+                logger.warning("Secrets encryption provider is not configured")
+                return JSONResponse(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    content={
+                        "error": ENCRYPTION_PROVIDER_NOT_CONFIGURED,
+                        "message": ENCRYPTION_PROVIDER_NOT_CONFIGURED_MESSAGE,
+                    },
+                )
 
         updated_secret = await entity_store.update(secret)
         return schemas.HelixSecretResponse.from_entity(updated_secret)
@@ -195,14 +230,18 @@ async def delete_secret(
         await entity_store.delete(HelixSecret, name, workspace=workspace)
 
 
-@router.get("/v2/workspaces/{workspace}/secrets/{name}/access", status_code=status.HTTP_200_OK)
+@router.get(
+    "/v2/workspaces/{workspace}/secrets/{name}/access",
+    status_code=status.HTTP_200_OK,
+    response_model=schemas.HelixSecretAccessResponse,
+)
 async def access_secret(
     name: str,
     workspace: str,
     entity_store: EntityClient = Depends(get_entity_client),
     auth_client: AuthClient = Depends(get_auth_client),
     platform_config: HelixConfig = Depends(get_platform_config),
-) -> schemas.HelixSecretAccessResponse:
+) -> schemas.HelixSecretAccessResponse | JSONResponse:
     """Access the value of a secret."""
     with scoped_app_ctx(SecretsContext(name=name, namespace=workspace)):
         # Additional authorization check.
@@ -235,6 +274,15 @@ async def access_secret(
         try:
             encryptor = get_encryptor_by_name(secret._secret_provider)
             secret_data = envelope_decrypt(encryptor, secret._data, secret._encrypted_dek, secret._secret_provider)
+        except EncryptionProviderNotConfiguredError:
+            logger.warning("Secrets encryption provider is not configured")
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                content={
+                    "error": ENCRYPTION_PROVIDER_NOT_CONFIGURED,
+                    "message": ENCRYPTION_PROVIDER_NOT_CONFIGURED_MESSAGE,
+                },
+            )
         except EncryptionError:
             logger.exception("Failed to decrypt secret value")
             raise HTTPException(

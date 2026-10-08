@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EvaluateJob, HelixJobStatus } from '@nemo/sdk/generated/evaluator/schema';
+import type { EvaluateJob, HelixJobStatus } from '@nemo/sdk/generated/evals/schema';
 
 /** Alias used by hooks that work with the v2 evaluator API. */
 export type EvaluationJobV2 = EvaluateJob;

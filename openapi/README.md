@@ -32,7 +32,7 @@ The generator no longer emits one spec per microservice and merges them. It now 
 | Customization | `plugins/nemo-customizer/openapi/openapi.yaml` |
 | Data Designer | `plugins/nemo-data-designer/openapi/openapi.yaml` |
 | Deployments | `plugins/nemo-deployments/openapi/openapi.yaml` |
-| Evaluator | `plugins/nemo-evaluator/openapi/openapi.yaml` |
+| Evaluator | `plugins/nemo-evals/openapi/openapi.yaml` |
 | Agent Hardener | `plugins/nemo-agent-hardener/openapi/openapi.yaml` |
 | Safe Synthesizer | `plugins/nemo-safe-synthesizer/openapi/openapi.yaml` |
 

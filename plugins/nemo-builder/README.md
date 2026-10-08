@@ -245,26 +245,27 @@ job: images in a set finish independently.
 
 ### Read the results: `GET /container-images` and `GET /container-images/{name}`
 
-`GET /container-images` takes `page` and `page_size` (at most 100), and two filters: `job`, a job
-name a submit returned, and `status`. `GET /container-images/{name}` returns `404` for a name that
-doesn't exist. With platform auth on, a person needs only the permission to read an image; a service,
-as the push step calls without workload token exchange, must also act for the image's submitter, or
-gets `403`. Each row is a `ContainerImage`:
+`GET /container-images` takes `page` and `page_size` (at most 100), and four filters: `job`, a job
+name a submit returned; `build_set` and `revision`, a request's `name` and `revision`; and `status`.
+`GET /container-images/{name}` returns `404` for a name that doesn't exist. With platform auth on, a
+person needs only the permission to read an image; a service, as the push step calls without
+workload token exchange, must also act for the image's submitter, or gets `403`. Each row is a
+`ContainerImage`:
 
 | Field | Meaning |
 |---|---|
 | `status` | `pending`, `ready` or `failed`. `ready` is written once the push step has pushed and signed the image; `failed` only when the submit that wrote the row was refused. The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
-| `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. Pin `<registry>/<repository>@<digest>`. |
-| `platform` | The platform the image was built for. |
+| `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
+| `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
 | `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. |
 
 Names come from the request:
 
 | | Pattern | Example |
 |---|---|---|
-| Job | `<set>-<revision>` | `hello-1` |
+| Job | `builder-<set>-<revision>` | `builder-hello-1` |
 | Row | `<set>-<revision>.<spec>`, or `<set>-<revision>` for the unnamed spec | `hello-1.tests`, `hello-1` |
 | System tag | `<workspace>--<row>` | `default--hello-1` |
 

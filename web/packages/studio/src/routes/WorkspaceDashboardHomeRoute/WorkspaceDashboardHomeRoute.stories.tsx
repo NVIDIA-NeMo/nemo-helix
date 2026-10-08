@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
+import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
 import { PageHeader, Stack } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
 import { StatTileRow } from '@studio/routes/WorkspaceDashboardHomeRoute/StatTileRow';
 import { http, HttpResponse } from 'msw';
 import type { FC } from 'react';
+import { AuthContext, type AuthContextProps } from 'react-oidc-context';
+
+/** Auth off: no signed-in user. */
+const signedOut = { user: null } as unknown as AuthContextProps;
 
 /**
  * Every StatTile/Quickstart action fetches a `total_results` count from a
@@ -24,7 +29,7 @@ const genericTotalResultsHandler = http.get('*', () =>
 interface DashboardFlagsArgs {
   agentsEnabled: boolean;
   optimizerEnabled: boolean;
-  evaluatorEnabled: boolean;
+  evalsEnabled: boolean;
   experimentEnabled: boolean;
   customizerEnabled: boolean;
   intakeEnabled: boolean;
@@ -40,7 +45,7 @@ interface DashboardFlagsArgs {
 const DashboardFlagsPreview: FC<DashboardFlagsArgs> = ({
   agentsEnabled,
   optimizerEnabled,
-  evaluatorEnabled,
+  evalsEnabled,
   experimentEnabled,
   customizerEnabled,
   intakeEnabled,
@@ -54,14 +59,14 @@ const DashboardFlagsPreview: FC<DashboardFlagsArgs> = ({
         workspace="acme"
         agentsEnabled={agentsEnabled}
         optimizerEnabled={optimizerEnabled}
-        evaluatorEnabled={evaluatorEnabled}
+        evalsEnabled={evalsEnabled}
         experimentEnabled={experimentEnabled}
         customizerEnabled={customizerEnabled}
       />
       <QuickstartSection
         workspace="acme"
         agentsEnabled={agentsEnabled}
-        evaluatorEnabled={evaluatorEnabled}
+        evalsEnabled={evalsEnabled}
         optimizerEnabled={optimizerEnabled}
         intakeEnabled={intakeEnabled}
         experimentEnabled={experimentEnabled}
@@ -79,10 +84,20 @@ const meta = {
   parameters: {
     msw: { handlers: [genericTotalResultsHandler] },
   },
+  // QuickstartSection's "Try a Sample Agent" modal reads auth and raises toasts.
+  decorators: [
+    (Story) => (
+      <AuthContext.Provider value={signedOut}>
+        <ToastProvider>
+          <Story />
+        </ToastProvider>
+      </AuthContext.Provider>
+    ),
+  ],
   argTypes: {
     agentsEnabled: { control: 'boolean', name: 'AGENTS_ENABLED' },
     optimizerEnabled: { control: 'boolean', name: 'OPTIMIZER_ENABLED' },
-    evaluatorEnabled: { control: 'boolean', name: 'EVALUATOR_ENABLED' },
+    evalsEnabled: { control: 'boolean', name: 'EVALS_ENABLED' },
     experimentEnabled: { control: 'boolean', name: 'EXPERIMENT_ENABLED' },
     customizerEnabled: { control: 'boolean', name: 'CUSTOMIZER_ENABLED' },
     intakeEnabled: { control: 'boolean', name: 'INTAKE_ENABLED' },
@@ -97,7 +112,7 @@ type Story = StoryObj<typeof meta>;
 const ALL_ENABLED: DashboardFlagsArgs = {
   agentsEnabled: true,
   optimizerEnabled: true,
-  evaluatorEnabled: true,
+  evalsEnabled: true,
   experimentEnabled: true,
   customizerEnabled: true,
   intakeEnabled: true,
@@ -123,7 +138,7 @@ export const AgentsOnly: Story = {
   args: {
     agentsEnabled: true,
     optimizerEnabled: false,
-    evaluatorEnabled: false,
+    evalsEnabled: false,
     experimentEnabled: false,
     customizerEnabled: false,
     intakeEnabled: false,
@@ -137,7 +152,7 @@ export const AllFlagsDisabled: Story = {
   args: {
     agentsEnabled: false,
     optimizerEnabled: false,
-    evaluatorEnabled: false,
+    evalsEnabled: false,
     experimentEnabled: false,
     customizerEnabled: false,
     intakeEnabled: false,

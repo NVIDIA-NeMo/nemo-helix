@@ -1398,7 +1398,7 @@ def _harbor_run_argv(harbor_dir: Path) -> tuple[str, ...]:
     return HARBOR_RUN
 
 
-def _spawn_detached(argv: list[str], cwd: Path, log_path: Path) -> None:
+def _spawn_detached(argv: list[str], cwd: Path, log_path: Path, *, env: Mapping[str, str] | None = None) -> None:
     """Fire-and-forget ``harbor run``, detached, logging to ``log_path``."""
     pid_path = log_path.with_suffix(f"{log_path.suffix}.pid")
     exit_path = log_path.with_suffix(f"{log_path.suffix}.exit.json")
@@ -1418,6 +1418,7 @@ def _spawn_detached(argv: list[str], cwd: Path, log_path: Path) -> None:
             ],
             cwd=cwd,
             log=log,
+            env=env,
         )
     start_ticks = _process_start_ticks(proc.pid)
     pid_path.write_text(json.dumps({"pid": proc.pid, "start_ticks": start_ticks, "token": token}))

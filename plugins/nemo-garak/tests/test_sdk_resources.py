@@ -5,8 +5,8 @@
 
 Each CRUD test stubs ``platform.http`` with a ``MagicMock(spec=httpx.Client)``
 (or ``AsyncMock(spec=httpx.AsyncClient)``) so we can assert on the URL and
-JSON body the SDK actually sends — same pattern the evaluator plugin uses in
-``plugins/nemo-evaluator/tests/test_sdk.py``.
+JSON body the SDK actually sends — same pattern the evals plugin uses in
+``plugins/nemo-evals/tests/test_sdk.py``.
 
 ``test_run_*`` patches ``nemo_garak.sdk.AuditJob`` so the test never actually
 shells out to garak; we just verify the SDK builds the right ``AuditInputSpec``

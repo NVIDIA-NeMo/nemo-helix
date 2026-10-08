@@ -38,7 +38,9 @@ describe('AgentDetailRoute optimization form', () => {
     await screen.findByText('brevity-sweep-3');
     await user.click(await screen.findByRole('button', { name: 'Optimize' }));
 
-    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).not.toBeChecked();
+    expect(
+      await screen.findByRole('radio', { name: /Hyper-parameter optimization/ })
+    ).not.toBeChecked();
     expect(screen.getByRole('radio', { name: /Upload a config/ })).toBeInTheDocument();
     expect(screen.queryByText('brevity-sweep-3')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
@@ -68,7 +70,9 @@ describe('AgentDetailRoute optimization form', () => {
     });
     await user.click(within(emptyState).getByRole('button', { name: 'Optimize' }));
 
-    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('radio', { name: /Hyper-parameter optimization/ })
+    ).toBeInTheDocument();
   });
 
   it('opens the strategy picker when arriving with ?action=optimize', async () => {
@@ -77,15 +81,28 @@ describe('AgentDetailRoute optimization form', () => {
       routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
     });
 
-    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('radio', { name: /Hyper-parameter optimization/ })
+    ).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
   });
 
-  it('continues to the form from the parameter sweep strategy', async () => {
+  it('lists the planned strategies as disabled tiles', async () => {
+    renderDetail('?tab=optimizations&view=strategy');
+
+    expect(
+      await screen.findByRole('radio', { name: /Hyper-parameter optimization/ })
+    ).toBeEnabled();
+    for (const name of [/Skill optimization/, /Model Routing \(Switchyard\)/]) {
+      expect(screen.getByRole('radio', { name })).toBeDisabled();
+    }
+  });
+
+  it('continues to the form from the hyper-parameter optimization strategy', async () => {
     const user = userEvent.setup();
     renderDetail('?tab=optimizations&view=strategy');
 
-    await user.click(await screen.findByRole('radio', { name: /Parameter sweep/ }));
+    await user.click(await screen.findByRole('radio', { name: /Hyper-parameter optimization/ }));
 
     expect(await screen.findByRole('button', { name: 'Run optimization' })).toBeInTheDocument();
   });
@@ -110,7 +127,9 @@ describe('AgentDetailRoute optimization form', () => {
     await user.click(await screen.findByRole('button', { name: 'Optimizations' }));
 
     expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: /Parameter sweep/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('radio', { name: /Hyper-parameter optimization/ })
+    ).not.toBeInTheDocument();
   });
 
   it('returns to the strategy picker from the form', async () => {
@@ -119,7 +138,9 @@ describe('AgentDetailRoute optimization form', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Back' }));
 
-    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('radio', { name: /Hyper-parameter optimization/ })
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run optimization' })).not.toBeInTheDocument();
   });
 

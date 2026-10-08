@@ -214,7 +214,7 @@ The base model must be a model entity with a non-null `fileset`. An Inference
 Gateway auto-discovered entity with only `api_endpoint` cannot be downloaded for
 training.
 
-Next after a successful job: `nemo-retrieval-recipes` or `nemo evaluator
+Next after a successful job: `nemo-retrieval-recipes` or `nemo evals
 retrieve-eval` on the **frozen** `eval_beir` — not CHAT `evaluate`.
 
 ```json

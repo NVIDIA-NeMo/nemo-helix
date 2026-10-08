@@ -5,7 +5,7 @@
 
 from math import nan
 
-from nemo_evaluator_sdk.values.results import MetricResult, MetricScore
+from nhx_evals_sdk.values.results import MetricResult, MetricScore
 
 
 class TrajectoryEvidenceMetric:

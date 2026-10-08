@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentEvaluateJob } from '@nemo/sdk/generated/evaluator/schema';
+import type { AgentEvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import {
   type AgentEvalBundle,
   type AgentEvalResult,
@@ -16,7 +16,7 @@ import {
 } from '@studio/api/evaluation/agent-evaluations';
 
 const customFetchMock = vi.fn();
-vi.mock('@nemo/sdk/generated/fetchers/evaluator', () => ({
+vi.mock('@nemo/sdk/generated/fetchers/evals', () => ({
   customFetch: (...args: unknown[]) => customFetchMock(...args),
 }));
 
@@ -60,7 +60,7 @@ describe('fetchAgentEvalJobs', () => {
     await fetchAgentEvalJobs('ws-a', new AbortController().signal);
     expect(customFetchMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: '/apis/evaluator/v2/workspaces/ws-a/agent-evaluate/jobs',
+        url: '/apis/evals/v2/workspaces/ws-a/agent-evaluate/jobs',
       })
     );
   });

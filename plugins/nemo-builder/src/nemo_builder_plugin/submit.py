@@ -89,7 +89,6 @@ def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
             workspace=plan.workspace,
             registry=image.placed.registry,
             repository=image.placed.repository,
-            platform=image.spec.platform,
             provenance=Provenance(
                 build_set=plan.build_set.name,
                 revision=plan.build_set.revision,

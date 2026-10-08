@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
@@ -20,6 +22,12 @@ from nemo_anonymizer_plugin.app.context import (
     require_model_configs_for_execution,
 )
 from nemo_anonymizer_plugin.app.errors import AnonymizerInternalError, AnonymizerInvalidConfigError
+from nemo_anonymizer_plugin.app.gliner_detector import (
+    caller_supplied_entity_detector,
+    ensure_gliner_fileset_async,
+    is_gliner_cached,
+    prewarm_gliner_cache,
+)
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec, PreparedAnonymizerInput
 from nemo_anonymizer_plugin.app.model_configs import (
     build_model_configs_yaml,
@@ -32,6 +40,8 @@ from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
 from nemo_helix_plugin.functions.frames import Done, Error, FrameModel, Heartbeat
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 LogLevel = Literal["debug", "info", "warning", "error"]
 
@@ -46,6 +56,19 @@ PreviewSpec: TypeAlias = PreviewRequest
 class LogFrame(FrameModel):
     kind: Literal["log"] = "log"
     level: LogLevel
+    message: str
+
+
+class ModelDownloadFrame(FrameModel):
+    """Signals the first-use GLiNER detector weight download so UIs can show it.
+
+    Emitted with ``status='started'`` before the (one-time, ~1.7G) pull-through
+    download and ``status='complete'`` once the weights are cached. Only emitted
+    when a real download happens; a warm cache yields no frame.
+    """
+
+    kind: Literal["model_download"] = "model_download"
+    status: Literal["started", "complete"]
     message: str
 
 
@@ -72,7 +95,14 @@ class FailedRecordsFrame(FrameModel):
 
 
 PreviewFrame: TypeAlias = Annotated[
-    LogFrame | PreviewDatasetFrame | TraceDatasetFrame | FailedRecordsFrame | Heartbeat | Done | Error,
+    LogFrame
+    | ModelDownloadFrame
+    | PreviewDatasetFrame
+    | TraceDatasetFrame
+    | FailedRecordsFrame
+    | Heartbeat
+    | Done
+    | Error,
     Field(discriminator="kind"),
 ]
 
@@ -104,6 +134,32 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
             model_configs=model_configs,
             selected_models=spec.selected_models,
         )
+
+        use_in_process_detector = not caller_supplied_entity_detector(spec.selected_models)
+        if use_in_process_detector:
+            await ensure_gliner_fileset_async(async_sdk)
+            if not is_gliner_cached():
+                download_message = (
+                    "Downloading PII detector model (~1.7G, first run only); subsequent runs load from cache."
+                )
+                yield ModelDownloadFrame(status="started", message=download_message)
+                try:
+                    await anyio.to_thread.run_sync(
+                        prewarm_gliner_cache, str(async_sdk.base_url), abandon_on_cancel=True
+                    )
+                except Exception:
+                    # The download runs after the first frame is sent, so the framework
+                    # can no longer turn this into an HTTP error — surface it as an
+                    # in-stream Error frame instead of letting the stream die silently.
+                    # Log the real exception internally; keep its text (which can carry a
+                    # filesystem path or connection detail) out of the client-facing frames.
+                    logger.exception("GLiNER PII detector model download failed")
+                    failure_message = "Failed to download the PII detector model."
+                    yield LogFrame(level="error", message=failure_message)
+                    yield Error(message=failure_message, details={"type": "ModelDownloadError"})
+                    return
+                yield ModelDownloadFrame(status="complete", message="PII detector model ready.")
+
         async with _prepare_input(anon_ctx, spec.data) as prepared_input:
             send_stream, receive_stream = anyio.create_memory_object_stream[BaseModel]()
             token = current_token()
@@ -125,7 +181,7 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
             async def _worker() -> None:
                 try:
                     await anyio.to_thread.run_sync(
-                        _make_preview,
+                        functools.partial(_make_preview, use_in_process_detector=use_in_process_detector),
                         send_from_thread,
                         spec,
                         prepared_input.input,

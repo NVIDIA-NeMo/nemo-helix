@@ -28,7 +28,7 @@ nhx-platform-seed = { source = "../../services/platform-seed/src/nhx/platform_se
 nhx-safe-synthesizer = { source = "../../services/safe-synthesizer/src/nhx/safe_synthesizer", module = "nhx/safe_synthesizer", deps_group = "safe-synthesizer-service", include_in_services = false }
 nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/platform_runner", module = "nhx/platform_runner", deps_group = "services" }
 nemo-garak-plugin = { source = "../../plugins/nemo-garak/src/nemo_garak", module = "nemo_garak" }
-nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evaluator", module = "nemo_evaluator" }
+nemo-evals-plugin = { source = "../../plugins/nemo-evals/src/nemo_evals", module = "nemo_evals" }
 nemo-switchyard-plugin = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", deps_group = "nemo-switchyard" }
 nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_plugin", module = "nemo_helix_plugin" }
 """
@@ -48,7 +48,7 @@ nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_
         "nemo-helix[files-service]",
     ]
     assert list(wrapper_optional["plugins"]) == [
-        "nemo-helix[nemo-evaluator-plugin]",
+        "nemo-helix[nemo-evals-plugin]",
         "nemo-helix[nemo-garak-plugin]",
         "nemo-helix[nemo-switchyard]",
     ]
@@ -221,7 +221,7 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 
 def test_process_bundle_packages_keeps_published_workspace_dependencies(tmp_path: Path, monkeypatch) -> None:
     wrapper_path = tmp_path / "packages/nemo_helix"
-    evaluator_path = tmp_path / "packages/nemo_evaluator_sdk"
+    evaluator_path = tmp_path / "packages/nhx_evals_sdk"
     gym_path = tmp_path / "packages/sandboxed_gym"
     unpublished_path = tmp_path / "packages/nhx_testing"
     for path in (wrapper_path, evaluator_path, gym_path, unpublished_path):
@@ -230,7 +230,7 @@ def test_process_bundle_packages_keeps_published_workspace_dependencies(tmp_path
     (tmp_path / "pyproject.toml").write_text(
         """
 [tool.uv.workspace]
-members = ["packages/nemo_helix", "packages/nemo_evaluator_sdk", "packages/sandboxed_gym", "packages/nhx_testing"]
+members = ["packages/nemo_helix", "packages/nhx_evals_sdk", "packages/sandboxed_gym", "packages/nhx_testing"]
 """.lstrip(),
         encoding="utf-8",
     )
@@ -242,7 +242,7 @@ name = "nemo-helix"
 [project.optional-dependencies]
 
 [tool.bundle-package]
-nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk" }
+nhx-evals-sdk = { source = "../../packages/nhx_evals_sdk/src/nhx_evals_sdk", module = "nhx_evals_sdk" }
 
 [tool.bundle-package-published]
 packages = ["nemo-sandboxed-gym"]
@@ -252,7 +252,7 @@ packages = ["nemo-sandboxed-gym"]
     (evaluator_path / "pyproject.toml").write_text(
         """
 [project]
-name = "nemo-evaluator-sdk"
+name = "nhx-evals-sdk"
 dependencies = ["pydantic>=2.10.6", "nemo-sandboxed-gym", "nhx-testing"]
 """.lstrip(),
         encoding="utf-8",
@@ -264,7 +264,7 @@ dependencies = ["pydantic>=2.10.6", "nemo-sandboxed-gym", "nhx-testing"]
     vendor_package._process_bundle_packages()
 
     wrapper_updated = tomlkit.parse((wrapper_path / "pyproject.toml").read_text(encoding="utf-8"))
-    assert list(wrapper_updated["project"]["optional-dependencies"]["nemo-evaluator-sdk"]) == [
+    assert list(wrapper_updated["project"]["optional-dependencies"]["nhx-evals-sdk"]) == [
         "pydantic>=2.10.6",
         "nemo-sandboxed-gym",
     ]
@@ -272,9 +272,9 @@ dependencies = ["pydantic>=2.10.6", "nemo-sandboxed-gym", "nhx-testing"]
 
 def test_process_bundle_packages_rebuilds_generated_dependency_groups(tmp_path: Path, monkeypatch) -> None:
     wrapper_path = tmp_path / "packages/nemo_helix"
-    plugin_path = tmp_path / "plugins/nemo-evaluator"
+    plugin_path = tmp_path / "plugins/nemo-evals"
     runner_path = tmp_path / "packages/nhx_platform_runner"
-    (plugin_path / "src/nemo_evaluator").mkdir(parents=True)
+    (plugin_path / "src/nemo_evals").mkdir(parents=True)
     (runner_path / "src/nhx/platform_runner").mkdir(parents=True)
     wrapper_path.mkdir(parents=True)
 
@@ -292,13 +292,13 @@ name = "nemo-helix"
 
 [project.optional-dependencies]
 # Generated from [tool.bundle-package]; do not edit by hand.
-nemo-evaluator-plugin = ["nemo-evaluator-sdk", "stale-plugin-dep"]
+nemo-evals-plugin = ["nhx-evals-sdk", "stale-plugin-dep"]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 services = ["nemo-helix[core-service]", "old-service"]
 
 [tool.bundle-package]
-nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evaluator", module = "nemo_evaluator" }
+nemo-evals-plugin = { source = "../../plugins/nemo-evals/src/nemo_evals", module = "nemo_evals" }
 nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/platform_runner", module = "nhx/platform_runner", deps_group = "services" }
 """.lstrip(),
         encoding="utf-8",
@@ -306,8 +306,8 @@ nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/pla
     (plugin_path / "pyproject.toml").write_text(
         """
 [project]
-name = "nemo-evaluator-plugin"
-dependencies = ["nemo-evaluator-sdk", "nemo-helix-sdk", "nhx-common", "pydantic>=2.10.6"]
+name = "nemo-evals-plugin"
+dependencies = ["nhx-evals-sdk", "nemo-helix-sdk", "nhx-common", "pydantic>=2.10.6"]
 """.lstrip(),
         encoding="utf-8",
     )
@@ -326,8 +326,8 @@ dependencies = ["rich>=14.1.0"]
     wrapper_updated = tomlkit.parse((wrapper_path / "pyproject.toml").read_text(encoding="utf-8"))
     optional = wrapper_updated["project"]["optional-dependencies"]
 
-    assert list(optional["nemo-evaluator-plugin"]) == [
-        "nemo-evaluator-sdk",
+    assert list(optional["nemo-evals-plugin"]) == [
+        "nhx-evals-sdk",
         "nemo-helix-sdk",
         "nhx-common",
         "pydantic>=2.10.6",

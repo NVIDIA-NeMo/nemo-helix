@@ -1,0 +1,479 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Define and Run Custom Python Metrics"
+description: ""
+---
+{/* @nemo-nb: process */}
+{/* @nemo-nb: skip-test */}
+
+
+<a id="evaluate-define-run-custom-python-metrics"></a>
+
+Custom Python metrics let you score model outputs with deterministic, domain-specific logic that is easier to express in code than in a generic metric or an LLM-as-a-judge prompt.
+
+This tutorial shows how to evaluate a model that solves arithmetic word problems by returning a Python expression. This response format is useful for calculator-style systems because it makes the model output executable and easy to verify. You will define a metric that checks whether each expression is safe to evaluate and whether it produces the expected answer, test the metric locally, then submit the same metric as a durable Evals service job with a `FilesetRef` dataset and a `ModelRef` target.
+
+**What you will learn:**
+
+- Define a Python metric with the Evals SDK metric protocol
+- Score model outputs with standard-library Python logic
+- Run the same metric through the local Evals SDK
+- Map dataset prediction columns into the evaluator's candidate output field
+- Package the metric with the Cloudpickle metric bundle packager for remote execution
+- Submit a durable Evals service job with `FilesetRef` and `ModelRef`
+- Inspect aggregate and row-level metric results
+
+<Tip>
+
+Keep custom metric code dependency-light. Local execution runs your metric in the current Python environment, and remote execution hydrates the serialized metric in the evaluator job runtime. This tutorial uses only the Python standard library.
+
+</Tip>
+
+## Prerequisites
+
+For remote execution, use Python 3.13, the version the default Evaluator task image runs. A `cloudpickle` metric bundle only loads on the Python minor version that created it.
+
+Install the PyPI `nemo-helix` wrapper package, which includes the Evals SDK. The `all` extra is defined by the wrapper package; if you are working from a source checkout, run `make bootstrap PYTHON_VERSION=3.13` from the repository root instead.
+
+```bash
+pip install "nemo-helix[all]"
+```
+
+Verify that the SDK imports:
+
+```python
+import nhx_evals_sdk
+
+print(nhx_evals_sdk.version)
+```
+
+You do not need a running NeMo Helix instance to define the metric or run it locally. Start NeMo Helix and configure platform resources before submitting the durable remote job.
+
+## 1. Understand the Metric Contract
+
+A custom metric implements the `Metric` protocol from `nhx_evals_sdk`. The protocol has one identifier property and two methods:
+
+- `type`: a public metric identifier used in result names and logs
+- `output_spec()`: declares every row-level output the metric can emit
+- `compute_scores(...)`: scores one dataset row and one candidate output
+
+`compute_scores(...)` receives a `MetricInput` object as `input`:
+
+- `input.row.data` contains the original dataset row, including any canonical fields produced by field mapping.
+- `input.candidate.output_text` contains the candidate output. For offline evaluations, the Evals SDK can populate this from a mapped dataset column. For online evaluations, it contains the generated model output.
+
+The method returns a `MetricResult` whose `outputs` match the names declared by `output_spec()`. Output names must be stable because they become aggregate score names in the final result.
+
+Start with the smallest possible shape:
+
+```python
+from nhx_evals_sdk import Metric, MetricInput, MetricOutputSpec, MetricResult
+
+class ArithmeticExpressionCorrectnessMetric(Metric):
+    type = "arithmetic-expression-correctness"
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        raise NotImplementedError
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        raise NotImplementedError
+```
+
+You will fill in `output_spec()` first, then the scoring logic.
+
+## 2. Declare the Outputs
+
+This metric should answer two yes-or-no questions for each model output:
+
+- `valid_expression`: `True` when the output is a safe arithmetic expression, otherwise `False`
+- `correct_value`: `True` when the expression evaluates to the expected answer, otherwise `False`
+
+Declare those outputs with `MetricOutputSpec.boolean(...)`:
+
+```python
+from nhx_evals_sdk import MetricOutputSpec
+
+def output_spec(self) -> list[MetricOutputSpec]:
+    return [
+        MetricOutputSpec.boolean("valid_expression"),
+        MetricOutputSpec.boolean("correct_value"),
+    ]
+```
+
+These names are part of the result contract. Each row result must emit exactly these outputs, and the aggregate result prefixes them with the metric identifier, such as `arithmetic-expression-correctness.correct_value`. Boolean outputs aggregate as rates, so the aggregate mean for `correct_value` is the fraction of rows that were correct.
+
+## 3. Write a Restricted Expression Evaluator
+
+The metric needs to evaluate model output, but it must not execute arbitrary Python. `ast.parse(...)` parses Python source into an abstract syntax tree without executing it, but it is not a complete sandbox by itself. For untrusted model output, keep inputs bounded and evaluate only an explicit allowlist of AST node types.
+
+This helper limits expression length, limits AST size, and allows only numeric constants and arithmetic operators.
+
+```python
+import ast
+import operator
+from collections.abc import Callable
+
+MAX_EXPRESSION_CHARS = 256
+MAX_AST_NODES = 64
+
+_BINARY_OPERATORS: dict[type[ast.operator], Callable[[float, float], float]] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+}
+
+_UNARY_OPERATORS: dict[type[ast.unaryop], Callable[[float], float]] = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+def _validate_expression_size(expression: str, parsed: ast.AST) -> None:
+    if len(expression) > MAX_EXPRESSION_CHARS:
+        raise ValueError("expression is too long")
+
+    if sum(1 for _ in ast.walk(parsed)) > MAX_AST_NODES:
+        raise ValueError("expression is too complex")
+
+def _evaluate_ast(node: ast.AST) -> float:
+    if isinstance(node, ast.Expression):
+        return _evaluate_ast(node.body)
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+        return float(node.value)
+
+    if isinstance(node, ast.BinOp):
+        operator_fn = _BINARY_OPERATORS.get(type(node.op))
+        if operator_fn is None:
+            raise ValueError(f"unsupported operator: {type(node.op).__name__}")
+        return operator_fn(_evaluate_ast(node.left), _evaluate_ast(node.right))
+
+    if isinstance(node, ast.UnaryOp):
+        operator_fn = _UNARY_OPERATORS.get(type(node.op))
+        if operator_fn is None:
+            raise ValueError(f"unsupported unary operator: {type(node.op).__name__}")
+        return operator_fn(_evaluate_ast(node.operand))
+
+    raise ValueError(f"unsupported expression: {type(node).__name__}")
+
+def safe_eval_math_expression(expression: str) -> float:
+    expression = expression.strip()
+    parsed = ast.parse(expression, mode="eval")
+    _validate_expression_size(expression, parsed)
+    return _evaluate_ast(parsed)
+```
+
+This helper rejects function calls, names, attributes, comprehensions, imports, and other Python syntax because `_evaluate_ast(...)` raises on any node type it does not explicitly support.
+
+## 4. Put the Metric Together
+
+Now combine the protocol methods and the safe evaluator.
+
+The scoring method uses `input.candidate.output_text`, where the evaluator stores the candidate output. The metric does not need to look for dataset-specific prediction columns or implement a row-level fallback. For offline rows, use field mapping to normalize your prediction column into the evaluator's canonical `output` field before the metric runs. If the evaluator does not provide a candidate output, the metric treats the row as a failure.
+
+```python
+import math
+
+from nhx_evals_sdk import (
+    Metric,
+    MetricInput,
+    MetricOutput,
+    MetricOutputSpec,
+    MetricResult,
+)
+
+class ArithmeticExpressionCorrectnessMetric(Metric):
+    type = "arithmetic-expression-correctness"
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        return [
+            MetricOutputSpec.boolean("valid_expression"),
+            MetricOutputSpec.boolean("correct_value"),
+        ]
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        expression = input.candidate.output_text
+        if not expression:
+            return MetricResult(
+                outputs=[
+                    MetricOutput(name="valid_expression", value=False),
+                    MetricOutput(name="correct_value", value=False),
+                ]
+            )
+
+        try:
+            actual = safe_eval_math_expression(expression)
+        except (SyntaxError, ValueError, TypeError, ZeroDivisionError, OverflowError, RecursionError):
+            return MetricResult(
+                outputs=[
+                    MetricOutput(name="valid_expression", value=False),
+                    MetricOutput(name="correct_value", value=False),
+                ]
+            )
+
+        expected = float(input.row.data["expected"])
+        tolerance = float(input.row.data.get("tolerance", 1e-6))
+        correct_value = math.isclose(actual, expected, rel_tol=tolerance, abs_tol=tolerance)
+
+        return MetricResult(
+            outputs=[
+                MetricOutput(name="valid_expression", value=True),
+                MetricOutput(name="correct_value", value=correct_value),
+            ]
+        )
+```
+
+## 5. Run the Metric with the Local Evaluator
+
+Run the metric through the Evals SDK so you exercise the normal dataset loading, metric execution, aggregation, and result objects before submitting a service-side job.
+
+For an offline evaluation, datasets often store predictions under task-specific column names such as `model_expression`, `answer`, or `prediction`. Use `FieldMapping` to map that column to the evaluator's canonical `output` field. The Evals SDK then passes it to your metric as `input.candidate.output_text`.
+
+The local dataset includes correct expressions, a valid expression with the wrong value, and an invalid expression so you can see both metric outputs vary.
+
+```python
+from nhx_evals_sdk import Evaluator, FieldMapping, RunConfig
+
+dataset = [
+    {
+        "question": "A box has 12 rows of pencils with 4 pencils in each row. Then 7 pencils are added. How many pencils are there?",
+        "expected": 55,
+        "tolerance": 1e-6,
+        "model_expression": "(12 * 4) + 7",
+    },
+    {
+        "question": "A server processed 125 requests, then processed 3 more batches of 25 requests. How many requests were processed?",
+        "expected": 200,
+        "tolerance": 1e-6,
+        "model_expression": "125 + 25",
+    },
+    {
+        "question": "A tank starts with 90 liters and loses 18 liters each hour for 3 hours. How many liters remain?",
+        "expected": 36,
+        "tolerance": 1e-6,
+        "model_expression": "90 - (18 * 3)",
+    },
+    {
+        "question": "A package contains 12 items and 4 packages are used. How many items are used?",
+        "expected": 48,
+        "tolerance": 1e-6,
+        "model_expression": "__import__('os').system('echo nope')",
+    },
+]
+
+metric = ArithmeticExpressionCorrectnessMetric()
+evaluator = Evaluator()
+result = evaluator.run_sync(
+    metrics=[metric],
+    dataset=dataset,
+    config=RunConfig(parallelism=1),
+    field_mapping=FieldMapping(output="model_expression"),
+)
+
+result.print_summary()
+```
+
+With this mapping in place, every row still preserves its original `model_expression` field in `input.row.data`, and the metric receives the normalized candidate output through `input.candidate.output_text`.
+
+## 6. Prepare Platform Resources
+
+To run the same metric remotely, install and start NeMo Helix using the [Setup guide](/documentation/get-started). You also need:
+
+- A model entity that can be referenced as `workspace/model-name`. See [Model Configuration](/documentation/evaluate-models/metrics/model-configuration) for model setup details.
+- A platform secret for the model, if the model requires an API key.
+- A current CLI context that points at your deployment. See [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+
+### Create a Workspace
+
+Create a workspace for the tutorial and make it the default workspace for your current CLI context:
+
+```bash
+nemo workspaces create custom-python-metrics
+nemo config set --workspace custom-python-metrics
+```
+
+If the workspace already exists, the create command reports a conflict; continue with the second command. To return to your original workspace afterward, run `nemo config set --workspace default`.
+
+Create a client from your current CLI context:
+
+```python
+import os
+
+from nemo_evals.sdk import Evaluator as HelixEvaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+MODEL_REF = os.environ.get("NHX_EVAL_MODEL_REF", "default/my-model")
+
+client = NemoClient.from_config()
+helix_evaluator = HelixEvaluator.from_client(client)
+```
+
+### Register a Dataset Fileset
+
+The dataset contains word problems with the expected numeric answer. The model will generate a Python arithmetic expression, and the custom metric will evaluate that expression.
+
+```python
+import json
+from pathlib import Path
+
+from nemo_evals.sdk import FilesetRef
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.metadata import DatasetMetadataContent, FilesetMetadata
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+
+DATASET_NAME = "arithmetic-expression-data"
+DATASET_FILE = "math-expressions.jsonl"
+
+remote_rows = [
+    {
+        "question": "A box has 12 rows of pencils with 4 pencils in each row. Then 7 pencils are added. How many pencils are there?",
+        "expected": 55,
+        "tolerance": 1e-6,
+    },
+    {
+        "question": "A server processed 125 requests, then processed 3 more batches of 25 requests. How many requests were processed?",
+        "expected": 200,
+        "tolerance": 1e-6,
+    },
+    {
+        "question": "A tank starts with 90 liters and loses 18 liters each hour for 3 hours. How many liters remain?",
+        "expected": 36,
+        "tolerance": 1e-6,
+    },
+]
+
+dataset_path = Path(DATASET_FILE)
+dataset_path.write_text(
+    "".join(json.dumps(row) + "\n" for row in remote_rows),
+    encoding="utf-8",
+)
+
+try:
+    fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            description="Math expression evaluation dataset",
+            purpose=FilesetPurpose.DATASET,
+            metadata=FilesetMetadata(
+                dataset=DatasetMetadataContent(
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "question": {"type": "string"},
+                            "expected": {"type": "number"},
+                            "tolerance": {"type": "number"},
+                        },
+                        "required": ["question", "expected"],
+                        "additionalProperties": True,
+                    }
+                )
+            ),
+        ),
+    ).data()
+    print(f"Created fileset: {fileset.workspace}/{fileset.name}")
+except ConflictError:
+    fileset = client.files.get_fileset(name=DATASET_NAME).data()
+    print(f"Fileset exists: {fileset.workspace}/{fileset.name}")
+
+client.files.upload_file(
+    name=fileset.name,
+    path=DATASET_FILE,
+    content=dataset_path.read_bytes(),
+)
+
+dataset_ref = FilesetRef(root=f"{fileset.workspace}/{fileset.name}").with_fragment(DATASET_FILE)
+print(f"Using dataset: {dataset_ref.root}")
+```
+
+The `nhx_evals_sdk` package provides metric and runtime types, such as `Metric`, `RunConfigOnlineModel`, and `ModelRef`. The `nemo_evals.sdk` package provides platform submission helpers, such as `FilesetRef`, that are specific to durable evaluator jobs.
+
+## 7. Submit a Durable Evaluator Job
+
+Pass `CloudpickleMetricBundlePackager()` to `helix_evaluator.submit(...)` so the SDK serializes the metric object into the evaluator job spec. The job runtime hydrates the metric bundle before scoring rows. Use `ModelRef` to reference the platform model entity you configured with `NHX_EVAL_MODEL_REF`.
+
+<Note>
+
+Submit from a Python 3.13 environment. A bundle created on another minor version fails when the job hydrates it, with `cloudpickle metric payload was created with Python 3.12.x, but this runtime is Python 3.13.x; recreate the metric bundle with the runtime Python version.`
+
+</Note>
+
+```python
+from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nhx_evals_sdk import InferenceParams, ModelRef, RunConfigOnlineModel
+
+job = helix_evaluator.submit(
+    metric=metric,
+    dataset=dataset_ref,
+    config=RunConfigOnlineModel(
+        parallelism=2,
+        limit_samples=3,
+        inference=InferenceParams(
+            temperature=0.0,
+            max_tokens=32,
+        ),
+    ),
+    target=ModelRef(root=MODEL_REF),
+    prompt_template=(
+        "Return exactly one valid Python arithmetic expression that evaluates to the answer.\n"
+        "Start immediately with the expression. Do not start with a newline.\n"
+        "Do not include markdown, code fences, prose, units, the final answer, or any explanation.\n"
+        "Use only numbers, whitespace, parentheses, and these operators: +, -, *, /, //, %.\n\n"
+        "Question: {{item.question}}\n"
+        "Expression:"
+    ),
+    metric_bundle_packager=CloudpickleMetricBundlePackager(),
+)
+
+print(f"Submitted job: {job.name}")
+job.wait_until_done()
+remote_result = job.get_result()
+remote_result.print_summary()
+```
+
+<Warning>
+
+Cloudpickle metric bundles execute serialized Python code when the job hydrates the metric. Use this path only for metric code that you fully understand and trust.
+
+</Warning>
+
+## 8. Inspect Results
+
+The aggregate scores show how often the outputs followed the expression contract and how often the expression evaluated to the expected value.
+
+```python
+for score in remote_result.aggregate_scores.scores:
+    print(f"{score.name}: mean={score.mean}, count={score.count}, nan_count={score.nan_count}")
+```
+
+If `valid_expression` is low, inspect row scores before changing the metric. Some models return the right expression followed by explanation text, which is not a valid Python expression and should fail this metric.
+
+Use row scores to debug the expressions:
+
+```python
+for row in remote_result.row_scores:
+    print("Question:", row.item["question"])
+    print("Model output:", row.sample.get("output_text"))
+    print("Metric outputs:", row.metrics)
+    print()
+```
+
+Use the local `result` object from Step 5 the same way if you want to inspect the local run instead.
+
+## Best Practices
+
+- Run custom metrics locally with representative rows before submitting service-side jobs.
+- Keep metric code deterministic and side-effect free.
+- Prefer Python standard-library logic unless you know the dependency is available in the service runtime.
+- Emit separate outputs for format validity and task correctness so failures are easier to diagnose.
+- Pass an explicit metric bundle packager when submitting custom Python metrics as durable jobs.
+- Use `FilesetRef` for reusable datasets and `ModelRef` for platform-managed model routing.
+
+## Next Steps
+
+- Learn about built-in metric types in [Evaluation Metrics](/documentation/evaluate-models/metrics).
+- Learn how to configure model targets in [Model Configuration](/documentation/evaluate-models/metrics/model-configuration).
+- Learn how to inspect result artifacts in Evaluation Results.

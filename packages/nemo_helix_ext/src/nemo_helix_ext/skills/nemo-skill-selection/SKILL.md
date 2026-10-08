@@ -72,7 +72,7 @@ Match the user's intent to one downstream skill. Pick exactly one.
 | "why does my agent keep failing", "analyze my agent's traces", "find recurring failure patterns", "generate insights for my agent" | `nemo-analyst` (plugin-owned, in `plugins/nemo-insights`) | Reads an agent's existing telemetry and files each recurring failure pattern as an Insight citing the traces that evidence it. Requires the Insights plugin. |
 | "optimize my agent", "make it cheaper", "reduce latency", "smaller model", "switchyard", "routing split", "compare against a newer model" | `agents-optimize` (plugin-owned, in `plugins/nemo-agents`) | Cost / latency / quality optimization for a **deployed** agent. Routing splits, skill tuning, prompt tuning, new-model scans. |
 | "secure my agent", "harden my agent", "check for PII", "leaked secrets", "guardrail coverage" | `agents-secure` (plugin-owned, in `plugins/nemo-agents`) | Safety and security audit for a **deployed** agent. Guardrails, PII, secrets scan. |
-| "evaluate my agent", "run a benchmark", "eval suite" | `nemo-evaluator` (plugin-owned, in `plugins/nemo-evaluator`) | Evaluation metrics, LLM-judge, benchmark jobs against a deployed agent or model. |
+| "evaluate my agent", "run a benchmark", "eval suite" | `nemo-evals` (plugin-owned, in `plugins/nemo-evals`) | Evaluation metrics, LLM-judge, benchmark jobs against a deployed agent or model. |
 
 **Optimize vs build:** Do NOT route optimize asks to `nemo-build-agent`. Build is for creating new agents from a spec. Use `agents-optimize` for a deployed agent's routing, prompts, skills, cost, or latency. If the user says "make my agent faster" or "use a cheaper model," that is `agents-optimize`, not `nemo-build-agent`.
 
@@ -199,7 +199,7 @@ NeMo Helix skills I can route to:
 Plugin-owned skills:
   agents-optimize   cost / latency / quality optimization for a deployed agent
   agents-secure     safety and security audit for a deployed agent
-  nemo-evaluator-plugin  evaluation metrics, LLM-judge, retrieve-eval, benchmark jobs
+  nemo-evals-plugin  evaluation metrics, LLM-judge, retrieve-eval, benchmark jobs
   nemo-customizer   fine-tuning of chat/SFT/RL models (not the retrieval recipe)
   nemo-analyst      analyze agent telemetry and file recurring problems as Insights
   guardrails        content-safety middleware via virtual models
@@ -210,7 +210,7 @@ Plugin-owned skills:
 Which one fits what you're trying to do?
 ```
 
-For things outside this catalog (for example, "show me how Switchyard routes between models"), point at the relevant repo skill (`nemo-evaluator`, `garak`, etc.) or tell the user no skill claims that intent yet. Do not invent a path.
+For things outside this catalog (for example, "show me how Switchyard routes between models"), point at the relevant repo skill (`nemo-evals`, `garak`, etc.) or tell the user no skill claims that intent yet. Do not invent a path.
 
 If the pre-flight finds no platform but the user insists they have installed one: ask them to report
 the output of `lsof -iTCP:<port> -sTCP:LISTEN` (the port from `NHX_URL`, usually `8080`) and the redacted scan below from the shell where they ran

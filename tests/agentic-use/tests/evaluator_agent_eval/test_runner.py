@@ -5,7 +5,7 @@
 
 from evaluator_agent_eval.runner import score_evaluator_rows
 from evaluator_agent_eval.schemas import EvaluatorScoringRow
-from nemo_evaluator_sdk.values.results import MetricResult, MetricScore
+from nhx_evals_sdk.values.results import MetricResult, MetricScore
 
 
 class ExtraMetric:
@@ -28,7 +28,7 @@ def _row(**overrides: object) -> EvaluatorScoringRow:
         "surface_constraint": "standalone_sdk",
         "allowed_surfaces": ["standalone_sdk"],
         "forbidden_surfaces": ["legacy_service"],
-        "output_text": "Used nemo_evaluator_sdk only.",
+        "output_text": "Used nhx_evals_sdk only.",
         "observed_surfaces": ["standalone_sdk"],
         "trajectory_summary": {"tool_call_count": 3, "failed_command_count": 1, "recovery_event_count": 1},
     }
@@ -37,7 +37,7 @@ def _row(**overrides: object) -> EvaluatorScoringRow:
 
 
 def test_score_evaluator_rows_uses_evaluator_sdk():
-    result = score_evaluator_rows([_row(), _row(output_text="Still used nemo_evaluator_sdk.")])
+    result = score_evaluator_rows([_row(), _row(output_text="Still used nhx_evals_sdk.")])
 
     assert len(result.row_scores) == 2
     aggregate_names = {score.name for score in result.aggregate_scores.scores}

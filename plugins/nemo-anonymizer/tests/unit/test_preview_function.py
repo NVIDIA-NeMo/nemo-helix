@@ -16,6 +16,7 @@ from nemo_anonymizer_plugin.app.errors import AnonymizerInvalidConfigError
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
 from nemo_anonymizer_plugin.functions import _preview_worker as worker_module
+from nemo_anonymizer_plugin.functions import preview as preview_module
 from nemo_anonymizer_plugin.functions._preview_logs import request_callback_cvar
 from nemo_anonymizer_plugin.functions.preview import LogFrame, PreviewFunction, PreviewSpec, TraceDatasetFrame
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -70,6 +71,25 @@ def test_preview_worker_requires_model_configs() -> None:
         worker_module._make_anonymizer(model_configs_yaml="", dd_providers=None)
 
 
+def test_make_anonymizer_uses_gateway_when_caller_supplies_detector(monkeypatch: pytest.MonkeyPatch) -> None:
+    # When the caller supplies its own detector, the worker must build the plain
+    # gateway Anonymizer and must NOT spin up the in-process GLiNER runtime.
+    sentinel = object()
+    monkeypatch.setattr(worker_module, "Anonymizer", lambda **kwargs: sentinel)
+
+    def _must_not_run(**kwargs: object) -> object:
+        raise AssertionError("in-process GLiNER must not be built on the gateway path")
+
+    monkeypatch.setattr(worker_module, "build_gliner_anonymizer", _must_not_run)
+
+    result = worker_module._make_anonymizer(
+        model_configs_yaml="model_configs: []",
+        dd_providers=None,
+        use_in_process_detector=False,
+    )
+    assert result is sentinel
+
+
 @pytest.mark.asyncio
 async def test_preview_function_resets_request_log_callback(
     monkeypatch: pytest.MonkeyPatch,
@@ -77,12 +97,17 @@ async def test_preview_function_resets_request_log_callback(
     def fake_worker(
         send_frame: Callable[[BaseModel], None],
         *args: object,
+        **kwargs: object,
     ) -> None:
         send_frame(LogFrame(level="info", message="generated"))
 
     igw_lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(context_module, "make_model_provider_registry", igw_lookup)
     monkeypatch.setattr(worker_module, "_make_preview", fake_worker)
+    # The GLiNER detector weights are ensured out-of-band; stub readiness so the
+    # test stays focused on preview frame/callback behavior.
+    monkeypatch.setattr(preview_module, "ensure_gliner_fileset_async", AsyncMock(return_value=None))
+    monkeypatch.setattr(preview_module, "is_gliner_cached", lambda: True)
     async_sdk = AsyncMock(spec=AsyncNemoClient)
 
     frames = [
@@ -99,6 +124,43 @@ async def test_preview_function_resets_request_log_callback(
     assert igw_lookup.await_args.kwargs["client"] is async_sdk
     assert [frame.model_dump()["kind"] for frame in frames] == ["log", "done"]
     assert request_callback_cvar.get() is None
+
+
+@pytest.mark.asyncio
+async def test_preview_function_emits_error_frame_when_model_download_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    igw_lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(context_module, "make_model_provider_registry", igw_lookup)
+    monkeypatch.setattr(preview_module, "ensure_gliner_fileset_async", AsyncMock(return_value=None))
+    # Cold cache + a failing download: the stream must surface an Error frame, not die silently.
+    monkeypatch.setattr(preview_module, "is_gliner_cached", lambda: False)
+
+    def _boom(_base_url: str) -> None:
+        raise RuntimeError("files unreachable")
+
+    monkeypatch.setattr(preview_module, "prewarm_gliner_cache", _boom)
+
+    frames = [
+        frame
+        async for frame in PreviewFunction().run(
+            _preview_spec(),
+            ctx=FunctionContext(workspace="team-a"),
+            async_sdk=AsyncMock(spec=AsyncNemoClient),
+        )
+    ]
+
+    # A started model_download frame, an error log, then the Error frame. There is no
+    # duplicate info LogFrame for the started message (callers get it from the
+    # model_download frame itself).
+    kinds = [frame.model_dump()["kind"] for frame in frames]
+    assert kinds == ["model_download", "log", "error"]
+    # The raw exception text (which may carry a path/connection detail) must NOT leak
+    # into the client-facing frames; a fixed message + reason code is sent instead.
+    error_frame = frames[-1].model_dump()
+    assert "files unreachable" not in error_frame["message"]
+    assert error_frame["message"] == "Failed to download the PII detector model."
+    assert error_frame["details"]["type"] == "ModelDownloadError"
 
 
 @pytest.mark.asyncio

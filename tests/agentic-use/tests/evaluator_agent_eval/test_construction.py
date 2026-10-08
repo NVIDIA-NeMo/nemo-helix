@@ -12,7 +12,7 @@ from evaluator_agent_eval.factory import AgentRunMetadata, build_evaluator_scori
 
 def test_capture_agent_attempt_from_task_config_and_artifacts(evaluator_task_dir: Path, agent_log_dir: Path):
     (agent_log_dir / "final_message.txt").write_text(
-        "Use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric.",
+        "Use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric.",
         encoding="utf-8",
     )
 
@@ -26,7 +26,7 @@ def test_capture_agent_attempt_from_task_config_and_artifacts(evaluator_task_dir
     assert captured_attempt.input.instruction_path is not None
     assert (
         captured_attempt.output.final_text
-        == "Use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric."
+        == "Use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric."
     )
     assert captured_attempt.output.final_answer_extracted is True
     assert captured_attempt.metadata.agent_runtime == "claude-code"
@@ -35,7 +35,7 @@ def test_capture_agent_attempt_from_task_config_and_artifacts(evaluator_task_dir
 
 def test_build_evaluator_scoring_row_from_task_config_and_artifacts(evaluator_task_dir: Path, agent_log_dir: Path):
     (agent_log_dir / "final_message.txt").write_text(
-        "Use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric.",
+        "Use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric.",
         encoding="utf-8",
     )
     artifacts = AgentArtifacts.from_dir(agent_log_dir)
@@ -68,7 +68,7 @@ def test_build_evaluator_scoring_row_allows_sdk_task_metrics_to_populate_scores(
     evaluator_task_dir: Path, agent_log_dir: Path
 ):
     (agent_log_dir / "final_message.txt").write_text(
-        "Use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric.",
+        "Use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric.",
         encoding="utf-8",
     )
     artifacts = AgentArtifacts.from_dir(agent_log_dir)
@@ -84,7 +84,7 @@ def test_build_evaluator_scoring_row_allows_sdk_task_metrics_to_populate_scores(
         artifacts=artifacts,
     )
 
-    assert scoring_row.output_text == "Use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric."
+    assert scoring_row.output_text == "Use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric."
 
 
 def test_build_evaluator_scoring_row_detects_surface_from_workspace_artifact(
@@ -93,7 +93,7 @@ def test_build_evaluator_scoring_row_detects_surface_from_workspace_artifact(
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir()
     (workspace_dir / "solution.py").write_text(
-        "from nemo_evaluator_sdk import Evaluator, ExactMatchMetric\n",
+        "from nhx_evals_sdk import Evaluator, ExactMatchMetric\n",
         encoding="utf-8",
     )
     (agent_log_dir / "final_message.txt").write_text("Wrote the requested solution.", encoding="utf-8")
@@ -135,7 +135,7 @@ def test_build_evaluator_scoring_row_fails_success_when_final_answer_missing(
 
 def test_capture_agent_attempt_carries_runtime_metadata(evaluator_task_dir: Path, agent_log_dir: Path):
     (agent_log_dir / "final_message.txt").write_text(
-        "Use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric.",
+        "Use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric.",
         encoding="utf-8",
     )
 
@@ -166,7 +166,7 @@ def test_build_evaluator_scoring_row_validates_atif_and_populates_trajectory_sum
     atif_payload: dict[str, object],
 ):
     (agent_log_dir / "final_message.txt").write_text(
-        "Use packages/nemo_evaluator_sdk with Evaluator, run_sync, and ExactMatchMetric.",
+        "Use packages/nhx_evals_sdk with Evaluator, run_sync, and ExactMatchMetric.",
         encoding="utf-8",
     )
     (agent_log_dir / "trajectory.json").write_text(json.dumps(atif_payload), encoding="utf-8")
@@ -194,7 +194,7 @@ def test_build_evaluator_scoring_row_ignores_raw_log_prompt_echo_for_surface_det
     evaluator_task_dir: Path, agent_log_dir: Path
 ):
     (agent_log_dir / "final_message.txt").write_text(
-        "Use only packages/nemo_evaluator_sdk and do not use services/*.",
+        "Use only packages/nhx_evals_sdk and do not use services/*.",
         encoding="utf-8",
     )
     (agent_log_dir / "nat_agent.log").write_text(

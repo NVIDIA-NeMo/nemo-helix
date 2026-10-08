@@ -27,7 +27,7 @@ import os
 import sys
 
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.evaluator.client import EvaluatorClient
+from nemo_helix_plugin.evals.client import EvaluatorClient
 from nemo_helix_plugin.files.client import FilesClient
 
 sys.path.insert(0, "/tests/shared")

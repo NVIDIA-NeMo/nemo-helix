@@ -85,7 +85,7 @@ def build_evaluator_scoring_row(
     artifacts: AgentArtifacts,
     task_config: AgenticUseTaskConfig | None = None,
 ) -> EvaluatorScoringRow:
-    """Build an Evaluator SDK dataset row for one captured attempt."""
+    """Build an Evals SDK dataset row for one captured attempt."""
     root = Path(task_dir)
     config = task_config or load_agentic_use_task_config(root)
     evidence = evidence_from_artifacts(

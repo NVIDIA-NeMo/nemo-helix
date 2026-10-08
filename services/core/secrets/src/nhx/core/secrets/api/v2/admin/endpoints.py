@@ -4,12 +4,17 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
 from nhx.core.secrets.api.v2.admin.routines import rotate_encryption_keys
 from nhx.core.secrets.api.v2.admin.schemas import HelixSecretAdminRotationResponse
-from nhx.core.secrets.app.encryptor import get_current_encryptor
+from nhx.core.secrets.api.v2.secrets.endpoints import (
+    ENCRYPTION_PROVIDER_NOT_CONFIGURED,
+    ENCRYPTION_PROVIDER_NOT_CONFIGURED_MESSAGE,
+)
+from nhx.core.secrets.app.encryptor import EncryptionProviderNotConfiguredError, get_current_encryptor
 
 router = APIRouter()
 
@@ -32,16 +37,29 @@ async def require_rotate_encryption_keys_caller(auth_client: AuthClient) -> None
 ## Admin endpoints for Platform secrets ##
 
 
-@router.post("/v2/rotate-encryption-keys", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/v2/rotate-encryption-keys",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=HelixSecretAdminRotationResponse,
+)
 async def admin_rotate_encryption_keys(
     entity_client: EntityClient = Depends(get_entity_client),
     auth_client: AuthClient = Depends(get_auth_client),
-) -> HelixSecretAdminRotationResponse:
+) -> HelixSecretAdminRotationResponse | JSONResponse:
     """Rotate encryption keys for all platform secrets."""
     await require_rotate_encryption_keys_caller(auth_client)
     try:
         current_encryptor = get_current_encryptor()
         await rotate_encryption_keys(current_encryptor, entity_client)
+    except EncryptionProviderNotConfiguredError:
+        logger.warning("Secrets encryption provider is not configured")
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "error": ENCRYPTION_PROVIDER_NOT_CONFIGURED,
+                "message": ENCRYPTION_PROVIDER_NOT_CONFIGURED_MESSAGE,
+            },
+        )
     except Exception as e:
         logger.exception("Failed to rotate encryption keys")
         raise HTTPException(

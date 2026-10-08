@@ -48,11 +48,11 @@ def _force_default_provider(monkeypatch):
 # ---------------------------------------------------------------------------
 def test_task_client_delegates_to_job_creator(monkeypatch):
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))
-    headers = get_task_nemo_client("evaluator")._default_headers
+    headers = get_task_nemo_client("evals")._default_headers
 
     assert headers["X-NHX-Internal"] == "true"
-    assert headers["X-NHX-Principal-Id"] == "service:evaluator"
-    assert headers["X-NHX-Actor-Aliases"] == "service:evaluator"
+    assert headers["X-NHX-Principal-Id"] == "service:evals"
+    assert headers["X-NHX-Actor-Aliases"] == "service:evals"
     assert headers["X-NHX-Principal-On-Behalf-Of"] == "user:alice@acme.com"
     assert headers["X-NHX-Principal-On-Behalf-Of-Email"] == "alice@acme.com"
     assert headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "team-a,team-b"
@@ -67,8 +67,8 @@ def test_task_client_collapses_already_delegated_creator(monkeypatch):
         "on_behalf_of_groups": ["team-z"],
     }
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(delegated))
-    headers = get_task_nemo_client("evaluator")._default_headers
-    assert headers["X-NHX-Principal-Id"] == "service:evaluator"
+    headers = get_task_nemo_client("evals")._default_headers
+    assert headers["X-NHX-Principal-Id"] == "service:evals"
     assert headers["X-NHX-Principal-On-Behalf-Of"] == "user:bob@acme.com"
     assert headers["X-NHX-Principal-On-Behalf-Of-Email"] == "bob@acme.com"
     assert headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "team-z"
@@ -77,16 +77,16 @@ def test_task_client_collapses_already_delegated_creator(monkeypatch):
 def test_task_client_without_principal_warns_and_stays_service(monkeypatch, caplog):
     monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
     with caplog.at_level("WARNING"):
-        headers = get_task_nemo_client("evaluator")._default_headers
-    assert headers["X-NHX-Principal-Id"] == "service:evaluator"
+        headers = get_task_nemo_client("evals")._default_headers
+    assert headers["X-NHX-Principal-Id"] == "service:evals"
     assert "X-NHX-Principal-On-Behalf-Of" not in headers
     assert "without on-behalf-of delegation" in caplog.text
 
 
 async def test_async_task_client_delegates(monkeypatch):
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))
-    headers = get_async_task_nemo_client("evaluator")._default_headers
-    assert headers["X-NHX-Principal-Id"] == "service:evaluator"
+    headers = get_async_task_nemo_client("evals")._default_headers
+    assert headers["X-NHX-Principal-Id"] == "service:evals"
     assert headers["X-NHX-Principal-On-Behalf-Of"] == "user:alice@acme.com"
 
 
@@ -94,8 +94,8 @@ def test_general_as_service_stays_undelegated(monkeypatch):
     # Contrast: the generic entry point must NOT silently delegate, so
     # background controllers can act as an unscoped service principal.
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))
-    headers = get_nemo_client(as_service="evaluator")._default_headers
-    assert headers["X-NHX-Principal-Id"] == "service:evaluator"
+    headers = get_nemo_client(as_service="evals")._default_headers
+    assert headers["X-NHX-Principal-Id"] == "service:evals"
     assert "X-NHX-Principal-On-Behalf-Of" not in headers
 
 
@@ -132,7 +132,7 @@ def test_task_client_uses_workload_identity(monkeypatch, tmp_path, _stub_workloa
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))  # must be ignored in WI mode
 
-    client = get_task_nemo_client("evaluator")
+    client = get_task_nemo_client("evals")
 
     # Bearer exchange wired up...
     assert isinstance(client._auth, _FakeExchangeProvider)
@@ -148,8 +148,7 @@ async def test_async_task_client_uses_workload_identity(monkeypatch, tmp_path, _
     token_file = tmp_path / "token"
     token_file.write_text("subject-token")
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
-
-    client = get_async_task_nemo_client("evaluator")
+    client = get_async_task_nemo_client("evals")
     assert client._auth is not None
     assert await client._auth.get_access_token_or_none_async() == "exchanged-token"
     assert "X-NHX-Principal-Id" not in client._default_headers
@@ -159,5 +158,5 @@ def test_default_provider_directly(monkeypatch):
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))
     provider = DefaultNemoClientProvider()
     assert isinstance(provider, cp.NemoClientProvider)
-    headers = provider.get_task_nemo_client("evaluator")._default_headers
+    headers = provider.get_task_nemo_client("evals")._default_headers
     assert headers["X-NHX-Principal-On-Behalf-Of"] == "user:alice@acme.com"

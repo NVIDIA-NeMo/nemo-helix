@@ -11,9 +11,10 @@ import { NewOptimizationForm } from '@studio/routes/agents/AgentDetailRoute/opti
 import { useSubmitOptimization } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useSubmitOptimization';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { getAgentOptimizeRoute } from '@studio/routes/utils';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useLocation } from 'react-router';
 import { parse } from 'yaml';
 
 const AGENT = 'react-agent';
@@ -37,6 +38,8 @@ const EVALUATION: AgentEvaluationRow = {
     },
   ],
 };
+
+const LocationSearch = () => <div data-testid="location-search">{useLocation().search}</div>;
 
 const SubmitForm = ({ evaluation = EVALUATION }: { evaluation?: AgentEvaluationRow }) => {
   const onSubmit = useSubmitOptimization({
@@ -126,8 +129,15 @@ describe('optimization form submission', () => {
     renderRoute(undefined, {
       history: getAgentOptimizeRoute(DEFAULT_WORKSPACE, AGENT),
       routes: [
-        { path: ROUTES.workspace.agentDetail, element: <SubmitForm /> },
-        { path: ROUTES.workspace.agentOptimizationDetail, element: <div>Study detail page</div> },
+        {
+          path: ROUTES.workspace.agentDetail,
+          element: (
+            <>
+              <SubmitForm />
+              <LocationSearch />
+            </>
+          ),
+        },
       ],
     });
 
@@ -135,7 +145,9 @@ describe('optimization form submission', () => {
     await user.click(screen.getByRole('radio', { name: /Quick/ }));
     await user.click(screen.getByRole('button', { name: 'Run optimization' }));
 
-    expect(await screen.findByText('Study detail page')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('location-search')).toHaveTextContent(/^\?tab=optimizations$/)
+    );
     expect(submitted).toHaveLength(1);
     expect(submitted[0]).toMatchObject({
       spec: {

@@ -9,7 +9,7 @@ from evaluator_agent_eval.surfaces import SurfaceEvidence, detect_surfaces
 def test_surface_detection_uses_logs_commands_and_forbidden_patterns():
     result = detect_surfaces(
         SurfaceEvidence(
-            final_answer_text="Use packages/nemo_evaluator_sdk.",
+            final_answer_text="Use packages/nhx_evals_sdk.",
             raw_logs=["ran nemo evaluation metrics run"],
             command_argvs=[["nemo", "evaluation", "metrics", "run"]],
             changed_paths=["services/evaluator/old.py"],
@@ -48,8 +48,7 @@ def test_surface_detection_ignores_negated_forbidden_surface_mentions():
     result = detect_surfaces(
         SurfaceEvidence(
             final_answer_text=(
-                "Use only packages/nemo_evaluator_sdk. Do not use the nemo evaluation CLI, "
-                "plugin SDK APIs, or services/*."
+                "Use only packages/nhx_evals_sdk. Do not use the nemo evaluation CLI, plugin SDK APIs, or services/*."
             )
         ),
         forbidden_patterns=["nemo evaluation", "plugin sdk", "services/*"],

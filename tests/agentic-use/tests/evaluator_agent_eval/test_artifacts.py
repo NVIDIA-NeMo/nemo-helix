@@ -22,7 +22,7 @@ def test_agent_artifacts_do_not_treat_json_without_final_answer_as_text(agent_lo
 
 def test_agent_artifacts_extract_json_result(agent_log_dir: Path):
     (agent_log_dir / "nat_agent.log").write_text(
-        json.dumps({"result": "Use packages/nemo_evaluator_sdk with Evaluator.run_sync and ExactMatchMetric."}),
+        json.dumps({"result": "Use packages/nhx_evals_sdk with Evaluator.run_sync and ExactMatchMetric."}),
         encoding="utf-8",
     )
 

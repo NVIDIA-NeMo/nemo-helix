@@ -23,6 +23,7 @@ HARNESS_ADAPTER_IDS = {
     "hermes": "nvidia.fabric.hermes",
     "remote-agent": "nvidia.fabric.remote-agent",
     "pi": "nvidia.fabric.pi",
+    "nooa-bench-agent": "nvidia.fabric.nooa.bench-agent",
 }
 
 # A harness kind carrying this prefix is already a fully-qualified Fabric
@@ -48,8 +49,25 @@ class FabricTranslationError(ValueError):
 
 def translate_agent_config(config: AgentConfig, harness_name: str | None = None) -> fabric.FabricConfig:
     """Translate Platform-owned agent config into a typed in-memory FabricConfig."""
-    selected_harness_name, harness = _select_harness(config, harness_name)
-    model = _resolve_model(config, selected_harness_name, harness)
+    harness_config = None
+    workflow_config = None
+    runtime_payload = config.runtime.model_dump(exclude_none=True)
+    if config.workflow is not None:
+        if harness_name is not None:
+            raise FabricTranslationError("A harness override cannot be used with a workflow config.")
+        workflow_config = fabric.WorkflowConfig(**config.workflow.model_dump())
+        model = config.models.get("default")
+        if model is None:
+            raise FabricTranslationError("Workflow requires models.default to be configured.")
+    else:
+        selected_harness_name, harness = _select_harness(config, harness_name)
+        model = _resolve_model(config, selected_harness_name, harness)
+        _default_relay_runtime_artifacts(runtime_payload, config, harness)
+        harness_config = fabric.HarnessConfig(
+            adapter_id=_adapter_id_for_harness(harness),
+            resolution="preinstalled",
+            settings=harness.settings,
+        )
     model_payloads = _model_payloads(config, model)
     runtime_env = {
         **_platform_runtime_env(),
@@ -57,16 +75,10 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
     }
     _validate_untranslated_shared_fields(config)
 
-    runtime_payload = config.runtime.model_dump(exclude_none=True)
-    _default_relay_runtime_artifacts(runtime_payload, config, harness)
-
     fabric_config = fabric.FabricConfig(
         metadata=fabric.MetadataConfig(name=config.name, description=config.description or None),
-        harness=fabric.HarnessConfig(
-            adapter_id=_adapter_id_for_harness(harness),
-            resolution="preinstalled",
-            settings=harness.settings,
-        ),
+        harness=harness_config,
+        workflow=workflow_config,
         models={key: fabric.ModelConfig(**payload) for key, payload in model_payloads.items()},
         instructions=_instructions_config(config),
         runtime=fabric.RuntimeConfig(**runtime_payload),
@@ -117,6 +129,8 @@ def _environment_config(config: AgentConfig, runtime_env: dict[str, str]) -> Any
 
 def _select_harness(config: AgentConfig, harness_name: str | None) -> tuple[str, HarnessConfig]:
     selected_harness_name = harness_name or config.default_harness
+    if selected_harness_name is None:
+        raise FabricTranslationError("No default_harness is configured.")
     harness = config.harnesses.get(selected_harness_name)
     if harness is None:
         available = ", ".join(sorted(config.harnesses))
@@ -277,7 +291,7 @@ def _default_relay_extension_path(fabric_config: Any) -> None:
     setting, so defaulting it is a no-op for the other harnesses.
     """
     harness = fabric_config.harness
-    if harness.adapter_id != HARNESS_ADAPTER_IDS["pi"]:
+    if harness is None or harness.adapter_id != HARNESS_ADAPTER_IDS["pi"]:
         return
     harness.settings.setdefault("relay_extension_path", PI_RELAY_EXTENSION_PATH)
 

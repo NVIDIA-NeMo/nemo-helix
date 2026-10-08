@@ -1,0 +1,254 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Model Configuration"
+description: ""
+---
+<a id="eval-metrics-model-configuration"></a>
+
+Online evaluations use `Model` objects for model endpoints. A model can be the evaluation target that produces outputs, or it can be part of a judge-style metric such as LLM-as-a-Judge, RAG, or agentic metrics.
+
+The Evals plugin SDK uses inline model objects from `nhx_evals_sdk`. Pass the model either as `target=...` or as a field on the metric class that needs a judge or embeddings model.
+
+## Initialize the SDK
+
+```python
+import os
+
+from nemo_evals.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
+```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
+## Inline Model
+
+Define the endpoint URL and model name directly:
+
+```python
+from nhx_evals_sdk import Model, SecretRef
+
+model = Model(
+    url="https://integrate.api.nvidia.com/v1",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | Yes | Base URL of the inference endpoint. |
+| `name` | Yes | Model name to send in inference requests. |
+| `format` | No | **Deprecated and ignored.** Structured output support is detected from the endpoint during preflight rather than inferred from this label. |
+| `api_key_secret` | No | Model API key reference. See [Model API Authentication](#model-api-authentication). |
+
+<a id="model-api-authentication"></a>
+
+## Model API Authentication
+
+`api_key_secret` is an optional property on the `Model` object. Omit it when the endpoint does not require API-key authentication.
+
+For `nhx_evals_sdk.Evaluator` runs, the `SecretRef` root names an environment variable available to the local Python process. For example, `api_key_secret=SecretRef(root="NVIDIA_API_KEY")` reads `os.environ["NVIDIA_API_KEY"]`.
+
+For remote `evaluator.submit(...)` jobs, the `SecretRef` root must name a NeMo Helix secret in the target workspace. Create the secret before submitting the job:
+
+```python
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="nvidia-api-key",
+        value=SecretStr(os.environ["NVIDIA_API_KEY"]),
+    ),
+)
+```
+
+## Model as the Evaluation Target
+
+Use `target=model` when the evaluator should call the model to generate the sample output before scoring.
+
+```python
+from nhx_evals_sdk import (
+    RunConfigOnlineModel,
+    ExactMatchMetric,
+    InferenceParams,
+    Model,
+    SecretRef,
+)
+
+model = Model(
+    url="https://integrate.api.nvidia.com/v1",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+
+metric = ExactMatchMetric(reference="{{item.expected_answer}}")
+dataset = [
+    {"question": "What is the capital of France?", "expected_answer": "Paris"},
+]
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=dataset,
+    config=RunConfigOnlineModel(
+        parallelism=4,
+        inference=InferenceParams(temperature=0.1, max_tokens=64),
+    ),
+    target=model,
+    prompt_template={
+        "messages": [
+            {
+                "role": "user",
+                "content": "Answer this question concisely: {{item.question}}",
+            },
+        ],
+    },
+)
+job.wait_until_done()
+result = job.get_result()
+```
+
+## Model on a Judge Metric
+
+Use a model field on the metric when the metric itself calls an LLM to score existing outputs.
+
+```python
+from nhx_evals_sdk import LLMJudgeMetric, Model, RangeScore, SecretRef
+
+judge_model = Model(
+    url="https://integrate.api.nvidia.com/v1",
+    name="nvidia/nemotron-3.5-lightning-30b-a3b",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+metric = LLMJudgeMetric(
+    model=judge_model,
+    scores=[
+        RangeScore(
+            name="correctness",
+            description="Correctness from 1 to 5.",
+            minimum=1,
+            maximum=5,
+        ),
+    ],
+    prompt_template={
+        "messages": [
+            {
+                "role": "system",
+                "content": "Return JSON with a correctness score from 1 to 5.",
+            },
+            {
+                "role": "user",
+                "content": "Question: {{item.question}}\nAnswer: {{item.output}}\nExpected: {{item.expected_answer}}",
+            },
+        ],
+    },
+)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {
+            "question": "What is the capital of France?",
+            "output": "Paris",
+            "expected_answer": "Paris",
+        },
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+```
+
+## Runtime Parameters
+
+Use `RunConfigOnlineModel` for model-target evaluations:
+
+```python
+from nhx_evals_sdk import (
+    RunConfigOnlineModel,
+    InferenceParams,
+    ReasoningParams,
+)
+
+params = RunConfigOnlineModel(
+    parallelism=4,
+    request_timeout=60,
+    max_retries=2,
+    ignore_request_failure=False,
+    inference=InferenceParams(temperature=0.2, max_tokens=256),
+    reasoning=ReasoningParams(end_token="</think>"),
+)
+```
+
+Use plain `RunConfig` for offline evaluations where the dataset already contains the output to score.
+
+## Model References
+
+You can supply the evaluation target two ways. Which one is valid depends on whether you submit the evaluation as a durable platform job or run it locally with `nhx_evals_sdk.Evaluator`.
+
+### Inline `Model`
+
+An inline `Model` carries the resolved endpoint details. Always pass an inline `Model` as the `target` (or as a judge/embeddings field on the metric). If your deployment stores platform model entities, resolve the entity into endpoint details before constructing the `Model`:
+
+```python
+from nhx_evals_sdk import Model, RunConfigOnlineModel, SecretRef
+
+model_entity = client.models.get_model(name="my-model", workspace="default").data()
+model = Model(
+    url=client.models.get_model_entity_route_openai_url(model_entity),
+    name="my-model",
+    api_key_secret=SecretRef(root="nvidia-api-key"),
+)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=dataset,
+    config=RunConfigOnlineModel(parallelism=4),
+    target=model,
+    prompt_template={
+        "messages": [
+            {
+                "role": "user",
+                "content": "Answer this question concisely: {{item.question}}",
+            },
+        ],
+    },
+)
+job.wait_until_done()
+result = job.get_result()
+```
+
+### `ModelRef` (supported by `evaluator.submit(...)`)
+
+Durable remote `evaluator.submit(...)` jobs additionally accept a `ModelRef` target. A `ModelRef` names a platform model entity (`workspace/model-name`) and is resolved by the evaluator backend when the job runs, so you do not have to resolve the endpoint yourself. Use this for platform-managed model routing. A `ModelRef` target generates outputs online, so it requires an online run config (`RunConfigOnlineModel`):
+
+```python
+from nhx_evals_sdk import ModelRef, RunConfigOnlineModel
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=dataset,
+    config=RunConfigOnlineModel(),
+    target=ModelRef(root="default/my-model"),
+    prompt_template={
+        "messages": [
+            {
+                "role": "user",
+                "content": "Answer this question concisely: {{item.question}}",
+            },
+        ],
+    },
+)
+```
+
+`evaluator.submit(...)` accepts either a `Model` or a `ModelRef`. `nhx_evals_sdk.Evaluator` resolves no platform entities, so pass it an inline `Model`. See the [Define and Run Custom Python Metrics](/documentation/evaluate-models/tutorials/define-and-run-custom-python-metrics) tutorial for an end-to-end `ModelRef` + `FilesetRef` submit example.
+
+<Note>
+
+For evaluating agentic systems, use an `Agent` request target instead of a `Model`. See [Agent Configuration](/documentation/evaluate-models/metrics/agent-configuration).
+
+</Note>

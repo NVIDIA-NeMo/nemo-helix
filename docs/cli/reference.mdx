@@ -32,12 +32,12 @@ nemo [GLOBAL OPTIONS] COMMAND [ARGS]...
 
 **Global Options:**
 
+* `--context, -c`: The name of the context to use. Overrides the current context in the config file.
 * `--base-url`: Base URL for the NeMo Helix API
 * `--output-format, --output, -f <CHOICE>`: Output format for how results are printed. [possible values: table, json, yaml, markdown, csv, raw, code]
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output
 * `--timestamp-format <CHOICE>`: Timestamp format for table/markdown/csv output [possible values: relative, iso8601]
 * `--verbose, -v`: Enable verbose messaging. This only impacts logs that are visible, it doesn't change any data outputs.
-* `--agent-mode, -A`: Enable agent-friendly output mode with extra context for coding agents.
 * `--no-telemetry`: Disable anonymous usage telemetry for this invocation.
 
 **Help:**
@@ -106,7 +106,7 @@ nemo setup [OPTIONS]
 * `--install-skills, --no-install-skills`: Install NeMo skills for coding agents
 * `--skills-agents`: Comma-separated list of agents to install skills for (e.g. 'codex,cursor'). Default: all detected. Only applied when --install-skills is set.
 * `--skills-scope <CHOICE>`: Install scope for skills: 'project' (this repo) or 'user' (home). Default: project. Only applied when --install-skills is set. [possible values: project, user]
-* `--skills-from`: Comma-separated list of skill sources to install from (e.g. 'nemo-helix,nemo-evaluator-plugin'). Use 'nemo-helix' for the built-in set. Default: all sources. Only applied when --install-skills is set.
+* `--skills-from`: Comma-separated list of skill sources to install from (e.g. 'nemo-helix,nemo-evals-plugin'). Use 'nemo-helix' for the built-in set. Default: all sources. Only applied when --install-skills is set.
 * `--skills-path <DIRECTORY>`: Install skills to a custom directory for another coding agent
 * `--resume`: Retry an interrupted setup using the normal idempotent setup path.
 * `--ready-timeout <INTEGER>`: Seconds to wait for platform readiness (default: 240)
@@ -412,6 +412,180 @@ nemo auth access-keys rotate [OPTIONS] JTI
 **Options:**
 
 * `--grace-period-seconds <INTEGER RANGE>`: Grace period in seconds for the rotated-out key. Defaults to the server's `rotation_grace_period_seconds` config (default 48h) when omitted, and is capped by `max_rotation_grace_period_seconds`.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+### nemo config
+
+Manage NeMo Helix CLI configuration.
+
+**Examples:**
+
+```shell
+# Connect the current context to a remote deployment.
+nemo config set --base-url https://nhx.example.com
+# Keep contexts separate.
+nemo config set --context staging --base-url https://nhx.staging.example.com
+nemo config set --context production --base-url https://nhx.example.com --activate
+# Configure a local TLS endpoint.
+nemo config set --context local-tls --base-url https://localhost:8443 --certificate-authority /path/to/ca.crt
+# Switch the current context and inspect its configuration.
+nemo config use-context staging
+nemo config view
+# Delete a context without deleting its cluster or user records.
+nemo config delete-context staging
+```
+
+NHX_BASE_URL and NHX_CURRENT_CONTEXT override saved configuration.
+
+**Usage:**
+
+```shell
+nemo config [OPTIONS] [COMMAND] [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `view`: Display the configuration file.
+* `set`: Set configuration values in the current or specified...
+* `current-context`: Display the effective current context name.
+* `use-context`: Set the current context in the configuration file.
+* `delete-context`: Delete a context from the configuration file.
+
+#### nemo config view
+
+Display the configuration file.
+
+By default, this shows only the effective current context (from --context,
+NHX_CURRENT_CONTEXT, or the config file) and its referenced cluster and user.
+Use --all-contexts to show the full configuration.
+
+**Usage:**
+
+```shell
+nemo config view [OPTIONS]
+```
+
+**Options:**
+
+* `--all-contexts`: Show all contexts, clusters, and users
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for config. [possible values: json, yaml, raw]
+
+#### nemo config set
+
+Set configuration values in the current or specified context.
+
+If no config file exists, creates one. Without --context, uses the effective
+current context, or 'default' when no current context is selected.
+If the saved config has no current context, the next written context becomes
+current automatically. Otherwise, creating additional contexts does not switch
+the current context; use --activate or use-context.
+At least one option must be provided.
+
+**Examples:**
+
+```shell
+nemo config set --base-url https://api.example.com
+nemo config set --context staging --base-url https://nhx.staging.example.com
+nemo config set --context production --base-url https://nhx.example.com --activate
+nemo config set --context local-tls --base-url https://localhost:8443 --certificate-authority /path/to/ca.crt
+nemo config set --workspace my-workspace --output-format json
+nemo config set --api-key YOUR_API_KEY
+nemo config set --api-key -        # prompts for API key securely
+nemo config set --access-token YOUR_ACCESS_TOKEN
+nemo config set --access-token -   # prompts for access token securely
+```
+
+**Usage:**
+
+```shell
+nemo config set [OPTIONS]
+```
+
+**Options:**
+
+* `--base-url`: NeMo Helix API base URL
+* `--certificate-authority`: Path to a PEM certificate authority bundle for the cluster
+* `--api-key`: API key for authentication
+* `--access-token`: OAuth access token for authentication
+* `--workspace, -w`: Default workspace
+* `--output-format, -f <CHOICE>`: Default output format [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--timestamp-format <CHOICE>`: Timestamp display format [possible values: relative, iso8601]
+* `--truncate, --no-truncate`: Truncate long output values
+* `--context`: Context name to create or modify (user-defined label; default: current context)
+* `--activate`: Set this context as the current context
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo config current-context
+
+Display the effective current context name.
+
+For full context details, use: nemo config view
+
+**Usage:**
+
+```shell
+nemo config current-context [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo config use-context
+
+Set the current context in the configuration file.
+
+**Usage:**
+
+```shell
+nemo config use-context [OPTIONS] CONTEXT_NAME
+```
+
+**Arguments:**
+
+* `<CONTEXT_NAME>`: Context name to use
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo config delete-context
+
+Delete a context from the configuration file.
+
+By default this follows kubectl's convention and deletes only the context;
+referenced cluster and user records are kept.
+
+**Usage:**
+
+```shell
+nemo config delete-context [OPTIONS] CONTEXT_NAME
+```
+
+**Arguments:**
+
+* `<CONTEXT_NAME>`: Context name to delete
+
+**Options:**
+
+* `--prune-orphans`: Also delete cluster and user records no longer referenced by any context
 
 **Help:**
 
@@ -963,6 +1137,30 @@ nemo docs [OPTIONS] [PATH]
 
 * `--help, -h`: Show this message and exit.
 
+### nemo describe
+
+Describe the installed NeMo Helix CLI, plugins, and skills.
+
+Prints installed plugins, top-level commands, the plugin entry-point
+catalog, available agent skills, and quick-reference patterns as
+Markdown. Reads local metadata only and does not contact the platform.
+
+**Examples:**
+
+```shell
+nemo describe
+```
+
+**Usage:**
+
+```shell
+nemo describe [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
 ### nemo wait
 
 Wait for resources to reach a desired status.
@@ -1076,81 +1274,6 @@ nemo wait inference provider [OPTIONS] NAME
 * `--workspace`: Workspace name
 * `--timeout, -t <INTEGER RANGE>`: Maximum time to wait in seconds [default: 60]
 * `--poll-interval <INTEGER RANGE>`: Seconds between status checks [default: 1]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-### nemo agent
-
-Commands for AI agent context and capability discovery.
-
-**Examples:**
-
-```shell
-# Dump full agent context (plugins, commands, skills).
-nemo agent context
-# List all available commands.
-nemo agent commands
-```
-
-**Usage:**
-
-```shell
-nemo agent [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `context`: Dump everything an agent needs in one call.
-* `commands`: List all available top-level CLI commands.
-
-#### nemo agent context
-
-Dump everything an agent needs in one call.
-
-Outputs installed plugins, CLI commands, entry-point catalog,
-available skills, and quick-reference patterns. Runs without a
-connected cluster (metadata-only).
-
-**Examples:**
-
-```shell
-nemo agent context
-```
-
-**Usage:**
-
-```shell
-nemo agent context [OPTIONS]
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-#### nemo agent commands
-
-List all available top-level CLI commands.
-
-Outputs a flat list of commands with descriptions, useful for
-agent capability discovery.
-
-**Examples:**
-
-```shell
-nemo agent commands
-```
-
-**Usage:**
-
-```shell
-nemo agent commands [OPTIONS]
-```
 
 **Help:**
 
@@ -5924,6 +6047,10 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 **Commands:**
 
+*Additional commands from plugins:*
+
+* `optimize`: Optimize a platform agent with an installed optimization...
+
 *Agent Resources (requires running cluster):*
 
 * `create`: Register an agent on the platform.
@@ -5962,9 +6089,144 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 * `package`: Package a Fabric or NAT agent -- render -> validate ->...
 
-*Platform agents:*
+#### nemo agents optimize
 
-* `optimize`: Optimize a platform agent with an installed optimization...
+Optimize a platform agent with an installed optimization strategy.
+
+**Usage:**
+
+```shell
+nemo agents optimize [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--install-completion`: Install completion for the current shell.
+* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `list-strategies`: List installed strategies and what each one optimizes.
+* `prepare-fileset`: Validate a NAT optimize bundle and upload it to a fileset...
+
+*Jobs:*
+
+* `run-strategy`: Optimize a platform agent with an installed optimization...
+
+##### nemo agents optimize list-strategies
+
+List installed strategies and what each one optimizes.
+
+Every name listed is a valid `--strategy`. Only the platform is asked,
+because only the platform runs the job: a client venv without a strategy
+plugin still submits to a server that has it, and vice versa. Answering
+from this environment instead would describe a different machine, so an
+unreachable platform is an error rather than a cue to guess.
+
+Output follows every other `nemo` list command: a table on a terminal,
+JSON when piped, so a script reads the names with
+`-f json | jq -r '.[].name'`. The target is announced once on stderr by
+the shared base-URL resolver.
+
+**Usage:**
+
+```shell
+nemo agents optimize list-strategies [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+##### nemo agents optimize prepare-fileset
+
+Validate a NAT optimize bundle and upload it to a fileset for `optimize run-strategy`.
+
+**Usage:**
+
+```shell
+nemo agents optimize prepare-fileset [OPTIONS]
+```
+
+**Options:**
+
+* `--source <DIRECTORY>`: Directory holding the optimize config and every asset it references.
+* `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize run-strategy --optimize-config`.
+* `--fileset`: Fileset to upload into ('name' or 'workspace/name'). Created if missing.
+* `--workspace`: Workspace for the fileset and for agent / model preflight. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.
+* `--check-models, --no-check-models`: Also resolve the config's models against the platform before uploading.
+* `--dry-run`: Run preflight and print the result without uploading.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo agents optimize run-strategy
+
+Optimize a platform agent with an installed optimization strategy.
+
+**Usage:**
+
+```shell
+nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Job Spec:**
+
+* `--strategy`: Installed optimization strategy to run, e.g. 'legacy'. List what this platform has with `nemo agents optimize list-strategies`.
+* `--optimize-config`: Location of the strategy's configuration YAML, for strategies that take one.  With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root.  Without it (programmatic local runs only) it is an absolute path on the host running the job.  Whether it is required is the selected strategy's call.
+* `--optimize-config-fileset FILESET_REF`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references.  Stage one with `nemo agents optimize prepare-fileset`.  Required for remote submissions, where the job has no access to the client's filesystem.
+* `--agent`: Platform agent to optimize ('name' or 'workspace/name'). Strategies that can take the agent under test from the config itself may leave this unset.
+* `--output PATH | FILESET_REF`: Where the strategy should publish its artifacts once the run succeeds — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.
+
+**Spec Source:**
+
+* `--spec`: Spec as a JSON string. [default: \{}]
+* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
+
+**Submission:**
+
+* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
+* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
+* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+Job Spec flags are generated from the RunStrategySubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
+​
+
+**Commands:**
+
+* `explain`: Show input/output schemas.
+
+###### nemo agents optimize run-strategy explain
+
+Show input/output schemas.
+
+**Usage:**
+
+```shell
+nemo agents optimize run-strategy explain [OPTIONS]
+```
+
+**Options:**
+
+* `--profile`: Annotate the bundle with this profile.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
 
 #### nemo agents create
 
@@ -7306,145 +7568,6 @@ nemo agents package [OPTIONS]
 * `--agent-version`: Override agent version OCI label.
 * `--agent-author`: Override agent author OCI label.
 * `--template`: Path to an external Jinja2 Dockerfile template.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-#### nemo agents optimize
-
-Optimize a platform agent with an installed optimization strategy.
-
-**Usage:**
-
-```shell
-nemo agents optimize [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `list-strategies`: List installed strategies and what each one optimizes.
-* `prepare-fileset`: Validate a NAT optimize bundle and upload it to a fileset...
-
-*Jobs:*
-
-* `run-strategy`: Optimize a platform agent with an installed optimization...
-
-##### nemo agents optimize list-strategies
-
-List installed strategies and what each one optimizes.
-
-Every name listed is a valid `--strategy`. Only the platform is asked,
-because only the platform runs the job: a client venv without a strategy
-plugin still submits to a server that has it, and vice versa. Answering
-from this environment instead would describe a different machine, so an
-unreachable platform is an error rather than a cue to guess.
-
-Output follows every other `nemo` list command: a table on a terminal,
-JSON when piped, so a script reads the names with
-`-f json | jq -r '.[].name'`. The target is announced once on stderr by
-the shared base-URL resolver.
-
-**Usage:**
-
-```shell
-nemo agents optimize list-strategies [OPTIONS]
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
-* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
-* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
-
-##### nemo agents optimize prepare-fileset
-
-Validate a NAT optimize bundle and upload it to a fileset for `optimize run-strategy`.
-
-**Usage:**
-
-```shell
-nemo agents optimize prepare-fileset [OPTIONS]
-```
-
-**Options:**
-
-* `--source <DIRECTORY>`: Directory holding the optimize config and every asset it references.
-* `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize run-strategy --optimize-config`.
-* `--fileset`: Fileset to upload into ('name' or 'workspace/name'). Created if missing.
-* `--workspace`: Workspace for the fileset and for agent / model preflight. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.
-* `--check-models, --no-check-models`: Also resolve the config's models against the platform before uploading.
-* `--dry-run`: Run preflight and print the result without uploading.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-##### nemo agents optimize run-strategy
-
-Optimize a platform agent with an installed optimization strategy.
-
-**Usage:**
-
-```shell
-nemo agents optimize run-strategy [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Job Spec:**
-
-* `--strategy`: Installed optimization strategy to run, e.g. 'legacy'. List what this platform has with `nemo agents optimize list-strategies`.
-* `--optimize-config`: Location of the strategy's configuration YAML, for strategies that take one.  With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root.  Without it (programmatic local runs only) it is an absolute path on the host running the job.  Whether it is required is the selected strategy's call.
-* `--optimize-config-fileset FILESET_REF`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references.  Stage one with `nemo agents optimize prepare-fileset`.  Required for remote submissions, where the job has no access to the client's filesystem.
-* `--agent`: Platform agent to optimize ('name' or 'workspace/name'). Strategies that can take the agent under test from the config itself may leave this unset.
-* `--output PATH | FILESET_REF`: Where the strategy should publish its artifacts once the run succeeds — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.
-
-**Spec Source:**
-
-* `--spec`: Spec as a JSON string. [default: \{}]
-* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
-
-**Submission:**
-
-* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
-* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
-* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-
-Job Spec flags are generated from the RunStrategySubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
-​
-
-**Commands:**
-
-* `explain`: Show input/output schemas.
-
-###### nemo agents optimize run-strategy explain
-
-Show input/output schemas.
-
-**Usage:**
-
-```shell
-nemo agents optimize run-strategy explain [OPTIONS]
-```
-
-**Options:**
-
-* `--profile`: Annotate the bundle with this profile.
 
 **Help:**
 
@@ -9017,14 +9140,14 @@ nemo anonymizer run explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-### nemo evaluator
+### nemo evals
 
-Plugin commands for evaluator.
+Plugin commands for evals.
 
 **Usage:**
 
 ```shell
-nemo evaluator [OPTIONS] COMMAND [ARGS]...
+nemo evals [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -9039,31 +9162,31 @@ nemo evaluator [OPTIONS] COMMAND [ARGS]...
 *Jobs:*
 
 * `agent-evaluate`: Run agent evaluation over tasks against a model, agent,...
-* `evaluate`: Run evaluator SDK metrics against inline rows or...
+* `evaluate`: Run evals SDK metrics against inline rows or FilesetRef...
 * `retrieve-eval`: Evaluate dense retrieval over a BEIR corpus with nDCG,...
 
-#### nemo evaluator info
+#### nemo evals info
 
 Print the current plugin status.
 
 **Usage:**
 
 ```shell
-nemo evaluator info [OPTIONS]
+nemo evals info [OPTIONS]
 ```
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo evaluator metric-types
+#### nemo evals metric-types
 
 Print available evaluator metric names or a metric JSON schema.
 
 **Usage:**
 
 ```shell
-nemo evaluator metric-types [OPTIONS] [<metric-name>]
+nemo evals metric-types [OPTIONS] [<metric-name>]
 ```
 
 **Arguments:**
@@ -9074,14 +9197,14 @@ nemo evaluator metric-types [OPTIONS] [<metric-name>]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo evaluator agent-evaluate
+#### nemo evals agent-evaluate
 
 Run agent evaluation over tasks against a model, agent, or runner.
 
 **Usage:**
 
 ```shell
-nemo evaluator agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
+nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
@@ -9118,14 +9241,14 @@ Some spec fields cannot be represented as CLI flags: `target`, `trials`, `labels
 
 * `explain`: Show input/output schemas.
 
-##### nemo evaluator agent-evaluate explain
+##### nemo evals agent-evaluate explain
 
 Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo evaluator agent-evaluate explain [OPTIONS]
+nemo evals agent-evaluate explain [OPTIONS]
 ```
 
 **Options:**
@@ -9136,14 +9259,14 @@ nemo evaluator agent-evaluate explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo evaluator evaluate
+#### nemo evals evaluate
 
-Run evaluator SDK metrics against inline rows or FilesetRef datasets.
+Run evals SDK metrics against inline rows or FilesetRef datasets.
 
 **Usage:**
 
 ```shell
-nemo evaluator evaluate [OPTIONS] [COMMAND] [ARGS]...
+nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
@@ -9180,14 +9303,14 @@ Some spec fields cannot be represented as CLI flags: `dataset`, `params`, `targe
 
 * `explain`: Show input/output schemas.
 
-##### nemo evaluator evaluate explain
+##### nemo evals evaluate explain
 
 Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo evaluator evaluate explain [OPTIONS]
+nemo evals evaluate explain [OPTIONS]
 ```
 
 **Options:**
@@ -9198,14 +9321,14 @@ nemo evaluator evaluate explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo evaluator retrieve-eval
+#### nemo evals retrieve-eval
 
 Evaluate dense retrieval over a BEIR corpus with nDCG, recall, precision, and MAP.
 
 **Usage:**
 
 ```shell
-nemo evaluator retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
+nemo evals retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
@@ -9237,14 +9360,14 @@ Some spec fields cannot be represented as CLI flags: `target`, `baseline`, `k`. 
 
 * `explain`: Show input/output schemas.
 
-##### nemo evaluator retrieve-eval explain
+##### nemo evals retrieve-eval explain
 
 Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo evaluator retrieve-eval explain [OPTIONS]
+nemo evals retrieve-eval explain [OPTIONS]
 ```
 
 **Options:**

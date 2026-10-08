@@ -19,11 +19,11 @@ from evaluator_agent_eval.task_metric_utils import (
     run_python_code,
     score_checks,
 )
-from nemo_evaluator_sdk.values.results import MetricResult, MetricScore
+from nhx_evals_sdk.values.results import MetricResult, MetricScore
 
 
 class AgentTargetConfigurationMetric:
-    """Verify the candidate configured an Evaluator SDK Agent target."""
+    """Verify the candidate configured an Evals SDK Agent target."""
 
     @property
     def type(self) -> str:

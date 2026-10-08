@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared helpers for task-local Evaluator SDK metrics.
+"""Shared helpers for task-local Evals SDK metrics.
 
 These helpers keep task-specific metric modules focused on their scoring policy.
 They deliberately return plain Python values so callers can use them from SDK
