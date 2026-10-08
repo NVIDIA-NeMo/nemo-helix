@@ -881,10 +881,12 @@ builder:
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
     image:
-    # CPU request for the sandbox. | default: '2'
+    # CPU for each sandbox: its request and its limit. | default: '2'
     cpu: '2'
-    # Memory request for the sandbox. | default: '8Gi'
+    # Memory for each sandbox: its request and its limit. | default: '8Gi'
     memory: 8Gi
+    # Ephemeral storage for each sandbox, its request and its limit: kaniko unpacks each base image into it. | default: '20Gi'
+    ephemeral_storage: 20Gi
     # Resolvers the sandbox uses instead of cluster DNS, so a network policy can block every cluster address.
     dns_nameservers:
     - 8.8.8.8

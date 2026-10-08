@@ -114,6 +114,14 @@ def sandbox_pod_name(workspace: str, job_id: str, index: int) -> str:
     return f"nhx-sbx-{job_id[:36].rstrip('-')}-{suffix}-g{index}"
 
 
+def _resources(sandbox: SandboxSpec) -> dict[str, str]:
+    """The sandbox's requests, which are also its limits."""
+    resources = {"cpu": sandbox.cpu, "memory": sandbox.memory}
+    if sandbox.ephemeral_storage:
+        resources["ephemeral-storage"] = sandbox.ephemeral_storage
+    return resources
+
+
 def _pod_manifest(
     *,
     name: str,
@@ -157,9 +165,8 @@ def _pod_manifest(
                         capabilities=k8s.V1Capabilities(drop=["ALL"], add=KANIKO_CAPABILITIES),
                     ),
                     volume_mounts=_volume_mounts(group, job_sub_path),
-                    resources=k8s.V1ResourceRequirements(
-                        requests={"cpu": sandbox.cpu, "memory": sandbox.memory},
-                    ),
+                    # Bounded, so one Dockerfile can't take the node, and requested in full, so the node has room for it.
+                    resources=k8s.V1ResourceRequirements(requests=_resources(sandbox), limits=_resources(sandbox)),
                 )
             ],
             volumes=[

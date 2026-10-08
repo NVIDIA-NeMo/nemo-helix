@@ -1,0 +1,181 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- /*
+The build namespace: each build's job steps and sandboxes run here, apart from the platform's Secrets.
+*/}}
+{{- if .Values.builder.enabled }}
+{{- $namespace := include "nemo-helix.builder.namespace" . }}
+{{- if eq $namespace .Release.Namespace }}
+{{- fail "builder.namespace must not be the release namespace: the build step can create pods there, and a pod can mount any Secret in its namespace" }}
+{{- end }}
+{{- if and .Values.builder.resourceQuota.enabled (not .Values.builder.limitRange.enabled) }}
+{{- fail "builder.resourceQuota needs builder.limitRange: without its defaults, the quota refuses every build pod that sets no limits" }}
+{{- end }}
+{{- /* Not `restricted`: the sandbox runs as root. The chart's own labels win over builder.namespaceLabels. */}}
+{{- $labels := mergeOverwrite (dict) (.Values.builder.namespaceLabels | default dict) (include "nemo-helix.labels" . | fromYaml) (dict "pod-security.kubernetes.io/enforce" "baseline") }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $namespace }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+{{- range $step := list "fetch" "control" "push" }}
+---
+# One per step. None may read a Secret: the push step's credentials are platform secrets, which Jobs fetches for it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "nemo-helix.builder.serviceAccountName" (list $ $step) }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "nemo-helix.labels" $ | nindent 4 }}
+{{- end }}
+---
+# The build step's: it manages the sandbox pods, and nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nhx-build-control
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nhx-build-control
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nhx-build-control
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "nemo-helix.builder.serviceAccountName" (list . "control") }}
+    namespace: {{ $namespace }}
+---
+# The jobs controller's, which runs the build jobs here: its Role in the release namespace covers only that one.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "nhx-core.controllerServiceAccountName" . }}
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/component: {{ .Values.core.controller.componentLabel | quote }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "nhx-core.controllerServiceAccountName" . }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "nhx-core.controllerServiceAccountName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "nhx-core.controllerServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Every build step and sandbox mounts it: fetch writes the contexts, the sandbox the image layouts, and push reads them.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nemo-helix.builder.workVolume" . }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+spec:
+  {{- with .Values.builder.workVolume.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  accessModes:
+    {{- toYaml .Values.builder.workVolume.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.builder.workVolume.size }}
+{{- with .Values.builder.limitRange }}
+{{- if .enabled }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: nhx-builds
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "nemo-helix.labels" $ | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      {{- with .default }}
+      default:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .defaultRequest }}
+      defaultRequest:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}
+{{- with .Values.builder.resourceQuota }}
+{{- if .enabled }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: nhx-builds
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "nemo-helix.labels" $ | nindent 4 }}
+spec:
+  hard:
+    {{- toYaml .hard | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- if or .Values.sandboxClusterCapable (dig "platform" "sandbox_cluster_capable" false .Values.platformConfig) }}
+---
+# With sandboxClusterCapable, Jobs gives every job pod a required reference to the OpenSandbox key in its own namespace.
+# No build step uses the key, so the build namespace gets this placeholder rather than a copy of it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ dig "platform" "sandbox_api_key_secret" .Values.opensandbox.apiKeySecret .Values.platformConfig }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  {{ dig "platform" "sandbox_api_key_secret_key" .Values.opensandbox.apiKeySecretKey .Values.platformConfig }}: not-the-opensandbox-key
+{{- end }}
+{{- end }}

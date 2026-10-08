@@ -8,26 +8,25 @@ fileset. The plugin builds them with kaniko, in a sandbox pod that holds no cred
 pushes each image to the deployment's registry, signs it with your workspace's key, and records it
 as a `ContainerImage` you can pin by digest.
 
-**Status: proof of concept.** It runs end to end on minikube. It isn't in the Helm chart, and it has
-the [limitations](#limitations) listed below.
+**Status: proof of concept.** It runs end to end, installed with the platform's Helm chart, on minikube
+and on a shared multi-node cluster publishing to Harbor, and it has the [limitations](#limitations)
+listed below.
 
 ## Quickstart (minikube)
 
-This runs the platform with the builder, and a registry, inside minikube. It builds one image and
-checks the result. Run the commands from the repository root, in one shell: later steps use
-variables that earlier ones set.
+This installs the platform with the builder, and a registry, inside minikube, from the platform's Helm
+chart. It builds one image and checks the result. Run the commands from the repository root, in one
+shell: later steps use variables that earlier ones set.
 
-You need Docker with buildx, minikube, `kubectl`, `openssl`, `jq`, and the `nemo`
-CLI (`make bootstrap`; see [SETUP.md](../../SETUP.md)). The cluster uses 3 CPUs and 5.5 GB of
-memory. Sandboxes resolve names with `8.8.8.8` and `1.1.1.1`, so your network must allow DNS to
-them; some corporate networks and VPNs don't.
+You need Docker with buildx, minikube, `kubectl`, `helm`, `openssl`, `jq`, and the `nemo` CLI
+(`make bootstrap`; see [SETUP.md](../../SETUP.md)). The cluster uses 4 CPUs and 6 GB of memory.
+Sandboxes resolve names with `8.8.8.8` and `1.1.1.1`, so your network must allow DNS to them; some
+corporate networks and VPNs don't.
 
-**1. Cluster.** The work volume is `ReadWriteOnce`, so every build pod runs on the node labelled
-`nhx.nvidia.com/build-node=true`.
+**1. Cluster.**
 
 ```bash
-minikube start --driver=docker --cpus=3 --memory=5500
-kubectl label node minikube nhx.nvidia.com/build-node=true
+minikube start --driver=docker --cpus=4 --memory=6144
 ```
 
 **2. Images.** Build the platform image, `nhx-api`, which includes the builder; `nhx-builder-tasks`, the
@@ -46,55 +45,48 @@ minikube image load my-registry/nhx-builder-tasks:local
 minikube image load my-registry/nhx-kaniko:local
 ```
 
-The builder runs `nhx-builder-tasks` and `nhx-kaniko` from the platform's `image_registry` at its
-`image_tag`, whose defaults, `my-registry` and `local`, are what these are tagged.
+They're tagged `my-registry/<name>:local`, which step 4's values point the platform at.
 
 `minikube image load` doesn't reliably replace an image already loaded under the same tag. When you
-rebuild, give all three a new tag with `BAKE_TAG=<tag> docker buildx bake …`, then set it in the
-config, as `platform.image_tag` and in `launcher_image`, and in `deploy/platform.yaml`'s image.
+rebuild, give all three a new tag with `BAKE_TAG=<tag> docker buildx bake …`, then pass it to
+`helm upgrade` as `--set api.image.tag=<tag>,core.image.tag=<tag>,platformConfig.platform.image_tag=<tag>`.
 
 **3. Keys and a password.** All for this cluster only, kept in a temporary directory rather than the
-repository: a signing key pair, a password for the registry, and the registry's password file. Keep
-`$KEYS/signing.pub` to verify signatures later.
+repository: a signing key pair, and a password for the registry. Keep `$KEYS/signing.pub` to verify
+signatures later.
 
 ```bash
 KEYS=$(mktemp -d)
 openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "$KEYS/signing.key"
 openssl pkey -in "$KEYS/signing.key" -pubout -out "$KEYS/signing.pub"
-REGISTRY_PASSWORD=$(openssl rand -hex 16)
-printf '%s\n' "$REGISTRY_PASSWORD" | docker run --rm -i httpd:2.4-alpine htpasswd -niB builder > "$KEYS/htpasswd"
+printf '%s' "$(openssl rand -hex 16)" > "$KEYS/registry-password"
 ```
 
-**4. Deploy.** `deploy/` has one manifest per namespace:
+**4. Install.** `config/minikube-values.yaml` installs the platform with only the services the builder
+uses, and turns on the chart's `builder` section:
 
-| File | Namespace | What runs there |
-|---|---|---|
-| `builds.yaml` | `nhx-builds` | The build jobs and their sandboxes, with the step ServiceAccounts, their RBAC, and the work volume |
-| `platform.yaml` | `nhx-platform` | The platform services the builder uses, in one pod with SQLite |
-| `registry.yaml` | `nhx-registry` | A registry at `registry.nhx-registry.svc.cluster.local:5000` that takes a username and password |
+| Namespace | What runs there |
+|---|---|
+| `nhx-platform` | The platform, its database, and a registry at `nemo-helix-builder-registry.nhx-platform.svc.cluster.local:5000` that takes a username and password |
+| `nhx-platform-builds` | The build jobs and their sandboxes, with the step ServiceAccounts, their RBAC, the work volume, and the namespace's limits |
 
 ```bash
-kubectl apply -f plugins/nemo-builder/deploy/
-kubectl -n nhx-platform create configmap nemo-helix-config \
-  --from-file=config.yaml=plugins/nemo-builder/config/platform-config.minikube.yaml
-kubectl -n nhx-registry create secret generic registry-htpasswd --from-file=htpasswd="$KEYS/htpasswd"
+helm install nemo-helix k8s/helm --namespace nhx-platform --create-namespace \
+  -f plugins/nemo-builder/config/minikube-values.yaml \
+  --set-file builder.devRegistry.password="$KEYS/registry-password" --wait --timeout 15m
 
-kubectl -n nhx-registry wait --for=condition=Ready pod --all --timeout=300s
-kubectl -n nhx-platform wait --for=condition=Ready pod -l app=nemo-helix --timeout=600s
-kubectl -n nhx-platform port-forward svc/nemo-helix 8080:8080 >/dev/null &
+kubectl -n nhx-platform port-forward svc/nemo-helix-api 8080:8080 >/dev/null &
 export NHX_BASE_URL=http://localhost:8080
 ```
 
-Pods waiting on a Secret or ConfigMap made after them start once it exists, so wait on the pods, as
-above, rather than on the rollouts, whose progress deadline can pass first. The port-forward runs in
-the background until the shell exits.
+The port-forward runs in the background until the shell exits.
 
 **5. Your workspace's secrets.** The push step logs in to the registry, and signs, with three
 platform secrets in the workspace that submits the build:
 
 ```bash
 nemo secrets create builder-registry-username --workspace default --value builder
-printf '%s' "$REGISTRY_PASSWORD" | nemo secrets create builder-registry-password --workspace default --from-file -
+nemo secrets create builder-registry-password --workspace default --from-file "$KEYS/registry-password"
 nemo secrets create builder-signing-key --workspace default --from-file "$KEYS/signing.key"
 ```
 
@@ -129,7 +121,7 @@ curl -s -X POST "$NHX_BASE_URL/apis/builder/v2/workspaces/default/builds" \
   }' | jq '{job, images: [.images[] | {name, status}]}'
 ```
 
-`kubectl -n nhx-builds get pods -w` shows the `fetch` pod, then `build` with its sandbox, then
+`kubectl -n nhx-platform-builds get pods -w` shows the `fetch` pod, then `build` with its sandbox, then
 `push`. Poll the image until it leaves `pending`, which takes a minute or two:
 
 ```bash
@@ -151,10 +143,10 @@ signature should verify against your public key; the second checks it with cosig
 
 ```bash
 DIGEST=$(curl -s "$NHX_BASE_URL/apis/builder/v2/workspaces/default/container-images/hello-1" | jq -r .digest)
-REF=registry.nhx-registry.svc.cluster.local:5000/default/demo/hello
+REF=nemo-helix-builder-registry.nhx-platform.svc.cluster.local:5000/default/demo/hello
 
-kubectl -n nhx-registry run check --rm -i --restart=Never --image=my-registry/nhx-builder-tasks:local \
-  --env="PASSWORD=$REGISTRY_PASSWORD" --env="DIGEST=$DIGEST" --env="REF=$REF" --command -- sh -c '
+kubectl -n nhx-platform run check --rm -i --restart=Never --image=my-registry/nhx-builder-tasks:local \
+  --env="PASSWORD=$(cat "$KEYS/registry-password")" --env="DIGEST=$DIGEST" --env="REF=$REF" --command -- sh -c '
   set -e; export HOME=/tmp
   crane auth login "${REF%%/*}" -u builder -p "$PASSWORD" >/dev/null 2>&1
   V1=$(crane digest --insecure "$REF:v1")
@@ -162,9 +154,9 @@ kubectl -n nhx-registry run check --rm -i --restart=Never --image=my-registry/nh
   echo "v1 is $DIGEST"
   crane export --insecure "$REF:v1" - | tar -xO hello.txt'
 
-kubectl -n nhx-registry run verify --rm -i --restart=Never --image=ghcr.io/sigstore/cosign/cosign:v2.5.3 \
+kubectl -n nhx-platform run verify --rm -i --restart=Never --image=ghcr.io/sigstore/cosign/cosign:v2.5.3 \
   --env="PUB=$(cat "$KEYS/signing.pub")" -- verify --key env://PUB --insecure-ignore-tlog=true \
-  --allow-http-registry --registry-username builder --registry-password "$REGISTRY_PASSWORD" \
+  --allow-http-registry --registry-username builder --registry-password "$(cat "$KEYS/registry-password")" \
   "$REF@$DIGEST" >/dev/null && echo "its signature verifies"
 ```
 
@@ -173,6 +165,124 @@ On success the first prints `v1 is sha256:…` and `hello from nemo-builder`, an
 non-zero.
 
 To build again, submit with `"revision": 2`.
+
+## On another cluster
+
+The quickstart runs on any cluster the chart installs on, with the changes below; submitting,
+polling and checking work as they do on minikube. Set these first, for your registry, the path in it
+for builds, the namespace to install in, and a storage class:
+
+```bash
+REGISTRY=registry.example.com         # a host only
+PREFIX=builds                         # builder.repository_prefix: the project or path for builds
+NS=nemo-helix                         # the release namespace; builds run in $NS-builds
+STORAGE_CLASS=<class>                 # for the work volume: ReadWriteMany, and binds immediately
+```
+
+**Before you start.** Sandboxes resolve names with `8.8.8.8` and `1.1.1.1`. Check that a pod can
+reach them, from any namespace you can run pods in; if it can't, set
+`platformConfig.builder.sandbox.dns_nameservers` to resolvers that answer. Name images in full, here
+and in your own pods: some runtimes, CRI-O among them, refuse a short name such as `busybox:1.36`.
+
+```bash
+kubectl run dnscheck --rm -i --restart=Never --image=docker.io/library/busybox:1.36 -- nslookup pypi.org 8.8.8.8
+```
+
+**Instead of steps 1 and 2: images the cluster can pull.** Use a release's, or the ones CI publishes
+to `ghcr.io/nvidia-nemo/nemo-helix` for every commit to `main` and every pull request from a branch in
+this repository, tagged with the commit and built for `linux/amd64` only. The build steps and
+sandboxes take `nhx-builder-tasks` and `nhx-kaniko` from the platform's `image_registry` and
+`image_tag`, so point those at the same build as the API:
+
+```bash
+IMAGES=ghcr.io/nvidia-nemo/nemo-helix
+TAG=<commit>
+```
+
+**Instead of step 3: a registry credential.** There's no dev registry: the workspace logs in to
+yours. On Harbor, use a robot account with push on the project `$PREFIX` names. Single quotes keep a
+robot's `$` from being expanded:
+
+```bash
+KEYS=$(mktemp -d)
+openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "$KEYS/signing.key"
+openssl pkey -in "$KEYS/signing.key" -pubout -out "$KEYS/signing.pub"
+printf '%s' '<username>' > "$KEYS/registry-username"
+printf '%s' '<password>' > "$KEYS/registry-password"
+```
+
+**Instead of step 4: values for your cluster.** These are the builder's. Add what every install
+needs, such as the `ngc-api` Secret, from the chart's [install guide](../../docs/set-up/helm/install.mdx):
+
+```bash
+cat > "$KEYS/values.yaml" <<EOF
+api:
+  image: {repository: $IMAGES/nhx-api, tag: "$TAG"}
+core:
+  image: {repository: $IMAGES/nhx-api, tag: "$TAG"}
+platformConfig:
+  platform: {image_registry: $IMAGES, image_tag: "$TAG"}
+  builder: {registry: $REGISTRY, repository_prefix: $PREFIX}
+builder:
+  enabled: true
+  workVolume: {storageClass: $STORAGE_CLASS}
+EOF
+helm install nemo-helix k8s/helm --namespace $NS --create-namespace -f "$KEYS/values.yaml" --wait --timeout 15m
+kubectl -n $NS port-forward svc/nemo-helix-api 8080:8080 >/dev/null &
+export NHX_BASE_URL=http://localhost:8080
+```
+
+[The Helm chart](#the-helm-chart) explains each setting. If the images are private, add
+`imagePullSecrets`, and get the same Secret into `$NS-builds`: the chart doesn't copy it, but
+`builder.namespaceLabels` can label the namespace for a tool that does. Installing needs permission
+to create the build namespace and its RBAC. Platform auth is off, the chart's default, as in the
+quickstart; with it on, your calls need a token, and the builder needs workload token exchange off
+(see [Security](#security)).
+
+**Instead of step 5:** the username from your file, not `builder`.
+
+```bash
+nemo secrets create builder-registry-username --workspace default --from-file "$KEYS/registry-username"
+nemo secrets create builder-registry-password --workspace default --from-file "$KEYS/registry-password"
+nemo secrets create builder-signing-key --workspace default --from-file "$KEYS/signing.key"
+```
+
+**In step 6,** a `FROM` on Docker Hub can hit its pull rate limit where many nodes share one address.
+Pull through a mirror if your registry has one: `FROM <mirror>/library/python:3.13-slim`.
+
+**In step 7,** watch `$NS-builds` instead of `nhx-platform-builds`.
+
+**Instead of step 8:** your registry, with its TLS, and the robot's credential.
+
+```bash
+DIGEST=$(curl -s "$NHX_BASE_URL/apis/builder/v2/workspaces/default/container-images/hello-1" | jq -r .digest)
+REF=$REGISTRY/$PREFIX/default/demo/hello
+
+kubectl -n $NS run check --rm -i --restart=Never --image=$IMAGES/nhx-builder-tasks:$TAG \
+  --env="U=$(cat "$KEYS/registry-username")" --env="P=$(cat "$KEYS/registry-password")" \
+  --env="DIGEST=$DIGEST" --env="REF=$REF" --command -- sh -c '
+  set -e; export HOME=/tmp
+  crane auth login "${REF%%/*}" -u "$U" -p "$P" >/dev/null 2>&1
+  V1=$(crane digest "$REF:v1")
+  [ "$V1" = "$DIGEST" ] || { echo "v1 is $V1, not the recorded $DIGEST" >&2; exit 1; }
+  echo "v1 is $DIGEST"
+  crane export "$REF:v1" - | tar -xO hello.txt'
+
+kubectl -n $NS run verify --rm -i --restart=Never --image=ghcr.io/sigstore/cosign/cosign:v2.5.3 \
+  --env="PUB=$(cat "$KEYS/signing.pub")" -- verify --key env://PUB --insecure-ignore-tlog=true \
+  --registry-username "$(cat "$KEYS/registry-username")" --registry-password "$(cat "$KEYS/registry-password")" \
+  "$REF@$DIGEST" >/dev/null && echo "its signature verifies"
+```
+
+These pods carry the credential in their spec, and anything that records `kubectl` sessions records
+it too. Use a credential you can rotate.
+
+**If the push fails with `401`** on crane's first `HEAD`, rather than at login, check the username
+and password: Harbor answers bad credentials with an anonymous token, so the failure shows up only
+once crane uses it. Fix the secret, then submit with the next `revision`: the failed image's row stays
+`pending` (see [Reliability](#reliability)).
+
+`helm uninstall` deletes `$NS-builds` and its work volume. The images stay in the registry.
 
 ## Using the API
 
@@ -275,20 +385,20 @@ A submitted build set becomes one Jobs job with three steps, each under its own 
 Dockerfiles run in sandboxes, one pod per build context, which aren't job steps and hold nothing. The
 steps are trusted (green): they run the builder's own code. The sandboxes are untrusted (red): they
 run yours. What a sandbox writes reaches the steps two ways only: the layouts on the work volume, and
-its log, which `build` reads for each image's result. The namespaces are the quickstart's: the build
-namespace is whichever the [Jobs execution profiles](#jobs-execution-profiles) name.
+its log, which `build` reads for each image's result. The build namespace is whichever the
+[Jobs execution profiles](#jobs-execution-profiles) name.
 
 ```mermaid
 flowchart TB
     caller([Caller])
-    subgraph platform ["platform (nhx-platform)"]
+    subgraph platform ["platform (release namespace)"]
         api[Builder routes]
         entities["Entities: the ContainerImage rows"]
         jobs[Jobs]
         files[Files]
         secrets["Secrets: each workspace's<br/>registry credential and signing key,<br/>if the deployment uses them"]
     end
-    subgraph builds ["build namespace (nhx-builds)"]
+    subgraph builds ["build namespace"]
         subgraph trusted ["trusted: the job's steps"]
             fetch[fetch]
             build[build]
@@ -457,10 +567,43 @@ records the digest the push step names.
 
 ## Deploying
 
+### The Helm chart
+
+Every platform image includes the builder, and the platform's chart deploys what builds need when
+`builder.enabled` is set:
+
+- **The build namespace,** `builder.namespace`, by default `<release namespace>-builds`, at the
+  `baseline` Pod Security standard. Each step has a ServiceAccount there. The build step's Role
+  manages the sandbox pods. The jobs controller gets a Role there too. It can't be the release
+  namespace: the build step's pods could mount any of the platform's Secrets there.
+  `builder.namespaceLabels` adds labels to it.
+- **The work volume,** `builder.workVolume`, `ReadWriteMany` by default, which its storage class must
+  support. A class that binds a volume only once a pod uses it, as kind's and most clouds' defaults
+  do, keeps `helm install --wait` waiting on this one until it times out: name a class that binds
+  immediately, or leave out `--wait`.
+- **A LimitRange and a ResourceQuota,** `builder.limitRange` and `builder.resourceQuota`, so that no
+  container goes unbounded and all builds together stay within a quota. The quota needs the
+  LimitRange's defaults.
+- **The three [Jobs execution profiles](#jobs-execution-profiles).**
+- **The platform's own URL, namespace-qualified,** since build pods run in another namespace. With
+  `networkPolicies.enabled`, the platform's API admits the build pods.
+- **For kind and minikube, a registry,** `builder.devRegistry`, which `builder.registry` then names.
+- **With `sandboxClusterCapable`, a placeholder for the OpenSandbox key's Secret.** Jobs gives every
+  job pod a reference to it, and no build step uses the key, so the build namespace never holds it.
+
+The chart doesn't copy image pull secrets. Jobs gives the step pods the platform's `imagePullSecrets`
+and their profile's by name, and `build` gives its sandboxes the same ones as its own pod, so create
+them in the build namespace too, or have a cluster tool copy them there, on a label from
+`builder.namespaceLabels`.
+
+`helm uninstall` deletes the build namespace, and with it the work volume's claim. The volume and every
+build's files go too, unless the storage class retains released volumes (`reclaimPolicy: Retain`):
+then delete the volume yourself.
+
 ### Configuration
 
-Operator settings live under `builder:` in the platform config, or in `NEMO_BUILDER_*` environment
-variables. Callers can't set any of them.
+Operator settings live under `builder:` in the platform config, which with the chart is
+`platformConfig.builder`, or in `NEMO_BUILDER_*` environment variables. Callers can't set any of them.
 
 ```yaml
 builder:
@@ -476,8 +619,8 @@ builder:
 die in a pod. Set `repository_prefix` to a path dedicated to builds: left empty, each workspace name
 is a top-level namespace in the registry. The steps run the release's `nhx-builder-tasks` image, and
 the sandboxes its `nhx-kaniko`, both from the platform's `image_registry` at its `image_tag`;
-`sandbox.image` names another kaniko image. The other sandbox settings are `cpu`, `memory` and `dns_nameservers`,
-each described on `SandboxConfig` in `config.py`. Where the sandboxes run isn't a builder setting:
+`sandbox.image` names another kaniko image. The other sandbox settings are `cpu`, `memory`, `ephemeral_storage` and
+`dns_nameservers`, each described on `SandboxConfig` in `config.py`. Where the sandboxes run isn't a builder setting:
 it comes from the
 [Jobs execution profiles](#jobs-execution-profiles). From the environment, the `sandbox` section is
 one JSON value, `NEMO_BUILDER_SANDBOX`: only its one-word settings can be set on their own.
@@ -488,8 +631,8 @@ unsigned. Both suit a local registry rather than a shared one: anything that can
 open to anonymous pushes can overwrite any workspace's images, and an unsigned image can be checked
 only against the digest its row records.
 
-`config/platform-config.minikube.yaml` is the quickstart's config. It works, but it is local-only in
-the ways its header lists, auth being off among them; don't start a shared deployment from it.
+`config/minikube-values.yaml` is the quickstart's chart values. They work, but they are local-only in
+the ways their header lists, auth being off among them; don't start a shared deployment from them.
 
 ### Each workspace's secrets
 
@@ -524,9 +667,10 @@ must be created first, and names have a fixed depth. Known differences:
 
 The platform needs three Jobs execution profiles, one per step, named by `fetch_profile`,
 `control_profile` and `push_profile` (`build-fetch`, `build-control` and `build-push` by default).
-Each is a `cpu` profile on the `kubernetes_job` backend. The sandboxes run in the build step's
-namespace, on the fetch step's work volume and `node_selector`, so the profiles must agree with each
-other and with the manifests:
+Each is a `cpu` profile on the `kubernetes_job` backend. The chart renders all three. A profile in
+`platformConfig.jobs.executors` with the same `provider` and `profile` replaces the chart's, and must
+agree as the chart's do. The sandboxes run in the build step's namespace, on the fetch step's work
+volume and `node_selector`, so the profiles must agree with each other:
 
 - all three name the same `namespace`, and the fetch and push profiles the same `storage.pvc_name`;
   until they do, submits fail with a `409`
@@ -542,7 +686,9 @@ other and with the manifests:
 - **Kubernetes only, with the platform inside the cluster.** Submits fail with a `409` unless the
   build's execution profiles are on Kubernetes. Build pods call back to Files, Jobs and the builder,
   so a control plane outside the cluster can't run builds.
-- **One build node.** The work volume is `ReadWriteOnce`. A `ReadWriteMany` volume would lift this.
+- **A `ReadWriteOnce` work volume means one node.** The chart's profiles name no `node_selector`, so
+  with a `ReadWriteOnce` work volume on more than one node, a build pod can land where the volume
+  isn't. Use `ReadWriteMany`, the chart's default.
 - **One registry per deployment.** Every image is published to `registry`, under the submitting
   workspace's path. Publishing anywhere else means copying the image out afterwards.
 - **Each new request needs a new `revision`.** The same request again returns its rows; a different
@@ -564,9 +710,8 @@ other and with the manifests:
   previous attempt's sandbox still exists, and a sandbox whose `build` was killed is never deleted:
   it stays until someone deletes it.
 - **The work volume fills up.** Jobs deletes a job's directory only when the push step's profile
-  sets `cleanup_completed_jobs_immediately`, and only after the job's last step succeeds. The
-  quickstart's profiles don't set it, so every build's contexts and layouts stay until someone
-  deletes them; a failed build's stay either way.
+  sets `cleanup_completed_jobs_immediately`, and only after the job's last step succeeds. The chart's
+  profiles set it, so a failed build's contexts and layouts stay until someone deletes them.
 - **`fetch` reads each file of a fileset whole into memory.** A build context with very large files
   can exhaust the step's memory. An archive is streamed to the work volume instead.
 - **An archive unpacks to at most 4 GiB and 100,000 entries.** A larger one fails the whole set,
@@ -613,18 +758,18 @@ other and with the manifests:
   inside the archive's directory, and refuses links out of it and devices; the caps bound what one
   archive writes to the work volume every build on the node shares.
 - **Execution profiles aren't authorized in Jobs.** Anyone who can submit a build can run a raw job
-  under any of the builder's profiles. Under `build-control` such a job can create any pod in
-  `nhx-builds`: it can mount the whole work volume, with every build's contexts and outputs, and
-  rewrite a layout another job's push step is about to publish; read any build pod's log; and
-  delete any build pod. Closing it needs Jobs to restrict these profiles to the builder.
+  under any of the builder's profiles. Under `build-control` such a job can create any pod in the
+  build namespace: it can mount the whole work volume, with every build's contexts and outputs, and
+  rewrite a layout another job's push step is about to publish; read any build pod's log; and delete
+  any build pod. Closing it needs Jobs to restrict these profiles to the builder.
 - **Nothing restricts the sandbox's network.** A Dockerfile's `RUN` can reach anything a pod can:
   the platform, as any user or service it names, every other Service, and on a cloud cluster the
   node's metadata server. A NetworkPolicy allowing the sandbox only public addresses would close
   this, on a network plugin that enforces it; the sandbox already resolves names with public DNS,
   and carries the label `nhx.nvidia.com/sandbox=true` to select it by.
-- **Nothing bounds a sandbox's resources.** It requests CPU and memory but has no limits, and
-  `nhx-builds` has no LimitRange or quota, so one Dockerfile can take all of the build node's CPU,
-  memory, processes and disk. In the quickstart, that node also runs the platform and the registry.
+- **Nothing bounds a sandbox's processes.** Its CPU, memory and ephemeral storage are limited, and the
+  build namespace has a quota, but how many processes a pod may run is the kubelet's `podPidsLimit`,
+  a node setting, so one Dockerfile can exhaust the build node's.
 - **Images built from one context share a sandbox.** Each one's `RUN` can reach the others' outputs,
   so one image's Dockerfile, or a base image it pulls, can alter another image of the same build.
 - **Base images must be pullable without credentials.** The sandbox holds none, and nothing bounds
@@ -668,5 +813,4 @@ The tests need no cluster, registry or running platform.
 | `config.py` | `BuilderConfig` |
 | `run/` | The programs: `fetch.py`, `supervise.py` and `push.py`; `main.py`, the `nhx-build` entry point; `utils.py`, what the steps share; and `tools.py`, which runs crane for `push` |
 | `docker/builder/`, at the repository root | The `nhx-builder-tasks` and `nhx-kaniko` images |
-| `deploy/` | The quickstart's manifests, one per namespace |
-| `config/` | The platform config for the minikube quickstart |
+| `config/` | The chart values for the minikube quickstart |

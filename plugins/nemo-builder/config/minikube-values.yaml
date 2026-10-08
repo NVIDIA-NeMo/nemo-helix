@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The minikube quickstart's values for the platform chart (k8s/helm): the platform with only the services the builder
+# uses, and the builder with its development registry. Set the registry's password with
+# `--set-file builder.devRegistry.password=<file>`.
+#
+# LOCAL ONLY. Change each of these before starting a shared cluster from it:
+#
+#   - auth is off, the chart's default, so every request acts as the admin and no permission check runs: anything
+#     that reaches the platform, a build's own `RUN` included, can read every workspace's secrets and mark an image
+#     `ready` at a digest of its choosing
+#   - the registry is in-cluster, plain HTTP, takes one password, and loses its images when its pod restarts
+#   - `repository_prefix` is empty (see "Configuration" in the README)
+#   - the sandbox is sized for a laptop
+#   - the images are side-loaded with `minikube image load`, so there is no image pull secret
+
+# The chart creates the `ngc-api` Secret with its placeholder key; the builder doesn't use NGC.
+existingSecret: ""
+# The seed creates a model provider, in the Models service, which isn't running; its other seeds are for auth.
+platformSeedJob:
+  enabled: false
+
+# The images the README's step 2 builds and loads.
+api:
+  image:
+    repository: my-registry/nhx-api
+    tag: local
+  # Only what the builder uses, so the platform fits in minikube.
+  services: [auth, entities, jobs, files, secrets, builder]
+core:
+  image:
+    repository: my-registry/nhx-api
+    tag: local
+  controller:
+    controllers: [jobs]
+postgresql:
+  image:
+    repository: docker.io/library/postgres
+# Intake's store, which the builder doesn't use, but which the chart requires: as small as it goes.
+clickhouse:
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+builder:
+  enabled: true
+  workVolume:
+    size: 10Gi
+  devRegistry:
+    enabled: true
+
+platformConfig:
+  platform:
+    # Where the builder finds nhx-builder-tasks and nhx-kaniko: what step 2 tags them.
+    image_registry: my-registry
+    image_tag: local
+  builder:
+    repository_prefix: ""
+    sandbox:
+      cpu: 500m
+      memory: 1Gi
+      ephemeral_storage: 4Gi

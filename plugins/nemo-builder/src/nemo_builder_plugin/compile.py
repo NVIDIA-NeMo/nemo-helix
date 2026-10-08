@@ -115,6 +115,7 @@ def _build_step(
                 cpu=config.sandbox.cpu,
                 memory=config.sandbox.memory,
                 image_pull_secrets=image_pull_secrets,
+                ephemeral_storage=config.sandbox.ephemeral_storage,
             ),
             groups=groups,
         ).model_dump(),
