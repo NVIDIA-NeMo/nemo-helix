@@ -13,8 +13,10 @@ through the platform. This module is the one place that logic lives.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.metric_refs import MetricRef, MetricRefOrInline, resolve_metric_specs
@@ -26,6 +28,7 @@ from nemo_evals.shared.metric_bundles.bundles import (
 )
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
@@ -102,6 +105,19 @@ def _model_not_found_error(model_ref: ModelRef, workspace: str, name: str) -> Va
     )
 
 
+def _job_reachable_url(url: str, client_base_url: str) -> str:
+    """Re-anchor a URL minted on a loopback client base URL on the in-cluster service URL.
+
+    Under embedded auth the API process calls itself over loopback, so a model reference it resolves
+    would carry an address no job container can reach. Deployments without embedded auth already
+    resolve against the service URL, which jobs reach today.
+    """
+    internal_base_url = os.environ.get("NEMO_INTERNAL_BASE_URL") or os.environ.get("NHX_INTERNAL_BASE_URL")
+    if not internal_base_url or urlsplit(client_base_url).hostname not in LOOPBACK_ADDRESSES:
+        return url
+    return internal_base_url.rstrip("/") + url.removeprefix(client_base_url.rstrip("/"))
+
+
 @dataclass(frozen=True)
 class HelixMetricModelResolver(ModelResolver):
     """Resolve evaluator metric ``ModelRef`` values through the typed Models client."""
@@ -117,7 +133,7 @@ class HelixMetricModelResolver(ModelResolver):
         except NotFoundError as exc:
             raise _model_not_found_error(model_ref, workspace, name) from exc
         return Model(
-            url=resolved.url,
+            url=_job_reachable_url(resolved.url, self.models_client.base_url),
             name=resolved.name,
             host_url=resolved.host_url,
             served_model_name=resolved.served_model_name,
