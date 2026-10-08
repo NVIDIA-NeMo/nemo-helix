@@ -11,6 +11,9 @@ describe('isUnroutableHost', () => {
     'https://0.0.0.0/',
     'http://[::]:8080',
     'http://[0:0:0:0:0:0:0:0]:8080',
+    'http://nemo-helix-api:8080',
+    'http://nemo-helix-api.default.svc:8080',
+    'http://nemo-helix-api.default.svc.cluster.local:8080',
   ])('treats %s as unroutable', (url) => {
     expect(isUnroutableHost(url)).toBe(true);
   });
@@ -35,8 +38,9 @@ describe('resolveBrowserBaseUrl', () => {
     expect(resolveBrowserBaseUrl('http://localhost:8080')).toBe('http://localhost:8080');
   });
 
-  it('falls back to window.location.origin when env value is wildcard host', () => {
+  it('falls back to window.location.origin when env value is not browser-routable', () => {
     expect(resolveBrowserBaseUrl('http://0.0.0.0:8080')).toBe(window.location.origin);
+    expect(resolveBrowserBaseUrl('http://nemo-helix-api:8080')).toBe(window.location.origin);
   });
 
   it('falls back to window.location.origin when env value is empty', () => {

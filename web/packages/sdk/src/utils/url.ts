@@ -5,8 +5,18 @@
 
 export const isUnroutableHost = (url: string): boolean => {
   try {
-    const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
-    return host === '0.0.0.0' || host === '::' || host === '0:0:0:0:0:0:0:0';
+    const host = new URL(url).hostname
+      .replace(/^\[|\]$/g, '')
+      .replace(/\.$/, '')
+      .toLowerCase();
+    const isWildcardHost = host === '0.0.0.0' || host === '::' || host === '0:0:0:0:0:0:0:0';
+    // Browsers outside Kubernetes cannot resolve Service DNS names. Dotless
+    // non-localhost names are treated as likely short Service names.
+    const isDotlessNonLocalhost =
+      host !== 'localhost' && !host.includes('.') && !host.includes(':');
+    const isLikelyClusterInternalHost =
+      host.endsWith('.svc') || host.includes('.svc.') || isDotlessNonLocalhost;
+    return isWildcardHost || isLikelyClusterInternalHost;
   } catch {
     return false;
   }
