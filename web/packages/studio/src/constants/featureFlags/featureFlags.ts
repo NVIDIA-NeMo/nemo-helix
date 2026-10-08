@@ -59,7 +59,7 @@ export const flagDefinitions = {
     true
   ),
   agentOptimizationsEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', true),
-  agentOptimizationFormEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', false),
+  agentOptimizationFormEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', true),
   agentOverviewEnabled: booleanFlag('VITE_FF_AGENT_OVERVIEW_ENABLED', true),
   agentsEnabled: previewFlag('VITE_FF_AGENTS_ENABLED', true),
   anonymizerEnabled: booleanFlag('VITE_FF_ANONYMIZER_ENABLED', true),
