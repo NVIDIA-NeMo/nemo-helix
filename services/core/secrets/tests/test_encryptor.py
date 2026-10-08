@@ -5,7 +5,7 @@
 
 import pytest
 from nhx.common.config import Configuration, nhx_user_data_dir
-from nhx.common.secrets.encryption import SecretKeyEncryptor, get_base64_encoded_random_bytes
+from nhx.common.secrets.encryption import SecretKeyEncryptor, VaultEncryptor, get_base64_encoded_random_bytes
 from nhx.core.secrets.app.encryptor import (
     EncryptionProviderNotConfiguredError,
     get_encryptor_by_name,
@@ -116,5 +116,54 @@ def test_get_encryptor_by_name_empty_raises_when_allow_key_creation_false():
     try:
         with pytest.raises(EncryptionProviderNotConfiguredError, match="No encryptor configuration found"):
             get_encryptor_by_name("")
+    finally:
+        Configuration.clear_override(SecretsServiceConfig)
+
+
+def _vault_provider_config() -> SecretsServiceConfig:
+    return SecretsServiceConfig(
+        encryption={
+            "current_provider": "vault-main",
+            "providers": {
+                "vault": {
+                    "vault-main": {
+                        "address": "http://127.0.0.1:8200",
+                        "token": "not-a-real-token",
+                        "key_name": "nemo-helix-key",
+                    }
+                }
+            },
+        }
+    )
+
+
+def test_vault_authentication_failure_is_provider_not_configured(monkeypatch):
+    """A Vault provider that cannot authenticate is a configuration error."""
+    monkeypatch.setattr(
+        "nhx.common.secrets.encryption.vault.hvac.Client.is_authenticated",
+        lambda self: False,
+    )
+    Configuration.set_override(_vault_provider_config())
+    try:
+        with pytest.raises(
+            EncryptionProviderNotConfiguredError,
+            match="Encryption provider 'vault-main' is misconfigured: .*failed to authenticate",
+        ):
+            get_encryptor_by_name("vault-main")
+    finally:
+        Configuration.clear_override(SecretsServiceConfig)
+
+
+def test_vault_construction_operational_error_is_not_reclassified(monkeypatch):
+    """Non-configuration failures while building a Vault encryptor stay operational errors."""
+
+    def _unavailable(name: str, config: object) -> VaultEncryptor:
+        raise RuntimeError("vault unavailable")
+
+    monkeypatch.setattr("nhx.core.secrets.app.encryptor.VaultEncryptor.from_config", _unavailable)
+    Configuration.set_override(_vault_provider_config())
+    try:
+        with pytest.raises(RuntimeError, match="vault unavailable"):
+            get_encryptor_by_name("vault-main")
     finally:
         Configuration.clear_override(SecretsServiceConfig)

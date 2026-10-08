@@ -53,7 +53,10 @@ def get_encryptor_by_name(name: str) -> HelixEncryptor:
     if isinstance(encryptor_config, SecretKeyEncryptorConfig):
         return SecretKeyEncryptor.from_config(config=encryptor_config, name=name)
     elif isinstance(encryptor_config, VaultEncryptorConfig):
-        return VaultEncryptor.from_config(config=encryptor_config, name=name)
+        try:
+            return VaultEncryptor.from_config(config=encryptor_config, name=name)
+        except ValueError as exc:
+            raise EncryptionProviderNotConfiguredError(f"Encryption provider {name!r} is misconfigured: {exc}") from exc
     else:
         raise EncryptionProviderNotConfiguredError(f"Cannot get encryptor configuration for provider {name}.")
 
