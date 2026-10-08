@@ -4,7 +4,7 @@
 """SQLAlchemy implementation of FilterRepository."""
 
 from datetime import datetime
-from typing import Any, List, Optional, Set
+from typing import Any, List, NamedTuple, Optional, Set
 
 from nemo_helix_plugin.filter_ops import ElemMatchCondition
 from nhx.common.api.filter import FilterOperation, FilterOperator, FilterRepository
@@ -27,6 +27,15 @@ from sqlalchemy import (
     type_coerce,
 )
 from sqlalchemy.orm import aliased
+
+
+class _ElementValue(NamedTuple):
+    """An array element as decoded text, with SQL predicates for its JSON type."""
+
+    text: Any
+    is_number: Any
+    is_bool: Any
+    is_string: Any
 
 
 class SQLAlchemyFilterRepository(FilterRepository):
@@ -284,47 +293,61 @@ class SQLAlchemyFilterRepository(FilterRepository):
         # SQLite may evaluate a comparison before the type check, and raises on a key lookup into a
         # scalar; NULL out non-target elements first.
         target = case((is_target, elements.c.value))
-        matches = []
-        for condition in conditions:
-            text, is_number = self._element_text(elements, target, condition.key)
-            matches.append(self._compare_text(text, is_number, condition.operator, condition.value))
+        matches = [
+            self._compare_element(self._element_value(elements, target, condition.key), condition)
+            for condition in conditions
+        ]
         return select(literal(1)).select_from(elements).where(is_target, *matches).exists()
 
-    def _element_text(self, elements: Any, target: Any, key: str | None) -> tuple[Any, Any]:
-        """An array element (or its ``key`` field) as decoded text, plus whether it is a JSON number."""
+    def _element_value(self, elements: Any, target: Any, key: str | None) -> _ElementValue:
+        """An array element (or its ``key`` field) as decoded text, with its JSON type."""
         if self._dialect_name == "sqlite":
-            raw = target if key is None else type_coerce(target, JSON)[key].as_string()
-            kind = elements.c.type if key is None else func.typeof(raw)
-            return cast(raw, String), kind.in_(["integer", "real"])
+            if key is None:
+                text, kind = cast(target, String), elements.c.type
+            else:
+                text = cast(type_coerce(target, JSON)[key].as_string(), String)
+                kind = func.json_type(type_coerce(target, String).op("->")(key))
+            return _ElementValue(text, kind.in_(["integer", "real"]), kind.in_(["true", "false"]), kind == "text")
         if key is None:
-            return target.op("#>>")(literal_column("'{}'::text[]")), func.json_typeof(elements.c.value) == "number"
-        element = type_coerce(target, JSON)
-        return element[key].as_string(), func.json_typeof(element[key]) == "number"
+            text, kind = target.op("#>>")(literal_column("'{}'::text[]")), func.json_typeof(elements.c.value)
+        else:
+            element = type_coerce(target, JSON)
+            text, kind = element[key].as_string(), func.json_typeof(element[key])
+        return _ElementValue(text, kind == "number", kind == "boolean", kind == "string")
 
-    def _compare_text(self, text: Any, is_number: Any, operator: FilterOperator, value: Any) -> Any:
-        """One comparison against decoded element text; null or missing (SQL NULL) matches only ``$eq`` null."""
+    def _compare_element(self, element: _ElementValue, condition: ElemMatchCondition) -> Any:
+        """One condition against an element, by JSON type: a string never equals a number or boolean.
+
+        Null or missing (SQL NULL) matches only ``$eq`` null.
+        """
+        operator, value, text = condition.operator, condition.value, element.text
         if operator == FilterOperator.EQ:
-            if value is None:
-                return text.is_(None)
-            if isinstance(value, bool):
-                return text.in_(["1", "true"] if value else ["0", "false"])
-            return text == str(value)
+            return self._element_equals(element, value)
+        if operator in (FilterOperator.IN, FilterOperator.NIN):
+            matches = or_(false(), *(self._element_equals(element, v) for v in value if v is not None))
+            return matches if operator == FilterOperator.IN else and_(text.is_not(None), not_(matches))
         if operator == FilterOperator.LIKE:
             comparison = text.ilike(f"%{value}%")
         elif operator == FilterOperator.STARTS_WITH:
             comparison = func.substr(text, 1, len(value)) == value
         elif operator == FilterOperator.ENDS_WITH:
             comparison = func.substr(text, func.length(text) - len(value) + 1) == value
-        elif operator in (FilterOperator.IN, FilterOperator.NIN):
-            values = [str(v) for v in value]
-            comparison = text.in_(values) if operator == FilterOperator.IN else text.not_in(values)
-        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        elif isinstance(value, (int, float)):
             # Cast only numbers: PostgreSQL raises casting other text to a float.
-            numeric = cast(case((is_number, text)), Float)
-            comparison = and_(is_number, getattr(numeric, self._ORDERED_OPS[operator])(value))
+            numeric = cast(case((element.is_number, text)), Float)
+            return and_(element.is_number, getattr(numeric, self._ORDERED_OPS[operator])(value))
         else:
-            comparison = getattr(text, self._ORDERED_OPS[operator])(str(value))
-        return and_(text.is_not(None), comparison)
+            comparison = getattr(text, self._ORDERED_OPS[operator])(value)
+        return and_(element.is_string, comparison)
+
+    def _element_equals(self, element: _ElementValue, value: Any) -> Any:
+        if value is None:
+            return element.text.is_(None)
+        if isinstance(value, bool):
+            return and_(element.is_bool, element.text.in_(["1", "true"] if value else ["0", "false"]))
+        if isinstance(value, (int, float)):
+            return and_(element.is_number, cast(case((element.is_number, element.text)), Float) == value)
+        return and_(element.is_string, element.text == value)
 
     def and_op(self, operations: List[Any]) -> Any:
         """Logical AND."""

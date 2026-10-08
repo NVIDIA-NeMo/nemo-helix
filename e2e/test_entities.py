@@ -450,6 +450,9 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
         assert names_matching({"data.metadata": {"$elemMatch": city}}) == {f"{prefix}-escaped"}
         assert names_matching({"data.metadata": {"$contains": 'a"b'}}) == {f"{prefix}-escaped"}
         assert names_matching({"data.metadata": {"$elemMatch": {"key": "n", "value": {"$gt": 2}}}}) == set()
+        # JSON types: a boolean is neither the string "true" nor a number.
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": "true"}}}) == set()
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": {"$gt": 0}}}}) == set()
     finally:
         for name in rows:
             try:
