@@ -27,6 +27,16 @@ The two backends do **not** share field names. For example, Automodel uses `batc
 
 Each backend can also print its live schema, and the generated REST shapes are in the [Customizer API Reference](/documentation/reference/api-reference) (search for `AutomodelJobInput` and `UnslothJobInput`).
 
+<a id="reference-recipes"></a>
+## Start from a Reference Recipe
+
+The training libraries publish benchmarked recipes per model. Start a job from the closest one instead of from defaults:
+
+- **Automodel jobs**: [Automodel `r0.6.0` LLM fine-tuning recipes](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.6.0/examples/llm_finetune). Nemotron recipes are under [`llm_finetune/nemotron`](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.6.0/examples/llm_finetune/nemotron).
+- **RL jobs (DPO, GRPO)**: [NeMo-RL `r0.8.0` recipes](https://github.com/NVIDIA-NeMo/RL/tree/r0.8.0/examples/configs/recipes/llm). Only the `fsdp2` and `automodel` recipes apply; Megatron recipes do not.
+
+Copy the learning rate, LoRA rank and alpha, batch sizes, sequence length, and parallel layout into the job, then scale the batch to your GPU count. Ignore `max_steps` and the `ci` block; those are CI smoke-test settings.
+
 ---
 
 ## Automodel Configuration
@@ -125,7 +135,7 @@ When `training.training_type` is `"distillation"`, the following additional fiel
 <Note>
 
 - Knowledge distillation uses **logit-pair distillation** — the student learns to match the teacher's output probability distribution.
-- Both student and teacher must be **full-weight Model Entities** and **share the same tokenizer and vocabulary**. Use models from the same family (e.g. Qwen3 1.7B + Qwen3 4B).
+- Both student and teacher must be **full-weight Model Entities** and **share the same tokenizer and vocabulary**. Use models from the same family (for example, Qwen3 0.6B + Qwen3 8B).
 - Both models are loaded during training; plan GPU memory accordingly (or set `offload_teacher`).
 
 </Note>

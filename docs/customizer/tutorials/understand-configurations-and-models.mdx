@@ -90,12 +90,12 @@ customization = Customization.from_client(client)
 # Create a FileSet from Hugging Face
 fileset = client.files.create_fileset(
     body=CreateFilesetRequest(
-        name="llama-3-2-1b",
-        description="Llama 3.2 1B base model",
+        name="nemotron-3-5-lightning-30b-a3b",
+        description="Nemotron 3.5 Lightning 30B A3B base model",
         storage=HuggingfaceStorageConfig(
-            repo_id="meta-llama/Llama-3.2-1B-Instruct",
+            repo_id="nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
             repo_type="model",
-            token_secret=SecretRef("my-hf-token"),  # Secret containing Hugging Face token
+            # Gated repositories also need token_secret=SecretRef("my-hf-token")
         ),
     ),
 ).data()
@@ -113,9 +113,9 @@ from nemo_helix_plugin.models.types import (
 
 model = client.models.create_model(
     body=CreateModelEntityRequest(
-        name="llama-3-2-1b",
-        fileset="default/llama-3-2-1b",  # Reference to the FileSet
-        description="Llama 3.2 1B base model",
+        name="nemotron-3-5-lightning-30b-a3b",
+        fileset="default/nemotron-3-5-lightning-30b-a3b",  # Reference to the FileSet
+        description="Nemotron 3.5 Lightning 30B A3B base model",
     ),
 ).data()
 
@@ -124,7 +124,7 @@ import time
 
 while not model.spec:
     time.sleep(5)
-    model = client.models.get_model(name="llama-3-2-1b").data()
+    model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 print(f"Model architecture: {model.spec.family}")
 print(f"Parameters: {model.spec.base_num_parameters:,}")
@@ -136,11 +136,16 @@ print(f"Parameters: {model.spec.base_num_parameters:,}")
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 spec = AutomodelJobInput(
-    model="default/llama-3-2-1b",
+    model="default/nemotron-3-5-lightning-30b-a3b",
     dataset={"training": "default/email-training-data"},
-    training={"training_type": "sft", "finetuning_type": "lora", "lora": {"rank": 8, "alpha": 32}},
+    training={
+        "training_type": "sft",
+        "finetuning_type": "lora",
+        "lora": {"rank": 16, "alpha": 32, "exclude_modules": ["*.out_proj"]},
+    },
     schedule={"epochs": 3},
-    batch={"global_batch_size": 32, "micro_batch_size": 1},
+    batch={"global_batch_size": 8, "micro_batch_size": 1},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
 )
 
 job = customization.automodel.jobs.create(
@@ -156,7 +161,7 @@ After training completes:
 
 ```python
 # For LoRA jobs - adapter is attached to the model
-model = client.models.get_model(name="llama-3-2-1b").data()
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 for adapter in model.adapters:
     print(f"Adapter: {adapter.name}")
@@ -181,7 +186,7 @@ When you run a LoRA customization job:
 ### Viewing Adapters on a Model
 
 ```python
-model = client.models.get_model(name="llama-3-2-1b").data()
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 print(f"Model: {model.name}")
 print(f"Adapters:")
@@ -198,7 +203,7 @@ Adapters are enabled by default, but you can disable an adapter to remove it fro
 
 ```python
 client.models.update_model_adapter(
-    model_name="llama-3-2-1b",
+    model_name="nemotron-3-5-lightning-30b-a3b",
     adapter="my-custom-lora",
     body=UpdateAdapterRequest(enabled=False),
 )
@@ -208,7 +213,7 @@ To re-enable:
 
 ```python
 client.models.update_model_adapter(
-    model_name="llama-3-2-1b",
+    model_name="nemotron-3-5-lightning-30b-a3b",
     adapter="my-custom-lora",
     body=UpdateAdapterRequest(enabled=True),
 )
@@ -220,7 +225,7 @@ You can also create adapters manually (e.g., from externally trained weights):
 
 ```python
 model = client.models.create_model_adapter(
-    model_name="llama-3-2-1b",
+    model_name="nemotron-3-5-lightning-30b-a3b",
     body=CreateModelAdapterRequest(
         name="my-custom-lora",
         fileset="default/my-lora-weights",
@@ -247,6 +252,7 @@ model = client.models.create_model_adapter(
 | 1B parameters | 1x 80GB GPU | 1x 80GB GPU |
 | 8B parameters | 1x 80GB GPU | 4x 80GB GPUs |
 | 70B parameters | 2x 80GB GPUs | 8x 80GB GPUs |
+| 30B MoE, 3B active (Nemotron 3.5 Lightning) | 4x H100 80GB GPUs, expert parallel size 4 | 8x H100 80GB GPUs, expert parallel size 8 |
 
 ### Storage Requirements
 
@@ -370,8 +376,8 @@ flowchart TD
 
 | Model Family | Description | Examples |
 | --- | --- | --- |
+| **Nemotron Models** | NVIDIA models with configurable reasoning, including hybrid Mamba-Transformer MoE variants | Nemotron 3.5 Lightning, Nemotron 3 Nano and Super, Llama Nemotron Nano |
 | **Llama Models** | General-purpose language models excellent for instruction following, conversation, and text generation tasks | `llama-3.1-8b-instruct`, `llama-3.2-1b-instruct` |
-| **Llama Nemotron Models** | NVIDIA's specialized variants optimized for specific use cases with enhanced reasoning capabilities | Various Nano and Super variants |
 | **Phi Models** | Microsoft's efficient models designed for strong reasoning with optimized deployment characteristics | Phi model family configurations |
 | **GPT-OSS Models** | Open-weight reasoning models with tested Full SFT and LoRA configurations | `openai/gpt-oss-20b` |
 
@@ -469,15 +475,16 @@ Import and fine-tune private Hugging Face models.
 models = client.models.list_models()
 
 # Get a specific Model Entity with adapters
-model = client.models.get_model(name="llama-3-2-1b").data()
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 # Create an Automodel training job
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 spec = AutomodelJobInput(
-    model="default/llama-3-2-1b",
+    model="default/nemotron-3-5-lightning-30b-a3b",
     dataset={"training": "default/my-dataset"},
-    training={"training_type": "sft", "finetuning_type": "lora"},
+    training={"training_type": "sft", "finetuning_type": "lora", "lora": {"exclude_modules": ["*.out_proj"]}},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
 )
 
 job = customization.automodel.jobs.create(
@@ -488,7 +495,7 @@ job = customization.automodel.jobs.create(
 
 # Add an adapter to a model
 client.models.create_model_adapter(
-    model_name="llama-3-2-1b",
+    model_name="nemotron-3-5-lightning-30b-a3b",
     body=CreateModelAdapterRequest(
         name="my-adapter",
         fileset="default/adapter-weights",

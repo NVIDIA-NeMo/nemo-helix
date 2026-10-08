@@ -5,7 +5,7 @@
 
 # Automodel job JSON
 
-Job JSON for `nemo customization automodel submit` uses **`AutomodelJobInput`** (`plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`).
+Job JSON for `nemo customization automodel submit` uses **`AutomodelJobInput`** (`plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). For per-model values (LR, LoRA rank, batch, MoE layout), start from the model's recipe in **`recipes.md`**.
 
 **Schema dump:**
 
@@ -35,9 +35,9 @@ nemo customization automodel explain
 
 | Valid | Invalid |
 |-------|---------|
-| `default/qwen3-1.7b` (entity from `nemo models create`) | `Qwen/Qwen3-1.7B` (HF id) |
-| `default/llama-3.2-1b-instruct` | `default/commonsense_qa` (dataset fileset) |
-| `other-ws/my-model` (qualified ref) | `qwen3-1.7b-commonsense-qa-lora` (output fileset only, unless registered as entity) |
+| `default/nemotron-3-5-lightning-30b-a3b` (entity from `nemo models create`) | `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` (HF id) |
+| `default/qwen3-0.6b` | `default/commonsense_qa` (dataset fileset) |
+| `other-ws/my-model` (qualified ref) | `nemotron-3-5-lightning-commonsense-qa-lora` (output fileset only, unless registered as entity) |
 
 Register before submit (same as skill fast path): HF **model** fileset → `nemo models create <model-entity> …` with `"fileset":"default/<weights-fileset>"`. List: `nemo models list --workspace default`.
 
@@ -329,15 +329,15 @@ Use only when the user requests KD/distillation. **`model`** is the **student** 
 
 | Form | Example |
 |------|---------|
-| Same workspace | `default/llama-3.2-3b-instruct` |
+| Same workspace | `default/qwen3-8b` |
 | Explicit workspace | `default/<teacher-entity>` |
 
 It is **not** a Hugging Face repo id. Register the teacher like the student before submit:
 
 ```bash
-TEACHER_WEIGHTS=llama-3.2-3b-instruct   # fileset name
-TEACHER_ENTITY=llama-3.2-3b-instruct    # entity name
-TEACHER_HF=meta-llama/Llama-3.2-3B-Instruct
+TEACHER_WEIGHTS=qwen3-8b   # fileset name
+TEACHER_ENTITY=qwen3-8b    # entity name
+TEACHER_HF=Qwen/Qwen3-8B
 
 nemo files filesets create "$TEACHER_WEIGHTS" --workspace default --purpose model --exist-ok \
   --storage '{"type":"huggingface","repo_id":"'"$TEACHER_HF"'","repo_type":"model","revision":"main"}'

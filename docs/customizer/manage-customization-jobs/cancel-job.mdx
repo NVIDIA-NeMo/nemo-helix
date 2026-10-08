@@ -48,7 +48,7 @@ print(f"Updated at: {cancelled_job.updated_at}")
   "source": "customization",
   "status": "cancelled",
   "spec": {
-    "model": "default/qwen3-1.7b",
+    "model": "default/qwen3-0.6b",
     "dataset": { "training": "default/my-training-dataset" },
     "training": {
       "training_type": "sft",
@@ -59,8 +59,8 @@ print(f"Updated at: {cancelled_job.updated_at}")
     "batch": { "global_batch_size": 16, "micro_batch_size": 1 },
     "optimizer": { "learning_rate": 1e-05 },
     "parallelism": {
-      "num_gpus_per_node": 2,
-      "tensor_parallel_size": 2
+      "num_gpus_per_node": 1,
+      "tensor_parallel_size": 1
     },
     "output": {
       "name": "my-finetuned-qwen",

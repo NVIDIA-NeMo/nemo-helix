@@ -19,7 +19,7 @@ Knowledge Distillation transfers knowledge from a large **teacher** model to a s
 
 **What you can achieve with KD:**
 
-- **Compress models:** Distill a 3B model into a 1B model for faster inference and lower deployment costs
+- **Compress models:** Distill an 8B model into a 0.6B model for faster inference and lower deployment costs
 - **Reduce latency:** Deploy a smaller model that responds faster while preserving quality
 - **Lower resource requirements:** Serve a distilled model on fewer GPUs
 
@@ -37,7 +37,7 @@ Knowledge Distillation transfers knowledge from a large **teacher** model to a s
 
 | Parameter | Default | Description |
 | --- | --- | --- |
-| `teacher_model` | *(required)* | Teacher model entity URN (e.g., `default/llama-3-2-3b-teacher`) |
+| `teacher_model` | *(required)* | Teacher model entity URN (e.g., `default/qwen3-8b-teacher`) |
 | `teacher_precision` | `bf16` | Precision for the frozen teacher (`bf16`, `fp16`, `fp32`). Lower = less memory |
 | `distillation_ratio` | `0.5` | Balance between CE loss and KD loss. `0.0` = CE only, `1.0` = KD only |
 | `distillation_temperature` | `1.0` | Softmax temperature. Higher = softer distributions, more knowledge transfer |
@@ -55,7 +55,7 @@ This tutorial follows a complete distillation pipeline:
 
 - You have a high-quality large model and want a smaller, faster version
 - Deployment latency or cost is a constraint
-- The teacher and student share the same vocabulary (e.g., both are Llama models)
+- The teacher and student share the same vocabulary (e.g., both are Qwen3 models)
 
 **When to choose SFT instead:** Refer to the [Full SFT tutorial](/documentation/customizer-reference/tutorials/sft-customization-job) when you want to train a model directly on labeled data without a teacher.
 
@@ -71,7 +71,7 @@ Before starting this tutorial, ensure you have:
 pip install evaluate rouge_score datasets
 ```
 
-4. **At least one GPU with CUDA 13+**
+4. **Two 80 GB GPUs with CUDA 13+** for the teacher's full SFT. The distillation job and the deployments each use one GPU.
 
 ## Quick Start
 
@@ -216,18 +216,16 @@ print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_N
 
 ### 3. Secrets Setup
 
-In this tutorial we use two Llama 3.2 Instruct models from Hugging Face:
-- **Teacher:** [meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) (3B parameters)
-- **Student:** [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) (1B parameters)
+In this tutorial we use two Qwen3 models from Hugging Face:
+- **Teacher:** [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) (8B parameters)
+- **Student:** [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) (0.6B parameters)
 
 Both models share the same tokenizer/vocabulary (required for knowledge distillation) and include a chat template for deployment with `/chat/completions`.
 
 **Hugging Face Authentication:**
-- For gated models (Llama, Gemma), you must provide a Hugging Face token via the `token_secret` parameter
+- Both models are public, so the Hugging Face token is optional
+- For gated models, you must provide a Hugging Face token via the `token_secret` parameter and accept the model's terms on its Hugging Face page
 - Get your token from [Hugging Face Settings](https://huggingface.co/settings/tokens) (requires Read access)
-- Accept the model's terms on the Hugging Face model page before using it:
-  - [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct)
-  - [meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct)
 
 ```python
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -235,7 +233,8 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 
 def create_or_get_secret(name: str, value: str | None, label: str):
     if not value:
-        raise ValueError(f"{label} is not set")
+        print(f"{label} is not set - skipping setting secret")
+        return None
     try:
         secret = client.secrets.create_secret(
             body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
@@ -248,17 +247,18 @@ def create_or_get_secret(name: str, value: str | None, label: str):
 
 
 hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
-print("HF_TOKEN secret:")
-print(hf_secret.model_dump_json(indent=2))
+if hf_secret:
+    print("HF_TOKEN secret:")
+    print(hf_secret.model_dump_json(indent=2))
 ```
 
 ### 4. Create Model FileSets and Model Entities
 
 Knowledge distillation requires **two** model entities:
-1. **Student model** — the smaller model that will be trained ([meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct))
-2. **Teacher model** — the larger model that provides soft targets ([meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct))
+1. **Student model** — the smaller model that will be trained ([Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B))
+2. **Teacher model** — the larger model that provides soft targets ([Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B))
 
-Using the Instruct variants ensures the output model includes a chat template, which is required for the `/chat/completions` inference endpoint.
+Both are post-trained checkpoints, so the output model includes a chat template, which is required for the `/chat/completions` inference endpoint.
 
 ```python
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
@@ -276,7 +276,7 @@ def create_model(hf_repo: str, model_name: str, description: str):
                 storage=HuggingfaceStorageConfig(
                     repo_id=hf_repo,
                     repo_type="model",
-                    token_secret=SecretRef(hf_secret.name),
+                    token_secret=SecretRef(hf_secret.name) if hf_secret else None,
                 ),
             ),
         )
@@ -313,17 +313,17 @@ def create_model(hf_repo: str, model_name: str, description: str):
 
 
 student_model = create_model(
-    hf_repo="meta-llama/Llama-3.2-1B-Instruct",
-    model_name="llama-3-2-1b-student",
-    description="Llama 3.2 1B Instruct student model",
+    hf_repo="Qwen/Qwen3-0.6B",
+    model_name="qwen3-0.6b-student",
+    description="Qwen3 0.6B student model",
 )
 
 print()
 
 teacher_model = create_model(
-    hf_repo="meta-llama/Llama-3.2-3B-Instruct",
-    model_name="llama-3-2-3b-teacher",
-    description="Llama 3.2 3B Instruct teacher model",
+    hf_repo="Qwen/Qwen3-8B",
+    model_name="qwen3-8b-teacher",
+    description="Qwen3 8B teacher model",
 )
 ```
 
@@ -335,7 +335,7 @@ teacher_model = create_model(
 
 For best distillation results, fine-tune the teacher on the **same dataset** that will be used for distillation. This ensures the teacher has learned the task-specific knowledge that the student will inherit.
 
-We train the 3B Instruct model with Full SFT on the SQuAD dataset.
+We train the 8B teacher with Full SFT on the SQuAD dataset, sharded across 2 GPUs. Activation checkpointing and a micro batch of 1 keep it within 80 GB per GPU. The global batch and learning rate follow the Automodel 7B full-SFT SQuAD recipe [`qwen2_5_7b_squad.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/qwen/qwen2_5_7b_squad.yaml).
 
 ```python
 from nemo_automodel_plugin.schema import AutomodelJobInput
@@ -352,11 +352,12 @@ teacher_spec = AutomodelJobInput(
         "training_type": "sft",
         "finetuning_type": "all_weights",
         "max_seq_length": 2048,
+        "activation_checkpointing": True,
     },
     schedule={"epochs": 1},
     batch={"global_batch_size": 64, "micro_batch_size": 1},
-    optimizer={"learning_rate": 5e-5},
-    parallelism={"num_gpus_per_node": 1},
+    optimizer={"learning_rate": 1e-5, "weight_decay": 0.0},
+    parallelism={"num_gpus_per_node": 2},
     output={"name": TEACHER_OUTPUT_NAME},
 )
 
@@ -391,7 +392,7 @@ assert teacher_status.status.lower() == "completed"
 
 ### 6. Deploy the Base Student Model
 
-Before distillation, deploy the base student model (1B Instruct, without any fine-tuning) to establish a baseline ROUGE score. After distillation, we compare the distilled student against this baseline to measure improvement.
+Before distillation, deploy the base student model (Qwen3-0.6B, without any fine-tuning) to establish a baseline ROUGE score. After distillation, we compare the distilled student against this baseline to measure improvement.
 
 ```python
 baseline_suffix = uuid.uuid4().hex[:4]
@@ -529,6 +530,8 @@ def generate_completions(
                     "messages": messages,
                     "temperature": 0,
                     "max_tokens": 128,
+                    # Qwen3 reasons by default; turn it off for a short answer.
+                    "chat_template_kwargs": {"enable_thinking": False},
                 }
             ),
         ).data()
@@ -570,12 +573,12 @@ print(f"Deleted baseline deployment config: {BASELINE_DEPLOYMENT_CONFIG}")
 
 ### 9. Create Knowledge Distillation Job
 
-Now create a distillation job that trains the 1B student using the **fine-tuned** 3B teacher's output distribution. The `model` field specifies the student, and `teacher_model` references the trained teacher model entity from Phase 1.
+Now create a distillation job that trains the 0.6B student using the **fine-tuned** 8B teacher's output distribution. The KD loss settings and learning rate follow the Automodel reference recipe [`llama3_2_1b_kd.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_kd/llama3_2/llama3_2_1b_kd.yaml). The `model` field specifies the student, and `teacher_model` references the trained teacher model entity from Phase 1.
 
 **GPU Requirements:**
 
 KD requires loading both student and teacher models, so plan GPU memory accordingly:
-- 1B student + 3B teacher: 1 GPU (24GB+ VRAM each)
+- 0.6B student + 8B teacher: 1 GPU (80 GB)
 - 3B student + 8B teacher: 4 GPUs
 - 8B student + 70B teacher: 8+ GPUs
 
@@ -596,12 +599,12 @@ kd_spec = AutomodelJobInput(
         "teacher_model": f"default/{TRAINED_TEACHER_NAME}",
         "teacher_precision": "bf16",
         "distillation_ratio": 0.5,
-        "distillation_temperature": 2.0,
+        "distillation_temperature": 1.0,
         "max_seq_length": 2048,
     },
-    schedule={"epochs": 1},
-    batch={"global_batch_size": 64, "micro_batch_size": 1},
-    optimizer={"learning_rate": 5e-5},
+    schedule={"epochs": 2},
+    batch={"global_batch_size": 32, "micro_batch_size": 1},
+    optimizer={"learning_rate": 1e-5, "weight_decay": 0.0},
     parallelism={"num_gpus_per_node": 1},
     output={"name": KD_OUTPUT_NAME},
 )
@@ -641,7 +644,7 @@ assert kd_status.status.lower() == "completed"
 
 ### 11. Deploy the Distilled Student Model
 
-The output model has the same architecture as the 1B student—only its weights have been updated via distillation. It requires just 1 GPU to deploy.
+The output model has the same architecture as the 0.6B student—only its weights have been updated via distillation. It requires just 1 GPU to deploy.
 
 ```python
 deploy_suffix_2 = uuid.uuid4().hex[:4]
@@ -709,8 +712,8 @@ print("ROUGE SCORE COMPARISON")
 print("=" * 60)
 print(header)
 print(separator)
-print(f"{'Base Student (1B, no training)':<35} " + " ".join(f"{baseline_scores[m]:>10.4f}" for m in metrics))
-print(f"{'Distilled Student (1B, KD)':<35} " + " ".join(f"{student_scores[m]:>10.4f}" for m in metrics))
+print(f"{'Base Student (0.6B, no training)':<35} " + " ".join(f"{baseline_scores[m]:>10.4f}" for m in metrics))
+print(f"{'Distilled Student (0.6B, KD)':<35} " + " ".join(f"{student_scores[m]:>10.4f}" for m in metrics))
 ```
 
 ```python
@@ -734,8 +737,8 @@ for i in range(min(3, len(contexts))):
 | **ROUGE-Lsum** | ROUGE-L computed over full summaries |
 
 **What to expect:**
-- The base student (1B, no training) provides a lower bound since it has not seen the task data
-- The distilled student (1B, KD) should significantly outperform the base student, demonstrating the knowledge transferred from the 3B teacher
+- The base student (0.6B, no training) provides a lower bound since it has not seen the task data
+- The distilled student (0.6B, KD) should significantly outperform the base student, demonstrating the knowledge transferred from the 8B teacher
 - If the distilled student scores are not much higher than the baseline, try increasing `distillation_temperature`, adjusting `distillation_ratio`, or training for more epochs
 
 ---
@@ -750,7 +753,7 @@ For detailed information on all available hyperparameters, recommended values, a
 
 **Job fails during model download:**
 - Verify authentication secrets are configured (refer to [Managing Secrets](/documentation/get-started/core-concepts/manage-secrets))
-- For gated Hugging Face models (Llama, Gemma), accept the license on the model page
+- For gated Hugging Face models, accept the license on the model page
 - Check both `model` (student) and `teacher_model` URNs are correct
 - Ensure both model entities exist: `client.models.get_model(name=...)`
 
@@ -763,7 +766,7 @@ KD loads both models, so OOM is more likely than with SFT:
 4. **Last resort:** Increase `num_gpus_per_node`
 
 **No chat template / `/chat/completions` fails:**
-- Use Instruct model variants (e.g., `Llama-3.2-1B-Instruct`) instead of base models (`Llama-3.2-1B`). Base models do not include a chat template in their tokenizer, so the output model will also lack one.
+- Use post-trained checkpoints (e.g., `Qwen3-0.6B`) instead of base checkpoints (`Qwen3-0.6B-Base`). Base checkpoints may not include a chat template in their tokenizer, so the output model would also lack one.
 
 **Distilled model quality is poor:**
 - Increase `distillation_temperature` (try 2.0–5.0) to transfer more nuanced knowledge
@@ -772,7 +775,7 @@ KD loads both models, so OOM is more likely than with SFT:
 - Verify teacher and student share the same vocabulary
 
 **Vocabulary mismatch error:**
-- Teacher and student must use the same tokenizer. Use models from the same family (e.g., Llama 3.2 1B Instruct + Llama 3.2 3B Instruct)
+- Teacher and student must use the same tokenizer. Use models from the same family (e.g., Qwen3-0.6B + Qwen3-8B)
 
 **Deployment fails:**
 - Verify output model exists: `client.models.get_model(name=DISTILLED_STUDENT_NAME)`

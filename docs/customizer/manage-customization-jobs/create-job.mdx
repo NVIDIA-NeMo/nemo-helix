@@ -41,18 +41,18 @@ customization = Customization.from_client(client)
 
 # Build the job spec (SFT + LoRA)
 spec = AutomodelJobInput(
-    model="default/qwen3-1.7b",  # Base Model Entity (workspace/name)
+    model="default/nemotron-3-5-lightning-30b-a3b",  # Base Model Entity (workspace/name)
     dataset={"training": "default/my-training-dataset"},
     training={
         "training_type": "sft",
         "finetuning_type": "lora",
-        "lora": {"rank": 16, "alpha": 32},
+        "lora": {"rank": 16, "alpha": 32, "exclude_modules": ["*.out_proj"]},
         "max_seq_length": 2048,
     },
     schedule={"epochs": 3},
-    batch={"global_batch_size": 32, "micro_batch_size": 1},
-    optimizer={"learning_rate": 1e-4},
-    parallelism={"num_gpus_per_node": 1},
+    batch={"global_batch_size": 8, "micro_batch_size": 1},
+    optimizer={"learning_rate": 1e-5},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
     output={"name": "my-custom-model"},  # Optional: auto-generated if omitted
 )
 
@@ -64,6 +64,8 @@ print(f"Job status: {job.job.status}")
 ```
 
 <Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
+The LoRA values follow Automodel's reference recipe for this architecture. To start from the recipe for another model, see [Start from a Reference Recipe](/documentation/customizer-reference/manage-customization-jobs/training-configuration#reference-recipes).
 
 The response preserves the explicit `name`. If you omit `name`, the platform generates a backend-prefixed job name.
 
@@ -78,17 +80,18 @@ The response preserves the explicit `name`. If you omit `name`, the platform gen
   "id": "platform-job-2k8i3i1HqJHHPVB5M6Bk9Z",
   "status": "queued",
   "spec": {
-    "model": "default/qwen3-1.7b",
+    "model": "default/nemotron-3-5-lightning-30b-a3b",
     "dataset": { "training": "default/my-training-dataset" },
     "training": {
       "training_type": "sft",
       "finetuning_type": "lora",
-      "lora": { "rank": 16, "alpha": 32 },
+      "lora": { "rank": 16, "alpha": 32, "exclude_modules": ["*.out_proj"] },
       "max_seq_length": 2048
     },
     "schedule": { "epochs": 3 },
-    "batch": { "global_batch_size": 32, "micro_batch_size": 1 },
-    "optimizer": { "learning_rate": 0.0001 },
+    "batch": { "global_batch_size": 8, "micro_batch_size": 1 },
+    "optimizer": { "learning_rate": 0.00001 },
+    "parallelism": { "num_gpus_per_node": 4, "expert_parallel_size": 4 },
     "output": {
       "name": "my-custom-model",
       "type": "adapter",
@@ -144,12 +147,12 @@ client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 spec = AutomodelJobInput(
-    model="default/qwen3-1.7b",  # Student model
+    model="default/qwen3-0.6b",  # Student model
     dataset={"training": "default/my-training-dataset"},
     training={
         "training_type": "distillation",
         "finetuning_type": "lora",
-        "teacher_model": "default/qwen3-4b",  # Teacher model
+        "teacher_model": "default/qwen3-8b",  # Teacher model
         "teacher_precision": "bf16",
         "distillation_ratio": 0.5,
         "distillation_temperature": 2.0,
@@ -195,7 +198,7 @@ For LoRA jobs, the adapter is added to the parent Model Entity's `adapters` list
 
 ```python
 # After training completes, retrieve the model to see the adapter
-model = client.models.get_model(workspace="default", name="qwen3-1.7b").data()
+model = client.models.get_model(workspace="default", name="nemotron-3-5-lightning-30b-a3b").data()
 
 for adapter in model.adapters or []:
     print(f"Adapter: {adapter.name}")

@@ -29,9 +29,9 @@ Full SFT models require a NIM deployment to serve inference. The Deployment Mana
 
 ## Parameter-Efficient Fine-Tuning
 
-Parameter-Efficient Fine-Tuning (PEFT) methods enable efficient model customization by training a small number of parameters while keeping the base model frozen. For example, when customizing Llama 3.3 70B:
+Parameter-Efficient Fine-Tuning (PEFT) methods enable efficient model customization by training a small number of parameters while keeping the base model frozen. For example, when customizing Nemotron 3.5 Lightning 30B A3B:
 
-- **Traditional SFT**: Produces a full BF16 checkpoint of approximately 140 GB per task. During training, budget free disk space separately for the base checkpoint, intermediate checkpoint, and final output—approximately 3× the downloaded base checkpoint size.
+- **Traditional SFT**: Produces a full BF16 checkpoint of approximately 66 GB per task. During training, budget free disk space separately for the base checkpoint, intermediate checkpoint, and final output—approximately 3× the downloaded base checkpoint size.
 - **PEFT**: Produces an adapter that is approximately 100–500 MB per task while maintaining comparable performance. During training, budget approximately 1.5× the downloaded base checkpoint size.
 
 ```mermaid
@@ -39,9 +39,9 @@ Parameter-Efficient Fine-Tuning (PEFT) methods enable efficient model customizat
 caption: Traditional Fine-Tuning
 ---
 flowchart TD
- T1[Task 1] --> M1[Llama 3.3 - 70B]
- T2[Task 2] --> M2[Llama 3.3 - 70B]
- T3[Task 3] --> M3[Llama 3.3 - 70B]
+ T1[Task 1] --> M1[Nemotron 3.5 Lightning - 30B]
+ T2[Task 2] --> M2[Nemotron 3.5 Lightning - 30B]
+ T3[Task 3] --> M3[Nemotron 3.5 Lightning - 30B]
 
  style M1 fill:#B8D5F2
  style M2 fill:#B8D5F2
@@ -57,7 +57,7 @@ flowchart TD
  P1[Task 1] --> A1[LoRA 113M]
  P2[Task 2] --> A2[LoRA 20M]
  P3[Task 3] --> A3[LoRA 10M]
- A1 & A2 & A3 --> M[Llama 3.3 - 70B]
+ A1 & A2 & A3 --> M[Nemotron 3.5 Lightning - 30B]
 
  style A1 fill:#B8D5F2
  style A2 fill:#B8D5F2
@@ -262,7 +262,7 @@ TP can be configured via `parallelism.tensor_parallel_size` in the [training con
 
 <Note>
 
-As of release 25.10.0, AutoModel engines including Phi-4, Qwen, and Gemma support tensor parallelism greater than 1 through the multi-GPU LoRA patch. Previous releases only supported `TP=1` for these models.
+As of release 25.10.0, more Automodel model families support tensor parallelism greater than 1 for LoRA through the multi-GPU LoRA patch. Previous releases supported only `TP=1` for those models. MoE models such as Nemotron 3.5 Lightning scale with `parallelism.expert_parallel_size` instead, and require `tensor_parallel_size` 1.
 
 </Note>
 

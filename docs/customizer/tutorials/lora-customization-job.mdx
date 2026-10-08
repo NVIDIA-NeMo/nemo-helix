@@ -11,7 +11,7 @@ description: ""
   </a>
 </div>
 
-Learn how to use NeMo Helix to create a LoRA (Low-Rank Adaptation) customization job using a custom dataset. In this tutorial we use LoRA to fine-tune a **question-answering model** from the SQuAD dataset.
+Learn how to use NeMo Helix to create a LoRA (Low-Rank Adaptation) customization job using a custom dataset. In this tutorial we use LoRA to fine-tune [NVIDIA Nemotron 3.5 Lightning 30B-A3B](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) into a **question-answering model** with the SQuAD dataset.
 
 LoRA is a parameter-efficient fine-tuning method that requires fewer computational resources than full fine-tuning. If you need full model fine-tuning instead, see the [Full SFT Customization Job](/documentation/customizer-reference/tutorials/sft-customization-job) tutorial.
 
@@ -24,7 +24,7 @@ Before starting this tutorial, ensure you have:
 1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
 2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **Installed the `datasets` package** for loading SQuAD: `pip install datasets`
-4. **At least one GPU with CUDA 13+**
+4. **Four NVIDIA H100 80 GB GPUs with CUDA 13+** for training. Nemotron customization is supported on H100 GPUs only. The deployment step later reuses two of them.
 
 ## Quick Start
 
@@ -183,7 +183,7 @@ print(client.files.list_files(name=DATASET_NAME).data())
 
 For Hugging Face models that require authentication, create a secret with your HF token. Get a token from [Hugging Face Settings](https://huggingface.co/settings/tokens) and accept the model terms.
 
-This is generally true for Llama-based models (for example, [Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct)).
+The Nemotron model in this tutorial is public, so the token is optional.
 
 ```sh
 export HF_TOKEN=<your-huggingface-token>
@@ -215,11 +215,13 @@ hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
 
 ### 5. Create Base Model FileSet and Model Entity
 
-Create a fileset pointing to [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) and a Model Entity that references it. Model download happens when the customization job runs.
+Create a fileset pointing to [nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) and a Model Entity that references it. Model download happens when the customization job runs.
+
+Train on the BF16 checkpoint. The [NVFP4 variant](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4) is quantized for inference and cannot be used as a training base.
 
 ```python
-HF_REPO_ID = "Qwen/Qwen3-0.6B"
-MODEL_NAME = "qwen3-0.6b"
+HF_REPO_ID = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+MODEL_NAME = "nemotron-3-5-lightning-30b-a3b"
 
 try:
     storage = HuggingfaceStorageConfig(
@@ -230,7 +232,7 @@ try:
     base_model_fs = client.files.create_fileset(
         body=CreateFilesetRequest(
             name=MODEL_NAME,
-            description="Qwen3 0.6b base model from Hugging Face",
+            description="Nemotron 3.5 Lightning 30B-A3B from Hugging Face",
             storage=storage,
             cache=True,
         ),
@@ -275,6 +277,11 @@ print(f"ModelSpec: {base_model.spec}")
 
 Submit to the **Automodel** backend using `AutomodelJobInput` with `finetuning_type: lora`. After training completes, deploy the base model with LoRA support manually (step 8).
 
+The hyperparameters follow the Automodel reference recipes for this architecture, [`customizer_nemotron_nano_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft.yaml) and [`nemotron_nano_v3_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_nano_v3_hellaswag_peft.yaml):
+
+- **Expert parallelism:** the 128 experts are sharded across 4 GPUs (`expert_parallel_size=4`, `tensor_parallel_size=1`).
+- **LoRA targets:** `*.out_proj` is excluded because the Mamba output projection runs through a fused kernel that LoRA cannot wrap.
+
 ```python
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
@@ -288,18 +295,19 @@ spec = AutomodelJobInput(
     training={
         "training_type": "sft",
         "finetuning_type": "lora",
+        "lora": {"rank": 16, "alpha": 32, "exclude_modules": ["*.out_proj"]},
         "max_seq_length": 2048,
     },
-    schedule={"epochs": 2},
-    batch={"global_batch_size": 64, "micro_batch_size": 1},
-    optimizer={"learning_rate": 5e-5},
+    schedule={"epochs": 1},
+    batch={"global_batch_size": 8, "micro_batch_size": 1},
+    optimizer={"learning_rate": 1e-5, "min_learning_rate": 1e-6},
     parallelism={
-        "num_gpus_per_node": 1,
+        "num_gpus_per_node": 4,
         "num_nodes": 1,
         "tensor_parallel_size": 1,
         "pipeline_parallel_size": 1,
         "context_parallel_size": 1,
-        "expert_parallel_size": 1,
+        "expert_parallel_size": 4,
     },
     output={"name": OUTPUT_NAME},
 )
@@ -359,7 +367,7 @@ deployment_config = client.models.create_deployment_config(
             lora_enabled=True,
         ),
         executor_config=ContainerExecutorConfig(
-            gpu=1,
+            gpu=2,
             image_name="docker.io/vllm/vllm-openai",
             image_tag="v0.22.1",
             additional_args=["--max-lora-rank", "32"],
@@ -438,6 +446,8 @@ response = gateway.provider_post(
             "messages": messages,
             "temperature": 0,
             "max_tokens": 256,
+            # Nemotron 3.5 Lightning reasons by default; turn it off for a short answer.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
     ),
 ).data()

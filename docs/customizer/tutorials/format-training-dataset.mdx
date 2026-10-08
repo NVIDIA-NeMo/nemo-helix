@@ -128,10 +128,10 @@ For illustrative purposes only, we show an example entry as multi-line JSON.
 <a id="ft-tut-format-dataset-reasoning-considerations"></a>
 ### Reasoning Considerations
 
-Some models (such as [Llama Nemotron](/documentation/customizer-reference/models/llama-nemotron)) support a **detailed thinking** mode, which you can toggle in the system message. This setting controls whether the model is encouraged to show step-by-step reasoning in its responses.
+[Nemotron models](/documentation/customizer-reference/models/llama-nemotron) support a reasoning mode that controls whether the model shows step-by-step reasoning in its responses. Match the mode to your training data.
 
-- **Training data without reasoning:** Use `detailed thinking off` in the system message.
-- **Training data with reasoning:** Use `detailed thinking on` in the system message.
+- **Nemotron 3 and 3.5 models** (for example, Nemotron 3.5 Lightning): the chat template's `enable_thinking` flag selects the mode, and an assistant turn whose `<think></think>` block is empty is a non-reasoning response.
+- **Llama Nemotron models**: use `detailed thinking on` (training data with reasoning) or `detailed thinking off` (training data without reasoning) in the system message.
 
 <Note>
 
@@ -280,7 +280,7 @@ from nemo_helix_plugin.client.client import NemoClient
 client = NemoClient.from_config()
 
 # Get a specific model
-model = client.models.get_model(name="llama-3-2-1b", workspace="default").data()
+model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b", workspace="default").data()
 
 print(f"Model: {model.name}")
 if model.spec:
@@ -311,7 +311,7 @@ oai_client = client.models.get_openai_client(workspace="default")
 # Create a chat completion (model format: "workspace/model-entity-name")
 
 response = oai_client.chat.completions.create(
-model="default/llama-3-2-1b",
+model="default/nemotron-3-5-lightning-30b-a3b",
 messages=[
 {"role": "system", "content": "You are a helpful assistant."},
 {"role": "user", "content": "Hello! How are you?"},
@@ -357,7 +357,7 @@ oai_client = client.models.get_openai_client(workspace="default")
 
 # Create a completion (model format: "workspace/model-entity-name")
 response = oai_client.completions.create(
-    model="default/llama-3-2-1b",
+    model="default/nemotron-3-5-lightning-30b-a3b",
     prompt="Once upon a time",
     temperature=0.5,
     top_p=1,

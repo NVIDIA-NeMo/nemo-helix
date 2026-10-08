@@ -41,7 +41,7 @@ CHAT_REFERENCE_TEMPLATE = "{{ item.messages[-1].content }}"
 
 Import from `references/eval_helpers.py` — do not re-type these in one-off scripts.
 
-## Inference defaults (thinking models, e.g. Qwen3)
+## Inference defaults (thinking models, e.g. Nemotron 3.5 Lightning, Qwen3)
 
 | Setting | Recommended | Avoid |
 |---------|-------------|-------|
@@ -151,7 +151,7 @@ When comparing adapters from **different backends** (automodel vs unsloth) or ba
 | HTTP base URL | `…/provider/<provider>/-/v1` | `…/model/<model-entity>/-/v1` |
 | `"model"` | `default--<adapter-name>` | `default/<model-entity>` |
 | `messages` | `messages[:-1]` from the training row (exclude final assistant label) | Same |
-| Short-answer SFT (e.g. Qwen3) | `"chat_template_kwargs": {"enable_thinking": false}` | Same |
+| Short-answer SFT (e.g. Nemotron 3.5 Lightning, Qwen3) | `"chat_template_kwargs": {"enable_thinking": false}` | Same |
 | `max_tokens` / `temperature` | `64` / `0` typical for short labels | Same |
 
 CLI shortcuts (substitute names from the job):
