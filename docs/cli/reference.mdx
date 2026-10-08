@@ -5957,8 +5957,6 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 * `invoke`: Invoke an agent — locally (with --agent-config) or via...
 * `run`: Run an agent locally as a persistent FastAPI server.
-* `leaderboard`: Commands for usage leaderboard workflows.
-* `usage`: Token-usage reports from nat_runner.py outputs.
 
 *Packaging (no platform required):*
 
@@ -7254,102 +7252,6 @@ nemo agents run [OPTIONS]
 * `--agent-config, -c <FILE>`: Path to an agent YAML config file.
 * `--host`: [default: 0.0.0.0]
 * `--port, -p <INTEGER>`: [default: 8080]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-#### nemo agents leaderboard
-
-Commands for usage leaderboard workflows.
-
-**Examples:**
-
-```shell
-# Show leaderboard help.
-nemo agents leaderboard --help
-```
-
-**Usage:**
-
-```shell
-nemo agents leaderboard [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `show`: Show a ranked leaderboard from local usage report files.
-
-##### nemo agents leaderboard show
-
-Show a ranked leaderboard from local usage report files.
-
-**Examples:**
-
-```shell
-nemo agents leaderboard show ./result.json
-nemo agents leaderboard show ./reports/
-nemo agents leaderboard show ./reports/ ./baseline.json --compact
-```
-
-**Usage:**
-
-```shell
-nemo agents leaderboard show [OPTIONS] PATHS...
-```
-
-**Arguments:**
-
-* `<PATHS...>`: One or more usage report files or directories containing report files.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--compact`: Render the compact leaderboard table.
-
-#### nemo agents usage
-
-Token-usage reports from nat_runner.py outputs.
-
-**Usage:**
-
-```shell
-nemo agents usage [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `show`: Show a usage report for *ref*.
-
-##### nemo agents usage show
-
-Show a usage report for *ref*.
-
-**Usage:**
-
-```shell
-nemo agents usage show [OPTIONS] <PATH | FILESET_REF>
-```
-
-**Arguments:**
-
-* `<<PATH | FILESET_REF>>`: Local path to a result.json / run dir / nat-jobs dir, or a NeMo Helix fileset reference.
-
-**Options:**
-
-* `--total-params <FLOAT>`: Model's total parameter count, in billions (e.g. 8.0 for Llama-3.1-8B, 70.0 for Llama-3.1-70B).  When set with non-null tokens, compute_units = total_tokens × total_params.  Closed-source models have no public number — leave unset and compute_units stays null.
-* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 **Help:**
 

@@ -33,9 +33,23 @@ class EntityCreateInput(BaseModel):
     data: Dict[str, Any] = Field(
         ...,
         description="Entity-specific data (schema is opaque to entity store, validated by client SDK)",
+        examples=[{"target_id": "llama-2-7b", "training_options": {"learning_rate": 0.01}}],
     )
 
-    model_config = ConfigDict(regex_engine="python-re")
+    model_config = ConfigDict(
+        regex_engine="python-re",
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "my-config",
+                    "data": {
+                        "target_id": "llama-2-7b",
+                        "training_options": {"learning_rate": 0.01},
+                    },
+                }
+            ]
+        },
+    )
 
 
 class EntityUpdate(BaseModel):
@@ -54,10 +68,23 @@ class EntityUpdate(BaseModel):
     data: Dict[str, Any] = Field(
         ...,
         description="Updated entity-specific data",
+        examples=[{"target_id": "llama-2-7b", "training_options": {"learning_rate": 0.02}}],
     )
     expected_db_version: int | None = Field(
         default=None,
         description="Optional database version for optimistic locking. Update only succeeds if current version matches.",
     )
 
-    model_config = ConfigDict(regex_engine="python-re")
+    model_config = ConfigDict(
+        regex_engine="python-re",
+        json_schema_extra={
+            "examples": [
+                {
+                    "data": {
+                        "target_id": "llama-2-7b",
+                        "training_options": {"learning_rate": 0.02},
+                    }
+                }
+            ]
+        },
+    )

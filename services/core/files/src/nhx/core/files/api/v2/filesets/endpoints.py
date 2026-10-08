@@ -744,6 +744,8 @@ async def list_fileset_files(
     "/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}",
     summary="Get File Metadata",
     status_code=HTTP_200_OK,
+    response_class=Response,
+    responses={HTTP_200_OK: {"description": "Successful Response"}},
 )
 async def head_file(
     workspace: str,

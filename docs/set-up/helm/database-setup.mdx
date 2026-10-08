@@ -37,14 +37,14 @@ Use a secret that holds the full database connection URI and reference it with `
 
 2. **Configure the chart** to use that secret:
 
- ```yaml
- postgresql:
- enabled: false
- externalDatabase:
- uriSecret:
- name: my-db-uri-secret
- key: uri
- ```
+```yaml
+postgresql:
+  enabled: false
+externalDatabase:
+  uriSecret:
+    name: my-db-uri-secret
+    key: uri
+```
 
  When `uriSecret` is set, the platform uses the URI from the secret and ignores `host`, `port`, `user`, `database`, and `existingSecret`.
 
@@ -60,26 +60,26 @@ Use individual `host`, `port`, `user`, and `database` values and a secret that c
 
  Or define the secret in YAML:
 
- ```yaml
- apiVersion: v1
- kind: Secret
- metadata:
- name: my-db-password-secret
- type: Opaque
- stringData:
- password: my-password
- ```
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-db-password-secret
+type: Opaque
+stringData:
+  password: my-password
+```
 
 2. **Configure the chart** with connection details and the secret name:
 
- ```yaml
- postgresql:
- enabled: false
- externalDatabase:
- host: db-host.example.com
- port: 5432
- user: nemo
- database: nemohelix
- existingSecret: my-db-password-secret
- existingSecretPasswordKey: "password" # key in the secret that holds the password
- ```
+```yaml
+postgresql:
+  enabled: false
+externalDatabase:
+  host: db-host.example.com
+  port: 5432
+  user: nemo
+  database: nemohelix
+  existingSecret: my-db-password-secret
+  existingSecretPasswordKey: "password" # key in the secret that holds the password
+```
