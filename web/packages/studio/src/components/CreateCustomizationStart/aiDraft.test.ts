@@ -128,6 +128,31 @@ describe('validateDraft', () => {
       );
     });
 
+    it("reports a form rule at the job key the model wrote, not the form's field", () => {
+      const draft: CustomizationDraft = {
+        backend: 'rl',
+        job: {
+          model: 'x',
+          dataset: 'x',
+          training: {
+            type: 'grpo',
+            batch_size: 32,
+            num_generations_per_prompt: 8,
+            num_prompts_per_step: 3,
+          },
+          output: { name: 'math-grpo' },
+        },
+        rationale: [],
+        needs_from_user: [],
+      };
+      const errors = expectErrors(
+        validate(draft, { ...INPUTS, dataset: GYM_DATASET, environment: SQL_ENVIRONMENT })
+      );
+      expect(errors).toEqual([
+        expect.stringMatching(/^training\.num_prompts_per_step: Prompts per step × rollouts/),
+      ]);
+    });
+
     it("rejects a method the dataset's format cannot train", () => {
       expect(
         expectErrors(validate(automodelDraft(), { ...INPUTS, dataset: PREFERENCE_DATASET }))
