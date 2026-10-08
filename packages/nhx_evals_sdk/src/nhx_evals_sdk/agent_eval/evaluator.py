@@ -67,7 +67,7 @@ from nhx_evals_sdk.execution.metric_execution import (
     run_sync,
 )
 from nhx_evals_sdk.session import begin_evaluation_session
-from nhx_evals_sdk.execution.samples import build_metric_input
+from nhx_evals_sdk.execution.samples import SAMPLE_RUNTIME_SEC_KEY, build_metric_input, sample_runtime_sec
 from nhx_evals_sdk.inference import InferenceFn
 from nhx_evals_sdk.metrics.protocol import Metric, MetricWithPreflight, validate_metric_result
 from nhx_evals_sdk.metrics.utils import metric_type_name
@@ -98,6 +98,7 @@ _SAMPLE_KEYS_EXCLUDED_FROM_OUTPUT_METADATA = frozenset(
         "invocation_status",
         "output_text",
         "response",
+        SAMPLE_RUNTIME_SEC_KEY,
         "trajectory",
     }
 )
@@ -631,7 +632,9 @@ def _trial_from_sample(task: AgentEvalTask, target: Model | Agent, sample: dict[
             },
         ),
         evidence=evidence,
-        measurements=_live_response_usage_measurements(sample.get("response"), trial_id=trial_id),
+        measurements=_live_response_usage_measurements(sample.get("response"), trial_id=trial_id).model_copy(
+            update={"runtime_sec": sample_runtime_sec(sample)}
+        ),
         metadata={
             **invocation_metadata,
             "model_id": target.name,

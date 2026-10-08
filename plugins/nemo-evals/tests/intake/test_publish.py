@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 import pytest
 from nemo_evals.intake.publish import PublishError, _token_final_metrics, publish_to_intake
+from nemo_evals.intake.row_adapter import row_result_to_agent_eval_result
 from nemo_helix_plugin.client.errors import NotFoundError, UnprocessableEntityError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.intake.types import (
@@ -35,6 +36,7 @@ from nhx_evals_sdk.agent_eval.trials import (
 )
 from nhx_evals_sdk.metrics.protocol import MetricOutput
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from nhx_evals_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
 from pydantic import ValidationError
 
 # --- fakes ------------------------------------------------------------------
@@ -274,6 +276,29 @@ async def test_publishes_trajectory_and_scores() -> None:
         "span:run-1:t-1",
         3,
     )
+
+
+async def test_an_agent_row_trial_publishes_its_runtime_as_the_trajectory_window() -> None:
+    row = RowScore(
+        row_index=0,
+        item={"prompt": "2+2?"},
+        sample={"output_text": "4", "response": {"choices": []}, "runtime_sec": 37.25},
+        metrics={},
+        requests=[],
+    )
+    result = row_result_to_agent_eval_result(
+        EvaluationResult(row_scores=[row], aggregate_scores=AggregatedMetricResult(scores=[])),
+        run_id="job-1",
+        started_at=STARTED_AT,
+    )
+    client = _FakeClient()
+
+    await publish_to_intake(result, client=client, experiment_id="exp-1")
+
+    (step,) = client.atif_calls[0]["steps"]
+    invocation = step["extra"]["invocation"]
+    assert invocation["start_timestamp"] == STARTED_AT.timestamp()
+    assert invocation["end_timestamp"] - invocation["start_timestamp"] == 37.25
 
 
 async def test_publish_revalidates_model_copy_corrupted_measurements_before_network_calls() -> None:

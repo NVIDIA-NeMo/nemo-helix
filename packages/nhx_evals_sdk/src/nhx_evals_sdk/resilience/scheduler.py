@@ -13,6 +13,7 @@ from typing import Deque, ParamSpec, TypeVar
 
 import anyio
 from nhx_evals_sdk.logging_utils import escape_log_value
+from nhx_evals_sdk.resilience.attempt_timing import record_successful_attempt
 from nhx_evals_sdk.resilience.classifier import classify_exception
 from nhx_evals_sdk.resilience.config import ResilienceConfig
 from nhx_evals_sdk.resilience.policy import (
@@ -224,7 +225,10 @@ class ResilienceScheduler:
             global_acquired = True
             await self._on_dispatch(controller.state, attempt=attempt)
             dispatched = True
-            return await operation(*args, **kwargs)
+            dispatched_at = self.now()
+            result = await operation(*args, **kwargs)
+            record_successful_attempt(max(0.0, self.now() - dispatched_at))
+            return result
         except asyncio.CancelledError as exc:
             async with controller.lock, self._lock:
                 self._metrics.cancellations += 1

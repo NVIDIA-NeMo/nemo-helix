@@ -196,6 +196,31 @@ def test_trial_from_sample_normalizes_live_usage(
     assert trial.measurements.cost_usd is None
 
 
+def test_trial_from_sample_records_generation_runtime_as_a_measurement() -> None:
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={"instruction": "Q?"})
+    target = GenericAgent(
+        name="agent",
+        url="https://example/agent",
+        format=AgentFormat.GENERIC,
+        body={"input": "{{ instruction }}"},
+        response_path="$.answer",
+    )
+
+    trial = _trial_from_sample(
+        task,
+        target,
+        {
+            "output_text": "answer",
+            "response": {"usage": {"prompt_tokens": 8, "completion_tokens": 2}},
+            "runtime_sec": 42.5,
+        },
+    )
+
+    assert trial.measurements == TrialMeasurements(prompt_tokens=8, completion_tokens=2, runtime_sec=42.5)
+    assert trial.output is not None
+    assert "runtime_sec" not in trial.output.metadata
+
+
 def test_trial_from_sample_omits_ambiguous_prompt_cache_usage(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
