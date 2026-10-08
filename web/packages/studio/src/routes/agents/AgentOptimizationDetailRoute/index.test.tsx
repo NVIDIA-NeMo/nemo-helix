@@ -29,6 +29,7 @@ const step = (name: string, status: HelixJobStatus) => ({
 
 const renderStudy = (status: HelixJobStatus) => {
   server.use(
+    http.get(`${OPTIMIZE_JOB_URL}/results`, () => HttpResponse.json({ data: [] })),
     http.get(OPTIMIZE_JOB_URL, () =>
       HttpResponse.json({
         name: jobName,
@@ -92,6 +93,59 @@ describe('AgentOptimizationDetailRoute', () => {
     expect(within(steps[0]).getByText('prepare')).toBeInTheDocument();
     expect(within(steps[1]).getByText('optimize')).toBeInTheDocument();
 
-    expect(within(inProgress).getByText('Logs')).toBeInTheDocument();
+    expect(screen.getAllByText('Logs')).toHaveLength(1);
+    expect(await screen.findByText('No artifacts yet')).toBeInTheDocument();
   });
+
+  it.each<HelixJobStatus>(['completed', 'error', 'cancelled'])(
+    'keeps logs and generated artifacts visible when the job is %s',
+    async (status) => {
+      renderStudy(status);
+      server.use(
+        http.get(`${OPTIMIZE_JOB_URL}/results`, () =>
+          HttpResponse.json({
+            data: [
+              {
+                name: 'switchyard',
+                artifact_storage_type: 'fileset',
+                artifact_url: `fileset://${workspace}/routing-artifacts#results/switchyard`,
+              },
+            ],
+          })
+        ),
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/routing-artifacts/files`,
+          () =>
+            HttpResponse.json({
+              data: [
+                {
+                  path: 'results/switchyard/agent-routed.yaml',
+                  size: 128,
+                  file_ref: 'routed-config',
+                },
+              ],
+            })
+        ),
+        http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name/logs`, () =>
+          HttpResponse.json({
+            data: [
+              {
+                timestamp: '2026-08-13T09:30:00Z',
+                level: 'INFO',
+                message: 'Created routed virtual model',
+              },
+            ],
+            total: 1,
+            next_page: '',
+            prev_page: '',
+          })
+        )
+      );
+
+      expect(await screen.findByText('results/switchyard/agent-routed.yaml')).toBeInTheDocument();
+      expect(await screen.findByText(/Created routed virtual model/)).toBeInTheDocument();
+      expect(screen.getAllByText('Logs')).toHaveLength(1);
+      expect(screen.getByText('Artifacts')).toBeInTheDocument();
+    }
+  );
 });
