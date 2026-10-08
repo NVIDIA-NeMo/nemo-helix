@@ -967,7 +967,7 @@ async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.Log
     with pytest.raises(RuntimeError, match="Failed to resolve deployment log backend"), caplog.at_level(logging.ERROR):
         await backend.get_logs(workspace="default", name="dep")
 
-    assert "Failed to resolve deployment log backend for 'default/dep'" in caplog.text
+    assert "Failed to resolve deployment log backend" in caplog.text
 
 
 @pytest.mark.asyncio

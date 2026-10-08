@@ -159,7 +159,7 @@ async def _resolve_external_logs(
     try:
         log_result = await get_logs(workspace=workspace, name=name, tail=tail)
     except Exception as exc:
-        logger.exception("Failed to read deployment logs for '%s/%s'", workspace, name)
+        logger.exception("Failed to read deployment logs")
         raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
     lines = [line.rstrip("\n") for line in list(getattr(log_result, "lines", []) or [])]
     cursors = _external_line_cursors(lines)
@@ -457,7 +457,7 @@ async def stream_deployment_logs(
         try:
             initial_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
         except Exception as exc:
-            logger.exception("Failed to open deployment log stream for '%s/%s'", workspace, name)
+            logger.exception("Failed to open deployment log stream")
             raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
         initial_lines = [line.rstrip("\n") for line in list(getattr(initial_result, "lines", []) or [])]
         return StreamingResponse(

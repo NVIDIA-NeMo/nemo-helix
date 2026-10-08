@@ -1024,12 +1024,12 @@ class DeploymentsRunnerBackend(RunnerBackend):
         except NemoEntityNotFoundError:
             return LogResult(lines=[])
         if deployment_config.labels.get("nemo.agents/deployment") != name:
-            logger.warning("Refusing to read non-agent deployment logs for '%s/%s'", workspace, name)
+            logger.warning("Refusing to read non-agent deployment logs")
             return LogResult(lines=[])
         try:
             backend = (await self._registry()).resolve(deployment.executor)
         except Exception as exc:
-            logger.exception("Failed to resolve deployment log backend for '%s/%s'", workspace, name)
+            logger.exception("Failed to resolve deployment log backend")
             raise RuntimeError("Failed to resolve deployment log backend.") from exc
         return await backend.get_logs(workspace=workspace, name=name, tail=tail)
 
