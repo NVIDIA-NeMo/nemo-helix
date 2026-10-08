@@ -8,17 +8,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
 import pytest
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin import cli_state as cli_state_module
+from nemo_helix_plugin.cli_options import ListOutputFormat, TimestampFormat
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 
 PLATFORM_BASE_URL = "http://test"
+ClientT = TypeVar("ClientT", bound=NemoClient)
+AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
 
 
 def _reject_request(request: httpx.Request) -> httpx.Response:
@@ -49,6 +53,81 @@ def make_platform_client() -> HelixClientFactory:
     stray platform call.
     """
     return _make_platform_client
+
+
+@dataclass
+class MockCLIState:
+    """Minimal ``nemo`` CLI state for plugin commands driven directly by Typer tests."""
+
+    client: NemoClient
+    output_format: ListOutputFormat | None = None
+    timestamp_format: TimestampFormat = "relative"
+    no_truncate: bool = False
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        return self.client
+
+    def get_async_client(self, timeout: float | httpx.Timeout | None = None) -> AsyncNemoClient:
+        return self.client.to_async()
+
+    def typed_client(
+        self,
+        client_cls: type[ClientT],
+        timeout: float | httpx.Timeout | None = None,
+    ) -> ClientT:
+        return client_cls.from_client(self.client)
+
+    def async_typed_client(
+        self,
+        client_cls: type[AsyncClientT],
+        timeout: float | httpx.Timeout | None = None,
+    ) -> AsyncClientT:
+        return client_cls.from_client(self.get_async_client(timeout=timeout))
+
+    def get_workspace(self) -> str | None:
+        return self.client.workspace
+
+    def get_base_url(self, default: str | None = None) -> str | None:
+        return self.client.base_url or default
+
+    def get_output_format(
+        self,
+        override: ListOutputFormat | None = None,
+        *,
+        apply_non_tty_default: bool = True,
+    ) -> ListOutputFormat:
+        if override is not None:
+            return override
+        if self.output_format is not None:
+            return self.output_format
+        if apply_non_tty_default and not cli_state_module.is_tty():
+            return "json"
+        return "table"
+
+    def get_timestamp_format(self, override: TimestampFormat | None = None) -> TimestampFormat:
+        return override or self.timestamp_format
+
+    def get_no_truncate(self, override: bool | None = None) -> bool:
+        return self.no_truncate if override is None else override
+
+    def get_agent_hints(self, command_path: str) -> list[str]:
+        return []
+
+
+CLIStateFactory = Callable[..., MockCLIState]
+
+
+@pytest.fixture
+def make_cli_state(make_platform_client: HelixClientFactory) -> CLIStateFactory:
+    def factory(
+        handler: Callable[[httpx.Request], httpx.Response] = _reject_request,
+        *,
+        workspace: str | None = "default",
+        output_format: ListOutputFormat | None = None,
+    ) -> MockCLIState:
+        return MockCLIState(make_platform_client(handler, workspace=workspace), output_format=output_format)
+
+    return factory
 
 
 def _fileset_output(workspace: str, name: str) -> FilesetOutput:

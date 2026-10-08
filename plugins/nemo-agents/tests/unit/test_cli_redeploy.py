@@ -23,7 +23,6 @@ and there is no update route. These tests pin the user-visible contract:
 from __future__ import annotations
 
 import re
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -35,19 +34,6 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 _PATCH_PREFIX = "nemo_agents_plugin.cli"
-
-
-def _install_mock_transport(handler) -> AbstractContextManager[Any]:
-    """Patch ``httpx.Client`` in the CLI module to use a ``MockTransport``."""
-    transport = httpx.MockTransport(handler)
-    real_client = httpx.Client
-
-    class _Client(real_client):
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            kwargs["transport"] = transport
-            super().__init__(*args, **kwargs)
-
-    return patch(f"{_PATCH_PREFIX}.httpx.Client", _Client)
 
 
 def _page(data: list[dict[str, Any]]) -> dict[str, Any]:
@@ -140,11 +126,11 @@ class _Recorder:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_runs_steps_in_order(tmp_path: Path) -> None:
+def test_redeploy_runs_steps_in_order(tmp_path: Path, make_cli_state) -> None:
     """undeploy -> delete -> create -> deploy, in that order."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -157,6 +143,7 @@ def test_redeploy_runs_steps_in_order(tmp_path: Path) -> None:
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code == 0, result.output
     assert rec.ordered_ops() == ["undeploy", "delete", "create", "deploy"]
@@ -167,16 +154,16 @@ def test_redeploy_runs_steps_in_order(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_bad_config_aborts_before_teardown(tmp_path: Path) -> None:
+def test_redeploy_bad_config_aborts_before_teardown(tmp_path: Path, make_cli_state) -> None:
     """An unsupported config_format aborts with zero destructive calls."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     bad = _write_config(tmp_path, config_format="totally_bogus")
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec):
-        result = runner.invoke(
-            app,
-            ["redeploy", "--agent", "my-agent", "--agent-config", str(bad), "--yes"],
-        )
+    result = runner.invoke(
+        app,
+        ["redeploy", "--agent", "my-agent", "--agent-config", str(bad), "--yes"],
+        obj=make_cli_state(rec),
+    )
     assert result.exit_code != 0
     # No teardown or rebuild calls at all — validation is a pre-flight gate.
     assert rec.ordered_ops() == []
@@ -188,11 +175,11 @@ def test_redeploy_bad_config_aborts_before_teardown(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_prompts_and_proceeds_on_yes(tmp_path: Path) -> None:
+def test_redeploy_prompts_and_proceeds_on_yes(tmp_path: Path, make_cli_state) -> None:
     """Without --yes, the user is prompted; 'y' proceeds through all steps."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -205,27 +192,28 @@ def test_redeploy_prompts_and_proceeds_on_yes(tmp_path: Path) -> None:
                 "10",
             ],
             input="y\n",
+            obj=make_cli_state(rec),
         )
     assert result.exit_code == 0, result.output
     assert rec.ordered_ops() == ["undeploy", "delete", "create", "deploy"]
 
 
-def test_redeploy_aborts_on_decline(tmp_path: Path) -> None:
+def test_redeploy_aborts_on_decline(tmp_path: Path, make_cli_state) -> None:
     """Declining the prompt performs no destructive calls."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec):
-        result = runner.invoke(
-            app,
-            [
-                "redeploy",
-                "--agent",
-                "my-agent",
-                "--agent-config",
-                str(_write_config(tmp_path)),
-            ],
-            input="n\n",
-        )
+    result = runner.invoke(
+        app,
+        [
+            "redeploy",
+            "--agent",
+            "my-agent",
+            "--agent-config",
+            str(_write_config(tmp_path)),
+        ],
+        input="n\n",
+        obj=make_cli_state(rec),
+    )
     assert result.exit_code != 0
     # The GET /deployments list happens (auto-detect) before the prompt, but no
     # DELETE/POST teardown-or-rebuild should occur.
@@ -237,11 +225,11 @@ def test_redeploy_aborts_on_decline(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_skips_undeploy_when_no_live_deployments(tmp_path: Path) -> None:
+def test_redeploy_skips_undeploy_when_no_live_deployments(tmp_path: Path, make_cli_state) -> None:
     """No live deployments -> no deployment DELETE, still deletes + recreates."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "failed"}])
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -254,13 +242,14 @@ def test_redeploy_skips_undeploy_when_no_live_deployments(tmp_path: Path) -> Non
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code == 0, result.output
     assert rec.ordered_ops() == ["delete", "create", "deploy"]
     assert "No live deployments" in result.output
 
 
-def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path) -> None:
+def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path, make_cli_state) -> None:
     """Agent entity already gone: the DELETE 404s, which is caught as idempotent
     'already absent', and redeploy still proceeds to create+deploy."""
 
@@ -277,7 +266,7 @@ def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path) -> None:
 
     rec = _AbsentRecorder(deployments=[])
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -290,6 +279,7 @@ def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path) -> None:
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code == 0, result.output
     # The DELETE was attempted (and 404'd -> treated as already-absent), then
@@ -303,14 +293,14 @@ def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_wait_exits_1_on_failed(tmp_path: Path) -> None:
+def test_redeploy_wait_exits_1_on_failed(tmp_path: Path, make_cli_state) -> None:
     """When the new deployment fails readiness, redeploy exits 1."""
     rec = _Recorder(
         deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}],
         poll_statuses=["pending", "failed"],
     )
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -323,28 +313,29 @@ def test_redeploy_wait_exits_1_on_failed(tmp_path: Path) -> None:
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code == 1, result.output
     assert rec.ordered_ops() == ["undeploy", "delete", "create", "deploy"]
 
 
-def test_redeploy_no_wait_returns_pending_json(tmp_path: Path) -> None:
+def test_redeploy_no_wait_returns_pending_json(tmp_path: Path, make_cli_state) -> None:
     """--no-wait returns the pending deployment without polling."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec):
-        result = runner.invoke(
-            app,
-            [
-                "redeploy",
-                "--agent",
-                "my-agent",
-                "--agent-config",
-                str(_write_config(tmp_path)),
-                "--yes",
-                "--no-wait",
-            ],
-        )
+    result = runner.invoke(
+        app,
+        [
+            "redeploy",
+            "--agent",
+            "my-agent",
+            "--agent-config",
+            str(_write_config(tmp_path)),
+            "--yes",
+            "--no-wait",
+        ],
+        obj=make_cli_state(rec),
+    )
     assert result.exit_code == 0, result.output
     # No GET /deployments/{name} poll happened.
     assert not any(m == "GET" and "/deployments/" in p for (m, p) in rec.calls)
@@ -355,7 +346,7 @@ def test_redeploy_no_wait_returns_pending_json(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_autodetects_mode_from_existing_deployment(tmp_path: Path) -> None:
+def test_redeploy_autodetects_mode_from_existing_deployment(tmp_path: Path, make_cli_state) -> None:
     """Omitted --mode is reused from the existing deployment (docker)."""
     posted: dict[str, Any] = {}
 
@@ -373,7 +364,7 @@ def test_redeploy_autodetects_mode_from_existing_deployment(tmp_path: Path) -> N
         ]
     )
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -386,13 +377,14 @@ def test_redeploy_autodetects_mode_from_existing_deployment(tmp_path: Path) -> N
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code == 0, result.output
     assert posted.get("deployment_mode") == "docker"
     assert posted.get("image") == "img:1"
 
 
-def test_redeploy_explicit_flag_overrides_detection(tmp_path: Path) -> None:
+def test_redeploy_explicit_flag_overrides_detection(tmp_path: Path, make_cli_state) -> None:
     """An explicit --mode wins over the existing deployment's mode."""
     posted: dict[str, Any] = {}
 
@@ -408,7 +400,7 @@ def test_redeploy_explicit_flag_overrides_detection(tmp_path: Path) -> None:
         deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running", "deployment_mode": "docker"}]
     )
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -423,12 +415,13 @@ def test_redeploy_explicit_flag_overrides_detection(tmp_path: Path) -> None:
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code == 0, result.output
     assert posted.get("deployment_mode") == "subprocess"
 
 
-def test_redeploy_errors_when_deployments_disagree(tmp_path: Path) -> None:
+def test_redeploy_errors_when_deployments_disagree(tmp_path: Path, make_cli_state) -> None:
     """Multiple deployments disagreeing on an omitted field errors."""
     rec = _Recorder(
         deployments=[
@@ -437,18 +430,18 @@ def test_redeploy_errors_when_deployments_disagree(tmp_path: Path) -> None:
         ]
     )
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec):
-        result = runner.invoke(
-            app,
-            [
-                "redeploy",
-                "--agent",
-                "my-agent",
-                "--agent-config",
-                str(_write_config(tmp_path)),
-                "--yes",
-            ],
-        )
+    result = runner.invoke(
+        app,
+        [
+            "redeploy",
+            "--agent",
+            "my-agent",
+            "--agent-config",
+            str(_write_config(tmp_path)),
+            "--yes",
+        ],
+        obj=make_cli_state(rec),
+    )
     assert result.exit_code == 2, result.output
     assert "disagree" in result.output
     # Errored during arg resolution, before any teardown.
@@ -460,14 +453,14 @@ def test_redeploy_errors_when_deployments_disagree(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_recovery_hint_on_recreate_failure(tmp_path: Path) -> None:
+def test_redeploy_recovery_hint_on_recreate_failure(tmp_path: Path, make_cli_state) -> None:
     """If recreate fails after delete, print a re-run recovery hint."""
     rec = _Recorder(
         deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}],
         create_agent_status=500,
     )
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -480,6 +473,7 @@ def test_redeploy_recovery_hint_on_recreate_failure(tmp_path: Path) -> None:
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code != 0
     assert "re-run to finish" in result.output
@@ -493,7 +487,7 @@ def test_redeploy_recovery_hint_on_recreate_failure(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_autodetects_inline_dict_environment(tmp_path: Path) -> None:
+def test_redeploy_autodetects_inline_dict_environment(tmp_path: Path, make_cli_state) -> None:
     """An existing deployment with an inline (dict) environment auto-detects
     without a TypeError (the value is unhashable; dedupe must not use a set)."""
     posted: dict[str, Any] = {}
@@ -520,7 +514,7 @@ def test_redeploy_autodetects_inline_dict_environment(tmp_path: Path) -> None:
         ]
     )
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -533,6 +527,7 @@ def test_redeploy_autodetects_inline_dict_environment(tmp_path: Path) -> None:
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code == 0, result.output
     assert rec.ordered_ops() == ["undeploy", "delete", "create", "deploy"]
@@ -548,7 +543,7 @@ def test_redeploy_autodetects_inline_dict_environment(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redeploy_surfaces_real_delete_failure(tmp_path: Path) -> None:
+def test_redeploy_surfaces_real_delete_failure(tmp_path: Path, make_cli_state) -> None:
     """A 500 on the agent-entity delete must fail the command (not be masked
     as 'already absent' and then march on to a misleading recreate)."""
 
@@ -561,7 +556,7 @@ def test_redeploy_surfaces_real_delete_failure(tmp_path: Path) -> None:
 
     rec = _DeleteFailsRecorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+    with patch(f"{_PATCH_PREFIX}.time.sleep"):
         result = runner.invoke(
             app,
             [
@@ -574,6 +569,7 @@ def test_redeploy_surfaces_real_delete_failure(tmp_path: Path) -> None:
                 "--timeout",
                 "10",
             ],
+            obj=make_cli_state(rec),
         )
     assert result.exit_code != 0
     # It undeployed and attempted the delete, but did NOT proceed to recreate.

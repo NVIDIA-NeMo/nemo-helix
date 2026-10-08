@@ -164,6 +164,15 @@ const isSameValue = (left: unknown, right: unknown): boolean => {
 const isHelixAgent = (config: Record<string, unknown>): boolean =>
   config.config_format === FABRIC_CONFIG_FORMAT;
 
+// translate_agent_config copies instructions.system.{content,mode} through to Fabric unchanged.
+const SPEC_INSTRUCTION_FIELDS = new Set(['content', 'mode']);
+
+const isSpecInstructionPath = (segments: readonly string[]): boolean =>
+  segments.length === 3 &&
+  segments[0] === 'instructions' &&
+  segments[1] === 'system' &&
+  SPEC_INSTRUCTION_FIELDS.has(segments[2] ?? '');
+
 // Where the agent keeps the model the study ran as `modelKey`. A platform agent's default
 // harness model outranks `models.default`, as in translate_agent_config.
 const agentModelSegments = (
@@ -225,6 +234,7 @@ export const applyTrialToAgentConfig = (
     agentModelSegments(config, modelKey) ??
     (overlayModels.has(modelKey) ? ['models', modelKey] : undefined);
 
+  let setsSystemInstruction = false;
   for (const param of trial.params) {
     const entry = searchSpace.get(param.name);
     if (!entry) {
@@ -236,9 +246,12 @@ export const applyTrialToAgentConfig = (
 
     if (root !== 'models' || !modelKey) {
       if (isHelixAgent(config)) {
-        throw new Error(
-          `Cannot apply "${entry.path}" to a ${FABRIC_CONFIG_FORMAT} agent; only model settings are supported.`
-        );
+        if (!isSpecInstructionPath(segments)) {
+          throw new Error(
+            `Cannot apply "${entry.path}" to a ${FABRIC_CONFIG_FORMAT} agent; only model settings and system instructions are supported.`
+          );
+        }
+        setsSystemInstruction = true;
       }
       setAt(next, segments, value);
       continue;
@@ -254,6 +267,13 @@ export const applyTrialToAgentConfig = (
     if (!studyModel) continue;
     if (field.length > 0) setAt(studyModel, field, value);
     else if (isPlainObject(value)) studyModels.set(modelKey, structuredClone(value));
+  }
+
+  if (setsSystemInstruction) {
+    const content = getAt(next, ['instructions', 'system', 'content']);
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('The trial leaves the agent without non-empty system instruction content.');
+    }
   }
 
   const modelDifferences = [...studyModels].flatMap(([modelKey, studyModel]) => {

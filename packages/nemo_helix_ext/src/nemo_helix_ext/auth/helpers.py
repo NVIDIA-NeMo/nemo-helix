@@ -21,23 +21,27 @@ import base64
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import httpx
+from nhx.common.auth.discovery import (
+    DEFAULT_AUTH_DISCOVERY_SCOPES,
+    AuthDiscoveryBearerTokenSourceError,
+    AuthDiscoveryResponse,
+    BearerTokenSource,
+    OIDCDiscoveryResponse,
+)
+from nhx.common.auth.discovery import (
+    parse_bearer_token_source as _parse_bearer_token_source,
+)
+from pydantic import ValidationError
 
-from nemo_helix_ext.client.tls import httpx_tls_config_from_env
-
-DEFAULT_OAUTH_SCOPES = "openid profile email offline_access"
-BearerTokenSource = Literal["access_token", "id_token"]
+DEFAULT_OAUTH_SCOPES = DEFAULT_AUTH_DISCOVERY_SCOPES
 
 
 def parse_bearer_token_source(value: object) -> BearerTokenSource:
     """Validate a bearer-token response field received from discovery."""
-    if value == "access_token":
-        return "access_token"
-    if value == "id_token":
-        return "id_token"
-    raise ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'")
+    return _parse_bearer_token_source(value)
 
 
 class AuthError(Exception):
@@ -169,38 +173,67 @@ class NHXOIDCConfig:
 
 def discover_nhx_config(
     base_url: str,
+    http_client: httpx.Client,
     timeout: float = 10.0,
-    *,
-    certificate_authority: str | None = None,
 ) -> NHXOIDCConfig:
     """Fetch OIDC configuration from the NeMo Helix auth discovery endpoint."""
-    response = httpx.get(
-        f"{base_url.rstrip('/')}/apis/auth/discovery",
-        timeout=timeout,
-        **httpx_tls_config_from_env(certificate_authority),
-    )
+    url = f"{base_url.rstrip('/')}/apis/auth/discovery"
+    # TLS verification belongs to the caller-owned httpx.Client; do not override it here.
+    # codeql[py/request-without-cert-validation]
+    response = http_client.get(url, timeout=timeout)
     response.raise_for_status()
-    data = response.json()
+    return _nhx_oidc_config_from_payload(response.json())
 
-    oidc = data.get("oidc") or {}
+
+async def discover_nhx_config_async(
+    base_url: str,
+    http_client: httpx.AsyncClient,
+    timeout: float = 10.0,
+) -> NHXOIDCConfig:
+    """Fetch OIDC configuration from the NeMo Helix auth discovery endpoint."""
+    url = f"{base_url.rstrip('/')}/apis/auth/discovery"
+    # TLS verification belongs to the caller-owned httpx.AsyncClient; do not override it here.
+    # codeql[py/request-without-cert-validation]
+    response = await http_client.get(url, timeout=timeout)
+    response.raise_for_status()
+    return _nhx_oidc_config_from_payload(response.json())
+
+
+def _nhx_oidc_config_from_payload(data: object) -> NHXOIDCConfig:
+    try:
+        discovery = AuthDiscoveryResponse.model_validate(data)
+    except AuthDiscoveryBearerTokenSourceError as exc:
+        raise ValueError(str(exc)) from exc
+    except ValidationError as exc:
+        raise AttributeError("auth discovery response did not match expected shape") from exc
+    return _nhx_oidc_config_from_discovery(discovery)
+
+
+def _nhx_oidc_config_from_discovery(discovery: AuthDiscoveryResponse) -> NHXOIDCConfig:
+    if discovery.oidc is None:
+        return NHXOIDCConfig(auth_enabled=discovery.auth_enabled)
+    return _nhx_oidc_config_from_oidc_discovery(discovery.auth_enabled, discovery.oidc)
+
+
+def _nhx_oidc_config_from_oidc_discovery(auth_enabled: bool, oidc: OIDCDiscoveryResponse) -> NHXOIDCConfig:
     return NHXOIDCConfig(
-        auth_enabled=data.get("auth_enabled", False),
-        issuer=oidc.get("issuer"),
-        client_id=oidc.get("client_id"),
-        cli_client_id=oidc.get("cli_client_id"),
-        bearer_token_source=parse_bearer_token_source(oidc.get("bearer_token_source", "access_token")),
-        token_endpoint=oidc.get("token_endpoint"),
-        device_authorization_endpoint=oidc.get("device_authorization_endpoint"),
-        device_authorization_requires_device_id=oidc.get("device_authorization_requires_device_id", False),
-        device_authorization_display_name=oidc.get("device_authorization_display_name"),
-        device_token_request_includes_scope=oidc.get("device_token_request_includes_scope", True),
-        default_scopes=oidc.get("default_scopes", DEFAULT_OAUTH_SCOPES),
-        scope_prefix=oidc.get("scope_prefix"),
-        workload_token_exchange_enabled=oidc.get("workload_token_exchange_enabled", False),
-        workload_client_id=oidc.get("workload_client_id"),
-        workload_token_endpoint=oidc.get("workload_token_endpoint"),
-        workload_audience=oidc.get("workload_audience"),
-        workload_scope=oidc.get("workload_scope"),
+        auth_enabled=auth_enabled,
+        issuer=oidc.issuer,
+        client_id=oidc.client_id,
+        cli_client_id=oidc.cli_client_id,
+        bearer_token_source=oidc.bearer_token_source,
+        token_endpoint=oidc.token_endpoint,
+        device_authorization_endpoint=oidc.device_authorization_endpoint,
+        device_authorization_requires_device_id=oidc.device_authorization_requires_device_id,
+        device_authorization_display_name=oidc.device_authorization_display_name,
+        device_token_request_includes_scope=oidc.device_token_request_includes_scope,
+        default_scopes=oidc.default_scopes or DEFAULT_OAUTH_SCOPES,
+        scope_prefix=oidc.scope_prefix,
+        workload_token_exchange_enabled=oidc.workload_token_exchange_enabled,
+        workload_client_id=oidc.workload_client_id,
+        workload_token_endpoint=oidc.workload_token_endpoint,
+        workload_audience=oidc.workload_audience,
+        workload_scope=oidc.workload_scope,
     )
 
 

@@ -58,18 +58,6 @@ import click
 import httpx
 import typer
 import yaml
-from nemo_agents_plugin.cli_context import (
-    DEFAULT_BASE_URL as _DEFAULT_BASE_URL,
-)
-from nemo_agents_plugin.cli_context import (
-    resolve_base_url as _resolve_base_url,
-)
-from nemo_agents_plugin.cli_context import (
-    resolve_context_headers as _resolve_context_headers,
-)
-from nemo_agents_plugin.cli_context import (
-    shared_cli_client,
-)
 from nemo_agents_plugin.deployment_routing import is_deployment_routable
 from nemo_agents_plugin.entities import (
     AGENT_SPEC_FILENAME,
@@ -122,7 +110,15 @@ from nemo_helix_plugin.cli_options import (
 from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output, is_tty
 from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_pages, warn_if_more_pages
 from nemo_helix_plugin.cli_progress import request_progress
-from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
+from nemo_helix_plugin.cli_state import DEFAULT_BASE_URL as _DEFAULT_BASE_URL
+from nemo_helix_plugin.cli_state import (
+    cli_state,
+    resolve_cli_workspace,
+    resolve_output_format,
+    shared_cli_client,
+    shared_cli_client_context,
+)
+from nemo_helix_plugin.cli_state import resolve_base_url as _resolve_base_url
 from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -2407,14 +2403,18 @@ def _platform_invoke(
         path = f"/apis/agents/v2/workspaces/{workspace}/deployments/{deployment}/-/v1/chat/completions"
 
     url = base_url.rstrip("/") + path
-    headers = _resolve_context_headers()
     target_label = agent or deployment
     for query in queries:
         payload = {"messages": [{"role": "user", "content": query}], "stream": False}
         try:
             with request_progress(f"Waiting for agent '{target_label}'...", disabled=no_progress):
-                with httpx.Client(timeout=timeout) as client:
-                    resp = client.post(url, json=payload, headers=headers or None)
+                with shared_cli_client_context(NemoClient) as platform:
+                    resp = platform.http_client.post(
+                        url,
+                        json=payload,
+                        headers=platform.request_headers(url=url),
+                        timeout=timeout,
+                    )
                     resp.raise_for_status()
                     body = resp.json()
                 typer.echo(json.dumps(body, indent=2))
@@ -2551,7 +2551,6 @@ def _run_resolved_session_chat(
         f"{base_url.rstrip('/')}/apis/agents/v2/workspaces/{workspace}"
         f"/deployments/{deployment.name}/-/v1/chat/completions"
     )
-    headers = {**_resolve_context_headers(), SESSION_ID_HEADER: session_id}
     display_info = {
         "Deployment": deployment.name,
         "Session": session.name,
@@ -2561,7 +2560,11 @@ def _run_resolved_session_chat(
         display_info["Expires"] = session.expires_at.isoformat()
 
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with shared_cli_client_context(NemoClient) as platform:
+            client = platform.http_client
+            headers = platform.request_headers({SESSION_ID_HEADER: session_id}, url=url) or {
+                SESSION_ID_HEADER: session_id
+            }
 
             def send_turn(user_input: str) -> StreamingResponse:
                 request = client.build_request(
@@ -2569,6 +2572,7 @@ def _run_resolved_session_chat(
                     url,
                     headers=headers,
                     json={"messages": [{"role": "user", "content": user_input}], "stream": True},
+                    timeout=timeout,
                 )
                 response = client.send(request, stream=True)
                 try:
@@ -2837,17 +2841,8 @@ def _print_entity(
     format_output(resp, output_format=resolved_output_format)
 
 
-def _agents_client(base_url: str, workspace: str) -> AgentsClient:
-    shared = shared_cli_client(AgentsClient, timeout=30)
-    if shared is not None:
-        return shared
-    return AgentsClient(
-        base_url=base_url,
-        workspace=workspace,
-        default_headers=_resolve_context_headers() or None,
-        timeout=30,
-        http_client=httpx.Client(timeout=30),
-    )
+def _agents_client(_base_url: str, _workspace: str) -> AgentsClient:
+    return shared_cli_client(AgentsClient)
 
 
 def _json_from_response(response: NemoResponse[Any]) -> Any:
@@ -2889,17 +2884,6 @@ def _resolve_timestamp_format(ctx: typer.Context) -> str | None:
         except Exception:
             logger.debug("Failed to resolve global timestamp format for agents list", exc_info=True)
     return None
-
-
-def _platform_sdk(base_url: str) -> NemoClient:
-    """Return an auth-aware platform client for fileset upload/delete."""
-    shared = shared_cli_client(NemoClient)
-    if shared is not None:
-        return shared
-    headers = _resolve_context_headers()
-    if headers:
-        return NemoClient(base_url=base_url, default_headers=headers)
-    return NemoClient(base_url=base_url)
 
 
 def _run_sdk(action: str, call: Callable[[], _T]) -> _T:
@@ -3126,7 +3110,6 @@ def _create_agent_from_validated_config(
                 agent_name=name,
                 workspace=workspace,
                 agent_root=agent_config.parent,
-                base_url=base_url,
             )
         except Exception as exc:
             typer.echo(
@@ -3177,7 +3160,6 @@ def _upload_ethos_fileset(
     agent_name: str,
     workspace: str,
     agent_root: Path,
-    base_url: str,
 ) -> None:
     """Replace the executable snapshot in the conventional Ethos fileset.
 
@@ -3198,7 +3180,7 @@ def _upload_ethos_fileset(
         warn_on_binary=True,
     )
     fileset = ethos_fileset_name(agent_name)
-    sdk = _platform_sdk(base_url)
+    sdk = shared_cli_client(NemoClient)
     with tempfile.TemporaryDirectory(prefix=f".{agent_name}-ethos-upload-") as directory:
         staged = Path(directory) / agent_root.name
         staged.mkdir()

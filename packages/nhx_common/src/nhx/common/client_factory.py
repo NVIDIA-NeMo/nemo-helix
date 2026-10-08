@@ -195,7 +195,7 @@ def get_async_nemo_client(
     return AsyncNemoClient(
         base_url=resolved_base_url,
         workspace=workspace,
-        auth=context.nemo_client_auth(),
+        auth=context.async_nemo_client_auth(),
         default_headers=context.default_headers_or_none(),
         timeout=timeout,
         retry=retry,

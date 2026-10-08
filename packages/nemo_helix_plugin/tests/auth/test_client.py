@@ -6,6 +6,7 @@ from __future__ import annotations
 import httpx
 import pytest
 from nemo_helix_plugin.auth.client import AsyncAuthenticationClient, AuthenticationClient
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.errors import AuthenticationError
 
 BASE = "http://127.0.0.1:8000"
@@ -50,7 +51,7 @@ async def test_async_authentication_client_dispatches_post_with_auth_header() ->
         return httpx.Response(200, json=AUTH_RESPONSE, request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-        client = AsyncAuthenticationClient(base_url=BASE, auth="tok", http_client=http_client)
+        client = AsyncAuthenticationClient(base_url=BASE, auth=StaticToken("tok"), http_client=http_client)
 
         response = await client.authenticate_bearer_token_post()
 

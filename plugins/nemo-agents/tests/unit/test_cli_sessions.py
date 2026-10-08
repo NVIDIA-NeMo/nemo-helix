@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
@@ -49,19 +50,9 @@ def _sessions_response() -> dict[str, Any]:
     }
 
 
-def _install_mock_transport(handler):
-    transport = httpx.MockTransport(handler)
-    real_client = httpx.Client
-
-    class _Client(real_client):
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            kwargs["transport"] = transport
-            super().__init__(*args, **kwargs)
-
-    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
-
-
-def _scripted_responses(*responses: dict[str, Any]):
+def _scripted_responses(
+    *responses: dict[str, Any],
+) -> tuple[Callable[[httpx.Request], httpx.Response], list[httpx.Request]]:
     requests: list[httpx.Request] = []
     queue = list(responses)
 
@@ -73,7 +64,7 @@ def _scripted_responses(*responses: dict[str, Any]):
         status_code = 201 if request.method == "POST" else 200
         return httpx.Response(status_code, request=request, json=response)
 
-    return _install_mock_transport(handler), requests
+    return handler, requests
 
 
 def test_sessions_help_exposes_management_scope_without_pagination_or_delete(app) -> None:
@@ -92,11 +83,11 @@ def test_sessions_help_exposes_management_scope_without_pagination_or_delete(app
         assert option not in list_help.stdout
 
 
-def test_sessions_list_defaults_to_newest_first_api_table(app) -> None:
+def test_sessions_list_defaults_to_newest_first_api_table(app, make_cli_state) -> None:
     response = _sessions_response()
-    transport, requests = _scripted_responses(response)
-    with transport, patch("nemo_helix_plugin.cli_state.is_tty", return_value=True):
-        result = runner.invoke(app, ["sessions", "list"])
+    handler, requests = _scripted_responses(response)
+    with patch("nemo_helix_plugin.cli_state.is_tty", return_value=True):
+        result = runner.invoke(app, ["sessions", "list"], obj=make_cli_state(handler))
 
     assert result.exit_code == 0, result.output
     assert [(request.method, request.url.path) for request in requests] == [
@@ -111,11 +102,14 @@ def test_sessions_list_defaults_to_newest_first_api_table(app) -> None:
 
 
 @pytest.mark.parametrize("output_format", ["json", "yaml", "csv", "markdown", "raw"])
-def test_sessions_list_supports_existing_output_formats(app, output_format: str) -> None:
+def test_sessions_list_supports_existing_output_formats(app, make_cli_state, output_format: str) -> None:
     response = _sessions_response()
-    transport, _requests = _scripted_responses(response)
-    with transport:
-        result = runner.invoke(app, ["sessions", "list", "--output-format", output_format])
+    handler, _requests = _scripted_responses(response)
+    result = runner.invoke(
+        app,
+        ["sessions", "list", "--output-format", output_format],
+        obj=make_cli_state(handler),
+    )
 
     assert result.exit_code == 0, result.output
     assert "debug-auth" in result.stdout
@@ -123,14 +117,14 @@ def test_sessions_list_supports_existing_output_formats(app, output_format: str)
         assert [session["name"] for session in json.loads(result.stdout)["data"]] == ["debug-auth"]
 
 
-def test_sessions_list_filters_by_deployment_name(app) -> None:
+def test_sessions_list_filters_by_deployment_name(app, make_cli_state) -> None:
     response = _sessions_response()
-    transport, requests = _scripted_responses({"id": "deployment-id", "name": "fabric-deployment"}, response)
-    with transport:
-        result = runner.invoke(
-            app,
-            ["sessions", "list", "--agent-deployment", "fabric-deployment", "--output-format", "json"],
-        )
+    handler, requests = _scripted_responses({"id": "deployment-id", "name": "fabric-deployment"}, response)
+    result = runner.invoke(
+        app,
+        ["sessions", "list", "--agent-deployment", "fabric-deployment", "--output-format", "json"],
+        obj=make_cli_state(handler),
+    )
 
     assert result.exit_code == 0, result.output
     assert [(request.method, request.url.path) for request in requests] == [
@@ -141,10 +135,13 @@ def test_sessions_list_filters_by_deployment_name(app) -> None:
 
 
 @pytest.mark.parametrize("deployment", [{}, {"id": None}, {"id": ""}])
-def test_sessions_list_rejects_invalid_deployment_response(app, deployment: Any) -> None:
-    transport, requests = _scripted_responses(deployment)
-    with transport:
-        result = runner.invoke(app, ["sessions", "list", "--agent-deployment", "fabric-deployment"])
+def test_sessions_list_rejects_invalid_deployment_response(app, make_cli_state, deployment: Any) -> None:
+    handler, requests = _scripted_responses(deployment)
+    result = runner.invoke(
+        app,
+        ["sessions", "list", "--agent-deployment", "fabric-deployment"],
+        obj=make_cli_state(handler),
+    )
 
     assert result.exit_code == 1
     assert "Deployment 'fabric-deployment' returned an invalid response" in result.stderr
@@ -153,18 +150,17 @@ def test_sessions_list_rejects_invalid_deployment_response(app, deployment: Any)
     ]
 
 
-def test_sessions_list_rejects_empty_deployment_filter(app) -> None:
-    result = runner.invoke(app, ["sessions", "list", "--agent-deployment", ""])
+def test_sessions_list_rejects_empty_deployment_filter(app, make_cli_state) -> None:
+    result = runner.invoke(app, ["sessions", "list", "--agent-deployment", ""], obj=make_cli_state())
 
     assert result.exit_code == 2
     assert "--agent-deployment must not be empty" in result.stderr
 
 
-def test_sessions_get_prints_full_session_json(app) -> None:
+def test_sessions_get_prints_full_session_json(app, make_cli_state) -> None:
     session = _sessions_response()["data"][0]
-    transport, requests = _scripted_responses(session)
-    with transport:
-        result = runner.invoke(app, ["sessions", "get", "debug-auth"])
+    handler, requests = _scripted_responses(session)
+    result = runner.invoke(app, ["sessions", "get", "debug-auth"], obj=make_cli_state(handler))
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == session
@@ -180,14 +176,14 @@ def test_sessions_close_requires_confirmation(app) -> None:
     assert "cannot be resumed" in result.stdout
 
 
-def test_sessions_close_accepts_yes_and_calls_close_endpoint(app) -> None:
+def test_sessions_close_accepts_yes_and_calls_close_endpoint(app, make_cli_state) -> None:
     session = {**_sessions_response()["data"][0], "status": "closed"}
-    transport, requests = _scripted_responses(session)
-    with transport:
-        result = runner.invoke(
-            app,
-            ["sessions", "close", "debug-auth", "--yes", "--workspace", "team-a"],
-        )
+    handler, requests = _scripted_responses(session)
+    result = runner.invoke(
+        app,
+        ["sessions", "close", "debug-auth", "--yes", "--workspace", "team-a"],
+        obj=make_cli_state(handler),
+    )
 
     assert result.exit_code == 0, result.output
     assert "Session 'debug-auth' closed." in result.stdout

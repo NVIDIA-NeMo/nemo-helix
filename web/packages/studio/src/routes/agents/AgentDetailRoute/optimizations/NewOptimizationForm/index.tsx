@@ -33,7 +33,7 @@ export interface NewOptimizationFormProps {
   agentName?: string;
   evals: AgentEvaluationRow[];
   isEvalsPending: boolean;
-  /** Returns to the studies table; also the target of the breadcrumb above the header. */
+  /** Returns to the strategy picker; the target of the back button above the header. */
   onBack: () => void;
   /**
    * Starts the study from the validated answers. A rejection is shown beside the run button, so
@@ -46,8 +46,8 @@ export interface NewOptimizationFormProps {
  * Configure a numeric HPO study for one agent.
  *
  * Renders in place of the studies table rather than in a modal: the form carries a run summary
- * beside it, which does not survive a dialog's width, and its own breadcrumb is what returns to
- * the list.
+ * beside it, which does not survive a dialog's width, and its own back button is what returns to
+ * the strategy picker it was chosen from.
  *
  * The user answers three questions — what to tune for, what to score against, how many trials.
  * Nothing here asks for a config path or a fileset; those are derived on submit.
@@ -70,7 +70,6 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
       intent: DEFAULT_INTENT,
       budget: 'standard',
       experimentId: '',
-      judgeModel: '',
       searchSpace: intentById(DEFAULT_INTENT).parameters,
     },
   });
@@ -96,7 +95,6 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   const budget = budgetById(watch('budget'));
   const searchSpace = watch('searchSpace');
   const experimentId = watch('experimentId');
-  const judgeModel = watch('judgeModel');
 
   // Regenerate when the intent changes, since the intent is part of the name — and when the agent
   // finally resolves, which is what leaves the initial name empty.
@@ -125,15 +123,13 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
     ? 'No agent selected.'
     : !experimentId
       ? 'Pick an evaluation to score trials against.'
-      : !judgeModel
-        ? 'Pick a judge model to score trials with.'
-        : nameError
-          ? 'Fix the name before running.'
-          : errors.searchSpace
-            ? 'Fix the search space before running.'
-            : !onSubmit
-              ? 'Running a study from here is not available yet.'
-              : undefined;
+      : nameError
+        ? 'Fix the name before running.'
+        : errors.searchSpace
+          ? 'Fix the search space before running.'
+          : !onSubmit
+            ? 'Running a study from here is not available yet.'
+            : undefined;
 
   const [submitError, setSubmitError] = useState<string | undefined>();
 
@@ -152,7 +148,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
       <Stack gap="density-xl" className="w-full">
         <Button kind="tertiary" className="w-fit px-0" onClick={onBack}>
           <ChevronLeft className="size-4" aria-hidden />
-          Optimizations
+          Back
         </Button>
 
         <Stack gap="density-sm">
@@ -197,11 +193,11 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             <Stepper
               layout="vertical"
               aria-label="Optimization setup"
-              activeStep={experimentId && judgeModel ? 3 : 1}
+              activeStep={experimentId ? 3 : 1}
               items={[
                 {
                   slotHeading: 'What are you tuning for?',
-                  slotDescription: 'Pick one — it sets the objective and the parameters we sweep',
+                  slotDescription: 'Pick one — it sets the parameters we sweep',
                   slotSuccessIndicator: 1,
                   slotContent: <IntentSection />,
                 },

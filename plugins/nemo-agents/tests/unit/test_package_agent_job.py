@@ -447,7 +447,7 @@ class TestPublishedPackagingContract:
         declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
         assert any(spec.startswith(dependency) for spec in declared)
 
-    @pytest.mark.parametrize("dependency", ["python-on-whales", "jinja2"])
+    @pytest.mark.parametrize("dependency", ["python-on-whales", "jinja2", "nemo-fabric-adapters-remote-agent"])
     def test_published_platform_extra_includes_packaging_dependency(self, dependency: str) -> None:
         import tomllib
 
@@ -474,6 +474,7 @@ class TestPublishedPackagingContract:
             "nemo-fabric-adapters-codex",
             "nemo-fabric-adapters-deepagents",
             "nemo-fabric-adapters-hermes",
+            "nemo-fabric-adapters-remote-agent",
         }
         assert not any(
             spec.startswith(("claude-agent-sdk", "deepagents", "hermes-agent", "openai-codex")) for spec in declared

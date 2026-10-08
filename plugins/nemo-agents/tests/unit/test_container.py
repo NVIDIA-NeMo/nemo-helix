@@ -534,6 +534,8 @@ class TestRenderFabricDockerfile:
         ("kind", "extra"),
         [
             ("claude", "nemo-agents-plugin-claude"),
+            ("remote-agent", "nemo-agents-plugin"),
+            ("nvidia.fabric.remote-agent", "nemo-agents-plugin"),
             ("nvidia.fabric.codex", "nemo-agents-plugin-codex"),
             ("nvidia.fabric.langchain.deepagents", "nemo-agents-plugin-deepagents"),
         ],
@@ -586,6 +588,80 @@ class TestRenderFabricDockerfile:
         assert "--editable /opt/hermes-agent" in result
         assert "uv pip check --python /opt/hermes-venv/bin/python" in result
         assert "ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python" in result
+
+    def test_pi_harness_installs_node_adapter_and_stages_descriptor(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import (
+            PI_ADAPTER_NPM_SPEC,
+            PI_RELAY_EXTENSION_PATH,
+            PI_RELAY_EXTENSION_REF,
+            PINNED_NODE_MAJOR,
+            get_contract_version,
+            render_fabric_dockerfile,
+        )
+
+        agent_config = tmp_path / "agent.yaml"
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: pi-agent\n"
+            "default_harness: pi\n"
+            "harnesses:\n"
+            "  pi:\n"
+            "    kind: nvidia.fabric.pi\n"
+        )
+
+        result = render_fabric_dockerfile(agent_config)
+
+        # The Python/Rust Fabric stack is still installed under the base plugin extra.
+        assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
+        # Node is installed additively and the npm adapter + Pi SDK peers are present.
+        assert f"setup_{PINNED_NODE_MAJOR}.x" in result
+        assert "apt-get install -y --no-install-recommends nodejs" in result
+        assert PI_ADAPTER_NPM_SPEC in result
+        assert "@earendil-works/pi-coding-agent@^0.86.0" in result
+        assert "@earendil-works/pi-ai@^0.86.0" in result
+        # Relay 0.9 CLI for telemetry and git for the agent's own GitHub work.
+        assert "nemo-relay-cli-bin" in result
+        assert "ca-certificates curl git" in result
+        # The RUN block must render as a real multi-line Dockerfile instruction with
+        # backslash-newline continuations — not collapse to one physical line.
+        assert " \\\n    curl -fsSL" in result
+        assert "uv pip install --no-sources --prerelease=allow" in result
+        # Guarded symlink staging (fail-fast if the descriptor is missing, not a dangling link).
+        assert 'test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json"' in result
+        # The descriptor is linked into the Fabric share/ tree for preinstalled discovery.
+        assert "share/nemo-fabric/adapters/pi" in result
+        assert "pi.fabric-adapter.json" in result
+        # The Relay Pi extension is fetched from the pinned Relay 0.9 ref and staged
+        # in-image (the npm adapter + CLI wheel do not ship it), so a Relay-enabled
+        # Pi agent has an extension to point relay_extension_path at.
+        assert f"fetch --depth 1 origin {PI_RELAY_EXTENSION_REF}" in result
+        assert "crates/cli/assets/pi-extension" in result
+        assert f'cp -r "/opt/pi-relay-src/crates/cli/assets/pi-extension" "{PI_RELAY_EXTENSION_PATH}"' in result
+        # The transient clone is removed so it does not bloat the image layer.
+        assert "rm -rf /opt/pi-relay-src" in result
+
+    def test_non_pi_harness_omits_node_install(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        agent_config = tmp_path / "agent.yaml"
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: deepagents-agent\n"
+            "default_harness: deepagents\n"
+            "harnesses:\n"
+            "  deepagents:\n"
+            "    kind: deepagents\n"
+        )
+
+        result = render_fabric_dockerfile(agent_config)
+
+        # Node and the Pi adapter must not leak into a non-Pi image.
+        assert "nodejs" not in result
+        assert "nemo-fabric-adapters-pi" not in result
+        assert "share/nemo-fabric/adapters/pi" not in result
+        # The Relay Pi extension fetch is likewise Pi-gated.
+        assert "pi-relay-src" not in result
+        assert "crates/cli/assets/pi-extension" not in result
 
     def test_unresolved_contract_version_is_rejected(
         self,

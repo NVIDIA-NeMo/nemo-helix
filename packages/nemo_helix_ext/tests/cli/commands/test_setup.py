@@ -1286,6 +1286,8 @@ class TestRemoteConnection:
 
     def test_authenticates_when_context_has_no_credentials(self):
         cli_context = MagicMock()
+        shared_http_client = MagicMock(spec=httpx.Client)
+        cli_context.get_http_client.return_value = shared_http_client
         cli_context.get_sdk_context.return_value = Context(
             context_name="default",
             cluster=Cluster(name="remote", base_url="https://remote.example.com"),
@@ -1297,11 +1299,16 @@ class TestRemoteConnection:
         with patch("nemo_helix_ext.cli.commands.auth._login_with_oidc", return_value=True) as mock_login:
             setup_commands._ensure_platform_auth(cli_context)
 
-        mock_login.assert_called_once_with(cli_context, selected_context="default")
+        mock_login.assert_called_once()
+        assert mock_login.call_args.args == (cli_context,)
+        assert mock_login.call_args.kwargs["http_client"] is shared_http_client
+        assert mock_login.call_args.kwargs["selected_context"] == "default"
         cli_context.reset_sdk_context.assert_called_once_with()
 
     def test_reauthenticates_stored_context_credentials_for_new_remote(self):
         cli_context = MagicMock()
+        shared_http_client = MagicMock(spec=httpx.Client)
+        cli_context.get_http_client.return_value = shared_http_client
         context = Context(
             context_name="default",
             cluster=Cluster(name="remote", base_url="https://remote.example.com"),
@@ -1314,7 +1321,10 @@ class TestRemoteConnection:
         with patch("nemo_helix_ext.cli.commands.auth._login_with_oidc", return_value=True) as mock_login:
             setup_commands._ensure_platform_auth(cli_context)
 
-        mock_login.assert_called_once_with(cli_context, selected_context="default")
+        mock_login.assert_called_once()
+        assert mock_login.call_args.args == (cli_context,)
+        assert mock_login.call_args.kwargs["http_client"] is shared_http_client
+        assert mock_login.call_args.kwargs["selected_context"] == "default"
         cli_context.reset_sdk_context.assert_called_once_with()
 
     def test_reuses_runtime_access_token_override(self, monkeypatch):
@@ -1354,15 +1364,10 @@ class TestRemoteConnection:
 
     def test_platform_request_headers_include_context_token(self):
         cli_context = MagicMock()
-        cli_context.get_sdk_context.return_value = Context(
-            context_name="default",
-            cluster=Cluster(name="remote", base_url="https://remote.example.com"),
-            user=OAuthUser(name="default-user", token=SecretStr("remote-token")),
-            workspace="default",
-            preferences={},
-        )
+        cli_context.get_http_headers.return_value = {"Authorization": "Bearer remote-token"}
 
         assert setup_commands._platform_request_headers(cli_context) == {"Authorization": "Bearer remote-token"}
+        cli_context.get_http_headers.assert_called_once_with()
 
 
 class TestLegacyDirectoryNotice:
@@ -2188,6 +2193,8 @@ class TestInteractiveModelPairSelection:
     def test_run_scopes_picker_to_registered_provider(self):
         client = MagicMock()
         cli_context = MagicMock()
+        shared_http_client = MagicMock(spec=httpx.Client)
+        cli_context.get_http_client.return_value = shared_http_client
         event_order: list[str] = []
         model_pair = ModelPair(
             default="default/claude-sonnet-4-6",
@@ -2420,6 +2427,8 @@ class TestInteractiveModelPairSelection:
         """When the new provider is still syncing, setup should not show a misleading picker."""
         client = MagicMock()
         cli_context = MagicMock()
+        shared_http_client = MagicMock(spec=httpx.Client)
+        cli_context.get_http_client.return_value = shared_http_client
 
         with (
             patch(
@@ -2459,6 +2468,8 @@ class TestInteractiveModelPairSelection:
         """If other providers have models, explain that the new provider is not yet represented."""
         client = MagicMock()
         cli_context = MagicMock()
+        shared_http_client = MagicMock(spec=httpx.Client)
+        cli_context.get_http_client.return_value = shared_http_client
 
         with (
             patch(
@@ -4054,7 +4065,7 @@ class TestWaitForModelsEarlyExit:
 
 
 # ---------------------------------------------------------------------------
-# Direct agent API helper TLS
+# Custom provider prompt
 # ---------------------------------------------------------------------------
 
 

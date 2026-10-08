@@ -2247,7 +2247,7 @@
               },
               "details": "Context was not properly tracked across template branches for JS template literals, leading to possibly incorrect escaping of content when branches were used. Additionally template actions within JS template literals did not properly track the brace depth, leading to incorrect escaping being applied.\n\nThese issues could cause actions within JS template literals to be incorrectly or improperly escaped, leading to XSS vulnerabilities.",
               "id": "GO-2026-4865",
-              "modified": "2026-07-10T10:44:23.724783758Z",
+              "modified": "2026-10-07T10:41:46.025548889Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -2264,8 +2264,9 @@
                 }
               ],
               "related": [
-                "CGA-w5jp-g3cv-wvfm",
-                "RHSA-2026:19181",
+                "RHSA-2026:10217",
+                "RHSA-2026:10219",
+                "RHSA-2026:22112",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -2337,7 +2338,7 @@
               },
               "details": "tar.Reader can allocate an unbounded amount of memory when reading a maliciously-crafted archive containing a large number of sparse regions encoded in the \"old GNU sparse map\" format.",
               "id": "GO-2026-4869",
-              "modified": "2026-05-15T10:59:23.054049848Z",
+              "modified": "2026-10-07T10:41:45.714787203Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -2354,7 +2355,9 @@
                 }
               ],
               "related": [
-                "CGA-6f85-jvrm-qq3w",
+                "RHSA-2026:10217",
+                "RHSA-2026:10219",
+                "RHSA-2026:22112",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -2690,7 +2693,7 @@
               },
               "details": "When processing HTTP/2 SETTINGS frames, transport will enter an infinite loop of writing CONTINUATION frames if it receives a SETTINGS_MAX_FRAME_SIZE with a value of 0.",
               "id": "GO-2026-4918",
-              "modified": "2026-10-02T10:41:43.770640438Z",
+              "modified": "2026-10-07T10:41:46.070042506Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -2728,6 +2731,8 @@
                 "RHSA-2026:63639",
                 "RHSA-2026:66350",
                 "RHSA-2026:71443",
+                "RHSA-2026:74376",
+                "RHSA-2026:74427",
                 "RHSA-2026:74581"
               ],
               "schema_version": "1.7.5",
@@ -3459,7 +3464,7 @@
               },
               "details": "Pathological inputs could cause DoS through consumePhrase when parsing an email address according to RFC 5322.",
               "id": "GO-2026-4977",
-              "modified": "2026-09-24T10:41:42.457153787Z",
+              "modified": "2026-10-07T10:41:46.157915498Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -3525,7 +3530,9 @@
                 "RHSA-2026:68504",
                 "RHSA-2026:68527",
                 "RHSA-2026:68534",
-                "RHSA-2026:70201"
+                "RHSA-2026:70201",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic string concatenation in consumePhrase in net/mail"
@@ -3909,7 +3916,7 @@
               },
               "details": "Well-crafted inputs reaching ParseAddress, ParseAddressList, and ParseDate were able to trigger excessive CPU exhaustion and memory allocations.",
               "id": "GO-2026-4986",
-              "modified": "2026-09-24T10:41:42.580314663Z",
+              "modified": "2026-10-07T10:41:45.865352723Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -3970,7 +3977,9 @@
                 "RHSA-2026:68334",
                 "RHSA-2026:68504",
                 "RHSA-2026:68527",
-                "RHSA-2026:68534"
+                "RHSA-2026:68534",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic string concatentation in consumeComment in net/mail"
@@ -4105,7 +4114,7 @@
               },
               "details": "The ToASCII and ToUnicode functions incorrectly accept Punycode-encoded labels that decode to an ASCII-only label. For example, ToUnicode(\"xn--example-.com\") incorrectly returns the name \"example.com\" rather than an error.\n\nThis behavior can lead to privilege escalation in programs using the idna package. For example, a program which performs privilege checks on the ASCII hostname may reject \"example.com\" but permit \"xn--example-.com\". If that program subsequently converts the ASCII hostname to Unicode, it will inadvertently permits access to the Unicode name \"example.com\".",
               "id": "GO-2026-5026",
-              "modified": "2026-10-02T10:41:43.800501679Z",
+              "modified": "2026-10-07T10:41:45.942803600Z",
               "published": "2026-05-22T02:46:43Z",
               "references": [
                 {
@@ -4204,7 +4213,9 @@
                 "RHSA-2026:70645",
                 "RHSA-2026:72276",
                 "RHSA-2026:72737",
-                "RHSA-2026:72805"
+                "RHSA-2026:72805",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna"
@@ -4390,7 +4401,7 @@
               },
               "details": "Decoding a maliciously-crafted MIME header containing many invalid encoded-words can consume excessive CPU.",
               "id": "GO-2026-5038",
-              "modified": "2026-10-03T10:41:52.386150476Z",
+              "modified": "2026-10-07T10:41:46.133454638Z",
               "published": "2026-06-02T21:39:47Z",
               "references": [
                 {
@@ -4462,7 +4473,10 @@
                 "RHSA-2026:74503",
                 "RHSA-2026:74504",
                 "RHSA-2026:74505",
-                "RHSA-2026:74506"
+                "RHSA-2026:74506",
+                "RHSA-2026:74796",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic complexity in WordDecoder.DecodeHeader in mime"
@@ -4722,7 +4736,7 @@
               },
               "details": "Enforce a recursion limit in Unmarshal to prevent stack exhaustion when parsing deeply-nested, recursive structures.",
               "id": "GO-2026-5972",
-              "modified": "2026-10-05T10:26:49.390532778Z",
+              "modified": "2026-10-07T10:41:45.909997834Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -4835,7 +4849,10 @@
                 "RHSA-2026:74504",
                 "RHSA-2026:74505",
                 "RHSA-2026:74506",
-                "RHSA-2026:75689"
+                "RHSA-2026:74796",
+                "RHSA-2026:75689",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Enforce maximum recursion depth in encoding/asn1"
@@ -4907,7 +4924,7 @@
               },
               "details": "Previously, DecodeElement would reset the depth counter causing it to never fire; this could lead to stack exhaustion.",
               "id": "GO-2026-6088",
-              "modified": "2026-10-02T10:41:44.109308061Z",
+              "modified": "2026-10-07T10:41:46.001674133Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -4988,7 +5005,9 @@
                 "RHSA-2026:71420",
                 "RHSA-2026:71443",
                 "RHSA-2026:71445",
-                "RHSA-2026:72276"
+                "RHSA-2026:72276",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Add recursion depth guard during decode in encoding/xml"
@@ -5060,7 +5079,7 @@
               },
               "details": "When a server is configured to support unencrypted HTTP/2, it reads a few bytes from each new connection to see if they contain the HTTP/2 client preface. ReadHeaderTimeout is unexpectedly not being applied when doing this.",
               "id": "GO-2026-6089",
-              "modified": "2026-10-06T10:41:49.621586327Z",
+              "modified": "2026-10-07T10:41:45.889550693Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -5146,7 +5165,9 @@
                 "RHSA-2026:72805",
                 "RHSA-2026:74504",
                 "RHSA-2026:74505",
-                "RHSA-2026:74506"
+                "RHSA-2026:74506",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Apply ReadHeaderTimeout when doing unencrypted HTTP/2 check in net/http"
@@ -5224,7 +5245,7 @@
               },
               "details": "Handshake messages, such as KeyUpdate, are always considered as state-advancing, regardless of whether a handshake has been completed or not. As a result, a malicious client can keep sending KeyUpdate messages to force the server to keep performing key derivation operations indefinitely.",
               "id": "GO-2026-6090",
-              "modified": "2026-10-05T10:26:50.747601075Z",
+              "modified": "2026-10-07T10:41:46.270018548Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -5338,7 +5359,10 @@
                 "RHSA-2026:74504",
                 "RHSA-2026:74505",
                 "RHSA-2026:74506",
-                "RHSA-2026:75689"
+                "RHSA-2026:74796",
+                "RHSA-2026:75689",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Limit handshake messages we are willing to accept post-handshake in crypto/tls"
@@ -5408,7 +5432,7 @@
               },
               "details": "Previously, pathological inputs could close an unescaped '/' early, allowing for attack-controlled data to inject arbitrary content, potentially leading to XSS.",
               "id": "GO-2026-6091",
-              "modified": "2026-10-05T10:26:49.857639133Z",
+              "modified": "2026-10-07T10:41:45.811639577Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -5502,7 +5526,10 @@
                 "RHSA-2026:74504",
                 "RHSA-2026:74505",
                 "RHSA-2026:74506",
-                "RHSA-2026:75689"
+                "RHSA-2026:74796",
+                "RHSA-2026:75689",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Fix Javascript regexp context tracking in html/template"
@@ -5567,7 +5594,7 @@
               },
               "details": "Previously, resolving relative paths containing parent directory ('..') segments performed string conversions and buffer rewrites on each step, resulting in quadratic time complexity and high memory allocation overhead.\n\nNow, path resolution operates on a byte buffer using index-based backtracking for '..' segments, eliminating the quadratic time complexity and significantly reducing memory allocations.",
               "id": "GO-2026-6218",
-              "modified": "2026-10-03T10:41:52.407671097Z",
+              "modified": "2026-10-07T10:41:45.740266615Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -5683,7 +5710,10 @@
                 "RHSA-2026:74503",
                 "RHSA-2026:74504",
                 "RHSA-2026:74505",
-                "RHSA-2026:74506"
+                "RHSA-2026:74506",
+                "RHSA-2026:74796",
+                "RHSA-2026:76795",
+                "RHSA-2026:76809"
               ],
               "schema_version": "1.9.0",
               "summary": "Avoid quadratic complexity in resolvePath in net/url"

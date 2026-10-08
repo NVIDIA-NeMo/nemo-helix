@@ -55,7 +55,6 @@ export const optimizationFormSchema = z.object({
   intent: z.enum(['accuracy', 'brevity', 'creativity', 'cost']),
   budget: z.enum(['quick', 'standard', 'thorough']),
   experimentId: z.string().min(1, 'Pick an evaluation to score trials against.'),
-  judgeModel: z.string().min(1, 'Pick a judge model to score trials with.'),
   searchSpace: z.array(searchParameterSchema).min(1, 'Sweep at least one parameter.'),
 });
 
@@ -66,7 +65,6 @@ export type OptimizationFormValues = {
   intent: IntentId;
   budget: BudgetId;
   experimentId: string;
-  judgeModel: string;
   searchSpace: SearchParameter[];
 };
 

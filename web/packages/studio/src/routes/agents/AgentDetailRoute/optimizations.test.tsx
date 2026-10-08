@@ -92,6 +92,16 @@ describe('AgentDetailRoute optimizations tab', () => {
     expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
   });
 
+  it('shows the studies table for a create view while the in-tab flow is flagged off', async () => {
+    renderDetail('?tab=optimizations&view=strategy');
+
+    expect(
+      await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /Parameter sweep/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('New optimization')).not.toBeInTheDocument();
+  });
+
   it('scopes the list server-side with a spec.agent filter', async () => {
     const filters: string[] = [];
     const capture = ({ request }: { request: Request }) => {

@@ -3,10 +3,10 @@
 
 import httpx
 import pytest
-from nemo_helix_ext.auth.helpers import discover_nhx_config
 from nemo_helix_ext.client.tls import httpx_tls_config_from_env
 
 from tests.auth_idp.authentik_live import AUTHENTIK_DOCKER_E2E_CONFIG
+from tests.auth_idp.common import discover_nhx_config_with_tls
 
 pytestmark = [
     pytest.mark.auth_idp,
@@ -18,7 +18,10 @@ pytestmark = [
 
 
 def test_authentik_discovery_exposes_gateway_reachable_device_flow(authentik_stack):
-    oidc = discover_nhx_config(authentik_stack.gateway_base_url)
+    oidc = discover_nhx_config_with_tls(
+        authentik_stack.gateway_base_url,
+        httpx_tls_config_from_env(),
+    )
 
     assert oidc.auth_enabled is True
     assert oidc.client_id == "nemo-helix-cli"
@@ -26,6 +29,7 @@ def test_authentik_discovery_exposes_gateway_reachable_device_flow(authentik_sta
     assert oidc.device_authorization_endpoint == f"{authentik_stack.gateway_base_url}/application/o/device/"
     assert oidc.default_scopes == "openid email offline_access groups"
 
+    assert oidc.device_authorization_endpoint is not None
     response = httpx.post(
         oidc.device_authorization_endpoint,
         data={

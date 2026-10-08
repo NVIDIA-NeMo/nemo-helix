@@ -7,7 +7,7 @@
 Wraps ``nemo_nb.converter.NotebookConverter`` (``nemo-nb to-sphinx-md``) and
 post-processes the output for Fern:
   - Fern frontmatter (title, description)
-  - Google Colab link instead of the nemo-nb download anchor
+  - The nemo-nb download anchor removed; ``sync-colab-links.mjs`` adds Colab links
   - Relative doc links rewritten to canonical ``/documentation/...`` URLs
 
 Usage:
@@ -22,8 +22,6 @@ import sys
 from pathlib import Path
 
 from nemo_nb.converter import NotebookConverter
-
-COLAB_REPO = "https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main"
 
 DOWNLOAD_LINK_RE = re.compile(
     r'<a href="[^"]+\.ipynb" download="[^"]+\.ipynb">Download this tutorial as a Jupyter notebook</a>\s*',
@@ -138,15 +136,6 @@ def strip_jupyter_shell_magics(text: str) -> str:
     return _JUPYTER_SHELL_MAGIC_RE.sub(r"\1", text)
 
 
-def repo_relative_path(path: Path) -> str:
-    repo_root = Path(__file__).resolve().parents[3]
-    return path.resolve().relative_to(repo_root).as_posix()
-
-
-def colab_link_for(ipynb_path: Path) -> str:
-    return f"[Run in Google Colab]({COLAB_REPO}/{repo_relative_path(ipynb_path)})"
-
-
 def convert_notebook_to_mdx(ipynb_path: Path, *, title: str) -> str:
     body = NotebookConverter().convert(ipynb_path)
     body = DOWNLOAD_LINK_RE.sub("", body).lstrip("\n")
@@ -161,8 +150,6 @@ def convert_notebook_to_mdx(ipynb_path: Path, *, title: str) -> str:
         f'title: "{title}"\n'
         'description: ""\n'
         "---\n"
-        "\n"
-        f"{colab_link_for(ipynb_path)}\n"
         "\n"
         f"{body.rstrip()}\n"
     )
