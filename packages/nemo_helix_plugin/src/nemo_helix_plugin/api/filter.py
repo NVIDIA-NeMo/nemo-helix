@@ -22,12 +22,19 @@ from nemo_helix_plugin.filter_ops import FilterOperation as FilterOperation
 from nemo_helix_plugin.filter_ops import FilterOperator as FilterOperator
 from nemo_helix_plugin.filter_ops import FilterRepository as FilterRepository
 from nemo_helix_plugin.filter_ops import LogicalOperation as LogicalOperation
+from nemo_helix_plugin.filter_ops import parse_elem_match_criteria, validate_string_operand
 
 
 def _normalize_value(operator: FilterOperator, value: Any) -> Any:
     """Normalize value based on operator (e.g., split comma-separated strings for $in/$nin)."""
     if operator in (FilterOperator.IN, FilterOperator.NIN) and isinstance(value, str):
         return value.split(",")
+    if operator == FilterOperator.ELEM_MATCH:
+        parse_elem_match_criteria(value)
+    elif operator == FilterOperator.HAS_KEY:
+        validate_string_operand(operator, value, allow_quotes=False)
+    elif operator in (FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH):
+        validate_string_operand(operator, value)
     return value
 
 

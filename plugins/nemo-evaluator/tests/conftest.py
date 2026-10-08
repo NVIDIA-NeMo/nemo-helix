@@ -14,13 +14,13 @@ import pytest
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_helix_plugin.filter_ops import LogicalOperation
+from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretAccessResponse
 
 
 def matches_filter(entity, operation) -> bool:
-    """Evaluate the AND-of-equality filters services emit.
+    """Evaluate a filter the way the entity store does: base fields as columns, the rest under ``data``.
 
     Filters are *evaluated*, not ignored: a fake that returned every row would make a revision
     lookup that forgot its ``parent`` predicate look correct, and cross-record confusion is exactly
@@ -28,11 +28,14 @@ def matches_filter(entity, operation) -> bool:
     """
     if operation is None:
         return True
-    if isinstance(operation, LogicalOperation):
-        return all(matches_filter(entity, child) for child in operation.operations)
-    field = operation.field
-    actual = entity.parent if field == "parent" else getattr(entity, field.removeprefix("data."), None)
-    return actual == operation.value
+    row = {
+        "name": entity.name,
+        "workspace": entity.workspace,
+        "project": entity.project,
+        "parent": entity.parent,
+        "data": entity.model_dump(mode="json", exclude=set(entity.__base_fields__)),
+    }
+    return operation.apply(InMemoryFilterRepository(row))
 
 
 class FakeEntityStore(EntityClient):

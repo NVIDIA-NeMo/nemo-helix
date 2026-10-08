@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from nemo_evaluator.api.dependencies import get_task_service
-from nemo_evaluator.api.schemas import Revision, Task, TaskFilter, TaskInput, TaskSort
+from nemo_evaluator.api.schemas import Revision, Task, TaskFilter, TaskInput, TaskSort, qualify_ref_filters
 from nemo_evaluator.api.service.task_service import MetricRefNotFoundError, TaskService
 from nemo_evaluator.authz import scope
 from nemo_evaluator.entities import MAX_NAME_LENGTH, NAME_PATTERN
@@ -48,7 +48,8 @@ router = APIRouter()
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
         filter_schema=TaskFilter,
-        filter_description="Filter tasks by workspace, name, created_at, and updated_at.",
+        filter_description="Filter tasks by name, kind, intent, native_task_id, metrics, tags, metadata, created_at, "
+        "and updated_at.",
     ),
 )
 @scope.read
@@ -67,13 +68,14 @@ async def list_tasks(
     """List stored tasks for a specific workspace."""
     # Discard any workspace override in the filter — always scope to the path workspace.
     parsed_filter.remove("workspace")
+    filter_operation = qualify_ref_filters(parsed_filter.operation, workspace)
     try:
         return await service.list_tasks(
             workspace=workspace,
             page=page,
             page_size=page_size,
             sort=sort,
-            filter_operation=parsed_filter.operation,
+            filter_operation=filter_operation,
         )
     except Exception:
         logger.exception(f"Failed to list tasks for workspace {sanitize_for_log(workspace)}")
