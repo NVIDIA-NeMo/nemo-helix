@@ -429,6 +429,18 @@ def _task_pack_missing_detail(object_key: str) -> str:
     return f"task_object_missing: task pack object is missing: {object_key}"
 
 
+def verify_launch_images(spec: LaunchSpec) -> None:
+    """Re-resolve the stored task images at the last application-controlled boundary.
+
+    Tag-form runtime references are required by signed-image admission; the platform
+    admission controller remains final authority.
+    """
+    if spec.image_ref:
+        verify_stored_task_image(spec.image_ref, spec.image_digest)
+    if spec.verifier_image_ref:
+        verify_stored_task_image(spec.verifier_image_ref, spec.verifier_image_digest)
+
+
 class DispatchClaimLost(RuntimeError):
     """The inline worker no longer owns the evaluation dispatch lease."""
 
@@ -1767,6 +1779,8 @@ class Dispatcher:
                 ),
                 image_ref=row["image_ref"] or "",
                 image_digest=row.get("image_digest"),
+                verifier_image_ref=row.get("verifier_image_ref"),
+                verifier_image_digest=row.get("verifier_image_digest"),
                 n_attempts=row.get("n_attempts") or 1,
                 parallelism=row["parallelism"],
                 network_policy=str(row.get("network_policy") or "unrestricted"),
@@ -1851,11 +1865,7 @@ class Dispatcher:
                             repair=repair_shared_campaign,
                         )
                     if should_launch:
-                        if spec.image_ref:
-                            # Tag-form runtime references are required by signed-image admission.
-                            # Re-resolve at the last application-controlled boundary;
-                            # the platform admission controller remains final authority.
-                            verify_stored_task_image(spec.image_ref, spec.image_digest)
+                        verify_launch_images(spec)
                         handle = backend.launch(spec)
                     else:
                         handle = LaunchHandle(backend=row["runtime"], external_id=execution_id)
