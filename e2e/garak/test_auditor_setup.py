@@ -14,9 +14,9 @@
 Adds and lists configs, targets and their dependencies.
 """
 
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.garak.client import GarakClient
 from nemo_helix_plugin.garak.types import CreateAuditConfigRequest, CreateAuditTargetRequest
-from nemo_helix_plugin.client.client import NemoClient
 from nhx.testing import short_unique_name
 
 

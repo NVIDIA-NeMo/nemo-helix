@@ -22,9 +22,9 @@ audit job container can be scheduled and can reach the IGW at nhx-quickstart:808
 import time
 
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.garak.client import GarakClient
 from nemo_helix_plugin.garak.types import CreateAuditConfigRequest, CreateAuditTargetRequest, SubmitAuditRequest
-from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.projects.client import ProjectsClient
 from nemo_helix_plugin.projects.types import CreateProjectRequest
