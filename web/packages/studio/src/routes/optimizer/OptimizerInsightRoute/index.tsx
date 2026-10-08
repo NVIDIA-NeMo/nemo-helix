@@ -103,7 +103,7 @@ export const OptimizerInsightRoute: FC = () => {
     );
   }
 
-  const traceRefs = insight.trace_refs ?? [];
+  const evidence = insight.evidence ?? [];
   const status = insight.status ?? 'open';
 
   return (
@@ -189,8 +189,8 @@ export const OptimizerInsightRoute: FC = () => {
         </div>
 
         <Stack className="gap-density-sm">
-          <Text kind="label/bold/md">Observed Sessions ({traceRefs.length})</Text>
-          <InsightTracesTable workspace={workspace} traceIds={traceRefs} />
+          <Text kind="label/bold/md">Observed Sessions ({evidence.length})</Text>
+          <InsightTracesTable workspace={workspace} evidence={evidence} />
         </Stack>
       </Stack>
     </AccessibleTitle>

@@ -22,7 +22,7 @@ def render_summary_md(insights_path: Path, subject: str) -> str:
     if not records:
         lines.append("_No insights._")
     for rec in records:
-        refs = rec.get("trace_refs") or []
+        refs = rec["evidence"] if "evidence" in rec else rec.get("trace_refs") or []
         first_desc = str(rec.get("description", "")).splitlines()[0] if rec.get("description") else ""
         lines.append(f"- **{rec.get('title', '(untitled)')}** — {rec.get('status', '?')}, {len(refs)} trace refs")
         if first_desc:

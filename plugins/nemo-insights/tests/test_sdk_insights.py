@@ -8,17 +8,18 @@ from nemo_insights_plugin.sdk_resources.insights import _build_update_body
 
 
 def test_update_insight_sdk_body_omits_none_fields() -> None:
-    empty = _build_update_body(agent=None, description=None, status=None, trace_refs=None)
+    empty = _build_update_body(agent=None, description=None, status=None, evidence=None, updated_date=None)
     partial = _build_update_body(
         agent=None,
         description="Updated description",
         status=InsightStatus.RESOLVED,
-        trace_refs=[],
+        evidence=[],
+        updated_date=None,
     )
 
     assert empty.model_dump(mode="json", exclude_unset=True) == {}
     assert partial.model_dump(mode="json", exclude_unset=True) == {
         "description": "Updated description",
         "status": "resolved",
-        "trace_refs": [],
+        "evidence": [],
     }

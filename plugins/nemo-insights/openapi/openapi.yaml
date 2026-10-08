@@ -1086,11 +1086,15 @@ components:
           allOf:
           - $ref: '#/components/schemas/InsightStatus'
           default: open
-        trace_refs:
+        updated_date:
+          title: Updated Date
+          type: string
+          format: date-time
+        evidence:
           items:
-            type: string
+            $ref: '#/components/schemas/TraceEvidence'
           type: array
-          title: Trace Refs
+          title: Evidence
       type: object
       required:
       - title
@@ -1169,15 +1173,18 @@ components:
             the issue is not actually a problem or if it is not a good insight for
             their domain.
           default: open
-        trace_refs:
+        updated_date:
+          title: Updated Date
+          description: UTC timestamp when Compass last added trace evidence.
+          type: string
+          format: date-time
+        evidence:
           items:
-            type: string
+            $ref: '#/components/schemas/TraceEvidence'
           type: array
-          title: Trace Refs
-          description: Intake trace ids the analyst identified as evidence for this
-            insight. This is used as evidence for the insight UI to communicate to
-            the developer what traces triggered the issue, and can also be used to
-            identify other similar traces that might experience the same issue.
+          title: Evidence
+          description: Supporting traces, with optional source URLs and relevant spans.
+            No spans means whole-trace evidence.
         id:
           type: string
           title: Id
@@ -1275,15 +1282,18 @@ components:
             the issue is not actually a problem or if it is not a good insight for
             their domain.
           default: open
-        trace_refs:
+        updated_date:
+          title: Updated Date
+          description: UTC timestamp when Compass last added trace evidence.
+          type: string
+          format: date-time
+        evidence:
           items:
-            type: string
+            $ref: '#/components/schemas/TraceEvidence'
           type: array
-          title: Trace Refs
-          description: Intake trace ids the analyst identified as evidence for this
-            insight. This is used as evidence for the insight UI to communicate to
-            the developer what traces triggered the issue, and can also be used to
-            identify other similar traces that might experience the same issue.
+          title: Evidence
+          description: Supporting traces, with optional source URLs and relevant spans.
+            No spans means whole-trace evidence.
         experiment_group_count:
           title: Experiment Group Count
           description: Number of live experiment groups linked to this insight.
@@ -1478,6 +1488,37 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    SpanEvidence:
+      properties:
+        span_id:
+          type: string
+          minLength: 1
+          title: Span Id
+        url:
+          title: Url
+          type: string
+      type: object
+      required:
+      - span_id
+      title: SpanEvidence
+    TraceEvidence:
+      properties:
+        trace_id:
+          type: string
+          minLength: 1
+          title: Trace Id
+        url:
+          title: Url
+          type: string
+        spans:
+          items:
+            $ref: '#/components/schemas/SpanEvidence'
+          type: array
+          title: Spans
+      type: object
+      required:
+      - trace_id
+      title: TraceEvidence
     UpdateAnalysisConfigRequest:
       properties:
         enabled:
@@ -1524,10 +1565,14 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/InsightStatus'
-        trace_refs:
-          title: Trace Refs
+        updated_date:
+          title: Updated Date
+          type: string
+          format: date-time
+        evidence:
+          title: Evidence
           items:
-            type: string
+            $ref: '#/components/schemas/TraceEvidence'
           type: array
       type: object
       title: UpdateInsightRequest

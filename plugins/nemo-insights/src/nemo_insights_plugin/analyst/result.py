@@ -1,18 +1,21 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Platform persistence contract for trace-intel's reconciled insights.
+"""Platform persistence contract for Compass's reconciled insights.
 
 The adapter translates package Insights into this change-set after validating
 their storage IDs. Both the CLI and the Fabric execute extension persist it
 through the same backend.
 """
 
+from datetime import datetime
+
 from nemo_insights_plugin.entities import InsightStatus
+from nemo_insights_plugin.evidence import EvidenceCompatibility, TraceEvidence
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class NewInsight(BaseModel):
+class NewInsight(EvidenceCompatibility):
     """A brand-new Insight the analyst wants to file."""
 
     model_config = ConfigDict(extra="forbid")
@@ -37,13 +40,14 @@ class NewInsight(BaseModel):
         default=InsightStatus.OPEN,
         description="Lifecycle status for the new insight (usually 'open').",
     )
-    trace_refs: list[str] = Field(
+    updated_date: datetime | None = None
+    evidence: list[TraceEvidence] = Field(
         default_factory=list,
-        description="Intake trace ids that serve as evidence for this insight.",
+        description="Supporting traces, optional source URLs, and relevant spans.",
     )
 
 
-class InsightUpdate(BaseModel):
+class InsightUpdate(EvidenceCompatibility):
     """New evidence to add to an existing Insight."""
 
     model_config = ConfigDict(extra="forbid")
@@ -56,11 +60,10 @@ class InsightUpdate(BaseModel):
             "'insight-5Q2LoF8z8M9JZxZsHwJKNn'). Not the human-readable title."
         ),
     )
-    trace_refs: list[str] = Field(
+    updated_date: datetime | None = None
+    evidence: list[TraceEvidence] = Field(
         default_factory=list,
-        description=(
-            "Intake trace ids to append as new evidence (merged with the insight's existing refs, de-duplicated)."
-        ),
+        description=("Evidence to merge with the insight's existing traces and spans, preserving saved links."),
     )
 
 
@@ -83,7 +86,7 @@ class AnalystResult(BaseModel):
     updated_insights: list[InsightUpdate] = Field(
         default_factory=list,
         description=(
-            "New evidence (trace refs) for insights that already exist for "
+            "New trace and span evidence for insights that already exist for "
             "the agent. Only evidence can be added to an existing insight — to "
             "record anything else, file a new insight."
         ),

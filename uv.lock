@@ -2633,7 +2633,7 @@ wheels = [
 [[package]]
 name = "insight-agent"
 version = "0.1.0rc1"
-source = { git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137#cd639d223e06ee9d27783df6b461d302ceb09137" }
+source = { git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8#11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" }
 dependencies = [
     { name = "jsonschema", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "litellm", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -6021,10 +6021,10 @@ requires-dist = [
     { name = "hvac", marker = "extra == 'jobs-service'", specifier = ">=2.3.0" },
     { name = "hvac", marker = "extra == 'nhx-common'", specifier = ">=2.3.0" },
     { name = "hvac", marker = "extra == 'services'", specifier = ">=2.3.0" },
-    { name = "insight-agent", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "insight-agent", marker = "extra == 'nemo-insights-plugin'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "insight-agent", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "insight-agent", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "insight-agent", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
+    { name = "insight-agent", marker = "extra == 'nemo-insights-plugin'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
+    { name = "insight-agent", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
+    { name = "insight-agent", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'harbor'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin'", specifier = ">=3.1" },
@@ -6597,10 +6597,10 @@ requires-dist = [
     { name = "tenacity", marker = "extra == 'rl-service'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'services'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'unsloth-service'", specifier = ">=8.5.0" },
-    { name = "trace-ingest", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "trace-ingest", marker = "extra == 'nemo-insights-plugin'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "trace-ingest", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "trace-ingest", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "trace-ingest", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
+    { name = "trace-ingest", marker = "extra == 'nemo-insights-plugin'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
+    { name = "trace-ingest", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
+    { name = "trace-ingest", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.9.0" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.20.0" },
@@ -6899,7 +6899,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx" },
-    { name = "insight-agent", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "insight-agent", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
     { name = "nemo-fabric-adapter-contract", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-common", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
@@ -6910,7 +6910,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", specifier = ">=1.42.1" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "trace-ingest", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "trace-ingest", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" },
     { name = "typer", specifier = ">=0.20.0" },
     { name = "tzdata", specifier = "==2026.2" },
 ]
@@ -12348,7 +12348,7 @@ wheels = [
 [[package]]
 name = "trace-ingest"
 version = "0.1.0"
-source = { git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137#cd639d223e06ee9d27783df6b461d302ceb09137" }
+source = { git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=11fefa0a6a2c20fa1eeda56447869b3a4fba88f8#11fefa0a6a2c20fa1eeda56447869b3a4fba88f8" }
 dependencies = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },

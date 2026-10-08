@@ -89,13 +89,13 @@ export const OptimizerRoute: FC = () => {
         return <Text className="truncate">{row.original.agent || '—'}</Text>;
       },
     }),
-    accessor('trace_refs', {
+    accessor('evidence', {
       id: 'traces',
       header: 'Traces',
       enableSorting: false,
       size: 80,
       cell({ row }) {
-        return <Text>{row.original.trace_refs?.length ?? 0}</Text>;
+        return <Text>{row.original.evidence?.length ?? 0}</Text>;
       },
     }),
     accessor('experiment_group_count', {

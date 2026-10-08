@@ -37,7 +37,7 @@ export interface UseOpenInsightsResult {
  * response does carry. Replace this with a server-side sort once severity lands.
  */
 const byImpact = (a: InsightListItem, b: InsightListItem): number => {
-  const volume = (b.trace_refs?.length ?? 0) - (a.trace_refs?.length ?? 0);
+  const volume = (b.evidence?.length ?? 0) - (a.evidence?.length ?? 0);
   if (volume !== 0) return volume;
   return (
     Date.parse(b.last_seen_at ?? b.created_at ?? '') -

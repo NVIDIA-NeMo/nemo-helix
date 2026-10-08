@@ -7,6 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from nemo_helix_plugin.entity import NemoEntity
+from nemo_insights_plugin.evidence import EvidenceCompatibility, TraceEvidence
 from pydantic import Field
 
 
@@ -24,7 +25,7 @@ class AnalysisConfigStatus(StrEnum):
     ERROR = "error"
 
 
-class Insight(NemoEntity, entity_type="insights_insight"):
+class Insight(NemoEntity, EvidenceCompatibility, entity_type="insights_insight"):
     """A persistent problem, theme, or category of issues in the agent under test."""
 
     title: str = Field(
@@ -57,15 +58,12 @@ class Insight(NemoEntity, entity_type="insights_insight"):
             "not a good insight for their domain."
         ),
     )
-    trace_refs: list[str] = Field(
+    updated_date: datetime | None = Field(
+        default=None, description="UTC timestamp when Compass last added trace evidence."
+    )
+    evidence: list[TraceEvidence] = Field(
         default_factory=list,
-        description=(
-            "Intake trace ids the analyst identified as evidence for this "
-            "insight. This is used as evidence for the insight UI to "
-            "communicate to the developer what traces triggered the issue, and "
-            "can also be used to identify other similar traces that might "
-            "experience the same issue."
-        ),
+        description="Supporting traces, with optional source URLs and relevant spans. No spans means whole-trace evidence.",
     )
 
 

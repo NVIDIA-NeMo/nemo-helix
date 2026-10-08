@@ -18,10 +18,10 @@ insights:
     layer mis-classifies these benign tasks as disallowed and short-circuits an in-progress
     trajectory.'
   status: open
-  trace_refs:
-  - constraints-scheduling-xhsKy3g
-  - regex-chess-HfzhtaZ
-  - headless-terminal-DzYqtUy
+  evidence:
+  - trace_id: constraints-scheduling-xhsKy3g
+  - trace_id: regex-chess-HfzhtaZ
+  - trace_id: headless-terminal-DzYqtUy
   created_at: '2026-06-05T22:28:00.691135+00:00'
   updated_at: '2026-06-05T22:28:00.691135+00:00'
 - id: insight-c0bbadce52c34656a0e61b215142f291
@@ -40,14 +40,14 @@ insights:
     the agent anchors on self-invented success criteria and never reconciles them
     with the real spec, producing overconfident but incorrect completions.'
   status: open
-  trace_refs:
-  - adaptive-rejection-sampler-sCQXPuA
-  - adaptive-rejection-sampler-qYLBFwo
-  - adaptive-rejection-sampler-Fgeag3m
-  - sam-cell-seg-XVe4VSi
-  - regex-chess-mbr83he
-  - raman-fitting-4TkuEBg
-  - mailman-Aw7evCn
+  evidence:
+  - trace_id: adaptive-rejection-sampler-sCQXPuA
+  - trace_id: adaptive-rejection-sampler-qYLBFwo
+  - trace_id: adaptive-rejection-sampler-Fgeag3m
+  - trace_id: sam-cell-seg-XVe4VSi
+  - trace_id: regex-chess-mbr83he
+  - trace_id: raman-fitting-4TkuEBg
+  - trace_id: mailman-Aw7evCn
   created_at: '2026-06-05T22:28:00.691135+00:00'
   updated_at: '2026-06-05T22:28:00.691135+00:00'
 - id: insight-78d54712121d416192b9aa04bc78d375
@@ -68,12 +68,12 @@ insights:
     its turn/step budget (or is cut off) before converging, leaving a broken solution
     and never delivering or verifying a result.'
   status: open
-  trace_refs:
-  - qemu-alpine-ssh-Z9EtcT7
-  - write-compressor-U9gsqTF
-  - path-tracing-reverse-XKeZn2P
-  - make-mips-interpreter-vgGbWQh
-  - caffe-cifar-10-mZcR43P
-  - polyglot-c-py-jcceToH
+  evidence:
+  - trace_id: qemu-alpine-ssh-Z9EtcT7
+  - trace_id: write-compressor-U9gsqTF
+  - trace_id: path-tracing-reverse-XKeZn2P
+  - trace_id: make-mips-interpreter-vgGbWQh
+  - trace_id: caffe-cifar-10-mZcR43P
+  - trace_id: polyglot-c-py-jcceToH
   created_at: '2026-06-05T22:28:00.691135+00:00'
   updated_at: '2026-06-05T22:28:00.691135+00:00'
