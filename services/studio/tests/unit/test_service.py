@@ -566,10 +566,10 @@ class TestStudioConfigEnvReplacements:
         # Should only have called get_global_settings_from_env once (during first access)
         assert call_count == 1
 
-    def test_platform_base_url_falls_back_to_platform_base_url(self, monkeypatch: pytest.MonkeyPatch):
-        """When studio.platform_base_url is blank, platform.base_url is used."""
+    def test_platform_base_url_does_not_fall_back_to_platform_base_url(self, monkeypatch: pytest.MonkeyPatch):
+        """A blank studio.platform_base_url stays empty so the UI uses its own origin."""
         mock_settings = {
-            "platform": {"base_url": "http://0.0.0.0:8080"},
+            "platform": {"base_url": "http://nemo-helix-api:8080"},
             "studio": {},
         }
         from nhx.common import config as common_config
@@ -579,10 +579,10 @@ class TestStudioConfigEnvReplacements:
         config = StudioConfig()
         replacements = config.env_replacements
 
-        assert replacements["STUDIO_UI_VITE_PLATFORM_BASE_URL"] == "http://0.0.0.0:8080"
+        assert replacements["STUDIO_UI_VITE_PLATFORM_BASE_URL"] == ""
 
     def test_platform_base_url_studio_value_takes_precedence(self, monkeypatch: pytest.MonkeyPatch):
-        """An explicit studio.platform_base_url wins over the platform-level fallback."""
+        """An explicit studio.platform_base_url is used as-is."""
         mock_settings = {
             "platform": {"base_url": "http://0.0.0.0:8080"},
             "studio": {"platform_base_url": "https://studio.example.com"},

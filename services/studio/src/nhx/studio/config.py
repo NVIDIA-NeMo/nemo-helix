@@ -159,10 +159,6 @@ class StudioConfig(create_service_config_class("studio")):  # type: ignore[misc]
                 value = self._resolve_field_path(mapping.config_path.removeprefix("studio."))
             if value == "":
                 value = None
-            if value is None and mapping.config_path == "studio.platform_base_url":
-                value = self._resolve_config_path("platform.base_url")
-            if value == "":
-                value = None
             if value is not None:
                 replacements[mapping.marker] = value
                 logger.debug(f"Resolved {mapping.marker} -> {value}")
