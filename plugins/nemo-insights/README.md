@@ -36,9 +36,17 @@ uv tool install --force \
   "nemo-helix[all]"
 ```
 
-For a virtual environment, install the same two requirements with `uv pip install`
-in the environment that runs the analyst. Source checkouts and the platform images
-install these pinned dependencies through the workspace's `insights` group.
+For a virtual environment, install both pinned requirements in the environment
+that runs the analyst:
+
+```bash
+uv pip install \
+  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137" \
+  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest"
+```
+
+Source checkouts and the platform images install these pinned dependencies through
+the workspace's `insights` group.
 
 ## CLI
 
