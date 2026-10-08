@@ -160,7 +160,7 @@ class TestOrdering:
         client = FakeEntityClient()
         result = await _submit(client)
         provenance = result.images[0].provenance
-        assert (provenance.job, provenance.spec) == ("default/demo-1", "img0")
+        assert (provenance.job, provenance.spec) == ("default/builder-demo-1", "img0")
 
 
 class TestResubmission:
@@ -180,7 +180,7 @@ class TestResubmission:
             "conflict:demo-1.img1",
             "get:demo-1.img1",
             "job_conflict",
-            "get_job:demo-1",
+            "get_job:builder-demo-1",
         ]
         assert [i.name for i in second.images] == [i.name for i in first.images]
         assert len(client.rows) == 2 and len(jobs.jobs) == 1
@@ -218,14 +218,16 @@ class TestResubmission:
         """Left pending, they would wait on a job this request didn't create."""
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
-        jobs.jobs["demo-1"] = CreateHelixJobRequest.model_construct(name="demo-1", custom_fields={"owner": "someone"})
+        jobs.jobs["builder-demo-1"] = CreateHelixJobRequest.model_construct(
+            name="builder-demo-1", custom_fields={"owner": "someone"}
+        )
         with pytest.raises(BuildConflict, match="not created by this request"):
             await _submit(client, jobs)
         assert client.events == [
             "create:demo-1.img0",
             "create:demo-1.img1",
             "job_conflict",
-            "get_job:demo-1",
+            "get_job:builder-demo-1",
             "update:demo-1.img0:failed",
             "update:demo-1.img1:failed",
         ]
@@ -235,7 +237,9 @@ class TestResubmission:
     async def test_submitting_again_into_the_held_name_writes_nothing_more(self) -> None:
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
-        jobs.jobs["demo-1"] = CreateHelixJobRequest.model_construct(name="demo-1", custom_fields={"owner": "someone"})
+        jobs.jobs["builder-demo-1"] = CreateHelixJobRequest.model_construct(
+            name="builder-demo-1", custom_fields={"owner": "someone"}
+        )
         with pytest.raises(BuildConflict):
             await _submit(client, jobs)
         client.events.clear()
@@ -249,7 +253,9 @@ class TestResubmission:
         client = FakeEntityClient()
         client.changed.add("demo-1.img0")
         jobs = FakeJobs(client.events)
-        jobs.jobs["demo-1"] = CreateHelixJobRequest.model_construct(name="demo-1", custom_fields={"owner": "someone"})
+        jobs.jobs["builder-demo-1"] = CreateHelixJobRequest.model_construct(
+            name="builder-demo-1", custom_fields={"owner": "someone"}
+        )
         with pytest.raises(BuildConflict):
             await _submit(client, jobs)
         assert client.events[-2:] == ["update_conflict:demo-1.img0", "update:demo-1.img1:failed"]
@@ -303,7 +309,7 @@ class TestTheJobRequest:
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
         await _submit(client, jobs)
-        request = jobs.jobs["demo-1"]
+        request = jobs.jobs["builder-demo-1"]
         assert request.source == JOB_SOURCE
         assert request.custom_fields == {
             "images": ["demo-1.img0", "demo-1.img1"],
@@ -315,7 +321,7 @@ class TestTheJobRequest:
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
         result = await _submit(client, jobs, _set(3))
-        push = PushStepConfig.model_validate(jobs.jobs["demo-1"].platform_spec.steps[2].config)
+        push = PushStepConfig.model_validate(jobs.jobs["builder-demo-1"].platform_spec.steps[2].config)
         pushed = [image.refs for image in push.images]
 
         for index, row in enumerate(result.images):
