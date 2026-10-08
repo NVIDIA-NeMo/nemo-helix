@@ -10470,7 +10470,7 @@ nemo experiments create [OPTIONS] [NAME]
 * `--insight-id`: Reference to an external insight that seeded this experiment, if any.
 * `--is-favorite`: Whether this Experiment is marked as a favorite. Defaults to false on create; omit on update to preserve the existing value.
 * `--metadata`: Free-form producer metadata for the experiment. (JSON string)
-* `--pareto`: Default X/Y metrics for a group's cost-vs-accuracy Pareto view. Metric ids use the same vocabulary as the evaluations list sort/filter fields — `cost_usd`, `latency_ms`, or `evaluators.<name>`. Defaults to cost (x) vs latency (y): both exist for every group, so the chart always has something to render before anyone customizes it. (JSON string)
+* `--pareto`: Default X/Y metrics for a group's cost-vs-accuracy Pareto view. Metric ids use the same vocabulary as the evaluations list sort/filter fields — `cost_usd`, `latency_ms`, `tokens`, or `evaluators.<name>`. Defaults to cost (x) vs latency (y): both exist for every group, so the chart always has something to render before anyone customizes it. (JSON string)
 * `--show-evaluations-over-time`: Whether Studio should display this Experiment's Evaluation results over time. Defaults to false on create; omit on update to preserve the existing value.
 * `--summary`: Human- or agent-authored summary of the experiment's findings.
 * `--exist-ok`: Do not raise an error if the resource already exists. Returns the existing resource.
@@ -10615,7 +10615,7 @@ nemo experiments update [OPTIONS] PATH_NAME
 * `--insight-id`: Reference to an external insight that seeded this experiment, if any.
 * `--is-favorite`: Whether this Experiment is marked as a favorite. Defaults to false on create; omit on update to preserve the existing value.
 * `--metadata`: Free-form producer metadata for the experiment. (JSON string)
-* `--pareto`: Default X/Y metrics for a group's cost-vs-accuracy Pareto view. Metric ids use the same vocabulary as the evaluations list sort/filter fields — `cost_usd`, `latency_ms`, or `evaluators.<name>`. Defaults to cost (x) vs latency (y): both exist for every group, so the chart always has something to render before anyone customizes it. (JSON string)
+* `--pareto`: Default X/Y metrics for a group's cost-vs-accuracy Pareto view. Metric ids use the same vocabulary as the evaluations list sort/filter fields — `cost_usd`, `latency_ms`, `tokens`, or `evaluators.<name>`. Defaults to cost (x) vs latency (y): both exist for every group, so the chart always has something to render before anyone customizes it. (JSON string)
 * `--show-evaluations-over-time`: Whether Studio should display this Experiment's Evaluation results over time. Defaults to false on create; omit on update to preserve the existing value.
 * `--summary`: Human- or agent-authored summary of the experiment's findings.
 
