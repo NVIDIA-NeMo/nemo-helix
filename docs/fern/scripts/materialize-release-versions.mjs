@@ -235,6 +235,7 @@ function discoverBranchReleases() {
       releases.push({
         ...release,
         ref,
+        colabRef: branch,
         ...(tagExists ? { overridesTag: true } : { availability: branchReleaseAvailability }),
       });
     }
@@ -377,6 +378,7 @@ function materializeRelease(release) {
     cpSync(exportedDocs, outputRoot, { recursive: true });
     materializeGeneratedDocs(release, outputRoot);
     pinStaleSnippetReferences(release, outputRoot);
+    syncColabLinks(release, outputRoot);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -440,6 +442,20 @@ function updateDocsYml(releases, previousGeneratedVersionPaths) {
   }
 
   writeFileSync(docsYmlPath, String(doc));
+}
+
+function syncColabLinks(release, outputRoot) {
+  execFileSync(
+    process.execPath,
+    [
+      join(scriptDir, "sync-colab-links.mjs"),
+      "--docs-root",
+      outputRoot,
+      "--ref",
+      release.colabRef ?? release.tag,
+    ],
+    { cwd: repoRoot, stdio: "inherit" },
+  );
 }
 
 function materializeGeneratedDocs(release, outputRoot) {

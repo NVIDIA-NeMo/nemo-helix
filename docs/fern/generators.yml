@@ -3,4 +3,4 @@
 
 api:
   specs:
-    - openapi: ./openapi/openapi.public.yaml
+    - openapi: ./openapi/openapi.yaml
