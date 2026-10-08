@@ -2,23 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { Banner, Flex, Spinner, Stack } from '@nvidia/foundations-react-core';
+import { Banner, Flex, Spinner } from '@nvidia/foundations-react-core';
 import {
   START_OPTIONS,
   TEMPLATE_GROUP_TITLE,
 } from '@studio/components/CreateCustomizationStart/constants';
 import { DeleteSavedTemplate } from '@studio/components/CreateCustomizationStart/DeleteSavedTemplate';
 import { TemplateConflictBanner } from '@studio/components/CreateCustomizationStart/TemplateConflictBanner';
-import type {
-  CreateCustomizationStartProps,
-  StartOptionId,
-} from '@studio/components/CreateCustomizationStart/types';
+import type { CreateCustomizationStartProps } from '@studio/components/CreateCustomizationStart/types';
 import { useSavedTemplates } from '@studio/components/CreateCustomizationStart/useSavedTemplates';
 import {
   useTemplateSetup,
   type ConflictResolution,
 } from '@studio/components/CreateCustomizationStart/useTemplateSetup';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
+import { StartSubPage } from '@studio/components/StartOptions/StartSubPage';
 import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
 import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
 import {
@@ -54,21 +52,15 @@ const SAVED_PREFIX = 'saved:';
 const savedTemplateKey = (template: { name?: string; id: string }) =>
   `${SAVED_PREFIX}${template.name ?? template.id}`;
 
-/** Why Continue is unavailable, shown next to the disabled button. */
-const BLOCKED_HINT: Partial<Record<StartOptionId, string>> = {
-  template: 'Pick a recipe to continue.',
-  ai: 'Draft settings that pass the checks to continue.',
-};
-
-/** Templates are the middle rung, and the likeliest way in, so the page opens on them. */
-const DEFAULT_OPTION: StartOptionId = 'template';
+const AI_OPTION = START_OPTIONS.find((option) => option.id === 'ai');
 
 export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   workspace,
   onContinue,
 }) => {
-  const [selectedId, setSelectedId] = useState<StartOptionId>(DEFAULT_OPTION);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [isDescribing, setIsDescribing] = useState(false);
+  // The recipe being set up, or whose fileset conflict is waiting on the user's answer.
+  const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
   // Set only once a generated draft validates, so Continue can never load a broken config.
   const [draftValues, setDraftValues] = useState<CustomizationFormFields | null>(null);
 
@@ -121,6 +113,14 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
           name: template.name ?? template.id,
           description: template.description || 'Saved from an earlier job.',
           icon: Bookmark,
+          action: (
+            <DeleteSavedTemplate
+              workspace={workspace}
+              template={template}
+              onDeleted={() => void refetchSaved()}
+              disabled={isSettingUp}
+            />
+          ),
         })),
       },
       {
@@ -134,47 +134,25 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
         })),
       },
     ],
-    [savedTemplates, savedLoading]
+    [savedTemplates, savedLoading, workspace, refetchSaved, isSettingUp]
   );
 
-  const selectedTemplate =
-    CUSTOMIZATION_TEMPLATES.find((template) => template.id === selectedTemplateId) ?? null;
-
-  const selectedSaved =
-    savedTemplates.find((template) => savedTemplateKey(template) === selectedTemplateId) ?? null;
-
-  const handleContinue = async () => {
-    if (selectedId === 'scratch') {
-      onContinue({ optionId: 'scratch' });
-      return;
-    }
-    if (selectedId === 'ai') {
-      if (draftValues) onContinue({ optionId: 'ai', initialValues: draftValues });
-      return;
-    }
-    // Names a model and dataset the workspace already has, so nothing to provision.
-    if (selectedSaved) {
-      const initialValues = templateToFormFields(selectedSaved);
-      if (initialValues) onContinue({ optionId: 'template', initialValues });
-      return;
-    }
-    if (!selectedTemplate) return;
-    await provision(selectedTemplate);
-  };
+  const activeTemplate =
+    CUSTOMIZATION_TEMPLATES.find((template) => template.id === activeTemplateId) ?? null;
 
   /**
    * Registering the model and loading the dataset has to finish before the form can
-   * reference them, so it happens here rather than on the next screen.
+   * reference them, so it happens here, with every card locked until it does.
    *
    * `resolution` is set when the user is answering a fileset conflict rather than starting
    * the recipe fresh.
    */
   const provision = async (template: CustomizationTemplate, resolution?: ConflictResolution) => {
+    setActiveTemplateId(template.id);
     const result = await runTemplateSetup(template, resolution);
-    // Provisioning spans a render, and the page is locked throughout, but only hand over
-    // values that still match what is selected, and only if there is still a picker to
-    // hand them over from.
-    if (!result || !mounted.current || selectedTemplateId !== template.id) return;
+    // Only hand over values if there is still a picker to hand them over from. A failed or
+    // conflicted run leaves the recipe active, so the conflict banner can resolve it.
+    if (!result || !mounted.current) return;
 
     // Which fileset the job trains on is the whole point of the recipe, so a reuse is
     // stated rather than left silent. It goes to a toast because handing the values over
@@ -198,62 +176,67 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
     onContinue({ optionId: 'template', initialValues: result.values });
   };
 
+  const startFromTemplate = (templateId: string) => {
+    // A conflict names one recipe's fileset; moving to another recipe retires it.
+    clearConflict();
+    // Names a model and dataset the workspace already has, so nothing to provision.
+    const savedTemplate = savedTemplates.find(
+      (template) => savedTemplateKey(template) === templateId
+    );
+    if (savedTemplate) {
+      const initialValues = templateToFormFields(savedTemplate);
+      if (initialValues) onContinue({ optionId: 'template', initialValues });
+      return;
+    }
+    const recipe = CUSTOMIZATION_TEMPLATES.find((template) => template.id === templateId);
+    if (recipe) void provision(recipe);
+  };
+
+  if (isDescribing && AI_OPTION) {
+    return (
+      <StartSubPage
+        heading={AI_OPTION.title}
+        headingDescription={AI_OPTION.description}
+        onBack={() => {
+          setIsDescribing(false);
+          setDraftValues(null);
+        }}
+        canContinue={draftValues !== null}
+        onContinue={() => {
+          if (draftValues) onContinue({ optionId: 'ai', initialValues: draftValues });
+        }}
+        blockedHint="Draft settings that pass the checks to continue."
+      >
+        <Suspense fallback={panelFallback}>
+          <DescribeWithAiPanel workspace={workspace} onDraft={setDraftValues} />
+        </Suspense>
+      </StartSubPage>
+    );
+  }
+
   return (
     <StartPage
       heading="Fine-tune a Model"
       headingDescription="Train a model on your own data. Describe what you need and let AI draft the settings, pick a ready-made recipe, or set everything up yourself."
       options={START_OPTIONS}
-      value={selectedId}
+      // Templates are the likeliest way in, so their cards are always the panel here.
+      value="template"
       onChange={(id) => {
-        setSelectedId(id as StartOptionId);
-        setSelectedTemplateId(null);
         clearConflict();
-        setDraftValues(null);
+        if (id === 'ai') setIsDescribing(true);
+        if (id === 'scratch') onContinue({ optionId: 'scratch' });
       }}
-      // Provisioning registers models and uploads a dataset, which takes long enough that
-      // the cards would stay clickable behind the disabled Continue. Moving the selection
-      // then would leave a finished setup pointing at something else.
+      // Provisioning registers models and uploads a dataset. Every card stays locked until
+      // it settles, so a finished setup can never hand over something the user moved off.
       disabled={isSettingUp}
-      canContinue={
-        !isSettingUp &&
-        (selectedId === 'scratch' ||
-          (selectedId === 'ai' ? draftValues !== null : selectedTemplateId !== null))
-      }
-      continueLabel={isSettingUp ? statusLabel : 'Continue'}
-      continueLoading={isSettingUp}
-      onContinue={() => void handleContinue()}
-      blockedHint={BLOCKED_HINT[selectedId]}
-      slotFooterStart={
-        selectedSaved ? (
-          <DeleteSavedTemplate
-            workspace={workspace}
-            template={selectedSaved}
-            onDeleted={() => {
-              setSelectedTemplateId(null);
-              void refetchSaved();
-            }}
-          />
-        ) : null
-      }
       slotDetail={
-        selectedId === 'ai' ? (
-          <Suspense fallback={panelFallback}>
-            <DescribeWithAiPanel workspace={workspace} onDraft={setDraftValues} />
-          </Suspense>
-        ) : selectedId === 'template' ? (
-          <Stack gap="density-2xl" className="w-full">
-            <TemplateGroups
-              groups={templateGroups}
-              value={selectedTemplateId}
-              // A conflict names one recipe's fileset; moving off that recipe retires it.
-              onChange={(id) => {
-                setSelectedTemplateId(id);
-                clearConflict();
-              }}
-              disabled={isSettingUp}
-            />
-          </Stack>
-        ) : null
+        <TemplateGroups
+          groups={templateGroups}
+          onSelect={startFromTemplate}
+          pendingId={isSettingUp ? activeTemplateId : null}
+          pendingLabel={statusLabel}
+          disabled={isSettingUp}
+        />
       }
       slotBanner={
         conflict ? (
@@ -261,10 +244,10 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
             conflict={conflict}
             busy={isSettingUp}
             onRename={() =>
-              selectedTemplate && void provision(selectedTemplate, { action: 'rename', conflict })
+              activeTemplate && void provision(activeTemplate, { action: 'rename', conflict })
             }
             onReplace={() =>
-              selectedTemplate && void provision(selectedTemplate, { action: 'replace', conflict })
+              activeTemplate && void provision(activeTemplate, { action: 'replace', conflict })
             }
           />
         ) : templateError ? (

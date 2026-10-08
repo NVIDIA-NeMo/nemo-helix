@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StartPage } from '@studio/components/StartOptions/StartPage';
+import { StartSubPage } from '@studio/components/StartOptions/StartSubPage';
+import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -35,19 +37,48 @@ const renderPage = (over: Partial<React.ComponentProps<typeof StartPage>> = {}) 
         options={OPTIONS}
         value="scratch"
         onChange={() => undefined}
-        canContinue
-        onContinue={() => undefined}
         {...over}
       />
     </TestProviders>
   );
 
+const renderSubPage = (over: Partial<React.ComponentProps<typeof StartSubPage>> = {}) =>
+  render(
+    <TestProviders>
+      <StartSubPage
+        heading="Describe with AI"
+        headingDescription="Say what you need."
+        onBack={() => undefined}
+        canContinue
+        onContinue={() => undefined}
+        {...over}
+      >
+        <div>Option content</div>
+      </StartSubPage>
+    </TestProviders>
+  );
+
+const GROUPS = [
+  {
+    id: 'recipes',
+    title: 'Recipes',
+    templates: [
+      { id: 'sft', name: 'SFT recipe', description: 'Supervised.', icon: Plus },
+      {
+        id: 'mine',
+        name: 'My recipe',
+        description: 'Saved.',
+        icon: Plus,
+        action: <button type="button">Delete My recipe</button>,
+      },
+    ],
+  },
+];
+
 describe('StartPage', () => {
   it('names the group holding the options', () => {
     renderPage();
 
-    // KUI sets the role but takes its name from a wrapping FormField, which this page has
-    // no visible prompt for — without a name the group is announced as an unnamed one.
     expect(
       screen.getByRole('radiogroup', { name: 'How do you want to start?' })
     ).toBeInTheDocument();
@@ -64,34 +95,90 @@ describe('StartPage', () => {
     );
   });
 
-  it('shows the detail panel the caller gives it', () => {
+  it('shows the content the caller gives it', () => {
     renderPage({ slotDetail: <div>Recipe list</div> });
 
     expect(screen.getByText('Recipe list')).toBeInTheDocument();
   });
 
-  it('reports the selection rather than acting on it', async () => {
+  it('reports a card click to the caller, with no Continue step', async () => {
     const onChange = vi.fn();
-    const onContinue = vi.fn();
-    renderPage({ onChange, onContinue });
+    renderPage({ onChange });
 
     await userEvent.click(screen.getByRole('radio', { name: 'Describe with AI' }));
 
-    // Choosing a way in reveals its panel; nothing starts until Continue.
     expect(onChange).toHaveBeenCalledWith('ai');
-    expect(onContinue).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
   });
 
+  it('does not act while locked', async () => {
+    const onChange = vi.fn();
+    renderPage({ onChange, disabled: true });
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Describe with AI' }));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('StartSubPage', () => {
   it('says what is missing while Continue is disabled', () => {
-    renderPage({ canContinue: false, blockedHint: 'Pick a recipe to continue.' });
+    renderSubPage({ canContinue: false, blockedHint: 'Draft settings to continue.' });
 
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
-    expect(screen.getByText('Pick a recipe to continue.')).toBeInTheDocument();
+    expect(screen.getByText('Draft settings to continue.')).toBeInTheDocument();
   });
 
-  it('drops the hint once Continue is available', () => {
-    renderPage({ canContinue: true, blockedHint: 'Pick a recipe to continue.' });
+  it('drops the hint once Continue is available', async () => {
+    const onContinue = vi.fn();
+    renderSubPage({ onContinue, blockedHint: 'Draft settings to continue.' });
 
-    expect(screen.queryByText('Pick a recipe to continue.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Draft settings to continue.')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(onContinue).toHaveBeenCalled();
+  });
+
+  it('goes back to the options', async () => {
+    const onBack = vi.fn();
+    renderSubPage({ onBack });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(onBack).toHaveBeenCalled();
+    expect(screen.getByText('Option content')).toBeInTheDocument();
+  });
+});
+
+describe('TemplateGroups', () => {
+  const renderGroups = (over: Partial<React.ComponentProps<typeof TemplateGroups>> = {}) =>
+    render(
+      <TestProviders>
+        <TemplateGroups groups={GROUPS} onSelect={() => undefined} {...over} />
+      </TestProviders>
+    );
+
+  it('starts from a template on click', async () => {
+    const onSelect = vi.fn();
+    renderGroups({ onSelect });
+
+    await userEvent.click(screen.getByRole('radio', { name: 'SFT recipe' }));
+
+    expect(onSelect).toHaveBeenCalledWith('sft');
+  });
+
+  it('keeps a tile action apart from the tile', async () => {
+    const onSelect = vi.fn();
+    renderGroups({ onSelect });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete My recipe' }));
+
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('says what is running on the template being set up', () => {
+    renderGroups({ pendingId: 'sft', pendingLabel: 'Registering model…', disabled: true });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Registering model…');
+    expect(screen.getByRole('radio', { name: 'My recipe' })).toBeDisabled();
   });
 });
