@@ -52,9 +52,11 @@ router = APIRouter()
 
 
 # Match the timestamp prefix written by ``logging.basicConfig``-style emitters
-# (e.g. ``2026-05-19 21:04:28 - INFO     - foo:11 - message``). Falls back to
-# the empty string when the line is plain (uvicorn debug, tracebacks, …).
-_TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)")
+# (e.g. ``2026-05-19 21:04:28 - INFO     - foo:11 - message``) and substrate
+# logs that include RFC3339 timestamps (e.g. Kubernetes ``timestamps=True``).
+# Falls back to the empty string when the line is plain (uvicorn debug,
+# tracebacks, …).
+_TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)")
 
 
 class LogLine(BaseModel):
@@ -117,6 +119,43 @@ async def _resolve_log_path(
     raise HTTPException(status_code=404, detail=f"No log channel available for {name!r}.")
 
 
+async def _resolve_external_logs(
+    workspace: str,
+    name: str,
+    tail: int,
+    entity_client: NemoEntitiesClient,
+) -> DeploymentLogsResponse | None:
+    """Return logs for container-backed deployments when the runner can fetch them.
+
+    Subprocess deployments expose a local file and use ``_resolve_log_path``.
+    Docker/Kubernetes deployments are managed by ``DeploymentsRunnerBackend``;
+    it can bridge to the deployments plugin's ``get_logs`` API. Older/custom
+    runner backends may still only return ``ExternalLog`` hints, so absence of a
+    ``get_logs`` coroutine means the caller should keep the existing 404 path.
+    """
+    try:
+        await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Deployment {name!r} not found in workspace {workspace!r}.",
+        ) from exc
+
+    backend = get_runner_backend()
+    get_logs = getattr(backend, "get_logs", None)
+    if get_logs is None:
+        return None
+    log_result = await get_logs(workspace=workspace, name=name, tail=tail)
+    lines = getattr(log_result, "lines", None)
+    if lines is None:
+        return None
+    parsed = [_parse_line(line) for line in lines]
+    # External substrate logs do not expose a stable byte-offset cursor, so SSE
+    # resume is unavailable. ``0`` keeps the response schema stable; the UI still
+    # renders the fetched tail.
+    return DeploymentLogsResponse(data=parsed, total_lines=len(parsed), next_offset=0)
+
+
 _TAIL_READ_BLOCK = 8192
 
 
@@ -162,7 +201,11 @@ async def get_deployment_logs(
     tail: int = Query(default=500, ge=0, le=_TAIL_LINE_CAP),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> DeploymentLogsResponse:
-    """Return the most recent *tail* lines from the deployment's log file."""
+    """Return the most recent *tail* lines from the deployment's logs."""
+    external = await _resolve_external_logs(workspace, name, tail, entity_client)
+    if external is not None:
+        return external
+
     path = await _resolve_log_path(workspace, name, entity_client)
     raw_lines, end_offset = await asyncio.to_thread(_read_tail, path, tail)
     parsed = [_parse_line(line) for line in raw_lines]

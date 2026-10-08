@@ -100,7 +100,7 @@ def test_logs_returns_404_when_log_not_yet_available(client: TestClient, monkeyp
 def test_logs_returns_404_with_hint_for_external_log_backend(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Remote backends (Docker/K8s) surface their fetch hint in the detail."""
+    """Remote backends without API log fetch support surface their fetch hint in the detail."""
     from nemo_agents_plugin.runner.backend import ExternalLog
 
     backend = type(
@@ -115,6 +115,37 @@ def test_logs_returns_404_with_hint_for_external_log_backend(
     assert resp.status_code == 404
     assert "docker logs abc123" in resp.json()["detail"]
     assert ".log" not in resp.json()["detail"]
+
+
+def test_logs_fetches_external_backend_lines(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Container backends can bridge Docker/Kubernetes pod logs into the Studio logs API."""
+    from nemo_agents_plugin.runner.backend import ExternalLog
+    from nemo_deployments_plugin.backends.base import LogResult
+
+    class _RemoteBackend:
+        @staticmethod
+        def get_log_location(_workspace: str, _name: str) -> ExternalLog:
+            return ExternalLog(hint="kubectl logs ...")
+
+        @staticmethod
+        async def get_logs(*, workspace: str, name: str, tail: int) -> LogResult:
+            assert (workspace, name, tail) == ("default", "test", 2)
+            return LogResult(
+                lines=[
+                    "2026-05-19T21:00:00.123456Z pod started",
+                    "2026-05-19T21:00:01Z request served",
+                ]
+            )
+
+    monkeypatch.setattr(module, "get_runner_backend", lambda: _RemoteBackend())
+    resp = client.get("/apis/agents/v2/workspaces/default/deployments/test/logs?tail=2")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_lines"] == 2
+    assert body["next_offset"] == 0
+    assert body["data"][0]["timestamp"] == "2026-05-19T21:00:00.123456Z"
+    assert body["data"][0]["message"] == "pod started"
+    assert body["data"][1]["message"] == "request served"
 
 
 def test_logs_rejects_negative_tail(client: TestClient) -> None:

@@ -45,8 +45,10 @@ from nemo_agents_plugin.telemetry.intake_export import (
     supports_intake_atif_export,
 )
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
+from nemo_deployments_plugin.backends.base import LogResult
 from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
 from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
+from nemo_deployments_plugin.backends.registry import ExecutorRegistry, ExecutorSpec
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.deployment_auth import plan_deployment_auth
 from nemo_deployments_plugin.entities import (
@@ -693,12 +695,28 @@ class DeploymentsRunnerBackend(RunnerBackend):
     def __init__(self, config: AgentsConfig) -> None:
         self._config: DeploymentsRunnerConfig = config.deployments
         self._entities: NemoEntitiesClient | None = None
+        self._executor_registry: ExecutorRegistry | None = None
 
     def _entity_client(self) -> NemoEntitiesClient:
         if self._entities is None:
             client = get_async_nemo_client(as_service="agents", internal=True)
             self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
         return self._entities
+
+    def _registry(self) -> ExecutorRegistry:
+        if self._executor_registry is None:
+            config = DeploymentsConfig.get()
+            specs = [ExecutorSpec(name=e.name, backend=e.backend, config=e.config) for e in config.executors]
+            if specs:
+                client = get_async_nemo_client(as_service="deployments", internal=True)
+                self._executor_registry = ExecutorRegistry.from_config(
+                    client,
+                    specs,
+                    default_executor=config.default_executor,
+                )
+            else:
+                self._executor_registry = ExecutorRegistry.empty()
+        return self._executor_registry
 
     async def create_deployment(
         self,
@@ -961,9 +979,32 @@ class DeploymentsRunnerBackend(RunnerBackend):
         del endpoint
         return False
 
+    async def get_logs(self, *, workspace: str, name: str, tail: int = 100) -> LogResult:
+        """Fetch container logs through the deployments plugin backend.
+
+        Agents container deployments are projected as deployments-plugin
+        ``Deployment`` entities with the same ``(workspace, name)``. The
+        deployments backend already knows how to read Docker/Kubernetes pod logs;
+        bridge to that implementation so Studio and ``nemo agents`` API callers
+        don't have to shell out to substrate-specific CLIs.
+        """
+        entities = self._entity_client()
+        try:
+            deployment = await entities.get(Deployment, name=name, workspace=workspace)
+        except NemoEntityNotFoundError:
+            return LogResult(lines=[])
+        try:
+            backend = self._registry().resolve(deployment.executor)
+        except Exception as exc:
+            return LogResult(lines=[f"Failed to resolve deployment log backend: {exc}"])
+        return await backend.get_logs(workspace=workspace, name=name, tail=tail)
+
     def get_log_location(self, workspace: str, name: str) -> LogLocation:
         del workspace, name
         return ExternalLog(hint="Inspect container logs via the deployments plugin or substrate CLI.")
 
     async def shutdown(self) -> None:
+        if self._executor_registry is not None:
+            self._executor_registry.shutdown_all()
+        self._executor_registry = None
         self._entities = None
