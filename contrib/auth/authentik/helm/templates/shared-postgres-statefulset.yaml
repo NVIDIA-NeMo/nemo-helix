@@ -62,8 +62,8 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.sharedPostgresql.serviceName }}
-                  key: postgres-password
+                  name: {{ .Values.sharedPostgresql.existingSecret }}
+                  key: POSTGRES_PASSWORD
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
             - name: AUTHENTIK_DATABASE
@@ -73,8 +73,8 @@ spec:
             - name: AUTHENTIK_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.sharedPostgresql.serviceName }}
-                  key: authentik-password
+                  name: {{ .Values.sharedPostgresql.existingSecret }}
+                  key: AUTHENTIK_POSTGRES_PASSWORD
             - name: NEMO_DATABASE
               value: {{ .Values.sharedPostgresql.nemo.database | quote }}
             - name: NEMO_USERNAME
@@ -82,8 +82,8 @@ spec:
             - name: NEMO_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.sharedPostgresql.serviceName }}
-                  key: nemo-password
+                  name: {{ .Values.sharedPostgresql.existingSecret }}
+                  key: NEMO_POSTGRES_PASSWORD
           ports:
             - name: postgresql
               containerPort: 5432

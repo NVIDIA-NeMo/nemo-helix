@@ -524,7 +524,7 @@ class TestStudioConfigEnvReplacements:
         monkeypatch.setattr(
             common_config.Configuration,
             "get_global_settings_from_env",
-            lambda: {"auth": {"oidc": {"bearer_token_source": "id_token"}}},
+            lambda: {"auth": {"oidc": {"public_client": {"bearer_token_source": "id_token"}}}},
         )
 
         replacements = StudioConfig().env_replacements
@@ -578,8 +578,8 @@ class TestStudioConfigEnvReplacements:
         # Should only have called get_global_settings_from_env once (during first access)
         assert call_count == 1
 
-    def test_platform_base_url_does_not_fall_back_to_platform_base_url(self, monkeypatch: pytest.MonkeyPatch):
-        """The browser-facing Studio URL must not inherit the in-cluster platform.base_url."""
+    def test_platform_base_url_stays_empty_without_studio_override(self, monkeypatch: pytest.MonkeyPatch):
+        """A blank Studio URL lets the browser use its current origin."""
         mock_settings = {
             "platform": {"base_url": "http://0.0.0.0:8080"},
             "studio": {},
@@ -594,7 +594,7 @@ class TestStudioConfigEnvReplacements:
         assert replacements["STUDIO_UI_VITE_PLATFORM_BASE_URL"] == ""
 
     def test_platform_base_url_studio_value_takes_precedence(self, monkeypatch: pytest.MonkeyPatch):
-        """An explicit studio.platform_base_url wins over the platform-level fallback."""
+        """An explicit Studio browser URL is still supported."""
         mock_settings = {
             "platform": {"base_url": "http://0.0.0.0:8080"},
             "studio": {"platform_base_url": "https://studio.example.com"},

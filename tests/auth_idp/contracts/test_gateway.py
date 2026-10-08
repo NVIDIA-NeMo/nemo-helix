@@ -55,47 +55,6 @@ def _gateway_get_with_transient_retries(
         time.sleep(min(GATEWAY_TRANSIENT_RETRY_SLEEP_SECONDS, remaining))
 
 
-def _expected_aliases_from_token_claims(claims: dict) -> list[str]:
-    subject = claims.get("sub")
-    assert isinstance(subject, str)
-    expected_aliases = [subject]
-    email = claims.get("email")
-    if isinstance(email, str) and email:
-        expected_aliases.append(email)
-    return expected_aliases
-
-
-def _assert_trusted_identity_headers(
-    response: httpx.Response,
-    *,
-    claims: dict,
-    required_scopes: set[str] | None = None,
-) -> None:
-    expected_aliases = _expected_aliases_from_token_claims(claims)
-    assert response.headers["x-nhx-principal-id"] == expected_aliases[0]
-    assert response.headers["x-nhx-actor-aliases"] == ",".join(expected_aliases)
-    scopes = response.headers.get("x-nhx-scopes", "").split()
-    if required_scopes is not None:
-        assert required_scopes.issubset(scopes)
-
-
-def _assert_no_trusted_identity_headers(response: httpx.Response) -> None:
-    for header_name in (
-        "x-nhx-principal-id",
-        "x-nhx-actor-account-id",
-        "x-nhx-principal-email",
-        "x-nhx-principal-groups",
-        "x-nhx-actor-aliases",
-        "x-nhx-principal-on-behalf-of",
-        "x-nhx-principal-on-behalf-of-email",
-        "x-nhx-principal-on-behalf-of-groups",
-        "x-nhx-subject-account-id",
-        "x-nhx-subject-aliases",
-        "x-nhx-scopes",
-    ):
-        assert header_name not in response.headers
-
-
 def test_provider_gateway_rejects_unauthenticated_requests(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "gateway_authn")
 
@@ -125,7 +84,7 @@ def test_provider_gateway_accepts_e2e_setup_token(auth_idp_case, auth_idp_runtim
     assert response.json()["name"] == auth_idp_workspace
 
 
-def test_provider_gateway_auth_callout_validates_bearer_token(auth_idp_case, auth_idp_runtime):
+def test_provider_gateway_blocks_direct_auth_callout(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "gateway_authn")
     require_capability(auth_idp_case, "workload_provider_token")
 
@@ -138,32 +97,7 @@ def test_provider_gateway_auth_callout_validates_bearer_token(auth_idp_case, aut
         tls_config=tls_config,
     )
 
-    assert response.status_code == 200, response.text
-    if "workload_token_exchange" in auth_idp_case.capabilities:
-        _assert_no_trusted_identity_headers(response)
-    else:
-        _assert_trusted_identity_headers(response, claims=workload_token.claims)
-
-
-def test_provider_gateway_auth_callout_accepts_exchanged_workload_token_without_trusted_headers(
-    auth_idp_case,
-    auth_idp_runtime,
-):
-    require_capability(auth_idp_case, "gateway_authn")
-    require_capability(auth_idp_case, "workload_subject_token")
-    require_capability(auth_idp_case, "workload_token_exchange")
-
-    workload_token = auth_idp_runtime.exchange_workload_token(auth_idp_runtime.workload_subject_token())
-
-    tls_config = runtime_tls_config(auth_idp_runtime)
-    response = _gateway_get_with_transient_retries(
-        f"{auth_idp_runtime.gateway_base_url}/apis/auth/ext-authz/apis/entities/v2/workspaces",
-        headers={"Authorization": f"Bearer {workload_token.access_token}"},
-        tls_config=tls_config,
-    )
-
-    assert response.status_code == 200, response.text
-    _assert_no_trusted_identity_headers(response)
+    assert response.status_code == 404, response.text
 
 
 def test_provider_gateway_rejects_spoofed_principal_headers(auth_idp_case, auth_idp_runtime):

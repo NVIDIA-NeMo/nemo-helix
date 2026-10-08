@@ -77,7 +77,7 @@ def test_middleware_internal_paths_use_standard_auth():
 
 
 def test_middleware_health_endpoints_skip_auth():
-    """Test that health endpoints skip auth (paths in HEALTH_ENDPOINTS bypass)."""
+    """Test that health endpoints skip auth via middleware exclusion."""
     with patch("nhx.common.auth.middleware.get_auth_config") as mock_get_config:
         mock_get_config.return_value = make_mock_auth_config(enabled=True)
 

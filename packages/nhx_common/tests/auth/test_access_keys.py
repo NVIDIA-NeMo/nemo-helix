@@ -96,16 +96,17 @@ def test_token_signing_private_key_file_uses_auth_service_env_override(monkeypat
 
 
 def test_workload_private_key_file_uses_auth_service_env_override(monkeypatch):
+    monkeypatch.setenv("NHX_AUTH_OIDC__WORKLOAD__CLIENT_ID", "nemo-helix-workload")
     monkeypatch.setenv(
-        "NHX_AUTH_OIDC__WORKLOAD_TOKEN_PRIVATE_KEY_FILE",
+        "NHX_AUTH_OIDC__WORKLOAD__TOKEN_PRIVATE_KEY_FILE",
         "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem",
     )
 
     config = AuthConfig()
 
-    assert (
-        config.oidc.workload_token_private_key_file
-        == "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem"
+    assert config.oidc.workload is not None
+    assert config.oidc.workload.token_private_key_file == (
+        "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem"
     )
 
 

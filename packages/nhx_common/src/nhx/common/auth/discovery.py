@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_AUTH_DISCOVERY_SCOPES = "openid profile email offline_access"
 BearerTokenSource = Literal["access_token", "id_token"]
@@ -26,29 +26,16 @@ def parse_bearer_token_source(value: object) -> BearerTokenSource:
     raise ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'")
 
 
-class OIDCDiscoveryResponse(BaseModel):
-    """OIDC discovery response returned by the auth discovery endpoint."""
+class OidcAdvertisedClientBase(BaseModel):
+    """Fields shared by interactive OIDC clients."""
 
     model_config = ConfigDict(extra="ignore", strict=True)
 
-    issuer: str
-    authorization_endpoint: str | None = None
-    token_endpoint: str | None = None
-    device_authorization_endpoint: str | None = None
-    userinfo_endpoint: str | None = None
     client_id: str
-    cli_client_id: str | None = None
+    default: bool
     bearer_token_source: BearerTokenSource = "access_token"
-    device_authorization_requires_device_id: bool = False
-    device_authorization_display_name: str | None = None
-    device_token_request_includes_scope: bool = True
     default_scopes: str = DEFAULT_AUTH_DISCOVERY_SCOPES
     scope_prefix: str | None = None
-    workload_token_exchange_enabled: bool = False
-    workload_client_id: str | None = None
-    workload_token_endpoint: str | None = None
-    workload_audience: str | None = None
-    workload_scope: str | None = None
 
     @field_validator("bearer_token_source", mode="before")
     @classmethod
@@ -57,6 +44,52 @@ class OIDCDiscoveryResponse(BaseModel):
             return parse_bearer_token_source(value)
         except ValueError as exc:
             raise AuthDiscoveryBearerTokenSourceError(str(exc)) from exc
+
+
+class PublicOidcAdvertisedClient(OidcAdvertisedClientBase):
+    """Public client using direct provider tokens or NeMo-managed sessions."""
+
+    name: Literal["public"] = "public"
+    client_authentication: Literal["public"] = "public"
+    server_side_sessions: bool = False
+    authorization_endpoint: str | None = None
+    token_endpoint: str | None = None
+    device_authorization_endpoint: str | None = None
+    device_authorization_requires_device_id: bool = False
+    device_authorization_display_name: str | None = None
+    device_token_request_includes_scope: bool = True
+    authorization_start_endpoint: str | None = None
+    broker_token_endpoint: str | None = None
+
+
+class ConfidentialOidcAdvertisedClient(OidcAdvertisedClientBase):
+    """Confidential client that talks only to the NeMo Helix broker."""
+
+    name: Literal["confidential"] = "confidential"
+    client_authentication: Literal["client_secret_basic"] = "client_secret_basic"
+    authorization_start_endpoint: str
+    broker_token_endpoint: str
+
+
+OidcAdvertisedClient = Annotated[
+    PublicOidcAdvertisedClient | ConfidentialOidcAdvertisedClient,
+    Field(discriminator="name"),
+]
+
+
+class OIDCDiscoveryResponse(BaseModel):
+    """OIDC discovery response returned by the auth discovery endpoint."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    issuer: str
+    userinfo_endpoint: str | None = None
+    clients: list[OidcAdvertisedClient] = Field(default_factory=list)
+    workload_token_exchange_enabled: bool = False
+    workload_client_id: str | None = None
+    workload_token_endpoint: str | None = None
+    workload_audience: str | None = None
+    workload_scope: str | None = None
 
 
 class AuthDiscoveryResponse(BaseModel):

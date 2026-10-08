@@ -113,8 +113,17 @@ class JWTValidator:
                     "Cannot introspect opaque token: configured introspection client secret env var is not set or empty"
                 )
                 return None
-        client_id = self.config.oidc.introspection_client_id or self.config.oidc.client_id
-        auth = (client_id, client_secret) if client_secret else None
+        confidential_client = self.config.oidc.confidential_client
+        public_client = self.config.oidc.public_client
+        client_id = self.config.oidc.introspection_client_id
+        if client_id is None and confidential_client is not None:
+            client_id = confidential_client.client_id
+        if client_id is None and public_client is not None:
+            client_id = public_client.client_id
+        if client_secret and client_id is None:
+            logger.warning("Cannot introspect opaque token: no introspection client ID is configured")
+            return None
+        auth = (client_id, client_secret) if client_id is not None and client_secret is not None else None
         client = http_clients.shared_async_http_client()
         response = await client.post(
             introspection_endpoint,

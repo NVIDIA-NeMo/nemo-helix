@@ -250,3 +250,41 @@ class DBAccountIdentity(Base):
         Index("idx_account_identities_account_id", "account_id"),
         Index("idx_account_identities_status", "status"),
     )
+
+
+class DBAccountCredential(Base):
+    """Account-bound credential lifecycle and encrypted provider state."""
+
+    __tablename__ = "account_credentials"
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    owner_account_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    subject_account_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    account_identity_id: Mapped[Optional[str]] = mapped_column(
+        String(255), ForeignKey("account_identities.id", ondelete="CASCADE"), nullable=True
+    )
+    credential_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    lookup_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", server_default="ACTIVE")
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, server_default=func.now(), nullable=False)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    public_metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    encrypted_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    db_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+    __mapper_args__ = {"version_id_col": db_version}
+    __table_args__ = (
+        UniqueConstraint("credential_type", "lookup_hash", name="uq_account_credentials_type_lookup_hash"),
+        Index("idx_account_credentials_owner", "owner_account_id"),
+        Index("idx_account_credentials_subject", "subject_account_id"),
+        Index("idx_account_credentials_identity", "account_identity_id"),
+        Index("idx_account_credentials_type_status", "credential_type", "status"),
+        Index("idx_account_credentials_expires", "expires_at"),
+    )

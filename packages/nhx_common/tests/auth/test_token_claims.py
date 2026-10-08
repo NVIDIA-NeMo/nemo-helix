@@ -5,7 +5,7 @@ import pytest
 from nhx.common.auth.json_payload import JsonObject
 from nhx.common.auth.token_claims import ActorClaims, TokenClaimsExtractor
 from nhx.common.config import AuthConfig
-from nhx.common.config.base import OIDCConfig
+from nhx.common.config.base import OIDCConfig, OIDCPublicClientConfig
 
 
 @pytest.fixture
@@ -16,11 +16,10 @@ def auth_config() -> AuthConfig:
         oidc=OIDCConfig(
             enabled=True,
             issuer="https://sso.example.com",
-            client_id="test-client",
+            public_client=OIDCPublicClientConfig(client_id="test-client", scope_prefix="nhx:"),
             email_claim="mail",
             groups_claim="roles",
             subject_claim="preferred_username",
-            scope_prefix="nhx:",
         ),
     )
 

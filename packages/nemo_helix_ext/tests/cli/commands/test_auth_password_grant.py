@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from nemo_helix_ext.cli.app import app
+from nemo_helix_plugin.client.oidc import AdvertisedOidcClient, NHXOIDCConfig
 from typer.testing import CliRunner
 
 from ..utils import assert_exit_code
@@ -13,17 +14,21 @@ from ..utils import assert_exit_code
 runner = CliRunner()
 
 
-def _mock_oidc_config() -> SimpleNamespace:
-    return SimpleNamespace(
+def _mock_oidc_config() -> NHXOIDCConfig:
+    return NHXOIDCConfig(
         auth_enabled=True,
         issuer="https://idp.example.com",
-        client_id="test-client",
-        cli_client_id=None,
-        bearer_token_source="access_token",
-        token_endpoint="https://idp.example.com/token",
-        device_authorization_endpoint="https://idp.example.com/device",
-        default_scopes="openid profile email offline_access",
-        scope_prefix="api://nhx",
+        clients=(
+            AdvertisedOidcClient(
+                name="public",
+                client_id="test-client",
+                client_authentication="public",
+                default=True,
+                token_endpoint="https://idp.example.com/token",
+                device_authorization_endpoint="https://idp.example.com/device",
+                scope_prefix="api://nhx",
+            ),
+        ),
     )
 
 
@@ -43,7 +48,7 @@ def test_login_password_grant_with_flags(monkeypatch: pytest.MonkeyPatch):
         ),
     )
     monkeypatch.setattr(
-        "nemo_helix_ext.cli.commands.auth.decode_jwt_claims",
+        "nemo_helix_ext.auth.login.decode_jwt_claims",
         lambda *_: {"email": "user@example.com", "scp": "platform:read"},
     )
 
@@ -66,6 +71,7 @@ def test_login_password_grant_with_flags(monkeypatch: pytest.MonkeyPatch):
     mock_write.assert_called_once()
     assert mock_write.call_args.args[0]["access_token"] == "access-token"
     assert mock_write.call_args.args[0]["refresh_token"] == "refresh-token"
+    assert mock_write.call_args.args[0]["token_broker_url"] is None
 
 
 def test_login_password_grant_with_env(monkeypatch: pytest.MonkeyPatch):
@@ -81,7 +87,7 @@ def test_login_password_grant_with_env(monkeypatch: pytest.MonkeyPatch):
         lambda **_: SimpleNamespace(token_for_nhx="access-token", refresh_token=None, scope=None, expires_in=3600),
     )
     monkeypatch.setattr(
-        "nemo_helix_ext.cli.commands.auth.decode_jwt_claims",
+        "nemo_helix_ext.auth.login.decode_jwt_claims",
         lambda *_: {"email": "user@example.com", "scp": ""},
     )
 
@@ -91,3 +97,4 @@ def test_login_password_grant_with_env(monkeypatch: pytest.MonkeyPatch):
     assert_exit_code(result, 0)
     mock_write.assert_called_once()
     assert mock_write.call_args.args[0]["access_token"] == "access-token"
+    assert mock_write.call_args.args[0]["token_broker_url"] is None

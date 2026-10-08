@@ -16,6 +16,7 @@ api:
 platformConfig:
   auth:
     oidc:
-      workload_token_exchange_enabled: true
-      workload_token_key_id: nemo-workload-exchange
-      workload_token_private_key_file: /etc/nhx/workload-token/private-key.pem
+      workload:
+        client_id: nemo-workload
+        token_key_id: nemo-workload-exchange
+        token_private_key_file: /etc/nhx/workload-token/private-key.pem

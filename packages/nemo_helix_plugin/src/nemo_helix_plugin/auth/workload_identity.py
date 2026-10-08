@@ -51,7 +51,7 @@ def is_workload_identity_token_exchange_enabled() -> bool:
     try:
         from nhx.common.config import get_auth_config
 
-        return bool(get_auth_config().oidc.workload_token_exchange_enabled)
+        return get_auth_config().oidc.workload is not None
     except ImportError:
         logger.debug("Could not resolve auth config for workload identity token exchange", exc_info=True)
         return False
@@ -67,7 +67,7 @@ def get_workload_identity_token_audience() -> str:
         from nhx.common.config import get_auth_config
 
         oidc = get_auth_config().oidc
-        return oidc.workload_client_id or oidc.client_id or DEFAULT_WORKLOAD_AUDIENCE
+        return oidc.workload.client_id if oidc.workload is not None else DEFAULT_WORKLOAD_AUDIENCE
     except ImportError:
         logger.debug("Could not resolve auth config for workload identity audience", exc_info=True)
         return DEFAULT_WORKLOAD_AUDIENCE
@@ -82,7 +82,11 @@ def get_workload_delegation_audience() -> str:
         from nhx.common.config import get_auth_config
 
         oidc = get_auth_config().oidc
-        return oidc.workload_audience or oidc.audience or DEFAULT_WORKLOAD_AUDIENCE
+        return (
+            (oidc.workload.audience if oidc.workload is not None else None)
+            or oidc.audience
+            or DEFAULT_WORKLOAD_AUDIENCE
+        )
     except ImportError:
         logger.debug("Could not resolve auth config for workload delegation audience", exc_info=True)
         return DEFAULT_WORKLOAD_AUDIENCE

@@ -34,7 +34,7 @@ def test_all_provider_manifests_share_the_same_contract(monkeypatch):
         (
             "e2e_setup_password_grant",
             None,
-            {"password_env_var": "AUTHENTIK_SETUP_PASSWORD"},
+            {"password": "duplicate-source"},
         ),
         (
             "interactive_user_password_grant",
@@ -86,15 +86,17 @@ def test_authentik_manifest_declares_real_token_acquisition_contract():
     workload_contract = manifest["workload_contract"]
 
     assert interactive_user_identity["username"] == "nemo-user"
-    assert interactive_user_identity["password"] == "nemo-user-password-dev"
+    assert interactive_user_identity["password_env_var"] == "AUTHENTIK_INTERACTIVE_USER_PASSWORD"
     assert interactive_user_identity["expected_email"] == "nemo-user@example.com"
     assert token_acquisition["token_endpoint"]
     setup_grant = token_acquisition["e2e_setup_password_grant"]
     assert setup_grant["grant_type"] == "password"
     assert setup_grant["client_id"] == "nemo-helix"
     assert setup_grant["username"] == "nemo-setup"
-    assert setup_grant["password"] == "nemo-setup-token-secret-dev"
-    assert "password_env_var" not in setup_grant
+    assert setup_grant["password_env_var"] == "AUTHENTIK_SETUP_PASSWORD"
+    assert setup_grant["client_secret_env_var"] == "AUTHENTIK_SETUP_CLIENT_SECRET"
+    assert "password" not in setup_grant
+    assert "client_secret" not in setup_grant
     assert "interactive_user_password_grant" not in token_acquisition
     workload_provider_grant = token_acquisition["workload_provider_password_grant"]
     assert workload_provider_grant["grant_type"] == "password"
@@ -177,6 +179,9 @@ def test_authentik_manifest_declares_extended_startup_timeouts_for_real_oidc():
 
 
 def test_authentik_provider_config_loads_token_acquisition_fields(monkeypatch):
+    monkeypatch.setenv("AUTHENTIK_INTERACTIVE_USER_PASSWORD", "interactive-secret")
+    monkeypatch.setenv("AUTHENTIK_SETUP_PASSWORD", "setup-password")
+    monkeypatch.setenv("AUTHENTIK_SETUP_CLIENT_SECRET", "setup-client-secret")
     monkeypatch.setenv("AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD", "shared-secret")
     provider = next(config for config in load_provider_configs() if config.name == "authentik")
 
@@ -186,11 +191,12 @@ def test_authentik_provider_config_loads_token_acquisition_fields(monkeypatch):
     assert provider.discovery_url == "https://127.0.0.1:18080/application/o/nemo/.well-known/openid-configuration"
     assert provider.token_endpoint == "https://127.0.0.1:18080/application/o/token/"
     assert provider.interactive_user_username == "nemo-user"
-    assert provider.interactive_user_password == "nemo-user-password-dev"
+    assert provider.interactive_user_password == "interactive-secret"
     assert provider.interactive_user_expected_email == "nemo-user@example.com"
     assert provider.e2e_setup_password_grant is not None
     assert provider.e2e_setup_password_grant["grant_type"] == "password"
-    assert provider.e2e_setup_password_grant["password"] == "nemo-setup-token-secret-dev"
+    assert provider.e2e_setup_password_grant["password"] == "setup-password"
+    assert provider.e2e_setup_password_grant["client_secret"] == "setup-client-secret"
     assert provider.interactive_user_password_grant is None
     assert provider.workload_provider_password_grant is not None
     assert provider.workload_provider_password_grant["grant_type"] == "password"
@@ -207,6 +213,8 @@ def test_authentik_provider_config_loads_token_acquisition_fields(monkeypatch):
 
 
 def test_authentik_provider_config_resolves_workload_provider_password_grant_env_var(monkeypatch):
+    monkeypatch.setenv("AUTHENTIK_SETUP_PASSWORD", "setup-password")
+    monkeypatch.setenv("AUTHENTIK_SETUP_CLIENT_SECRET", "setup-client-secret")
     monkeypatch.setenv("AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD", "shared-secret")
 
     provider = load_provider_config(Path("contrib/auth/authentik/manifest.yaml"))
@@ -215,7 +223,8 @@ def test_authentik_provider_config_resolves_workload_provider_password_grant_env
     assert provider.workload_provider_password_grant["password"] == "shared-secret"
     assert "password_env_var" not in provider.workload_provider_password_grant
     assert provider.e2e_setup_password_grant is not None
-    assert provider.e2e_setup_password_grant["password"] == "nemo-setup-token-secret-dev"
+    assert provider.e2e_setup_password_grant["password"] == "setup-password"
+    assert provider.e2e_setup_password_grant["client_secret"] == "setup-client-secret"
     assert "password_env_var" not in provider.e2e_setup_password_grant
 
 

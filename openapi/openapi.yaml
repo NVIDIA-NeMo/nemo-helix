@@ -63,19 +63,9 @@ paths:
         \ to authenticate with this NeMo Helix deployment.\n\n**Response fields:**\n\
         \n- `auth_enabled`: Whether authentication is enabled on this cluster\n- `oidc`:\
         \ OIDC configuration (only present when OIDC is enabled)\n  - `issuer`: The\
-        \ OIDC issuer URL\n  - `authorization_endpoint`: Authorization endpoint for\
-        \ browser-based flows\n  - `token_endpoint`: Token exchange endpoint\n  -\
-        \ `device_authorization_endpoint`: Device flow authorization endpoint (for\
-        \ CLI)\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `client_id`: OAuth\
-        \ client ID to use\n  - `cli_client_id`: Optional OAuth client ID dedicated\
-        \ to interactive CLI authentication\n  - `bearer_token_source`: Token response\
-        \ field clients send to NeMo Helix APIs\n  - `device_authorization_requires_device_id`:\
-        \ Whether CLI device requests must include a generated `device_id`\n  - `device_authorization_display_name`:\
-        \ Optional device name shown during device authorization\n  - `device_token_request_includes_scope`:\
-        \ Whether CLI device token requests include the requested scopes\n  - `default_scopes`:\
-        \ OAuth scopes to request during authentication\n  - `scope_prefix`: Prefix\
-        \ clients prepend to NeMo Helix API scopes and NeMo Helix strips from returned\
-        \ token scopes\n  - `workload_token_exchange_enabled`: Whether SDK workload\
+        \ OIDC issuer URL\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `clients`:\
+        \ Complete public and confidential user-login client contracts. Exactly one\
+        \ is the default.\n  - `workload_token_exchange_enabled`: Whether SDK workload\
         \ identity token exchange is enabled\n  - `workload_client_id`: OAuth client\
         \ ID to use for workload identity token exchange\n  - `workload_token_endpoint`:\
         \ Token endpoint to use only for workload identity token exchange\n  - `workload_audience`:\
@@ -493,6 +483,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/authorize:
+    post:
+      tags:
+      - Authentication
+      summary: Start Token Authorization
+      operationId: start_token_authorization_apis_auth_v2_authorize_post
+      parameters:
+      - name: client
+        in: query
+        required: false
+        schema:
+          enum:
+          - public
+          - confidential
+          type: string
+          default: confidential
+          title: Client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenAuthorizationStart'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Start Token Authorization Apis Auth V2 Authorize Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/authorize/{transaction_id}:
+    get:
+      tags:
+      - Authentication
+      summary: Continue Token Authorization
+      operationId: continue_token_authorization_apis_auth_v2_authorize__transaction_id__get
+      parameters:
+      - name: transaction_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Transaction Id
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/auth/v2/iam/role-bindings:
     get:
       tags:
@@ -647,6 +703,149 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/login:
+    get:
+      tags:
+      - Authentication
+      summary: Start Web Session Login
+      operationId: start_web_session_login_apis_auth_v2_login_get
+      parameters:
+      - name: return_to
+        in: query
+        required: false
+        schema:
+          type: string
+          default: /
+          title: Return To
+      - name: client
+        in: query
+        required: false
+        schema:
+          enum:
+          - public
+          - confidential
+          type: string
+          default: confidential
+          title: Client
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/login/callback:
+    get:
+      tags:
+      - Authentication
+      summary: Token Authorization Callback
+      operationId: token_authorization_callback_apis_auth_v2_login_callback_get
+      parameters:
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          title: State
+      - name: code
+        in: query
+        required: false
+        schema:
+          title: Code
+          type: string
+      - name: error
+        in: query
+        required: false
+        schema:
+          title: Error
+          type: string
+      - name: error_description
+        in: query
+        required: false
+        schema:
+          title: Error Description
+          type: string
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/logout:
+    post:
+      tags:
+      - Authentication
+      summary: Logout
+      operationId: logout_apis_auth_v2_logout_post
+      responses:
+        '204':
+          description: Successful Response
+  /apis/auth/v2/session:
+    get:
+      tags:
+      - Authentication
+      summary: Web Session
+      operationId: web_session_apis_auth_v2_session_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSessionResponse'
+  /apis/auth/v2/token:
+    post:
+      tags:
+      - Authentication
+      summary: Broker Token
+      operationId: broker_token_apis_auth_v2_token_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - $ref: '#/components/schemas/AuthorizationCodeBrokerTokenRequest'
+              - $ref: '#/components/schemas/RefreshTokenBrokerTokenRequest'
+              title: Body
+              discriminator:
+                propertyName: grant_type
+                mapping:
+                  authorization_code: '#/components/schemas/AuthorizationCodeBrokerTokenRequest'
+                  refresh_token: '#/components/schemas/RefreshTokenBrokerTokenRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  anyOf:
+                  - type: string
+                  - type: integer
+                type: object
+                title: Response Broker Token Apis Auth V2 Token Post
         '422':
           description: Validation Error
           content:
@@ -9771,6 +9970,28 @@ components:
       - token_kind
       title: AuthenticateResponse
       description: Successful bearer token authentication response for direct callers.
+    AuthorizationCodeBrokerTokenRequest:
+      properties:
+        grant_type:
+          type: string
+          const: authorization_code
+          title: Grant Type
+        code:
+          type: string
+          title: Code
+        code_verifier:
+          type: string
+          maxLength: 128
+          minLength: 43
+          pattern: ^[A-Za-z0-9._~-]+$
+          title: Code Verifier
+      additionalProperties: false
+      type: object
+      required:
+      - grant_type
+      - code
+      - code_verifier
+      title: AuthorizationCodeBrokerTokenRequest
     AutoAlignOptions:
       properties:
         guardrails_config:
@@ -10324,6 +10545,52 @@ components:
       type: object
       title: ComputeResources
       description: Resource requirements matching k8s ResourceRequirements format.
+    ConfidentialOidcAdvertisedClient:
+      properties:
+        client_id:
+          type: string
+          title: Client Id
+        default:
+          type: boolean
+          title: Default
+        bearer_token_source:
+          type: string
+          enum:
+          - access_token
+          - id_token
+          title: Bearer Token Source
+          default: access_token
+        default_scopes:
+          type: string
+          title: Default Scopes
+          default: openid profile email offline_access
+        scope_prefix:
+          title: Scope Prefix
+          type: string
+        name:
+          type: string
+          const: confidential
+          title: Name
+          default: confidential
+        client_authentication:
+          type: string
+          const: client_secret_basic
+          title: Client Authentication
+          default: client_secret_basic
+        authorization_start_endpoint:
+          type: string
+          title: Authorization Start Endpoint
+        broker_token_endpoint:
+          type: string
+          title: Broker Token Endpoint
+      type: object
+      required:
+      - client_id
+      - default
+      - authorization_start_endpoint
+      - broker_token_endpoint
+      title: ConfidentialOidcAdvertisedClient
+      description: Confidential client that talks only to the NeMo Helix broker.
     ContainerExecutorConfig:
       properties:
         gpu:
@@ -15880,7 +16147,7 @@ components:
         token_audience:
           title: Token Audience
           description: Audience for the projected service account token. Defaults
-            to auth.oidc.workload_client_id, auth.oidc.client_id, then 'nemo-helix'.
+            to auth.oidc.workload.client_id, then 'nemo-helix'.
           type: string
       additionalProperties: false
       type: object
@@ -17801,49 +18068,21 @@ components:
         issuer:
           type: string
           title: Issuer
-        authorization_endpoint:
-          title: Authorization Endpoint
-          type: string
-        token_endpoint:
-          title: Token Endpoint
-          type: string
-        device_authorization_endpoint:
-          title: Device Authorization Endpoint
-          type: string
         userinfo_endpoint:
           title: Userinfo Endpoint
           type: string
-        client_id:
-          type: string
-          title: Client Id
-        cli_client_id:
-          title: Cli Client Id
-          type: string
-        bearer_token_source:
-          type: string
-          enum:
-          - access_token
-          - id_token
-          title: Bearer Token Source
-          default: access_token
-        device_authorization_requires_device_id:
-          type: boolean
-          title: Device Authorization Requires Device Id
-          default: false
-        device_authorization_display_name:
-          title: Device Authorization Display Name
-          type: string
-        device_token_request_includes_scope:
-          type: boolean
-          title: Device Token Request Includes Scope
-          default: true
-        default_scopes:
-          type: string
-          title: Default Scopes
-          default: openid profile email offline_access
-        scope_prefix:
-          title: Scope Prefix
-          type: string
+        clients:
+          items:
+            oneOf:
+            - $ref: '#/components/schemas/PublicOidcAdvertisedClient'
+            - $ref: '#/components/schemas/ConfidentialOidcAdvertisedClient'
+            discriminator:
+              propertyName: name
+              mapping:
+                confidential: '#/components/schemas/ConfidentialOidcAdvertisedClient'
+                public: '#/components/schemas/PublicOidcAdvertisedClient'
+          type: array
+          title: Clients
         workload_token_exchange_enabled:
           type: boolean
           title: Workload Token Exchange Enabled
@@ -17863,7 +18102,6 @@ components:
       type: object
       required:
       - issuer
-      - client_id
       title: OIDCDiscoveryResponse
       description: OIDC discovery response returned by the auth discovery endpoint.
     OpenAIListModelsResp:
@@ -18501,6 +18739,74 @@ components:
       required:
       - data
       title: PromptsPage
+    PublicOidcAdvertisedClient:
+      properties:
+        client_id:
+          type: string
+          title: Client Id
+        default:
+          type: boolean
+          title: Default
+        bearer_token_source:
+          type: string
+          enum:
+          - access_token
+          - id_token
+          title: Bearer Token Source
+          default: access_token
+        default_scopes:
+          type: string
+          title: Default Scopes
+          default: openid profile email offline_access
+        scope_prefix:
+          title: Scope Prefix
+          type: string
+        name:
+          type: string
+          const: public
+          title: Name
+          default: public
+        client_authentication:
+          type: string
+          const: public
+          title: Client Authentication
+          default: public
+        server_side_sessions:
+          type: boolean
+          title: Server Side Sessions
+          default: false
+        authorization_endpoint:
+          title: Authorization Endpoint
+          type: string
+        token_endpoint:
+          title: Token Endpoint
+          type: string
+        device_authorization_endpoint:
+          title: Device Authorization Endpoint
+          type: string
+        device_authorization_requires_device_id:
+          type: boolean
+          title: Device Authorization Requires Device Id
+          default: false
+        device_authorization_display_name:
+          title: Device Authorization Display Name
+          type: string
+        device_token_request_includes_scope:
+          type: boolean
+          title: Device Token Request Includes Scope
+          default: true
+        authorization_start_endpoint:
+          title: Authorization Start Endpoint
+          type: string
+        broker_token_endpoint:
+          title: Broker Token Endpoint
+          type: string
+      type: object
+      required:
+      - client_id
+      - default
+      title: PublicOidcAdvertisedClient
+      description: Public client using direct provider tokens or NeMo-managed sessions.
     RailStatus:
       properties:
         status:
@@ -18761,6 +19067,21 @@ components:
       type: object
       title: ReasoningConfig
       description: Configuration for reasoning mode in content safety models.
+    RefreshTokenBrokerTokenRequest:
+      properties:
+        grant_type:
+          type: string
+          const: refresh_token
+          title: Grant Type
+        refresh_token:
+          type: string
+          title: Refresh Token
+      additionalProperties: false
+      type: object
+      required:
+      - grant_type
+      - refresh_token
+      title: RefreshTokenBrokerTokenRequest
     RegexDetection:
       properties:
         input:
@@ -19785,6 +20106,28 @@ components:
       - task
       title: TaskPrompt
       description: Configuration for prompts that will be used for a specific task.
+    TokenAuthorizationStart:
+      properties:
+        redirect_uri:
+          type: string
+          title: Redirect Uri
+        code_challenge:
+          type: string
+          maxLength: 128
+          minLength: 43
+          pattern: ^[A-Za-z0-9_-]+$
+          title: Code Challenge
+        state:
+          type: string
+          maxLength: 512
+          minLength: 16
+          title: State
+      type: object
+      required:
+      - redirect_uri
+      - code_challenge
+      - state
+      title: TokenAuthorizationStart
     TokenRollupResponse:
       properties:
         sum:
@@ -21098,6 +21441,34 @@ components:
       type: object
       title: VolcanoJobExecutionProfileConfig
       description: Configuration for Volcano Job Execution Profile
+    WebSessionResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        email:
+          title: Email
+          type: string
+        groups:
+          items:
+            type: string
+          type: array
+          title: Groups
+        account_id:
+          type: string
+          title: Account Id
+        authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Authz Aliases
+      type: object
+      required:
+      - id
+      - groups
+      - account_id
+      - authz_aliases
+      title: WebSessionResponse
     WorkloadTokenExchangeErrorResponse:
       properties:
         error:

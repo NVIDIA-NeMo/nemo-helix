@@ -29,7 +29,7 @@ from nhx.common.auth.workload_delegations import (
     reference_delegation_name,
 )
 from nhx.common.config import AuthConfig, Configuration
-from nhx.common.config.base import AccessKeyConfig, OIDCConfig, TokenSigningConfig
+from nhx.common.config.base import AccessKeyConfig, OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
 from nhx.common.entities import SYSTEM_WORKSPACE, EntityNotFoundError
 from nhx.core.auth.api.v2 import workload_token_exchange as exchange
 from pydantic import ValidationError
@@ -83,6 +83,11 @@ def _private_key_pem(private_key: rsa.RSAPrivateKey) -> str:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     ).decode()
+
+
+def _workload(config: AuthConfig) -> OIDCWorkloadConfig:
+    assert config.oidc.workload is not None
+    return config.oidc.workload
 
 
 def _openapi(client: TestClient) -> dict[str, Any]:
@@ -252,14 +257,14 @@ def exchange_config(workload_signing_key: rsa.RSAPrivateKey, tmp_path) -> AuthCo
             enabled=True,
             issuer="https://idp.example.com/application/o/nemo-cli/",
             additional_issuers=["https://idp.example.com/application/o/nemo/"],
-            client_id="nemo-helix-cli",
-            workload_token_exchange_enabled=True,
-            workload_client_id="nemo-helix-workload",
-            workload_audience="nemo-helix",
-            workload_scope="openid email groups",
-            workload_subject_jwks_uri="https://idp.example.com/application/o/nemo-workload/jwks/",
-            workload_subject_issuers=["https://idp.example.com/application/o/nemo-workload/"],
-            workload_token_private_key_file=str(private_key_file),
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-helix-workload",
+                audience="nemo-helix",
+                scope="openid email groups",
+                subject_jwks_uri="https://idp.example.com/application/o/nemo-workload/jwks/",
+                subject_issuers=["https://idp.example.com/application/o/nemo-workload/"],
+                token_private_key_file=str(private_key_file),
+            ),
         ),
     )
 
@@ -355,9 +360,11 @@ def test_jwks_includes_distinct_workload_and_access_key_signing_keys(
         ),
         oidc=OIDCConfig(
             enabled=True,
-            workload_token_exchange_enabled=True,
-            workload_token_key_id="workload-signing",
-            workload_token_private_key_file=str(workload_private_key_file),
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-helix-workload",
+                token_key_id="workload-signing",
+                token_private_key_file=str(workload_private_key_file),
+            ),
         ),
         access_keys=AccessKeyConfig(enabled=True),
     )
@@ -376,7 +383,7 @@ def test_jwks_deduplicates_shared_workload_and_access_key_signing_key(
     config = exchange_config.model_copy(
         update={
             "token_signing": exchange_config.token_signing.model_copy(
-                update={"private_key_file": exchange_config.oidc.workload_token_private_key_file}
+                update={"private_key_file": _workload(exchange_config).token_private_key_file}
             ),
             "access_keys": AccessKeyConfig(enabled=True),
         }
@@ -684,7 +691,7 @@ def test_token_exchange_accepts_single_allowed_audience(
     exchange_service: exchange.WorkloadTokenExchangeService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    exchange_config.oidc.workload_allowed_audiences.append("extra-audience")
+    _workload(exchange_config).allowed_audiences.append("extra-audience")
 
     async def decode_subject_token(
         config: AuthConfig, subject_token: str, audience: str
@@ -739,7 +746,7 @@ def test_token_exchange_mints_access_token_signed_by_configured_key(
 
     assert response.status_code == 200
     response_body = response.json()
-    assert response_body["expires_in"] == exchange_config.oidc.workload_token_ttl_seconds
+    assert response_body["expires_in"] == _workload(exchange_config).token_ttl_seconds
     access_token = response_body["access_token"]
     signing_key = exchange_service.workload_signing_key(exchange_config)
     assert exchange.jwt.get_unverified_header(access_token)["kid"] == signing_key.kid
@@ -908,7 +915,7 @@ def test_delegated_access_token_expiry_is_capped_by_delegation_expiry(
     exchange_service: exchange.WorkloadTokenExchangeService,
     entity_client: _FakeEntityClient,
 ) -> None:
-    exchange_config.oidc.workload_token_ttl_seconds = 600
+    _workload(exchange_config).token_ttl_seconds = 600
     subject_token, token_hash = create_opaque_docker_proof_token(_docker_delegation_name())
     delegation_expires_at = datetime.now(timezone.utc) + timedelta(seconds=120)
     delegation = _delegation_entity(
@@ -935,7 +942,7 @@ def test_delegated_access_token_expiry_keeps_configured_ttl_when_delegation_expi
     exchange_service: exchange.WorkloadTokenExchangeService,
     entity_client: _FakeEntityClient,
 ) -> None:
-    exchange_config.oidc.workload_token_ttl_seconds = 120
+    _workload(exchange_config).token_ttl_seconds = 120
     subject_token, token_hash = create_opaque_docker_proof_token(_docker_delegation_name())
     delegation = _delegation_entity(
         opaque_subject_token_hash=token_hash,
@@ -1162,7 +1169,7 @@ def test_kubernetes_reference_lookup_default_retry_budget_uses_five_seconds(
 
 
 def test_validated_audience_accepts_configured_allowlist(exchange_config: AuthConfig) -> None:
-    exchange_config.oidc.workload_allowed_audiences.append("extra-audience")
+    _workload(exchange_config).allowed_audiences.append("extra-audience")
 
     assert exchange._validated_audience(exchange_config, "extra-audience") == "extra-audience"
 
@@ -1183,8 +1190,7 @@ def test_workload_signing_key_uses_shared_token_signing_when_workload_override_u
         oidc=OIDCConfig(
             enabled=True,
             issuer="https://idp.example.com/application/o/nemo-cli/",
-            client_id="nemo-helix-cli",
-            workload_token_exchange_enabled=True,
+            workload=OIDCWorkloadConfig(client_id="nemo-helix-workload"),
         ),
     )
 
@@ -1194,24 +1200,24 @@ def test_workload_signing_key_uses_shared_token_signing_when_workload_override_u
 
 
 def test_workload_exchange_requires_resolved_token_signing_key_id() -> None:
-    with pytest.raises(ValidationError, match="workload_token_key_id or auth.token_signing.key_id"):
+    with pytest.raises(ValidationError, match="workload.token_key_id or auth.token_signing.key_id"):
         AuthConfig(
             enabled=True,
             token_signing=TokenSigningConfig(key_id=""),
             oidc=OIDCConfig(
                 enabled=True,
-                workload_token_exchange_enabled=True,
+                workload=OIDCWorkloadConfig(client_id="nemo-helix-workload"),
             ),
         )
 
 
 def test_workload_exchange_requires_configured_signing_private_key_file() -> None:
-    with pytest.raises(ValidationError, match="workload_token_private_key_file or auth.token_signing.private_key_file"):
+    with pytest.raises(ValidationError, match="workload.token_private_key_file or auth.token_signing.private_key_file"):
         AuthConfig(
             enabled=True,
             oidc=OIDCConfig(
                 enabled=True,
-                workload_token_exchange_enabled=True,
+                workload=OIDCWorkloadConfig(client_id="nemo-helix-workload"),
             ),
         )
 
@@ -1222,16 +1228,15 @@ def test_workload_exchange_accepts_workload_key_id_when_shared_key_id_unset(tmp_
         token_signing=TokenSigningConfig(key_id="", private_key_file=str(tmp_path / "workload-token.pem")),
         oidc=OIDCConfig(
             enabled=True,
-            workload_token_exchange_enabled=True,
-            workload_token_key_id="workload-signing",
+            workload=OIDCWorkloadConfig(client_id="nemo-helix-workload", token_key_id="workload-signing"),
         ),
     )
 
-    assert config.oidc.workload_token_key_id == "workload-signing"
+    assert _workload(config).token_key_id == "workload-signing"
 
 
 def test_workload_exchange_requires_distinct_key_id_for_distinct_access_key_jwks_file(tmp_path: Path) -> None:
-    with pytest.raises(ValidationError, match="workload_token_key_id must be distinct"):
+    with pytest.raises(ValidationError, match="workload.token_key_id must be distinct"):
         AuthConfig(
             enabled=True,
             token_signing=TokenSigningConfig(
@@ -1240,8 +1245,10 @@ def test_workload_exchange_requires_distinct_key_id_for_distinct_access_key_jwks
             ),
             oidc=OIDCConfig(
                 enabled=True,
-                workload_token_exchange_enabled=True,
-                workload_token_private_key_file=str(tmp_path / "workload-token.pem"),
+                workload=OIDCWorkloadConfig(
+                    client_id="nemo-helix-workload",
+                    token_private_key_file=str(tmp_path / "workload-token.pem"),
+                ),
             ),
             access_keys=AccessKeyConfig(enabled=True),
         )
@@ -1265,10 +1272,11 @@ def test_workload_signing_key_specific_override_wins_over_shared_token_signing(
         oidc=OIDCConfig(
             enabled=True,
             issuer="https://idp.example.com/application/o/nemo-cli/",
-            client_id="nemo-helix-cli",
-            workload_token_exchange_enabled=True,
-            workload_token_key_id="nemo-workload-exchange",
-            workload_token_private_key_file=str(workload_private_key_file),
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-helix-workload",
+                token_key_id="nemo-workload-exchange",
+                token_private_key_file=str(workload_private_key_file),
+            ),
         ),
     )
 
@@ -1345,7 +1353,7 @@ def test_auth_jwks_response_uses_async_workload_public_jwk_path(exchange_config:
     assert signing_key_cache.calls == [
         {
             "kid": "nemo-helix-signing",
-            "private_key_file": exchange_config.oidc.workload_token_private_key_file,
+            "private_key_file": _workload(exchange_config).token_private_key_file,
             "missing_private_key_message": "auth.token_signing.private_key_file must be configured for workload token exchange",
             "invalid_private_key_message": "workload token private key must be an RSA private key",
         }
@@ -1373,7 +1381,7 @@ def _signed_subject_token(
     key_id: str | None = None,
     extra_claims: dict[str, Any] | None = None,
 ) -> str:
-    token_issuer = issuer or config.oidc.workload_subject_issuers[0]
+    token_issuer = issuer or _workload(config).subject_issuers[0]
     signing_key = exchange_service.workload_signing_key(config)
     claims = {
         "iss": token_issuer,
@@ -1594,7 +1602,7 @@ def test_jwt_subject_token_decoder_requires_explicit_workload_subject_issuers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_subject_jwks_client(exchange_config, exchange_service, monkeypatch)
-    exchange_config.oidc.workload_subject_issuers = []
+    _workload(exchange_config).subject_issuers = []
     subject_token = _signed_subject_token(
         exchange_config,
         exchange_service,
@@ -1612,8 +1620,8 @@ def test_subject_token_decoder_reports_all_validation_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-helix-workload")
-    exchange_config.oidc.workload_subject_jwks_uri = None
-    exchange_config.oidc.workload_kubernetes_token_review_enabled = True
+    _workload(exchange_config).subject_jwks_uri = None
+    _workload(exchange_config).kubernetes_token_review_enabled = True
     monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
 
     with pytest.raises(exchange.jwt.InvalidTokenError) as exc_info:
@@ -1652,7 +1660,7 @@ def test_kubernetes_subject_token_decoder_posts_token_review_with_async_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
-    exchange_config.oidc.workload_kubernetes_token_review_enabled = True
+    _workload(exchange_config).kubernetes_token_review_enabled = True
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
     monkeypatch.setenv("KUBERNETES_SERVICE_PORT", "443")
     monkeypatch.setattr(exchange, "_kubernetes_reviewer_credentials", lambda: ("reviewer-token", "/tmp/ca.crt"))
@@ -1719,7 +1727,7 @@ def test_kubernetes_subject_token_decoder_preserves_single_pod_uid_reference(
     exchange_config: AuthConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    exchange_config.oidc.workload_kubernetes_token_review_enabled = True
+    _workload(exchange_config).kubernetes_token_review_enabled = True
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
     monkeypatch.setenv("KUBERNETES_SERVICE_PORT", "443")
     monkeypatch.setattr(exchange, "_kubernetes_reviewer_credentials", lambda: ("reviewer-token", "/tmp/ca.crt"))
@@ -1775,7 +1783,7 @@ def test_kubernetes_subject_token_decoder_rejects_ambiguous_pod_uid_reference(
     monkeypatch: pytest.MonkeyPatch,
     pod_uids: list[str],
 ) -> None:
-    exchange_config.oidc.workload_kubernetes_token_review_enabled = True
+    _workload(exchange_config).kubernetes_token_review_enabled = True
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
     monkeypatch.setattr(exchange, "_kubernetes_reviewer_credentials", lambda: ("reviewer-token", "/tmp/ca.crt"))
 

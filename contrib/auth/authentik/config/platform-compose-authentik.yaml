@@ -4,6 +4,7 @@
 platform:
   runtime: "none"
   base_url: "https://nemo-gateway:8080"
+  advertised_base_url: "https://127.0.0.1:18080"
 
 service: {}
 
@@ -23,28 +24,42 @@ auth:
     enabled: true
   oidc:
     enabled: true
-    issuer: "http://authentik-server:9000/application/o/nemo-cli/"
+    issuer: "http://authentik-server:9000/application/o/nemo-user/"
     additional_issuers:
       - "http://authentik-server:9000/application/o/nemo/"
+      - "http://authentik-server:9000/application/o/nemo-cli/"
+      - "https://127.0.0.1:18080/application/o/nemo-user/"
       - "https://127.0.0.1:18080/application/o/nemo-cli/"
       - "https://127.0.0.1:18080/application/o/nemo/"
-    client_id: "nemo-helix-cli"
-    token_endpoint: "https://127.0.0.1:18080/application/o/token/"
-    device_authorization_endpoint: "https://127.0.0.1:18080/application/o/device/"
-    workload_token_exchange_enabled: true
-    workload_client_id: "nemo-helix-workload"
-    workload_audience: "nemo-helix"
-    workload_scope: "openid email groups"
-    workload_token_endpoint: "https://nemo-gateway:8080/apis/auth/token"
-    workload_subject_jwks_uri: "http://authentik-server:9000/application/o/nemo-workload/jwks/"
-    workload_subject_issuers:
-      - "http://authentik-server:9000/application/o/nemo-workload/"
-      - "https://nemo-gateway:8080/application/o/nemo-workload/"
-      - "https://127.0.0.1:18080/application/o/nemo-workload/"
+    public_client:
+      client_id: "nemo-helix-cli"
+      server_side_sessions: false
+      authorization_endpoint: "https://127.0.0.1:18080/application/o/authorize/"
+      token_endpoint: "https://127.0.0.1:18080/application/o/token/"
+      device_authorization_endpoint: "https://127.0.0.1:18080/application/o/device/"
+      default_scopes: "openid email offline_access groups"
+    server_sessions:
+      encryption_key_env_var: NHX_AUTH_SESSION_ENCRYPTION_KEY
+    confidential_client:
+      client_id: "nemo-helix-user"
+      client_secret_env_var: NHX_OIDC_CLIENT_SECRET
+      login_redirect_uri: "https://127.0.0.1:18080/apis/auth/v2/login/callback"
+      authorization_endpoint: "https://127.0.0.1:18080/application/o/authorize/"
+      token_endpoint: "http://authentik-server:9000/application/o/token/"
+      default_scopes: "openid email offline_access groups"
+    workload:
+      client_id: "nemo-helix-workload"
+      token_endpoint: "https://nemo-gateway:8080/apis/auth/token"
+      audience: "nemo-helix"
+      scope: "openid email groups"
+      subject_jwks_uri: "http://authentik-server:9000/application/o/nemo-workload/jwks/"
+      subject_issuers:
+        - "http://authentik-server:9000/application/o/nemo-workload/"
+        - "https://nemo-gateway:8080/application/o/nemo-workload/"
+        - "https://127.0.0.1:18080/application/o/nemo-workload/"
     subject_claim: "sub"
     email_claim: "email"
     groups_claim: "groups"
-    default_scopes: "openid email offline_access groups"
 
 entities: {}
 
@@ -55,7 +70,7 @@ jobs:
       profile: workload
       backend: docker
       config:
-        cleanup_completed_jobs_immediately: false
+        cleanup_completed_jobs_immediately: true
         launcher_tool_path: /tools/jobs-launcher
         env:
           SSL_CERT_FILE: "/etc/nhx/gateway-tls/tls.crt"
@@ -66,7 +81,7 @@ jobs:
               mount_path: "/etc/nhx/gateway-tls"
   executor_defaults:
     docker:
-      cleanup_completed_jobs_immediately: false
+      cleanup_completed_jobs_immediately: true
       launcher_tool_path: /tools/jobs-launcher
       ttl_seconds_before_active: 60
       ttl_seconds_active: 3600
@@ -104,7 +119,12 @@ models:
 inference_gateway: {}
 
 secrets:
-  allow_key_creation: true
+  encryption:
+    current_provider: local_v1
+    providers:
+      secret_key:
+        local_v1:
+          from_env: NHX_SECRETS_DEFAULT_ENCRYPTION_KEY
 
 files:
   default_storage_config:

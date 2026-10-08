@@ -265,7 +265,7 @@ class KubernetesWorkloadIdentityConfig(BaseModel):
     )
     token_audience: str | None = Field(
         default=None,
-        description="Audience for the projected service account token. Defaults to auth.oidc.workload_client_id, auth.oidc.client_id, then 'nemo-helix'.",
+        description="Audience for the projected service account token. Defaults to auth.oidc.workload.client_id, then 'nemo-helix'.",
     )
 
 

@@ -18,6 +18,7 @@ from nhx.core.auth.api.v2.iam import endpoints as iam
 from nhx.core.auth.app.embedded_pdp.data import apply_embedded_policy_document
 from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
 from nhx.core.auth.config import AuthServiceConfig
+from nhx.core.auth.oidc_broker import routes as oidc_broker
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,11 @@ class AuthService(Service[AuthServiceConfig]):
                 authenticate.router, tag="Authentication", description="Bearer token authentication endpoints"
             ),
             RouterConfig(access_keys.router, tag="Scoped Access Keys", description="Scoped Access Key endpoints"),
+            RouterConfig(
+                oidc_broker.router,
+                tag="Authentication",
+                description="OIDC server-side login broker",
+            ),
             RouterConfig(
                 workload_token_exchange.router,
                 tag="Workload Identity",

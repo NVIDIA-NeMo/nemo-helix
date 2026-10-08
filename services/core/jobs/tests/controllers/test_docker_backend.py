@@ -121,8 +121,7 @@ def assert_created_task_volumes_cleaned_up(docker_client_mock) -> None:
 def workload_token_exchange_auth_config(enabled: bool = True) -> SimpleNamespace:
     return SimpleNamespace(
         oidc=SimpleNamespace(
-            workload_token_exchange_enabled=enabled,
-            workload_audience="nemo-helix",
+            workload=(SimpleNamespace(client_id="nemo-helix-workload", audience="nemo-helix") if enabled else None),
             audience=None,
         )
     )
