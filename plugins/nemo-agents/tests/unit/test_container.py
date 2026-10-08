@@ -1979,12 +1979,13 @@ class TestEndToEndPipeline:
 
 @pytest.fixture()
 def package_cli():
-    """Return a Typer app with only the ``package`` command registered.
+    """Return a Typer app with the local commands (``package`` included) registered.
 
     A no-op callback keeps the app in multi-command mode so ``package``
     must be invoked explicitly (matching real ``nemo agents package`` usage).
     """
     import typer
+    from nemo_agents_plugin.cli import _register_local_commands
     from typer.testing import CliRunner
 
     app = typer.Typer(no_args_is_help=True)
@@ -1993,6 +1994,7 @@ def package_cli():
     def _root() -> None:
         pass
 
+    _register_local_commands(app)
     return app, CliRunner()
 
 
