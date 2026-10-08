@@ -23,8 +23,6 @@ from nemo_insights_plugin.analyst.observability import (
     setup_analyst_observability,
 )
 from nemo_insights_plugin.analyst.result import AnalystResult
-from nemo_insights_plugin.analyst.trace_intel import analyze_snapshot, load_existing_insights
-from nemo_insights_plugin.analyst.trace_snapshot import load_trace_snapshot
 from nooa.context_blocks import EventBase
 from nooa.events import LLMComplete, PythonOutput
 
@@ -123,6 +121,20 @@ async def run_analyst_change_set(
             instrumenting it. ``None`` runs uninstrumented. Independent of
             *enable_observability*, which is the older direct-to-Intake path.
     """
+    try:
+        from nemo_insights_plugin.analyst.trace_intel import analyze_snapshot, load_existing_insights
+        from nemo_insights_plugin.analyst.trace_snapshot import load_trace_snapshot
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"insight_agent", "trace_ingest"}:
+            raise
+        raise RuntimeError(
+            "The Insights analyst requires the separately installed insight-agent and trace-ingest packages. "
+            "Install the pinned dependencies in the environment running the analyst. "
+            "For uv tool and virtual-environment installation commands, see "
+            "https://github.com/NVIDIA-NeMo/nemo-helix/blob/release/0.7/plugins/nemo-insights/README.md"
+            "#install-analyst-dependencies-for-pypi-installations"
+        ) from exc
+
     observability = None
     model_clients: ConfiguredModelClients | None = None
     insights_output_path = str(insights_output) if insights_output else None
