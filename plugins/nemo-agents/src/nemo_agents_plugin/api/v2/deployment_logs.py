@@ -119,6 +119,24 @@ async def _resolve_log_path(
     raise HTTPException(status_code=404, detail=f"No log channel available for {name!r}.")
 
 
+async def _resolve_external_log_getter(
+    workspace: str,
+    name: str,
+    entity_client: NemoEntitiesClient,
+):  # noqa: ANN202 — structural runner-backend hook
+    """Return a container log fetcher when the runner backend supports one."""
+    try:
+        await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Deployment {name!r} not found in workspace {workspace!r}.",
+        ) from exc
+
+    backend = get_runner_backend()
+    return getattr(backend, "get_logs", None)
+
+
 async def _resolve_external_logs(
     workspace: str,
     name: str,
@@ -133,27 +151,21 @@ async def _resolve_external_logs(
     runner backends may still only return ``ExternalLog`` hints, so absence of a
     ``get_logs`` coroutine means the caller should keep the existing 404 path.
     """
-    try:
-        await entity_client.get(AgentDeployment, name=name, workspace=workspace)
-    except NemoEntityNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Deployment {name!r} not found in workspace {workspace!r}.",
-        ) from exc
-
-    backend = get_runner_backend()
-    get_logs = getattr(backend, "get_logs", None)
+    get_logs = await _resolve_external_log_getter(workspace, name, entity_client)
     if get_logs is None:
         return None
-    log_result = await get_logs(workspace=workspace, name=name, tail=tail)
+    try:
+        log_result = await get_logs(workspace=workspace, name=name, tail=tail)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
     lines = getattr(log_result, "lines", None)
     if lines is None:
         return None
     parsed = [_parse_line(line) for line in lines]
-    # External substrate logs do not expose a stable byte-offset cursor, so SSE
-    # resume is unavailable. ``0`` keeps the response schema stable; the UI still
-    # renders the fetched tail.
-    return DeploymentLogsResponse(data=parsed, total_lines=len(parsed), next_offset=0)
+    # External substrate logs do not expose byte offsets. For streaming, use a
+    # line-count cursor: the client sends this next_offset as Last-Event-ID and
+    # the poller emits only later lines.
+    return DeploymentLogsResponse(data=parsed, total_lines=len(parsed), next_offset=len(parsed))
 
 
 _TAIL_READ_BLOCK = 8192
@@ -254,6 +266,38 @@ def _read_next(fh) -> tuple[str | None, int, bool]:  # noqa: ANN001 — TextIO h
     return None, pos, False
 
 
+async def _stream_external_log_lines(
+    get_logs,  # noqa: ANN001 — structural runner-backend hook
+    *,
+    workspace: str,
+    name: str,
+    start_offset: int | None,
+    is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncIterator[str]:
+    """Poll external substrate logs and yield SSE events after a line-count cursor."""
+    poll_interval = 0.5
+    keepalive_interval = 15.0
+    seen = start_offset or 0
+    last_keepalive = asyncio.get_running_loop().time()
+    while True:
+        if is_disconnected is not None and await is_disconnected():
+            return
+        log_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
+        lines = list(getattr(log_result, "lines", []) or [])
+        if seen > len(lines):
+            seen = 0  # log buffer rotated/truncated; replay the current buffer
+        for index, line in enumerate(lines[seen:], start=seen + 1):
+            payload = _parse_line(line).model_dump()
+            yield f"id: {index}\ndata: {json.dumps(payload)}\n\n"
+            seen = index
+            last_keepalive = asyncio.get_running_loop().time()
+        now = asyncio.get_running_loop().time()
+        if now - last_keepalive >= keepalive_interval:
+            yield f": keepalive {datetime.now(UTC).isoformat()}\n\n"
+            last_keepalive = now
+        await asyncio.sleep(poll_interval)
+
+
 async def _stream_log_lines(
     path: Path,
     start_offset: int | None,
@@ -303,9 +347,26 @@ async def stream_deployment_logs(
     request: Request,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> StreamingResponse:
-    """SSE tail-follow of the deployment's log file; resumes via ``Last-Event-ID``."""
-    path = await _resolve_log_path(workspace, name, entity_client)
+    """SSE tail-follow of deployment logs; resumes via ``Last-Event-ID``."""
     start_offset = _parse_last_event_id(request.headers.get("last-event-id"))
+    get_logs = await _resolve_external_log_getter(workspace, name, entity_client)
+    if get_logs is not None:
+        return StreamingResponse(
+            _stream_external_log_lines(
+                get_logs,
+                workspace=workspace,
+                name=name,
+                start_offset=start_offset,
+                is_disconnected=request.is_disconnected,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",  # disable proxy buffering so events flush immediately
+            },
+        )
+
+    path = await _resolve_log_path(workspace, name, entity_client)
     return StreamingResponse(
         _stream_log_lines(path, start_offset, request.is_disconnected),
         media_type="text/event-stream",

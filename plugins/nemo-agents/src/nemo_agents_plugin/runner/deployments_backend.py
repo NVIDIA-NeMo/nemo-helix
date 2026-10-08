@@ -696,6 +696,8 @@ class DeploymentsRunnerBackend(RunnerBackend):
         self._config: DeploymentsRunnerConfig = config.deployments
         self._entities: NemoEntitiesClient | None = None
         self._executor_registry: ExecutorRegistry | None = None
+        self._executor_registry_lock = asyncio.Lock()
+        self._executor_registry_task: asyncio.Task[ExecutorRegistry] | None = None
 
     def _entity_client(self) -> NemoEntitiesClient:
         if self._entities is None:
@@ -703,20 +705,40 @@ class DeploymentsRunnerBackend(RunnerBackend):
             self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
         return self._entities
 
-    def _registry(self) -> ExecutorRegistry:
-        if self._executor_registry is None:
-            config = DeploymentsConfig.get()
-            specs = [ExecutorSpec(name=e.name, backend=e.backend, config=e.config) for e in config.executors]
-            if specs:
-                client = get_async_nemo_client(as_service="deployments", internal=True)
-                self._executor_registry = ExecutorRegistry.from_config(
-                    client,
-                    specs,
-                    default_executor=config.default_executor,
-                )
-            else:
-                self._executor_registry = ExecutorRegistry.empty()
-        return self._executor_registry
+    def _build_registry(self) -> ExecutorRegistry:
+        config = DeploymentsConfig.get()
+        specs = [ExecutorSpec(name=e.name, backend=e.backend, config=e.config) for e in config.executors]
+        if specs:
+            client = get_async_nemo_client(as_service="deployments", internal=True)
+            return ExecutorRegistry.from_config(
+                client,
+                specs,
+                default_executor=config.default_executor,
+            )
+        return ExecutorRegistry.empty()
+
+    async def _registry(self) -> ExecutorRegistry:
+        if self._executor_registry is not None:
+            return self._executor_registry
+        async with self._executor_registry_lock:
+            if self._executor_registry is not None:
+                return self._executor_registry
+            if self._executor_registry_task is None:
+                self._executor_registry_task = asyncio.create_task(asyncio.to_thread(self._build_registry))
+            task = self._executor_registry_task
+        try:
+            registry = await task
+        except Exception:
+            async with self._executor_registry_lock:
+                if self._executor_registry_task is task:
+                    self._executor_registry_task = None
+            raise
+        async with self._executor_registry_lock:
+            if self._executor_registry is None:
+                self._executor_registry = registry
+            if self._executor_registry_task is task:
+                self._executor_registry_task = None
+            return self._executor_registry
 
     async def create_deployment(
         self,
@@ -994,9 +1016,10 @@ class DeploymentsRunnerBackend(RunnerBackend):
         except NemoEntityNotFoundError:
             return LogResult(lines=[])
         try:
-            backend = self._registry().resolve(deployment.executor)
+            backend = (await self._registry()).resolve(deployment.executor)
         except Exception as exc:
-            return LogResult(lines=[f"Failed to resolve deployment log backend: {exc}"])
+            logger.exception("Failed to resolve deployment log backend for '%s/%s'", workspace, name)
+            raise RuntimeError("Failed to resolve deployment log backend.") from exc
         return await backend.get_logs(workspace=workspace, name=name, tail=tail)
 
     def get_log_location(self, workspace: str, name: str) -> LogLocation:
@@ -1004,6 +1027,9 @@ class DeploymentsRunnerBackend(RunnerBackend):
         return ExternalLog(hint="Inspect container logs via the deployments plugin or substrate CLI.")
 
     async def shutdown(self) -> None:
+        if self._executor_registry_task is not None and not self._executor_registry_task.done():
+            self._executor_registry_task.cancel()
+        self._executor_registry_task = None
         if self._executor_registry is not None:
             self._executor_registry.shutdown_all()
         self._executor_registry = None
