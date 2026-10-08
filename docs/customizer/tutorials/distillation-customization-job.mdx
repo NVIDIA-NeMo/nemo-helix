@@ -123,6 +123,8 @@ customization = Customization.from_client(client)
 
 Knowledge distillation uses the same dataset formats as SFT. We use the SQuAD dataset for both teacher training and distillation so that the teacher first learns the task, then transfers that knowledge to the student.
 
+We convert each example to the chat `messages` format. The user turn is the same prompt the evaluation step sends, so the model is trained and queried through the same chat template, including the end-of-turn token that stops generation.
+
 We also hold out a small **test split** for ROUGE evaluation at the end.
 
 ```python
@@ -151,11 +153,19 @@ val_ds = split['test'].select(range(min(VALIDATION_SIZE, len(split['test']))))
 test_ds = split['test'].select(range(VALIDATION_SIZE, min(VALIDATION_SIZE + TEST_SIZE, len(split['test']))))
 
 
+def chat_prompt(context, question):
+    """User turn shared by the training rows and the evaluation requests."""
+    return f"Based on the following context, answer the question.\n\nContext: {context}\n\nQuestion: {question}"
+
+
 def convert_squad(example):
-    """Convert SQuAD format to prompt/completion format."""
-    prompt = f"Context: {example['context']} Question: {example['question']} Answer:"
-    completion = example["answers"]["text"][0]
-    return {"prompt": prompt, "completion": completion}
+    """Convert SQuAD to a chat `messages` row."""
+    return {
+        "messages": [
+            {"role": "user", "content": chat_prompt(example["context"], example["question"])},
+            {"role": "assistant", "content": example["answers"]["text"][0]},
+        ]
+    }
 
 
 def write_jsonl(dataset, path):
@@ -185,8 +195,8 @@ print(f"Test:       {len(test_ds)} rows")
 
 with open(f"{DATASET_PATH}/training.jsonl", 'r') as f:
     sample = json.loads(f.readline())
-    print(f"\nSample prompt:     {sample['prompt'][:150]}...")
-    print(f"Sample completion:  {sample['completion']}")
+    print(f"\nSample user turn:      {sample['messages'][0]['content'][:150]}...")
+    print(f"Sample assistant turn: {sample['messages'][1]['content']}")
 ```
 
 ```python
@@ -514,12 +524,7 @@ def generate_completions(
     gateway = InferenceGatewayClient.from_client(client)
     completions = []
     for context, question in zip(contexts, questions):
-        messages = [
-            {
-                "role": "user",
-                "content": f"Based on the following context, answer the question.\n\nContext: {context}\n\nQuestion: {question}",
-            }
-        ]
+        messages = [{"role": "user", "content": chat_prompt(context, question)}]
         response = gateway.provider_post(
             name=deployment_name,
             workspace="default",

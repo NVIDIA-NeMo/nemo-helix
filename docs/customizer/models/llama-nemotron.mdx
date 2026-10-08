@@ -32,7 +32,7 @@ Customizing Nemotron models is supported on NVIDIA Hopper or Blackwell era GPUs,
 - **LoRA**: 4x 80GB GPU, tensor parallel size 1, expert parallel size 4, `lora.exclude_modules: ["*.out_proj"]`
 - **Full SFT**: 8x 80GB GPU, tensor parallel size 1, expert parallel size 8
 
-These follow the Automodel reference recipes for this architecture: [LoRA](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft.yaml) and [Full SFT](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_full_sft.yaml).
+These follow the Automodel reference recipes for this architecture: [LoRA](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft.yaml) and [Full SFT](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_full_sft.yaml). Both recipes target the Nemotron 3 Nano checkpoint, which shares this architecture. Use them as starting settings and point the model at the Lightning checkpoint.
 
 <Note>
 

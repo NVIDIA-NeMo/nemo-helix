@@ -88,25 +88,24 @@ customization = Customization.from_client(client)
 
 ### 2. Prepare Dataset
 
-Create your data in JSONL format (one JSON object per line). For SFT with LoRA, the platform expects **prompt/completion** pairs.
+Create your data in JSONL format (one JSON object per line). For a chat model, use the **chat** format so training and inference share the model's chat template.
 
 **Dataset structure:**
 - Training files under `training/` (or root with `training.jsonl`)
 - Validation files under `validation/` (or `validation.jsonl`)
 
-**SFT format:** Each line is a JSON object with:
-- **`prompt`**: The input (e.g. context + question)
-- **`completion`**: The desired model output
+**Chat format:** Each line is a JSON object with:
+- **`messages`**: A list of `user` and `assistant` turns. The final `assistant` turn is the desired model output.
 
 Example record (single line in `.jsonl`):
 
 ```json
-{"prompt": "Context: ... Question: What is X? Answer:", "completion": "X is ..."}
+{"messages": [{"role": "user", "content": "Based on the following context, answer the question.\n\nContext: ...\n\nQuestion: What is X?"}, {"role": "assistant", "content": "X is ..."}]}
 ```
 
-#### Download SQuAD and Convert to SFT Format
+#### Download SQuAD and Convert to Chat Format
 
-We use the [SQuAD](https://huggingface.co/datasets/rajpurkar/squad) dataset and convert it to prompt/completion JSONL.
+We use the [SQuAD](https://huggingface.co/datasets/rajpurkar/squad) dataset. We convert each example to the chat `messages` format. The user turn is the same prompt the evaluation step sends, so the model is trained and queried through the same chat template, including the end-of-turn token that stops generation.
 
 ```python
 from datasets import load_dataset, DatasetDict
@@ -130,24 +129,24 @@ split_dataset = train_set.train_test_split(test_size=VALIDATION_PROPORTION, seed
 train_ds = split_dataset["train"].select(range(min(training_size, len(split_dataset["train"]))))
 validation_ds = split_dataset["test"].select(range(min(validation_size, len(split_dataset["test"]))))
 
-def convert_squad_to_sft_format(example):
-    prompt = f"Context: {example['context']} Question: {example['question']} Answer:"
-    completion = example["answers"]["text"][0]
-    return {"prompt": prompt, "completion": completion}
+def convert_squad_to_chat_format(example):
+    """Convert SQuAD to a chat `messages` row whose user turn matches the inference prompt."""
+    user = f"Based on the following context, answer the question.\n\nContext: {example['context']}\n\nQuestion: {example['question']}"
+    return {"messages": [{"role": "user", "content": user}, {"role": "assistant", "content": example["answers"]["text"][0]}]}
 
 with open(f"{DATASET_PATH}/training.jsonl", "w", encoding="utf-8") as f:
     for example in train_ds:
-        f.write(json.dumps(convert_squad_to_sft_format(example)) + "\n")
+        f.write(json.dumps(convert_squad_to_chat_format(example)) + "\n")
 with open(f"{DATASET_PATH}/validation.jsonl", "w", encoding="utf-8") as f:
     for example in validation_ds:
-        f.write(json.dumps(convert_squad_to_sft_format(example)) + "\n")
+        f.write(json.dumps(convert_squad_to_chat_format(example)) + "\n")
 
 print(f"Saved training.jsonl with {len(train_ds)} rows")
 print(f"Saved validation.jsonl with {len(validation_ds)} rows")
 with open(f"{DATASET_PATH}/training.jsonl", "r") as f:
     sample = json.loads(f.readline())
-print("Sample prompt (first 200 chars):", sample["prompt"][:200] + "...")
-print("Sample completion:", sample["completion"])
+print("Sample user turn (first 200 chars):", sample["messages"][0]["content"][:200] + "...")
+print("Sample assistant turn:", sample["messages"][1]["content"])
 
 ```
 

@@ -147,6 +147,8 @@ pip install datasets
 
 SQuAD (Stanford Question Answering Dataset) is a reading comprehension dataset consisting of questions posed on Wikipedia articles, where the answer is a segment of text from the corresponding passage.
 
+We convert each example to the chat `messages` format. The user turn is the same prompt the evaluation step sends, so the model is trained and queried through the same chat template, including the end-of-turn token that stops generation.
+
 ```python
 from pathlib import Path
 from datasets import load_dataset, DatasetDict
@@ -181,23 +183,23 @@ split_dataset = train_set.train_test_split(test_size=VALIDATION_PROPORTION, seed
 train_ds = split_dataset['train'].select(range(min(training_size, len(split_dataset['train']))))
 validation_ds = split_dataset['test'].select(range(min(validation_size, len(split_dataset['test']))))
 
-# Convert SQuAD format to prompt/completion format and save to JSONL
-def convert_squad_to_sft_format(example):
-    """Convert SQuAD format to prompt/completion format for SFT training."""
-    prompt = f"Context: {example['context']} Question: {example['question']} Answer:"
-    completion = example["answers"]["text"][0]  # Take the first answer
-    return {"prompt": prompt, "completion": completion}
+# Convert SQuAD to chat format and save to JSONL
+def convert_squad_to_chat_format(example):
+    """Convert SQuAD to a chat `messages` row whose user turn matches the inference prompt."""
+    user = f"Based on the following context, answer the question.\n\nContext: {example['context']}\n\nQuestion: {example['question']}"
+    answer = example["answers"]["text"][0]  # Take the first answer
+    return {"messages": [{"role": "user", "content": user}, {"role": "assistant", "content": answer}]}
 
 # Save training data
 with open(f"{DATASET_PATH}/training.jsonl", "w", encoding="utf-8") as f:
     for example in train_ds:
-        converted = convert_squad_to_sft_format(example)
+        converted = convert_squad_to_chat_format(example)
         f.write(json.dumps(converted) + "\n")
 
 # Save validation data
 with open(f"{DATASET_PATH}/validation.jsonl", "w", encoding="utf-8") as f:
     for example in validation_ds:
-        converted = convert_squad_to_sft_format(example)
+        converted = convert_squad_to_chat_format(example)
         f.write(json.dumps(converted) + "\n")
 
 print(f"Saved training.jsonl with {len(train_ds)} rows")
@@ -208,8 +210,8 @@ print("\nSample from training data:")
 with open(f"{DATASET_PATH}/training.jsonl", 'r') as f:
     first_line = f.readline()
     sample = json.loads(first_line)
-    print(f"Prompt: {sample['prompt'][:200]}...")
-    print(f"Completion: {sample['completion']}")
+    print(f"User: {sample['messages'][0]['content'][:200]}...")
+    print(f"Assistant: {sample['messages'][1]['content']}")
 ```
 
 ```python
@@ -600,7 +602,9 @@ After training, evaluate whether your model meets your requirements:
 context = "The Apollo 11 mission was the first manned mission to land on the Moon. It was launched on July 16, 1969, and Neil Armstrong became the first person to walk on the lunar surface on July 20, 1969. Buzz Aldrin joined him shortly after, while Michael Collins remained in lunar orbit."
 question = "Who was the first person to walk on the Moon?"
 
-prompt = f"Context: {context} Question: {question} Answer:"
+messages = [
+    {"role": "user", "content": f"Based on the following context, answer the question.\n\nContext: {context}\n\nQuestion: {question}"}
+]
 
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
@@ -608,13 +612,15 @@ from nemo_helix_plugin.inference_gateway.types import JsonBody
 response = InferenceGatewayClient.from_client(client).provider_post(
     name=deployment.name,
     workspace="default",
-    trailing_uri="v1/completions",
+    trailing_uri="v1/chat/completions",
     body=JsonBody(
         {
             "model": f"default/{OUTPUT_NAME}",
-            "prompt": prompt,
+            "messages": messages,
             "temperature": 0,
             "max_tokens": 128,
+            # Qwen3 reasons by default; turn it off for a short answer.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
     ),
 ).data()
@@ -624,7 +630,7 @@ print("MODEL EVALUATION")
 print("=" * 60)
 print(f"Question: {question}")
 print(f"Expected: Neil Armstrong")
-print(f"Model output: {response['choices'][0]['text']}")
+print(f"Model output: {response['choices'][0]['message']['content']}")
 ```
 
 #### Evaluation Best Practices

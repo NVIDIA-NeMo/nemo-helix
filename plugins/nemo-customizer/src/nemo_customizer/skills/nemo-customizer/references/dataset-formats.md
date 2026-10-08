@@ -24,6 +24,8 @@ Automodel detects schema from the **first JSONL line** (`DatasetSchema` in `serv
 
 **Conversion preference:** CHAT if `AutoTokenizer(...).chat_template` or model `spec.is_chat` / `spec.chat_template` → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it.
 
+**Why CHAT for chat models:** SFT (and CUSTOM) rows train as plain text, `prompt + completion`, with no chat template and no end-of-sequence token. A chat model trained that way barely changes through `/v1/chat/completions`, and `/v1/completions` output runs past the answer. Put the exact user prompt you will send at inference in the `user` turn.
+
 Retrieval Stage 1 already emits Automodel EMBEDDING `training.jsonl`. Do not convert those rows to CHAT `messages`.
 
 For **CUSTOM**, placeholders in `prompt_template` must match column names exactly (two placeholders).

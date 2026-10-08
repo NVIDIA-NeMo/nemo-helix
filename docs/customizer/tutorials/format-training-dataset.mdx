@@ -83,6 +83,7 @@ Before uploading your dataset, verify:
 
 Chat and instruction models require additional structure in their data to capture concepts such as multi-turn conversations. We support the [OpenAI messages](https://platform.openai.com/docs/guides/text?api-mode=chat) format.
 
+<a id="ft-tut-format-conversation-dataset"></a>
 ### Format a Conversation Dataset
 
 Train a chat model to optimize for generating responses using multiple messages as context.
@@ -130,19 +131,35 @@ For illustrative purposes only, we show an example entry as multi-line JSON.
 
 [Nemotron models](/documentation/customizer-reference/models/llama-nemotron) support a reasoning mode that controls whether the model shows step-by-step reasoning in its responses. Match the mode to your training data.
 
-- **Nemotron 3 and 3.5 models** (for example, Nemotron 3.5 Lightning): the chat template's `enable_thinking` flag selects the mode, and an assistant turn whose `<think></think>` block is empty is a non-reasoning response.
+- **Nemotron 3 and 3.5 models** (for example, Nemotron 3.5 Lightning): put reasoning in the assistant turn's `reasoning_content` field and omit it for non-reasoning examples. The chat template's `enable_thinking` flag only controls the prefix for a new generation.
 - **Llama Nemotron models**: use `detailed thinking on` (training data with reasoning) or `detailed thinking off` (training data without reasoning) in the system message.
 
 <Note>
 
-If you have an existing system message that must be preserved, prepend `detailed thinking on` or `detailed thinking off` to the beginning of your system message.
+For Llama Nemotron, if you have an existing system message that must be preserved, prepend `detailed thinking on` or `detailed thinking off` to the beginning of your system message.
 
 For example, if your original system message is `You are a helpful assistant.`, you should use `detailed thinking on\nYou are a helpful assistant.` or `detailed thinking off\nYou are a helpful assistant.`
 
 </Note>
 <Tabs>
 
-<Tab title="Detailed Thinking Off">
+<Tab title="Nemotron 3.5 Lightning">
+
+```json
+{
+  "messages": [
+    { "role": "user", "content": "What is 2 + 2?" },
+    {
+      "role": "assistant",
+      "reasoning_content": "To solve 2 + 2, add 2 and 2 together.",
+      "content": "The answer is 4."
+    }
+  ]
+}
+```
+
+</Tab>
+<Tab title="Llama Nemotron: Detailed Thinking Off">
 
 ```json
 {
@@ -155,7 +172,7 @@ For example, if your original system message is `You are a helpful assistant.`, 
 ```
 
 </Tab>
-<Tab title="Detailed Thinking On">
+<Tab title="Llama Nemotron: Detailed Thinking On">
 
 ```json
 {
@@ -337,6 +354,12 @@ Prompt completion datasets have a simple schema. Each datum has:
 
 - A `prompt` field for the body of information provided by the user.
 - A `completion` field for output of the model.
+
+<Warning>
+
+Use `prompt`/`completion` only for models you query through `/v1/completions`. Customizer trains these rows as plain text, `prompt` followed by `completion`, without the model's chat template or an end-of-sequence token. A chat model trained this way barely changes when you query it through `/v1/chat/completions`, and its raw completions can keep generating past the answer. For chat models, use the [`messages` format](#ft-tut-format-conversation-dataset).
+
+</Warning>
 
 ### Prompt the Model
 

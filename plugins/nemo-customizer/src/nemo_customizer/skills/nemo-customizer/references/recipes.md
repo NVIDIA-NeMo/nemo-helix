@@ -47,6 +47,7 @@ All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automo
 - Set `lora.exclude_modules: ["*.out_proj"]`. Mamba `out_proj` runs through a fused kernel that LoRA cannot wrap.
 - MoE layout: `parallelism.expert_parallel_size` equal to the GPU count, `tensor_parallel_size: 1` (`hyperparameters-automodel.md` § `parallelism`).
 - Lightning and Nano v3 default to reasoning mode. For short-answer eval, send `"chat_template_kwargs": {"enable_thinking": false}`.
+- In training rows, put reasoning in the assistant's `reasoning_content` field, and omit it for non-reasoning rows. `enable_thinking` only sets the prefix for a new generation.
 
 ## Other families
 
