@@ -304,15 +304,18 @@ def score_to_evaluator_results(
     becomes a FAILED row with no value and the diagnostic as its ``comment``, so Intake counts it
     as a failed attempt rather than inferring that from a missing row.
 
-    A FAILED score carries no outputs, so ``output_names`` (the metric's declared outputs) names
-    the rows to write; when the caller has none, the metric itself gets one FAILED row.
+    A FAILED score usually carries no outputs, so ``output_names`` (the metric's declared outputs)
+    names the rows to write; any outputs it does carry are added to that set, and when neither
+    names anything the metric itself gets one FAILED row.
     ``session_id``/``span_id`` are supplied by the caller — the trajectory span id is resolved
     at publish time, not derivable from the pure score.
 
     ``skipped`` is kept for callers that report omissions; nothing is omitted today.
     """
     if score.status == AgentEvalScoreStatus.FAILED:
-        names = [output.name for output in score.outputs] or list(output_names)
+        # Observed outputs first, then declared ones not among them: a partial FAILED score must
+        # still produce a row for every output the metric promised.
+        names = list(dict.fromkeys([*(output.name for output in score.outputs), *output_names]))
         rows = [
             _failed_row(
                 session_id=session_id,

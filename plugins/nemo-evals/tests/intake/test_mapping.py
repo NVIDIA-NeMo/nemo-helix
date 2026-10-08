@@ -342,6 +342,20 @@ def test_failed_score_becomes_one_failed_row_per_declared_output() -> None:
     assert all("value" not in row for row in rows)
 
 
+def test_failed_score_with_partial_outputs_still_covers_every_declared_output() -> None:
+    """A FAILED score that carries some outputs must not hide the declared ones it lacks."""
+    rows, _ = score_to_evaluator_results(
+        _score(outputs=[MetricOutput(name="score", value=math.nan)], status=AgentEvalScoreStatus.FAILED),
+        session_id="s",
+        span_id="sp",
+        output_names=["score", "passed"],
+    )
+    assert [(row["name"], row["status"]) for row in rows] == [
+        ("accuracy.score", "FAILED"),
+        ("accuracy.passed", "FAILED"),
+    ]
+
+
 def test_failed_rows_keep_each_outputs_own_diagnostic() -> None:
     """A metric that failed per output (Harbor rewards) explains each FAILED row with its own cause."""
     rows, _ = score_to_evaluator_results(
