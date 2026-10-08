@@ -5,8 +5,11 @@ import {
   type CustomizationDraft,
   type DraftInputs,
   type DraftValidation,
+  datasetProblem,
   ERROR_NOT_JSON,
   estimateTrainingRows,
+  NO_TRAINING_FILES,
+  UNRECOGNIZED_FORMAT,
   validateDraft,
 } from '@studio/components/CreateCustomizationStart/aiDraft';
 import {
@@ -231,5 +234,49 @@ describe('estimateTrainingRows', () => {
       trainingRowCount: 10_000,
       rowCountIsEstimate: true,
     });
+  });
+});
+
+describe('datasetProblem', () => {
+  const read = {
+    discoveryError: null,
+    hasTraining: true,
+    schema: null,
+    format: { ok: true, fileErrors: [] },
+  };
+
+  it('accepts a dataset whose format was detected', () => {
+    expect(datasetProblem({ ...read, schema: INPUTS.dataset.schema })).toBeNull();
+  });
+
+  it('says when the files could not be listed', () => {
+    expect(datasetProblem({ ...read, discoveryError: new Error('403 Forbidden') })).toBe(
+      "Couldn't read the dataset: 403 Forbidden"
+    );
+  });
+
+  it('says when there is nothing to train on', () => {
+    expect(datasetProblem({ ...read, hasTraining: false })).toBe(NO_TRAINING_FILES);
+  });
+
+  it('names a file that failed to download instead of blaming the format', () => {
+    const fileErrors = [
+      { path: 'training/a.jsonl', error: 'Failed to download file: 403 Forbidden' },
+      { path: 'training/b.jsonl', error: 'Failed to download file: 403 Forbidden' },
+    ];
+    expect(datasetProblem({ ...read, format: { ok: false, fileErrors } })).toBe(
+      "Couldn't read training/a.jsonl: Failed to download file: 403 Forbidden (1 more file too)"
+    );
+  });
+
+  it('names a malformed file instead of blaming the format', () => {
+    const fileErrors = [{ path: 'training.jsonl', error: 'Line 3 is not valid JSON' }];
+    expect(datasetProblem({ ...read, format: { ok: false, fileErrors } })).toBe(
+      "Couldn't read training.jsonl: Line 3 is not valid JSON"
+    );
+  });
+
+  it('blames the format only when every file was read', () => {
+    expect(datasetProblem(read)).toBe(UNRECOGNIZED_FORMAT);
   });
 });
