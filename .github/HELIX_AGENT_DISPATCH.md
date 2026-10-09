@@ -48,17 +48,13 @@ name — never serialized into the payload. Agents read `GH_TOKEN` to drive the 
 
 ## Onboarding a new GitHub-triggered agent
 
-Follow these in order. Steps 1–3 are the Helix-cluster legwork (done once, out of
-band); step 4 is the ~1-line PR to the WORKER repo's registry; step 5 installs the trigger.
+Follow these in order. Steps 1–2 are the Helix-cluster legwork (done once, out of
+band); step 3 is the ~1-line PR to the WORKER repo's registry; step 4 installs the
+trigger. You do NOT create a GitHub-token secret: the dispatcher mints a repo-scoped
+token per dispatch and upserts it into a per-dispatch secret the agent reads under
+`github_token_env` (default `GH_TOKEN`).
 
-**1. Create the GitHub-token secret in your Helix workspace** (once per workspace).
-The agent reads this to drive the `gh` CLI. The registry entry references it by name
-(`github_secret`, default `github-token`):
-```bash
-nemo secrets create github-token --workspace <workspace> --value "$(gh auth token)"
-```
-
-**2. Author the agent config** (`agent.yaml`). For a pi agent on a gateway-served
+**1. Author the agent config** (`agent.yaml`). For a pi agent on a gateway-served
 model, declare the harness + model, and put Pi catalog metadata the gateway can't
 express under the model's `extensions` (api is required; declared fields like
 `max_tokens` stay top-level):
@@ -83,13 +79,13 @@ The agent's job `input` is a JSON blob of PR context
 (`{trigger, repo, pr_number, comment_author, head_sha, github_token_env, …}`) — write
 the system prompt to consume it and act via `gh`.
 
-**3. Create the `agent` entity** in the workspace (type `agent`, looked up by
+**2. Create the `agent` entity** in the workspace (type `agent`, looked up by
 `{workspace, name}`). The dispatcher no-ops gracefully until this exists:
 ```bash
 nemo agents create --agent agent.yaml --workspace <workspace>
 ```
 
-**4. Add a registry row** in the WORKER repo's `.github/dispatch-registry.yaml`
+**3. Add a registry row** in the WORKER repo's `.github/dispatch-registry.yaml`
 (the dispatcher only reads the registry there, not the target repo) — see the
 `/helix-review` entry below as a template:
 ```yaml
@@ -101,7 +97,7 @@ nemo agents create --agent agent.yaml --workspace <workspace>
     allowed_repos: [ "<owner>/<repo>" ]
 ```
 
-**5. Install the trigger workflow** on the target repo(s): the generic
+**4. Install the trigger workflow** on the target repo(s): the generic
 `.github/workflows/helix-agent-dispatch.yaml` + `.github/scripts/helix-agent-dispatch.cjs`
 (from the nemo-helix PR), plus the `CI_DISPATCH_TOKEN` / `CI_DISPATCH_REPO` secrets.
 `CI_DISPATCH_TOKEN` needs `issues: write` on the TARGET repo for the 👀 reaction AND
@@ -127,8 +123,9 @@ a missing agent entity logs a `::notice::` and skips (not an error).
 | `AIRE_OPS_APP_PRIVATE_KEY` | `aire-ops` GitHub App key (App ID 4809653) — mints repo-scoped tokens |
 | `INTERNAL_AGENTS_NHX_ACCESS_TOKEN` | Helix API bearer (dispatcher service identity, cross-workspace submit) |
 
-Plus, per workspace, a Helix secret holding the GitHub token the agent reads
-(referenced by the registry entry's `github_secret`, default `github-token`).
+The agent's GitHub token is NOT a pre-created secret: the dispatcher mints a
+repo-scoped `aire-ops` token per dispatch and upserts it into a per-dispatch Helix
+secret (named `dispatch-…`), which the agent reads via its AgentEnvironment.
 
 ## Status / open items
 
