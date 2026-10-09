@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
@@ -40,10 +42,13 @@ def build_combinations(spec: SwitchyardOptimizeSpec, *, agent_name: str) -> list
     refs = [_qualify(ref, spec.workspace) for ref in spec.models]
     judge = _qualify(spec.judge_model, spec.workspace) if spec.judge_model else None
     built: list[Combination] = []
-    for n, (capable, efficient) in enumerate(combinations(refs, 2), start=1):
+    for capable, efficient in combinations(refs, 2):
         for config_type in spec.routing_strategies:
             pair_judge = (judge or capable) if config_type == "llm_classifier" else None
-            virtual_model = f"{agent_name}-{config_type.replace('_', '-')}-{n}"
+            config = middleware_config(spec, config_type, capable=capable, efficient=efficient, judge=pair_judge)
+            # Keyed on the routing itself so a re-run with the same request reuses the VirtualModel
+            # and a different model list or setting never collides with an earlier run's.
+            virtual_model = f"{agent_name}-{config_type.replace('_', '-')}-{_routing_digest(config_type, config)}"
             # Checked up front so a long agent name fails before any VirtualModel is created.
             if len(virtual_model) > NAME_MAX_LENGTH:
                 raise LocalRunError(
@@ -56,10 +61,15 @@ def build_combinations(spec: SwitchyardOptimizeSpec, *, agent_name: str) -> list
                     capable=capable,
                     efficient=efficient,
                     judge=pair_judge,
-                    config=middleware_config(spec, config_type, capable=capable, efficient=efficient, judge=pair_judge),
+                    config=config,
                 )
             )
     return built
+
+
+def _routing_digest(config_type: str, config: dict[str, Any]) -> str:
+    payload = json.dumps({"config_type": config_type, "config": config}, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:8]
 
 
 def middleware_config(
