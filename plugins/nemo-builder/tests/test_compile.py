@@ -196,6 +196,10 @@ class TestTheSandboxIsToldNothingAboutPublishing:
         sandbox = SuperviseStepConfig.model_validate(_compile(_set(), config=_config()).steps[1].config).sandbox
         assert sandbox.node_selector == {}
 
+    def test_the_sandbox_runs_on_the_deployments_provider(self) -> None:
+        sandbox = SuperviseStepConfig.model_validate(_compile(_set(), config=_config()).steps[1].config).sandbox
+        assert sandbox.provider == "kubernetes_pod"
+
     def test_the_sandbox_uses_public_dns_not_cluster_dns(self) -> None:
         spec = _compile(_set(), config=_config())
         sandbox = SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox
