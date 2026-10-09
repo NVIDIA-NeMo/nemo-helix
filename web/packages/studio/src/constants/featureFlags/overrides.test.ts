@@ -46,6 +46,50 @@ const flagsGlobal = () => (window as unknown as { __flags?: FlagsGlobal }).__fla
 const readManifest = (): FlagManifest =>
   JSON.parse(window.localStorage.getItem(FEATURE_FLAG_MANIFEST_KEY)!) as FlagManifest;
 
+/**
+ * Simulate a browser where storage is blocked. Reading `window.localStorage` is
+ * itself the throwing operation, which is why the module cannot `typeof`-guard
+ * it.
+ */
+const withBlockedStorage = (fn: () => void) => {
+  const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    get() {
+      throw new DOMException('Access denied', 'SecurityError');
+    },
+  });
+  try {
+    fn();
+  } finally {
+    if (original) Object.defineProperty(window, 'localStorage', original);
+  }
+};
+
+/** Storage that reads normally but rejects every write, as when quota is full. */
+const withFailingWrites = (fn: () => void) => {
+  const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  const backing = new Map<string, string>();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: () => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      },
+      removeItem: () => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      },
+      clear: () => backing.clear(),
+    },
+  });
+  try {
+    fn();
+  } finally {
+    if (original) Object.defineProperty(window, 'localStorage', original);
+  }
+};
+
 beforeEach(() => {
   window.localStorage.clear();
   delete (window as unknown as Record<string, unknown>).__flags;
@@ -99,6 +143,26 @@ describe('readFlagOverrides', () => {
     setBlob({ gammaCount: 'not-a-number', alphaEnabled: 'preview' });
 
     expect(readFlagOverrides(definitions)).toEqual({ VITE_FF_ALPHA_ENABLED: 'preview' });
+  });
+
+  // A bare `definitions[key]` lookup reaches Object.prototype, so these keys
+  // return a truthy non-descriptor and `.schema.safeParse` throws a TypeError
+  // out of the warn-and-skip loop, aborting flag parsing entirely.
+  it.each(['constructor', 'toString', 'valueOf', 'hasOwnProperty'])(
+    'drops the inherited key "%s" instead of throwing',
+    (key) => {
+      setBlob({ [key]: 'true', alphaEnabled: 'preview' });
+
+      expect(() => readFlagOverrides(definitions)).not.toThrow();
+      expect(readFlagOverrides(definitions)).toEqual({ VITE_FF_ALPHA_ENABLED: 'preview' });
+    }
+  );
+
+  it('returns an empty layer when localStorage access throws', () => {
+    withBlockedStorage(() => {
+      expect(() => readFlagOverrides(definitions)).not.toThrow();
+      expect(readFlagOverrides(definitions)).toEqual({});
+    });
   });
 
   it('produces a layer that parseFlags consumes without throwing', () => {
@@ -158,6 +222,20 @@ describe('writeFlagManifest', () => {
       overridesEnabled: false,
       overridesKey: '',
       flags: [],
+    });
+  });
+});
+
+describe('writeFlagManifest storage failures', () => {
+  it('does not throw when localStorage access is blocked', () => {
+    withBlockedStorage(() => {
+      expect(() => writeFlagManifest(definitions, {}, {}, true)).not.toThrow();
+    });
+  });
+
+  it('does not throw when the write is rejected', () => {
+    withFailingWrites(() => {
+      expect(() => writeFlagManifest(definitions, {}, {}, true)).not.toThrow();
     });
   });
 });
@@ -231,6 +309,31 @@ describe('installFlagsGlobal', () => {
     flagsGlobal()!.reset();
 
     expect(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)).toBeNull();
+  });
+
+  it('does not attach when localStorage access is blocked', () => {
+    withBlockedStorage(() => {
+      install();
+      expect(flagsGlobal()).toBeUndefined();
+    });
+  });
+
+  it('rejects an inherited key without writing', () => {
+    install();
+    flagsGlobal()!.set('constructor', 'true');
+
+    expect(window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY)).toBeNull();
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  // Throwing out of a devtools call would also report a save that never landed.
+  it('reports a failed write instead of throwing or claiming success', () => {
+    withFailingWrites(() => {
+      install();
+      expect(() => flagsGlobal()!.set('alphaEnabled', 'preview')).not.toThrow();
+      expect(logger.error).toHaveBeenCalled();
+      expect(logger.info).not.toHaveBeenCalled();
+    });
   });
 
   it('list returns one entry per defined flag', () => {
