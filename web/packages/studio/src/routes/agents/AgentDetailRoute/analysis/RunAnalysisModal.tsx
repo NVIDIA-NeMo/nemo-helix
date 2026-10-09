@@ -103,7 +103,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
       onOpenChange={(open) => !open && !running && onClose()}
       slotHeading={
         <Stack gap="1">
-          <Text kind="title/sm">Run analysis</Text>
+          <Text kind="title/sm">Run insight analysis</Text>
           <Text kind="body/regular/sm" className="text-secondary">
             Choose which of <strong>{agent}</strong>&apos;s traces the analyst reads for this run.
           </Text>
@@ -122,7 +122,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
             loading={running}
             disabled={running || lastRunPending || invalidCustom || invalidModels}
           >
-            Run analysis
+            Run insight analysis
           </LoadingButton>
         </Flex>
       }

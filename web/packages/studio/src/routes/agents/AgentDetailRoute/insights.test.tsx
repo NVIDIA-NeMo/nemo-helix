@@ -94,7 +94,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     renderDetail('?tab=insights');
 
     await user.click(await runButton());
-    await user.click(await screen.findByRole('button', { name: 'Run analysis' }));
+    await user.click(await screen.findByRole('button', { name: 'Run insight analysis' }));
 
     expect(await screen.findByText('Queued')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

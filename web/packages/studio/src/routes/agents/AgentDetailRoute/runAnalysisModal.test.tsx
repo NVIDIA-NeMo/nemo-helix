@@ -103,7 +103,7 @@ const submit = async (
   user: ReturnType<typeof userEvent.setup>,
   dialog: ReturnType<typeof within>
 ) => {
-  const button = dialog.getByRole('button', { name: 'Run analysis' });
+  const button = dialog.getByRole('button', { name: 'Run insight analysis' });
   await waitFor(() => expect(button).toBeEnabled());
   await user.click(button);
   await waitFor(() => expect(requests).toHaveLength(1));
@@ -119,7 +119,9 @@ describe('Run analysis modal', () => {
   it('opens with blank model pickers that name the stored models and no Ethos control', async () => {
     const { dialog } = await openModal();
 
-    await waitFor(() => expect(dialog.getByRole('button', { name: 'Run analysis' })).toBeEnabled());
+    await waitFor(() =>
+      expect(dialog.getByRole('button', { name: 'Run insight analysis' })).toBeEnabled()
+    );
     expect(dialog.getByLabelText('Default model')).toHaveValue('');
     expect(dialog.getByLabelText('Default model')).toHaveAttribute(
       'placeholder',

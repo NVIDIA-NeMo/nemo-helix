@@ -50,7 +50,7 @@ vi.mock('@studio/routes/agents/AgentDetailRoute/analysis/RunAnalysisModal', () =
     onRun: (variables: { agent: string }) => void;
   }) => (
     <div role="dialog">
-      <button onClick={() => onRun({ agent })}>Run analysis</button>
+      <button onClick={() => onRun({ agent })}>Run insight analysis</button>
     </div>
   ),
 }));
@@ -247,7 +247,7 @@ describe('AnalysisConfigPanel', () => {
     renderPanel('email-security-triage');
 
     await user.click(screen.getByRole('button', { name: 'Run analysis now' }));
-    await user.click(screen.getByRole('button', { name: 'Run analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Run insight analysis' }));
 
     expect(mutateRun).toHaveBeenCalledWith({ agent: 'email-security-triage' }, expect.anything());
     expect(toast.success).toHaveBeenCalledWith('Queued analysis run "analysis-run-1".');
@@ -268,7 +268,7 @@ describe('AnalysisConfigPanel', () => {
     renderPanel('email-security-triage');
 
     await user.click(screen.getByRole('button', { name: 'Run analysis now' }));
-    await user.click(screen.getByRole('button', { name: 'Run analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Run insight analysis' }));
 
     expect(toast.error).toHaveBeenCalledWith('Could not reach the Jobs service.');
     expect(toast.success).not.toHaveBeenCalled();
