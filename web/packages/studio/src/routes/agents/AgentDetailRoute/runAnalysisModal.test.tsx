@@ -10,6 +10,7 @@ import type {
   AnalysisRunResponse,
   CreateAnalysisRunRequest,
 } from '@nemo/sdk/generated/insights/schema';
+import { queryClientConfig } from '@studio/api/queryClient';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import {
@@ -79,11 +80,12 @@ afterEach(() => {
   server.events.removeListener('request:start', recordConfigWrites);
 });
 
-const openModal = async () => {
+const openModal = async ({ productionCache = false } = {}) => {
   const user = userEvent.setup();
   renderRoute(undefined, {
     history: `${getAgentDetailRoute(workspace1.workspace, 'react-agent')}?tab=insights`,
     routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
+    ...(productionCache ? { testProviderOptions: { queryClientConfig } } : {}),
   });
   await user.click(await screen.findByRole('button', { name: 'Run analysis now' }));
   const dialog = within(await screen.findByRole('dialog'));
@@ -263,6 +265,27 @@ describe('Run analysis modal', () => {
     const body = await submit(user, dialog);
 
     expect(body).not.toHaveProperty('ethos');
+  });
+
+  it('rereads the evaluations each time it opens, so a just-indexed one appears', async () => {
+    server.use(agentEvaluationsHandler('react-agent', []));
+    const { user, dialog } = await openModal({ productionCache: true });
+
+    expect(
+      await dialog.findByText('No evaluations have recorded traces for this agent.')
+    ).toBeInTheDocument();
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    server.use(agentEvaluationsHandler('react-agent', ['baseline-3']));
+    await user.click(screen.getByRole('button', { name: 'Run analysis now' }));
+    const reopened = within(await screen.findByRole('dialog'));
+
+    await waitFor(() =>
+      expect(reopened.getByRole('combobox', { name: 'Scope to an evaluation' })).toBeEnabled()
+    );
+    await user.click(reopened.getByRole('combobox', { name: 'Scope to an evaluation' }));
+    expect(await screen.findByRole('option', { name: 'baseline-3' })).toBeInTheDocument();
   });
 
   it("scopes the run to one of the agent's evaluations by name", async () => {

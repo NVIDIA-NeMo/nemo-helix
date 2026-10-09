@@ -48,7 +48,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
   onRun,
 }) => {
   const { data: runStatus } = useInsightsGetStatusesAnalysisRunStatus(workspace, agent, {
-    query: { retry: false },
+    query: { retry: false, staleTime: 0 },
   });
   const periodicCursor = runStatus?.last_successful_run_at ?? undefined;
   const [preset, setPreset] = useState<SincePreset>('all');
@@ -59,11 +59,12 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
   const runDefaultModel = defaultModel || config.default_model || '';
   const runFastModel = fastModel || config.fast_model || '';
 
-  const { data: evaluations } = useListEvaluations(workspace, {
-    page_size: DEFAULT_LARGE_PAGE_SIZE,
-    sort: '-created_at',
-    filter: { agent_name: agent },
-  });
+  // Intake fills an evaluation's agent_names up to a minute after ingest, so reread on every open.
+  const { data: evaluations } = useListEvaluations(
+    workspace,
+    { page_size: DEFAULT_LARGE_PAGE_SIZE, sort: '-created_at', filter: { agent_name: agent } },
+    { query: { staleTime: 0 } }
+  );
   const evaluationNames = (evaluations?.data ?? []).map(({ name }) => name);
 
   const since = sinceFor(preset, { now: new Date(), periodicCursor, custom });
