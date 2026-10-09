@@ -36,12 +36,21 @@ EVALUATION_METADATA_KEY = "nemo-scaled-evals-evaluation"
 BENCHMARK_RUN_METADATA_KEY = "nemo-scaled-evals-benchmark-run"
 # Labels every cleanup selector must set, so it can never match beyond one evaluation of one deployment.
 REQUIRED_SELECTOR_KEYS = (DEPLOYMENT_METADATA_KEY, EVALUATION_METADATA_KEY)
-# Per-trial record NemoOpenSandboxEnvironment writes after a sandbox's policy passes verification.
-APPLIED_EGRESS_FILENAME = "nemo-applied-egress.json"
+# Per-sandbox records NemoOpenSandboxEnvironment writes into the trial directory after a sandbox's
+# policy passes verification. One trial can have two sandboxes (agent and separate verifier), so
+# each gets its own file.
+APPLIED_EGRESS_FILENAME_PREFIX = "nemo-applied-egress"
+APPLIED_EGRESS_GLOB = f"{APPLIED_EGRESS_FILENAME_PREFIX}*.json"
 # OpenSandbox states in which a sandbox no longer needs killing.
 _TERMINAL_STATES = frozenset({"Terminated", "Failed"})
 # Platform-style environment names accepted as fallbacks for the names the OpenSandbox SDK reads.
 _ENV_ALIASES = {"OPEN_SANDBOX_DOMAIN": "OPENSANDBOX_DOMAIN", "OPEN_SANDBOX_API_KEY": "OPENSANDBOX_API_KEY"}
+
+
+def applied_egress_filename(sandbox_key: str) -> str:
+    """Name of one sandbox's applied-egress record; ``sandbox_key`` is its sandbox or session ID."""
+    safe = "".join(char if char.isalnum() or char in "-._" else "_" for char in sandbox_key)
+    return f"{APPLIED_EGRESS_FILENAME_PREFIX}-{safe}.json"
 
 
 def ownership_selector(*, deployment_id: str, evaluation_id: str) -> dict[str, str]:
