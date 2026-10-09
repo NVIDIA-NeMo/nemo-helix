@@ -58,16 +58,23 @@ def test_combinations_cover_every_pair_and_strategy() -> None:
         ("default/b", "default/c", "random_routing"),
         ("default/b", "default/c", "stage_router"),
     ]
-    assert [c.virtual_model for c in combos[:3]] == [
-        "calc-random-routing-1",
-        "calc-stage-router-1",
-        "calc-random-routing-2",
-    ]
+    assert all(c.virtual_model.startswith("calc-") for c in combos)
+    assert len({c.virtual_model for c in combos}) == len(combos)
+
+
+def test_virtual_model_names_are_stable_per_routing_and_differ_when_it_changes() -> None:
+    (first,) = build_combinations(spec(models=["a", "b"]), agent_name="calc")
+    (again,) = build_combinations(spec(models=["a", "b"]), agent_name="calc")
+    (other_pair,) = build_combinations(spec(models=["a", "c"]), agent_name="calc")
+    (other_setting,) = build_combinations(spec(models=["a", "b"], strong_probability=0.2), agent_name="calc")
+
+    assert first.virtual_model == again.virtual_model
+    assert len({first.virtual_model, other_pair.virtual_model, other_setting.virtual_model}) == 3
 
 
 def test_combinations_refuse_a_virtual_model_name_over_the_entity_limit() -> None:
     with pytest.raises(LocalRunError, match="exceeds 63 characters"):
-        build_combinations(spec(), agent_name="a" * 47)
+        build_combinations(spec(), agent_name="a" * 55)
 
 
 def test_combination_configs_satisfy_the_middleware_validators() -> None:

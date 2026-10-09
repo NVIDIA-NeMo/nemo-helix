@@ -28,11 +28,15 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 from nemo_helix_plugin.virtual_models.types import VirtualModel, VirtualModelInferenceConfig
 from nemo_switchyard.jobs import optimize as optimize_module
 from nemo_switchyard.jobs.optimize import INDEX_FILENAME, RESULT_NAME, TASK_MODULE, SwitchyardOptimizeJob
+from nemo_switchyard.routing import build_combinations
 from nemo_switchyard.schemas.optimize import SwitchyardOptimizeSpec
 
 SUBPROCESS_PROFILE = SubprocessJobExecutionProfile(profile="default")
 CPU_PROFILE = DockerJobExecutionProfile(provider="cpu", profile="default", config=DockerJobExecutionProfileConfig())
 SPEC: dict[str, Any] = {"agent": "calc", "models": ["a", "b"], "routing_strategies": ["random_routing", "stage_router"]}
+RANDOM_VM, STAGE_VM = (
+    combo.virtual_model for combo in build_combinations(SwitchyardOptimizeSpec.model_validate(SPEC), agent_name="calc")
+)
 SOURCE_AGENT: dict[str, Any] = {
     "config_format": "nemo-agents-spec-v1",
     "name": "calc",
@@ -132,13 +136,13 @@ def test_run_creates_one_virtual_model_per_combination(ctx: JobContext) -> None:
     calls = client.create_virtual_model.call_args_list
     assert all(call.kwargs["workspace"] == "default" and call.kwargs["exist_ok"] for call in calls)
     bodies = [call.kwargs["body"] for call in calls]
-    assert [body.name for body in bodies] == ["calc-random-routing-1", "calc-stage-router-1"]
+    assert [body.name for body in bodies] == [RANDOM_VM, STAGE_VM]
     assert [m.model for m in bodies[0].models] == ["default/a", "default/b"]
     (call,) = bodies[1].request_middleware
     assert call.name == "nemo-switchyard"
     assert call.config_type == "stage_router"
     assert call.config["models"] == {"capable": ["default/a"], "efficient": ["default/b"]}
-    assert result["virtual_models"] == ["calc-random-routing-1", "calc-stage-router-1"]
+    assert result["virtual_models"] == [RANDOM_VM, STAGE_VM]
 
 
 def test_run_writes_one_agent_config_each_and_an_index(ctx: JobContext, tmp_path: Path) -> None:
@@ -149,13 +153,13 @@ def test_run_writes_one_agent_config_each_and_an_index(ctx: JobContext, tmp_path
     assert result["agent"] == "team/calc"
     assert result["result"]["name"] == RESULT_NAME
     saved = tmp_path / "job-results" / RESULT_NAME
-    rewritten = yaml.safe_load((saved / "agent-calc-random-routing-1.yaml").read_text(encoding="utf-8"))
-    assert rewritten["models"]["default"]["model"] == "default/calc-random-routing-1"
+    rewritten = yaml.safe_load((saved / f"agent-{RANDOM_VM}.yaml").read_text(encoding="utf-8"))
+    assert rewritten["models"]["default"]["model"] == f"default/{RANDOM_VM}"
     index = json.loads((saved / INDEX_FILENAME).read_text(encoding="utf-8"))
     assert index["agent"] == "team/calc"
     assert [c["agent_config"] for c in index["combinations"]] == [
-        "agent-calc-random-routing-1.yaml",
-        "agent-calc-stage-router-1.yaml",
+        f"agent-{RANDOM_VM}.yaml",
+        f"agent-{STAGE_VM}.yaml",
     ]
     assert index["combinations"][0]["config"]["strong_probability"] == 0.5
 
@@ -168,7 +172,7 @@ def test_run_refuses_an_agent_that_is_not_spec_v1(ctx: JobContext, config: dict[
 
 def test_run_refuses_an_existing_virtual_model_that_routes_differently(ctx: JobContext) -> None:
     stale = VirtualModel(
-        name="calc-random-routing-1",
+        name=RANDOM_VM,
         workspace="default",
         models=[VirtualModelInferenceConfig(model="default/a"), VirtualModelInferenceConfig(model="default/c")],
     )
