@@ -32,7 +32,8 @@ from e2e.backends.docker_compose import DockerComposeE2EBackend
 logger = logging.getLogger(__name__)
 _E2E_HARNESS_DEBUG = os.environ.get("E2E_HARNESS_DEBUG") == "1"
 
-_HEALTH_TIMEOUT = 60
+# Loading all services and plugins can exceed a minute on CPU CI runners.
+_HEALTH_TIMEOUT = 180
 _HEALTH_POLL_INTERVAL = 1.0
 _AUTH_READY_TIMEOUT = 60
 _E2E_ADMIN_EMAIL = "admin@example.com"
