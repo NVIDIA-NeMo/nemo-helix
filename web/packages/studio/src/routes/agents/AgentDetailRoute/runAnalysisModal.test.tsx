@@ -242,7 +242,7 @@ describe('Run analysis modal', () => {
     const { user, dialog } = await openModal();
 
     await pickPreset(user, dialog, 'Custom');
-    const input = dialog.getByLabelText('Analyze traces since');
+    const input = dialog.getByLabelText('Analyze traces since', { selector: 'input' });
     await user.clear(input);
     await user.type(input, '2026-10-01T08:30');
     const body = await submit(user, dialog);
@@ -254,7 +254,7 @@ describe('Run analysis modal', () => {
     const { user, dialog } = await openModal();
 
     await pickPreset(user, dialog, 'Custom');
-    const input = dialog.getByLabelText('Analyze traces since');
+    const input = dialog.getByLabelText('Analyze traces since', { selector: 'input' });
     await user.clear(input);
     await user.type(input, `${new Date().getFullYear() + 1}-01-01T00:00`);
 

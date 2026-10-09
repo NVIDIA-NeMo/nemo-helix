@@ -1,20 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
+import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
+import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
+import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useInsightsGetStatusesAnalysisRunStatus } from '@nemo/sdk/generated/insights/insights-analysis-run-statuses';
 import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
-import {
-  Button,
-  Flex,
-  FormField,
-  Modal,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-} from '@nvidia/foundations-react-core';
+import { Stack, Text } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import type { TriggerInsightsRunVariables } from '@studio/api/useTriggerInsightsRun';
 import { InsightsModelPairFields } from '@studio/components/ImportTracesModal/InsightsModelPairFields';
@@ -26,9 +19,18 @@ import {
   toDateTimeLocalValue,
 } from '@studio/routes/agents/AgentDetailRoute/analysis/analysisSince';
 import { formatDateTime } from '@studio/util/date';
-import { type FC, useState } from 'react';
+import type { FC } from 'react';
+import { useForm, useWatch } from 'react-hook-form';
 
 const ALL_TRACES = '__all__';
+
+interface RunAnalysisFormFields {
+  preset: SincePreset;
+  custom: string;
+  evaluation: string;
+  defaultModel: string;
+  fastModel: string;
+}
 
 interface RunAnalysisModalProps {
   workspace: string;
@@ -56,11 +58,20 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
   });
   const periodicCursor =
     isFetchedAfterMount && !isError ? (runStatus?.last_successful_run_at ?? undefined) : undefined;
-  const [preset, setPreset] = useState<SincePreset>('all');
-  const [custom, setCustom] = useState(() => toDateTimeLocalValue(new Date(Date.now() - DAY_MS)));
-  const [evaluation, setEvaluation] = useState(ALL_TRACES);
-  const [defaultModel, setDefaultModel] = useState('');
-  const [fastModel, setFastModel] = useState('');
+
+  const { control, handleSubmit, setValue } = useForm<RunAnalysisFormFields>({
+    defaultValues: {
+      preset: 'all',
+      custom: toDateTimeLocalValue(new Date(Date.now() - DAY_MS)),
+      evaluation: ALL_TRACES,
+      defaultModel: '',
+      fastModel: '',
+    },
+  });
+  const [preset, custom, defaultModel, fastModel] = useWatch({
+    control,
+    name: ['preset', 'custom', 'defaultModel', 'fastModel'],
+  });
   const runDefaultModel = defaultModel || config.default_model || '';
   const runFastModel = fastModel || config.fast_model || '';
 
@@ -91,7 +102,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
     { value: 'custom', children: 'Custom' },
   ];
 
-  const handleRun = () =>
+  const onSubmit = ({ evaluation }: RunAnalysisFormFields) =>
     onRun({
       agent,
       overrides: { default_model: runDefaultModel, fast_model: runFastModel },
@@ -103,10 +114,9 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
     });
 
   return (
-    <Modal
+    <FormModal
       open
-      onOpenChange={(open) => !open && !running && onClose()}
-      slotHeading={
+      title={
         <Stack gap="1">
           <Text kind="title/sm">Run insight analysis</Text>
           <Text kind="body/regular/sm" className="text-secondary">
@@ -114,74 +124,55 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
           </Text>
         </Stack>
       }
+      submitButtonText="Run insight analysis"
       className="w-[90vw] max-w-[640px]"
-      attributes={{ ModalFooter: { className: 'justify-end' } }}
-      slotFooter={
-        <Flex gap="density-sm">
-          <Button kind="tertiary" onClick={onClose} disabled={running}>
-            Cancel
-          </Button>
-          <LoadingButton
-            color="brand"
-            onClick={handleRun}
-            loading={running}
-            disabled={running || invalidCustom || invalidModels}
-          >
-            Run insight analysis
-          </LoadingButton>
-        </Flex>
-      }
+      onSubmit={(event) => void handleSubmit(onSubmit)(event)}
+      onClose={onClose}
+      disabled={running}
+      loading={running}
+      submitDisabled={invalidCustom || invalidModels}
+      attributes={{ SubmitButton: { color: 'brand' } }}
     >
       <Stack gap="density-lg">
-        <FormField
-          slotLabel="Traces to analyze"
-          slotHelp={
-            invalidCustom
+        <ControlledSelect
+          useControllerProps={{ control, name: 'preset' }}
+          aria-label="Traces to analyze"
+          items={presetItems}
+          formFieldProps={{
+            slotLabel: 'Traces to analyze',
+            slotHelp: invalidCustom
               ? 'Enter a date and time in the past.'
               : since
                 ? `Analyzes traces that started since ${formatDateTime(since)}.`
-                : "Analyzes the agent's full trace history."
-          }
-        >
-          <Select
-            aria-label="Traces to analyze"
-            value={preset}
-            onValueChange={(value) => setPreset(value as SincePreset)}
-            items={presetItems}
-          />
-        </FormField>
+                : "Analyzes the agent's full trace history.",
+          }}
+        />
 
         {preset === 'custom' ? (
-          <FormField slotLabel="Analyze traces since">
-            <TextInput
-              type="datetime-local"
-              value={custom}
-              max={toDateTimeLocalValue(new Date())}
-              onChange={(event) => setCustom(event.target.value)}
-              aria-label="Analyze traces since"
-            />
-          </FormField>
+          <ControlledTextInput
+            useControllerProps={{ control, name: 'custom' }}
+            label="Analyze traces since"
+            type="datetime-local"
+            max={toDateTimeLocalValue(new Date())}
+          />
         ) : null}
 
-        <FormField
-          slotLabel="Scope to an evaluation"
-          slotHelp={
-            evaluationNames.length > 0
-              ? 'Reads only the spans recorded for that evaluation, within the time range above.'
-              : 'No evaluations have recorded traces for this agent.'
-          }
-        >
-          <Select
-            aria-label="Scope to an evaluation"
-            value={evaluation}
-            onValueChange={setEvaluation}
-            disabled={evaluationNames.length === 0}
-            items={[
-              { value: ALL_TRACES, children: 'All traces' },
-              ...evaluationNames.map((name) => ({ value: name, children: name })),
-            ]}
-          />
-        </FormField>
+        <ControlledSelect
+          useControllerProps={{ control, name: 'evaluation' }}
+          aria-label="Scope to an evaluation"
+          disabled={evaluationNames.length === 0}
+          items={[
+            { value: ALL_TRACES, children: 'All traces' },
+            ...evaluationNames.map((name) => ({ value: name, children: name })),
+          ]}
+          formFieldProps={{
+            slotLabel: 'Scope to an evaluation',
+            slotHelp:
+              evaluationNames.length > 0
+                ? 'Reads only the spans recorded for that evaluation, within the time range above.'
+                : 'No evaluations have recorded traces for this agent.',
+          }}
+        />
 
         <InsightsModelPairFields
           workspace={workspace}
@@ -189,11 +180,11 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
           unresolved={false}
           defaultModel={defaultModel}
           fastModel={fastModel}
-          onDefaultModelChange={setDefaultModel}
-          onFastModelChange={setFastModel}
+          onDefaultModelChange={(value) => setValue('defaultModel', value)}
+          onFastModelChange={(value) => setValue('fastModel', value)}
           stored={{ defaultModel: config.default_model, fastModel: config.fast_model }}
         />
       </Stack>
-    </Modal>
+    </FormModal>
   );
 };
