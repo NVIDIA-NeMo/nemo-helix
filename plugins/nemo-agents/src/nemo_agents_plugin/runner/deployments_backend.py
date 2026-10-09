@@ -726,24 +726,17 @@ class DeploymentsRunnerBackend(RunnerBackend):
             if self._executor_registry_task is None:
                 self._executor_registry_task = asyncio.create_task(asyncio.to_thread(self._build_registry))
             task = self._executor_registry_task
+        registry: ExecutorRegistry | None = None
         try:
             registry = await task
-        except asyncio.CancelledError:
+        finally:
             async with self._executor_registry_lock:
+                if registry is not None and self._executor_registry is None:
+                    self._executor_registry = registry
                 if self._executor_registry_task is task:
                     self._executor_registry_task = None
-            raise
-        except Exception:
-            async with self._executor_registry_lock:
-                if self._executor_registry_task is task:
-                    self._executor_registry_task = None
-            raise
-        async with self._executor_registry_lock:
-            if self._executor_registry is None:
-                self._executor_registry = registry
-            if self._executor_registry_task is task:
-                self._executor_registry_task = None
-            return self._executor_registry
+        assert self._executor_registry is not None
+        return self._executor_registry
 
     async def create_deployment(
         self,
