@@ -68,4 +68,4 @@ nhx-sandbox = { path = "../../packages/nhx_sandbox", editable = true }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-pythonpath = ["src"]
+pythonpath = ["src", "opensandbox_ext"]
