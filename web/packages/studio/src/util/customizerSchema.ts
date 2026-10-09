@@ -50,6 +50,10 @@ export const CUSTOMIZER_SCHEMA_LABELS: Record<CustomizerSchemaVariant, string> =
   'grpo-gym': 'GRPO Gym (responses_create_params + agent_ref)',
 };
 
+/** Unsloth renders chat rows through the model's chat template; other formats are raw text. */
+export const usesChatTemplate = (variant: CustomizerSchemaVariant): boolean =>
+  variant === 'sft-chat';
+
 export interface CustomizerSchemaDetection {
   variant: CustomizerSchemaVariant;
   /** Friendly label for the panel checklist row, sourced from CUSTOMIZER_SCHEMA_LABELS. */
