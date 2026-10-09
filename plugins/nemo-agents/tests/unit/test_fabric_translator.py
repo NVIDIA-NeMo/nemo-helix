@@ -810,3 +810,19 @@ def test_nooa_bench_harness_selection(kind: str) -> None:
     assert translated.harness is not None
     assert translated.harness.adapter_id == "nvidia.fabric.nooa.bench-agent"
     assert translated.harness.resolution == "preinstalled"
+
+
+@pytest.mark.parametrize("kind", ["mini-swe-agent", "nvidia.fabric.mini-swe-agent"])
+def test_mini_swe_agent_example(kind: str) -> None:
+    config = load_agent_config(Path(__file__).parents[2] / "examples/nemo-agent-config/agent-mini-swe-agent.yaml")
+    config.harnesses["mini-swe-agent"].kind = kind
+    translated = translate_agent_config(config)
+
+    assert translated.workflow is None
+    assert translated.harness is not None
+    assert translated.harness.adapter_id == "nvidia.fabric.mini-swe-agent"
+    assert translated.harness.settings == {"timeout": 30}
+    assert translated.harness.resolution == "preinstalled"
+    assert translated.runtime is not None
+    assert translated.runtime.max_turns == 50
+    assert translated.runtime.timeout_seconds == 1800

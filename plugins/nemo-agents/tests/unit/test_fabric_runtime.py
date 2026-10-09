@@ -699,3 +699,23 @@ def test_remote_streaming_rejects_incomplete_configuration(
     )
     with pytest.raises(FabricRuntimeStartError, match=message):
         fabric_runtime.fabric_streaming_options(config)
+
+
+@pytest.mark.parametrize(
+    ("output", "response"),
+    [
+        ({"output": "submitted text\n"}, "submitted text\n"),
+        ({"output": ""}, ""),
+        ({"response": "preferred", "output": "other"}, "preferred"),
+        ({"response": "", "output": "other"}, ""),
+        ({"response": None, "output": "other"}, None),
+        ({"output": {"structured": "data"}}, None),
+        ({"output": ["text"]}, None),
+        ({}, None),
+    ],
+)
+def test_normalize_text_output_fallback(output: dict[str, Any], response: str | None) -> None:
+    result = fabric_runtime._normalize_fabric_run_result(cast(Any, _FakeRunResult(output=_FabricMapping(output))))
+
+    assert result.response == response
+    assert result.output == output

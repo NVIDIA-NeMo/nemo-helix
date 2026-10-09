@@ -23,6 +23,7 @@ HARNESS_ADAPTER_IDS = {
     "hermes": "nvidia.fabric.hermes",
     "remote-agent": "nvidia.fabric.remote-agent",
     "pi": "nvidia.fabric.pi",
+    "mini-swe-agent": "nvidia.fabric.mini-swe-agent",
     "nooa-bench-agent": "nvidia.fabric.nooa.bench-agent",
 }
 
