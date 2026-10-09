@@ -31,7 +31,6 @@ export interface LatestAnalysisRun {
 export const LIST_POLL_MS = 15_000;
 // The scheduler records a run just before submitting its job.
 const UNSUBMITTED_GRACE_MS = 60_000;
-const MAX_POLL_FAILURES = 3;
 const NEW_FINDINGS_PAGE_SIZE = 100;
 
 const IN_FLIGHT_STATUSES: HelixJobStatus[] = [
@@ -40,17 +39,22 @@ const IN_FLIGHT_STATUSES: HelixJobStatus[] = [
   HelixJobStatus.active,
 ];
 
-const runPollInterval = (
-  data: AnalysisRunResponse | undefined,
-  fetchFailureCount: number
-): number | false => {
-  if (!data || fetchFailureCount >= MAX_POLL_FAILURES) return false;
+const runStatusPollInterval = (data: AnalysisRunResponse): number | false => {
   if (!data.job) {
     const age = Date.now() - parseISOWithUTCFallback(data.run.created_at).getTime();
     return age < UNSUBMITTED_GRACE_MS ? JOB_POLLING_INTERVAL_MS : false;
   }
   const status = analysisJobStatus(data.job);
   return status ? getJobRefetchInterval(status) : false;
+};
+
+export const runPollInterval = (
+  data: AnalysisRunResponse | undefined,
+  fetchFailureCount: number
+): number | false => {
+  if (!data) return false;
+  const interval = runStatusPollInterval(data);
+  return interval !== false && fetchFailureCount > 0 ? LIST_POLL_MS : interval;
 };
 
 const countInsightsSince = async (
