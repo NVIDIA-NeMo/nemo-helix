@@ -29,12 +29,11 @@ or exported in your shell) **before** the relevant tests run:
 =================  ============================================================
 Variable           Notebooks that require it
 =================  ============================================================
-``NVIDIA_API_KEY`` evaluator tutorials, example-applications,
+``NVIDIA_API_KEY`` evals tutorials, example-applications,
                    run-inference (about, deploy-models),
                    data-designer (quickstart, basics, seeding)
 ``NGC_API_KEY``    guardrails tutorials, audit/docker-local-nim
-``HF_TOKEN``       evaluator/run-an-evaluation,
-                   safe-synthesizer-101, run-inference/deploy-models
+``HF_TOKEN``       safe-synthesizer-101, run-inference/deploy-models
 ``NIM_API_KEY``    safe-synthesizer/pii-replacement,
                    safe-synthesizer/safe-synthesizer-101
 ``OPENAI_API_KEY`` run-inference/deploy-models
@@ -80,6 +79,8 @@ DOCS_DIR = REPO_ROOT / "docs"
 # ``nhx_base_url`` fixture handles it for every test.
 # ---------------------------------------------------------------------------
 NOTEBOOK_REQUIRED_ENV: dict[str, set[str]] = {
+    # Get started: the Python example stores the NVIDIA API key as a secret.
+    "docs/get-started/concepts/manage-secrets.mdx": {"NVIDIA_API_KEY"},
     # Guardrails: chat completions route through the system/nvidia-build model provider,
     # which uses the system/ngc-api-key secret for authentication.
     "docs/guardrails/concepts/configurations/default-configs.md": {"NGC_API_KEY"},
@@ -88,9 +89,8 @@ NOTEBOOK_REQUIRED_ENV: dict[str, set[str]] = {
     "docs/guardrails/tutorials/injection-detection.md": {"NGC_API_KEY"},
     "docs/guardrails/tutorials/multimodal-data.md": {"NGC_API_KEY"},
     "docs/guardrails/tutorials/parallel-rails.md": {"NGC_API_KEY"},
-    # Evaluator
-    "docs/evaluator/tutorials/run-an-evaluation.md": {"NVIDIA_API_KEY", "HF_TOKEN"},
-    "docs/evaluator/tutorials/run-llm-judge-evaluation.md": {"NVIDIA_API_KEY"},
+    # Evals
+    "docs/evals/tutorials/run-llm-judge-evaluation.mdx": {"NVIDIA_API_KEY"},
     # Example applications
     "docs/example-applications/custom-evaluations-synthetic-data.md": {"NVIDIA_API_KEY"},
     # Run-inference

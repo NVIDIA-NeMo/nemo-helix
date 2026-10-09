@@ -6,7 +6,7 @@
 All dataset sources, sizes, and output paths are defined in the manifest. Run via
 ``publish_assets_to_s3.sh`` (off-CI) or directly:
 
-    uv run --with datasets python e2e/customizer/generate_customizer_data.py
+    PYTHONPATH=. uv run --with datasets python e2e/customizer/generate_customizer_data.py
 
 Produces, under the manifest ``generation.output_dir``:
   - prompt_completion/{training,validation}.jsonl   (SQuAD, from squad.outputs)

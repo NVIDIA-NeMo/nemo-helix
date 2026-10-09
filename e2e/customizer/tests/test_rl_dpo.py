@@ -7,7 +7,6 @@ import logging
 
 import pytest
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.jobs.client import JobsClient
 
 from e2e.customizer import customizer_eval as ceval
 from e2e.customizer import customizer_jobs as jobs
@@ -15,21 +14,9 @@ from e2e.customizer.customization_helpers import unique_name
 
 logger = logging.getLogger(__name__)
 
-pytestmark = [pytest.mark.platform("kubernetes"), pytest.mark.feature("gpu", "rl")]
+pytestmark = [pytest.mark.platform("kubernetes"), pytest.mark.feature("gpu", "rl", "uplift")]
 
 RlJobInput = pytest.importorskip("nemo_rl_plugin.schema").RlJobInput
-
-
-def _require_kubernetes_backend(client: NemoClient) -> None:
-    try:
-        profiles = JobsClient.from_client(client).get_execution_profiles().data()
-    except Exception as exc:
-        pytest.skip(f"could not list execution profiles to verify rl backend: {exc}")
-    text = str(profiles)
-    if "kubernetes_job" not in text and "volcano_job" not in text:
-        pytest.skip(
-            "rl (DPO) requires a kubernetes_job/volcano_job execution backend; platform is not configured for it"
-        )
 
 
 def _deploy_and_score(
@@ -62,7 +49,7 @@ def test_rl_dpo_uplift(
     rl_base_entity: str,
     require_uplift: bool,
 ) -> None:
-    _require_kubernetes_backend(client)
+    jobs.require_kubernetes_backend(client)
 
     ws = customizer_workspace
     base_entity = rl_base_entity

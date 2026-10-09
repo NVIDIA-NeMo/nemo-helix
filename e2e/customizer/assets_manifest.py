@@ -52,6 +52,15 @@ def iter_models(manifest: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     return list((manifest or load())["models"])
 
 
+def local_only_formats(manifest: dict[str, Any] | None = None) -> set[str]:
+    """Dataset output formats not yet published to S3 (``"s3_published": false``)."""
+    formats: set[str] = set()
+    for dataset in (manifest or load())["datasets"].values():
+        if dataset.get("s3_published", True) is False:
+            formats.update(dataset["outputs"])
+    return formats
+
+
 def print_publish_settings(repo_root_dir: Path) -> None:
     """Print bucket, dataset output dir, and model ignore globs for publish_assets_to_s3.sh."""
     manifest = load()

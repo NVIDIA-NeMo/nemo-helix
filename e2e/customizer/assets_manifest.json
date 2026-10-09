@@ -27,7 +27,9 @@
       },
       "tests": [
         "e2e/customizer/tests/test_automodel.py::test_automodel_sft_uplift",
-        "e2e/customizer/tests/test_unsloth.py::test_unsloth_lora_uplift"
+        "e2e/customizer/tests/test_unsloth.py::test_unsloth_sft_uplift",
+        "e2e/customizer/tests/test_smoke.py::test_automodel_sft_smoke",
+        "e2e/customizer/tests/test_smoke.py::test_unsloth_sft_smoke"
       ]
     },
     "helpsteer3": {
@@ -41,7 +43,93 @@
         }
       },
       "tests": [
-        "e2e/customizer/tests/test_rl_dpo.py::test_rl_dpo_uplift"
+        "e2e/customizer/tests/test_rl_dpo.py::test_rl_dpo_uplift",
+        "e2e/customizer/tests/test_smoke.py::test_rl_dpo_smoke"
+      ]
+    },
+    "nvdocs_retrieval": {
+      "hf_dataset": "nvidia/Retrieval-Synthetic-NVDocs-v1",
+      "outputs": {
+        "embedding_nvdocs": {
+          "training": "training.jsonl",
+          "eval": "eval_beir/"
+        },
+        "embedding_nvdocs_smoke": {
+          "training": "training.jsonl"
+        }
+      },
+      "tests": [
+        "e2e/customizer/tests/test_automodel_embedding.py::test_automodel_embedding_uplift",
+        "e2e/customizer/tests/test_smoke.py::test_automodel_embedding_smoke"
+      ]
+    },
+    "dapo_math": {
+      "hf_dataset": "YouJiacheng/DAPO-Math-17k-dedup",
+      "outputs": {
+        "grpo_math_smoke": {
+          "training": "training.jsonl",
+          "validation": "validation.jsonl"
+        },
+        "grpo_math_uplift": {
+          "training": "training.jsonl",
+          "validation": "validation.jsonl"
+        }
+      },
+      "tests": [
+        "e2e/customizer/tests/test_smoke.py::test_rl_grpo_offline_formats_smoke",
+        "e2e/customizer/tests/test_smoke.py::test_rl_grpo_internet_formats_smoke",
+        "e2e/customizer/tests/test_rl_grpo.py::test_rl_grpo_reward_uplift"
+      ]
+    },
+    "math_with_judge_env": {
+      "gym_server": "resources_servers/math_with_judge",
+      "environment_format": "wheels-v1",
+      "s3_published": false,
+      "generator": "e2e/customizer/generate_grpo_assets.py --env-only",
+      "outputs": {
+        "grpo_math_env": {
+          "manifest": "nemo-environment.yaml"
+        }
+      },
+      "tests": [
+        "e2e/customizer/tests/test_smoke.py::test_rl_grpo_offline_formats_smoke",
+        "e2e/customizer/tests/test_rl_grpo.py::test_rl_grpo_reward_uplift"
+      ]
+    },
+    "math_with_judge_native_env": {
+      "gym_server": "resources_servers/math_with_judge",
+      "environment_format": "native-v1",
+      "s3_published": false,
+      "generator": "e2e/customizer/generate_grpo_assets.py --env-only",
+      "outputs": {
+        "grpo_math_env_native": {
+          "manifest": "nemo-environment.yaml"
+        },
+        "grpo_math_env_native_ref": {
+          "manifest": "nemo-environment.yaml"
+        }
+      },
+      "tests": [
+        "e2e/customizer/tests/test_smoke.py::test_rl_grpo_internet_formats_smoke"
+      ]
+    },
+    "ascii_tree_adapter_env": {
+      "hub_id": "primeintellect/ascii-tree",
+      "hub_version": "0.1.5",
+      "environment_format": "adapter-wheels-v1",
+      "s3_published": false,
+      "generator": "e2e/customizer/generate_grpo_assets.py --env-only",
+      "outputs": {
+        "grpo_ascii_tree_env": {
+          "manifest": "nemo-environment.yaml"
+        },
+        "grpo_ascii_tree_smoke": {
+          "training": "training.jsonl",
+          "validation": "validation.jsonl"
+        }
+      },
+      "tests": [
+        "e2e/customizer/tests/test_smoke.py::test_rl_grpo_offline_formats_smoke"
       ]
     }
   },
@@ -51,14 +139,25 @@
       "hf_repo": "Qwen/Qwen3-0.6B",
       "tests": [
         "e2e/customizer/tests/test_automodel.py",
-        "e2e/customizer/tests/test_rl_dpo.py"
+        "e2e/customizer/tests/test_unsloth.py",
+        "e2e/customizer/tests/test_rl_dpo.py",
+        "e2e/customizer/tests/test_rl_grpo.py",
+        "e2e/customizer/tests/test_smoke.py"
       ]
     },
     {
-      "s3_folder": "qwen2.5-0.5b-instruct-unsloth",
-      "hf_repo": "unsloth/Qwen2.5-0.5B-Instruct",
+      "s3_folder": "nemotron-3-embed-1b-bf16",
+      "hf_repo": "nvidia/Nemotron-3-Embed-1B-BF16",
       "tests": [
-        "e2e/customizer/tests/test_unsloth.py"
+        "e2e/customizer/tests/test_automodel_embedding.py",
+        "e2e/customizer/tests/test_smoke.py::test_automodel_embedding_smoke"
+      ]
+    },
+    {
+      "s3_folder": "nemotron-3.5-lightning-30b-a3b-bf16",
+      "hf_repo": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      "tests": [
+        "e2e/customizer/tests/test_automodel_nemotron.py"
       ]
     }
   ]

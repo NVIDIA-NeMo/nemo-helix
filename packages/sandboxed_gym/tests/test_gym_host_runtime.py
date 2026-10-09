@@ -7,6 +7,7 @@ import io
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
 import urllib.error
@@ -567,7 +568,12 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
 
     # Capture the uv command without trying to install these intentionally empty wheel fixtures.
     calls = []
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: calls.append((a, k)))
+
+    def record(*a, **k):
+        calls.append((a, k))
+        return subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runtime.subprocess, "run", record)
     monkeypatch.setenv("PYTHONPATH", "/image/packages")
 
     package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
@@ -593,7 +599,7 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
         str(wheels_dir / "a_dep-1.0-py3-none-any.whl"),
         str(wheels_dir / "b_dep-2.0-py3-none-any.whl"),
     ]
-    assert kwargs == {"check": True}
+    assert kwargs == {"capture_output": True, "text": True, "check": False}
     assert install_dir.is_dir()
     assert runtime.os.environ[runtime.UV_FIND_LINKS_ENV_KEY] == str(wheels_dir)
     # Child processes and the already-running host both prefer staged packages over image packages.
@@ -609,8 +615,61 @@ def _stage_wheelhouse(tmp_path, monkeypatch):
     wheels_dir = tmp_path / WHEELS_V1_SUBDIR
     wheels_dir.mkdir()
     (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+    )
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def _fail_uv(monkeypatch, stderr: str) -> None:
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout="", stderr=stderr)
+    )
+
+
+def test_a_failed_wheel_install_raises_uvs_reason_instead_of_the_command(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    """uv writes to the raw stderr fd, so without capture the failure would carry no reason."""
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    _fail_uv(monkeypatch, "Resolved 1 package\n  × No solution found when resolving dependencies\n")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    message = str(excinfo.value)
+    assert "failed with exit code 1" in message
+    assert "× No solution found when resolving dependencies" in message
+    # The command lists every wheel; with a real wheelhouse it buries the reason.
+    assert "a_dep-1.0-py3-none-any.whl" not in message
+
+
+def test_a_failed_wheel_install_reaches_the_output_tail(tmp_path, monkeypatch, isolated_gym_host_process_state):
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    _fail_uv(monkeypatch, "error: Failed to install: a_dep-1.0-py3-none-any.whl\n")
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+    monkeypatch.setattr(runtime.sys, "stderr", runtime._OutputTail(io.StringIO(), runtime._OUTPUT_TAIL))
+
+    with pytest.raises(RuntimeError):
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    assert runtime._OUTPUT_TAIL[-1] == "error: Failed to install: a_dep-1.0-py3-none-any.whl"
+
+
+def test_a_failed_wheel_install_keeps_only_the_last_stderr_lines_and_masks_secrets(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    monkeypatch.setenv("NHX_TEST_API_KEY", "sk-secret-value")
+    noise = "".join(f"+ pkg{i}==1.0\n" for i in range(50))
+    _fail_uv(monkeypatch, noise + "error: token sk-secret-value rejected\n")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    reason = str(excinfo.value).split(":\n", 1)[1].splitlines()
+    assert len(reason) == runtime._UV_FAILURE_REASON_LINES
+    assert reason[-1] == "error: token *** rejected"
 
 
 def test_an_offline_environment_takes_uv_off_the_index(tmp_path, monkeypatch, isolated_gym_host_process_state):

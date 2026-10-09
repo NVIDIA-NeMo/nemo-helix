@@ -59,7 +59,7 @@ def _build_target(base_url: str, workspace: str, deployment_name: str, model_fie
     return Model(
         url=provider_route_url(base_url, workspace, deployment_name),
         name=model_field,
-        format=ModelFormat.NVIDIA_NIM,
+        format=ModelFormat.OPEN_AI,
     )
 
 

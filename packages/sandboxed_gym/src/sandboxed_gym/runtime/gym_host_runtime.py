@@ -52,6 +52,8 @@ UV_CACHE_DIR_KEY = "uv_cache_dir"
 UV_VENV_DIR_KEY = "uv_venv_dir"
 # Writable /job/work subdirectory where wheels are installed for the running Gym host.
 WHEELS_V1_INSTALL_SUBDIR = "wheels-v1-site-packages"
+#: uv ends a failure with its reason; this many trailing stderr lines carry it into the error message.
+_UV_FAILURE_REASON_LINES = 20
 # Writable /job/work subdirectory Gym writes one `<rollout_id>.capture.jsonl` per rollout into.
 # Under /job/work rather than beside the Gym tree because that is the one path the job image
 # guarantees is writable by uid 1000; /opt is not, which is why gym_host.sh stages Gym to /tmp.
@@ -490,6 +492,8 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     The wheels are installed into the writable work directory instead of an existing virtualenv.
     ``PYTHONPATH`` exposes them to Gym's child processes, while ``sys.path`` exposes them to the
     already-running host process.
+
+    A failed install raises ``RuntimeError`` carrying uv's own reason, not the command line.
     """
     if not isinstance(package, (WheelsV1Package, AdapterWheelsV1Package)):
         return
@@ -501,7 +505,9 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
 
     # --target keeps mutable packages under the writable work mount. --only-binary closes the
     # source-distribution path opened by --find-links, including for transitive dependencies.
-    subprocess.run(
+    # Output is captured because uv writes to the process's own file descriptors, which bypass
+    # the output tail, so a failure would otherwise reach the caller with no reason.
+    result = subprocess.run(
         [
             "uv",
             "pip",
@@ -515,8 +521,23 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
             wheels_dir,
         ]
         + [str(wheel) for wheel in package.wheel_files],
-        check=True,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    # Forwarded through sys.stdout/sys.stderr so the output tail keeps it, with secrets masked.
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        reason = "\n".join(lines[-_UV_FAILURE_REASON_LINES:]) or "uv printed no error output"
+        for secret in _captured_output_secrets():
+            reason = reason.replace(secret, "***")
+        # The command lists every wheel, so it is left out: it would bury the reason.
+        raise RuntimeError(
+            f"uv pip install of {len(package.wheel_files)} wheels from {wheels_dir} "
+            f"failed with exit code {result.returncode}:\n{reason}"
+        )
 
     # Gym creates a private venv for each agent and resource server from that component's
     # requirements.txt. Prefer the staged component wheels while retaining package-index fallback

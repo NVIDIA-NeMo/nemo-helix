@@ -25,12 +25,22 @@ from nhx.unsloth.schemas import (
 )
 
 
+def _no_in_flight_jobs() -> MagicMock:
+    """Jobs client whose in-flight output-name check finds no pending or running job."""
+    page = MagicMock()
+    page.items.return_value.__aiter__.return_value = []
+    jobs = MagicMock()
+    jobs.list_jobs = AsyncMock(return_value=page)
+    return jobs
+
+
 def _platform_mock() -> MagicMock:
     """Platform client whose adapter lookup reports "no such adapter"."""
     platform = MagicMock()
     platform.models.get_adapter = AsyncMock(
         side_effect=NotFoundError(httpx.Response(status_code=404, request=httpx.Request("GET", "http://test")))
     )
+    platform.jobs = _no_in_flight_jobs()
     return platform
 
 

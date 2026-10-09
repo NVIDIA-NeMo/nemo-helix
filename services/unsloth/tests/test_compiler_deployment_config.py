@@ -120,6 +120,15 @@ def _all_weights_job(deployment_config: str | DeploymentParams | None) -> Unslot
     )
 
 
+def _no_in_flight_jobs() -> MagicMock:
+    """Jobs client whose in-flight output-name check finds no pending or running job."""
+    page = MagicMock()
+    page.items.return_value.__aiter__.return_value = []
+    jobs = MagicMock()
+    jobs.list_jobs = AsyncMock(return_value=page)
+    return jobs
+
+
 @pytest.fixture
 def platform() -> MagicMock:
     """Platform clients with the model entity fetch stubbed; per-test stubs layer on."""
@@ -128,6 +137,7 @@ def platform() -> MagicMock:
     clients.models.get_model = AsyncMock(side_effect=_not_found())
     # No adapter holds the output name yet, which is what every test here assumes.
     clients.models.get_adapter = AsyncMock(side_effect=_not_found())
+    clients.jobs = _no_in_flight_jobs()
     return clients
 
 

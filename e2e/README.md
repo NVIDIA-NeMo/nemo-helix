@@ -103,41 +103,116 @@ uv run pytest e2e --docker --feature gpu --config=path/to/gpu-config.yaml -v
 
 Service-specific GPU tests can require an additional feature marker. Safe Synthesizer GPU tests use `feature("gpu", "safe-synthesizer")`.
 
-### Feature: Automodel And Unsloth
+### Feature: Customizer (Automodel, Unsloth, RL)
 
-Plugin-backed customization tests use backend-specific feature markers:
+Plugin-backed customization tests live in `e2e/customizer/tests/` and use backend-specific
+feature markers plus a suite marker:
 
-- Automodel training tests use `feature("gpu", "automodel")`.
-- Unsloth training tests use `feature("gpu", "unsloth")`.
+- **`smoke`** (`test_smoke.py`): checks functionality, not quality. Each backend trains a few
+  steps on a small dataset (the first 64 rows of each shared JSONL file, or a dedicated small
+  asset), and the job auto-deploys its output: the test passes an unbound vLLM deployment config
+  as the job's `deployment_config`, waits for the deployment, sends one chat completion (or one
+  embeddings request), and deletes it. A LoRA adapter is served from its base model's deployment.
+- **`uplift`**: longer runs on larger datasets that check the tuned model beats the base. SFT
+  and DPO train for one epoch, serve the base and tuned models on vLLM (the models service's
+  default vLLM image), and score both. The embedding test runs the validated NVDocs recipe
+  (3 epochs on 4 GPUs) on the full mined dataset. GRPO validates on the same holdout prompts
+  before and after training and requires both `val_accuracy` and `train_reward` to increase.
 
-Run these suites by selecting the backend feature along with `gpu`, or by targeting
-the backend file directly:
+| Test | Backend / mode | Base model | Features |
+|---|---|---|---|
+| `test_smoke.py` | Automodel and Unsloth SFT (LoRA, all-weights), NeMo RL DPO (Kubernetes only) | `Qwen/Qwen3-0.6B` | `gpu`, backend, `smoke` |
+| `test_smoke.py` | NeMo RL GRPO, `wheels-v1` `math_with_judge` environment (Kubernetes only) | `Qwen/Qwen3-0.6B` | `gpu`, `rl`, `grpo`, `smoke` |
+| `test_smoke.py` | Automodel `bi_encoder`, all-weights, served for embeddings | `nvidia/Nemotron-3-Embed-1B-BF16` | `gpu`, `automodel`, `smoke` |
+| `test_automodel.py` | Automodel SFT, LoRA and all-weights | `Qwen/Qwen3-0.6B` | `gpu`, `automodel`, `uplift` |
+| `test_unsloth.py` | Unsloth SFT, LoRA and all-weights | `Qwen/Qwen3-0.6B` | `gpu`, `unsloth`, `uplift` |
+| `test_rl_dpo.py` | NeMo RL DPO (Kubernetes only) | `Qwen/Qwen3-0.6B` | `gpu`, `rl`, `uplift` |
+| `test_rl_grpo.py` | NeMo RL GRPO, `wheels-v1` `math_with_judge` environment (Kubernetes only); `val_accuracy` and `train_reward` must increase | `Qwen/Qwen3-0.6B` | `gpu`, `rl`, `grpo`, `uplift` |
+| `test_automodel_embedding.py` | Automodel `bi_encoder`, all-weights on 4 GPUs, scored with `retrieve-eval`; requires nDCG@10 uplift >= 0.05 | `nvidia/Nemotron-3-Embed-1B-BF16` | `gpu`, `automodel`, `embedding`, `uplift` |
+| `test_automodel_nemotron.py` | Automodel LoRA on 4 GPUs (expert parallel 4), served on 4 GPUs | `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` | `gpu`, `automodel`, `h100`, `uplift` |
+
+A test runs only when all of its features are selected:
 
 ```bash
 # Against a Kubernetes cluster (review cluster in CI, or local minikube)
-uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel -v
-uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature unsloth -v
-uv run pytest e2e/customizer/tests/test_rl_dpo.py --kubernetes --feature gpu --feature rl -v
+uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel --feature unsloth --feature rl --feature smoke -v
+uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel --feature unsloth --feature rl --feature uplift -v
+uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature rl --feature grpo --feature smoke -v
+uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel --feature embedding --feature uplift -v
+uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel --feature h100 --feature uplift -v
 ```
 
-The CI GPU E2E suites select `gpu`, `automodel`, and `unsloth` together so the
-backend customization jobs run only on GPU-capable runners.
+**CI schedule** (Platform-Deploy `.github/workflows/docker.yaml`, `Run Kubernetes/Docker Customizer GPU E2E tests`):
 
-Automodel training data is staged from ``s3://aire-e2e-assets/datasets/chat_format/`` into platform filesets before tests run (see ``e2e/customizer/stage_assets.py``).
+| Trigger | Suite | Failure handling |
+|---|---|---|
+| Nightly (`0 9 * * *`), Platform-Deploy PRs, `workflow_dispatch` with `run-e2e` (default) | `smoke` | Fails the run |
+| Weekly (`0 11 * * 6`), `workflow_dispatch` with `run-e2e` and `customizer-suite: uplift` | `uplift` | Reported in the E2E summary; does not fail the run |
 
-**Environment variables for Automodel and Unsloth tests:**
+On Kubernetes, smoke runs install the platform with auth enabled
+(`e2e/k8s/values/auth-overlay.yaml`), so job pods authenticate as their service principals.
+Uplift runs without auth because its eval calls the inference gateway without principal headers.
+
+Docker runs skip `rl` and `grpo`. CI does not select `embedding` uplift (three epochs over the
+full mined set take hours) or `h100` (needs 4x 80GB H100s).
+
+GRPO needs OpenSandbox, which the platform chart does not install. The `customizer-grpo`
+`workflow_dispatch` input installs it on the Kubernetes GPU runner
+(`e2e/k8s/scripts/install_opensandbox_minikube.sh`), installs the platform with `sandboxClusterCapable=true`,
+and selects `grpo`. The nightly and weekly schedules always run it; manual runs opt in.
+
+GRPO smoke trains every environment format (`wheels-v1`, `adapter-wheels-v1`, `native-v1`, and
+`native-v1` reference-only) with DTensor full weights, Automodel full weights, and Automodel LoRA,
+and serves each output. The `native-v1` formats install the server's requirements from a package
+index, so they need sandbox internet. That setting is platform-wide, and turning it on stops
+forcing the wheels formats offline, so the job runs in two phases: the wheels formats first, then
+a Helm upgrade with `platformConfig.rl.sandbox_allow_internet=true` and the `native-v1` formats
+(feature `grpo-internet`).
+
+The `h100` test (`test_automodel_nemotron.py`) is disabled in code with `pytest.mark.skip`;
+remove the marker to enable it.
+
+**Test assets.** SQuAD, HelpSteer3, the mined NVDocs data, the GRPO math datasets, and the
+Qwen3-0.6B, Nemotron 3 Embed 1B, and Nemotron 3.5 Lightning snapshots are staged from
+``s3://aire-e2e-assets/`` into platform filesets before tests run (see
+``e2e/customizer/stage_assets.py`` and ``assets_manifest.json``). The Lightning snapshot is
+~66 GB and is synced only by the `h100` test.
+
+The GRPO environment packages are not published. They vendor the `nemo-gym`, `ray`, and `openai`
+versions of the NeMo-RL commit the training image is built from, so CI builds them from the
+checkout under test (`generate_grpo_assets.py --env-only`) and a pin bump cannot leave
+them stale. That build is the one place CI pulls from outside S3: it clones NeMo-RL, downloads
+wheels from PyPI, and the `ascii-tree` conversion fetches the environment from the Prime
+Intellect hub and its dataset (`kalomaze/ascii-tree-mix-it1`, ~36 MB) from Hugging Face.
+
+Generate the off-CI assets, then publish them with ``publish_assets_to_s3.sh``:
+
+```bash
+# Mined NVDocs data (needs a running platform with a GPU and the Data Designer plugin):
+# embedding_nvdocs/ (every training row, all 20,909 eval queries) and embedding_nvdocs_smoke/ (512 rows).
+NHX_BASE_URL=http://localhost:8080 PYTHONPATH=. uv run --frozen \
+    python e2e/customizer/mine_embedding_data.py --workspace default
+
+# GRPO datasets: grpo_math_smoke/ (64 / 16 prompts) and grpo_math_uplift/ (2,048 / 200 prompts).
+# Also builds the environment packages locally; publish_assets_to_s3.sh does not upload them.
+# Needs internet.
+PYTHONPATH=. uv run --frozen python e2e/customizer/generate_grpo_assets.py
+```
+
+The embedding uplift recipe was validated on the full mined set; `--max-train-rows` and
+`--max-eval-queries` subsample for quicker local runs, but then the uplift floor and
+`warmup_steps` no longer apply.
+
+**Environment variables for customizer tests:**
 
 | Variable | Description | Default |
 |---|---|---|
-| `TEST_MODEL_HF_REPO` | HuggingFace repo for the Automodel base model | `Qwen/Qwen3-0.6B` |
-| `AUTOMODEL_E2E_MAX_STEPS` | Max training steps for the Automodel smoke job | `2` |
-| `AUTOMODEL_JOB_TIMEOUT` | Timeout in seconds for the Automodel training job | `2700` |
-| `UNSLOTH_TEST_MODEL_HF_REPO` | HuggingFace repo for the Unsloth base model | `unsloth/Qwen2.5-0.5B-Instruct` |
-| `UNSLOTH_E2E_MAX_STEPS` | Max training steps for the Unsloth smoke job | `2` |
-| `UNSLOTH_JOB_TIMEOUT` | Timeout in seconds for the Unsloth training job | `2700` |
-| `TRUST_REMOTE_CODE` | Allow trust_remote_code for model loading | `false` |
-| `UNSLOTH_TRUST_REMOTE_CODE` | Allow trust_remote_code for the Unsloth model | `false` |
-| `HF_TOKEN` | HuggingFace token for gated model access | (optional for public defaults) |
+| `E2E_REQUIRE_UPLIFT` | Set to `1` to require tuned > base instead of tuned >= base - 0.02 (the embedding test always requires nDCG@10 uplift >= 0.05) | unset |
+| `E2E_GPU_TEST_TIMEOUT` | Per-test timeout in seconds (the embedding test sets its own 12-hour timeout) | `5400` |
+| `E2E_ASSETS_CACHE_DIR` | Local cache for assets synced from S3 | `e2e/customizer/.asset-cache` |
+| `E2E_ASSETS_SYNC_TIMEOUT` | Timeout in seconds for each `aws s3 sync` | `1800` |
+| `S3_BUCKET` / `S3_ENDPOINT_URL` | Override the asset bucket or S3 endpoint | manifest bucket |
+| `HF_TOKEN` | Hugging Face token for models pulled at runtime | (optional for public repos) |
 
 ### Custom Registry and Tag (Docker)
 
@@ -327,7 +402,7 @@ By default, images are tagged as `my-registry/<name>:local` (configured in `dock
 # General GPU tests
 make test-e2e-minikube-gpu
 
-# Backend customization tests (dataset under e2e/customizer/testdata/)
+# Backend customization tests (see "Feature: Customizer" above for the embedding and h100 tests)
 uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel -v
 uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature unsloth -v
 uv run pytest e2e/customizer/tests/test_rl_dpo.py --kubernetes --feature gpu --feature rl -v
@@ -583,7 +658,7 @@ def test_access_control(sdk: NeMoHelix, workspace: str):
 
 ### Platform and Feature Markers
 
-Use **`@pytest.mark.platform("docker", "kubernetes")`** to restrict tests to specific platforms. No marker means the test runs on both. Use **`@pytest.mark.feature("auth")`**, `"gpu"`, `"automodel"`, or `"unsloth"` for tests that require a feature; run with `--feature <name>` to include them:
+Use **`@pytest.mark.platform("docker", "kubernetes")`** to restrict tests to specific platforms. No marker means the test runs on both. Use **`@pytest.mark.feature("auth")`**, `"gpu"`, `"automodel"`, `"unsloth"`, `"rl"`, `"grpo"`, `"embedding"`, or `"h100"` for tests that require a feature; run with `--feature <name>` to include them:
 
 ```python
 @pytest.mark.platform("docker")
