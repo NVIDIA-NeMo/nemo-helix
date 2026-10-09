@@ -3,7 +3,8 @@
 
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
 import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
-import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import type { AnalysisRunResponseJob } from '@nemo/sdk/generated/insights/schema';
+import { type AtifIngestRequest, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import { AxiosError } from 'axios';
 
@@ -40,6 +41,17 @@ export interface InsightsModelOverrides {
 export const isQualifiedModelRef = (ref: string): boolean => {
   const [workspace, ...rest] = ref.split('/');
   return rest.length === 1 && workspace.length > 0 && rest[0].length > 0;
+};
+
+const isHelixJobStatus = (value: unknown): value is HelixJobStatus =>
+  Object.values<unknown>(HelixJobStatus).includes(value);
+
+/** The analysis run's backing job is typed as an open object, so its status is narrowed here. */
+export const analysisJobStatus = (
+  job?: AnalysisRunResponseJob | null
+): HelixJobStatus | undefined => {
+  const status = job?.status;
+  return isHelixJobStatus(status) ? status : undefined;
 };
 
 const statusOf = (error: unknown): number | undefined =>

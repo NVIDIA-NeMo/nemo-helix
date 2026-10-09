@@ -11,14 +11,16 @@ import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import type { InsightsTriggerResult } from '@studio/api/insightsAnalysis';
 import { queryClient } from '@studio/api/queryClient';
+import { type LatestAnalysisRun, useLatestAnalysisRun } from '@studio/api/useLatestAnalysisRun';
 import { useTriggerInsightsRun } from '@studio/api/useTriggerInsightsRun';
 import { AnalysisConfigPanel } from '@studio/routes/agents/AgentDetailRoute/analysis/AnalysisConfigPanel';
 import {
   AnalysisConfigPartialSaveError,
   saveAnalysisConfig,
 } from '@studio/routes/agents/AgentDetailRoute/analysis/saveAnalysisConfig';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 
 vi.mock('@nemo/common/src/providers/toast/useToast');
 
@@ -37,6 +39,10 @@ vi.mock('@studio/api/queryClient', () => ({
 
 vi.mock('@studio/api/useTriggerInsightsRun', () => ({
   useTriggerInsightsRun: vi.fn(),
+}));
+
+vi.mock('@studio/api/useLatestAnalysisRun', () => ({
+  useLatestAnalysisRun: vi.fn(),
 }));
 
 vi.mock(
@@ -87,6 +93,17 @@ const mockTriggerRun = ({
   } as unknown as ReturnType<typeof useTriggerInsightsRun>);
 };
 
+const mockLatestRun = (latestRun?: Partial<LatestAnalysisRun>, isActive = false) =>
+  vi.mocked(useLatestAnalysisRun).mockReturnValue({
+    latestRun: latestRun && {
+      name: 'analysis-run-1',
+      startedAt: new Date(Date.now() - 125_000).toISOString(),
+      submitted: true,
+      ...latestRun,
+    },
+    isActive,
+  });
+
 const config = (overrides: Partial<AnalysisConfig> = {}): AnalysisConfig => ({
   id: 'insights-analysis-config-1',
   entity_id: 'insights-analysis-config-1',
@@ -118,7 +135,9 @@ const queryResult = (data: AnalysisConfig | undefined): ConfigQueryResult =>
 const renderPanel = (agent: string) =>
   render(
     <ThemeProvider>
-      <AnalysisConfigPanel workspace="demo-epa" agent={agent} />
+      <MemoryRouter>
+        <AnalysisConfigPanel workspace="demo-epa" agent={agent} />
+      </MemoryRouter>
     </ThemeProvider>
   );
 
@@ -130,6 +149,7 @@ beforeEach(() => {
   vi.mocked(useToast).mockReturnValue(toast);
   invalidateQueries.mockResolvedValue(undefined);
   mockTriggerRun();
+  mockLatestRun();
 });
 
 describe('AnalysisConfigPanel', () => {
@@ -189,7 +209,9 @@ describe('AnalysisConfigPanel', () => {
 
     rerender(
       <ThemeProvider>
-        <AnalysisConfigPanel workspace="demo-epa" agent="other-agent" />
+        <MemoryRouter>
+          <AnalysisConfigPanel workspace="demo-epa" agent="other-agent" />
+        </MemoryRouter>
       </ThemeProvider>
     );
 
@@ -250,5 +272,74 @@ describe('AnalysisConfigPanel', () => {
     renderPanel('email-security-triage');
 
     expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeDisabled();
+  });
+
+  it('shows no latest run row before the agent has been analyzed', () => {
+    useConfig.mockReturnValue(queryResult(config()));
+
+    renderPanel('email-security-triage');
+
+    expect(screen.queryByTestId('latest-analysis-run')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeEnabled();
+  });
+
+  it('shows a queued run and disables Run analysis now', () => {
+    useConfig.mockReturnValue(queryResult(config()));
+    mockLatestRun({ status: 'created' }, true);
+
+    renderPanel('email-security-triage');
+
+    const row = within(screen.getByTestId('latest-analysis-run'));
+    expect(row.getByText('Queued')).toBeInTheDocument();
+    expect(row.getByText(/Analysis running/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeDisabled();
+  });
+
+  it('shows how long a running run has been going', () => {
+    useConfig.mockReturnValue(queryResult(config()));
+    mockLatestRun({ status: 'active' }, true);
+
+    renderPanel('email-security-triage');
+
+    const row = within(screen.getByTestId('latest-analysis-run'));
+    expect(row.getByText('Running')).toBeInTheDocument();
+    expect(row.getByText(/for 2m \d+s/)).toBeInTheDocument();
+    expect(row.getByRole('button', { name: 'View job' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeDisabled();
+  });
+
+  it('shows a finished run and allows another', () => {
+    useConfig.mockReturnValue(queryResult(config()));
+    mockLatestRun({ status: 'completed' });
+
+    renderPanel('email-security-triage');
+
+    const row = within(screen.getByTestId('latest-analysis-run'));
+    expect(row.getByText('Completed')).toBeInTheDocument();
+    expect(row.getByText(/started/)).toBeInTheDocument();
+    expect(row.queryByText(/Analysis running/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeEnabled();
+  });
+
+  it('labels a failed run', () => {
+    useConfig.mockReturnValue(queryResult(config()));
+    mockLatestRun({ status: 'error' });
+
+    renderPanel('email-security-triage');
+
+    expect(
+      within(screen.getByTestId('latest-analysis-run')).getByText('Failed')
+    ).toBeInTheDocument();
+  });
+
+  it('flags a run whose job never landed and hides the job link', () => {
+    useConfig.mockReturnValue(queryResult(config()));
+    mockLatestRun({ submitted: false, status: undefined });
+
+    renderPanel('email-security-triage');
+
+    const row = within(screen.getByTestId('latest-analysis-run'));
+    expect(row.getByText('Not submitted')).toBeInTheDocument();
+    expect(row.queryByRole('button', { name: 'View job' })).not.toBeInTheDocument();
   });
 });

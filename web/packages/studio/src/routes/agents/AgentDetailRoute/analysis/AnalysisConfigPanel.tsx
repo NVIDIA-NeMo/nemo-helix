@@ -22,7 +22,9 @@ import {
 } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import { queryClient } from '@studio/api/queryClient';
+import { useLatestAnalysisRun } from '@studio/api/useLatestAnalysisRun';
 import { useTriggerInsightsRun } from '@studio/api/useTriggerInsightsRun';
+import { LatestAnalysisRun } from '@studio/routes/agents/AgentDetailRoute/analysis/LatestAnalysisRun';
 import { saveAnalysisConfig } from '@studio/routes/agents/AgentDetailRoute/analysis/saveAnalysisConfig';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { type FC, useEffect, useState } from 'react';
@@ -44,6 +46,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
   const [defaultModel, setDefaultModel] = useState('');
   const [fastModel, setFastModel] = useState('');
   const triggerRun = useTriggerInsightsRun(workspace);
+  const { latestRun, isActive: runActive } = useLatestAnalysisRun(workspace, agent);
 
   const {
     data: config,
@@ -148,7 +151,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
               height={28}
               onClick={handleRunNow}
               loading={triggerRun.isPending}
-              disabled={!config}
+              disabled={!config || runActive}
             >
               Run analysis now
             </LoadingButton>
@@ -234,6 +237,11 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
         </Text>
       ) : (
         <Grid cols={{ base: 1, md: 2 }} gap="4">
+          {latestRun ? (
+            <div className="md:col-span-2">
+              <LatestAnalysisRun workspace={workspace} run={latestRun} isActive={runActive} />
+            </div>
+          ) : null}
           <KVPair
             orientation="vertical"
             label="Periodic analysis"
