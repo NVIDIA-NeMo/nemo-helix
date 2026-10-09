@@ -197,8 +197,17 @@ class TestTheSandboxIsToldNothingAboutPublishing:
         assert sandbox.node_selector == {}
 
     def test_the_sandbox_runs_on_the_deployments_provider(self) -> None:
-        sandbox = SuperviseStepConfig.model_validate(_compile(_set(), config=_config()).steps[1].config).sandbox
-        assert sandbox.provider == "kubernetes_pod"
+        plain = SuperviseStepConfig.model_validate(_compile(_set(), config=_config()).steps[1].config).sandbox
+        assert (plain.provider, plain.opensandbox) == ("kubernetes_pod", None)
+        server = {"domain": "opensandbox-server.opensandbox-system.svc.cluster.local"}
+        spec = _compile(_set(), config=_config(provider="opensandbox", opensandbox=server))
+        sandbox = SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox
+        assert sandbox.provider == "opensandbox"
+        assert sandbox.opensandbox is not None and sandbox.opensandbox.domain == server["domain"]
+
+    def test_the_sandbox_reaches_what_the_deployment_allows(self) -> None:
+        spec = _compile(_set(), config=_config(egress_allow=["*.example.com"]))
+        assert SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox.egress_allow == ["*.example.com"]
 
     def test_the_sandbox_uses_public_dns_not_cluster_dns(self) -> None:
         spec = _compile(_set(), config=_config())

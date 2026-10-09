@@ -386,7 +386,9 @@ Dockerfiles run in sandboxes, one pod per build context, which aren't job steps 
 steps are trusted (green): they run the builder's own code. The sandboxes are untrusted (red): they
 run yours. What a sandbox writes reaches the steps two ways only: the layouts on the work volume, and
 its log, which `build` reads for each image's result. The build namespace is whichever the
-[Jobs execution profiles](#jobs-execution-profiles) name.
+[Jobs execution profiles](#jobs-execution-profiles) name. This is the default sandbox provider; with
+[OpenSandbox](#opensandbox), `build` asks an OpenSandbox server for a sandbox per image instead, and
+takes each image's result from its command's exit code rather than a log.
 
 ```mermaid
 flowchart TB
@@ -486,15 +488,19 @@ sequenceDiagram
    `data` filter, which keeps every entry inside the archive's directory. It refuses an archive that
    unpacks to more than 4 GiB or 100,000 entries.
 3. **`build`** first deletes any sandboxes an earlier attempt of the same job left. Then it creates
-   one sandbox per distinct fileset, archive and `context_path`, one at a time, and deletes each when
-   it ends. The sandbox runs kaniko
-   once per image with `--no-push`, writing an OCI layout to that image's output directory. The
-   sandbox has:
+   one sandbox per distinct fileset, archive and `context_path`, or with OpenSandbox one per image,
+   one at a time, and deletes each when it ends. The sandbox runs kaniko
+   once per image with `--no-push`, writing an OCI layout to that image's output directory. A plain
+   pod sandbox has:
    - no ServiceAccount token, no secret, and no credential in its environment
    - a security context the `baseline` Pod Security Standard admits: root, but with only five
      capabilities, `RuntimeDefault` seccomp and no privilege escalation
    - public DNS resolvers rather than cluster DNS
    - a deadline the kubelet enforces, so it ends even if `build` is killed first
+
+   An [OpenSandbox](#opensandbox) sandbox gets its security context and DNS from the server's
+   template instead, but kaniko runs in it with the same five capabilities, and the server enforces
+   its deadline.
 4. **`push`** treats each layout as untrusted, and checks what crane will read of it: an index with
    exactly one image manifest, and the index, the manifest and every blob it names as regular files,
    not symlinks or FIFOs, under real directories. The registry checks each blob against its digest
@@ -510,7 +516,7 @@ images still build, push and complete. The failed image's row stays `pending` (s
 | | Runs as | Holds | Work volume | Runs your code |
 |---|---|---|---|---|
 | `fetch` | `nhx-build-fetch` | a Files client, acting for the submitter | yes | no |
-| `build` (runs `nhx-build supervise`) | `nhx-build-control` | permission to manage pods in the build namespace | no | no |
+| `build` (runs `nhx-build supervise`) | `nhx-build-control` | permission to manage pods in the build namespace, and the OpenSandbox key with that provider | no | no |
 | sandbox (kaniko) | no ServiceAccount token | nothing | its own context read-only, and one output directory per image | yes |
 | `push` | `nhx-build-push` | the workspace's registry credential and signing key, unless the deployment turned them off | yes | no |
 
@@ -620,10 +626,11 @@ builder:
 die in a pod. Set `repository_prefix` to a path dedicated to builds: left empty, each workspace name
 is a top-level namespace in the registry. The steps run the release's `nhx-builder-tasks` image, and
 the sandboxes its `nhx-kaniko`, both from the platform's `image_registry` at its `image_tag`;
-`sandbox.image` names another kaniko image. `sandbox.provider` picks what runs the sandboxes;
-`kubernetes_pod`, a plain pod, is the only one so far. The other sandbox settings are `cpu`, `memory`,
-`ephemeral_storage` and `dns_nameservers`, each described on `SandboxConfig` in `config.py`. Where the
-sandboxes run isn't a builder setting: it comes from the
+`sandbox.image` names another kaniko image. `sandbox.provider` picks what runs the sandboxes:
+`kubernetes_pod`, a plain pod, or `opensandbox` (see [OpenSandbox](#opensandbox)). The other sandbox
+settings are `opensandbox`, `egress_allow`, `cpu`, `memory`, `ephemeral_storage` and
+`dns_nameservers`, each described on `SandboxConfig` in `config.py`. Where the sandboxes run isn't a
+builder setting: it comes from the
 [Jobs execution profiles](#jobs-execution-profiles). From the environment, the `sandbox` section is
 one JSON value, `NEMO_BUILDER_SANDBOX`: only its one-word settings can be set on their own.
 
@@ -681,6 +688,93 @@ volume and `node_selector`, so the profiles must agree with each other:
   steps name their image, so `default_task_image` doesn't apply
 - with a `ReadWriteOnce` work volume, every `node_selector` names the one node all build pods run on
 
+### OpenSandbox
+
+**Its egress policy can be bypassed today, so don't rely on it.** A `RUN` can ask execd,
+OpenSandbox's agent in the sandbox, over loopback, to start a command. execd checks no key, and
+starts the command with the container's full capabilities, `NET_RAW` among them, which gets past the
+egress sidecar's firewall (below). The fix is execd's hardening floor, in execd `v1.1.0` and later,
+with a check that refuses to build while a process execd starts still holds `NET_RAW` or
+`NET_ADMIN`. Neither is in yet. Until then, an OpenSandbox sandbox is no safer than a plain pod: use
+it only with Dockerfiles you trust.
+
+With `sandbox.provider: opensandbox`, each image builds in an OpenSandbox sandbox of its own rather
+than in a pod `build` creates. `build` asks the server for it, runs the image's build as a command in
+it, and takes the command's exit code as the image's result. The step image carries the SDK, the
+plugin's `opensandbox` extra. A deployment needs:
+
+- **An OpenSandbox server, `v0.2.3` or later, with a tenant whose namespace is the build namespace.**
+  Sandboxes mount the work volume, which can be mounted only in its own namespace. Multi-tenant mode
+  keeps other tenants' keys out of that namespace.
+- **The tenant's key** in the Secret `sandbox.opensandbox.api_key_secret` names
+  (`opensandbox-builder-api-key` by default), under `api-key`, in the build namespace. It isn't the
+  platform's own key, which `sandboxClusterCapable` refers to; the operator creates it. `build` reads
+  it with its ServiceAccount, so it's in neither the step's environment nor the sandbox's. So can a
+  raw job under the `build-control` profile (see [Security](#security)).
+- **A server template that hardens the sandbox.** OpenSandbox takes a sandbox's security context,
+  DNS and nodes from its BatchSandbox template, which applies to every sandbox the server creates,
+  not from the request; `dns_nameservers`, `ephemeral_storage` and the fetch profile's
+  `node_selector` don't apply. The plain pod's posture fits in it:
+
+  ```yaml
+  spec:
+    template:
+      spec:
+        automountServiceAccountToken: false
+        enableServiceLinks: false
+        containers:
+          - name: sandbox
+            securityContext:
+              allowPrivilegeEscalation: false
+              seccompProfile: {type: RuntimeDefault}
+              capabilities: {drop: ["ALL"], add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID"]}
+  ```
+
+  With a ReadWriteOnce work volume on more than one node, pin sandboxes to its node in the template too.
+
+  The template's `drop` doesn't hold, though: when the server adds the egress sidecar, it replaces
+  the template's drop list with its own, `["NET_ADMIN"]`, so the sandbox keeps the container
+  runtime's default capabilities. Among them, `NET_RAW` lets a `RUN` mark its packets past the
+  sidecar's firewall, or send frames around it. So `build` runs kaniko through `nhx-dropcaps`, which
+  drops every capability but those five, and runs nothing if it can't. That holds only until the
+  sandbox's first `RUN`, which could replace it, so each image gets a sandbox of its own. It doesn't
+  cover what execd starts (above).
+- **A kaniko image with `/bin/sh` and `/kaniko/nhx-dropcaps`.** OpenSandbox's startup script runs
+  the first, and `build` the second (above); the release's `nhx-kaniko` has both.
+- **The server's egress sidecar,** set server-wide by `[egress]` in its config: an `image`, such as
+  `docker.io/opensandbox/egress:v1.1.7`, and `mode = "dns+nft"`. In `dns`, the default, the sidecar
+  filters names only, so a sandbox can reach any address it doesn't look up; `build` refuses a sandbox
+  whose sidecar reports another mode.
+- **The build namespace at the `privileged` Pod Security standard, and `build` allowed to read the
+  key's Secret.** The egress sidecar needs `NET_ADMIN`, which `baseline` refuses, and the SDK then
+  sees only a timeout. The chart doesn't do either for this provider yet: it labels the build
+  namespace `baseline`, gives `build-control`'s Role no rule for the Secret, and keeps the `pods` and
+  `pods/log` rules only the plain pod uses. Until it does, relabel the namespace after each `helm
+  install` or `upgrade`, and add a Role rule that lets `nhx-build-control` `get` that one Secret:
+
+  ```bash
+  kubectl label namespace <build namespace> pod-security.kubernetes.io/enforce=privileged --overwrite
+  ```
+
+```yaml
+builder:
+  sandbox:
+    provider: opensandbox
+    opensandbox:
+      domain: opensandbox-server.opensandbox-system.svc.cluster.local   # the server's Service
+    egress_allow: ["*.com", "*.org", "*.io", "*.dev"]                  # the default
+```
+
+Each sandbox is created with a deny-by-default egress policy. It allows what `egress_allow` names,
+by default any name under `*.com`, `*.org`, `*.io` or `*.dev`, which covers the common registries
+and package indexes. It denies every private range, the cluster's and the metadata server's
+included, unless an address in `egress_allow` is in it: so not the platform, and not a registry
+inside the cluster. An address or CIDR in `egress_allow` is taken out of the denied ranges, so
+`0.0.0.0/0` would leave no IPv4 range denied. The build step's own resolver isn't: the sidecar
+reaches it by itself. Before running anything in a sandbox, `build` reads back what its sidecar
+reports, and fails the image unless the sidecar enforces `dns+nft`, denies by default, and reports
+every rule the sandbox was created with.
+
 ## Limitations
 
 ### Deployment
@@ -704,11 +798,11 @@ volume and `node_selector`, so the profiles must agree with each other:
   with a deadline. Submitting the same request again reuses its rows.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
-- **A sandbox has an hour.** The images from one context build one after another in one sandbox.
-  `build` stops watching it after an hour, and the kubelet ends it five minutes later; its
-  unfinished images fail.
-- **`build` gives up on a dropped watch.** If its watch on a sandbox closes early, the sandbox's
-  unfinished images fail. A sandbox whose `build` was killed ends at its deadline, and the job's next
+- **A build context's images have an hour.** They build one after another: in one sandbox, or with
+  OpenSandbox in one each. `build` stops after an hour, and the kubelet, or the OpenSandbox server,
+  ends a sandbox five minutes later if `build` doesn't; the unfinished images fail.
+- **`build` gives up on a dropped watch.** If its watch on a plain pod sandbox closes early, the
+  sandbox's unfinished images fail. A sandbox whose `build` was killed ends at its deadline, and the job's next
   attempt deletes it before building.
 - **The work volume fills up.** Jobs deletes a job's directory only when the push step's profile
   sets `cleanup_completed_jobs_immediately`, and only after the job's last step succeeds. The chart's
@@ -762,17 +856,30 @@ volume and `node_selector`, so the profiles must agree with each other:
   under any of the builder's profiles. Under `build-control` such a job can create any pod in the
   build namespace: it can mount the whole work volume, with every build's contexts and outputs, and
   rewrite a layout another job's push step is about to publish; read any build pod's log; and delete
-  any build pod. Closing it needs Jobs to restrict these profiles to the builder.
-- **Nothing restricts the sandbox's network.** A Dockerfile's `RUN` can reach anything a pod can:
-  the platform, as any user or service it names, every other Service, and on a cloud cluster the
-  node's metadata server. A NetworkPolicy allowing the sandbox only public addresses would close
-  this, on a network plugin that enforces it; the sandbox already resolves names with public DNS,
-  and carries the label `nhx.nvidia.com/sandbox=true` to select it by.
+  any build pod. With the `opensandbox` provider, it can also read the OpenSandbox tenant's key, and
+  with it create sandboxes without an egress policy, mount any of the work volume, and run commands
+  in any build's sandbox. Closing it needs Jobs to restrict these profiles to the builder.
+- **Nothing restricts a plain pod sandbox's network.** A Dockerfile's `RUN` in one can reach anything
+  a pod can: the platform, as any user or service it names, every other Service, and on a cloud
+  cluster the node's metadata server. A NetworkPolicy allowing the sandbox only public addresses
+  would close this, on a network plugin that enforces it; the sandbox already resolves names with
+  public DNS, and carries the label `nhx.nvidia.com/sandbox=true` to select it by. Use the
+  `kubernetes_pod` provider only with Dockerfiles you trust.
+- **OpenSandbox's egress policy can be bypassed.** A `RUN` can ask execd over loopback for a process
+  with `NET_RAW`, and with it get past the egress sidecar's firewall, to the platform among the rest
+  (see [OpenSandbox](#opensandbox)). So, for now, an OpenSandbox sandbox reaches what a plain pod
+  does.
+- **Anything that reaches an OpenSandbox sandbox can run commands in it.** execd checks no key.
+  `build` reaches it through the server, which checks the tenant's, but any pod that can reach a
+  sandbox's address can run commands in it as root, and rewrite the layout a push step is about to
+  publish. A NetworkPolicy in the build namespace that admits only the OpenSandbox server would close
+  this, on a network plugin that enforces it: Flannel, for one, doesn't.
 - **Nothing bounds a sandbox's processes.** Its CPU, memory and ephemeral storage are limited, and the
   build namespace has a quota, but how many processes a pod may run is the kubelet's `podPidsLimit`,
   a node setting, so one Dockerfile can exhaust the build node's.
-- **Images built from one context share a sandbox.** Each one's `RUN` can reach the others' outputs,
-  so one image's Dockerfile, or a base image it pulls, can alter another image of the same build.
+- **Images built from one context share a plain pod sandbox.** Each one's `RUN` can reach the
+  others' outputs, so one image's Dockerfile, or a base image it pulls, can alter another image of
+  the same build. An OpenSandbox sandbox builds one image.
 - **Base images must be pullable without credentials.** The sandbox holds none, and nothing bounds
   what a Dockerfile can pull `FROM`.
 
@@ -812,6 +919,6 @@ The tests need no cluster, registry or running platform.
 | `entities.py` | `ContainerImage` |
 | `identity.py` | Registry hosts, repository paths and tags, and the system tag |
 | `config.py` | `BuilderConfig` |
-| `run/` | The programs: `fetch.py`, `supervise.py` and `push.py`; `main.py`, the `nhx-build` entry point; `utils.py`, what the steps share; `tools.py`, which runs crane for `push`; and the sandbox providers, `sandbox.py`, what they share, with `pod_sandbox.py` |
-| `docker/builder/`, at the repository root | The `nhx-builder-tasks` and `nhx-kaniko` images |
+| `run/` | The programs: `fetch.py`, `supervise.py` and `push.py`; `main.py`, the `nhx-build` entry point; `utils.py`, what the steps share; `tools.py`, which runs crane for `push`; and the sandbox providers, `sandbox.py`, what they share, with `pod_sandbox.py`, and `opensandbox_sandbox.py` with its SDK calls in `opensandbox_sdk.py` |
+| `docker/builder/`, at the repository root | The `nhx-builder-tasks` and `nhx-kaniko` images, and `nhx-dropcaps` |
 | `config/` | The chart values for the minikube quickstart |

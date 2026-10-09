@@ -4421,10 +4421,14 @@ dependencies = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "kubernetes", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nhx-sandbox", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
 [package.optional-dependencies]
+opensandbox = [
+    { name = "opensandbox", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
 service = [
     { name = "nemo-helix", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
@@ -4436,9 +4440,11 @@ requires-dist = [
     { name = "kubernetes", specifier = ">=29.0.0" },
     { name = "nemo-helix", marker = "extra == 'service'", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "nhx-sandbox", editable = "packages/nhx_sandbox" },
+    { name = "opensandbox", marker = "extra == 'opensandbox'", specifier = "==0.1.16" },
     { name = "pydantic", specifier = ">=2.0.0" },
 ]
-provides-extras = ["service"]
+provides-extras = ["service", "opensandbox"]
 
 [[package]]
 name = "nemo-customizer-plugin"
@@ -7517,7 +7523,7 @@ auth-idp-e2e = [
     { name = "pytest-timeout", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 builder-steps = [
-    { name = "nemo-builder-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-builder-plugin", extra = ["opensandbox"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 core-services = [
     { name = "insight-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7805,7 +7811,7 @@ auth-idp-e2e = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-timeout", specifier = ">=2.3.1" },
 ]
-builder-steps = [{ name = "nemo-builder-plugin", editable = "plugins/nemo-builder" }]
+builder-steps = [{ name = "nemo-builder-plugin", extras = ["opensandbox"], editable = "plugins/nemo-builder" }]
 core-services = [
     { name = "insight-agent", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },

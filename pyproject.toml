@@ -287,7 +287,7 @@ gpu-tasks = [
 
 # The builder's job steps (for the nhx-builder-tasks container). The push step holds a workspace's registry
 # credential and signing key, so the image carries only the builder, not the task runtime.
-builder-steps = ["nemo-builder-plugin"]
+builder-steps = ["nemo-builder-plugin[opensandbox]"]
 
 
 [project.scripts]
@@ -689,6 +689,9 @@ exclude = [
   "packages/sandboxed_gym/src/sandboxed_gym/host/opensandbox.py",
   "packages/sandboxed_gym/src/sandboxed_gym/ray/",
   "packages/sandboxed_gym/src/sandboxed_gym/runtime/gym_host_runtime.py",
+  # The builder's one module that imports the OpenSandbox SDK, its `opensandbox` extra, for the same reason. Its
+  # logic is in `opensandbox_sandbox.py`, which is checked; this is the SDK calls behind it.
+  "plugins/nemo-builder/src/nemo_builder_plugin/run/opensandbox_sdk.py",
 
   "packages/nemo_helix_ext/",
   "packages/nemo_nb/",
