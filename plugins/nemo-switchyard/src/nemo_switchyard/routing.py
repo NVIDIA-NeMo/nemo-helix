@@ -48,7 +48,7 @@ def build_combinations(spec: SwitchyardOptimizeSpec, *, agent_name: str) -> list
             config = middleware_config(spec, config_type, capable=capable, efficient=efficient, judge=pair_judge)
             # Keyed on the routing itself so a re-run with the same request reuses the VirtualModel
             # and a different model list or setting never collides with an earlier run's.
-            virtual_model = f"{agent_name}-{config_type.replace('_', '-')}-{_routing_digest(config_type, config)}"
+            virtual_model = f"{agent_name}-{_routing_digest(config_type, config)}"
             # Checked up front so a long agent name fails before any VirtualModel is created.
             if len(virtual_model) > NAME_MAX_LENGTH:
                 raise LocalRunError(

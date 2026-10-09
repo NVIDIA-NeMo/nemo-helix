@@ -112,8 +112,9 @@ agent is never modified and no VirtualModel is deleted.
 `models` is ordered from most capable to most efficient: every pair `(i < j)`
 routes with `models[i]` as the capable/strong model and `models[j]` as the
 efficient/weak one. VirtualModels are named
-`<agent>-<routing-strategy>-<digest>` in the submission workspace, where
-`<digest>` is a short hash of the pair's models and middleware config. Re-running
+`<agent>-<digest>` in the submission workspace, where `<digest>` is a short
+hash of the routing strategy, the pair's models, and the middleware config;
+`switchyard-result.json` maps each name back to its strategy and models. Re-running
 the same request reuses the same VirtualModels; changing the model list or a
 routing setting creates new ones alongside the old. An existing VirtualModel
 with a matching name is reused only when its models and middleware config match
@@ -137,9 +138,9 @@ uv run nemo agents optimize run-strategy --strategy switchyard --agent my-agent 
 # plus switchyard-result.json, which maps each VirtualModel to its models and middleware config.
 uv run nemo jobs results download switchyard --job <job-name> -o switchyard.tar.gz
 mkdir -p switchyard-results && tar -xzf switchyard.tar.gz -C switchyard-results --strip-components=1
-# Pick a VirtualModel name from switchyard-result.json, e.g. my-agent-random-routing-3f2a9c1e.
-uv run nemo agents create --name my-agent-random-routing-3f2a9c1e \
-  --agent-config ./switchyard-results/agent-my-agent-random-routing-3f2a9c1e.yaml
+# Pick a VirtualModel name from switchyard-result.json, e.g. my-agent-3f2a9c1e.
+uv run nemo agents create --name my-agent-3f2a9c1e \
+  --agent-config ./switchyard-results/agent-my-agent-3f2a9c1e.yaml
 ```
 
 Each rewritten config points its `models.default` and harness model blocks at
