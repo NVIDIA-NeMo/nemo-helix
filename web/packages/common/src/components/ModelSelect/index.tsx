@@ -252,7 +252,7 @@ export const ModelSelect: FC<ModelSelectProps> = ({
             />
           </Block>
           {/* eslint-disable-next-line no-restricted-syntax */}
-          <Stack className="overflow-auto w-full" style={{ maxHeight }}>
+          <Stack className="overflow-auto overscroll-contain w-full" style={{ maxHeight }}>
             {hasModels ? (
               groups ? (
                 // Grouped path: workspace → models (server-side search, no client filter)
