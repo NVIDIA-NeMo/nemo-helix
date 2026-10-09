@@ -978,9 +978,7 @@ jobs:
           path: |
             third_party/
             openapi/openapi.yaml
-            openapi/ga/openapi.yaml
             openapicheck/openapi.yaml
-            openapicheck/openapi.ga.yaml
             docs/set-up/config-reference.md
             python-sdk-lint/
             web/packages/sdk/generated/
