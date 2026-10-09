@@ -11,7 +11,7 @@
   "cloneSubmodules": true,
   "reviewersFromCodeOwners": true,
   "reviewersSampleSize": 2,
-  "ignorePaths": [".gitlab/**", "controllers/**", "sdk/**"],
+  "ignorePaths": [".gitlab/**", "controllers/**"],
   "packageRules": [
     {
       "matchManagers": ["pep621", "pip_requirements"],

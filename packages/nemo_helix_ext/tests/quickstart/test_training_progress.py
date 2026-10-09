@@ -56,10 +56,10 @@ def test_wait_for_training_stops_when_the_job_completes(monkeypatch: pytest.Monk
     ]
 
     class _Jobs:
-        def get_status(self, name: str, workspace: str) -> SimpleNamespace:
+        def get_job_status(self, name: str, workspace: str) -> SimpleNamespace:
             assert name == "job-a"
             assert workspace == "default"
-            return statuses.pop(0)
+            return SimpleNamespace(data=lambda: statuses.pop(0))
 
     monkeypatch.setattr("nemo_helix_ext.quickstart.progress.time.sleep", lambda _seconds: None)
     monkeypatch.setattr("nemo_helix_ext.quickstart.progress._clear_output", lambda: None)
@@ -72,8 +72,8 @@ def test_wait_for_training_stops_when_the_job_completes(monkeypatch: pytest.Monk
 
 def test_wait_for_training_raises_when_the_job_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Jobs:
-        def get_status(self, name: str, workspace: str) -> SimpleNamespace:
-            return _status("failed")
+        def get_job_status(self, name: str, workspace: str) -> SimpleNamespace:
+            return SimpleNamespace(data=lambda: _status("failed"))
 
     monkeypatch.setattr("nemo_helix_ext.quickstart.progress.time.sleep", lambda _seconds: None)
     monkeypatch.setattr("nemo_helix_ext.quickstart.progress._clear_output", lambda: None)

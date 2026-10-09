@@ -23,9 +23,7 @@ The `nemo` CLI host (entry point, global options, config, auth, lazy group loadi
 | `cli_codegen` | `handle_code_generation` for `--output-format code` |
 
 Every command talks to the platform through the typed clients in `nemo_helix_plugin`
-(`nemo_helix_plugin.<area>.client`, or a plugin's own `client.py`). The CLI has **no dependency on the
-generated `nemo_helix` (Stainless) SDK**; `packages/nemo_helix_ext/tests/cli/test_stainless_boundary.py`
-enforces this. Never add a `from nemo_helix` import under `cli/` or in plugin CLI code.
+(`nemo_helix_plugin.<area>.client`, or a plugin's own `client.py`).
 
 Plugin and service code must **not import `nemo_helix_ext`** — plugins only depend on
 `nemo_helix_plugin`.
@@ -186,8 +184,7 @@ group with the same name as a built-in core group replaces it.
 
 If the typed client lacks a route, add it to `nemo_helix_plugin/<area>/{endpoints,types,client}.py`
 (or the plugin's own `types/endpoints.py` + `client.py`) mirroring the server's FastAPI route exactly,
-with tests. Keep plugin clients in a module that does not import the generated SDK, so the CLI can use
-them.
+with tests.
 
 ## Testing
 
@@ -203,8 +200,6 @@ Required for a new or changed group:
 2. **Integration tests** (core, `tests/cli/integration/test_<group>.py`): the `runner` fixture injects a
    `NemoClient` backed by the in-process ASGI app from `nhx.testing`; add the service class to
    `create_test_client(...)` in `tests/cli/integration/conftest.py` if it is not hosted yet.
-3. **Boundary**: add a core group's `--help` and a `-f code` invocation to `RUNTIME_COMMANDS` in
-   `tests/cli/test_stainless_boundary.py`.
 
 ```bash
 uv run --frozen pytest packages/nemo_helix_ext/tests/cli -q
@@ -221,5 +216,5 @@ uv run --frozen pytest packages/nemo_helix_plugin/tests -q
   masking, datetimes, dicts, lists) and add a `compile()` test in `packages/nemo_helix_plugin/tests/test_cli_codegen.py`.
 - **`RuntimeError: No NeMo Helix CLI state on this context`**: a test invoked the command without
   `obj=`; pass a CLI state.
-- **Command needs a Stainless helper**: it does not; find the equivalent on the typed client or in
-  `packages/filesets/src/filesets/transfer.py` (fileset upload/download/list/delete).
+- **Command needs a helper the typed client lacks**: check `packages/filesets/src/filesets/transfer.py`
+  (fileset upload/download/list/delete) before adding a route.

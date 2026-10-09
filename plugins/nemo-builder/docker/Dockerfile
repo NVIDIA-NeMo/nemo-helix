@@ -17,7 +17,6 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.17 /uv /usr/local/bin/uv
 WORKDIR /src
 # The plugin's path dependencies resolve through these.
 COPY pyproject.toml uv.lock ./
-COPY sdk ./sdk
 COPY packages ./packages
 COPY plugins/nemo-builder ./plugins/nemo-builder
 

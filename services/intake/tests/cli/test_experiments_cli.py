@@ -263,7 +263,6 @@ def test_create_code_output_renders_typed_client_without_request(experiments_cli
     assert 'client = IntakeClient(base_url="http://test/")' in result.stdout
     assert 'body=ExperimentCreateRequest(name="exp-1", description="demo")' in result.stdout
     assert "exist_ok=True" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_list_code_output(experiments_cli) -> None:

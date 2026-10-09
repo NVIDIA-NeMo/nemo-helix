@@ -41,9 +41,7 @@ The `nemo-helix` wheel bundles this package from source and publishes the public
 
 Every `nemo <group> *` command is hand-written Python on the typed clients in
 `nemo_helix_plugin` (for example `commands/secrets.py` uses `SecretsClient`).
-There is no code generator, and no module in this package depends on the generated
-`nemo_helix` (Stainless) SDK; `tests/cli/test_stainless_boundary.py` enforces this and
-runs the CLI with `nemo_helix` un-importable.
+There is no code generator.
 
 - Core resource groups (`files`, `inference`, `jobs`, `models`, `secrets`, `workspaces`, and the hidden
   `adapters`, `iam`, `projects`) live in `src/nemo_helix_ext/cli/commands/` and are registered in

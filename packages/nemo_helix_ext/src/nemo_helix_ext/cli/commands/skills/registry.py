@@ -29,13 +29,12 @@ logger = logging.getLogger(__name__)
 
 # When two ``nemo.skills`` entry points share a name and point at equivalent
 # content but different on-disk paths (e.g. the editable source tree and the
-# vendored SDK in this monorepo), this ranking decides which distribution wins.
+# ``nemo-helix`` bundling wrapper), this ranking decides which distribution wins.
 # Lower rank = preferred. Distributions not listed fall back to alphabetical
 # order via :func:`_distribution_preference`.
 _PROVIDER_PREFERENCE_RANKS: dict[str, int] = {
     "nemo-helix-ext": 0,
-    "nemo-helix-sdk": 1,
-    "nemo-helix": 2,
+    "nemo-helix": 1,
 }
 
 _INSTALLERS: dict[str, BaseAgentInstaller] = {
@@ -228,9 +227,9 @@ def _content_signature(skills_root: Path) -> frozenset[tuple[str, str]]:
 
     The signature is ``frozenset[(skill_dir_name, sha256(SKILL.md))]``. Two
     providers whose signatures match ship the same skills with byte-identical
-    content (the common case: editable source + its vendored mirror) and can
-    safely collapse to one. Signatures that differ flag a real drift between
-    source and vendored copies, which we surface as a hard error.
+    content (the common case: editable source + the bundling wrapper's copy)
+    and can safely collapse to one. Signatures that differ flag a real drift
+    between the copies, which we surface as a hard error.
     """
     signature: set[tuple[str, str]] = set()
     for entry in skills_root.iterdir():
@@ -335,9 +334,8 @@ def _discover_skill_providers() -> dict[str, SkillProvider]:
     Walks every registered entry point in the group (not the deduplicated map
     that :func:`nemo_helix_plugin.discovery.discover_entry_points` returns) so that
     multiple distributions registering the same provider name — common in this
-    monorepo where ``nemo-helix-ext`` (source), ``nemo-helix-sdk``
-    (vendored mirror), and ``nemo-helix`` (bundling wrapper) all register
-    ``platform`` — are joined deliberately by :func:`_join_same_name_candidates`
+    monorepo where ``nemo-helix-ext`` (source) and ``nemo-helix`` (bundling
+    wrapper) both register ``platform`` — are joined deliberately by :func:`_join_same_name_candidates`
     rather than being resolved by undefined enumeration order.
 
     Per-candidate validation (factory loads, returns ``Path``, path exists, is

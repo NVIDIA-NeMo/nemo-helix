@@ -4,9 +4,8 @@
 """Typed HTTP clients for the Models service.
 
 Wraps the endpoint functions from ``models.endpoints`` as direct methods using
-the ``method()`` descriptor (the Files/Secrets/Jobs pattern), and layers on the
-Models-specific ergonomics that used to live on the vendored Stainless
-``ModelsResource``:
+the ``method()`` descriptor (the Files/Secrets/Jobs pattern), and layers on
+Models-specific ergonomics:
 
 - OpenAI inference-gateway route builders (``get_openai_route_base_url`` and
   friends) -- pure string builders, safe from sync or async code, and
@@ -63,10 +62,7 @@ _TRANSIENT_GATEWAY_STATUS_CODES = frozenset({502, 503, 504})
 
 
 # The OpenAI-route builders only read a couple of attributes, so they accept any
-# object exposing them -- the plugin ``ModelProvider`` / ``ModelEntity`` models,
-# or the generated SDK equivalents.
-# Structural typing keeps the plugin free of a dependency on the generated SDK
-# types while still accepting them.
+# object exposing them, such as the plugin ``ModelProvider`` / ``ModelEntity`` models.
 
 
 class ProviderLike(Protocol):

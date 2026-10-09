@@ -4,9 +4,9 @@
 """Typed endpoint definitions for the Models service.
 
 These are the single source of truth for the HTTP contract. All paths include
-the ``/apis/models`` gateway prefix. Although the Stainless SDK grouped some of
-these under ``sdk.inference.*`` (deployments, providers, prompts), every route
-is served by the Models service under ``/apis/models/v2/...``.
+the ``/apis/models`` gateway prefix. Every route, including deployments,
+providers, and prompts, is served by the Models service under
+``/apis/models/v2/...``.
 
 The service exposes six resource groups:
 - model entities (``/models``) and their nested adapters (``/models/{m}/adapters``),

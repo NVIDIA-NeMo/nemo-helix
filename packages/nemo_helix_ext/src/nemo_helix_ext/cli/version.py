@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-# Distributions that can carry the CLI, most specific first. The wrapper
-# distribution and the SDK distribution share one release version.
-_DISTRIBUTIONS = ("nemo-helix", "nemo-helix-sdk", "nemo-helix-ext")
+# Distributions that can carry the CLI, most specific first.
+_DISTRIBUTIONS = ("nemo-helix", "nemo-helix-ext")
 
 UNKNOWN_VERSION = "unknown"
 

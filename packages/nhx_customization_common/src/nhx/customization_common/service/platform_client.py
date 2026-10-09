@@ -19,6 +19,7 @@ from nemo_helix_plugin.files.types import FilesetPurpose
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.types import ListJobsQueryParams
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.common.entities.utils import parse_entity_ref
@@ -235,7 +236,11 @@ async def validate_output_name_not_in_flight(
     try:
         conflicting = [
             job
-            async for job in platform.jobs.list(workspace=workspace, filter=in_flight, page_size=100)
+            async for job in (
+                await platform.jobs.list_jobs(
+                    workspace=workspace, query_params=ListJobsQueryParams(filter=in_flight, page_size=100)
+                )
+            ).items()
             if _output_name(job.spec) == output_name
         ]
     except NemoClientError as exc:

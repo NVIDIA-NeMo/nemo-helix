@@ -180,9 +180,6 @@ def test_generate_python_code_inference_deployment_wait_block():
     assert "gateway.provider_ready(name=provider_name, workspace=provider_workspace)" in code
     assert "time.sleep(min(5, remaining))" in code
     assert "--wait" in code
-    # No Stainless artefacts anywhere in the emitted snippet.
-    assert "NeMoHelix" not in code
-    assert "from nemo_helix import" not in code
 
 
 def test_generate_python_code_watch_mode_mentions_watch_flag():

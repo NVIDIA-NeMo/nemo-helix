@@ -37,7 +37,7 @@ def wait_for_training(
     while True:
         if timeout_seconds is not None and time.monotonic() - start > timeout_seconds:
             raise TimeoutError(f"{job_name} took longer than {timeout_seconds} seconds")
-        status = client.jobs.get_status(name=job_name, workspace=workspace)
+        status = client.jobs.get_job_status(name=job_name, workspace=workspace).data()
         _clear_output()
         print(f"Job: {job_name}")
         print(f"Status: {status_text(status.status)}")

@@ -45,7 +45,7 @@ from nemo_helix_plugin.jobs.types import (
 )
 
 # The execution-profiles endpoint returns a union over all configured backend
-# profile types (matches the Stainless ``JobListExecutionProfilesResponseItem``).
+# profile types.
 ExecutionProfile = (
     DockerJobExecutionProfile
     | KubernetesJobExecutionProfile
