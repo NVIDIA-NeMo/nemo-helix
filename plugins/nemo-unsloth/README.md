@@ -7,7 +7,7 @@ Unsloth GPU fine-tuning **customization contributor** for NeMo Helix.
 
 Registered under `nemo.customization.contributors` (key `unsloth`) — the `nemo-customizer-plugin` hub composes it under `/apis/customization/v2/workspaces/{workspace}/unsloth/` (HTTP) and `client.customization.unsloth.*` (SDK), and mounts the CLI at `nemo customization unsloth ...`.
 
-Unsloth is **submit-only**: training executes remotely on the platform's GPU cluster as a 4-step container job (download → train → upload → model-entity), mirroring `nemo-automodel-plugin`. The plugin itself stays lightweight — heavy ML deps (`unsloth`, `trl`, `transformers`, `peft`, `accelerate`, `bitsandbytes`, `torch`) live only inside the `nhx-unsloth-training` container image.
+Unsloth is **Jobs-service-only**: training executes remotely on the platform's GPU cluster as a 4-step container job (download → train → upload → model-entity), mirroring `nemo-automodel-plugin`. The plugin itself stays lightweight — heavy ML deps (`unsloth`, `trl`, `transformers`, `peft`, `accelerate`, `bitsandbytes`, `torch`) live only inside the `nhx-unsloth-training` container image.
 
 ## Install
 
@@ -18,7 +18,7 @@ Container image build / push instructions live in [`docker/unsloth/README.md`](.
 ## Submit a training job
 
 ```bash
-nemo customization unsloth submit /path/to/job.json -w default
+nemo customization unsloth --job-json /path/to/job.json -w default
 ```
 
 `GET /apis/customization/v2/workspaces/{workspace}/unsloth/jobs` returns jobs whose spec stores `backend`. To list jobs submitted before that field existed, use `nemo jobs list` (`GET /apis/jobs/v2/workspaces/{workspace}/jobs`).
@@ -53,7 +53,7 @@ What happens after submit:
 
 ```bash
 nemo customization unsloth --help
-nemo customization unsloth submit JOB_JSON -w WORKSPACE [--profile P] [-o k=v]
+nemo customization unsloth --job-json JOB_JSON -w WORKSPACE [--profile P] [-o k=v]
 nemo customization unsloth explain      # prints schemas
 ```
 

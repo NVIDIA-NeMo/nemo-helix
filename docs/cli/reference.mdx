@@ -9205,9 +9205,9 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 **Commands:**
 
-* `automodel`: Fine-tune a model with Automodel: SFT, LoRA, or knowledge...
-* `rl`: Align a model with NeMo-RL, using DPO or GRPO.
-* `unsloth`: Fine-tune a model with Unsloth on one GPU: SFT with LoRA...
+* `automodel`: Create an Automodel training job to the platform.
+* `rl`: Create a NeMo-RL training job to the platform.
+* `unsloth`: Create an Unsloth training job to the platform.
 
 *Jobs:*
 
@@ -9217,46 +9217,91 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 #### nemo customization automodel
 
-Fine-tune a model with Automodel: SFT, LoRA, or knowledge distillation.
+Create an Automodel training job to the platform.
 
-The platform runs the job on a GPU execution profile. On a single node, that
-profile's backend is docker or kubernetes_job, depending on how the platform
-was set up; set the GPU count with parallelism.num_gpus_per_node.
+Pass the path to a job JSON file holding one AutomodelJobInput object: the
+base model, the dataset, and how to train it.
 
-Multi-node training (parallelism.num_nodes above 1) runs on a volcano_job or
-kubernetes_job backend, so it needs a Kubernetes platform. Run
-'nemo jobs list-execution-profiles' to see the profiles on this platform.
+The command validates the file before creating the job, so an invalid field is
+reported immediately. The platform then creates the job and runs it on the
+execution profile resolved for this backend.
 
-The job JSON follows the AutomodelJobInput schema:
-  model        base model entity, as 'name' or 'workspace/name'
-  dataset      training fileset, plus an optional validation fileset
-  training     sft or distillation, and lora or all_weights
-  schedule     epochs, max_steps, seed, validation interval
-  batch        global_batch_size, micro_batch_size, sequence packing
-  optimizer    learning_rate, weight_decay, warmup_steps, decay shape
-  parallelism  nodes, GPUs per node, tensor and pipeline parallel sizes
+The command prints the created job as JSON on stdout. The 'name' field is the job
+id. Track the job with 'nemo jobs watch \<job id>', or check its status with
+'nemo jobs get-status \<job id>'.
 
-Optional blocks: output names the model entity written at the end of the run,
-and integrations enables Weights & Biases reporting.
+Pass --wait to stay with the job until it finishes, or --watch to do the same
+and print its logs as they arrive. Both report the final status, and exit
+non-zero when the job does not complete.
 
-For DPO or GRPO, use the rl backend.
+Pass --upload-model with a local path or a HuggingFace repo id, and
+--upload-dataset with a local path, to create those resources as part of this
+the job command. Either flag can be used on its own. The command creates the fileset, uploads
+the files, registers the model entity, and fills the reference into the job it
+sends. Your job JSON file is not modified.
 
-Run 'nemo customization automodel explain' for the full schema and defaults.
+Each flag takes one file or one directory, the same as 'nemo files upload'. A
+directory is uploaded whole, so put several files in one when a backend reads
+more than one.
+
+A reference must be set in one place only. The command refuses when the job JSON
+already names the model or dataset and the matching flag is passed, rather than
+choosing between the two for you. Remove the field from the job JSON to create
+it here, or drop the flag to use what the file names.
+
+Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
+create the resources and print their references without creating a job.
+
+One --upload-dataset fills both dataset.training and dataset.validation with
+the new fileset. Automodel finds the train and validation files inside it by
+name, so upload a directory holding both.
+
+Creating a resource that already exists fails unless you pass --exist-ok,
+which applies to whichever sources you gave.
+
+Important: with --exist-ok the existing fileset is reused and its files are not
+re-uploaded. Edits you made to a local file after that fileset was created are
+not part of this job, and nothing fails to tell you so. Delete the fileset, or
+upload into it yourself, when you need the new contents.
+
+Run 'nemo customization automodel explain' to print the job JSON schema.
 
 **Usage:**
 
 ```shell
-nemo customization automodel [OPTIONS] COMMAND [ARGS]...
+nemo customization automodel [OPTIONS] [COMMAND] [ARGS]...
 ```
+
+**Options:**
+
+* `--job-json JOB_JSON`: Path to Automodel job JSON (AutomodelJobInput schema).
+* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
+* `-o`: Backend option override, 'backend.key=value'. [default: ]
+* `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
 
+**Lifecycle Options:**
+
+* `--wait`: Wait for the job to finish, showing its status.
+* `--watch`: Wait for the job to finish, showing its status and logs.
+* `--timeout <INTEGER RANGE>`: Give up waiting after this many seconds. Waits indefinitely when omitted.
+* `--poll-interval <INTEGER RANGE>`: Seconds between status checks while waiting. [default: 3]
+
+**Resource Creation Options:**
+
+* `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
+* `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
+* `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment. GRPO only.
+* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
+
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `submit`: Submit an Automodel training job to the platform.
 
 ##### nemo customization automodel explain
 
@@ -9276,18 +9321,20 @@ nemo customization automodel explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-##### nemo customization automodel submit
+#### nemo customization rl
 
-Submit an Automodel training job to the platform.
+Create a NeMo-RL training job to the platform.
 
-Pass the path to a job JSON file holding one AutomodelJobInput object: the
-base model, the dataset, and how to train it.
+Pass the path to a job JSON file holding one RlJobInput object: the base
+model, the dataset, and how to align it. Set training.type to 'dpo' or 'grpo';
+GRPO also needs an environment fileset. The command fails immediately if the
+platform has no kubernetes_job backend.
 
-Submit validates the file before creating the job, so an invalid field is
+The command validates the file before creating the job, so an invalid field is
 reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
-Submit prints the created job as JSON on stdout. The 'name' field is the job
+The command prints the created job as JSON on stdout. The 'name' field is the job
 id. Track the job with 'nemo jobs watch \<job id>', or check its status with
 'nemo jobs get-status \<job id>'.
 
@@ -9297,7 +9344,7 @@ non-zero when the job does not complete.
 
 Pass --upload-model with a local path or a HuggingFace repo id, and
 --upload-dataset with a local path, to create those resources as part of this
-submit. Either flag can be used on its own. Submit creates the fileset, uploads
+the job command. Either flag can be used on its own. The command creates the fileset, uploads
 the files, registers the model entity, and fills the reference into the job it
 sends. Your job JSON file is not modified.
 
@@ -9305,17 +9352,18 @@ Each flag takes one file or one directory, the same as 'nemo files upload'. A
 directory is uploaded whole, so put several files in one when a backend reads
 more than one.
 
-A reference must be set in one place only. Submit refuses when the job JSON
+A reference must be set in one place only. The command refuses when the job JSON
 already names the model or dataset and the matching flag is passed, rather than
 choosing between the two for you. Remove the field from the job JSON to create
 it here, or drop the flag to use what the file names.
 
 Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
-create the resources and print their references without submitting anything.
+create the resources and print their references without creating a job.
 
-One --upload-dataset fills both dataset.training and dataset.validation with
-the new fileset. Automodel finds the train and validation files inside it by
-name, so upload a directory holding both.
+Uploaded files keep their local names. NeMo-RL reads both splits from one
+fileset, so point --upload-dataset at a local directory holding training.jsonl
+and validation.jsonl. For GRPO, --upload-environment takes the environment
+directory. Build and validate that package first; the job command only uploads it.
 
 Creating a resource that already exists fails unless you pass --exist-ok,
 which applies to whichever sources you gave.
@@ -9325,20 +9373,17 @@ re-uploaded. Edits you made to a local file after that fileset was created are
 not part of this job, and nothing fails to tell you so. Delete the fileset, or
 upload into it yourself, when you need the new contents.
 
-Run 'nemo customization automodel explain' to print the job JSON schema.
+Run 'nemo customization rl explain' to print the job JSON schema.
 
 **Usage:**
 
 ```shell
-nemo customization automodel submit [OPTIONS] JOB_JSON
+nemo customization rl [OPTIONS] [COMMAND] [ARGS]...
 ```
-
-**Arguments:**
-
-* `<JOB_JSON>`: Path to Automodel job JSON (AutomodelJobInput schema).
 
 **Options:**
 
+* `--job-json JOB_JSON`: Path to NeMo-RL job JSON (RlJobInput schema).
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
@@ -9363,49 +9408,9 @@ nemo customization automodel submit [OPTIONS] JOB_JSON
 * `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
 * `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
-#### nemo customization rl
-
-Align a model with NeMo-RL, using DPO or GRPO.
-
-The platform runs the job on the kubernetes_job backend only, starting a Ray
-cluster for it. There is no docker path. Run 'nemo jobs list-execution-profiles'
-to see the profiles on this platform.
-
-A single command covers both algorithms: training.type in the job JSON selects
-between 'dpo' and 'grpo'. DPO trains on preference pairs, full weights only.
-GRPO trains against a NeMo Gym environment, and can also train a LoRA adapter
-through training.finetuning_type.
-
-The job JSON follows the RlJobInput schema:
-  model        base model entity, as 'name' or 'workspace/name'
-  dataset      fileset reference. For DPO, one fileset holding training.jsonl
-and validation.jsonl of prompt, chosen and rejected rows. For
-GRPO, Gym rollout rows in training.jsonl
-  environment  Gym environment fileset. Required for GRPO, unused for DPO
-  training     type 'dpo' or 'grpo', plus that method's hyperparameters
-
-Optional blocks: output names the model entity written at the end of the run,
-and integrations enables Weights & Biases reporting.
-
-For supervised fine-tuning, use the automodel or unsloth backend. GRPO here
-trains LoRA adapters too.
-
-Run 'nemo customization rl explain' for the full schema and defaults.
-
-**Usage:**
-
-```shell
-nemo customization rl [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `submit`: Submit a NeMo-RL training job to the platform.
 
 ##### nemo customization rl explain
 
@@ -9425,20 +9430,18 @@ nemo customization rl explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-##### nemo customization rl submit
+#### nemo customization unsloth
 
-Submit a NeMo-RL training job to the platform.
+Create an Unsloth training job to the platform.
 
-Pass the path to a job JSON file holding one RlJobInput object: the base
-model, the dataset, and how to align it. Set training.type to 'dpo' or 'grpo';
-GRPO also needs an environment fileset. Submit fails immediately if the
-platform has no kubernetes_job backend.
+Pass the path to a job JSON file holding one UnslothJobInput object: the base
+model, the dataset, and how to train it.
 
-Submit validates the file before creating the job, so an invalid field is
+The command validates the file before creating the job, so an invalid field is
 reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
-Submit prints the created job as JSON on stdout. The 'name' field is the job
+The command prints the created job as JSON on stdout. The 'name' field is the job
 id. Track the job with 'nemo jobs watch \<job id>', or check its status with
 'nemo jobs get-status \<job id>'.
 
@@ -9448,7 +9451,7 @@ non-zero when the job does not complete.
 
 Pass --upload-model with a local path or a HuggingFace repo id, and
 --upload-dataset with a local path, to create those resources as part of this
-submit. Either flag can be used on its own. Submit creates the fileset, uploads
+the job command. Either flag can be used on its own. The command creates the fileset, uploads
 the files, registers the model entity, and fills the reference into the job it
 sends. Your job JSON file is not modified.
 
@@ -9456,18 +9459,17 @@ Each flag takes one file or one directory, the same as 'nemo files upload'. A
 directory is uploaded whole, so put several files in one when a backend reads
 more than one.
 
-A reference must be set in one place only. Submit refuses when the job JSON
+A reference must be set in one place only. The command refuses when the job JSON
 already names the model or dataset and the matching flag is passed, rather than
 choosing between the two for you. Remove the field from the job JSON to create
 it here, or drop the flag to use what the file names.
 
 Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
-create the resources and print their references without submitting anything.
+create the resources and print their references without creating a job.
 
-Uploaded files keep their local names. NeMo-RL reads both splits from one
-fileset, so point --upload-dataset at a local directory holding training.jsonl
-and validation.jsonl. For GRPO, --upload-environment takes the environment
-directory. Build and validate that package first; submit only uploads it.
+One --upload-dataset fills both dataset.path and dataset.validation_path with
+the new fileset, so upload a directory holding a training and a validation
+file.
 
 Creating a resource that already exists fails unless you pass --exist-ok,
 which applies to whichever sources you gave.
@@ -9477,20 +9479,17 @@ re-uploaded. Edits you made to a local file after that fileset was created are
 not part of this job, and nothing fails to tell you so. Delete the fileset, or
 upload into it yourself, when you need the new contents.
 
-Run 'nemo customization rl explain' to print the job JSON schema.
+Run 'nemo customization unsloth explain' to print the job JSON schema.
 
 **Usage:**
 
 ```shell
-nemo customization rl submit [OPTIONS] JOB_JSON
+nemo customization unsloth [OPTIONS] [COMMAND] [ARGS]...
 ```
-
-**Arguments:**
-
-* `<JOB_JSON>`: Path to NeMo-RL job JSON (RlJobInput schema).
 
 **Options:**
 
+* `--job-json JOB_JSON`: Path to Unsloth job JSON (UnslothJobInput schema).
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
@@ -9515,49 +9514,9 @@ nemo customization rl submit [OPTIONS] JOB_JSON
 * `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
 * `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
-#### nemo customization unsloth
-
-Fine-tune a model with Unsloth on one GPU: SFT with LoRA or full weights.
-
-The platform runs the job on a GPU execution profile. That profile's backend
-is docker or kubernetes_job, depending on how the platform was set up. Run
-'nemo jobs list-execution-profiles' to see the profiles on this platform.
-
-One job trains on a single GPU. hardware.gpus selects which GPU to use; it
-does not split the model across several GPUs.
-
-The job JSON follows the UnslothJobInput schema:
-  model      base model entity, max_seq_length, 4-bit or 8-bit loading
-  dataset    training fileset path, plus an optional validation_path
-  training   lora or all_weights, and the LoRA rank, alpha, dropout
-  schedule   epochs, max_steps, warmup, scheduler, logging cadence
-  batch      per_device_train_batch_size, gradient_accumulation_steps
-  optimizer  learning_rate, weight_decay, optimizer algorithm
-  hardware   which GPU to use, and training precision
-
-Optional blocks: output names the result and selects save_method (lora,
-merged_16bit, merged_4bit), deployment_config deploys the trained model, and
-integrations enables Weights & Biases reporting.
-
-For tensor, pipeline, or multi-node parallelism, use the automodel backend.
-For DPO or GRPO, use the rl backend.
-
-Run 'nemo customization unsloth explain' for the full schema and defaults.
-
-**Usage:**
-
-```shell
-nemo customization unsloth [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `submit`: Submit an Unsloth training job to the platform.
 
 ##### nemo customization unsloth explain
 
@@ -9577,93 +9536,6 @@ nemo customization unsloth explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-##### nemo customization unsloth submit
-
-Submit an Unsloth training job to the platform.
-
-Pass the path to a job JSON file holding one UnslothJobInput object: the base
-model, the dataset, and how to train it.
-
-Submit validates the file before creating the job, so an invalid field is
-reported immediately. The platform then creates the job and runs it on the
-execution profile resolved for this backend.
-
-Submit prints the created job as JSON on stdout. The 'name' field is the job
-id. Track the job with 'nemo jobs watch \<job id>', or check its status with
-'nemo jobs get-status \<job id>'.
-
-Pass --wait to stay with the job until it finishes, or --watch to do the same
-and print its logs as they arrive. Both report the final status, and exit
-non-zero when the job does not complete.
-
-Pass --upload-model with a local path or a HuggingFace repo id, and
---upload-dataset with a local path, to create those resources as part of this
-submit. Either flag can be used on its own. Submit creates the fileset, uploads
-the files, registers the model entity, and fills the reference into the job it
-sends. Your job JSON file is not modified.
-
-Each flag takes one file or one directory, the same as 'nemo files upload'. A
-directory is uploaded whole, so put several files in one when a backend reads
-more than one.
-
-A reference must be set in one place only. Submit refuses when the job JSON
-already names the model or dataset and the matching flag is passed, rather than
-choosing between the two for you. Remove the field from the job JSON to create
-it here, or drop the flag to use what the file names.
-
-Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
-create the resources and print their references without submitting anything.
-
-One --upload-dataset fills both dataset.path and dataset.validation_path with
-the new fileset, so upload a directory holding a training and a validation
-file.
-
-Creating a resource that already exists fails unless you pass --exist-ok,
-which applies to whichever sources you gave.
-
-Important: with --exist-ok the existing fileset is reused and its files are not
-re-uploaded. Edits you made to a local file after that fileset was created are
-not part of this job, and nothing fails to tell you so. Delete the fileset, or
-upload into it yourself, when you need the new contents.
-
-Run 'nemo customization unsloth explain' to print the job JSON schema.
-
-**Usage:**
-
-```shell
-nemo customization unsloth submit [OPTIONS] JOB_JSON
-```
-
-**Arguments:**
-
-* `<JOB_JSON>`: Path to Unsloth job JSON (UnslothJobInput schema).
-
-**Options:**
-
-* `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
-* `-o`: Backend option override, 'backend.key=value'. [default: ]
-* `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Lifecycle Options:**
-
-* `--wait`: Wait for the job to finish, showing its status.
-* `--watch`: Wait for the job to finish, showing its status and logs.
-* `--timeout <INTEGER RANGE>`: Give up waiting after this many seconds. Waits indefinitely when omitted.
-* `--poll-interval <INTEGER RANGE>`: Seconds between status checks while waiting. [default: 3]
-
-**Resource Creation Options:**
-
-* `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
-* `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
-* `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment. GRPO only.
-* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
-* `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
-
 #### nemo customization automodel.jobs
 
 Automodel SFT, retrieval, and knowledge-distillation training jobs.
@@ -9672,25 +9544,6 @@ Automodel SFT, retrieval, and knowledge-distillation training jobs.
 
 ```shell
 nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `submit`: Submit to a cluster.
-* `explain`: Show input/output schemas.
-
-##### nemo customization automodel.jobs submit
-
-Submit to a cluster.
-
-**Usage:**
-
-```shell
-nemo customization automodel.jobs submit [OPTIONS]
 ```
 
 **Help:**
@@ -9797,6 +9650,10 @@ Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precede
 Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
+**Commands:**
+
+* `explain`: Show input/output schemas.
+
 ##### nemo customization automodel.jobs explain
 
 Show input/output schemas.
@@ -9823,25 +9680,6 @@ NeMo-RL DPO and GRPO training jobs on the platform Kubernetes GPU cluster (Ray).
 
 ```shell
 nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `submit`: Submit to a cluster.
-* `explain`: Show input/output schemas.
-
-##### nemo customization rl.jobs submit
-
-Submit to a cluster.
-
-**Usage:**
-
-```shell
-nemo customization rl.jobs submit [OPTIONS]
 ```
 
 **Help:**
@@ -9884,6 +9722,10 @@ Job Spec flags are generated from the RlJobInput Pydantic schema. Precedence: --
 Some spec fields cannot be represented as CLI flags: `training`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
+**Commands:**
+
+* `explain`: Show input/output schemas.
+
 ##### nemo customization rl.jobs explain
 
 Show input/output schemas.
@@ -9910,25 +9752,6 @@ Unsloth SFT (LoRA / full / merged) training jobs on the platform GPU cluster.
 
 ```shell
 nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `submit`: Submit to a cluster.
-* `explain`: Show input/output schemas.
-
-##### nemo customization unsloth.jobs submit
-
-Submit to a cluster.
-
-**Usage:**
-
-```shell
-nemo customization unsloth.jobs submit [OPTIONS]
 ```
 
 **Help:**
@@ -10006,6 +9829,10 @@ Job Spec flags are generated from the UnslothJobInput Pydantic schema. Precedenc
 
 Some spec fields cannot be represented as CLI flags: `model.dtype`, `model.device_map`, `model.rope_scaling`, `training.training_type`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.bias`, `training.lora.loftq_config`, `training.lora.modules_to_save`, `training.lora.layers_to_transform (other union forms)`, `training.lora.layer_replication`, `training.lora.init_lora_weights (other union forms)`, `training.use_gradient_checkpointing`, `schedule.lr_scheduler_type`, `schedule.progress_reporting.time_series_metrics`, `schedule.lr_scheduler_kwargs`, `optimizer.optim`, `hardware.precision`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `output.save_method`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
+
+**Commands:**
+
+* `explain`: Show input/output schemas.
 
 ##### nemo customization unsloth.jobs explain
 

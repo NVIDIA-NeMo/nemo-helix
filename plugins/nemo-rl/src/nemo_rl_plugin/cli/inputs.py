@@ -20,18 +20,18 @@ from nemo_rl_plugin.schema import RlJobInput
 _JOB_JSON_HELP = "Path to NeMo-RL job JSON (RlJobInput schema)."
 
 
-_SUBMIT_HELP = """Submit a NeMo-RL training job to the platform.
+_SUBMIT_HELP = """Create a NeMo-RL training job to the platform.
 
 Pass the path to a job JSON file holding one RlJobInput object: the base
 model, the dataset, and how to align it. Set training.type to 'dpo' or 'grpo';
-GRPO also needs an environment fileset. Submit fails immediately if the
+GRPO also needs an environment fileset. The command fails immediately if the
 platform has no kubernetes_job backend.
 
-Submit validates the file before creating the job, so an invalid field is
+The command validates the file before creating the job, so an invalid field is
 reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
-Submit prints the created job as JSON on stdout. The 'name' field is the job
+The command prints the created job as JSON on stdout. The 'name' field is the job
 id. Track the job with 'nemo jobs watch <job id>', or check its status with
 'nemo jobs get-status <job id>'.
 
@@ -41,7 +41,7 @@ non-zero when the job does not complete.
 
 Pass --upload-model with a local path or a HuggingFace repo id, and
 --upload-dataset with a local path, to create those resources as part of this
-submit. Either flag can be used on its own. Submit creates the fileset, uploads
+the job command. Either flag can be used on its own. The command creates the fileset, uploads
 the files, registers the model entity, and fills the reference into the job it
 sends. Your job JSON file is not modified.
 
@@ -49,18 +49,18 @@ Each flag takes one file or one directory, the same as 'nemo files upload'. A
 directory is uploaded whole, so put several files in one when a backend reads
 more than one.
 
-A reference must be set in one place only. Submit refuses when the job JSON
+A reference must be set in one place only. The command refuses when the job JSON
 already names the model or dataset and the matching flag is passed, rather than
 choosing between the two for you. Remove the field from the job JSON to create
 it here, or drop the flag to use what the file names.
 
 Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
-create the resources and print their references without submitting anything.
+create the resources and print their references without creating a job.
 
 Uploaded files keep their local names. NeMo-RL reads both splits from one
 fileset, so point --upload-dataset at a local directory holding training.jsonl
 and validation.jsonl. For GRPO, --upload-environment takes the environment
-directory. Build and validate that package first; submit only uploads it.
+directory. Build and validate that package first; the job command only uploads it.
 
 Creating a resource that already exists fails unless you pass --exist-ok,
 which applies to whichever sources you gave.
@@ -92,7 +92,7 @@ def load_job_json(path: Path) -> str:
 
 
 def apply_rl_job_cli_overrides(group: typer.Typer) -> None:
-    """Flat ``rl`` CLI: ``submit JOB.json``."""
+    """Flat ``rl`` CLI using ``--job-json JOB.json``."""
     apply_job_cli_overrides(
         group,
         backend="rl",

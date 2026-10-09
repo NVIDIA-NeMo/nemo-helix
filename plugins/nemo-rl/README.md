@@ -12,7 +12,7 @@ Thin contributor layer only — the heavy compile glue and container tasks live 
 
 ## Surfaces
 
-- **CLI:** `nemo customization rl submit <job.json> -w <workspace>` (submit-only;
+- **CLI:** `nemo customization rl --job-json <job.json> -w <workspace>` (Jobs-service-only;
   there is no local `run` verb or local execution path).
 - **REST:** `POST /apis/customization/v2/workspaces/{workspace}/rl/jobs`
 - **List:** `GET .../rl/jobs` returns jobs whose spec stores `backend`. To list jobs submitted before that field existed, use `nemo jobs list` (`GET /apis/jobs/v2/workspaces/{workspace}/jobs`).

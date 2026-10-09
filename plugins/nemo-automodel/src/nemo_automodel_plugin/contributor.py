@@ -63,7 +63,7 @@ class AutomodelContributor(BaseContributor):
         ),
         job_json="model, dataset, training, schedule, batch, optimizer, parallelism.",
         use_when="you need SFT, LoRA, or knowledge distillation on one or more GPUs.",
-        command="nemo customization automodel submit job.json",
+        command="nemo customization automodel --job-json job.json",
     )
     jobs_router_description: ClassVar[str] = "Automodel training jobs."
 

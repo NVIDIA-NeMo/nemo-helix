@@ -39,7 +39,7 @@ class RlJobsListFilter(BaseJobsListFilter):
 
 
 class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
-    """NeMo-RL DPO and GRPO training job under the customization router (submit-only)."""
+    """NeMo-RL DPO and GRPO training job under the customization router (Jobs-service-only)."""
 
     name: ClassVar[str] = "rl.jobs"
     description: ClassVar[str] = "NeMo-RL DPO and GRPO training jobs on the platform Kubernetes GPU cluster (Ray)."
