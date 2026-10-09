@@ -27,7 +27,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
@@ -331,34 +331,11 @@ async def test_delete_deployment_removes_fabric_deployment(tmp_path: Path) -> No
     assert await backend.get_deployment_status("ws", "fabric-dep") is None
 
 
-@pytest.mark.asyncio
-async def test_create_deployment_cleans_fabric_base_dir_on_validation_failure(tmp_path: Path) -> None:
-    backend = _backend(tmp_path)
-    config = {
-        "config_format": "nemo-agents-spec-v1",
-        "name": "fabric-agent",
-        "default_harness": "hermes",
-        "harnesses": {"hermes": {"kind": "hermes"}},
-        "models": {"default": {"provider": "openai", "model": "openai/gpt-5.4"}},
-    }
-    base_dir = tmp_path / "system" / "ws" / "fabric-dep-fabric"
-
-    async def _validate_platform_agent_config(config_: dict[str, Any], *, base_dir: Path) -> Any:
-        del config_
-        (base_dir / "validation.txt").write_text("created during validation")
-        raise ValueError("bad fabric config")
-
-    with patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate_platform_agent_config):
-        with pytest.raises(ValueError, match="bad fabric config"):
-            await backend.create_deployment("ws", "fabric-dep", config, port=0)
-
-    assert not base_dir.exists()
-    assert await backend.get_deployment_status("ws", "fabric-dep") is None
-
-
+@pytest.mark.parametrize("spawn_fails", [False, True], ids=["success", "spawn-failure"])
 def test_spawn_fabric_uses_current_python_and_platform_server(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    spawn_fails: bool,
 ) -> None:
     backend = _backend(tmp_path)
     config_path = tmp_path / "agent.yaml"
@@ -367,17 +344,22 @@ def test_spawn_fabric_uses_current_python_and_platform_server(
     process = SimpleNamespace()
     monkeypatch.setenv("NVIDIA_API_KEY", "real-controller-key")
 
-    with patch("nemo_agents_plugin.runner.in_memory.subprocess.Popen", return_value=process) as popen:
-        spawned = backend._spawn_fabric(
-            "fabric-dep",
-            config_path,
-            log_path,
-            49212,
-            {"NVIDIA_API_KEY": "not-used"},
-            socket_fd=123,
-        )
+    with patch(
+        "nemo_agents_plugin.runner.in_memory.subprocess.Popen",
+        return_value=process,
+        side_effect=OSError("spawn failed") if spawn_fails else None,
+    ) as popen:
+        with pytest.raises(OSError, match="spawn failed") if spawn_fails else nullcontext():
+            spawned = backend._spawn_fabric(
+                "fabric-dep",
+                config_path,
+                log_path,
+                49212,
+                {"NVIDIA_API_KEY": "not-used"},
+                socket_fd=123,
+            )
+            assert spawned is process
 
-    assert spawned is process
     popen.assert_called_once_with(
         [
             sys.executable,
@@ -973,25 +955,6 @@ def test_spawn_fabric_inherits_socket_after_parent_closes(tmp_path: Path) -> Non
             proc.wait()
 
 
-def test_spawn_failure_closes_log_and_reservation(tmp_path: Path) -> None:
-    backend = _backend(tmp_path)
-    with patch("nemo_agents_plugin.runner.in_memory.subprocess.Popen", side_effect=OSError("spawn failed")) as popen:
-        with pytest.raises(OSError, match="spawn failed"):
-            with backend.reserve_socket() as reserved:
-                address = reserved.getsockname()
-                backend._spawn_fabric(
-                    "dep",
-                    tmp_path / "agent.yaml",
-                    tmp_path / "agent.log",
-                    address[1],
-                    socket_fd=reserved.fileno(),
-                )
-    assert popen.call_args.kwargs["stdout"].closed
-    assert reserved.fileno() == -1
-    with socket.socket() as replacement:
-        replacement.bind(address)
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure",
@@ -1000,6 +963,7 @@ def test_spawn_failure_closes_log_and_reservation(tmp_path: Path) -> None:
 async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) -> None:
     backend = _backend(tmp_path)
     sockets: list[socket.socket] = []
+    addresses: list[tuple[str, int]] = []
     reserve = backend.reserve_socket
     spawn_started = threading.Event()
     allow_spawn = threading.Event()
@@ -1009,6 +973,7 @@ async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) 
     def track_reservation() -> Iterator[socket.socket]:
         with reserve() as sock:
             sockets.append(sock)
+            addresses.append(sock.getsockname())
             yield sock
 
     async def stage(*args: Any) -> None:
@@ -1021,7 +986,8 @@ async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) 
         if failure == "stage":
             raise ValueError("stage failed")
 
-    async def validate(*args: Any, **kwargs: Any) -> None:
+    async def validate(*args: Any, base_dir: Path) -> None:
+        (base_dir / "validation.txt").write_text("created during validation")
         if failure == "cancel_validation":
             raise asyncio.CancelledError
         if failure == "validation":
@@ -1083,5 +1049,7 @@ async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) 
             assert info.endpoint == f"http://127.0.0.1:{info.port}"
         assert sockets[0].fileno() == -1
         if failure:
+            with socket.socket() as replacement:
+                replacement.bind(addresses[0])
             assert not backend._fabric_base_dir_for("ws", "dep").exists()
             assert await backend.get_deployment_status("ws", "dep") is None
