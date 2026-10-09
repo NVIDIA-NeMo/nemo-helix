@@ -41,6 +41,20 @@ vi.mock('@studio/api/useTriggerInsightsRun', () => ({
   useTriggerInsightsRun: vi.fn(),
 }));
 
+vi.mock('@studio/routes/agents/AgentDetailRoute/analysis/RunAnalysisModal', () => ({
+  RunAnalysisModal: ({
+    agent,
+    onRun,
+  }: {
+    agent: string;
+    onRun: (variables: { agent: string }) => void;
+  }) => (
+    <div role="dialog">
+      <button onClick={() => onRun({ agent })}>Run analysis</button>
+    </div>
+  ),
+}));
+
 vi.mock('@studio/api/useLatestAnalysisRun', () => ({
   useLatestAnalysisRun: vi.fn(),
 }));
@@ -83,7 +97,7 @@ const mockTriggerRun = ({
   result,
 }: { isPending?: boolean; result?: InsightsTriggerResult } = {}) => {
   mutateRun.mockImplementation(
-    (_agent: string, options?: { onSuccess?: (data: InsightsTriggerResult) => void }) => {
+    (_variables: unknown, options?: { onSuccess?: (data: InsightsTriggerResult) => void }) => {
       if (result) options?.onSuccess?.(result);
     }
   );
@@ -233,9 +247,11 @@ describe('AnalysisConfigPanel', () => {
     renderPanel('email-security-triage');
 
     await user.click(screen.getByRole('button', { name: 'Run analysis now' }));
+    await user.click(screen.getByRole('button', { name: 'Run analysis' }));
 
-    expect(mutateRun).toHaveBeenCalledWith('email-security-triage', expect.anything());
+    expect(mutateRun).toHaveBeenCalledWith({ agent: 'email-security-triage' }, expect.anything());
     expect(toast.success).toHaveBeenCalledWith('Queued analysis run "analysis-run-1".');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('reports why a run did not start', async () => {
@@ -252,9 +268,11 @@ describe('AnalysisConfigPanel', () => {
     renderPanel('email-security-triage');
 
     await user.click(screen.getByRole('button', { name: 'Run analysis now' }));
+    await user.click(screen.getByRole('button', { name: 'Run analysis' }));
 
     expect(toast.error).toHaveBeenCalledWith('Could not reach the Jobs service.');
     expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('disables Run analysis now while a run is pending', () => {

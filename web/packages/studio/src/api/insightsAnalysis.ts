@@ -3,7 +3,10 @@
 
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
 import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
-import type { AnalysisRunResponseJob } from '@nemo/sdk/generated/insights/schema';
+import type {
+  AnalysisRunResponseJob,
+  CreateAnalysisRunRequest,
+} from '@nemo/sdk/generated/insights/schema';
 import { type AtifIngestRequest, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import { AxiosError } from 'axios';
@@ -33,6 +36,15 @@ export const agentsFromTrajectories = (trajectories: AtifIngestRequest[]): strin
 export interface InsightsModelOverrides {
   default_model?: string;
   fast_model?: string;
+}
+
+/** What one run reads beyond the model pair. `evaluation_id` takes an evaluation's name. */
+export interface AnalysisRunOptions extends Pick<
+  CreateAnalysisRunRequest,
+  'since' | 'evaluation_id'
+> {
+  /** Defaults to true: send the agent's ETHOS.md when it has one. */
+  includeEthos?: boolean;
 }
 
 /**
@@ -78,7 +90,8 @@ const messageOf = (error: unknown): string => {
 export const triggerInsightsRun = async (
   workspace: string,
   agent: string,
-  overrides: InsightsModelOverrides = {}
+  overrides: InsightsModelOverrides = {},
+  { since, evaluation_id, includeEthos = true }: AnalysisRunOptions = {}
 ): Promise<InsightsTriggerResult> => {
   const invalidOverride = [overrides.default_model, overrides.fast_model]
     .map((ref) => ref?.trim())
@@ -125,7 +138,7 @@ export const triggerInsightsRun = async (
     };
   }
 
-  const ethos = await readAgentEthos(workspace, agent);
+  const ethos = includeEthos ? await readAgentEthos(workspace, agent) : undefined;
 
   try {
     const response = await insightsCreateAnalysisRun(workspace, {
@@ -133,6 +146,8 @@ export const triggerInsightsRun = async (
       default_model: defaultModel,
       fast_model: fastModel,
       ...(ethos ? { ethos } : {}),
+      ...(since ? { since } : {}),
+      ...(evaluation_id ? { evaluation_id } : {}),
     });
     if (!response.job) {
       return {

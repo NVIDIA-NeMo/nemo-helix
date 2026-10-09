@@ -23,8 +23,12 @@ import {
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import { queryClient } from '@studio/api/queryClient';
 import { useLatestAnalysisRun } from '@studio/api/useLatestAnalysisRun';
-import { useTriggerInsightsRun } from '@studio/api/useTriggerInsightsRun';
+import {
+  type TriggerInsightsRunVariables,
+  useTriggerInsightsRun,
+} from '@studio/api/useTriggerInsightsRun';
 import { LatestAnalysisRun } from '@studio/routes/agents/AgentDetailRoute/analysis/LatestAnalysisRun';
+import { RunAnalysisModal } from '@studio/routes/agents/AgentDetailRoute/analysis/RunAnalysisModal';
 import { saveAnalysisConfig } from '@studio/routes/agents/AgentDetailRoute/analysis/saveAnalysisConfig';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { type FC, useEffect, useState } from 'react';
@@ -45,6 +49,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
   const [enabled, setEnabled] = useState(false);
   const [defaultModel, setDefaultModel] = useState('');
   const [fastModel, setFastModel] = useState('');
+  const [runModalOpen, setRunModalOpen] = useState(false);
   const triggerRun = useTriggerInsightsRun(workspace);
   const { latestRun, isActive: runActive } = useLatestAnalysisRun(workspace, agent);
 
@@ -101,12 +106,12 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
     }
   };
 
-  const handleRunNow = () => {
-    if (!agent) return;
-    triggerRun.mutate(agent, {
+  const handleRun = (variables: TriggerInsightsRunVariables) => {
+    triggerRun.mutate(variables, {
       onSuccess: ({ status, jobName, message }) => {
         if (status === 'started') {
           toast.success(`Queued analysis run "${jobName}".`);
+          setRunModalOpen(false);
         } else {
           toast.error(message ?? 'Failed to start the analysis run.');
         }
@@ -149,7 +154,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
               color="neutral"
               size="small"
               height={28}
-              onClick={handleRunNow}
+              onClick={() => setRunModalOpen(true)}
               loading={triggerRun.isPending}
               disabled={!config || runActive}
             >
@@ -167,6 +172,16 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
         )
       }
     >
+      {runModalOpen && config ? (
+        <RunAnalysisModal
+          workspace={workspace}
+          agent={agent}
+          config={config}
+          running={triggerRun.isPending}
+          onClose={() => setRunModalOpen(false)}
+          onRun={handleRun}
+        />
+      ) : null}
       {isLoading ? (
         <Text className="text-secondary" kind="body/regular/sm">
           Loading analysis config...
