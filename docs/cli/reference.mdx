@@ -637,7 +637,7 @@ nemo services run [OPTIONS]
 * `--config`: Path to a platform configuration YAML file.
 * `--host`: Host to bind to. [default: 127.0.0.1]
 * `--port <INTEGER>`: Port to bind to. [default: 8080]
-* `--keep-alive-timeout-seconds <INTEGER RANGE>`: Seconds Uvicorn keeps idle HTTP connections open. [default: 5]
+* `--keep-alive-timeout-seconds <INTEGER RANGE>`: Seconds Uvicorn keeps idle HTTP connections open. [default: 10]
 * `--instance`: Instance name. Defaults to a name derived from the working directory and port.
 
 **Help:**
@@ -674,7 +674,7 @@ nemo services start [OPTIONS]
 * `--config`: Path to a platform configuration YAML file.
 * `--host`: Host to bind to. [default: 127.0.0.1]
 * `--port <INTEGER>`: Port to bind to. [default: 8080]
-* `--keep-alive-timeout-seconds <INTEGER RANGE>`: Seconds Uvicorn keeps idle HTTP connections open. [default: 5]
+* `--keep-alive-timeout-seconds <INTEGER RANGE>`: Seconds Uvicorn keeps idle HTTP connections open. [default: 10]
 * `--instance`: Instance name. Defaults to a name derived from the working directory and port.
 * `--ready-timeout <INTEGER RANGE>`: Seconds to wait for platform readiness. [default: 240]
 
@@ -746,7 +746,7 @@ nemo services restart [OPTIONS]
 * `--config`: Path to a platform configuration YAML file.
 * `--host`: Host to bind to. Defaults to previous value or 127.0.0.1.
 * `--port <INTEGER>`: Port to bind to. Defaults to previous value or 8080.
-* `--keep-alive-timeout-seconds <INTEGER RANGE>`: Seconds Uvicorn keeps idle HTTP connections open. Defaults to the previous value or 5.
+* `--keep-alive-timeout-seconds <INTEGER RANGE>`: Seconds Uvicorn keeps idle HTTP connections open. Defaults to the previous value or 10.
 * `--instance`: Instance name. Defaults to a name derived from the working directory and port.
 * `--ready-timeout <INTEGER RANGE>`: Seconds to wait for platform readiness. [default: 240]
 
