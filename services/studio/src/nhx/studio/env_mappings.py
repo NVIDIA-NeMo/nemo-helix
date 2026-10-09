@@ -220,6 +220,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_TRACE_GRAPH_ENABLED",
         config_path="studio.feature_flags.trace_graph_enabled",
-        default="false",
+        default="true",
     ),
 ]
