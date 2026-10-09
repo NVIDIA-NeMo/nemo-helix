@@ -397,7 +397,7 @@ Pass `CloudpickleMetricBundlePackager()` to `helix_evaluator.submit(...)` so the
 
 ### Enable Cloudpickle Metrics on the Deployment
 
-NeMo Helix rejects cloudpickle metrics by default. A cloudpickle bundle is arbitrary Python that the Evals service runs with its own service credentials, which can read secrets and entities in every workspace. Anyone who can create metrics or submit Evaluator jobs on a deployment that accepts them can run code as the platform. Enable them only on a deployment where you trust every such user, such as a single-user local install.
+Cloudpickle bundles let you run your own Python metrics on the Evals service, the same way you run them on your machine. This is useful when a built-in metric does not fit your evaluation. The bundle runs with the Evals service's credentials, so it can read secrets and entities in every workspace on the deployment, not only yours. The feature is off by default. Enable it only if you trust everyone who can create metrics or submit Evals jobs, and the environment itself, such as a single-user local install.
 
 Until a deployment enables them, creating a cloudpickle metric, a task with an inline cloudpickle metric, a job that uses one, or a `/live` request that uses one fails with HTTP 422 and the message `cloudpickle metrics are disabled on this deployment`.
 
