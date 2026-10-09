@@ -18,10 +18,7 @@ export interface InsightsModelPairFieldsProps {
   fastModel: string;
   onDefaultModelChange: (value: string) => void;
   onFastModelChange: (value: string) => void;
-  /**
-   * The stored pair a blank picker stands for. When given, the pickers start blank, show the
-   * stored model as their placeholder, and can be cleared back to it.
-   */
+  /** The stored pair a blank picker falls back to; makes each picker clearable. */
   stored?: { defaultModel?: string; fastModel?: string };
 }
 
@@ -42,14 +39,21 @@ interface ModelFieldProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  /** Present when blank means "use the stored model", so the field can be cleared back to it. */
   storedRef?: string | null;
 }
 
+const fieldError = (label: string, value: string, storedRef?: string | null) => {
+  if (value || storedRef === undefined) return errorFor(value);
+  return storedRef
+    ? errorFor(storedRef)
+    : `The analysis config has no stored ${label.toLowerCase()}. Pick one for this run.`;
+};
+
 const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, storedRef }) => {
   const clearable = storedRef !== undefined;
+  const error = fieldError(label, value, storedRef);
   return (
-    <FormField slotLabel={label} slotError={errorFor(value)}>
+    <FormField slotLabel={label} slotError={error} status={error ? 'error' : undefined}>
       <Flex gap="density-sm" align="center">
         <WorkspaceModelSelect
           workspace={workspace}

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
+import { useInsightsGetStatusesAnalysisRunStatus } from '@nemo/sdk/generated/insights/insights-analysis-run-statuses';
 import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import {
@@ -15,7 +16,6 @@ import {
   TextInput,
 } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
-import { useLastCompletedAnalysisRun } from '@studio/api/useLastCompletedAnalysisRun';
 import type { TriggerInsightsRunVariables } from '@studio/api/useTriggerInsightsRun';
 import { InsightsModelPairFields } from '@studio/components/ImportTracesModal/InsightsModelPairFields';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
@@ -47,13 +47,11 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
   onClose,
   onRun,
 }) => {
-  const { data: lastCompleted, isPending: lastRunPending } = useLastCompletedAnalysisRun(
-    workspace,
-    agent
-  );
-  const lastRunAt = lastCompleted ?? undefined;
-  const [chosenPreset, setPreset] = useState<SincePreset>();
-  const preset = chosenPreset ?? (lastRunAt ? 'last-run' : 'day');
+  const { data: runStatus } = useInsightsGetStatusesAnalysisRunStatus(workspace, agent, {
+    query: { retry: false },
+  });
+  const periodicCursor = runStatus?.last_successful_run_at ?? undefined;
+  const [preset, setPreset] = useState<SincePreset>('all');
   const [custom, setCustom] = useState(() => toDateTimeLocalValue(new Date(Date.now() - DAY_MS)));
   const [evaluation, setEvaluation] = useState(ALL_TRACES);
   const [defaultModel, setDefaultModel] = useState('');
@@ -68,22 +66,22 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
   });
   const evaluationNames = (evaluations?.data ?? []).map(({ name }) => name);
 
-  const since = sinceFor(preset, { now: new Date(), lastRunAt, custom });
+  const since = sinceFor(preset, { now: new Date(), periodicCursor, custom });
   const invalidCustom = preset === 'custom' && !since;
   const invalidModels = [runDefaultModel, runFastModel].some((ref) => !isQualifiedModelRef(ref));
 
   const presetItems = [
-    ...(lastRunAt
+    { value: 'all', children: 'All history' },
+    ...(periodicCursor
       ? [
           {
-            value: 'last-run',
-            children: `Since the last analysis run (${formatDateTime(lastRunAt)})`,
+            value: 'periodic-cursor',
+            children: `Since the last periodic analysis (${formatDateTime(periodicCursor)})`,
           },
         ]
       : []),
     { value: 'day', children: 'Last 24 hours' },
     { value: 'week', children: 'Last 7 days' },
-    { value: 'all', children: 'All history' },
     { value: 'custom', children: 'Custom' },
   ];
 
@@ -94,6 +92,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
       options: {
         since,
         evaluation_id: evaluation === ALL_TRACES ? undefined : evaluation,
+        storedConfig: config,
       },
     });
 
@@ -120,7 +119,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
             color="brand"
             onClick={handleRun}
             loading={running}
-            disabled={running || lastRunPending || invalidCustom || invalidModels}
+            disabled={running || invalidCustom || invalidModels}
           >
             Run insight analysis
           </LoadingButton>
@@ -131,13 +130,11 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
         <FormField
           slotLabel="Traces to analyze"
           slotHelp={
-            lastRunPending
-              ? 'Looking for the last completed analysis run...'
-              : invalidCustom
-                ? 'Enter a date and time.'
-                : since
-                  ? `Analyzes traces since ${formatDateTime(since)}.`
-                  : "Analyzes the agent's full trace history."
+            invalidCustom
+              ? 'Enter a date and time in the past.'
+              : since
+                ? `Analyzes traces that started since ${formatDateTime(since)}.`
+                : "Analyzes the agent's full trace history."
           }
         >
           <Select
@@ -153,6 +150,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
             <TextInput
               type="datetime-local"
               value={custom}
+              max={toDateTimeLocalValue(new Date())}
               onChange={(event) => setCustom(event.target.value)}
               aria-label="Analyze traces since"
             />

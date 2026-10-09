@@ -3,7 +3,7 @@
 
 import { parseISOWithUTCFallback } from '@nemo/common/src/components/RelativeTime/util';
 
-export type SincePreset = 'last-run' | 'day' | 'week' | 'all' | 'custom';
+export type SincePreset = 'all' | 'periodic-cursor' | 'day' | 'week' | 'custom';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -17,27 +17,25 @@ export const toDateTimeLocalValue = (date: Date): string => {
 
 interface SinceInputs {
   now: Date;
-  /** Start of the agent's last completed analysis run. */
-  lastRunAt?: string;
-  /** A `datetime-local` input value, read in the viewer's time zone. */
+  periodicCursor?: string;
   custom?: string;
 }
 
 /** The `since` bound a preset sends, or undefined for the full trace history or an unusable input. */
 export const sinceFor = (
   preset: SincePreset,
-  { now, lastRunAt, custom }: SinceInputs
+  { now, periodicCursor, custom }: SinceInputs
 ): string | undefined => {
   switch (preset) {
-    case 'last-run':
-      return lastRunAt ? parseISOWithUTCFallback(lastRunAt).toISOString() : undefined;
+    case 'periodic-cursor':
+      return periodicCursor ? parseISOWithUTCFallback(periodicCursor).toISOString() : undefined;
     case 'day':
       return msAgo(now, DAY_MS);
     case 'week':
       return msAgo(now, 7 * DAY_MS);
     case 'custom': {
       const date = custom ? new Date(custom) : undefined;
-      return date && !Number.isNaN(date.getTime()) ? date.toISOString() : undefined;
+      return date && !Number.isNaN(date.getTime()) && date <= now ? date.toISOString() : undefined;
     }
     case 'all':
       return undefined;

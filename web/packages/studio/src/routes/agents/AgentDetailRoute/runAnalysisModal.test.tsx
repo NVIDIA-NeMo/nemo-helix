@@ -5,6 +5,7 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OVERVIEW_ENABLED', 'true');
 });
 
+import { getInsightsGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-configs';
 import type {
   AnalysisRunResponse,
   CreateAnalysisRunRequest,
@@ -16,15 +17,17 @@ import {
   agentEvaluationsHandler,
   analysisRunCreateHandler,
   analysisRunHandlers,
+  analysisRunStatusHandler,
   mockAnalysisConfig,
-  mockAnalysisRunWithJob,
 } from '@studio/mocks/handlers/insights';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { DAY_MS } from '@studio/routes/agents/AgentDetailRoute/analysis/analysisSince';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 
 vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
   WorkspaceModelSelect: ({
@@ -46,7 +49,7 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
   ),
 }));
 
-const LAST_RUN = mockAnalysisRunWithJob('react-agent', 'completed');
+const PERIODIC_CURSOR = '2026-08-14T09:00:00Z';
 
 let runs: AnalysisRunResponse[];
 let requests: CreateAnalysisRunRequest[];
@@ -84,16 +87,13 @@ const openModal = async () => {
   });
   await user.click(await screen.findByRole('button', { name: 'Run analysis now' }));
   const dialog = within(await screen.findByRole('dialog'));
-  await waitFor(() =>
-    expect(dialog.queryByText('Looking for the last completed analysis run...')).toBeNull()
-  );
   return { user, dialog };
 };
 
 const pickPreset = async (
   user: ReturnType<typeof userEvent.setup>,
   dialog: ReturnType<typeof within>,
-  name: string
+  name: string | RegExp
 ) => {
   await user.click(dialog.getByRole('combobox', { name: 'Traces to analyze' }));
   await user.click(await screen.findByRole('option', { name }));
@@ -133,15 +133,16 @@ describe('Run analysis modal', () => {
     expect(dialog.queryByText(/ETHOS\.md/)).not.toBeInTheDocument();
   });
 
-  it('defaults to the last 24 hours when the agent has no completed run', async () => {
+  it('defaults to the full trace history', async () => {
     const { user, dialog } = await openModal();
 
     expect(dialog.getByRole('combobox', { name: 'Traces to analyze' })).toHaveTextContent(
-      'Last 24 hours'
+      'All history'
     );
+    expect(dialog.getByText("Analyzes the agent's full trace history.")).toBeInTheDocument();
     const body = await submit(user, dialog);
 
-    expectAbout(body.since, Date.now() - DAY_MS);
+    expect(body).not.toHaveProperty('since');
     expect(body).toMatchObject({
       agent: 'react-agent',
       default_model: mockAnalysisConfig.default_model,
@@ -151,38 +152,33 @@ describe('Run analysis modal', () => {
     expect(body).not.toHaveProperty('evaluation_id');
   });
 
-  it('defaults to the start of the last completed run when there is one', async () => {
-    runs = [LAST_RUN];
+  it("offers the periodic scheduler's cursor as a lower bound", async () => {
+    server.use(analysisRunStatusHandler('react-agent', PERIODIC_CURSOR));
     const { user, dialog } = await openModal();
 
-    expect(dialog.getByRole('combobox', { name: 'Traces to analyze' })).toHaveTextContent(
-      'Since the last analysis run'
-    );
+    await pickPreset(user, dialog, /Since the last periodic analysis/);
     const body = await submit(user, dialog);
 
-    expect(body.since).toBe(new Date(LAST_RUN.run.created_at).toISOString());
+    expect(body.since).toBe(new Date(PERIODIC_CURSOR).toISOString());
   });
 
-  it('looks past newer runs that did not complete for the last completed one', async () => {
-    runs = [
-      mockAnalysisRunWithJob('react-agent', 'cancelled', {
-        name: 'analysis-run-3',
-        created_at: '2026-08-16T09:00:00Z',
-      }),
-      mockAnalysisRunWithJob('react-agent', 'error', {
-        name: 'analysis-run-2',
-        created_at: '2026-08-15T09:00:00Z',
-      }),
-      LAST_RUN,
-    ];
+  it('does not offer the cursor before the scheduler has run', async () => {
     const { user, dialog } = await openModal();
 
-    expect(dialog.getByRole('combobox', { name: 'Traces to analyze' })).toHaveTextContent(
-      'Since the last analysis run'
-    );
+    await user.click(dialog.getByRole('combobox', { name: 'Traces to analyze' }));
+    await screen.findByRole('option', { name: 'Last 24 hours' });
+    expect(
+      screen.queryByRole('option', { name: /Since the last periodic analysis/ })
+    ).not.toBeInTheDocument();
+  });
+
+  it('sends a day back for Last 24 hours', async () => {
+    const { user, dialog } = await openModal();
+
+    await pickPreset(user, dialog, 'Last 24 hours');
     const body = await submit(user, dialog);
 
-    expect(body.since).toBe(new Date(LAST_RUN.run.created_at).toISOString());
+    expectAbout(body.since, Date.now() - DAY_MS);
   });
 
   it('sends a week back for Last 7 days', async () => {
@@ -192,16 +188,6 @@ describe('Run analysis modal', () => {
     const body = await submit(user, dialog);
 
     expectAbout(body.since, Date.now() - 7 * DAY_MS);
-  });
-
-  it('omits since for All history', async () => {
-    const { user, dialog } = await openModal();
-
-    await pickPreset(user, dialog, 'All history');
-    expect(dialog.getByText("Analyzes the agent's full trace history.")).toBeInTheDocument();
-    const body = await submit(user, dialog);
-
-    expect(body).not.toHaveProperty('since');
   });
 
   it('sends a custom lower bound read in local time', async () => {
@@ -214,6 +200,37 @@ describe('Run analysis modal', () => {
     const body = await submit(user, dialog);
 
     expect(body.since).toBe(new Date('2026-10-01T08:30').toISOString());
+  });
+
+  it('refuses a custom lower bound in the future', async () => {
+    const { user, dialog } = await openModal();
+
+    await pickPreset(user, dialog, 'Custom');
+    const input = dialog.getByLabelText('Analyze traces since');
+    await user.clear(input);
+    await user.type(input, `${new Date().getFullYear() + 1}-01-01T00:00`);
+
+    expect(dialog.getByText('Enter a date and time in the past.')).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Run insight analysis' })).toBeDisabled();
+  });
+
+  it('explains why it cannot run when the stored config has no fast model', async () => {
+    server.use(
+      http.get(mockApiUrl(getInsightsGetAnalysisConfigQueryKey, ':workspace', ':agent'), () =>
+        HttpResponse.json({ ...mockAnalysisConfig, fast_model: undefined })
+      )
+    );
+    const { user, dialog } = await openModal();
+
+    expect(
+      dialog.getByText('The analysis config has no stored fast model. Pick one for this run.')
+    ).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Run insight analysis' })).toBeDisabled();
+
+    await user.type(dialog.getByLabelText('Fast model'), 'default/override-model');
+    const body = await submit(user, dialog);
+
+    expect(body.fast_model).toBe('default/override-model');
   });
 
   it('sends overridden models for this run without saving them to the config', async () => {

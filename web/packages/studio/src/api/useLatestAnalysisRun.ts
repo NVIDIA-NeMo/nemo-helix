@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { parseISOWithUTCFallback } from '@nemo/common/src/components/RelativeTime/util';
+import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import {
@@ -12,6 +13,7 @@ import {
   getInsightsListInsightsQueryKey,
   insightsListInsights,
 } from '@nemo/sdk/generated/insights/insights-insights';
+import type { AnalysisRunResponse } from '@nemo/sdk/generated/insights/schema';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { analysisJobStatus } from '@studio/api/insightsAnalysis';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,101 +21,120 @@ import { useEffect, useRef } from 'react';
 
 export interface LatestAnalysisRun {
   name: string;
-  startedAt: string;
+  requestedAt: string;
   /** False when the run was recorded but its job never landed. */
   submitted: boolean;
   status?: HelixJobStatus;
 }
 
-interface WatchedRun {
-  name: string;
-  insightsBefore?: number;
-}
+// Picks up runs started outside this page, such as by the scheduler or a trace import.
+export const LIST_POLL_MS = 15_000;
+// The scheduler records a run just before submitting its job.
+const UNSUBMITTED_GRACE_MS = 60_000;
+const MAX_POLL_FAILURES = 3;
+const NEW_FINDINGS_PAGE_SIZE = 100;
 
-const countInsights = async (workspace: string, agent: string): Promise<number | undefined> => {
+const IN_FLIGHT_STATUSES: HelixJobStatus[] = [
+  HelixJobStatus.created,
+  HelixJobStatus.pending,
+  HelixJobStatus.active,
+];
+
+const runPollInterval = (
+  data: AnalysisRunResponse | undefined,
+  fetchFailureCount: number
+): number | false => {
+  if (!data || fetchFailureCount >= MAX_POLL_FAILURES) return false;
+  if (!data.job) {
+    const age = Date.now() - parseISOWithUTCFallback(data.run.created_at).getTime();
+    return age < UNSUBMITTED_GRACE_MS ? JOB_POLLING_INTERVAL_MS : false;
+  }
+  const status = analysisJobStatus(data.job);
+  return status ? getJobRefetchInterval(status) : false;
+};
+
+const countInsightsSince = async (
+  workspace: string,
+  agent: string,
+  since: string
+): Promise<number | undefined> => {
   try {
-    const { pagination } = await insightsListInsights(workspace, { agent, page_size: 1 });
-    return pagination?.total_results;
+    const { data } = await insightsListInsights(workspace, {
+      agent,
+      page_size: NEW_FINDINGS_PAGE_SIZE,
+      sort: '-created_at',
+    });
+    const start = parseISOWithUTCFallback(since).getTime();
+    return data.filter(({ created_at }) => parseISOWithUTCFallback(created_at).getTime() >= start)
+      .length;
   } catch {
     return undefined;
   }
 };
 
-const completionMessage = (added: number) =>
+const completionMessage = (added = 0) =>
   added > 0
     ? `Analysis complete: ${added} new ${added === 1 ? 'finding' : 'findings'}.`
     : 'Analysis complete.';
 
-/**
- * The agent's most recent analysis run with its job state, polled until the job is terminal.
- * A run seen in flight toasts when it finishes and refreshes the insights list.
- */
+/** The agent's most recent analysis run, polled while in flight; toasts when a watched run ends. */
 export const useLatestAnalysisRun = (
   workspace: string,
   agent: string | undefined
-): { latestRun?: LatestAnalysisRun; isActive: boolean } => {
+): { latestRun?: LatestAnalysisRun; isActive: boolean; blocksNewRun: boolean } => {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const watched = useRef<WatchedRun | null>(null);
+  const watchedName = useRef<string | null>(null);
 
   const { data: runs } = useInsightsListAnalysisRuns(
     workspace,
     { agent, page_size: 1, sort: '-created_at' },
-    { query: { enabled: !!agent } }
+    { query: { enabled: !!agent, refetchInterval: LIST_POLL_MS } }
   );
   const name = runs?.data[0]?.name;
 
-  const { data: detail } = useInsightsGetAnalysisRun(workspace, name ?? '', {
-    query: {
-      enabled: !!name,
-      refetchInterval: ({ state }) =>
-        state.data && !state.data.job
-          ? false
-          : getJobRefetchInterval(analysisJobStatus(state.data?.job)),
-    },
-  });
+  const { data: detail, isPending: detailPending } = useInsightsGetAnalysisRun(
+    workspace,
+    name ?? '',
+    {
+      query: {
+        enabled: !!name,
+        refetchInterval: ({ state }) => runPollInterval(state.data, state.fetchFailureCount),
+      },
+    }
+  );
 
-  const status = analysisJobStatus(detail?.job);
-  const isActive = !!status && !CJobTerminalStatuses.includes(status);
+  const current = detail && detail.run.name === name ? detail : undefined;
+  const status = analysisJobStatus(current?.job);
+  const isActive = !!status && IN_FLIGHT_STATUSES.includes(status);
+  const requestedAt = current?.run.created_at;
 
   useEffect(() => {
-    if (!agent || !name || !status) return;
+    if (!agent || !name || !status || !requestedAt) return;
 
     if (isActive) {
-      if (watched.current?.name === name) return;
-      const run: WatchedRun = { name };
-      watched.current = run;
-      void countInsights(workspace, agent).then((count) => {
-        run.insightsBefore = count;
-      });
+      watchedName.current = name;
       return;
     }
-
-    if (watched.current?.name !== name) return;
-    const { insightsBefore } = watched.current;
-    watched.current = null;
+    if (watchedName.current !== name) return;
+    watchedName.current = null;
 
     if (status === HelixJobStatus.completed) {
       void (async () => {
         await queryClient.invalidateQueries({
           queryKey: getInsightsListInsightsQueryKey(workspace),
         });
-        const insightsAfter = await countInsights(workspace, agent);
-        const added =
-          insightsBefore !== undefined && insightsAfter !== undefined
-            ? insightsAfter - insightsBefore
-            : 0;
-        toast.success(completionMessage(added));
+        toast.success(completionMessage(await countInsightsSince(workspace, agent, requestedAt)));
       })();
     } else if (status === HelixJobStatus.error) {
       toast.error(`Analysis run "${name}" failed. Open the run's job to read its logs.`);
     }
-  }, [agent, isActive, name, queryClient, status, toast, workspace]);
+  }, [agent, isActive, name, queryClient, requestedAt, status, toast, workspace]);
 
   const latestRun: LatestAnalysisRun | undefined =
-    detail && name && detail.run.name === name
-      ? { name, startedAt: detail.run.created_at, submitted: !!detail.job, status }
+    current && name
+      ? { name, requestedAt: current.run.created_at, submitted: !!current.job, status }
       : undefined;
 
-  return { latestRun, isActive };
+  return { latestRun, isActive, blocksNewRun: isActive || (!!name && detailPending) };
 };

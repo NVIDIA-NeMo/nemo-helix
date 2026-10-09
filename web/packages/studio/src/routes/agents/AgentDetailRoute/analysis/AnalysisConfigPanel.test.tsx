@@ -107,15 +107,20 @@ const mockTriggerRun = ({
   } as unknown as ReturnType<typeof useTriggerInsightsRun>);
 };
 
-const mockLatestRun = (latestRun?: Partial<LatestAnalysisRun>, isActive = false) =>
+const mockLatestRun = (
+  latestRun?: Partial<LatestAnalysisRun>,
+  isActive = false,
+  blocksNewRun = isActive
+) =>
   vi.mocked(useLatestAnalysisRun).mockReturnValue({
     latestRun: latestRun && {
       name: 'analysis-run-1',
-      startedAt: new Date(Date.now() - 125_000).toISOString(),
+      requestedAt: new Date(Date.now() - 125_000).toISOString(),
       submitted: true,
       ...latestRun,
     },
     isActive,
+    blocksNewRun,
   });
 
 const config = (overrides: Partial<AnalysisConfig> = {}): AnalysisConfig => ({
@@ -309,11 +314,11 @@ describe('AnalysisConfigPanel', () => {
 
     const row = within(screen.getByTestId('latest-analysis-run'));
     expect(row.getByText('Queued')).toBeInTheDocument();
-    expect(row.getByText(/Analysis running/)).toBeInTheDocument();
+    expect(row.getByText(/still in progress/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeDisabled();
   });
 
-  it('shows how long a running run has been going', () => {
+  it('shows when a running run was requested', () => {
     useConfig.mockReturnValue(queryResult(config()));
     mockLatestRun({ status: 'active' }, true);
 
@@ -321,8 +326,17 @@ describe('AnalysisConfigPanel', () => {
 
     const row = within(screen.getByTestId('latest-analysis-run'));
     expect(row.getByText('Running')).toBeInTheDocument();
-    expect(row.getByText(/for 2m \d+s/)).toBeInTheDocument();
+    expect(row.getByText(/requested/)).toBeInTheDocument();
     expect(row.getByRole('button', { name: 'View job' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeDisabled();
+  });
+
+  it('keeps Run analysis now disabled while a newly listed run is still loading', () => {
+    useConfig.mockReturnValue(queryResult(config()));
+    mockLatestRun(undefined, false, true);
+
+    renderPanel('email-security-triage');
+
     expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeDisabled();
   });
 
@@ -334,8 +348,8 @@ describe('AnalysisConfigPanel', () => {
 
     const row = within(screen.getByTestId('latest-analysis-run'));
     expect(row.getByText('Completed')).toBeInTheDocument();
-    expect(row.getByText(/started/)).toBeInTheDocument();
-    expect(row.queryByText(/Analysis running/)).not.toBeInTheDocument();
+    expect(row.getByText(/requested/)).toBeInTheDocument();
+    expect(row.queryByText(/still in progress/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run analysis now' })).toBeEnabled();
   });
 

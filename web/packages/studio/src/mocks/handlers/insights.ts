@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getInsightsGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-configs';
+import { getInsightsGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-run-statuses';
 import {
   getInsightsGetAnalysisRunQueryKey,
   getInsightsListAnalysisRunsQueryKey,
@@ -28,6 +29,11 @@ const ANALYSIS_CONFIG_URL = mockApiUrl(
 );
 const ANALYSIS_RUNS_URL = mockApiUrl(getInsightsListAnalysisRunsQueryKey, ':workspace');
 const ANALYSIS_RUN_URL = mockApiUrl(getInsightsGetAnalysisRunQueryKey, ':workspace', ':name');
+const ANALYSIS_RUN_STATUS_URL = mockApiUrl(
+  getInsightsGetStatusesAnalysisRunStatusQueryKey,
+  ':workspace',
+  ':agent'
+);
 
 export const mockAnalysisRunResponse = (
   workspace: string,
@@ -68,10 +74,7 @@ export const mockAnalysisRunWithJob = (
   };
 };
 
-/**
- * Serves `runs()`, newest first, as the workspace's analysis runs. It is read on every request,
- * so a test can move a run's job along between polls.
- */
+/** Serves `runs()`, newest first, reading it per request so a test can advance a job between polls. */
 export const analysisRunHandlers = (runs: () => AnalysisRunResponse[]) => [
   http.get(ANALYSIS_RUNS_URL, ({ request }) => {
     const params = new URL(request.url).searchParams;
@@ -99,6 +102,20 @@ export const analysisRunHandlers = (runs: () => AnalysisRunResponse[]) => [
       : HttpResponse.json({ detail: 'Not Found' }, { status: 404 });
   }),
 ];
+
+/** The scheduler's run status for `agent`, or a 404 when it has never run. */
+export const analysisRunStatusHandler = (agent: string, lastSuccessfulRunAt: string | null) =>
+  http.get<{ agent: string }>(ANALYSIS_RUN_STATUS_URL, ({ params }) =>
+    lastSuccessfulRunAt && params.agent === agent
+      ? HttpResponse.json({
+          id: `insights-analysis-run-status-${agent}`,
+          name: agent,
+          agent,
+          status: 'idle',
+          last_successful_run_at: lastSuccessfulRunAt,
+        })
+      : HttpResponse.json({ detail: 'Not Found' }, { status: 404 })
+  );
 
 /** Answers run creation like the default handler and hands each request body to `onCreate`. */
 export const analysisRunCreateHandler = (
@@ -210,6 +227,8 @@ export const mockInsights: InsightListItem[] = [
 
 export const insightsHandlers = [
   ...analysisRunHandlers(() => []),
+
+  analysisRunStatusHandler('', null),
 
   analysisRunCreateHandler(() => undefined),
 

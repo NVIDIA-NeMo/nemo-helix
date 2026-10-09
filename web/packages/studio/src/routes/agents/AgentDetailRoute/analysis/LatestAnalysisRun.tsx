@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import { parseISOWithUTCFallback } from '@nemo/common/src/components/RelativeTime/util';
 import { type BadgeStatus, StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { formatDurationMs } from '@nemo/common/src/utils/date';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { LatestAnalysisRun as LatestRun } from '@studio/api/useLatestAnalysisRun';
 import { JOBS_ENABLED } from '@studio/constants/environment';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
-import { type FC, useEffect, useState } from 'react';
+import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
 const RUN_BADGES: Partial<Record<HelixJobStatus, { status: BadgeStatus; label: string }>> = {
@@ -21,16 +19,6 @@ const RUN_BADGES: Partial<Record<HelixJobStatus, { status: BadgeStatus; label: s
 };
 
 const NOT_SUBMITTED = { status: 'unavailable', label: 'Not submitted' } as const;
-
-const Elapsed: FC<{ since: string }> = ({ since }) => {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  const seconds = Math.max(1, Math.floor((now - parseISOWithUTCFallback(since).getTime()) / 1000));
-  return <>{formatDurationMs(seconds * 1000)}</>;
-};
 
 interface LatestAnalysisRunProps {
   workspace: string;
@@ -52,15 +40,7 @@ export const LatestAnalysisRun: FC<LatestAnalysisRunProps> = ({ workspace, run, 
       <Flex align="center" gap="2" wrap="wrap">
         <StatusBadge status={badge.status} label={badge.label} />
         <Text kind="body/regular/sm" className="text-secondary">
-          {isActive && run.status === 'active' ? (
-            <>
-              for <Elapsed since={run.startedAt} />
-            </>
-          ) : (
-            <>
-              started <RelativeTime datetime={run.startedAt} />
-            </>
-          )}
+          requested <RelativeTime datetime={run.requestedAt} />
         </Text>
         {JOBS_ENABLED && run.submitted ? (
           <Button
@@ -74,7 +54,7 @@ export const LatestAnalysisRun: FC<LatestAnalysisRunProps> = ({ workspace, run, 
       </Flex>
       {isActive ? (
         <Text kind="body/regular/xs" className="text-secondary">
-          Analysis running. You can start another run when this one finishes.
+          This run is still in progress. You can start another run when this one finishes.
         </Text>
       ) : null}
     </Stack>

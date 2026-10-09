@@ -9,8 +9,8 @@ import {
 const now = new Date('2026-10-09T12:00:00Z');
 
 describe('sinceFor', () => {
-  it('reads a last-run timestamp without a zone as UTC', () => {
-    expect(sinceFor('last-run', { now, lastRunAt: '2026-10-09T02:10:13.237316' })).toBe(
+  it('reads a periodic cursor without a zone as UTC', () => {
+    expect(sinceFor('periodic-cursor', { now, periodicCursor: '2026-10-09T02:10:13.237316' })).toBe(
       '2026-10-09T02:10:13.237Z'
     );
   });
@@ -20,11 +20,17 @@ describe('sinceFor', () => {
     expect(sinceFor('week', { now })).toBe('2026-10-02T12:00:00.000Z');
   });
 
-  it('has no bound for all history, a missing last run, or an unusable custom value', () => {
+  it('has no bound for all history, a missing cursor, or an unusable custom value', () => {
     expect(sinceFor('all', { now })).toBeUndefined();
-    expect(sinceFor('last-run', { now })).toBeUndefined();
+    expect(sinceFor('periodic-cursor', { now })).toBeUndefined();
     expect(sinceFor('custom', { now, custom: '' })).toBeUndefined();
     expect(sinceFor('custom', { now, custom: 'not a date' })).toBeUndefined();
+  });
+
+  it('rejects a custom value in the future', () => {
+    expect(
+      sinceFor('custom', { now, custom: toDateTimeLocalValue(new Date(now.getTime() + 60_000)) })
+    ).toBeUndefined();
   });
 
   it('round-trips a custom value through the datetime-local format', () => {

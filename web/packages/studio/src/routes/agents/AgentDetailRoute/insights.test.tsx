@@ -8,7 +8,8 @@ vi.hoisted(() => {
 
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
-import type { AnalysisRunResponse } from '@nemo/sdk/generated/insights/schema';
+import type { AnalysisRunResponse, InsightListItem } from '@nemo/sdk/generated/insights/schema';
+import { LIST_POLL_MS } from '@studio/api/useLatestAnalysisRun';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import {
@@ -16,6 +17,7 @@ import {
   analysisRunHandlers,
   mockAnalysisConfig,
   mockAnalysisRunWithJob,
+  mockInsights,
 } from '@studio/mocks/handlers/insights';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
@@ -55,25 +57,25 @@ describe('AgentDetailRoute insights tab', () => {
 
 describe('AgentDetailRoute insights tab latest analysis run', () => {
   let latest: AnalysisRunResponse | undefined;
-  let findings: number;
+  let findings: InsightListItem[];
 
   const runButton = () => screen.findByRole('button', { name: 'Run analysis now' });
-  const nextPoll = () => act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_MS));
+  const nextPoll = (ms = JOB_POLLING_INTERVAL_MS) => act(() => vi.advanceTimersByTimeAsync(ms));
 
   beforeEach(() => {
     latest = undefined;
-    findings = 2;
+    findings = mockInsights;
     server.use(
       ...analysisRunHandlers(() => (latest ? [latest] : [])),
       http.get(mockApiUrl(getInsightsListInsightsQueryKey, ':workspace'), () =>
         HttpResponse.json({
-          data: [],
+          data: findings,
           pagination: {
             page: 1,
-            page_size: 1,
-            current_page_size: 0,
+            page_size: 100,
+            current_page_size: findings.length,
             total_pages: 1,
-            total_results: findings,
+            total_results: findings.length,
           },
         })
       )
@@ -116,7 +118,15 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     expect(await screen.findByText('Running')).toBeInTheDocument();
     expect(await runButton()).toBeDisabled();
 
-    findings = 3;
+    findings = [
+      {
+        ...mockInsights[0],
+        id: 'ins-new',
+        name: 'new-finding',
+        created_at: '2026-08-14T09:30:00Z',
+      },
+      ...mockInsights,
+    ];
     latest = mockAnalysisRunWithJob('react-agent', 'completed');
     await nextPoll();
 
@@ -143,6 +153,29 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
     expect(await runButton()).toBeEnabled();
+  });
+
+  it('picks up a run started outside the page on the next list poll', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderDetail('?tab=insights');
+
+    expect(await screen.findByText('Enabled')).toBeInTheDocument();
+    await waitFor(async () => expect(await runButton()).toBeEnabled());
+
+    latest = mockAnalysisRunWithJob('react-agent', 'active');
+    await nextPoll(LIST_POLL_MS);
+
+    expect(await screen.findByText('Running')).toBeInTheDocument();
+    expect(await runButton()).toBeDisabled();
+  });
+
+  it('does not block new runs on a paused job', async () => {
+    latest = mockAnalysisRunWithJob('react-agent', 'paused');
+    renderDetail('?tab=insights');
+
+    expect(await screen.findByTestId('latest-analysis-run')).toBeInTheDocument();
+    await waitFor(async () => expect(await runButton()).toBeEnabled());
+    expect(screen.queryByText(/You can start another run/)).not.toBeInTheDocument();
   });
 
   it('does not toast for a run that had already finished when the page opened', async () => {

@@ -4,6 +4,7 @@
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
 import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import type {
+  AnalysisConfig,
   AnalysisRunResponseJob,
   CreateAnalysisRunRequest,
 } from '@nemo/sdk/generated/insights/schema';
@@ -38,8 +39,14 @@ export interface InsightsModelOverrides {
   fast_model?: string;
 }
 
-/** What one run reads beyond the model pair. `evaluation_id` takes an evaluation's name. */
-export type AnalysisRunOptions = Pick<CreateAnalysisRunRequest, 'since' | 'evaluation_id'>;
+/** `evaluation_id` takes an evaluation's name. */
+export interface AnalysisRunOptions extends Pick<
+  CreateAnalysisRunRequest,
+  'since' | 'evaluation_id'
+> {
+  /** Skips the config lookup when the caller already holds the agent's config. */
+  storedConfig?: AnalysisConfig;
+}
 
 /**
  * Studio stores Model Entity references in `workspace/name` format.
@@ -85,7 +92,7 @@ export const triggerInsightsRun = async (
   workspace: string,
   agent: string,
   overrides: InsightsModelOverrides = {},
-  { since, evaluation_id }: AnalysisRunOptions = {}
+  { since, evaluation_id, storedConfig }: AnalysisRunOptions = {}
 ): Promise<InsightsTriggerResult> => {
   const invalidOverride = [overrides.default_model, overrides.fast_model]
     .map((ref) => ref?.trim())
@@ -100,7 +107,7 @@ export const triggerInsightsRun = async (
 
   let config;
   try {
-    config = await insightsGetAnalysisConfig(workspace, agent);
+    config = storedConfig ?? (await insightsGetAnalysisConfig(workspace, agent));
   } catch (error) {
     if (statusOf(error) === 404) {
       return {

@@ -4,6 +4,7 @@
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { useInsightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
+import { getInsightsListAnalysisRunsQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import { getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
 import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import {
@@ -177,6 +178,9 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
 
       const started = triggered.filter(({ status }) => status === 'started').length;
       if (started > 0) {
+        void queryClient.invalidateQueries({
+          queryKey: getInsightsListAnalysisRunsQueryKey(workspace),
+        });
         toast.success(`Queued ${started} insights analysis run${started === 1 ? '' : 's'}.`);
       }
       insightsNeedsAttention = started < triggered.length;

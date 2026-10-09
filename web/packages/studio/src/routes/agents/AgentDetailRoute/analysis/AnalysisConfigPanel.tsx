@@ -51,7 +51,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
   const [fastModel, setFastModel] = useState('');
   const [runModalOpen, setRunModalOpen] = useState(false);
   const triggerRun = useTriggerInsightsRun(workspace);
-  const { latestRun, isActive: runActive } = useLatestAnalysisRun(workspace, agent);
+  const { latestRun, isActive: runActive, blocksNewRun } = useLatestAnalysisRun(workspace, agent);
 
   const {
     data: config,
@@ -156,7 +156,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
               height={28}
               onClick={() => setRunModalOpen(true)}
               loading={triggerRun.isPending}
-              disabled={!config || runActive}
+              disabled={!config || blocksNewRun}
             >
               Run analysis now
             </LoadingButton>
@@ -208,11 +208,8 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
             <FormField
               slotLabel="Default model"
               slotHelp="Used for quality-critical analysis work."
-              slotError={
-                defaultModel && !isQualifiedModelRef(defaultModel)
-                  ? `Stored value "${defaultModel}" is not workspace-qualified. Pick a model to replace it.`
-                  : undefined
-              }
+              status={defaultModel && !isQualifiedModelRef(defaultModel) ? 'error' : undefined}
+              slotError={`Stored value "${defaultModel}" is not workspace-qualified. Pick a model to replace it.`}
             >
               <WorkspaceModelSelect
                 workspace={workspace}
@@ -227,11 +224,8 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
             <FormField
               slotLabel="Fast model"
               slotHelp="Used for latency-sensitive analysis work."
-              slotError={
-                fastModel && !isQualifiedModelRef(fastModel)
-                  ? `Stored value "${fastModel}" is not workspace-qualified. Pick a model to replace it.`
-                  : undefined
-              }
+              status={fastModel && !isQualifiedModelRef(fastModel) ? 'error' : undefined}
+              slotError={`Stored value "${fastModel}" is not workspace-qualified. Pick a model to replace it.`}
             >
               <WorkspaceModelSelect
                 workspace={workspace}
