@@ -881,6 +881,8 @@ builder:
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
     image:
+    # What runs each sandbox. `kubernetes_pod`, the only one so far, is a plain pod the build step creates, hardened by the builder, with an unrestricted network: use it only with Dockerfiles you trust. | default: 'kubernetes_pod' | values: 'kubernetes_pod'
+    provider: kubernetes_pod
     # CPU for each sandbox: its request and its limit. | default: '2'
     cpu: '2'
     # Memory for each sandbox: its request and its limit. | default: '8Gi'
