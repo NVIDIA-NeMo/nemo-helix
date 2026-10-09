@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Generic GitHub -> NeMo Helix agent trigger: a `/helix-*` PR comment reacts 👀 and
+# fires a `repository_dispatch` to the worker repo (fire-and-forget; the agent replies
+# itself). Architecture + the trigger->agent mapping: see HELIX_AGENT_DISPATCH.md.
+
+name: Helix agent dispatch
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch Helix agent
+    # Gate on: a PR comment (not an issue), a `/helix-` trigger token, AND a commenter
+    # with write access — issue_comment runs in the base repo with its secrets, so an
+    # author_association check is what stops an arbitrary user from firing the agent.
+    if: >-
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/helix-') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: React 👀 and dispatch
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+        with:
+          github-token: ${{ env.ACT == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
+          script: |
+            const { dispatchAgent } = require("./.github/scripts/helix-agent-dispatch.cjs");
+            await dispatchAgent({ core, github, context, env: process.env });
