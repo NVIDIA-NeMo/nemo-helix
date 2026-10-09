@@ -32,6 +32,8 @@ from typing import Any
 
 import tomlkit
 import yaml
+from nhx_sandbox.opensandbox_policy import canonical_egress_target
+from tomlkit.items import InlineTable, Table
 
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSION, HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
@@ -39,6 +41,7 @@ from scaled_evals.dispatch.credentials import merged_env_file
 from scaled_evals.dispatch.paths import setting_evaluation_dir
 from scaled_evals.dispatch.runtime_backend import (
     CallableRuntimeBackend,
+    IncompatibleTaskError,
     RuntimeBackendCapabilities,
     RuntimeBackendRegistration,
 )
@@ -48,6 +51,7 @@ from scaled_evals.dispatch.sandbox_k8s import (
     _deep_merge_harbor_config,
     _harbor_result_path,
     _harbor_run_argv,
+    _image_ref_for_sandbox,
     _inject_extra_skills,
     _is_dataset_only_harbor_profile,
     _normalize_harbor_profile_config,
@@ -189,8 +193,47 @@ def preflight(spec: LaunchSpec) -> None:
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} does not support dataset-only Harbor profiles")
 
 
-def preflight_staged_task(task_dir: Path, trusted_hosts: Sequence[str]) -> None:
-    """Checks that need the staged task tree: compose, and task-declared egress."""
+def _verifier_mode(verifier: Any) -> str | None:
+    """Harbor's verifier mode for one ``[verifier]`` table, before inheritance; ``None`` if unset.
+
+    Mirrors ``harbor.models.task.verifier_mode._resolve_mode``: an explicit ``environment_mode``
+    wins, and a ``[verifier.environment]`` table on its own implies ``separate``.
+    """
+    if not isinstance(verifier, Mapping):
+        return None
+    mode = verifier.get("environment_mode")
+    if mode is not None:
+        return str(mode)
+    if verifier.get("environment") is not None:
+        return "separate"
+    return None
+
+
+def uses_separate_verifier(document: Mapping[str, Any]) -> bool:
+    """True when any verify pass of the task runs in its own sandbox, as Harbor 0.20 resolves it."""
+    # Harbor's default is "shared": the verifier runs inside the agent's sandbox.
+    task_mode = _verifier_mode(document.get("verifier")) or "shared"
+
+    steps = document.get("steps") or []
+    if not steps:
+        return task_mode == "separate"
+
+    # Multi-step task: each step verifies on its own, using its own mode if set, else the task's.
+    for step in steps:
+        step_verifier = step.get("verifier") if isinstance(step, Mapping) else None
+        if (_verifier_mode(step_verifier) or task_mode) == "separate":
+            return True
+    return False
+
+
+def preflight_staged_task(
+    task_dir: Path,
+    trusted_hosts: Sequence[str],
+    *,
+    verifier_image_ref: str | None = None,
+    verifier_image_digest: str | None = None,
+) -> None:
+    """Checks that need the staged task tree: compose, the separate verifier image, and task-declared egress."""
     # Each trial gets exactly one sandbox, so multi-container (Compose) tasks can't run.
     for name in _COMPOSE_FILENAMES:
         if (task_dir / "environment" / name).exists() or (task_dir / name).exists():
@@ -199,13 +242,29 @@ def preflight_staged_task(task_dir: Path, trusted_hosts: Sequence[str]) -> None:
     task_toml = task_dir / "task.toml"
     if not task_toml.is_file():
         raise ValueError(f"staged task has no task.toml: {task_dir}")
+    document = tomlkit.parse(task_toml.read_text(encoding="utf-8"))
+
+    # A separate verifier runs from the image built from tests/, which the task revision must
+    # record. Without it Harbor would verify in a copy of the agent image, which has no tests.
+    if uses_separate_verifier(document):
+        if document.get("steps"):
+            raise IncompatibleTaskError(
+                f"{HARBOR_OPENSANDBOX_RUNTIME} does not support multi-step tasks with a separate verifier yet"
+            )
+        if not (verifier_image_ref and verifier_image_digest):
+            raise IncompatibleTaskError(
+                'the task runs its verifier separately ([verifier] environment_mode = "separate"), '
+                "but its revision has no verifier image with a recorded digest; finalize a new "
+                "revision with verifier_image_ref and verifier_image_digest for the image built from tests/"
+            )
 
     # A task may narrow egress to a subset of the operator allowlist, but asking for any other
     # host fails the evaluation instead of silently dropping it.
-    environment = tomlkit.parse(task_toml.read_text(encoding="utf-8")).get("environment") or {}
+    environment = document.get("environment") or {}
     if environment.get("network_mode") == "allowlist":
         requested = [str(host) for host in environment.get("allowed_hosts") or []]
-        extra = sorted(set(requested) - set(trusted_hosts))
+        trusted_targets = {canonical_egress_target(host) for host in trusted_hosts}
+        extra = sorted({host for host in requested if canonical_egress_target(host) not in trusted_targets})
         if extra:
             raise ValueError(
                 f"task requests egress to {extra}, which the operator allowlist for "
@@ -213,11 +272,17 @@ def preflight_staged_task(task_dir: Path, trusted_hosts: Sequence[str]) -> None:
             )
 
 
-def bind_task_image(task_dir: Path, image_ref: str) -> None:
-    """Point the staged task at its prebuilt image; OpenSandbox never builds images."""
+def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str | None = None) -> bool:
+    """Point the staged task at its prebuilt images; OpenSandbox never builds images.
+
+    ``verifier_image_ref`` is bound only when the task runs its verifier separately; any image the
+    task itself names for the verifier is replaced. Returns whether it was bound.
+    """
     # tomlkit keeps the rest of the author's task.toml (comments, ordering) as-is.
     task_toml = task_dir / "task.toml"
     document = tomlkit.parse(task_toml.read_text(encoding="utf-8"))
+
+    # Agent image: always bound, creating [environment] if the task has none.
     environment = document.get("environment")
     if environment is None:
         environment = tomlkit.table()
@@ -226,10 +291,35 @@ def bind_task_image(task_dir: Path, image_ref: str) -> None:
         raise ValueError(f"task [environment] must be a TOML table: {task_toml}")
     environment["docker_image"] = image_ref
 
+    # Verifier image: only for a verifier that runs in its own sandbox. A shared verifier
+    # runs inside the agent sandbox, so there is nothing to bind.
+    verifier_bound = verifier_image_ref is not None and uses_separate_verifier(document)
+    if verifier_bound:
+        verifier = document.get("verifier")
+        if not isinstance(verifier, MutableMapping):
+            raise ValueError(f"task [verifier] must be a TOML table: {task_toml}")
+
+        verifier_environment = verifier.get("environment")
+        if verifier_environment is None:
+            # Without [verifier.environment], Harbor verifies in a copy of [environment].
+            # Make that copy explicit, so the verifier keeps the task's resources and
+            # network mode and only the image changes.
+            verifier_environment = tomlkit.table()
+            plain = environment.unwrap() if isinstance(environment, Table | InlineTable) else dict(environment)
+            for key, value in plain.items():
+                verifier_environment[key] = value
+            verifier["environment"] = verifier_environment
+        if not isinstance(verifier_environment, MutableMapping):
+            raise ValueError(f"task [verifier.environment] must be a TOML table: {task_toml}")
+
+        # Replace any image the task file names: only the platform's image was verified and pinned.
+        verifier_environment["docker_image"] = verifier_image_ref
+
     # Write to a temporary file and swap it in, so a crash never leaves a half-written task.toml.
     temporary = task_toml.with_suffix(".toml.tmp")
     temporary.write_text(tomlkit.dumps(document), encoding="utf-8")
     os.replace(temporary, task_toml)
+    return verifier_bound
 
 
 def _profile_overrides(profile_config: Mapping[str, Any]) -> dict[str, Any]:
@@ -391,27 +481,45 @@ def make_harbor_opensandbox_submitter(
         if not staged:
             raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} task pack contains no Harbor task tree")
 
-        # Checks that need the task files: no Compose tasks, and no task egress beyond the operator allowlist.
+        # Checks that need the task files: no Compose tasks, a verifier image for a separate
+        # verifier, and no task egress beyond the operator allowlist.
         trusted_hosts = trusted_allowed_hosts()
-        preflight_staged_task(task_dir, trusted_hosts)
+        preflight_staged_task(
+            task_dir,
+            trusted_hosts,
+            verifier_image_ref=spec.verifier_image_ref,
+            verifier_image_digest=spec.verifier_image_digest,
+        )
 
         # Apply the evaluation's task customizations, shared with sandbox_k8s: extra skill files,
         # instruction prefix/postfix, and the agent timeout floor. The skill list and final
         # instruction are saved as run artifacts; the timeout change is kept for the launch handle.
         if spec.extra_skill_object_keys:
             materials = _inject_extra_skills(task_dir, spec.extra_skill_object_keys)
-            _save_extra_skill_materials_artifact(materials, spec.evaluation_id, harbor_dir=selected_harbor)
+            _save_extra_skill_materials_artifact(
+                materials, spec.evaluation_id, harbor_dir=selected_harbor, jobs_dir=jobs_dir
+            )
         _patch_instruction(task_dir, spec.instruction_prefix, spec.instruction_postfix)
-        _save_instruction_artifact(task_dir, spec.evaluation_id, harbor_dir=selected_harbor)
+        _save_instruction_artifact(task_dir, spec.evaluation_id, harbor_dir=selected_harbor, jobs_dir=jobs_dir)
         agent_timeout_apply = (
             apply_agent_timeout_floor(task_dir, spec.agent_timeout_floor_sec)
             if spec.agent_timeout_floor_sec is not None
             else None
         )
 
-        # OpenSandbox can't build images, so point task.toml at the task image built at upload time.
+        # OpenSandbox can't build images, so point task.toml at the images recorded at finalize.
+        # Both are pinned to their recorded digests.
         task_image_ref = _task_image_ref_for_sandbox(spec)
-        bind_task_image(task_dir, task_image_ref)
+        verifier_image_ref = (
+            _image_ref_for_sandbox(spec.verifier_image_ref, spec.verifier_image_digest)
+            if spec.verifier_image_ref
+            else None
+        )
+
+        # A shared-verifier task never uses the verifier image, even if the revision has one.
+        # Clear it so provenance doesn't claim a verifier image that wasn't used.
+        if not bind_task_image(task_dir, task_image_ref, verifier_image_ref=verifier_image_ref):
+            verifier_image_ref = None
 
         # Render the Harbor config: the operator template plus the evaluation profile, with the
         # environment block (sandbox class, egress allowlist, ownership labels) set by this backend.
@@ -445,6 +553,8 @@ def make_harbor_opensandbox_submitter(
             "environment_import_path": NEMO_OPENSANDBOX_IMPORT_PATH,
             "task_image_ref": task_image_ref,
             "task_image_digest": spec.image_digest,
+            "verifier_image_ref": verifier_image_ref,
+            "verifier_image_digest": spec.verifier_image_digest if verifier_image_ref else None,
             "network_policy": spec.network_policy,
             "trusted_allowed_hosts": trusted_hosts,
             "egress_verification": settings.harbor_opensandbox_egress_verification,
@@ -515,9 +625,11 @@ def write_applied_egress_summary(job_dir: Path) -> None:
     (job_dir / APPLIED_EGRESS_SUMMARY_FILENAME).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
 
 
-def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> StatusReader:
+def make_harbor_opensandbox_status_reader(
+    *, harbor_dir: str, jobs_dir: str, artifact_root: str | None = None
+) -> StatusReader:
     """Read Harbor's status like ``sandbox_k8s``, and write the applied-egress summary once the run ends."""
-    read_harbor = make_sandbox_k8s_status_reader(harbor_dir=harbor_dir, jobs_dir=jobs_dir)
+    read_harbor = make_sandbox_k8s_status_reader(harbor_dir=harbor_dir, jobs_dir=jobs_dir, artifact_root=artifact_root)
 
     def read(handle: LaunchHandle) -> RuntimeStatus:
         # Harbor writes the same result.json as under sandbox_k8s, so reuse that runtime's reader.
@@ -526,7 +638,9 @@ def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> 
         # Once Harbor has finished, every trial has written its record, so summarize them now.
         # A failed write is logged, not raised: it must not change the evaluation's outcome.
         if status.phase in {"succeeded", "failed"}:
-            job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
+            job_dir = _harbor_result_path(
+                handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir, artifact_root=artifact_root
+            ).parent
             try:
                 write_applied_egress_summary(job_dir)
             except OSError as exc:
@@ -577,6 +691,7 @@ def make_harbor_opensandbox_terminator(
     *,
     harbor_dir: str,
     jobs_dir: str,
+    artifact_root: str | None = None,
     env_file: str | None = None,
     cleanup_runner: CleanupRunner | None = None,
     environ: Mapping[str, str] | None = None,
@@ -635,7 +750,9 @@ def make_harbor_opensandbox_terminator(
             failures.append(f"OpenSandbox cleanup failed: {exc}")
 
         # Also write the summary here: a cancelled run never reaches a terminal phase in the status reader.
-        job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
+        job_dir = _harbor_result_path(
+            handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir, artifact_root=artifact_root
+        ).parent
         try:
             write_applied_egress_summary(job_dir)
         except OSError as exc:
@@ -678,6 +795,13 @@ def validate_settings() -> None:
     if not settings.harbor_opensandbox_deployment_id.strip():
         raise RuntimeError("HARBOR_OPENSANDBOX_DEPLOYMENT_ID must be non-empty")
 
+    # Valid but probably a mistake: the fallback reads harbor_dir, which may not be the runner Harbor wrote under.
+    if not settings.harbor_opensandbox_artifact_root:
+        LOG.warning(
+            "harbor_opensandbox has no HARBOR_OPENSANDBOX_ARTIFACT_ROOT; reading job output from "
+            "HARBOR_DIR/HARBOR_OPENSANDBOX_JOBS_DIR, which misses runs written under another Harbor runner"
+        )
+
     # Valid but probably a mistake: without a model endpoint host, agents can't reach their model.
     if not settings.harbor_opensandbox_model_endpoint_hosts.strip():
         LOG.warning("harbor_opensandbox has no model endpoint host; trials can reach only the operator allowlist")
@@ -704,10 +828,12 @@ def build_backend() -> HarborOpenSandboxBackend:
         status_reader=make_harbor_opensandbox_status_reader(
             harbor_dir=settings.harbor_dir,
             jobs_dir=settings.harbor_opensandbox_jobs_dir,
+            artifact_root=settings.harbor_opensandbox_artifact_root,
         ),
         terminator=make_harbor_opensandbox_terminator(
             harbor_dir=settings.harbor_dir,
             jobs_dir=settings.harbor_opensandbox_jobs_dir,
+            artifact_root=settings.harbor_opensandbox_artifact_root,
             env_file=settings.harbor_opensandbox_env_file,
         ),
     )
@@ -715,6 +841,8 @@ def build_backend() -> HarborOpenSandboxBackend:
 
 def _artifact_root(evaluation_id: str) -> Path:
     """Harbor's job directory for one evaluation; the worker uploads it as the evaluation's artifacts."""
+    if settings.harbor_opensandbox_artifact_root:
+        return Path(settings.harbor_opensandbox_artifact_root).expanduser() / evaluation_id
     return Path(settings.harbor_dir).expanduser() / settings.harbor_opensandbox_jobs_dir / evaluation_id
 
 

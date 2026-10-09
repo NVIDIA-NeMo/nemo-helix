@@ -23,6 +23,7 @@ import {
   FormField,
   SelectContent,
   SelectItem,
+  SelectListbox,
   SelectRoot,
   SelectTrigger,
   SidePanel,
@@ -35,6 +36,7 @@ import { Loading } from '@studio/components/Layouts/Loading';
 import { LINK_DOCS_FINE_TUNE_DATASET_FORMAT_REQUIREMENTS } from '@studio/constants/links';
 import { useCustomizationDatasetValidation } from '@studio/hooks/useCustomizationDatasetValidation';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { usesChatTemplate } from '@studio/util/customizerSchema';
 import { inferJsonContentType, isJsonFile } from '@studio/util/files';
 import {
   DATASET_FIELD_BY_BACKEND,
@@ -118,7 +120,7 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
   const detectedVariant = validation.schema?.variant;
   useEffect(() => {
     if (backend !== 'unsloth' || !detectedVariant) return;
-    setValue('unsloth.dataset.apply_chat_template', detectedVariant === 'sft-chat', {
+    setValue('unsloth.dataset.apply_chat_template', usesChatTemplate(detectedVariant), {
       shouldValidate: false,
     });
   }, [backend, detectedVariant, setValue]);
@@ -224,17 +226,19 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
             }
           />
           <SelectContent>
-            {filesets.map((f) => {
-              const ref = getEntityReference(f);
-              return (
-                <SelectItem key={ref} value={ref}>
-                  {f.name ?? ''}
-                </SelectItem>
-              );
-            })}
-            <SelectItem className="border-t border-base" value={NEW_DATASET_VALUE}>
-              New Dataset
-            </SelectItem>
+            <SelectListbox>
+              {filesets.map((f) => {
+                const ref = getEntityReference(f);
+                return (
+                  <SelectItem key={ref} value={ref}>
+                    {f.name ?? ''}
+                  </SelectItem>
+                );
+              })}
+              <SelectItem className="border-t border-base" value={NEW_DATASET_VALUE}>
+                New Dataset
+              </SelectItem>
+            </SelectListbox>
           </SelectContent>
         </SelectRoot>
       </FormField>

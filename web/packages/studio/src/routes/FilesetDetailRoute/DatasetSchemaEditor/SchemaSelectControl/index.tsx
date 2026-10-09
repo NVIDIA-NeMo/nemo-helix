@@ -4,6 +4,7 @@
 import {
   SelectContent,
   SelectItem,
+  SelectListbox,
   SelectRoot,
   SelectTrigger,
 } from '@nvidia/foundations-react-core';
@@ -63,13 +64,15 @@ export const SchemaSelectControl: FC<SchemaSelectControlProps> = ({
       }}
     />
     <SelectContent>
-      {hasInlineDefault && <SelectItem value={DEFAULT_SCHEMA_VALUE}>Default</SelectItem>}
-      {defKeys.map((key) => (
-        <SelectItem key={key} value={key}>
-          {key === defaultDefKey ? `${key} (default)` : key}
-        </SelectItem>
-      ))}
-      <SelectItem value={SHOW_ALL_VALUE}>Show All</SelectItem>
+      <SelectListbox>
+        {hasInlineDefault && <SelectItem value={DEFAULT_SCHEMA_VALUE}>Default</SelectItem>}
+        {defKeys.map((key) => (
+          <SelectItem key={key} value={key}>
+            {key === defaultDefKey ? `${key} (default)` : key}
+          </SelectItem>
+        ))}
+        <SelectItem value={SHOW_ALL_VALUE}>Show All</SelectItem>
+      </SelectListbox>
     </SelectContent>
   </SelectRoot>
 );

@@ -24,7 +24,10 @@ from .discovery import (
     AuthDiscoveryBearerTokenSourceError,
     AuthDiscoveryResponse,
     BearerTokenSource,
+    ConfidentialOidcAdvertisedClient,
+    OidcAdvertisedClient,
     OIDCDiscoveryResponse,
+    PublicOidcAdvertisedClient,
     parse_bearer_token_source,
 )
 from .exceptions import AuthorizationError, InvalidPermissionFormatError, InvalidScopeFormatError
@@ -107,6 +110,7 @@ __all__ = [
     "AuthorizationMiddleware",
     "AuthorizationResult",
     "BearerTokenSource",
+    "ConfidentialOidcAdvertisedClient",
     "ACCESS_KEY_JWKS_PATH",
     "ACCESS_KEY_TOKEN_TYPE",
     "AccessKeyIssuerService",
@@ -126,7 +130,9 @@ __all__ = [
     "ParsedOpaqueDockerProofToken",
     "Principal",
     "PrincipalIdentifier",
+    "OidcAdvertisedClient",
     "OIDCDiscoveryResponse",
+    "PublicOidcAdvertisedClient",
     "SyncWorkloadDelegationStore",
     "TRUSTED_IDENTITY_HEADERS",
     "WorkloadDelegationConflictError",

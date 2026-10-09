@@ -2,27 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 workloadTokenSigningKey:
-  create: true
   secretName: &workloadTokenSigningKeySecretName nemo-workload-token-signing-key
   key: private-key.pem
   mountPath: &workloadTokenSigningKeyMountPath /etc/nhx/workload-token
-  privateKeyPem: ""
 
 workloadTokenTls:
-  create: true
   secretName: &workloadTokenTlsSecretName nemo-helix-envoy-tls
-  durationDays: 365
   mountPath: &workloadTokenTlsMountPath /etc/nhx/workload-token-tls
   caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nhx/workload-token-ca
   caBundleFile: &workloadTokenTlsCaBundleFile /etc/nhx/workload-token-ca/ca.crt
-  # Additional DNS SANs. Envoy Service DNS SANs are generated from the configured Envoy service name/namespace.
-  dnsNames:
-    - localhost
-  ipAddresses:
-    - 127.0.0.1
 
 blueprintApplyJob:
   enabled: true
+  oidcSecretName: nemo-helix-user-oidc
+  oidcClientSecretKey: NHX_OIDC_CLIENT_SECRET
   image:
     tag: "2026.5.4"
     pullPolicy: IfNotPresent
@@ -39,11 +32,11 @@ blueprintApplyJob:
 sharedPostgresql:
   enabled: true
   serviceName: shared-postgresql
+  existingSecret: shared-postgresql
   postgresqlVersion: "18.4"
   imageRepository: docker.io/library/postgres
   imageTag: "18.4"
   imagePullPolicy: IfNotPresent
-  postgresPassword: postgres
   service:
     port: 5432
   persistence:
@@ -67,30 +60,30 @@ sharedPostgresql:
   nemo:
     database: nemohelix
     username: nemo
-    password: nemo
 
 authentik:
   fullnameOverride: authentik
   global:
     env:
-      - name: AUTHENTIK_BOOTSTRAP_PASSWORD
-        value: authentik-admin
-      - name: AUTHENTIK_BOOTSTRAP_TOKEN
-        value: bootstrap-token-dev
-      - name: AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD
-        value: workload-identity-dev-only
+      - name: AUTHENTIK_POSTGRESQL__HOST
+        value: shared-postgresql
+      - name: AUTHENTIK_POSTGRESQL__NAME
+        value: authentik
+      - name: AUTHENTIK_POSTGRESQL__USER
+        value: authentik
+      - name: AUTHENTIK_POSTGRESQL__PORT
+        value: "5432"
       - name: AUTHENTIK_POSTGRESQL__PASSWORD
         valueFrom:
           secretKeyRef:
             name: shared-postgresql
-            key: authentik-password
+            key: AUTHENTIK_POSTGRES_PASSWORD
+    envFrom:
+      - secretRef:
+          name: nemo-auth-idp-e2e
   authentik:
-    secret_key: authentik-demo-secret-key
-    postgresql:
-      host: shared-postgresql
-      name: authentik
-      user: authentik
-      port: 5432
+    existingSecret:
+      secretName: nemo-authentik-secret-key
     error_reporting:
       enabled: false
   blueprints:
@@ -101,8 +94,8 @@ authentik:
 
 nemo-helix:
   fullnameOverride: nemo-helix
-  existingSecret: ""
-  ngcAPIKey: demo-ngc-api-key
+  existingSecret: nemo-authentik-platform
+  ngcAPIKey: ""
   authentikPublicGateway:
     scheme: https
     host: 127.0.0.1
@@ -119,14 +112,19 @@ nemo-helix:
   externalClickhouse:
     host: unused-clickhouse
     existingSecret: shared-postgresql
-    existingSecretPasswordKey: nemo-password
+    existingSecretPasswordKey: NEMO_POSTGRES_PASSWORD
   externalDatabase:
     host: shared-postgresql
     port: 5432
     user: nemo
     database: nemohelix
-    existingSecret: shared-postgresql-nemo
-    existingSecretPasswordKey: password
+    existingSecret: shared-postgresql
+    existingSecretPasswordKey: NEMO_POSTGRES_PASSWORD
+  secrets:
+    defaultEncryptionKey:
+      existingSecret:
+        name: nemo-authentik-platform
+        key: NHX_SECRETS_DEFAULT_ENCRYPTION_KEY
   core:
     controller:
       controllerGroup: core
@@ -175,8 +173,19 @@ nemo-helix:
       - secrets
       - entities
       - deployments
+      - studio
     env:
       NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nhx/workload-token/private-key.pem"
+      NHX_OIDC_CLIENT_SECRET:
+        valueFrom:
+          secretKeyRef:
+            name: nemo-helix-user-oidc
+            key: NHX_OIDC_CLIENT_SECRET
+      NHX_AUTH_SESSION_ENCRYPTION_KEY:
+        valueFrom:
+          secretKeyRef:
+            name: nemo-helix-user-oidc
+            key: NHX_AUTH_SESSION_ENCRYPTION_KEY
     extraVolumes:
       - name: workload-token-signing-key
         secret:
@@ -252,6 +261,7 @@ nemo-helix:
   platformConfig:
     platform:
       base_url: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}'
+      advertised_base_url: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}'
     auth:
       enabled: true
       allow_unsigned_jwt: false
@@ -268,29 +278,43 @@ nemo-helix:
         enabled: false
       oidc:
         enabled: true
-        issuer: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-cli/'
+        issuer: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-user/'
         additional_issuers:
           - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo/'
+          - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-cli/'
+          - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo-user/'
           - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo-cli/'
           - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo/'
-        client_id: "nemo-helix-cli"
-        token_endpoint: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/token/'
-        device_authorization_endpoint: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/device/'
-        workload_token_exchange_enabled: true
-        workload_client_id: "nemo-helix-workload"
-        workload_audience: "nemo-helix"
-        workload_scope: "openid email groups"
-        workload_token_endpoint: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
-        workload_subject_jwks_uri: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/jwks/'
-        workload_subject_issuers:
-          - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/'
-          - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/application/o/nemo-workload/'
-          - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo-workload/'
-        workload_kubernetes_token_review_enabled: true
+        public_client:
+          client_id: "nemo-helix-cli"
+          server_side_sessions: false
+          authorization_endpoint: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/authorize/'
+          token_endpoint: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/token/'
+          device_authorization_endpoint: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/device/'
+          default_scopes: "openid email offline_access groups"
+        server_sessions:
+          encryption_key_env_var: NHX_AUTH_SESSION_ENCRYPTION_KEY
+        confidential_client:
+          client_id: "nemo-helix-user"
+          client_secret_env_var: NHX_OIDC_CLIENT_SECRET
+          login_redirect_uri: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/apis/auth/v2/login/callback'
+          authorization_endpoint: '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/authorize/'
+          token_endpoint: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/token/'
+          default_scopes: "openid email offline_access groups"
+        workload:
+          client_id: "nemo-helix-workload"
+          token_endpoint: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
+          audience: "nemo-helix"
+          scope: "openid email groups"
+          subject_jwks_uri: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/jwks/'
+          subject_issuers:
+            - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-workload/'
+            - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/application/o/nemo-workload/'
+            - '{{ include "nemo-helix-authentik.publicGatewayUrl" . }}/application/o/nemo-workload/'
+          kubernetes_token_review_enabled: true
         subject_claim: "sub"
         email_claim: "email"
         groups_claim: "groups"
-        default_scopes: "openid email offline_access groups"
     jobs:
       executor_defaults:
         kubernetes_job:

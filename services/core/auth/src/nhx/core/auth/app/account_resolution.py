@@ -25,6 +25,7 @@ from nhx.core.entities.app.repository import (
 )
 from nhx.core.entities.config import EntitiesConfig
 from nhx.core.entities.initialize import initialize_database
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -218,15 +219,18 @@ def _on_behalf_descriptor_from_input(auth_input: Mapping[str, Any]) -> dict[str,
     }
 
 
-async def _account_identity_store() -> AccountIdentityStore:
+async def get_account_session_maker() -> async_sessionmaker[AsyncSession]:
     try:
-        session_maker = await get_async_session_maker()
+        return await get_async_session_maker()
     except RuntimeError:
         entities_config = EntitiesConfig.get()
         await initialize_async_engine(entities_config)
         await initialize_database(run_migrations=entities_config.run_migrations)
-        session_maker = await get_async_session_maker()
-    return AccountIdentityStore(session_maker)
+        return await get_async_session_maker()
+
+
+async def _account_identity_store() -> AccountIdentityStore:
+    return AccountIdentityStore(await get_account_session_maker())
 
 
 class AccountResolver:

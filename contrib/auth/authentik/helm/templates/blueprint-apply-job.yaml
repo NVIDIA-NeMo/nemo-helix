@@ -11,6 +11,7 @@ SPDX-License-Identifier: Apache-2.0
 {{- $workerValues := index $authentikValues "worker" | default dict -}}
 {{- $workerImage := index $workerValues "image" | default dict -}}
 {{- $existingSecret := index $authentikConfig "existingSecret" | default dict -}}
+{{- $nemoHelixValues := index .Values "nemo-helix" | default dict -}}
 {{- $repository := coalesce (index $workerImage "repository") (index $globalImage "repository") "ghcr.io/goauthentik/server" -}}
 {{- $tag := coalesce (index $workerImage "tag") (index $globalImage "tag") .Values.blueprintApplyJob.image.tag -}}
 {{- $digest := coalesce (index $workerImage "digest") (index $globalImage "digest") -}}
@@ -53,13 +54,23 @@ spec:
           args:
             - apply_blueprint
             - /blueprints/mounted/cm-authentik-nemo-blueprint/nemo.yaml
-          {{- with (index $globalValues "env") }}
           env:
+          {{- with (index $globalValues "env") }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
+            - name: NHX_OIDC_LOGIN_REDIRECT_URI
+              value: '{{ include "nemo-helix-authentik.publicGatewayUrl" (dict "Values" $nemoHelixValues) }}/apis/auth/v2/login/callback'
+            - name: NHX_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "blueprintApplyJob.oidcSecretName is required" .Values.blueprintApplyJob.oidcSecretName }}
+                  key: {{ required "blueprintApplyJob.oidcClientSecretKey is required" .Values.blueprintApplyJob.oidcClientSecretKey }}
           envFrom:
             - secretRef:
                 name: {{ $secretName }}
+          {{- with (index $globalValues "envFrom") }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: authentik-nemo-blueprint
               mountPath: /blueprints/mounted/cm-authentik-nemo-blueprint

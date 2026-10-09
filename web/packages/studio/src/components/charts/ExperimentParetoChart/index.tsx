@@ -12,7 +12,7 @@ import { ParetoTooltip } from '@studio/components/charts/ExperimentParetoChart/P
 import {
   buildParetoPoints,
   deriveParetoMetrics,
-  metricLabel,
+  resolveParetoAxes,
 } from '@studio/components/charts/ExperimentParetoChart/utils';
 import { MetricSelect } from '@studio/components/charts/MetricSelect';
 import { useGroupEvaluations } from '@studio/components/charts/useGroupEvaluations';
@@ -75,8 +75,16 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
   const isLoading = hasPreloaded ? false : preloadPending || isFetching;
   const metrics = useMemo(() => deriveParetoMetrics(points), [points]);
 
-  const [xMetricId, setXMetricId] = useState(group.pareto?.x_metric ?? DEFAULT_X_METRIC);
-  const [yMetricId, setYMetricId] = useState(group.pareto?.y_metric ?? DEFAULT_Y_METRIC);
+  const savedX = group.pareto?.x_metric ?? DEFAULT_X_METRIC;
+  const savedY = group.pareto?.y_metric ?? DEFAULT_Y_METRIC;
+  const [pickedXId, setPickedXId] = useState<string>();
+  const [pickedYId, setPickedYId] = useState<string>();
+  const defaultAxes = useMemo(
+    () => resolveParetoAxes(points, metrics, savedX, savedY),
+    [points, metrics, savedX, savedY]
+  );
+  const xMetric = metrics.find((m) => m.id === pickedXId) ?? defaultAxes?.x;
+  const yMetric = metrics.find((m) => m.id === pickedYId) ?? defaultAxes?.y;
 
   const { mutate: saveGroup, isPending: isSaving } = useUpdateExperiment({
     mutation: {
@@ -107,16 +115,12 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
     });
   };
 
-  const handleXChange = (id: string) => setXMetricId(id);
-  const handleYChange = (id: string) => setYMetricId(id);
-
-  const savedX = group.pareto?.x_metric ?? DEFAULT_X_METRIC;
-  const savedY = group.pareto?.y_metric ?? DEFAULT_Y_METRIC;
-  const hasUnsavedAxes = xMetricId !== savedX || yMetricId !== savedY;
-
-  // Fall back to the first/second metric when a saved id isn't in the data; cost/latency always exist.
-  const xMetric = metrics.find((m) => m.id === xMetricId) ?? metrics[0];
-  const yMetric = metrics.find((m) => m.id === yMetricId) ?? metrics[1] ?? metrics[0];
+  const hasPickedAxes = pickedXId !== undefined || pickedYId !== undefined;
+  const hasUnsavedAxes =
+    hasPickedAxes &&
+    xMetric !== undefined &&
+    yMetric !== undefined &&
+    (xMetric.id !== savedX || yMetric.id !== savedY);
 
   const plotPoints = useMemo(
     () => (xMetric && yMetric ? buildParetoPoints(points, xMetric, yMetric) : []),
@@ -195,26 +199,28 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
   return (
     <div className="flex flex-col gap-3 rounded border border-base bg-surface p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <Text kind="title/xs">{`${metricLabel(xMetricId)} vs. ${metricLabel(yMetricId)}`}</Text>
+        <Text kind="title/xs">
+          {xMetric && yMetric ? `${xMetric.label} vs. ${yMetric.label}` : null}
+        </Text>
         <div className="flex flex-wrap items-center gap-4">
           <MetricSelect
             label="X axis"
             value={xMetric?.id ?? ''}
             metrics={metrics}
-            onChange={handleXChange}
+            onChange={setPickedXId}
           />
           <MetricSelect
             label="Y axis"
             value={yMetric?.id ?? ''}
             metrics={metrics}
-            onChange={handleYChange}
+            onChange={setPickedYId}
           />
           <Button
             kind="primary"
             size="small"
             aria-label={isSaving ? 'Saving' : 'Save as group default'}
             disabled={!hasUnsavedAxes || isSaving}
-            onClick={() => persistAxes(xMetricId, yMetricId)}
+            onClick={() => xMetric && yMetric && persistAxes(xMetric.id, yMetric.id)}
           >
             {isSaving ? (
               <Loader2 width={16} height={16} className="animate-spin" />

@@ -297,9 +297,10 @@ postgresql:
     username: nemo
     password: nemo
     database: nemohelix
-    # -- Name of an existing secret containing a "password" key (or use existingSecretPasswordKey). If set, the chart does not create a secret.
+    # -- Name of an existing secret containing the PostgreSQL password. If set, the chart does not create a secret.
     existingSecret: ""
-
+    # -- Key in the existing secret containing the PostgreSQL password.
+    existingSecretPasswordKey: password
 
   # -- PostgreSQL service configuration.
   service:
@@ -786,7 +787,7 @@ api:
   # -- Platform API server settings.
   server:
     # -- Seconds Uvicorn keeps idle HTTP connections open. Must be greater than envoyProxy.timeouts.upstreamIdle when Envoy is enabled.
-    keepAliveTimeoutSeconds: 5
+    keepAliveTimeoutSeconds: 10
 
   # -- Predefined service group passed to `nemo services run` with `--service-group`. Ignored when api.services is non-empty.
   serviceGroup: all

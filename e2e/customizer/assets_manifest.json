@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "s3": {
+    "bucket": "aire-e2e-assets",
+    "datasets_prefix": "datasets/",
+    "models_prefix": "models/"
+  },
+  "generation": {
+    "seed": 42,
+    "training_size": 3000,
+    "validation_size": 300,
+    "output_dir": "e2e/customizer/testdata"
+  },
+  "model_ignore_globs": "*.gguf,*.pth,original/*,*.onnx,consolidated*",
+  "datasets": {
+    "squad": {
+      "hf_dataset": "rajpurkar/squad",
+      "outputs": {
+        "prompt_completion": {
+          "training": "training.jsonl",
+          "validation": "validation.jsonl"
+        },
+        "chat_format": {
+          "training": "training.jsonl",
+          "validation": "validation.jsonl"
+        }
+      },
+      "tests": [
+        "e2e/customizer/tests/test_automodel.py::test_automodel_sft_uplift",
+        "e2e/customizer/tests/test_unsloth.py::test_unsloth_lora_uplift"
+      ]
+    },
+    "helpsteer3": {
+      "hf_dataset": "nvidia/HelpSteer3",
+      "hf_config": "preference",
+      "outputs": {
+        "dpo": {
+          "training": "training.jsonl",
+          "validation": "validation.jsonl",
+          "eval": "eval.jsonl"
+        }
+      },
+      "tests": [
+        "e2e/customizer/tests/test_rl_dpo.py::test_rl_dpo_uplift"
+      ]
+    }
+  },
+  "models": [
+    {
+      "s3_folder": "qwen3-0.6b",
+      "hf_repo": "Qwen/Qwen3-0.6B",
+      "tests": [
+        "e2e/customizer/tests/test_automodel.py",
+        "e2e/customizer/tests/test_rl_dpo.py"
+      ]
+    },
+    {
+      "s3_folder": "qwen2.5-0.5b-instruct-unsloth",
+      "hf_repo": "unsloth/Qwen2.5-0.5B-Instruct",
+      "tests": [
+        "e2e/customizer/tests/test_unsloth.py"
+      ]
+    }
+  ]
+}

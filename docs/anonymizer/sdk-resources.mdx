@@ -116,7 +116,7 @@ Both request models live in `nemo_anonymizer_plugin.app.task_config`.
 
 | Field             | Type                                            | Description                                                                 |
 |-------------------|-------------------------------------------------|-----------------------------------------------------------------------------|
-| `config`          | `AnonymizerConfig`                              | Upstream library config (replace strategy or rewrite, detection params).    |
+| `config`          | `AnonymizerConfigRequest`                       | Replace strategy or rewrite, and detection params. Build it from an upstream `AnonymizerConfig` with `AnonymizerConfigRequest.model_validate(config)`. |
 | `data`            | `AnonymizerInputSpec`                           | Input source plus column metadata. See below.                               |
 | `model_configs`   | `list[data_designer.config.ModelConfig] \\| None` | Model pool. `provider` references an Inference Gateway provider name.       |
 | `selected_models` | `SelectedModelsOverrides \\| None`               | Optional role overrides on top of bundled defaults. Requires `model_configs`. |
@@ -125,7 +125,7 @@ Both request models live in `nemo_anonymizer_plugin.app.task_config`.
 
 | Field             | Type                                            | Description                                                                 |
 |-------------------|-------------------------------------------------|-----------------------------------------------------------------------------|
-| `config`          | `AnonymizerConfig`                              | Upstream library config (replace strategy or rewrite, detection params).    |
+| `config`          | `AnonymizerConfigRequest`                       | Replace strategy or rewrite, and detection params. Build it from an upstream `AnonymizerConfig` with `AnonymizerConfigRequest.model_validate(config)`. |
 | `data`            | `AnonymizerInputSpec`                           | Input source plus column metadata. See below.                               |
 | `model_configs`   | `list[data_designer.config.ModelConfig] \\| None` | Model pool. `provider` references an Inference Gateway provider name.       |
 | `selected_models` | `SelectedModelsOverrides \\| None`               | Optional role overrides on top of bundled defaults. Requires `model_configs`. |

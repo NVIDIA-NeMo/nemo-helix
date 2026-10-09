@@ -30,9 +30,12 @@ auth:
     groups_claim: groups
 ```
 
-The chart generates Kubernetes Secrets for the ZITADEL master key, demo user
-password, embedded PostgreSQL passwords, and NeMo Helix placeholder NGC key
-instead of embedding those values in `values.yaml`.
+The runner creates or reuses the ZITADEL master key, workload-token signing
+key, and runtime-specific gateway TLS material under `.generated`, then
+reconciles their Kubernetes Secrets before Helm. The chart receives only
+Secret and key names. It still generates the demo-user password, embedded
+PostgreSQL passwords, and NeMo Helix placeholder NGC key instead of embedding
+those values in `values.yaml`.
 
 The Helm seed job creates the ZITADEL project, role, OIDC app, setup machine
 user, workload machine user, user grants, and complement-token action. It stores

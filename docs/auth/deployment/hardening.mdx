@@ -41,7 +41,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 ## Secrets and Credentials
 
 - [ ] **Verify CLI config file permissions**: Token storage at `~/.config/nhx/config.yaml` should have permissions `0600` (owner read/write only). Avoid storing this file in cloud-synced or shared directories. See [Using Authentication — Config File](/documentation/access-control/authentication/using-authentication#config-file) for full guidance.
-- [ ] **Rotate IdP client secrets**: If your OIDC application uses a client secret, rotate it periodically per your organization's policy.
+- [ ] **Rotate IdP client secrets**: If your OIDC application uses a client secret, rotate it periodically per your organization's policy. Store it in a Kubernetes Secret or equivalent external secret manager, then inject it into the API/auth service environment as described in [Confidential OIDC Client](/documentation/access-control/authentication/confidential-client).
 - [ ] **Avoid storing tokens in source code or CI configs**: Use environment variables or secret managers for tokens in CI/CD pipelines.
 
 ## Deployment Validation

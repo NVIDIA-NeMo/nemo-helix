@@ -76,6 +76,7 @@ from functools import cache
 from os import environ
 from pathlib import Path
 from typing import Any, ClassVar, Literal, Self, Type, TypeVar
+from urllib.parse import urlsplit
 
 import yaml
 from nemo_helix_plugin.capabilities import probe_docker
@@ -553,8 +554,44 @@ class NemoHelixConfig(ServiceConfig):
     )
     base_url: str = Field(
         default="http://localhost:8080",
-        description="Base URL for the NeMo Helix api. Used as the default URL for all services.",
+        description=(
+            "Connection endpoint for the NeMo Helix API. Used as the default endpoint for all services; "
+            "supported transports include HTTP, HTTPS, and Unix domain sockets."
+        ),
     )
+    advertised_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Absolute HTTP or HTTPS base URL advertised to clients. Defaults to base_url when it is HTTP or HTTPS. "
+            "Use this when services connect through an internal URL but clients reach a different gateway origin."
+        ),
+    )
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def normalize_platform_base_url(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"}:
+            return value
+        if not parsed.netloc:
+            raise ValueError("must be an absolute HTTP or HTTPS URL")
+        if parsed.query or parsed.fragment:
+            raise ValueError("must not contain a query string or fragment")
+        return value.rstrip("/")
+
+    @field_validator("advertised_base_url", mode="before")
+    @classmethod
+    def validate_advertised_base_url(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("must be an absolute HTTP or HTTPS URL")
+        if parsed.query or parsed.fragment:
+            raise ValueError("must not contain a query string or fragment")
+        return value.rstrip("/")
 
     service_discovery: dict[str, str] = internal_field(
         default_factory=dict,
@@ -667,6 +704,18 @@ class NemoHelixConfig(ServiceConfig):
             return self.service_discovery[api_name]
         return self.base_url
 
+    @property
+    def effective_advertised_base_url(self) -> str:
+        """Return the public client origin without propagating optionality."""
+        value = self.advertised_base_url or self.base_url
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(
+                "platform.advertised_base_url must be configured with an absolute HTTP or HTTPS URL "
+                "when platform.base_url is not HTTP or HTTPS"
+            )
+        return value
+
     def create_service_pattern(self) -> re.Pattern[str] | None:
         return re.compile(r"/apis/([a-z]+(?:-[a-z]+)*)/")
 
@@ -732,6 +781,8 @@ class NemoHelixConfig(ServiceConfig):
             f"{env_prefix}MODELS_URL": self.get_service_url("models"),
             f"{env_prefix}SECRETS_URL": self.get_service_url("secrets"),
         }
+        if self.advertised_base_url:
+            envvars[f"{env_prefix}ADVERTISED_BASE_URL"] = self.advertised_base_url
         if disable_warnings:
             envvars[NHX_CONFIG_WARNINGS_DISABLED_ENV_VAR] = "1"
         effective_override = loopback_address or self.loopback_address or determine_loopback_override()

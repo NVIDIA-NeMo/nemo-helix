@@ -420,7 +420,7 @@ entities_workspace_object_path(base_path, method) if {
 	lower(method) in ["get", "post", "put", "patch", "delete", "head"]
 }
 
-# Health check endpoints - always allow (must match middleware HEALTH_ENDPOINTS)
+# Health check endpoints - always allow (must match middleware auth exclusions)
 allow_request if {
 	path := extract_path
 	path in ["/health/live", "/health/ready", "/status", "/metrics"]

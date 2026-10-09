@@ -25,7 +25,7 @@ from nhx.common.auth.token_claims import (
     scopes_from_claim,
 )
 from nhx.common.config import AuthConfig
-from nhx.common.config.base import OIDCConfig
+from nhx.common.config.base import OIDCConfig, OIDCPublicClientConfig
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def oidc_config():
     return OIDCConfig(
         enabled=True,
         issuer="https://sso.example.com",
-        client_id="test-client",
+        public_client=OIDCPublicClientConfig(client_id="test-client"),
         audience="test-audience",
         email_claim="email",
         groups_claim="groups",
@@ -142,7 +142,7 @@ class TestOIDCConfigClaimDefaults:
         config = OIDCConfig(
             enabled=True,
             issuer="https://login.microsoftonline.com/43083d15-7273-40c1-b7db-39efd9ccc17a/v2.0",
-            client_id="test",
+            public_client=OIDCPublicClientConfig(client_id="test"),
         )
         assert config.email_claim == "email"
         assert config.subject_claim == "sub"
@@ -153,7 +153,7 @@ class TestOIDCConfigClaimDefaults:
         config = OIDCConfig(
             enabled=True,
             issuer="https://sso.example.com",
-            client_id="test",
+            public_client=OIDCPublicClientConfig(client_id="test"),
         )
         assert config.email_claim == "email"
         assert config.subject_claim == "sub"
@@ -624,7 +624,7 @@ class TestJWTValidator:
         config = OIDCConfig(
             enabled=True,
             issuer="https://sso.example.com",
-            client_id="test-client",
+            public_client=OIDCPublicClientConfig(client_id="test-client"),
             # audience is intentionally left as None
         )
         auth_cfg = AuthConfig(
@@ -667,7 +667,7 @@ class TestJWTValidator:
         config = OIDCConfig(
             enabled=True,
             issuer="https://sso.example.com",
-            client_id="test-client",
+            public_client=OIDCPublicClientConfig(client_id="test-client"),
             audience="expected-audience",
         )
         auth_cfg = AuthConfig(
@@ -843,7 +843,7 @@ class TestOpaqueTokenIntrospection:
         config = OIDCConfig(
             enabled=True,
             issuer="https://sso.example.com",
-            client_id="test-client",
+            public_client=OIDCPublicClientConfig(client_id="test-client"),
             **oidc_overrides,
         )
         auth_cfg = AuthConfig(
@@ -852,11 +852,6 @@ class TestOpaqueTokenIntrospection:
             oidc=config,
         )
         return JWTValidator(auth_cfg)
-
-    def test_oidc_config_rejects_inline_introspection_secret(self):
-        """The config schema accepts an env var name, not the introspection secret value."""
-        with pytest.raises(ValueError, match="introspection_client_secret is not supported"):
-            self._validator(introspection_client_secret="s3cret")
 
     @pytest.mark.asyncio
     async def test_opaque_token_without_introspection_enabled_returns_none(self):
@@ -1186,7 +1181,7 @@ class TestOpaqueTokenUserInfoResolution:
         config = OIDCConfig(
             enabled=True,
             issuer="https://sso.example.com",
-            client_id="test-client",
+            public_client=OIDCPublicClientConfig(client_id="test-client"),
             **oidc_overrides,
         )
         auth_cfg = AuthConfig(

@@ -55,6 +55,7 @@ const baseRules = {
       png: 'always',
       svg: 'always',
       css: 'always',
+      md: 'always',
     },
   ],
   'import/order': [

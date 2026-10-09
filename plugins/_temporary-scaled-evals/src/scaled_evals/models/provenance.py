@@ -141,6 +141,9 @@ class TaskProvenance(BaseModel):
     image_ref: str | None = None
     image_digest: str | None = None
     image_tag: str | None = None
+    # Recorded on the revision for a verifier that runs in its own sandbox; null otherwise.
+    verifier_image_ref: str | None = None
+    verifier_image_digest: str | None = None
     tarball_sha256: str | None = None
     tarball_object_key: str | None = None
     identifiers: TaskIdentifierProvenance
@@ -421,6 +424,8 @@ def build_run_provenance_manifest(
             image_ref=_clean_optional(row.get("image_ref")),
             image_digest=_clean_optional(row.get("image_digest") or row.get("task_image_digest")),
             image_tag=task_identifiers.image_tag,
+            verifier_image_ref=_clean_optional(row.get("verifier_image_ref")),
+            verifier_image_digest=_clean_optional(row.get("verifier_image_digest")),
             tarball_sha256=_clean_optional(row.get("tarball_sha256")),
             tarball_object_key=_clean_optional(row.get("tarball_object_key")),
             identifiers=task_identifiers,
@@ -595,6 +600,9 @@ def _opensandbox_sandbox(row: Mapping[str, Any]) -> dict[str, str]:
     ownership = _mapping(raw.get("ownership"))
     fields: dict[str, Any] = {
         "opensandbox_sdk_version": launch.get("opensandbox_sdk_version"),
+        # The verifier image bound into task.toml; absent when the verifier shared the agent sandbox.
+        "verifier_image_ref": launch.get("verifier_image_ref"),
+        "verifier_image_digest": launch.get("verifier_image_digest"),
         "egress_allowed_hosts": ",".join(str(host) for host in launch.get("trusted_allowed_hosts") or []),
         "egress_verification": launch.get("egress_verification"),
         "ownership_labels": json.dumps(dict(ownership), sort_keys=True) if ownership else None,

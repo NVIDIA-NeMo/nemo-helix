@@ -55,6 +55,8 @@ CREATE TABLE task_revisions (
     tarball_sha256     TEXT,
     image_ref          TEXT,
     image_digest       TEXT,
+    verifier_image_ref    TEXT,
+    verifier_image_digest TEXT,
     task_yaml     JSONB,
     tasks              JSONB,
     build_started_at   TIMESTAMPTZ,

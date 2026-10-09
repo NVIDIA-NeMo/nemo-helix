@@ -2,14 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StartOption } from '@studio/components/CreateCustomizationStart/types';
-import { ADVANCED, INTERMEDIATE } from '@studio/components/StartOptions/levels';
-import { LayoutTemplate, Plus } from 'lucide-react';
+import { ADVANCED, BEGINNER, INTERMEDIATE } from '@studio/components/StartOptions/levels';
+import { LayoutTemplate, Plus, Sparkles } from 'lucide-react';
 
 /**
  * The non-template ways in. "Start from a template" is not among them — templates are
  * picked directly from the group below the divider rather than behind an option.
  */
 export const START_OPTIONS: StartOption[] = [
+  {
+    id: 'ai',
+    title: 'Describe with AI',
+    description:
+      'Pick a model and dataset and describe your goal. AI drafts the training settings — then you review everything in the form.',
+    icon: Sparkles,
+    tag: BEGINNER,
+    enabled: true,
+  },
   {
     id: 'template',
     title: 'Start from a template',

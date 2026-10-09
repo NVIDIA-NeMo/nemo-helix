@@ -21,16 +21,20 @@ from nhx.common.auth.client import AuthClient, AuthorizationResult
 from nhx.common.auth.dependencies import get_auth_client
 from nhx.common.auth.jwt import UnsignedJWTRejectedError
 from nhx.common.auth.middleware import (
-    BYPASS_PREFIXES,
-    HEALTH_ENDPOINTS,
     PUBLIC_GET_PATHS,
     AuthorizationMiddleware,
+    is_auth_middleware_excluded_path,
 )
 from nhx.common.auth.models import Principal
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims
 from nhx.common.auth.token_resolver import ResolvedBearerToken
 from nhx.common.config import AuthConfig, Configuration, HelixConfig
-from nhx.common.config.base import OIDCConfig, TokenSigningConfig
+from nhx.common.config.base import (
+    OIDCConfig,
+    OIDCPublicClientConfig,
+    OIDCWorkloadConfig,
+    TokenSigningConfig,
+)
 from starlette.responses import Response
 
 
@@ -47,7 +51,7 @@ def oidc_config():
     return OIDCConfig(
         enabled=True,
         issuer="https://sso.example.com",
-        client_id="test-client",
+        public_client=OIDCPublicClientConfig(client_id="test-client"),
     )
 
 
@@ -79,7 +83,9 @@ def auth_config_token_exchange(auth_config_enabled, tmp_path: Path):
                 key_id="test-workload",
                 private_key_file=str(workload_private_key_file),
             ),
-            "oidc": auth_config_enabled.oidc.model_copy(update={"workload_token_exchange_enabled": True}),
+            "oidc": auth_config_enabled.oidc.model_copy(
+                update={"workload": OIDCWorkloadConfig(client_id="nemo-helix-workload")}
+            ),
         }
     )
 
@@ -190,20 +196,25 @@ def create_test_app_with_platform_routes(auth_config: AuthConfig) -> FastAPI:
     return app
 
 
-class TestHealthEndpointsBypass:
-    """Tests for health endpoints bypassing authentication."""
+class TestAuthMiddlewareExcludedPaths:
+    """Tests for endpoints excluded from middleware auth checks."""
 
-    def test_health_endpoints_in_bypass_list(self):
-        """Verify that health endpoints are in the bypass list."""
-        assert "/status" in HEALTH_ENDPOINTS
-        assert "/health/live" in HEALTH_ENDPOINTS
-        assert "/health/ready" in HEALTH_ENDPOINTS
-        assert "/metrics" in HEALTH_ENDPOINTS
-        assert "/apis/auth/discovery" in HEALTH_ENDPOINTS
-        assert "/apis/auth/authenticate" in HEALTH_ENDPOINTS
-        assert "/apis/auth/ext-authz" in HEALTH_ENDPOINTS
-        assert "/apis/auth/ext-authz/" in BYPASS_PREFIXES
-        assert "/apis/auth/authenticate/" not in BYPASS_PREFIXES
+    def test_auth_middleware_excluded_paths(self):
+        """Verify public health/auth endpoints are excluded from middleware auth checks."""
+        assert is_auth_middleware_excluded_path("/status")
+        assert is_auth_middleware_excluded_path("/health/live")
+        assert is_auth_middleware_excluded_path("/health/ready")
+        assert is_auth_middleware_excluded_path("/metrics")
+        assert is_auth_middleware_excluded_path("/apis/auth/discovery")
+        assert is_auth_middleware_excluded_path("/apis/auth/authenticate")
+        assert is_auth_middleware_excluded_path("/apis/auth/ext-authz")
+        assert is_auth_middleware_excluded_path("/apis/auth/ext-authz/apis/entities/v2/workspaces/default")
+        assert is_auth_middleware_excluded_path("/apis/auth/v2/login")
+        assert is_auth_middleware_excluded_path("/apis/auth/v2/login/callback")
+        assert is_auth_middleware_excluded_path("/apis/auth/v2/logout")
+        assert is_auth_middleware_excluded_path("/apis/auth/v2/session")
+        assert is_auth_middleware_excluded_path("/apis/auth/v2/authorize/transaction-id")
+        assert not is_auth_middleware_excluded_path("/apis/auth/authenticate/apis/entities/v2/workspaces/default")
 
     def test_root_path_in_public_get_paths(self):
         assert "/" in PUBLIC_GET_PATHS
@@ -279,9 +290,9 @@ class TestStudioPluginBypass:
     """Studio plugin manifest and bundles are public — the SPA fetches the manifest
     anonymously and loads bundles via dynamic import(), which cannot send Authorization."""
 
-    def test_plugin_paths_in_bypass_lists(self):
+    def test_plugin_paths_are_public(self):
         assert "/apis/plugins" in PUBLIC_GET_PATHS
-        assert "/plugin-ui/" in BYPASS_PREFIXES
+        assert is_auth_middleware_excluded_path("/plugin-ui/plugin.js")
 
     def test_plugins_manifest_get_bypasses_auth(self, auth_config_enabled):
         app = FastAPI()
@@ -497,7 +508,7 @@ class TestBearerTokenAuth:
         auth_config_disabled.oidc = OIDCConfig(
             enabled=True,
             issuer="https://sso.example.com",
-            client_id="test-client",
+            public_client=OIDCPublicClientConfig(client_id="test-client"),
         )
         app = create_test_app(auth_config_disabled)
         client = TestClient(app, raise_server_exceptions=False)
@@ -747,11 +758,11 @@ class TestBearerTokenAuth:
             with (
                 patch(
                     "nhx.common.platform_client_context.Configuration.get_platform_config",
-                    return_value=HelixConfig(base_url="unix:///tmp/nemo-helix.sock", services=""),
+                    return_value=HelixConfig(base_url="http://127.0.0.1:8080", services=""),
                 ),
                 patch(
                     "nhx.common.platform_endpoint._get_platform_config",
-                    return_value=HelixConfig(base_url="unix:///tmp/nemo-helix.sock", services=""),
+                    return_value=HelixConfig(base_url="http://127.0.0.1:8080", services=""),
                 ),
             ):
                 response = await middleware._authenticate_access_key_lifecycle("scoped-access-key")
@@ -1226,8 +1237,8 @@ class TestBearerTokenAuth:
         assert response.status_code == 200
         mock_authorize.assert_not_called()
 
-    def test_access_key_specific_jwks_path_is_not_a_health_bypass(self):
-        assert "/apis/auth/v2/access-keys/jwks" not in HEALTH_ENDPOINTS
+    def test_access_key_specific_jwks_path_is_not_middleware_excluded(self):
+        assert not is_auth_middleware_excluded_path("/apis/auth/v2/access-keys/jwks")
 
     def test_authenticate_path_bypasses_auth(self, auth_config_enabled):
         app = FastAPI()

@@ -15,12 +15,20 @@ import type { GeneratedConfigPanelProps } from '@studio/components/CreateFileset
 import { FileJson } from 'lucide-react';
 import type { FC } from 'react';
 
+const DEFAULT_DESCRIPTION =
+  'Raw output from the model. Any model the builder had to substitute is listed as a warning next to the result.';
+
 /**
  * Read-only view of what the model actually returned, for checking a draft before loading it
  * — or working out why one was rejected. Shows the tool-call arguments verbatim, so it can
  * differ from the config that lands on the canvas when the builder substitutes a model.
  */
-export const GeneratedConfigPanel: FC<GeneratedConfigPanelProps> = ({ open, config, onClose }) => (
+export const GeneratedConfigPanel: FC<GeneratedConfigPanelProps> = ({
+  open,
+  config,
+  onClose,
+  description = DEFAULT_DESCRIPTION,
+}) => (
   <SidePanelRoot open={open} onOpenChange={onClose} modal>
     <SidePanelDialog>
       <SidePanelContent className="w-[720px]" bordered>
@@ -32,8 +40,7 @@ export const GeneratedConfigPanel: FC<GeneratedConfigPanelProps> = ({ open, conf
         </SidePanelHeading>
         <Stack gap="density-md" padding="4" className="h-full min-h-0 overflow-y-auto">
           <Text kind="body/regular/sm" className="text-secondary">
-            Raw output from the model. Any model the builder had to substitute is listed as a
-            warning next to the result.
+            {description}
           </Text>
           <CodeSnippet
             value={config}
