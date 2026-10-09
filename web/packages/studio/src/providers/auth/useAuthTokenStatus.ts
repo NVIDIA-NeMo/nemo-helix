@@ -6,6 +6,8 @@
 import { useMemo } from 'react';
 import { useAuth } from 'react-oidc-context';
 
+import { useWebSession } from './useWebSession';
+
 /** Millisecond timestamps exceed this; oidc-client-ts uses seconds since epoch. */
 const EXPIRY_SECONDS_VS_MS_THRESHOLD = 10_000_000_000;
 
@@ -43,8 +45,31 @@ export type AuthTokenStatus = {
  */
 export const useAuthTokenStatus = (): AuthTokenStatus => {
   const auth = useAuth();
+  const webSession = useWebSession();
 
   return useMemo(() => {
+    if (webSession.isLoading || webSession.isError) {
+      return {
+        isAuthenticated: false,
+        isLoading: true,
+        isExpired: false,
+        isTokenActive: false,
+        activeScopes: [],
+        expiresAt: undefined,
+      };
+    }
+
+    if (webSession.isServerSession) {
+      return {
+        isAuthenticated: webSession.isAuthenticated,
+        isLoading: false,
+        isExpired: false,
+        isTokenActive: webSession.isAuthenticated,
+        activeScopes: [],
+        expiresAt: undefined,
+      };
+    }
+
     const user = auth.user;
     const isAuthenticated = auth.isAuthenticated && user != null;
     const expiresAtMs = normalizeOidcExpiresAtToMs(user?.expires_at);
@@ -64,5 +89,13 @@ export const useAuthTokenStatus = (): AuthTokenStatus => {
       activeScopes,
       expiresAt: expiresAtMs != null ? new Date(expiresAtMs) : undefined,
     };
-  }, [auth.isAuthenticated, auth.isLoading, auth.user]);
+  }, [
+    auth.isAuthenticated,
+    auth.isLoading,
+    auth.user,
+    webSession.isAuthenticated,
+    webSession.isError,
+    webSession.isLoading,
+    webSession.isServerSession,
+  ]);
 };

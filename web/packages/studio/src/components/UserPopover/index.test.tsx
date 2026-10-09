@@ -1,19 +1,24 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { mockSignoutRedirect } from '@studio/tests/mocks/react-oidc-context';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
 // Get access to the centralized auth mocks
-const { mockUseAuthProfile } = vi.hoisted(() => ({
+const { mockSignOut, mockUseAuthProfile, mockUseAuthSignOut } = vi.hoisted(() => ({
+  mockSignOut: vi.fn(),
   mockUseAuthProfile: vi.fn(),
+  mockUseAuthSignOut: vi.fn(),
 }));
 
 // Mock just the useAuthProfile hook since react-oidc-context is handled centrally
 vi.mock('@studio/providers/auth/useAuthProfile', () => ({
   useAuthProfile: mockUseAuthProfile,
+}));
+
+vi.mock('@studio/providers/auth/useWebSession', () => ({
+  useAuthSignOut: mockUseAuthSignOut,
 }));
 
 vi.mock('@studio/constants/environment', async (importOriginal) => {
@@ -59,6 +64,7 @@ describe('UserPopover', () => {
 
     // Default mock setup - user is authenticated
     mockUseAuthProfile.mockReturnValue(mockProfile);
+    mockUseAuthSignOut.mockReturnValue(mockSignOut);
   });
 
   afterEach(() => {
@@ -243,7 +249,7 @@ describe('UserPopover', () => {
     });
   });
 
-  it('should call signoutRedirect when Sign Out is clicked', async () => {
+  it('should sign out when Sign Out is clicked', async () => {
     renderWithRouter(<UserPopover />);
 
     // Click the avatar to open the popover
@@ -254,8 +260,7 @@ describe('UserPopover', () => {
     const signOutButton = screen.getByText('Sign Out');
     await user.click(signOutButton);
 
-    // Verify signoutRedirect was called
-    expect(mockSignoutRedirect).toHaveBeenCalled();
+    expect(mockSignOut).toHaveBeenCalled();
   });
 
   it('should handle profile with different name', async () => {

@@ -5,7 +5,14 @@ import {
   datasetFileContentQueryOptions,
   EDITOR_MAX_BYTES,
 } from '@studio/api/datasets/useDatasetFileContent';
-import axios from 'axios';
+
+const mocks = vi.hoisted(() => ({
+  platformFetch: vi.fn(),
+}));
+
+vi.mock('@nemo/sdk/src/utils/platformRequest', () => ({
+  platformFetch: mocks.platformFetch,
+}));
 
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>();
@@ -33,6 +40,13 @@ vi.mock('hyparquet', () => ({
 describe('useDatasetFileContent gate', () => {
   const baseParams = { workspace: 'ws', name: 'ds', path: 'README.md' };
 
+  beforeEach(() => {
+    mocks.platformFetch.mockReset();
+    mocks.platformFetch.mockResolvedValue(
+      new Response(null, { headers: { 'content-length': String(EDITOR_MAX_BYTES - 1) } })
+    );
+  });
+
   it('allows .md files and returns content via Range fetch', async () => {
     const { queryFn } = datasetFileContentQueryOptions(baseParams);
     await expect((queryFn as () => Promise<string>)()).resolves.toBe('# heading');
@@ -54,74 +68,65 @@ describe('useDatasetFileContent gate', () => {
   });
 
   it('returns full text (no preview cap) for fullContent editor loads within the ceiling', async () => {
-    const headSpy = vi.spyOn(axios, 'head').mockResolvedValueOnce({
-      headers: { 'content-length': String(EDITOR_MAX_BYTES - 1) },
-    } as never);
-
     const { queryFn } = datasetFileContentQueryOptions({ ...baseParams, fullContent: true });
     await expect((queryFn as () => Promise<string>)()).resolves.toBe('# heading');
+  });
 
-    headSpy.mockRestore();
+  it('reports a missing base file when the HEAD check returns an error status', async () => {
+    mocks.platformFetch.mockResolvedValueOnce(new Response(null, { status: 404 }));
+
+    const { queryFn } = datasetFileContentQueryOptions({ ...baseParams, fullContent: true });
+    await expect((queryFn as () => Promise<string>)()).rejects.toThrow(/Unable to find base file/i);
   });
 
   it('refuses fullContent loads above the editor ceiling instead of truncating', async () => {
-    const headSpy = vi.spyOn(axios, 'head').mockResolvedValueOnce({
-      headers: { 'content-length': String(EDITOR_MAX_BYTES + 1) },
-    } as never);
+    mocks.platformFetch.mockResolvedValueOnce(
+      new Response(null, { headers: { 'content-length': String(EDITOR_MAX_BYTES + 1) } })
+    );
 
     const { queryFn } = datasetFileContentQueryOptions({ ...baseParams, fullContent: true });
     await expect((queryFn as () => Promise<string>)()).rejects.toThrow(/too large to edit/i);
-
-    headSpy.mockRestore();
   });
 
   it('fails closed on fullContent loads when Content-Length is missing', async () => {
-    const headSpy = vi.spyOn(axios, 'head').mockResolvedValueOnce({ headers: {} } as never);
+    mocks.platformFetch.mockResolvedValueOnce(new Response(null));
 
     const { queryFn } = datasetFileContentQueryOptions({ ...baseParams, fullContent: true });
     await expect((queryFn as () => Promise<string>)()).rejects.toThrow(/too large to edit/i);
-
-    headSpy.mockRestore();
   });
 
   it('fails closed on fullContent loads when Content-Length is non-numeric', async () => {
-    const headSpy = vi.spyOn(axios, 'head').mockResolvedValueOnce({
-      headers: { 'content-length': 'not-a-number' },
-    } as never);
+    mocks.platformFetch.mockResolvedValueOnce(
+      new Response(null, { headers: { 'content-length': 'not-a-number' } })
+    );
 
     const { queryFn } = datasetFileContentQueryOptions({ ...baseParams, fullContent: true });
     await expect((queryFn as () => Promise<string>)()).rejects.toThrow(/too large to edit/i);
-
-    headSpy.mockRestore();
   });
 
   it('fails closed on fullContent loads when Content-Length is partially numeric', async () => {
     // parseInt('123garbage') === 123, which would slip a truncated size past the cap.
-    const headSpy = vi.spyOn(axios, 'head').mockResolvedValueOnce({
-      headers: { 'content-length': `${EDITOR_MAX_BYTES - 1}garbage` },
-    } as never);
+    mocks.platformFetch.mockResolvedValueOnce(
+      new Response(null, { headers: { 'content-length': `${EDITOR_MAX_BYTES - 1}garbage` } })
+    );
 
     const { queryFn } = datasetFileContentQueryOptions({ ...baseParams, fullContent: true });
     await expect((queryFn as () => Promise<string>)()).rejects.toThrow(/too large to edit/i);
-
-    headSpy.mockRestore();
   });
 
   it('fails closed on fullContent loads when Content-Length is negative', async () => {
-    const headSpy = vi.spyOn(axios, 'head').mockResolvedValueOnce({
-      headers: { 'content-length': '-1' },
-    } as never);
+    mocks.platformFetch.mockResolvedValueOnce(
+      new Response(null, { headers: { 'content-length': '-1' } })
+    );
 
     const { queryFn } = datasetFileContentQueryOptions({ ...baseParams, fullContent: true });
     await expect((queryFn as () => Promise<string>)()).rejects.toThrow(/too large to edit/i);
-
-    headSpy.mockRestore();
   });
 
   it('enforces the cap before downloading a parquet blob on fullContent loads', async () => {
     const { filesDownloadFile } = await import('@nemo/sdk/generated/platform/files');
     vi.mocked(filesDownloadFile).mockClear();
-    const headSpy = vi.spyOn(axios, 'head').mockResolvedValueOnce({ headers: {} } as never);
+    mocks.platformFetch.mockResolvedValueOnce(new Response(null));
 
     const { queryFn } = datasetFileContentQueryOptions({
       ...baseParams,
@@ -130,8 +135,6 @@ describe('useDatasetFileContent gate', () => {
     });
     await expect((queryFn as () => Promise<string>)()).rejects.toThrow(/too large to edit/i);
     expect(filesDownloadFile).not.toHaveBeenCalled();
-
-    headSpy.mockRestore();
   });
 
   it('serializes parquet rows with BigInt columns as JSONL text', async () => {

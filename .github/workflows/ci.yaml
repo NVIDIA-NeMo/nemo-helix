@@ -1454,7 +1454,7 @@ jobs:
           helm dependency build k8s/helm
           helm dependency build contrib/auth/authentik/helm
           helm dependency build contrib/auth/zitadel/helm
-          uv run --frozen pytest tests/auth_idp/static -v
+          uv run --frozen --group auth-idp-e2e pytest tests/auth_idp/static -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload test artifacts

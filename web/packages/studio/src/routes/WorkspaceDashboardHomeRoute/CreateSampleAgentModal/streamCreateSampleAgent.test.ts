@@ -10,6 +10,14 @@ import {
 } from '@studio/routes/WorkspaceDashboardHomeRoute/CreateSampleAgentModal/streamCreateSampleAgent';
 import { http, HttpResponse } from 'msw';
 
+const authMocks = vi.hoisted(() => ({
+  platformFetch: vi.fn(),
+}));
+
+vi.mock('@nemo/sdk/src/utils/platformRequest', () => ({
+  platformFetch: authMocks.platformFetch,
+}));
+
 const URL = `${PLATFORM_BASE_URL}/apis/agents/v2/sample-agent`;
 
 const RESULT: SampleAgentResponse = {
@@ -34,6 +42,15 @@ const respondWith = (body: string, status = 201) =>
 
 const run = () =>
   streamCreateSampleAgent({ model: 'my-ws/my-model' }, 'token', new AbortController().signal);
+
+beforeEach(() => {
+  authMocks.platformFetch.mockReset();
+  authMocks.platformFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    headers.set('X-Source', 'NeMo Studio');
+    return fetch(input, { ...init, headers });
+  });
+});
 
 describe('parseSampleAgentFrame', () => {
   it('reads known frame kinds', () => {
@@ -73,6 +90,32 @@ describe('streamCreateSampleAgent', () => {
 
     expect(await request?.json()).toEqual({ model: 'my-ws/my-model' });
     expect(request?.headers.get('Authorization')).toBe('Bearer token');
+    expect(request?.headers.get('X-Source')).toBe('NeMo Studio');
+  });
+
+  it('uses server-session credentials without stale bearer auth', async () => {
+    let request: Request | undefined;
+    authMocks.platformFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      headers.delete('Authorization');
+      headers.set('X-Source', 'NeMo Studio');
+      return fetch(input, { ...init, credentials: 'include', headers });
+    });
+    server.use(
+      http.post(URL, ({ request: req }) => {
+        request = req.clone();
+        return new HttpResponse(ndjson({ kind: 'done', result: RESULT }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/x-ndjson' },
+        });
+      })
+    );
+
+    await expect(run()).resolves.toEqual(RESULT);
+
+    expect(authMocks.platformFetch).toHaveBeenCalled();
+    expect(request?.credentials).toBe('include');
+    expect(request?.headers.has('Authorization')).toBe(false);
     expect(request?.headers.get('X-Source')).toBe('NeMo Studio');
   });
 

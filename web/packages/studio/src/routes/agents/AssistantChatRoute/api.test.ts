@@ -14,8 +14,13 @@ import {
   streamAssistantMessage,
 } from '@studio/routes/agents/AssistantChatRoute/api';
 
-const TEST_ID_TOKEN =
-  'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjQxMDI0NDQ4MDAsInN1YiI6InVzZXItMSJ9.signature';
+const platformMocks = vi.hoisted(() => ({
+  platformFetch: vi.fn(),
+}));
+
+vi.mock('@nemo/sdk/src/utils/platformRequest', () => ({
+  platformFetch: platformMocks.platformFetch,
+}));
 
 const getExpectedStudioBaseUrl = (): string => {
   const normalizedBaseUrl = BASE_URL.replace(/\/+$/, '');
@@ -24,58 +29,26 @@ const getExpectedStudioBaseUrl = (): string => {
 };
 
 describe('Assistant API helpers', () => {
+  beforeEach(() => {
+    platformMocks.platformFetch.mockReset();
+    platformMocks.platformFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      fetch(input, init)
+    );
+  });
+
   afterEach(() => {
     localStorage.clear();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
 
-  it('adds the active OIDC bearer token to Assistant requests', async () => {
-    const authority = 'https://auth.example.test';
-    const clientId = 'studio-client';
-    vi.stubEnv('VITE_AUTH_AUTHORITY', authority);
-    vi.stubEnv('VITE_AUTH_CLIENT_ID', clientId);
-    localStorage.setItem(
-      `oidc.user:${authority}:${clientId}`,
-      JSON.stringify({
-        access_token: 'assistant-token',
-        expires_at: Math.floor(Date.now() / 1000) + 3600,
-        profile: { sub: 'user-1' },
-        token_type: 'Bearer',
-      })
-    );
+  it('routes Assistant requests through the shared platform request boundary', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await listAssistantSkills();
 
-    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
-    expect(new Headers(requestInit?.headers).get('Authorization')).toBe('Bearer assistant-token');
-  });
-
-  it('uses the current ID token for Assistant requests when configured', async () => {
-    const authority = 'https://auth.example.test';
-    const clientId = 'MixedCaseClient';
-    vi.stubEnv('VITE_AUTH_AUTHORITY', authority);
-    vi.stubEnv('VITE_AUTH_CLIENT_ID', clientId);
-    vi.stubEnv('VITE_AUTH_BEARER_TOKEN_SOURCE', 'id_token');
-    localStorage.setItem(
-      `oidc.user:${authority}:${clientId}`,
-      JSON.stringify({
-        access_token: 'opaque-access-token',
-        expires_at: Math.floor(Date.now() / 1000) + 3600,
-        id_token: TEST_ID_TOKEN,
-        profile: { sub: 'user-1' },
-        token_type: 'Bearer',
-      })
-    );
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await listAssistantSkills();
-
-    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
-    expect(new Headers(requestInit?.headers).get('Authorization')).toBe(`Bearer ${TEST_ID_TOKEN}`);
+    expect(platformMocks.platformFetch).toHaveBeenCalledWith(expect.stringContaining('/skills'));
   });
 
   it('scopes session creation and history requests to the active workspace', async () => {

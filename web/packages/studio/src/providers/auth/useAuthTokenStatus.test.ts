@@ -13,6 +13,11 @@ import { type AuthState, useAuth } from 'react-oidc-context';
 
 vi.mock('react-oidc-context');
 
+const { mockUseWebSession } = vi.hoisted(() => ({ mockUseWebSession: vi.fn() }));
+vi.mock('@studio/providers/auth/useWebSession', () => ({
+  useWebSession: mockUseWebSession,
+}));
+
 const mockUseAuth = vi.mocked(useAuth);
 
 const frozenNow = new Date('2025-06-01T12:00:00.000Z');
@@ -57,6 +62,15 @@ describe('useAuthTokenStatus', () => {
     vi.useFakeTimers();
     vi.setSystemTime(frozenNow);
     mockUseAuth.mockReset();
+    mockUseWebSession.mockReturnValue({
+      session: undefined,
+      serverSessionClient: undefined,
+      isServerSession: false,
+      isAuthenticated: false,
+      isLoading: false,
+      isError: false,
+      authEnabled: true,
+    });
   });
 
   afterEach(() => {
