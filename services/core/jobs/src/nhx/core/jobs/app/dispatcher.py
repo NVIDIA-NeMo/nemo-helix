@@ -127,10 +127,9 @@ def _get_job_mutation_lock(job_name: str, workspace: str) -> asyncio.Lock:
     return lock
 
 
-def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime | None:
+def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime:
     # Status changes only rewrite the attempt, so the job entity's own timestamp stays at creation.
-    timestamps = [ts for ts in (job.updated_at, attempt.updated_at) if ts is not None]
-    return max(timestamps) if timestamps else None
+    return max(ts for ts in (job.updated_at, attempt.updated_at) if ts is not None)
 
 
 def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> HelixJobResponse:
@@ -146,7 +145,7 @@ def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> Hel
         workspace=job.workspace,
         project=job.project,
         created_at=job.created_at,  # type: ignore
-        updated_at=_job_updated_at(job, attempt),  # type: ignore
+        updated_at=_job_updated_at(job, attempt),
         source=job.source,
         spec=job.spec,
         platform_spec=job.platform_spec,
