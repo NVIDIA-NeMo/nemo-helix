@@ -65,7 +65,7 @@ class RlContributor(BaseContributor):
         runs_on="a Ray cluster on the kubernetes_job backend only. There is no docker path.",
         job_json="model, dataset, training, and environment for GRPO.",
         use_when="you need DPO or GRPO. No other backend supports them.",
-        command="nemo customization rl submit job.json",
+        command="nemo customization rl --job-json job.json",
     )
     jobs_router_description: ClassVar[str] = "NeMo-RL DPO and GRPO training jobs (Ray on Kubernetes)."
 

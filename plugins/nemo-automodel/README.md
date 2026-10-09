@@ -17,12 +17,12 @@ Verbs are mounted directly on the contributor (no `jobs` subgroup):
 
 ```bash
 nemo customization automodel explain
-nemo customization automodel submit path/to/job.json
-nemo customization automodel submit path/to/job.json -w acme-corp
-nemo --context my-context customization automodel submit path/to/job.json
+nemo customization automodel --job-json path/to/job.json
+nemo customization automodel --job-json path/to/job.json -w acme-corp
+nemo --context my-context customization automodel --job-json path/to/job.json
 ```
 
-Other customization backends may still use `nemo customization <backend> jobs submit ...`.
+Other customization backends may still use `nemo customization <backend> --job-json ...`.
 
 Job JSON uses the simplified `AutomodelJobInput` schema (see `nemo_automodel_plugin/schema.py`). Submit posts to `/apis/customization/v2/workspaces/{workspace}/automodel/jobs`.
 

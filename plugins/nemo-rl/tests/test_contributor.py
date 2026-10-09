@@ -19,7 +19,7 @@ def test_cli_summary_states_what_it_trains_and_where_it_runs(contributor: RlCont
     assert summary is not None
     assert "DPO" in summary.trains and "GRPO" in summary.trains
     assert "kubernetes_job backend only" in summary.runs_on
-    assert summary.command == "nemo customization rl submit job.json"
+    assert summary.command == "nemo customization rl --job-json job.json"
 
 
 def test_cli_summary_fits_the_rendered_width(contributor: RlContributor) -> None:
@@ -54,8 +54,8 @@ def test_backend_help_names_the_backend_to_use_for_sft(contributor: RlContributo
 
 def test_submit_help_explains_the_job_json(contributor: RlContributor) -> None:
     cli = contributor.get_cli()
-    submit = next(cmd for cmd in cli.registered_commands if cmd.name == "submit")
-    assert submit.help is not None
+    submit = cli.registered_callback
+    assert submit is not None and submit.help is not None
     assert "RlJobInput" in submit.help
     assert "nemo customization rl explain" in submit.help
 
@@ -68,7 +68,7 @@ def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> Non
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         overrides,
-        "_replace_job_submit",
+        "_replace_job_callback",
         lambda group, backend, *args, **kwargs: captured.update(backend=backend),
     )
     from nemo_rl_plugin.cli.inputs import apply_rl_job_cli_overrides

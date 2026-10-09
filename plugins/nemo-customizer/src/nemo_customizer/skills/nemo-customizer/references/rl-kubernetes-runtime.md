@@ -7,7 +7,7 @@ The `rl` (DPO **and GRPO**) backend runs **each job step as a Kubernetes pod** v
 `kubernetes_job` execution backend. This is different from `automodel` / `unsloth`,
 which use the **docker** job backend. So the platform you submit against must be
 deployed/configured for Kubernetes job execution — the docker job backend cannot
-run rl, and `rl submit` fails fast (`require_distributed_runtime`) on a
+run rl, and `rl --job-json` fails fast (`require_distributed_runtime`) on a
 docker-runtime platform.
 
 Deployment model is the same as automodel/unsloth: **run the platform locally**

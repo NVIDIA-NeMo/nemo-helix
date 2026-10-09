@@ -51,7 +51,7 @@ def test_contributor_get_cli_exposes_flat_verbs() -> None:
     assert isinstance(cli, typer.Typer)
     assert cli.info.name == "automodel"
     assert not any(g.name == "jobs" for g in cli.registered_groups)
-    assert {cmd.name for cmd in cli.registered_commands} == {"submit", "explain"}
+    assert {cmd.name for cmd in cli.registered_commands} == {"explain"}
 
 
 def test_contributor_exposes_sdk_resources() -> None:
@@ -68,7 +68,7 @@ def test_cli_summary_states_what_it_trains_and_where_it_runs() -> None:
     assert summary is not None
     assert "SFT" in summary.trains and "LoRA" in summary.trains
     assert "volcano_job or kubernetes_job for multi-node" in summary.runs_on
-    assert summary.command == "nemo customization automodel submit job.json"
+    assert summary.command == "nemo customization automodel --job-json job.json"
 
 
 def test_summary_and_help_agree_on_multi_node_backends() -> None:
@@ -114,8 +114,8 @@ def test_backend_help_goes_deeper_than_the_top_level_summary() -> None:
 
 def test_submit_help_explains_the_job_json() -> None:
     cli = AutomodelContributor().get_cli()
-    submit = next(cmd for cmd in cli.registered_commands if cmd.name == "submit")
-    assert submit.help is not None
+    submit = cli.registered_callback
+    assert submit is not None and submit.help is not None
     assert "AutomodelJobInput" in submit.help
     assert "nemo customization automodel explain" in submit.help
 
@@ -128,7 +128,7 @@ def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> Non
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         overrides,
-        "_replace_job_submit",
+        "_replace_job_callback",
         lambda group, backend, *args, **kwargs: captured.update(backend=backend),
     )
     from nemo_automodel_plugin.cli.inputs import apply_automodel_job_cli_overrides

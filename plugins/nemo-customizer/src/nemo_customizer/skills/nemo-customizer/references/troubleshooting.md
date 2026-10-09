@@ -67,13 +67,13 @@ Each entry has `provider`, `profile` (name), and `backend` (e.g. `docker`, `kube
 | Response includes **`provider`: `gpu` or `gpu_distributed`** | **`automodel`** (default) |
 | No GPU profiles (only `subprocess` and/or CPU `provider`) | Report that GPU customization is unavailable |
 
-Automodel and unsloth are **`submit`-only**. After submit, the platform's **Docker executor** runs GPU container steps on the daemon attached to the connected platform host (`platform.runtime: docker`). (rl is also submit-only but runs on Kubernetes/Ray — see `rl-kubernetes-runtime.md`.) Training does not run in the CLI shell — query execution profiles on the platform (`NHX_BASE_URL`), not GPU availability in the agent's terminal.
+Automodel and unsloth run through the platform Jobs service. After submission, the platform's **Docker executor** runs GPU container steps on the daemon attached to the connected platform host (`platform.runtime: docker`). (rl also runs through Kubernetes/Ray — see `rl-kubernetes-runtime.md`.) Training does not run in the CLI shell — query execution profiles on the platform (`NHX_BASE_URL`), not GPU availability in the agent's terminal.
 
 ### Pick execution profile
 
 **Automodel** — set `training.execution_profile` in job JSON to the **`profile`** string of a GPU row from the list (e.g. `default`, `docker_gpu`). If omitted, the plugin default is usually `gpu` — submit errors mentioning an unknown profile mean you should re-list and set an exact name from the API.
 
-**Unsloth** — pass `--profile <name>` on `nemo customization unsloth submit …` when the default `gpu` profile is wrong. There is no `execution_profile` field in `UnslothJobInput` today.
+**Unsloth** — pass `--profile <name>` on `nemo customization unsloth --job-json …` when the default `gpu` profile is wrong. There is no `execution_profile` field in `UnslothJobInput` today.
 
 Quick filter (stdout only — do not use `2>&1` or `json.load` breaks on stderr warnings):
 
@@ -102,9 +102,9 @@ Do not run `nemo customization --help` unless submit returns unknown plugin.
 
 Same rule for `nemo jobs list-execution-profiles -f json`: parse stdout only; use `2>/dev/null` if needed, never `2>&1` into `json.load`.
 
-## Verb is backend-specific (both submit-only)
+## Verb is backend-specific (Jobs service only)
 
-- **Automodel**, **Unsloth**, and **RL** use **`submit` only**. Use `nemo customization <plugin> submit …`; these backends expose no local `run` verb.
+- **Automodel**, **Unsloth**, and **RL** run through the Jobs service. Use `nemo customization <plugin> --job-json …`; these backends expose no local `run` verb.
 - Dataset refs in job JSON: `default/<fileset>` (automodel: `dataset.training` / `dataset.validation`; unsloth: `dataset.path` / optional `dataset.validation_path`).
 
 ## Gated HuggingFace models
@@ -232,7 +232,7 @@ When submit or poll returns a missing-image error and the base URL is **user-ove
 ```bash
 export NHX_BASE_URL=<user's platform URL>
 cd /path/to/nemo-helix
-nemo customization <plugin> submit /tmp/job.json --workspace default [--profile <gpu-profile>]
+nemo customization <plugin> --job-json /tmp/job.json --workspace default [--profile <gpu-profile>]
 ```
 
 Then poll until terminal status. Offer to re-submit once the user confirms the image is on the target — do not attempt a local Docker build from the agent for a remote platform.
@@ -329,7 +329,7 @@ Automodel:
 
 | Action | Command |
 |--------|---------|
-| Submit | `nemo customization automodel submit <job.json> --workspace default` |
+| Submit | `nemo customization automodel --job-json <job.json> --workspace default` |
 | Status | `nemo jobs get-status automodel-<job-id>` |
 | Live schema | `nemo customization automodel explain` |
 
@@ -337,7 +337,7 @@ Unsloth:
 
 | Action | Command |
 |--------|---------|
-| Submit | `nemo customization unsloth submit <job.json> --workspace default [--profile P]` |
+| Submit | `nemo customization unsloth --job-json <job.json> --workspace default [--profile P]` |
 | Status | `nemo jobs get-status unsloth-<job-id>` |
 | Live schema | `nemo customization unsloth explain` |
 
