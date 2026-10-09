@@ -223,17 +223,26 @@ def _replace_job_callback(
                 exist_ok=exist_ok,
                 hf_token_secret=hf_token_secret,
             )
-        submitted = original(
-            typer_ctx,
-            spec=spec_json,
-            spec_file=None,
-            options=options,
-            options_file=options_file,
-            profile=profile,
-            workspace=workspace,
-            config=None,
-            config_file=None,
-        )
+        had_programmatic_marker = hasattr(typer_ctx, "_nemo_programmatic_submit")
+        previous_programmatic_marker = getattr(typer_ctx, "_nemo_programmatic_submit", False)
+        setattr(typer_ctx, "_nemo_programmatic_submit", True)
+        try:
+            submitted = original(
+                typer_ctx,
+                spec=spec_json,
+                spec_file=None,
+                options=options,
+                options_file=options_file,
+                profile=profile,
+                workspace=workspace,
+                config=None,
+                config_file=None,
+            )
+        finally:
+            if had_programmatic_marker:
+                setattr(typer_ctx, "_nemo_programmatic_submit", previous_programmatic_marker)
+            else:
+                delattr(typer_ctx, "_nemo_programmatic_submit")
         _report_submitted(submitted, wait=wait, watch=watch, timeout=timeout, poll_interval=poll_interval)
 
 

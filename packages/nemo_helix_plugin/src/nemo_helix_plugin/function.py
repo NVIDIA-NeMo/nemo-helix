@@ -86,7 +86,7 @@ class NemoFunction(_NamedPlugin, Generic[SpecT]):
     Subclasses declare their identity via class variables and implement
     :meth:`run`. The platform auto-derives:
 
-    - A CLI subcommand tree: ``nemo <plugin> <fn> run|submit``.
+    - A CLI command: ``nemo <plugin> <fn>``.
     - A FastAPI route on the plugin service:
       ``POST /apis/<plugin>/v2/workspaces/{workspace}/<name>``
       (override per-class via :attr:`endpoint`).
@@ -136,14 +136,6 @@ class NemoFunction(_NamedPlugin, Generic[SpecT]):
         ``/{name}-stream``) — it does **not** let a function
         relocate itself outside its plugin's URL namespace. Leave
         ``None`` to use the default.
-
-    .. attribute:: generate_legacy_verbs
-        :type: bool
-
-        Temporary CLI compatibility knob. ``True`` keeps the generated
-        ``<function> run|submit`` command group. ``False`` registers
-        ``<function>`` itself as the remote submit command and omits the
-        local ``run`` and legacy ``submit`` verbs.
 
     Stream response start:
 
@@ -195,8 +187,6 @@ class NemoFunction(_NamedPlugin, Generic[SpecT]):
     # ------------------------------------------------------------------ #
 
     endpoint: ClassVar[str | None] = None
-
-    generate_legacy_verbs: ClassVar[bool] = True
 
     send_headers_before_first_frame: ClassVar[bool] = False
 

@@ -42,7 +42,6 @@ class RunJob(NemoJob):
     name: ClassVar[str] = "run"
     description: ClassVar[str] = "Anonymize a dataset of records"
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
 
     input_spec_schema = AnonymizerRequest
     spec_schema = AnonymizerStepConfig

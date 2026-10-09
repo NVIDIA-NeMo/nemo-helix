@@ -150,7 +150,6 @@ class EvaluateAgentJob(NemoJob):
     name: ClassVar[str] = "evaluate"
     description: ClassVar[str] = "Evaluate an agent workflow against a dataset as a scheduled platform job."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = EvaluateAgentSpec
 
     @classmethod
