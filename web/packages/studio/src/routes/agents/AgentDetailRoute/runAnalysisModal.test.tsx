@@ -28,6 +28,7 @@ import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { DAY_MS } from '@studio/routes/agents/AgentDetailRoute/analysis/analysisSince';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
+import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -163,6 +164,28 @@ describe('Run analysis modal', () => {
     const body = await submit(user, dialog);
 
     expect(body.since).toBe(new Date(PERIODIC_CURSOR).toISOString());
+  });
+
+  it('blocks the run when a refetch loses the picked cursor', async () => {
+    server.use(analysisRunStatusHandler('react-agent', PERIODIC_CURSOR));
+    const { user, dialog } = await openModal();
+    await pickPreset(user, dialog, /Since the last periodic analysis/);
+
+    server.use(
+      http.get(
+        mockApiUrl(getInsightsGetStatusesAnalysisRunStatusQueryKey, ':workspace', ':agent'),
+        () => HttpResponse.json({ detail: 'Unavailable' }, { status: 503 })
+      )
+    );
+    onlineManager.setOnline(false);
+    onlineManager.setOnline(true);
+
+    expect(
+      await dialog.findByText(
+        'The last periodic analysis time could not be read. Pick another range.'
+      )
+    ).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Run insight analysis' })).toBeDisabled();
   });
 
   it('hides a cached cursor until the reopened modal refetches it', async () => {

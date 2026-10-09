@@ -85,6 +85,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
 
   const since = sinceFor(preset, { now: new Date(), periodicCursor, custom });
   const invalidCustom = preset === 'custom' && !since;
+  const missingCursor = preset === 'periodic-cursor' && !periodicCursor;
   const invalidModels = [runDefaultModel, runFastModel].some((ref) => !isQualifiedModelRef(ref));
 
   const presetItems = [
@@ -130,7 +131,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
       onClose={onClose}
       disabled={running}
       loading={running}
-      submitDisabled={invalidCustom || invalidModels}
+      submitDisabled={invalidCustom || missingCursor || invalidModels}
       attributes={{ SubmitButton: { color: 'brand' } }}
     >
       <Stack gap="density-lg">
@@ -142,9 +143,11 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
             slotLabel: 'Traces to analyze',
             slotHelp: invalidCustom
               ? 'Enter a date and time in the past.'
-              : since
-                ? `Analyzes traces that started since ${formatDateTime(since)}.`
-                : "Analyzes the agent's full trace history.",
+              : missingCursor
+                ? 'The last periodic analysis time could not be read. Pick another range.'
+                : since
+                  ? `Analyzes traces that started since ${formatDateTime(since)}.`
+                  : "Analyzes the agent's full trace history.",
           }}
         />
 
