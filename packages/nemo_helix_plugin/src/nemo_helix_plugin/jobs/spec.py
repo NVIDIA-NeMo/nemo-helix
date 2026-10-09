@@ -73,6 +73,12 @@ class StepLifecycle(JobSpecModel):
         description="If every active task in the step goes this many seconds without an update, the step is terminated. "
         "A value of 0 disables staleness detection.",
     )
+    pause_deadline_seconds: int = Field(
+        default=0,
+        ge=0,
+        description="How long a pause may stay in progress before the workload is deleted and the step fails. "
+        "A value of 0 means this step cannot be paused.",
+    )
 
 
 class HelixJobStepSpec(JobSpecModel):
@@ -120,6 +126,14 @@ class HelixJobSpec(JobSpecModel):
 
     steps: list[HelixJobStepSpec] = Field(description="List of steps to be executed in the job")
     secrets: Optional[list[HelixJobSecret]] = Field(default=None, description="Secrets referenced by the job")
+    pause_ttl_seconds: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Per-job override for how long storage is kept after a step becomes paused, measured from "
+        "that step's stopped_at. Ignored on create. When unset, the platform paused-storage TTL applies. "
+        "A value of 0 reclaims storage on the next retention pass. While the job is paused, this value can "
+        "be changed without moving the start time.",
+    )
 
     @model_validator(mode="after")
     def validate_steps(self) -> Self:
