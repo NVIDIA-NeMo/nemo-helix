@@ -8,7 +8,7 @@ How a build runs is set here, never in the request.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Literal, Self
 
 from nemo_builder_plugin.identity import ImageIdentityError, validate_registry_host, validate_repository
 from nemo_helix_plugin.config import NemoConfig
@@ -24,7 +24,7 @@ from pydantic import (
 
 
 class SandboxConfig(BaseModel):
-    """The pods a build's Dockerfiles run in.
+    """The sandboxes a build's Dockerfiles run in.
 
     Where they run isn't set here: they run in the build step's namespace, on the work volume and nodes of
     the fetch step's Jobs execution profile. From the environment, the section is one JSON value,
@@ -39,6 +39,13 @@ class SandboxConfig(BaseModel):
             "The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` "
             "at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take "
             "the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have."
+        ),
+    )
+    provider: Literal["kubernetes_pod"] = Field(
+        default="kubernetes_pod",
+        description=(
+            "What runs each sandbox. `kubernetes_pod`, the only one so far, is a plain pod the build step creates, "
+            "hardened by the builder, with an unrestricted network: use it only with Dockerfiles you trust."
         ),
     )
     cpu: str = Field(default="2", description="CPU for each sandbox: its request and its limit.")
