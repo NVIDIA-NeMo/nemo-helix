@@ -26,10 +26,14 @@ import traceback
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from sandboxed_gym.environment_package import (
+    CUSTOM_AGENT_SUBDIR,
+    CUSTOM_RESOURCES_SERVER_SUBDIR,
     ENVIRONMENT_MANIFEST_FILENAME,
+    SERVER_INSTALL_MARKERS,
     AdapterWheelsV1Package,
     EnvironmentPackage,
     EnvironmentPackageError,
@@ -47,6 +51,7 @@ GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
 #: FileSet error instead of a silent fallback to the image-shipped environment.
 ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY = "NHX_ENVIRONMENT_PACKAGE_REQUIRED"
 ENVIRONMENT_OFFLINE_ENV_KEY = "NHX_ENVIRONMENT_OFFLINE"
+REUSE_IMAGE_GYM_INSTALL_ENV_KEY = "NHX_REUSE_IMAGE_GYM_INSTALL"
 HF_CACHE_DIRNAME = ".huggingface"
 UV_CACHE_DIR_KEY = "uv_cache_dir"
 UV_VENV_DIR_KEY = "uv_venv_dir"
@@ -66,6 +71,10 @@ MODEL_CALL_CAPTURE_DIR_KEY = "model_call_capture_dir"
 MODEL_CALLS_RESULT_KEY = "_nhx_model_calls"
 # uv setting that points Gym's per-server dependency resolver at the staged wheelhouse.
 UV_FIND_LINKS_ENV_KEY = "UV_FIND_LINKS"
+# Gym's config key; the name must match Gym's.
+SKIP_VENV_IF_PRESENT_KEY = "skip_venv_if_present"
+COMPONENT_VENV_DIRNAME = ".venv"
+COMPONENT_VENV_ROOT_SUBDIR = "gym_venvs"
 UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
 NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
 #: Writable copy of the image Gym checkout. ``gym_host.sh`` stages it here before this process starts.
@@ -412,6 +421,10 @@ def _environment_offline() -> bool:
     return os.environ.get(ENVIRONMENT_OFFLINE_ENV_KEY, "").strip().lower() in {"1", "true", "yes"}
 
 
+def _reuse_image_gym_install() -> bool:
+    return os.environ.get(REUSE_IMAGE_GYM_INSTALL_ENV_KEY, "").strip().lower() in {"1", "true", "yes"}
+
+
 def _apply_huggingface_offline_policy() -> None:
     """Pin the Hugging Face libraries offline when the job forbids egress.
 
@@ -518,9 +531,7 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
         check=True,
     )
 
-    # Gym creates a private venv for each agent and resource server from that component's
-    # requirements.txt. Prefer the staged component wheels while retaining package-index fallback
-    # for image-owned Gym and its core dependencies.
+    # For any component Gym still builds a venv for.
     os.environ[UV_FIND_LINKS_ENV_KEY] = wheels_dir
 
     if _environment_offline():
@@ -553,6 +564,118 @@ def _image_gym_search_root() -> str | None:
     if os.path.isdir(root):
         return os.path.realpath(root)
     return None
+
+
+def _container_gym_venv() -> Path | None:
+    """The virtualenv this host runs in, which carries Gym and Gym's dependency closure.
+
+    The runtime image activates it (``VIRTUAL_ENV``); ``sys.prefix`` is the same place when the
+    host was started with that interpreter directly. It only counts if it looks like a venv Gym
+    can activate: Gym's skip check needs both ``bin/python`` and ``bin/activate``.
+    """
+    candidate = Path(os.environ.get("VIRTUAL_ENV") or sys.prefix)
+    if (candidate / "bin" / "python").exists() and (candidate / "bin" / "activate").exists():
+        return candidate
+    return None
+
+
+def _writable_component_venv_root(configured_root: str, work_path: str, global_config: dict[str, Any]) -> Path:
+    """Return a venv root this host may write under, mirroring the image's baked venvs if needed.
+
+    ``/opt/gym_venvs`` is often read-only for the sandbox's uid. Gym reads one ``uv_venv_dir``
+    for every component, so moving it would hide the image's prebuilt venvs; instead the baked
+    entries are linked into the writable root so ``skip_venv_if_present`` still finds them.
+    """
+    root = Path(configured_root)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        writable = os.access(root, os.W_OK)
+    except OSError:
+        writable = False
+    if writable:
+        return root
+
+    mirrored_root = Path(work_path, COMPONENT_VENV_ROOT_SUBDIR)
+    mirrored_root.mkdir(parents=True, exist_ok=True)
+    if root.is_dir():
+        for kind_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+            for server_dir in sorted(path for path in kind_dir.iterdir() if path.is_dir()):
+                mirrored = mirrored_root / kind_dir.name / server_dir.name
+                if mirrored.exists() or mirrored.is_symlink():
+                    continue
+                mirrored.parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(server_dir, mirrored)
+    global_config[UV_VENV_DIR_KEY] = str(mirrored_root)
+    print(f"gym-host: {root} is read-only; component venvs live under {mirrored_root}", flush=True)
+    return mirrored_root
+
+
+def _link_wheels_v1_component_venvs(
+    package: EnvironmentPackage | None,
+    global_config: dict[str, Any],
+    work_path: str,
+) -> None:
+    """Give each wheels-v1 component the container's Gym install as its venv.
+
+    The wheels-v1 contract: the runtime image provides Gym and everything Gym needs; the
+    wheelhouse provides only what the package's own servers add, and this host has already
+    installed those onto ``PYTHONPATH`` (see `_install_wheels_v1_dependencies`). Left alone, Gym
+    would still build a fresh venv for every package server and install Gym's whole closure
+    into it from a package index, which is slow, duplicates the image, and fails outright
+    under a sandbox that allows no index egress.
+
+    Gym skips that build when ``skip_venv_if_present`` is set and the component's venv path
+    already holds ``bin/python`` and ``bin/activate``. So for every package server directory
+    Gym can discover (one holding an install marker), the venv path is made a symlink to the
+    container's own venv. Gym activates it and runs the entrypoint; the server's extra
+    dependencies come from ``PYTHONPATH``. A venv that already exists at that path, such as an
+    image-baked one for a same-named built-in, is kept.
+
+    Only wheels-v1 opts in: native-v1 declares that its dependencies resolve from an index. The
+    caller opts in too (``NHX_REUSE_IMAGE_GYM_INSTALL``): this host is shared with GRPO, whose
+    documented wheels-v1 contract still vendors the full closure.
+    """
+    if not isinstance(package, WheelsV1Package) or not _reuse_image_gym_install():
+        return
+    if not global_config.get(SKIP_VENV_IF_PRESENT_KEY):
+        print(
+            f"gym-host: {SKIP_VENV_IF_PRESENT_KEY} is off; wheels-v1 servers will build their own venvs",
+            flush=True,
+        )
+        return
+    container_venv = _container_gym_venv()
+    if container_venv is None:
+        print("gym-host: no activatable container venv found; wheels-v1 servers will build their own venvs", flush=True)
+        return
+    server_dirs = [
+        (kind, server_dir)
+        for kind in (CUSTOM_RESOURCES_SERVER_SUBDIR, CUSTOM_AGENT_SUBDIR)
+        if (package.root / kind).is_dir()
+        for server_dir in sorted(path for path in (package.root / kind).iterdir() if path.is_dir())
+        if any((server_dir / marker).is_file() for marker in SERVER_INSTALL_MARKERS)
+    ]
+    if not server_dirs:
+        return
+
+    configured_root = global_config.get(UV_VENV_DIR_KEY) or os.environ.get("NEMO_GYM_VENV_DIR")
+    if not configured_root:
+        # Gym's default is `<server dir>/.venv`, which is inside the read-only environment mount.
+        configured_root = str(Path(work_path, COMPONENT_VENV_ROOT_SUBDIR))
+        global_config[UV_VENV_DIR_KEY] = configured_root
+    venv_root = _writable_component_venv_root(configured_root, work_path, global_config)
+
+    for kind, server_dir in server_dirs:
+        venv_path = venv_root / kind / server_dir.name / COMPONENT_VENV_DIRNAME
+        if venv_path.exists() or venv_path.is_symlink():
+            print(f"gym-host: keeping existing venv for {kind}/{server_dir.name} at {venv_path}", flush=True)
+            continue
+        venv_path.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(container_venv, venv_path)
+        print(
+            f"gym-host: {kind}/{server_dir.name} uses the container's Gym install ({container_venv}); "
+            "its extra dependencies come from the wheelhouse",
+            flush=True,
+        )
 
 
 def _prepend_environment_search_root(environment_root: str) -> None:
@@ -691,6 +814,12 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
         _prepend_environment_search_root(str(environment_package.root))
     _install_wheels_v1_dependencies(
         environment_package,
+        os.environ.get("NHX_WORK_PATH", "/job/work"),
+    )
+    # After the wheelhouse is on PYTHONPATH and before Gym builds anything.
+    _link_wheels_v1_component_venvs(
+        environment_package,
+        global_config,
         os.environ.get("NHX_WORK_PATH", "/job/work"),
     )
 

@@ -392,6 +392,8 @@ def serve_config(
         "job_id": job_id,
         "host_provider": plan.host_provider,
         "environment_path": "/job/environment" if fileset_environment else None,
+        # GRPO leaves this off: its documented wheels-v1 contract vendors Gym's own closure.
+        "reuse_image_gym_install": True,
         "sandbox": {
             "image": plan.runtime_image,
             # One claim, two sub-paths. The environment mount is read-only and the workspace is not,

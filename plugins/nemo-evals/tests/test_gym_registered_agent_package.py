@@ -96,6 +96,7 @@ def test_a_users_wheels_environment_is_extended_and_a_native_one_refused(tmp_pat
     root = tmp_path / "environment"
     (root / "resources_servers" / "greet" / "configs").mkdir(parents=True)
     (root / "resources_servers" / "greet" / "configs" / "greet.yaml").write_text("greet: {}\n")
+    (root / "resources_servers" / "greet" / "requirements.txt").write_text("greet==1.0\n")
     (root / "wheels").mkdir()
     (root / "wheels" / "greet-1.0-py3-none-any.whl").write_bytes(b"")
     (root / "nemo-environment.yaml").write_text(

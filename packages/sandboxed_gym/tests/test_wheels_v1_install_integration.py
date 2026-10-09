@@ -33,6 +33,8 @@ def _write_wheels_v1_bundle(environment_dir: Path) -> None:
     config = environment_dir / config_path
     config.parent.mkdir(parents=True)
     config.write_text("wheels_v1_probe: {}\n", encoding="utf-8")
+    # Gym discovers a server directory by its install marker; the wheelhouse carries what it names.
+    (config.parent.parent / "requirements.txt").write_text(f"{_PACKAGE_NAME}==1.0\n", encoding="utf-8")
     (environment_dir / runtime.ENVIRONMENT_MANIFEST_FILENAME).write_text(
         f"format: wheels-v1\nconfig_paths:\n  - {config_path}\nmetadata:\n  name: wheels-v1-probe\n",
         encoding="utf-8",

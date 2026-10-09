@@ -1,0 +1,1 @@
+example-dependency==1.0

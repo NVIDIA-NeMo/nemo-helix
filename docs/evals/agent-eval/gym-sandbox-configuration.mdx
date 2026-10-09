@@ -121,6 +121,12 @@ platformConfig:
       - artifacts.example.internal:443
 ```
 
+A package index is not needed for built-in environments, whose virtual environments ship in the
+`nhx-gym-host` image, nor for `wheels-v1` custom environments: their servers run on the image's Gym
+install, and the package's `wheels/` directory supplies everything their `requirements.txt` files
+add. Only `native-v1` custom environments install from an index at job start; for those, allow
+`pypi.org:443` and `files.pythonhosted.org:443`, or whichever index mirror the cluster uses.
+
 Submitters cannot extend these lists from `GymRunnerTarget`. This prevents an environment from
 widening its own network access.
 

@@ -201,6 +201,15 @@ def test_serve_config_takes_cluster_facts_from_the_deployment_not_the_job() -> N
     assert payload["gym_global_config"]["config_paths"]
 
 
+def test_serve_config_runs_wheels_v1_servers_on_the_image_gym_install() -> None:
+    """Evaluator's wheels-v1 contract: the image provides Gym, the wheelhouse only the servers' extras.
+
+    The host honours this only when the caller says so, because GRPO shares it and still
+    documents vendoring the full closure.
+    """
+    assert serve_config(target(), capable_plan(), job_id="job-7")["reuse_image_gym_install"] is True
+
+
 def test_unset_runtime_image_uses_the_qualified_gym_host(monkeypatch: pytest.MonkeyPatch) -> None:
     qualified = "registry.example.com/nemo/nhx-gym-host:same-platform-tag"
     monkeypatch.setattr(
