@@ -52,7 +52,15 @@ export type FlagManifestEntry = {
   baseValue: unknown;
   /** Value the app is actually running with. */
   effectiveValue: unknown;
-  /** Whether an override is currently in force for this flag. */
+  /**
+   * Whether an override for this flag is present in storage.
+   *
+   * Not the same as "applied": between a write and the next reload an override
+   * is stored but the page is still running `effectiveValue`. Both fields are
+   * accurate in that window — `overridden` describes storage, `effectiveValue`
+   * describes the running app — so a reader wanting to distinguish staged from
+   * applied compares the two rather than trusting either alone.
+   */
   overridden: boolean;
 };
 
@@ -65,7 +73,23 @@ export type FlagManifest = {
   flags: FlagManifestEntry[];
 };
 
-const isBrowser = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+/**
+ * Reach localStorage without assuming it exists or is accessible.
+ *
+ * Reading `window.localStorage` is itself a throwing operation when storage is
+ * blocked — third-party storage disabled, or a sandboxed iframe — so a `typeof`
+ * guard is not safe: it evaluates the getter and throws with it. Every access in
+ * this module funnels through here so a blocked-storage browser degrades to "no
+ * overrides" instead of taking down app boot.
+ */
+const safeStorage = (): Storage | null => {
+  try {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Read the raw overrides blob.
@@ -74,13 +98,14 @@ const isBrowser = () => typeof window !== 'undefined' && typeof window.localStor
  * dev convenience must never be able to white-screen the app.
  */
 const readOverridesBlob = (): Record<string, unknown> => {
-  if (!isBrowser()) return {};
+  const storage = safeStorage();
+  if (!storage) return {};
 
   let raw: string | null = null;
   try {
-    raw = window.localStorage.getItem(FEATURE_FLAG_OVERRIDES_KEY);
+    raw = storage.getItem(FEATURE_FLAG_OVERRIDES_KEY);
   } catch {
-    // Storage can throw in private-browsing modes or when disabled by policy.
+    // getItem can still throw even once the getter itself succeeded.
     return {};
   }
   if (!raw) return {};
@@ -114,11 +139,16 @@ export const readFlagOverrides = (definitions: Record<string, FlagDescriptor>): 
   const layer: EnvConfig = {};
 
   for (const [key, value] of Object.entries(blob)) {
-    const descriptor = definitions[key];
-    if (!descriptor) {
+    // `Object.hasOwn`, not a truthiness check: a bare `definitions[key]` lookup
+    // reaches Object.prototype, so a stored key like "constructor" or "toString"
+    // returns a truthy non-descriptor whose `.schema` is undefined. Calling
+    // `.safeParse` on that throws a TypeError out of this per-key warn-and-skip
+    // loop and aborts flag parsing entirely — a white screen from a typo.
+    if (!Object.hasOwn(definitions, key)) {
       logger.warn(`[featureFlags] Ignoring override for unknown flag "${key}".`);
       continue;
     }
+    const descriptor = definitions[key]!;
     if (typeof value !== 'string') {
       logger.warn(
         `[featureFlags] Ignoring override for "${key}": expected a string, got ${typeof value}.`
@@ -185,24 +215,39 @@ export const writeFlagManifest = (
   effectiveFlags: Record<string, unknown>,
   overridesEnabled: boolean
 ): void => {
-  if (!isBrowser()) return;
+  const storage = safeStorage();
+  if (!storage) return;
 
   const manifest = overridesEnabled
     ? buildManifest(definitions, baseFlags, effectiveFlags, true)
     : { version: FLAG_MANIFEST_VERSION, overridesEnabled: false, overridesKey: '', flags: [] };
 
   try {
-    window.localStorage.setItem(FEATURE_FLAG_MANIFEST_KEY, JSON.stringify(manifest));
+    storage.setItem(FEATURE_FLAG_MANIFEST_KEY, JSON.stringify(manifest));
   } catch {
     // Non-fatal: the extension simply won't find a manifest.
   }
 };
 
-const writeOverridesBlob = (blob: Record<string, string>): void => {
-  if (Object.keys(blob).length === 0) {
-    window.localStorage.removeItem(FEATURE_FLAG_OVERRIDES_KEY);
-  } else {
-    window.localStorage.setItem(FEATURE_FLAG_OVERRIDES_KEY, JSON.stringify(blob));
+/**
+ * Persist the overrides blob. Returns false when storage rejected the write
+ * (quota exceeded, storage blocked) so callers can report it rather than
+ * throwing out of a devtools call and claiming a save that did not happen.
+ */
+const writeOverridesBlob = (blob: Record<string, string>): boolean => {
+  const storage = safeStorage();
+  if (!storage) return false;
+
+  try {
+    if (Object.keys(blob).length === 0) {
+      storage.removeItem(FEATURE_FLAG_OVERRIDES_KEY);
+    } else {
+      storage.setItem(FEATURE_FLAG_OVERRIDES_KEY, JSON.stringify(blob));
+    }
+    return true;
+  } catch (error) {
+    logger.error('[featureFlags] Failed to save overrides.', error);
+    return false;
   }
 };
 
@@ -227,9 +272,10 @@ export const installFlagsGlobal = (
   effectiveFlags: Record<string, unknown>,
   overridesEnabled: boolean
 ): void => {
-  if (!isBrowser() || !overridesEnabled) return;
+  if (!safeStorage() || !overridesEnabled) return;
 
-  const refresh = () => {
+  const refresh = (saved: boolean) => {
+    if (!saved) return;
     writeFlagManifest(definitions, baseFlags, effectiveFlags, overridesEnabled);
     logger.info('[featureFlags] Override saved. Reload the page to apply.');
   };
@@ -238,27 +284,27 @@ export const installFlagsGlobal = (
     list: () => buildManifest(definitions, baseFlags, effectiveFlags, true).flags,
     manifest: () => buildManifest(definitions, baseFlags, effectiveFlags, true),
     set: (key, value) => {
-      const descriptor = definitions[key];
-      if (!descriptor) {
+      // Own-property check for the same reason as readFlagOverrides above.
+      if (!Object.hasOwn(definitions, key)) {
         logger.error(`[featureFlags] Unknown flag "${key}".`);
         return;
       }
+      const descriptor = definitions[key]!;
       if (!descriptor.schema.safeParse(value).success) {
         logger.error(`[featureFlags] "${value}" is not a valid ${descriptor.typeName}.`);
         return;
       }
-      writeOverridesBlob({ ...(readOverridesBlob() as Record<string, string>), [key]: value });
-      refresh();
+      refresh(
+        writeOverridesBlob({ ...(readOverridesBlob() as Record<string, string>), [key]: value })
+      );
     },
     unset: (key) => {
       const blob = readOverridesBlob() as Record<string, string>;
       delete blob[key];
-      writeOverridesBlob(blob);
-      refresh();
+      refresh(writeOverridesBlob(blob));
     },
     reset: () => {
-      writeOverridesBlob({});
-      refresh();
+      refresh(writeOverridesBlob({}));
     },
   };
 
