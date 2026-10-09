@@ -76,6 +76,7 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
     NEMO_JOB_TASK_CONTAINER_NAME,
+    PAUSE_EXIT_CODE,
 )
 from nhx.core.jobs.app.providers import ComputeResources, ContainerSpec
 from nhx.core.jobs.controllers.backends.base import (
@@ -486,6 +487,58 @@ def list_pod_status(core_v1: client.CoreV1Api, namespace: str, labels: dict[str,
     return [map_pod_to_pod_status(pod) for pod in list_pods_by_labels(core_v1, namespace, labels)]
 
 
+def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
+    """Classify task containers while a step is pausing.
+
+    Returns ``(still_running, exit_code)``. ``still_running`` is true when a
+    task container has not exited. ``exit_code`` is ``75`` when a container
+    stopped for a pause and no other container failed, ``0`` when every task
+    container exited 0, and the first other code otherwise. It is ``None`` when
+    no task container has terminated.
+    """
+    if not pods:
+        return False, None
+    saw_exit = False
+    saw_pause = False
+    other: int | None = None
+    for pod in pods:
+        statuses: list[client.V1ContainerStatus] = []
+        if pod.status is not None and pod.status.container_statuses:
+            statuses = list(pod.status.container_statuses)
+        if not statuses:
+            phase = pod.status.phase if pod.status is not None else None
+            if phase in ("Succeeded", "Failed"):
+                continue
+            return True, None
+        for container in statuses:
+            terminated = container.state.terminated if container.state is not None else None
+            if terminated is None:
+                return True, None
+            saw_exit = True
+            code = terminated.exit_code if isinstance(terminated.exit_code, int) else 1
+            if code == PAUSE_EXIT_CODE:
+                saw_pause = True
+            elif code != 0 and other is None:
+                other = code
+    if not saw_exit:
+        return False, None
+    if other is not None:
+        return False, other
+    if saw_pause:
+        return False, PAUSE_EXIT_CODE
+    return False, 0
+
+
+def first_task_image_id(pods: list[V1Pod]) -> str | None:
+    """Return the first task container image id. Init containers are ignored."""
+    for pod in pods:
+        statuses = pod.status.container_statuses if pod.status is not None else None
+        for container in statuses or []:
+            if container.image_id:
+                return container.image_id
+    return None
+
+
 def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, str], str]:
     """Get details for pods associated with the step's k8s job."""
     try:
@@ -522,7 +575,10 @@ def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tup
                         "name": container_status.name,
                         "ready": container_status.ready,
                         "restart_count": container_status.restart_count,
+                        "image_id": container_status.image_id,
                     }
+                    if container_status.image_id and "image_digest" not in pod_info:
+                        pod_info["image_digest"] = container_status.image_id
                     if container_status.state and container_status.state.terminated:
                         container_info["terminated"] = {
                             "exit_code": container_status.state.terminated.exit_code,

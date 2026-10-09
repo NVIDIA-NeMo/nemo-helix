@@ -25,6 +25,7 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
+from nhx.core.jobs.app.lifecycle import describe_paused_exit, image_digest_updates, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import DistributedGPUExecutionProvider
 from nhx.core.jobs.app.schemas import BaseExecutionProfile
 from nhx.core.jobs.controllers.backends.base import (
@@ -37,13 +38,16 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     BaseKubernetesExecutionProfileConfig,
     build_event_field_selector,
     build_metadata,
+    classify_task_containers,
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
     delete_configmap,
+    first_task_image_id,
     get_namespace_from_environment,
     image_pull_backoff_failure,
+    list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
     update_all_tasks,
@@ -203,6 +207,15 @@ class VolcanoJobBackend(
         Schedule a Volcano Job using the Volcano Job CRD.
         """
         job_name = name_for_step(step)
+        existing_job = self.get_volcano_job_by_name(job_name)
+        if existing_job is not None:
+            phase = (existing_job.get("status") or {}).get("state", {}).get("phase")
+            if phase in ("Completed", "Failed"):
+                logger.info(
+                    "Removing finished Volcano job before scheduling the step again",
+                    extra={"job_name": job_name, "namespace": self.namespace, "phase": phase},
+                )
+                self.terminate_job(existing_job)
 
         # Basic labels for tracking
         common_labels = common_labels_for_step(step)
@@ -410,9 +423,71 @@ class VolcanoJobBackend(
         elif step.status == HelixJobStatus.CANCELLING:
             return self.sync_remove_job_with_status(step, HelixJobStatus.CANCELLED, volcano_job)
         elif step.status == HelixJobStatus.PAUSING:
-            raise NotImplementedError("Pausing not yet implemented for volcano backend.")
+            return self.sync_pausing(step, volcano_job)
         else:
             raise ValueError(f"Unhandled step status for sync: {step.status}")
+
+    def sync_pausing(self, step: HelixJobStepWithContext, volcano_job: dict | None) -> JobUpdate:
+        """Leave a pausing VolcanoJob running until it exits or the pause deadline passes.
+
+        Exit 75 is a pause. A Completed phase is exit 0, so training finished.
+        """
+        if pause_deadline_exceeded(step):
+            message = "Pause deadline exceeded"
+            return self.sync_remove_job_with_status(
+                step,
+                HelixJobStatus.ERROR,
+                volcano_job,
+                status_details={"message": message},
+                error_details={"message": message},
+            )
+        if volcano_job is None:
+            return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
+
+        phase = (volcano_job.get("status") or {}).get("state", {}).get("phase")
+        pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
+        digest_details = image_digest_updates(step.status_details, first_task_image_id(pods))
+        if phase not in ("Completed", "Failed"):
+            return JobUpdate(
+                status=HelixJobStatus.PAUSING,
+                status_details={"message": "Job is being paused", **digest_details},
+            )
+
+        running, exit_code = classify_task_containers(pods)
+        if running:
+            return JobUpdate(
+                status=HelixJobStatus.PAUSING,
+                status_details={"message": "Job is being paused", **digest_details},
+            )
+        if exit_code is None:
+            exit_code = 0 if phase == "Completed" else 1
+        status, message, error_details = describe_paused_exit(exit_code)
+        if status == HelixJobStatus.PAUSED:
+            self.terminate_job(volcano_job)
+        return JobUpdate(
+            status=status,
+            status_details={"message": message, **digest_details},
+            error_details=error_details or None,
+        )
+
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
+        storage = self._execution_profile_config.storage
+        if storage is None:
+            return
+        cleanup_job_persistent_storage(
+            namespace=self.namespace,
+            batch_v1=self._batch_v1,
+            pvc_name=storage.pvc_name,
+            workspace=workspace,
+            job_id=job,
+            step_name="retention",
+            permissions_image=storage.volume_permissions_image,
+            execution_backend=self.BACKEND_NAME,
+            execution_profile=self._profile_name,
+            job_metadata=self._execution_profile_config.job_metadata,
+            pod_metadata=self._execution_profile_config.pod_metadata,
+            pod_security_context=self._execution_profile_config.pod_security_context,
+        )
 
     def cleanup_steps(self):
         jobs = self.get_volcano_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)
@@ -606,6 +681,8 @@ class VolcanoJobBackend(
 
     def create_step_update(self, step: HelixJobStepWithContext, job: dict) -> JobUpdate:
         status, status_details = map_volcano_job_status_to_platform_status(job["status"])
+        pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
+        status_details.update(image_digest_updates(step.status_details, first_task_image_id(pods)))
         status_details["events"] = self.get_volcano_job_events(job)
         status_details["events"].extend(self.get_volcano_pod_group_events(job))
         tasks_has_error = update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)

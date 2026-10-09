@@ -21,6 +21,7 @@ from nemo_helix_plugin.jobs.types import (
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     ListStepsQueryParams,
+    PauseTTLUpdate,
 )
 
 from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
@@ -266,6 +267,21 @@ def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]
     if operation == (("jobs",), "resume"):
         return [
             "response = jobs_client.resume_job(name=args['name'], workspace=args.get('workspace'))",
+            "print(response.data())",
+        ]
+    if operation == (("jobs",), "rerun"):
+        return [
+            "response = jobs_client.rerun_job(job=args['name'], workspace=args.get('workspace'))",
+            "print(response.data())",
+        ]
+    if operation == (("jobs",), "pause_ttl"):
+        return [
+            "from nemo_helix_plugin.jobs.types import PauseTTLUpdate",
+            "response = jobs_client.update_pause_ttl(",
+            "    name=args['name'],",
+            "    workspace=args.get('workspace'),",
+            "    body=PauseTTLUpdate(pause_ttl_seconds=args['pause_ttl_seconds']),",
+            ")",
             "print(response.data())",
         ]
     if operation == (("jobs",), "get_status"):
@@ -956,6 +972,71 @@ def resume_jobs(
 
     _, jobs_client = _jobs_client_from_state(state)
     result = jobs_client.resume_job(name=name, workspace=workspace).data()
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@app.command("rerun")
+@collect_warnings
+@handle_errors
+def rerun_jobs(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Rerun a failed platform job from surviving storage."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = {"name": name, **build_kwargs(workspace=workspace)}
+    if handle_code_generation(["jobs"], "rerun", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.rerun_job(job=name, workspace=workspace).data()
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@app.command("pause-ttl")
+@collect_warnings
+@handle_errors
+def update_pause_ttl(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    pause_ttl_seconds: Annotated[
+        int, typer.Option("--seconds", help="How long to keep storage, measured from the pause.")
+    ],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Change how long a paused job keeps its storage."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = {"name": name, "pause_ttl_seconds": pause_ttl_seconds, **build_kwargs(workspace=workspace)}
+    if handle_code_generation(["jobs"], "pause_ttl", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.update_pause_ttl(
+        name=name,
+        workspace=workspace,
+        body=PauseTTLUpdate(pause_ttl_seconds=pause_ttl_seconds),
+    ).data()
 
     format_output(
         result,

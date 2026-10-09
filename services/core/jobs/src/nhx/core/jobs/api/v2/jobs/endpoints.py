@@ -11,6 +11,7 @@ from typing import Annotated, Any, Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
+from nemo_helix_plugin.jobs.types import PauseTTLUpdate
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -51,6 +52,7 @@ from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDeletionConflictError,
     JobDispatcher,
+    JobOperationConflictError,
     JobOutputLocationError,
     JobSecretValidationError,
     JobStatusUpdateSkippedError,
@@ -430,6 +432,7 @@ async def cancel_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
+        status.HTTP_409_CONFLICT: {"description": "The running step cannot be paused"},
     },
 )
 async def pause_job(
@@ -439,7 +442,10 @@ async def pause_job(
 ) -> HelixJobResponse:
     """Pause a platform job."""
     with scoped_app_ctx(JobContext(id=name)):
-        job = await dispatcher.pause_job(name, workspace)
+        try:
+            job = await dispatcher.pause_job(name, workspace)
+        except JobOperationConflictError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -453,6 +459,7 @@ async def pause_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
+        status.HTTP_409_CONFLICT: {"description": "The job cannot be resumed"},
     },
 )
 async def resume_job(
@@ -462,7 +469,38 @@ async def resume_job(
 ) -> HelixJobResponse:
     """Resume a paused platform job."""
     with scoped_app_ctx(JobContext(id=name)):
-        job = await dispatcher.resume_job(name, workspace)
+        try:
+            job = await dispatcher.resume_job(name, workspace)
+        except JobOperationConflictError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job '{name}' not found in workspace '{workspace}'.",
+            )
+        return job
+
+
+@router.patch(
+    "/v2/workspaces/{workspace}/jobs/{name}/pause-ttl",
+    responses={
+        status.HTTP_200_OK: {"description": "Successful Response"},
+        status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
+        status.HTTP_409_CONFLICT: {"description": "The pause window can only be changed while the job is paused"},
+    },
+)
+async def update_pause_ttl(
+    name: str,
+    workspace: str,
+    request: PauseTTLUpdate,
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> HelixJobResponse:
+    """Change how long a paused job keeps its storage."""
+    with scoped_app_ctx(JobContext(id=name)):
+        try:
+            job = await dispatcher.update_pause_ttl(name, workspace, request.pause_ttl_seconds)
+        except JobOperationConflictError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

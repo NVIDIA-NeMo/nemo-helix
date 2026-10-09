@@ -8,7 +8,7 @@ from nemo_helix_plugin.jobs.image import get_qualified_image
 from nhx.common.config import Runtime, create_service_config_class, get_platform_config, get_service_config
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
 from nhx.core.models.controllers.backends.registry import BackendConfig
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -428,13 +428,27 @@ class ModelsConfig(create_service_config_class("models")):  # type: ignore
     Contains both API and Controller configurations.
     """
 
-    huggingface_model_puller: str = Field(
-        default_factory=lambda: get_qualified_image("nhx-api"),
+    huggingface_model_puller: str | None = Field(
+        default=None,
         description="Image used to pull model weights. Its entrypoint is overridden to the "
         "Hugging Face CLI ('hf download ...'), so any image with the 'hf' CLI on PATH works. "
-        "Defaults to the platform's nhx-api image (registry/tag from platform config); override "
-        "to use a different puller image.",
+        "When unset, the platform image platform.image_registry/nhx-api:platform.image_tag is used.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_huggingface_model_puller(cls, data: Any) -> Any:
+        """Resolve the puller from platform config when the field is unset.
+
+        The default stays empty so config-reference generation, which uses
+        ``model_construct`` and skips validators, does not snapshot the
+        generator's live image registry.
+        """
+        if isinstance(data, dict) and not data.get("huggingface_model_puller"):
+            data = dict(data)
+            data["huggingface_model_puller"] = get_qualified_image("nhx-api")
+        return data
+
     controller: ControllerConfig = Field(
         default_factory=ControllerConfig, description="Controller service configuration"
     )
