@@ -6,6 +6,7 @@ vi.hoisted(() => {
 });
 
 import { getInsightsGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-configs';
+import { getInsightsGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-run-statuses';
 import type {
   AnalysisRunResponse,
   CreateAnalysisRunRequest,
@@ -162,6 +163,51 @@ describe('Run analysis modal', () => {
     const body = await submit(user, dialog);
 
     expect(body.since).toBe(new Date(PERIODIC_CURSOR).toISOString());
+  });
+
+  it('hides a cached cursor until the reopened modal refetches it', async () => {
+    const newerCursor = '2026-08-15T09:00:00Z';
+    server.use(analysisRunStatusHandler('react-agent', PERIODIC_CURSOR));
+    const { user, dialog } = await openModal();
+    await user.click(dialog.getByRole('combobox', { name: 'Traces to analyze' }));
+    await screen.findByRole('option', { name: /Since the last periodic analysis/ });
+    await user.keyboard('{Escape}');
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    let releaseStatus = () => {};
+    const statusGate = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
+    server.use(
+      http.get(
+        mockApiUrl(getInsightsGetStatusesAnalysisRunStatusQueryKey, ':workspace', ':agent'),
+        async () => {
+          await statusGate;
+          return HttpResponse.json({
+            id: 'insights-analysis-run-status-react-agent',
+            name: 'react-agent',
+            agent: 'react-agent',
+            status: 'idle',
+            last_successful_run_at: newerCursor,
+          });
+        }
+      )
+    );
+    await user.click(screen.getByRole('button', { name: 'Run analysis now' }));
+    const reopened = within(await screen.findByRole('dialog'));
+    await user.click(reopened.getByRole('combobox', { name: 'Traces to analyze' }));
+    await screen.findByRole('option', { name: 'Last 24 hours' });
+    expect(
+      screen.queryByRole('option', { name: /Since the last periodic analysis/ })
+    ).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    releaseStatus();
+    await pickPreset(user, reopened, /Since the last periodic analysis/);
+    const body = await submit(user, reopened);
+
+    expect(body.since).toBe(new Date(newerCursor).toISOString());
   });
 
   it('does not offer the cursor before the scheduler has run', async () => {

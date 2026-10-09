@@ -32,6 +32,10 @@ describe('runPollInterval', () => {
   });
 
   it('does not poll before the run has loaded', () => {
-    expect(runPollInterval(undefined, failedFetchAttempts)).toBe(false);
+    expect(runPollInterval(undefined, 0)).toBe(false);
+  });
+
+  it('retries at the list interval when the first detail fetch fails', () => {
+    expect(runPollInterval(undefined, failedFetchAttempts)).toBe(LIST_POLL_MS);
   });
 });

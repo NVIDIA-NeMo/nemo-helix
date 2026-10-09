@@ -52,7 +52,7 @@ export const runPollInterval = (
   data: AnalysisRunResponse | undefined,
   fetchFailureCount: number
 ): number | false => {
-  if (!data) return false;
+  if (!data) return fetchFailureCount > 0 ? LIST_POLL_MS : false;
   const interval = runStatusPollInterval(data);
   return interval !== false && fetchFailureCount > 0 ? LIST_POLL_MS : interval;
 };

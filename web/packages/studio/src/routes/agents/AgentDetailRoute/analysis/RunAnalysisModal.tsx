@@ -47,10 +47,15 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
   onClose,
   onRun,
 }) => {
-  const { data: runStatus } = useInsightsGetStatusesAnalysisRunStatus(workspace, agent, {
+  const {
+    data: runStatus,
+    isFetchedAfterMount,
+    isError,
+  } = useInsightsGetStatusesAnalysisRunStatus(workspace, agent, {
     query: { retry: false, staleTime: 0 },
   });
-  const periodicCursor = runStatus?.last_successful_run_at ?? undefined;
+  const periodicCursor =
+    isFetchedAfterMount && !isError ? (runStatus?.last_successful_run_at ?? undefined) : undefined;
   const [preset, setPreset] = useState<SincePreset>('all');
   const [custom, setCustom] = useState(() => toDateTimeLocalValue(new Date(Date.now() - DAY_MS)));
   const [evaluation, setEvaluation] = useState(ALL_TRACES);
