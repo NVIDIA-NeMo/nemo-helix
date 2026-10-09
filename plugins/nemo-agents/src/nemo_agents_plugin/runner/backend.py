@@ -108,6 +108,10 @@ class RunnerBackend(ABC):
     ) -> DeploymentInfo:
         """Start the agent process; returns status="starting".
 
+        ``port=0`` delegates allocation to the backend. The returned info
+        contains the actual port. Fabric subprocesses always reserve their
+        own socket; an explicit port applies only to NAT subprocesses.
+
         ``created_by`` is the principal id that created the deployment. When
         platform auth is enabled, container-mode backends delegate inference calls
         through the auth-proxy sidecar with this principal as on-behalf-of.
