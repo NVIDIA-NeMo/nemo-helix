@@ -21,7 +21,10 @@
       "@studio/*": ["./src/*"],
       "@e2e-tests/*": ["./e2e-tests/*"],
       "@screenshots/*": ["./screenshots/*"],
-      "@nemo/common/*": ["../common/*"]
+      "@nemo/common/*": ["../common/*"],
+      "@customizer-skill/*": [
+        "../../../plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/*"
+      ]
     },
     /* vitest */
     "types": [
