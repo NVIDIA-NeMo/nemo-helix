@@ -37,11 +37,18 @@ export const CANONICAL_FIELD_LABELS: Record<CanonicalField, string> = {
  *  ``toFieldMapping`` drops empty bindings at submit. */
 export const UNMAPPED = '';
 
-/** ``FieldMapping`` refuses any path with array indexing
- *  (``validate_supported_dataset_paths``: "array path segments are not supported
- *  for column mappings"), so ``messages[0].content`` — which
- *  ``extractUserFriendlyKeysFromRow`` happily produces — is not bindable. */
-export const isSupportedMappingPath = (path: string): boolean => !/[[\]]/.test(path);
+/** Mirrors ``FieldMapping`` path validation in ``nhx_evals_sdk.values.dataset_schemas``:
+ *  dotted keys with positional (``messages[1].content``) or predicate
+ *  (``messages[role=assistant].content``) segments. The ``[]`` wildcard, and a
+ *  predicate followed by another bracket group, are refused. */
+const FIELD_MAPPING_PATH = /^[^[\]]*(?:\[(?:[0-9]*|[^[\]"'.=\s]+=[^[\]"'.=\s]+)\](?:\.[^[\]]*)?)*$/;
+const PREDICATE_THEN_BRACKET = /\[[^[\]]*=[^[\]]*\]\[/;
+
+export const isSupportedMappingPath = (path: string): boolean =>
+  FIELD_MAPPING_PATH.test(path) && !path.includes('[]') && !PREDICATE_THEN_BRACKET.test(path);
+
+/** Whether a path addresses into an array rather than naming a column. */
+export const isArrayPath = (path: string): boolean => /[[\]]/.test(path);
 
 /** Plain-English judge guidance, generated from the Score Definitions.
  *
@@ -119,11 +126,8 @@ export const DEFAULT_CORRECTNESS_SCORE: PanelScoreFormData = {
   ],
 };
 
-/** The Jinja expressions templates use for each role a metric may need.
- *
- *  Not the same as ``field_mapping``: for an OpenAI messages dataset the binding
- *  is the whole array (``messages -> <column>``), because ``FieldMapping`` refuses
- *  a path containing ``[`` or ``]``, and the index lives in the template instead. */
+/** The Jinja expressions templates use for each role a metric may need. Always
+ *  the canonical names; ``field_mapping`` decides where each lives in the row. */
 export interface DatasetBindings {
   /** Set when the dataset is OpenAI messages format; the bound column's name. */
   messagesColumn: string | null;
@@ -132,8 +136,7 @@ export interface DatasetBindings {
   context: string | null;
   /** Dataset-relative dot-bracket paths for the same values, for resolving a
    *  preview against a real row via ``resolveKeyPath``. Templates cannot be used
-   *  for that: they are Jinja, and for a messages dataset they address the
-   *  canonical ``messages`` alias rather than the column's real name. */
+   *  for that: they name the canonical field, not where it sits in the row. */
   inputPath: string | null;
   referencePath: string | null;
 }
@@ -411,7 +414,7 @@ export const evaluationSchema = z
         code: z.ZodIssueCode.custom,
         path: mapping.messages ? ['dataset'] : ['fieldMapping', 'input'],
         message: mapping.messages
-          ? 'No user turn in this file to send as Input. Its last assistant message is not preceded by one.'
+          ? 'No user turn in this file to send as Input.'
           : 'Map a dataset field to Input.',
       });
     }
@@ -436,7 +439,7 @@ export const evaluationSchema = z
         code: z.ZodIssueCode.custom,
         path: mapping.messages ? ['body', 'metrics'] : ['fieldMapping', 'reference'],
         message: mapping.messages
-          ? 'This dataset has no assistant turn to compare against. Clear the metrics that score against the Reference.'
+          ? 'This dataset has no assistant reply to its last user turn to compare against. Clear the metrics that score against the Reference.'
           : 'This metric compares against the Reference, so Reference must be mapped.',
       });
     }

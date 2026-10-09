@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  lastExchange,
   type MessageSelector,
+  messagesPath,
+  messagesShape,
 } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 
 /** Mirrors ``extractUserFriendlyKeysFromRow``: `null` is a contentless message
@@ -13,67 +14,37 @@ const selectors = (...roles: (string | null)[]): MessageSelector[] =>
     role === null ? [] : [{ label: role, role, selector: `conversation[${index}].content` }]
   );
 
-describe('lastExchange', () => {
-  it('pairs a single-turn exchange', () => {
-    expect(lastExchange(selectors('user', 'assistant'))).toEqual({
-      user: 'conversation[0].content',
-      assistant: 'conversation[1].content',
-    });
+describe('messagesPath', () => {
+  it('selects the last turn with the role', () => {
+    expect(messagesPath('conversation', 'user')).toBe('conversation[role=user].content');
+    expect(messagesPath('conversation', 'assistant')).toBe('conversation[role=assistant].content');
   });
+});
 
-  it('pairs the last exchange of a multi-turn conversation', () => {
-    expect(lastExchange(selectors('user', 'assistant', 'user', 'assistant'))).toEqual({
-      user: 'conversation[2].content',
-      assistant: 'conversation[3].content',
-    });
-  });
-
-  it('ignores a leading system message', () => {
-    expect(lastExchange(selectors('system', 'user', 'assistant'))).toEqual({
-      user: 'conversation[1].content',
-      assistant: 'conversation[2].content',
-    });
-  });
-
-  // Regression: picking each role independently paired assistant[1] with the
-  // later user[2].
-  it('ignores a trailing unanswered user turn rather than pairing across it', () => {
-    expect(lastExchange(selectors('user', 'assistant', 'user'))).toEqual({
-      user: 'conversation[0].content',
-      assistant: 'conversation[1].content',
-    });
-  });
-
-  it('returns the last user turn and no reference when the file has no assistant', () => {
-    expect(lastExchange(selectors('user'))).toEqual({
-      user: 'conversation[0].content',
-      assistant: null,
-    });
-  });
-
-  it('takes the last user turn of a prompts-only file', () => {
-    expect(lastExchange(selectors('user', 'user'))).toEqual({
-      user: 'conversation[1].content',
-      assistant: null,
-    });
-  });
-
-  it('rejects both when the assistant turn is not preceded by a user turn', () => {
-    expect(lastExchange(selectors('system', 'assistant'))).toEqual({
-      user: null,
-      assistant: null,
-    });
-  });
-
-  // Adjacency uses the selector's index, not its position in the list.
-  it('rejects when a contentless message sits between the turns', () => {
-    expect(lastExchange(selectors('user', null, 'assistant'))).toEqual({
-      user: null,
-      assistant: null,
-    });
-  });
-
-  it('returns nothing for an empty selector list', () => {
-    expect(lastExchange([])).toEqual({ user: null, assistant: null });
+describe('messagesShape', () => {
+  it.each([
+    ['a single-turn exchange', ['user', 'assistant'], { input: true, reference: true }],
+    [
+      'a multi-turn conversation',
+      ['user', 'assistant', 'user', 'assistant'],
+      { input: true, reference: true },
+    ],
+    ['a leading system message', ['system', 'user', 'assistant'], { input: true, reference: true }],
+    // The last user turn is unanswered, so the earlier reply is not its reference.
+    ['a trailing user turn', ['user', 'assistant', 'user'], { input: true, reference: false }],
+    ['no assistant turn', ['user'], { input: true, reference: false }],
+    ['a prompts-only file', ['user', 'user'], { input: true, reference: false }],
+    ['no user turn', ['system', 'assistant'], { input: false, reference: false }],
+    // A contentless turn (e.g. a tool call) between the two does not break the pair.
+    [
+      'a contentless turn in between',
+      ['user', null, 'assistant'],
+      { input: true, reference: true },
+    ],
+    // A contentless assistant turn is not a reference.
+    ['a contentless last reply', ['user', null], { input: true, reference: false }],
+    ['no messages', [], { input: false, reference: false }],
+  ] as const)('handles %s', (_, roles, expected) => {
+    expect(messagesShape(selectors(...roles))).toEqual(expected);
   });
 });
