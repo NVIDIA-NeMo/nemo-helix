@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
+import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import {
   HelixJobResponse,
   HelixJobResponsesPage,
@@ -14,7 +15,7 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { getWorkspaceJobsRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
-import { fireEvent } from '@testing-library/react';
+import { act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -214,6 +215,45 @@ describe('JobsDataView', () => {
     renderComponent();
 
     expect(await screen.findByTestId('error-panel')).toBeInTheDocument();
+  });
+
+  describe('polling', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('picks up new jobs without user interaction', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let jobs = [makeJob({ name: 'first-job' })];
+      server.use(http.get(JOBS_URL, () => HttpResponse.json(makeJobsPage(jobs))));
+
+      renderComponent();
+      expect(await screen.findByText('first-job')).toBeInTheDocument();
+
+      jobs = [makeJob({ name: 'second-job', id: 'job-id-2' }), ...jobs];
+      await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_MS));
+
+      expect(await screen.findByText('second-job')).toBeInTheDocument();
+    });
+
+    it('stops polling while the list is in error', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let requestCount = 0;
+      server.use(
+        http.get(JOBS_URL, () => {
+          requestCount += 1;
+          return HttpResponse.error();
+        })
+      );
+
+      renderComponent();
+      expect(await screen.findByTestId('error-panel')).toBeInTheDocument();
+
+      const countAtError = requestCount;
+      await vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_MS * 3);
+
+      expect(requestCount).toBe(countAtError);
+    });
   });
 
   it('shows search input with correct placeholder', async () => {
