@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import errno
 import logging
 import os
 import re
@@ -32,6 +33,8 @@ import shutil
 import socket
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -242,14 +245,34 @@ class InMemoryRunnerBackend(RunnerBackend):
         Raises:
             RuntimeError: If no free port is found in the entire range.
         """
+        candidate = next(port for port in self._port_candidates() if self._is_port_free(port))
+        self._next_port = candidate + 1 if candidate < self._config.port_range_end else self._config.port_range_start
+        return candidate
+
+    @contextmanager
+    def reserve_socket(self) -> Iterator[socket.socket]:
+        """Reserve a loopback socket until context exit; the caller may pass it to a child."""
+        for candidate in self._port_candidates():
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                try:
+                    sock.bind(("127.0.0.1", candidate))
+                except OSError as exc:
+                    if exc.errno == errno.EADDRINUSE:
+                        continue
+                    raise
+                self._next_port = (
+                    candidate + 1 if candidate < self._config.port_range_end else self._config.port_range_start
+                )
+                yield sock
+                return
+
+    def _port_candidates(self) -> Iterator[int]:
         start = self._config.port_range_start
         end = self._config.port_range_end
         span = end - start + 1
         for offset in range(span):
             candidate = start + (self._next_port - start + offset) % span
-            if self._is_port_free(candidate):
-                self._next_port = candidate + 1 if candidate < end else start
-                return candidate
+            yield candidate
         raise RuntimeError(
             f"No free port available in range [{start}, {end}]. "
             "Consider adjusting NHX_AGENTS_CONTROLLER_PORT_RANGE_START / _END."
@@ -291,8 +314,9 @@ class InMemoryRunnerBackend(RunnerBackend):
         # resource isolation and injects no managed secrets.
         del image, deployment_mode, created_by, auth_context, resources, secrets, use_image_entrypoint
         if config.get("config_format") == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-            return await self._create_fabric_deployment(workspace, name, config, port, agent=agent)
+            return await self._create_fabric_deployment(workspace, name, config, agent=agent)
 
+        port = port or self.allocate_port()
         key = (workspace, name)
         config_path = await asyncio.to_thread(self._write_config, workspace, name, config)
         log_path = self.log_path_for(workspace, name)
@@ -328,7 +352,6 @@ class InMemoryRunnerBackend(RunnerBackend):
         workspace: str,
         name: str,
         config: dict[str, Any],
-        port: int,
         *,
         agent: str = "",
     ) -> DeploymentInfo:
@@ -337,24 +360,43 @@ class InMemoryRunnerBackend(RunnerBackend):
         base_dir = self._fabric_base_dir_for(workspace, name)
         await asyncio.to_thread(base_dir.mkdir, parents=True, exist_ok=True)
         try:
-            staged_spec = await self._stage_ethos(workspace, agent, config, base_dir)
-            # After staging so the support probe plans against a populated
-            # base_dir, and before the write so the staged config -- which is
-            # what the child process reads -- carries the export.
-            config = await asyncio.to_thread(configure_intake_telemetry, config, workspace=workspace, base_dir=base_dir)
-            config_path = await asyncio.to_thread(self._write_fabric_config, base_dir, config)
-            await validate_platform_agent_config(config, base_dir=base_dir)
-            log_path = self.log_path_for(workspace, name)
-            credential_env = platform_gateway_credential_env(config)
-            proc = await asyncio.to_thread(
-                self._spawn_fabric,
-                name,
-                config_path,
-                log_path,
-                port,
-                credential_env,
-            )
-        except Exception:
+            with self.reserve_socket() as reserved:
+                port = reserved.getsockname()[1]
+                staged_spec = await self._stage_ethos(workspace, agent, config, base_dir)
+                # After staging so the support probe plans against a populated
+                # base_dir, and before the write so the staged config -- which is
+                # what the child process reads -- carries the export.
+                config = await asyncio.to_thread(
+                    configure_intake_telemetry, config, workspace=workspace, base_dir=base_dir
+                )
+                config_path = await asyncio.to_thread(self._write_fabric_config, base_dir, config)
+                await validate_platform_agent_config(config, base_dir=base_dir)
+                log_path = self.log_path_for(workspace, name)
+                credential_env = platform_gateway_credential_env(config)
+                spawn_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        self._spawn_fabric,
+                        name,
+                        config_path,
+                        log_path,
+                        port,
+                        credential_env,
+                        socket_fd=reserved.fileno(),
+                    )
+                )
+                try:
+                    # A cancelled await must not close the socket while Popen still needs it.
+                    proc = await asyncio.shield(spawn_task)
+                except asyncio.CancelledError:
+                    while not spawn_task.done():
+                        try:
+                            await asyncio.shield(spawn_task)
+                        except asyncio.CancelledError:
+                            continue
+                    proc = spawn_task.result()
+                    await asyncio.to_thread(self._terminate, name, proc)
+                    raise
+        except (Exception, asyncio.CancelledError):
             await asyncio.to_thread(shutil.rmtree, base_dir, ignore_errors=True)
             raise
 
@@ -551,6 +593,8 @@ class InMemoryRunnerBackend(RunnerBackend):
         log_path: Path,
         port: int,
         credential_env: dict[str, str] | None = None,
+        *,
+        socket_fd: int,
     ) -> subprocess.Popen[bytes]:
         """Spawn the Platform-owned Fabric server on a loopback port."""
         cmd = [
@@ -563,6 +607,8 @@ class InMemoryRunnerBackend(RunnerBackend):
             "127.0.0.1",
             "--port",
             str(port),
+            "--socket-fd",
+            str(socket_fd),
         ]
         log_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info("Spawning: %s  (log: %s)", " ".join(cmd), log_path)
@@ -570,7 +616,9 @@ class InMemoryRunnerBackend(RunnerBackend):
         child_env = os.environ.copy()
         child_env.update(credential_env or {})
         try:
-            return subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, env=child_env)
+            return subprocess.Popen(
+                cmd, stdout=log_file, stderr=subprocess.STDOUT, env=child_env, pass_fds=(socket_fd,)
+            )
         finally:
             log_file.close()
 

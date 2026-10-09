@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import errno
 import socket
 from unittest.mock import patch
 
@@ -143,3 +144,48 @@ def test_allocate_port_error_message_includes_range() -> None:
     with patch.object(InMemoryRunnerBackend, "_is_port_free", return_value=False):
         with pytest.raises(RuntimeError, match=r"\[49152, 49153\]"):
             backend.allocate_port()
+
+
+def test_reservation_blocks_competing_backend_until_released() -> None:
+    backend = _backend(start=49152, end=65535)
+    with backend.reserve_socket() as reserved:
+        host, port = reserved.getsockname()
+        assert host == "127.0.0.1"
+        competitor = _backend(start=port, end=port)
+        with pytest.raises(RuntimeError, match="No free port available"):
+            with competitor.reserve_socket():
+                pytest.fail("Reserved port was allocated twice")
+
+    assert reserved.fileno() == -1
+    with competitor.reserve_socket() as reused:
+        assert reused.getsockname() == (host, port)
+        assert competitor._next_port == port
+
+
+def test_reservation_skips_occupied_port_when_revisited() -> None:
+    backend = _backend(start=49152, end=65535)
+    with backend.reserve_socket() as first:
+        first_port = first.getsockname()[1]
+        backend._next_port = first_port
+        with backend.reserve_socket() as second:
+            second_port = second.getsockname()[1]
+            assert second_port != first_port
+            assert backend._next_port == (second_port + 1 if second_port < 65535 else 49152)
+
+
+def test_reservation_closes_on_caller_error() -> None:
+    backend = _backend(start=49152, end=65535)
+    with pytest.raises(ValueError, match="staging failed"):
+        with backend.reserve_socket() as reserved:
+            raise ValueError("staging failed")
+    assert reserved.fileno() == -1
+
+
+def test_reservation_propagates_permission_error_and_closes_socket() -> None:
+    with patch("nemo_agents_plugin.runner.in_memory.socket.socket") as socket_cls:
+        sock = socket_cls.return_value.__enter__.return_value
+        sock.bind.side_effect = PermissionError(errno.EACCES, "Permission denied")
+        with pytest.raises(PermissionError):
+            with _backend().reserve_socket():
+                pytest.fail("Reservation succeeded without bind permission")
+        socket_cls.return_value.__exit__.assert_called_once()
