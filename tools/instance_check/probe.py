@@ -94,6 +94,7 @@ def main():
         "secret_expected": bool(os.environ.get("INSTANCE_CHECK_SECRET_SHA256")),
         "secret_matches": None,
         "model_call": {"skipped": True},
+        "report_id": os.environ.get("INSTANCE_CHECK_REPORT_ID") or "",
         "report_stored": False,
         "auth_proxy": os.environ.get("INSTANCE_CHECK_AUTH_PROXY") == "1",
     }
@@ -131,7 +132,11 @@ def main():
                     "email": str(getattr(who, "email", "") or ""),
                     "on_behalf_of": seen_obo,
                 }
-                report["mode"] = "on_behalf_of"
+                # A workload-identity token is the token-exchange proof. A later
+                # authenticate() call also returns a principal, and must not
+                # relabel that proof as on-behalf-of.
+                if report["mode"] != "workload_identity":
+                    report["mode"] = "on_behalf_of"
         except Exception:
             pass
 

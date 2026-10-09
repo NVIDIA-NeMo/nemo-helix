@@ -81,8 +81,8 @@ def check_secret(platform_client: NemoClient, workspace: str) -> Iterator[dict[s
     }
     try:
         secrets_client.delete_secret(workspace=workspace, name=name)
-    except Exception:
-        return
+    except Exception as exc:
+        print(f"cleanup secret {name} failed: {type(exc).__name__}: {exc}", flush=True)
 
 
 @pytest.fixture(scope="session")
@@ -104,7 +104,7 @@ def selected_model(platform_client: NemoClient, workspace: str) -> str | None:
 def task_image(platform_client: NemoClient) -> str | None:
     """Image for deployment probes. Jobs can omit it and use the profile default."""
     settings = load_settings()
-    image = resolve_check_image(platform_client, settings.image, settings.job_profile)
+    image = resolve_check_image(platform_client, settings.image, settings.job_profile or "default")
     if image:
         print(f"deployment task image: {image}", flush=True)
     return image

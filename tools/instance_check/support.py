@@ -268,27 +268,43 @@ def job_log_text(client: NemoClient, workspace: str, name: str) -> str:
     return "\n".join(item.message for item in logs.data if item.message)
 
 
-def load_job_report(client: NemoClient, workspace: str, name: str, path: str) -> dict[str, Any]:
+def report_path(kind: str, report_id: str) -> str:
+    """Fileset path for one probe run. A reused workspace cannot see another run's report."""
+    return f"{kind}-{report_id}.json"
+
+
+def accept_report(report: dict[str, Any] | None, report_id: str) -> dict[str, Any] | None:
+    """Return *report* only when it was written by this run."""
+    if report is None or report.get("report_id") != report_id:
+        return None
+    return report
+
+
+def load_job_report(client: NemoClient, workspace: str, name: str, path: str, report_id: str) -> dict[str, Any]:
     """Prefer the fileset report, then the ``INSTANCE_CHECK_AUTH`` log line."""
     try:
-        report = download_report(client, workspace, path)
+        report = accept_report(download_report(client, workspace, path), report_id)
     except Exception:
         report = None
     if report is not None:
         return report
-    parsed = parse_auth_report(job_log_text(client, workspace, name))
+    parsed = accept_report(parse_auth_report(job_log_text(client, workspace, name)), report_id)
     if parsed is None:
         raise RuntimeError(f"job {name} produced no auth report")
     return parsed
 
 
-def load_deployment_report(client: NemoClient, workspace: str, path: str) -> dict[str, Any]:
-    """Read the deployment report. Deployments have no log API."""
+def load_deployment_report(client: NemoClient, workspace: str, path: str, report_id: str) -> dict[str, Any]:
+    """Read the deployment report. Deployments have no log API.
+
+    The deadline is a short grace after the deployment is already terminal.
+    The workload wait uses ``--timeout`` separately.
+    """
     deadline = time.monotonic() + 30
     last_error = "report was not uploaded"
     while time.monotonic() < deadline:
         try:
-            report = download_report(client, workspace, path)
+            report = accept_report(download_report(client, workspace, path), report_id)
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             report = None

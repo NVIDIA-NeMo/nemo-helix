@@ -56,6 +56,7 @@ from support import (
     load_job_report,
     load_settings,
     read_platform_probe,
+    report_path,
     retry_until_workspace_granted,
     show_report,
     split_image,
@@ -141,6 +142,7 @@ def test_job_auth_probe(
     """A job can call an authenticated API, and its auth report matches discovery."""
     settings = load_settings()
     jobs = JobsClient.from_client(platform_client)
+    report_id = uuid.uuid4().hex
     container: dict[str, object] = {"entrypoint": ["python", "-c"], "command": [_PROBE]}
     if task_image:
         container["image"] = task_image
@@ -158,7 +160,7 @@ def test_job_auth_probe(
                             profile=settings.job_profile or "default",
                             container=ContainerSpec.model_validate(container),
                         ),
-                        environment=_job_environment(workspace, selected_model),
+                        environment=_job_environment(workspace, selected_model, report_id),
                         config={"workspace": workspace},
                     )
                 ]
@@ -167,7 +169,7 @@ def test_job_auth_probe(
     ).data()
     try:
         job = wait_for_job(platform_client, workspace, created.name, settings.timeout)
-        report = _job_report_or_fail(platform_client, workspace, job)
+        report = _job_report_or_fail(platform_client, workspace, job, report_id)
         _assert_report(
             "job",
             report,
@@ -200,6 +202,7 @@ def test_deployment_auth_probe(
     if not task_image:
         pytest.skip("no task image; pass --image")
     settings = load_settings()
+    report_id = uuid.uuid4().hex
     config_name = f"check-cfg-{uuid.uuid4().hex[:8]}"
     deployment_name = f"check-dep-{uuid.uuid4().hex[:8]}"
     deployments = DeploymentsClient.from_client(platform_client)
@@ -222,6 +225,7 @@ def test_deployment_auth_probe(
                             selected_model,
                             profile == "token_exchange",
                             str(platform_client.base_url).rstrip("/"),
+                            report_id,
                         ),
                     }
                 ],
@@ -241,7 +245,7 @@ def test_deployment_auth_probe(
         )
         deployment = wait_for_deployment(platform_client, workspace, deployment_name, settings.timeout)
         try:
-            report = load_deployment_report(platform_client, workspace, "deployment.json")
+            report = load_deployment_report(platform_client, workspace, report_path("deployment", report_id), report_id)
         except RuntimeError as exc:
             payload = deployment.model_dump(mode="json")
             raise RuntimeError(
@@ -400,13 +404,14 @@ def test_model_deploy(platform_client: NemoClient, workspace: str) -> None:
         _ignore_missing(lambda: models.delete_deployment_config(workspace=workspace, name=config_name))
 
 
-def _job_environment(workspace: str, model: str | None) -> list[HelixJobEnvironmentVariable]:
+def _job_environment(workspace: str, model: str | None, report_id: str) -> list[HelixJobEnvironmentVariable]:
     environment = [
         HelixJobEnvironmentVariable(name="INSTANCE_CHECK_KIND", value="job"),
         HelixJobEnvironmentVariable(name="INSTANCE_CHECK_SERVICE", value="jobs"),
         HelixJobEnvironmentVariable(name="INSTANCE_CHECK_WORKSPACE", value=workspace),
         HelixJobEnvironmentVariable(name="INSTANCE_CHECK_FILESET", value=FILESET_NAME),
-        HelixJobEnvironmentVariable(name="INSTANCE_CHECK_REPORT_PATH", value="job.json"),
+        HelixJobEnvironmentVariable(name="INSTANCE_CHECK_REPORT_ID", value=report_id),
+        HelixJobEnvironmentVariable(name="INSTANCE_CHECK_REPORT_PATH", value=report_path("job", report_id)),
     ]
     if model:
         environment.append(HelixJobEnvironmentVariable(name="INSTANCE_CHECK_MODEL", value=model))
@@ -419,13 +424,15 @@ def _deployment_environment(
     model: str | None,
     workload_identity: bool,
     platform_url: str | None,
+    report_id: str,
 ) -> list[RequestEnvVar]:
     environment = [
         RequestEnvVar(name="INSTANCE_CHECK_KIND", value="deployment"),
         RequestEnvVar(name="INSTANCE_CHECK_SERVICE", value="deployments"),
         RequestEnvVar(name="INSTANCE_CHECK_WORKSPACE", value=workspace),
         RequestEnvVar(name="INSTANCE_CHECK_FILESET", value=FILESET_NAME),
-        RequestEnvVar(name="INSTANCE_CHECK_REPORT_PATH", value="deployment.json"),
+        RequestEnvVar(name="INSTANCE_CHECK_REPORT_ID", value=report_id),
+        RequestEnvVar(name="INSTANCE_CHECK_REPORT_PATH", value=report_path("deployment", report_id)),
         RequestEnvVar(name="INSTANCE_CHECK_SECRET_SHA256", value=secret["sha256"]),
         RequestEnvVar.model_validate(
             {
@@ -443,9 +450,9 @@ def _deployment_environment(
     return environment
 
 
-def _job_report_or_fail(client: NemoClient, workspace: str, job: HelixJobResponse) -> dict[str, Any]:
+def _job_report_or_fail(client: NemoClient, workspace: str, job: HelixJobResponse, report_id: str) -> dict[str, Any]:
     try:
-        return load_job_report(client, workspace, job.name, "job.json")
+        return load_job_report(client, workspace, job.name, report_path("job", report_id), report_id)
     except RuntimeError as exc:
         pytest.fail(f"{exc}\n{_job_status_problem(job) or ''}")
 
