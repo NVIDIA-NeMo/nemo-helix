@@ -251,11 +251,14 @@ class InMemoryRunnerBackend(RunnerBackend):
 
     @contextmanager
     def reserve_socket(self) -> Iterator[socket.socket]:
-        """Reserve a loopback socket until context exit; the caller may pass it to a child."""
+        """Reserve a listening loopback socket until context exit for handoff to a child."""
         for candidate in self._port_candidates():
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try:
                     sock.bind(("127.0.0.1", candidate))
+                    # Listening makes the reservation exclusive even with SO_REUSEADDR.
+                    sock.listen()
                 except OSError as exc:
                     if exc.errno == errno.EADDRINUSE:
                         continue

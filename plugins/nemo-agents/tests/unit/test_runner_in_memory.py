@@ -948,7 +948,9 @@ def test_spawn_fabric_inherits_socket_after_parent_closes(tmp_path: Path) -> Non
         assert proc.returncode == 0
         assert stdout.strip() == str(port).encode()
         with socket.socket() as replacement:
+            replacement.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             replacement.bind(("127.0.0.1", port))
+            replacement.listen()
     finally:
         if proc is not None and proc.poll() is None:
             proc.kill()
@@ -1050,6 +1052,8 @@ async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) 
         assert sockets[0].fileno() == -1
         if failure:
             with socket.socket() as replacement:
+                replacement.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 replacement.bind(addresses[0])
+                replacement.listen()
             assert not backend._fabric_base_dir_for("ws", "dep").exists()
             assert await backend.get_deployment_status("ws", "dep") is None

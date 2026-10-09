@@ -89,7 +89,8 @@ def test_allocate_port_raises_when_range_exhausted() -> None:
             backend.allocate_port()
 
 
-def test_reservation_blocks_competing_backend_until_released() -> None:
+@pytest.mark.parametrize("serve_connection", [False, True], ids=["unused", "served-connection"])
+def test_reservation_blocks_competing_backend_until_released(serve_connection: bool) -> None:
     backend = _backend(start=49152, end=65535)
     with backend.reserve_socket() as reserved:
         host, port = reserved.getsockname()
@@ -98,6 +99,13 @@ def test_reservation_blocks_competing_backend_until_released() -> None:
         with pytest.raises(RuntimeError, match="No free port available"):
             with competitor.reserve_socket():
                 pytest.fail("Reserved port was allocated twice")
+        if serve_connection:
+            reserved.listen()
+            with socket.create_connection((host, port), timeout=2) as client:
+                connection, _ = reserved.accept()
+                # Server closes first so the accepted connection enters TIME_WAIT.
+                connection.close()
+                assert client.recv(1) == b""
 
     assert reserved.fileno() == -1
     with competitor.reserve_socket() as reused:
