@@ -110,9 +110,11 @@ def _build_step(
             sandbox=SandboxSpec(
                 image=sandbox_image,
                 provider=config.sandbox.provider,
+                opensandbox=config.sandbox.opensandbox,
                 work_pvc=work_profile.storage.pvc_name,
                 node_selector=work_profile.node_selector,
                 dns_nameservers=config.sandbox.dns_nameservers,
+                egress_allow=config.sandbox.egress_allow,
                 cpu=config.sandbox.cpu,
                 memory=config.sandbox.memory,
                 image_pull_secrets=image_pull_secrets,

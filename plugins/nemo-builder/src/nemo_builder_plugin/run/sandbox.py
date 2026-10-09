@@ -3,9 +3,8 @@
 
 """What every sandbox provider shares: the same mounts, and the same kaniko run.
 
-A provider is how ``supervise`` gets a sandbox; ``kubernetes_pod``, a plain pod, is the only one so far. Whichever it
-is, the sandbox runs the caller's Dockerfiles, so it holds no ServiceAccount token, no secret, and no credential in
-its environment.
+A provider is how ``supervise`` gets a sandbox: a plain Kubernetes pod, or OpenSandbox. Either way the sandbox runs
+the caller's Dockerfiles, so it holds no ServiceAccount token, no secret, and no credential in its environment.
 """
 
 from __future__ import annotations

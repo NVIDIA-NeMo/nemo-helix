@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, ClassVar, Literal, Self
 
 from nemo_builder_plugin.identity import ImageIdentityError, validate_registry_host, validate_repository
+from nemo_builder_plugin.steps import DEFAULT_EGRESS_ALLOW, OpenSandboxServer
 from nemo_helix_plugin.config import NemoConfig
 from pydantic import (
     BaseModel,
@@ -38,26 +39,46 @@ class SandboxConfig(BaseModel):
         description=(
             "The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` "
             "at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take "
-            "the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have."
+            "the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have. "
+            "OpenSandbox also needs `/bin/sh` and `/kaniko/nhx-dropcaps`, which the release's has."
         ),
     )
-    provider: Literal["kubernetes_pod"] = Field(
+    provider: Literal["kubernetes_pod", "opensandbox"] = Field(
         default="kubernetes_pod",
         description=(
-            "What runs each sandbox. `kubernetes_pod`, the only one so far, is a plain pod the build step creates, "
-            "hardened by the builder, with an unrestricted network: use it only with Dockerfiles you trust."
+            "What runs each sandbox: a plain pod the build step creates, hardened by the builder, with an unrestricted "
+            "network, so use it only with Dockerfiles you trust; or an OpenSandbox sandbox, hardened by the server's "
+            "template, with egress denied but to `egress_allow`."
         ),
+    )
+    opensandbox: OpenSandboxServer | None = Field(
+        default=None,
+        description="The OpenSandbox server, for `provider: opensandbox`. Unset with that provider refuses every submit.",
     )
     cpu: str = Field(default="2", description="CPU for each sandbox: its request and its limit.")
     memory: str = Field(default="8Gi", description="Memory for each sandbox: its request and its limit.")
     ephemeral_storage: str = Field(
         default="20Gi",
-        description="Ephemeral storage for each sandbox, its request and its limit: kaniko unpacks each base image into it.",
+        description=(
+            "Ephemeral storage for each plain pod sandbox, its request and its limit: kaniko unpacks each base image "
+            "into it. An OpenSandbox sandbox's comes from the server's template."
+        ),
     )
     dns_nameservers: list[str] = Field(
         default_factory=lambda: ["8.8.8.8", "1.1.1.1"],
         description=(
-            "Resolvers the sandbox uses instead of cluster DNS, so a network policy can block every cluster address."
+            "Resolvers a plain pod sandbox uses instead of cluster DNS, so a network policy can block every cluster "
+            "address. OpenSandbox's come from the server's template."
+        ),
+    )
+    egress_allow: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_EGRESS_ALLOW),
+        description=(
+            "What an OpenSandbox sandbox may reach: names, `*.`-prefixed wildcards, addresses or CIDRs. Everything "
+            "else is denied, and so is every private range, the cluster's and the metadata server's included, unless "
+            "an address here is in it: a CIDR here is taken out of the denied ranges, so `0.0.0.0/0` would leave no "
+            "IPv4 range denied. Base images and package indexes must be reachable through it. A plain pod sandbox's "
+            "network is unrestricted."
         ),
     )
 
