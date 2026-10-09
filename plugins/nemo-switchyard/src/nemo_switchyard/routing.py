@@ -39,6 +39,7 @@ class Combination:
 
 
 def build_combinations(spec: SwitchyardOptimizeSpec, *, agent_name: str) -> list[Combination]:
+    """One Combination per (capable, efficient) model pair and routing strategy, each named for its VirtualModel."""
     refs = [_qualify(ref, spec.workspace) for ref in spec.models]
     judge = _qualify(spec.judge_model, spec.workspace) if spec.judge_model else None
     built: list[Combination] = []
@@ -68,6 +69,7 @@ def build_combinations(spec: SwitchyardOptimizeSpec, *, agent_name: str) -> list
 
 
 def _routing_digest(config_type: str, config: dict[str, Any]) -> str:
+    """A short, stable hash of the strategy and middleware config, used to make VirtualModel names unique."""
     payload = json.dumps({"config_type": config_type, "config": config}, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:8]
 
