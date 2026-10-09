@@ -27,8 +27,10 @@ from nhx.core.auth.app.access_keys import (
     AccessKeyNotFoundError,
     AccessKeyRegistry,
     AccessKeyStateConflictError,
+    AdminOverride,
     PersistentAccessKeyIssuer,
     get_access_key_registry,
+    resolve_workspace_id,
 )
 
 from . import schemas
@@ -71,7 +73,7 @@ _ACCESS_KEY_CREATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": schemas.AccessKeyErrorResponse,
     },
     403: {
-        "description": "Service-bound Scoped Access Keys require HelixAdmin",
+        "description": "Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace",
         "model": schemas.AccessKeyErrorResponse,
     },
     404: _ACCESS_KEY_DISABLED_ERROR_RESPONSE,
@@ -103,18 +105,48 @@ _ACCESS_KEY_ROTATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
-async def _is_platform_admin(auth_client: AuthClient) -> bool:
-    # Only human HelixAdmins may create or manage service-bound Scoped Access Keys — the
-    # same invariant AccessKeyIssuerService._target_principal enforces for creation. A
-    # service-account principal must never qualify here, even if it were ever (mis)granted
-    # the HelixAdmin role, since that would let a service credential manage other
-    # service-bound credentials, including its own.
-    if auth_client.principal.effective_principal.is_service_identity():
-        return False
-    # Deny (rather than has_role's own default-allow) when auth is globally disabled: there is
-    # no real identity to check "is HelixAdmin" against, so we don't silently grant this
-    # highly privileged, service-account-impersonating capability.
-    return auth_client.auth_enabled and await auth_client.has_role("system", "HelixAdmin")
+def _service_key_admin_check(auth_client: AuthClient, workspaces_client: AsyncWorkspacesClient) -> AdminOverride:
+    """Build the per-request check for managing service-bound Scoped Access Keys.
+
+    Only humans may create or manage service-bound keys, matching
+    AccessKeyIssuerService._target_principal. A service account never qualifies, even if
+    granted HelixAdmin or workspace Admin, so it can't manage service credentials. A
+    HelixAdmin qualifies for any key; a workspace Admin only for keys bound to their own
+    workspace. The HelixAdmin role is resolved once per request, however many workspaces
+    are checked.
+    """
+    is_helix_admin: bool | None = None
+
+    async def can_administer(workspace: str | None, workspace_id: str | None = None) -> bool:
+        """Whether the caller is a human HelixAdmin, or Admin of the (unchanged) bound workspace."""
+        nonlocal is_helix_admin
+        if auth_client.principal.effective_principal.is_service_identity():
+            return False
+        # Deny (rather than has_role's default-allow) when auth is disabled: there is no real
+        # identity to check.
+        if not auth_client.auth_enabled:
+            return False
+        if is_helix_admin is None:
+            is_helix_admin = await auth_client.has_role("system", "HelixAdmin")
+        if is_helix_admin:
+            return True
+        if workspace is None:
+            return False
+        if workspace_id is None:
+            return await auth_client.has_role(workspace, "Admin")
+
+        # The key was bound to a specific workspace; a deleted and recreated workspace with the
+        # same name must not inherit it. has_role resolves the workspace by name, so read the ID
+        # before and after it: IDs are unique, so a match on both reads means the same workspace
+        # held the name throughout the role check. A workspace that is gone (or unreadable by the
+        # caller) fails closed; a transient lookup failure is a 503, like a failed has_role.
+        if await resolve_workspace_id(workspaces_client, workspace) != workspace_id:
+            return False
+        if not await auth_client.has_role(workspace, "Admin"):
+            return False
+        return await resolve_workspace_id(workspaces_client, workspace) == workspace_id
+
+    return can_administer
 
 
 def get_workspaces_client(
@@ -142,7 +174,7 @@ def get_access_key_issuer(
         auth_client.principal.effective_principal,
         registry,
         workspaces_client,
-        admin_override=lambda: _is_platform_admin(auth_client),
+        admin_override=_service_key_admin_check(auth_client, workspaces_client),
         caller_scope=_caller_access_key_scope(auth_client),
     )
 
@@ -191,12 +223,12 @@ async def create_access_key(
             if not get_auth_config().access_keys.enabled:
                 raise AccessKeyFeatureDisabledError("Scoped Access Keys are not enabled")
             # Delegates to the issuer's own memoized admin check (rather than calling
-            # _is_platform_admin(auth_client) directly here) so this pre-check and
+            # _service_key_admin_check(...) directly here) so this pre-check and
             # create_async's defense-in-depth re-check share one PDP has_role round trip.
-            if not await issuer.is_platform_admin():
+            if not await issuer.can_administer(request.workspace):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only HelixAdmin can create service-bound Scoped Access Keys",
+                    detail="Service-bound Scoped Access Keys require HelixAdmin or Admin of the bound workspace",
                 )
             return await issuer.create_async(request, allow_service_account=True)
         return await issuer.create_async(request)

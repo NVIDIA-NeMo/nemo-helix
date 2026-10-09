@@ -91,8 +91,25 @@ class AccessKeyCreateRequest(BaseModel):
         pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$",
         json_schema_extra={"nullable": True},
         description=(
-            "Optional non-human service account to bind the key to. Service-bound keys can only be "
-            "created by a HelixAdmin and authenticate as service-account:<id>."
+            "Optional non-human service account to bind the key to. Service-bound keys can be "
+            "created by a HelixAdmin, or by an Admin of the workspace named in `workspace`, "
+            "and authenticate as service-account:<id>."
+        ),
+    )
+    workspace: str | None = Field(
+        default=None,
+        pattern=_NON_BLANK_PATTERN,
+        json_schema_extra={"nullable": True},
+        description=(
+            "Workspace to bind a service-bound key to. Requires service_account_id. Admins of this "
+            "workspace can create and manage the key; the key is granted membership only in this "
+            "workspace (Editor if the service account is not already a member, unless `workspaces` names "
+            "another role for it). Required when the caller "
+            "is not a HelixAdmin. Such callers must also use a service_account_id of the form "
+            "'<workspace>/<name>' that has no keys or role bindings outside this workspace, including keys "
+            "bound to an earlier workspace of the same name (checked when the key is "
+            "created or rotated, not continuously). HelixAdmins are not subject to these account restrictions. "
+            "If the workspace is deleted and recreated, only a HelixAdmin can manage the key."
         ),
     )
     scope: list[str] | None = Field(
@@ -128,6 +145,18 @@ class AccessKeyCreateRequest(BaseModel):
         if any(char.isspace() or char == ":" for service in normalized for char in service):
             raise ValueError("scope service names must not contain whitespace or ':' characters")
         self.scope = normalized
+        return self
+
+    @model_validator(mode="after")
+    def _validate_workspace_binding(self) -> Self:
+        """Require a service account for a bound key and confine its grants to the bound workspace."""
+        if self.workspace is None:
+            return self
+        if self.service_account_id is None:
+            raise ValueError("workspace requires service_account_id")
+        self.workspace = self.workspace.strip()
+        if any(grant.workspace.strip() != self.workspace for grant in self.workspaces or []):
+            raise ValueError("workspaces may only grant access to the workspace the key is bound to")
         return self
 
     @model_validator(mode="after")
@@ -173,6 +202,11 @@ class AccessKeyMetadataResponse(BaseModel):
     entity_type: AccessKeyEntityType = Field(
         default="USER",
         description="Whether the key is bound to a user or a non-human service account.",
+    )
+    workspace: str | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Workspace a service-bound key is bound to, if any.",
     )
     status: AccessKeyStatus
     issuer: str = Field(description="Issuer stamped into the Scoped Access Key JWT.")

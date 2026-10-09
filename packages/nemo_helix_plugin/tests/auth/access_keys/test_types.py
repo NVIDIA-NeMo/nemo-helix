@@ -29,3 +29,27 @@ def test_access_key_create_request_rejects_normalized_duplicate_workspace_grants
                 AccessKeyWorkspaceGrant(workspace="team-a", roles=["Editor"]),
             ]
         )
+
+
+def test_access_key_create_request_requires_service_account_for_a_bound_workspace() -> None:
+    with pytest.raises(ValueError, match="workspace requires service_account_id"):
+        AccessKeyCreateRequest(workspace="team-a")
+
+
+def test_access_key_create_request_normalizes_the_bound_workspace() -> None:
+    request = AccessKeyCreateRequest(
+        service_account_id="team-a/otel",
+        workspace=" team-a ",
+        workspaces=[AccessKeyWorkspaceGrant(workspace="team-a", roles=["Viewer"])],
+    )
+
+    assert request.workspace == "team-a"
+
+
+def test_access_key_create_request_rejects_grants_outside_the_bound_workspace() -> None:
+    with pytest.raises(ValueError, match="only grant access to the workspace the key is bound to"):
+        AccessKeyCreateRequest(
+            service_account_id="team-a/otel",
+            workspace="team-a",
+            workspaces=[AccessKeyWorkspaceGrant(workspace="team-b")],
+        )
