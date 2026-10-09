@@ -31,3 +31,48 @@ KUBE_JOB_SELECTOR_LABELS = {
 
 JOB_MULTINODE_NETWORKING_ANNOTATION = "nhx.nvidia.com/enable-multi-node-networking"
 JOB_NUM_NODES_ANNOTATION = "nhx.nvidia.com/num-nodes"
+
+PAUSE_REQUESTED_AT = "pause_requested_at"
+RESUMED_AT = "resumed_at"
+STOPPED_AT = "stopped_at"
+STORAGE_RECLAIMED_AT = "storage_reclaimed_at"
+IMAGE_DIGEST = "image_digest"
+IMAGE_DIGEST_AT_SAVE = "image_digest_at_save"
+IMAGE_DIGEST_WARNING = "image_digest_warning"
+IMAGE_DIGEST_COMPARISON_SKIPPED = "image_digest_comparison_skipped"
+RERUN_WARNING = "rerun_warning"
+RESUMABLE = "resumable"
+NON_RESUMABLE_REASON = "non_resumable_reason"
+
+# sysexits EX_TEMPFAIL. The training process exits with this after the pause checkpoint is written.
+PAUSE_EXIT_CODE = 75
+
+# Progress copied onto a rerun. Pod status, pause clocks, and storage flags stay on the failed attempt.
+RERUN_EXCLUDED_STATUS_DETAILS = frozenset(
+    {
+        RESUMABLE,
+        NON_RESUMABLE_REASON,
+        STORAGE_RECLAIMED_AT,
+        PAUSE_REQUESTED_AT,
+        RESUMED_AT,
+        STOPPED_AT,
+        IMAGE_DIGEST,
+        IMAGE_DIGEST_WARNING,
+        IMAGE_DIGEST_COMPARISON_SKIPPED,
+        RERUN_WARNING,
+        "events",
+        "containers",
+        "conditions",
+        "exit_code",
+        "message",
+        "pid",
+        "pgid",
+        "subprocess_work_dir",
+        "subprocess_persistent_storage_path",
+        "name",
+        "restart_count",
+        "ready",
+        "error",
+    }
+)
+POD_PHASES = frozenset({"Pending", "Running", "Succeeded", "Failed", "Unknown"})

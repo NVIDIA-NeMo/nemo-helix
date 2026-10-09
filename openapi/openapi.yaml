@@ -5689,6 +5689,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
+    post:
+      tags:
+      - Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_jobs_v2_workspaces__workspace__jobs__job__rerun_post
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
     post:
       tags:
@@ -6268,6 +6302,51 @@ paths:
                 $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
+        '409':
+          description: The running step cannot be paused
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/pause-ttl:
+    patch:
+      tags:
+      - Jobs
+      summary: Update Pause Ttl
+      description: Change how long a paused job keeps its storage.
+      operationId: update_pause_ttl_apis_jobs_v2_workspaces__workspace__jobs__name__pause_ttl_patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PauseTTLUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: The pause window can only be changed while the job is paused
         '422':
           description: Validation Error
           content:
@@ -6349,6 +6428,8 @@ paths:
                 $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
+        '409':
+          description: The job cannot be resumed
         '422':
           description: Validation Error
           content:
@@ -14685,6 +14766,15 @@ components:
           items:
             $ref: '#/components/schemas/HelixJobSecret'
           type: array
+        pause_ttl_seconds:
+          title: Pause Ttl Seconds
+          description: Per-job override for how long storage is kept after a step
+            becomes paused, measured from that step's stopped_at. Ignored on create.
+            When unset, the platform paused-storage TTL applies. A value of 0 reclaims
+            storage on the next retention pass. While the job is paused, this value
+            can be changed without moving the start time.
+          type: integer
+          minimum: 0.0
       type: object
       required:
       - steps
@@ -18351,6 +18441,20 @@ components:
       type: object
       title: PatronusRailConfig
       description: Configuration data for the Patronus Evaluate API
+    PauseTTLUpdate:
+      properties:
+        pause_ttl_seconds:
+          type: integer
+          minimum: 0.0
+          title: Pause Ttl Seconds
+          description: Seconds to keep storage, measured from stopped_at. This overrides
+            the platform paused-storage TTL and does not move the start time. 0 reclaims
+            on the next pass.
+      type: object
+      required:
+      - pause_ttl_seconds
+      title: PauseTTLUpdate
+      description: Request body for changing how long a paused job keeps its storage.
     PolygrafDetection:
       properties:
         server_endpoint:
@@ -19900,6 +20004,13 @@ components:
           title: Staleness Timeout Seconds
           description: If every active task in the step goes this many seconds without
             an update, the step is terminated. A value of 0 disables staleness detection.
+          default: 0
+        pause_deadline_seconds:
+          type: integer
+          minimum: 0.0
+          title: Pause Deadline Seconds
+          description: How long a pause may stay in progress before the workload is
+            deleted and the step fails. A value of 0 means this step cannot be paused.
           default: 0
       type: object
       title: StepLifecycle

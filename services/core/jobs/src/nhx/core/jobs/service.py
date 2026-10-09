@@ -32,11 +32,17 @@ class JobsService(Service[JobsServiceConfig]):
     def get_routers(self) -> List[RouterConfig]:
         """Return routers for the jobs service."""
         from nhx.core.jobs.api.v2.jobs import endpoints
+        from nhx.core.jobs.api.v2.jobs.rerun import router as rerun_router
 
         return [
             RouterConfig(
                 endpoints.router,
                 tag="Jobs",
                 description="Job management endpoints",
+            ),
+            RouterConfig(
+                rerun_router,
+                tag="Jobs",
+                description="Rerun a failed job from surviving storage",
             ),
         ]

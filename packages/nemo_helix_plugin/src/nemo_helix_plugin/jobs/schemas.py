@@ -111,7 +111,12 @@ class HelixJobStatus(str, Enum):
                 HelixJobStatus.CANCELLING,
             },
             HelixJobStatus.CANCELLING: {HelixJobStatus.CANCELLED, HelixJobStatus.ERROR},
-            HelixJobStatus.PAUSING: {HelixJobStatus.PAUSED, HelixJobStatus.ERROR},
+            HelixJobStatus.PAUSING: {
+                HelixJobStatus.PAUSED,
+                HelixJobStatus.ERROR,
+                HelixJobStatus.CANCELLING,
+                HelixJobStatus.COMPLETED,
+            },
             HelixJobStatus.RESUMING: {
                 HelixJobStatus.PENDING,
                 HelixJobStatus.ACTIVE,

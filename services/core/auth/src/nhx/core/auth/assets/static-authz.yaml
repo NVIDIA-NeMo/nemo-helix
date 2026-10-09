@@ -371,6 +371,8 @@ authz:
       - jobs.cancel
       - jobs.create
       - jobs.delete
+      - jobs.jobs.create
+      - jobs.jobs.update
       - jobs.update
       - models.adapters.create
       - models.adapters.delete
@@ -430,15 +432,15 @@ authz:
 
   # Endpoint to permission mappings
   endpoints:
-    /apis/auth/discovery:
-      get:
-        permissions: []
-        scopes: []
     /apis/auth/authenticate:
       get:
         permissions: []
         scopes: []
       post:
+        permissions: []
+        scopes: []
+    /apis/auth/discovery:
+      get:
         permissions: []
         scopes: []
     /apis/auth/jwks:
@@ -499,6 +501,12 @@ authz:
         scopes:
         - auth:write
         - platform:write
+    /apis/auth/v2/access-keys/{jti}/rotate:
+      post:
+        permissions: []
+        scopes:
+        - auth:write
+        - platform:write
     /apis/auth/v2/access-keys/{jti}/suspend:
       post:
         permissions: []
@@ -506,12 +514,6 @@ authz:
         - auth:write
         - platform:write
     /apis/auth/v2/access-keys/{jti}/unsuspend:
-      post:
-        permissions: []
-        scopes:
-        - auth:write
-        - platform:write
-    /apis/auth/v2/access-keys/{jti}/rotate:
       post:
         permissions: []
         scopes:
@@ -748,13 +750,6 @@ authz:
         - platform:read
     # Refresh re-points an existing fileset at a new revision, so it takes the same
     # permission as PATCH rather than the create permission a POST would default to.
-    /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh:
-      post:
-        permissions:
-        - filesets.update
-        scopes:
-        - files:write
-        - platform:write
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs:
       post:
         permissions:
@@ -767,6 +762,13 @@ authz:
         scopes:
         - files:read
         - platform:read
+    /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh:
+      post:
+        permissions:
+        - filesets.update
+        scopes:
+        - files:write
+        - platform:write
     /apis/guardrails/v2/workspaces/{workspace}/checks:
       post:
         permissions:
@@ -1060,42 +1062,6 @@ authz:
         scopes:
         - intake:read
         - platform:read
-    /apis/intake/v2/workspaces/{workspace}/experiments:
-      get:
-        permissions:
-        - intake.experiments.read
-        scopes:
-        - intake:read
-        - platform:read
-      post:
-        permissions:
-        - intake.experiments.create
-        scopes:
-        - intake:write
-        - platform:write
-    /apis/intake/v2/workspaces/{workspace}/experiments/{name}:
-      delete:
-        permissions:
-        - intake.experiments.delete
-        scopes:
-        - intake:write
-        - platform:write
-      get:
-        permissions:
-        - intake.experiments.read
-        scopes:
-        - intake:read
-        - platform:read
-      put:
-        permissions:
-        - intake.experiments.update
-        scopes:
-        - intake:write
-        - platform:write
-    # Deprecated /experiment-groups aliases: the parent resource moved to /experiments, but the old
-    # paths are kept as hidden back-compat routes (include_in_schema=False), so they are absent from
-    # the OpenAPI-derived bundle. Map them to the intake.experiments.* permissions and mark
-    # x-not-in-openapi so the orphan check skips them. Remove alongside the router aliases.
     /apis/intake/v2/workspaces/{workspace}/experiment-groups:
       get:
         x-not-in-openapi: true
@@ -1133,6 +1099,42 @@ authz:
         scopes:
         - intake:write
         - platform:write
+    /apis/intake/v2/workspaces/{workspace}/experiments:
+      get:
+        permissions:
+        - intake.experiments.read
+        scopes:
+        - intake:read
+        - platform:read
+      post:
+        permissions:
+        - intake.experiments.create
+        scopes:
+        - intake:write
+        - platform:write
+    /apis/intake/v2/workspaces/{workspace}/experiments/{name}:
+      delete:
+        permissions:
+        - intake.experiments.delete
+        scopes:
+        - intake:write
+        - platform:write
+      get:
+        permissions:
+        - intake.experiments.read
+        scopes:
+        - intake:read
+        - platform:read
+      put:
+        permissions:
+        - intake.experiments.update
+        scopes:
+        - intake:write
+        - platform:write
+    # Deprecated /experiment-groups aliases: the parent resource moved to /experiments, but the old
+    # paths are kept as hidden back-compat routes (include_in_schema=False), so they are absent from
+    # the OpenAPI-derived bundle. Map them to the intake.experiments.* permissions and mark
+    # x-not-in-openapi so the orphan check skips them. Remove alongside the router aliases.
     /apis/intake/v2/workspaces/{workspace}/ingest/atif:
       post:
         permissions:
@@ -1196,17 +1198,17 @@ authz:
         scopes:
         - intake:read
         - platform:read
-    /apis/intake/v2/workspaces/{workspace}/traces/metrics:
-      get:
-        permissions:
-        - intake.trace-metrics.read
-        scopes:
-        - intake:read
-        - platform:read
     /apis/intake/v2/workspaces/{workspace}/traces:
       get:
         permissions:
         - intake.traces.read
+        scopes:
+        - intake:read
+        - platform:read
+    /apis/intake/v2/workspaces/{workspace}/traces/metrics:
+      get:
+        permissions:
+        - intake.trace-metrics.read
         scopes:
         - intake:read
         - platform:read
@@ -1234,6 +1236,13 @@ authz:
       post:
         permissions:
         - jobs.create
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
+      post:
+        permissions:
+        - jobs.jobs.create
         scopes:
         - jobs:write
         - platform:write
@@ -1322,6 +1331,13 @@ authz:
       post:
         permissions:
         - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/pause-ttl:
+      patch:
+        permissions:
+        - jobs.jobs.update
         scopes:
         - jobs:write
         - platform:write

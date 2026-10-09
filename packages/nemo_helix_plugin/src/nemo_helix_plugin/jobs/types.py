@@ -360,6 +360,17 @@ class JobStatusDetailsUpdate(RootModel[dict[str, Any]]):
     """Client request body for ``update_job_status_details`` (a bare JSON object)."""
 
 
+class PauseTTLUpdate(BaseModel):
+    """Request body for changing how long a paused job keeps its storage."""
+
+    pause_ttl_seconds: int = Field(
+        ge=0,
+        description="Seconds to keep storage, measured from stopped_at. "
+        "This overrides the platform paused-storage TTL and does not move the start time. "
+        "0 reclaims on the next pass.",
+    )
+
+
 # NB: list *filter* models (``HelixJobsListFilter`` etc.) are intentionally
 # NOT defined here.  They subclass the entity-store ``Filter`` (with field
 # mapping / translation) and are server-side only.  Clients pass a ``filter``

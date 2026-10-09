@@ -78,6 +78,7 @@ from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
     JobLogsQueryParams,
     ListJobsQueryParams,
+    PauseTTLUpdate,
     validate_output_location,
 )
 from nemo_helix_plugin.jobs.types import (
@@ -1435,7 +1436,36 @@ def job_route_factory(
             ).data()
             return from_response(job_resp)
 
+        @router.post("/jobs/{name}/rerun")
+        async def rerun_job(
+            name: str,
+            workspace: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+        ) -> TypedJobResponse:
+            f"""Rerun a failed job by name for the {service_name} microservice."""
+
+            job_resp = (await AsyncJobsClient.from_client(async_client).rerun_job(job=name, workspace=workspace)).data()
+            return from_response(job_resp)
+
+        @router.patch("/jobs/{name}/pause-ttl")
+        async def update_pause_ttl(
+            name: str,
+            workspace: str,
+            body: PauseTTLUpdate,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+        ) -> TypedJobResponse:
+            f"""Change how long a paused job keeps its storage for the {service_name} microservice."""
+
+            job_resp = (
+                await AsyncJobsClient.from_client(async_client).update_pause_ttl(
+                    name=name, workspace=workspace, body=body
+                )
+            ).data()
+            return from_response(job_resp)
+
         _stamp(pause_job, perm="pause", write=True)
         _stamp(resume_job, perm="resume", write=True)
+        _stamp(rerun_job, perm="rerun", write=True)
+        _stamp(update_pause_ttl, perm="pause", write=True)
 
     return router

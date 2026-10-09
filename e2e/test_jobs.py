@@ -7,6 +7,7 @@ These tests verify the core platform jobs API works correctly,
 including job creation, execution, and status tracking.
 """
 
+import hashlib
 import uuid
 from collections.abc import Callable
 
@@ -19,6 +20,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     EnvironmentVariableFromSecret,
     HelixJobSpec,
     HelixJobStep,
+    StepLifecycle,
 )
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
@@ -32,6 +34,48 @@ from nhx.testing.e2e import wait_for_job_logs, wait_for_platform_job
 from pydantic import SecretStr
 
 JOB_SOURCE = "e2e-test-jobs"
+
+# Cooperative pause. The jobs service does not signal the process. The workload polls its
+# step until the status is pausing, writes sha256(job id) into persistent storage, and
+# exits 75. Resume starts the same command again; the saved token is printed and the
+# process exits 0.
+_COOPERATIVE_PAUSE_SCRIPT = """
+import hashlib
+import json
+import os
+import time
+import urllib.request
+
+job_name = os.environ["NEMO_JOB_ID"]
+workspace = os.environ["NEMO_JOB_WORKSPACE"]
+step = os.environ["NEMO_JOB_STEP"]
+storage = os.environ["NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH"]
+jobs_url = os.environ["NHX_JOBS_URL"].rstrip("/")
+marker = os.path.join(storage, "pause-token")
+
+job_url = f"{jobs_url}/apis/jobs/v2/workspaces/{workspace}/jobs/{job_name}"
+with urllib.request.urlopen(job_url, timeout=5) as response:
+    job_id = json.load(response)["id"]
+token = hashlib.sha256(job_id.encode()).hexdigest()
+
+if os.path.exists(marker):
+    saved = open(marker, encoding="utf-8").read().strip()
+    print(saved, flush=True)
+    raise SystemExit(0 if saved == token else 1)
+
+step_url = f"{job_url}/steps/{step}"
+deadline = time.time() + 90
+while time.time() < deadline:
+    with urllib.request.urlopen(step_url, timeout=5) as response:
+        status = json.load(response).get("status")
+    if status == "pausing":
+        os.makedirs(storage, exist_ok=True)
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write(token)
+        raise SystemExit(75)
+    time.sleep(0.5)
+raise SystemExit("pause was not requested")
+"""
 
 pytestmark = [pytest.mark.timeout(600)]
 
@@ -550,11 +594,24 @@ def test_job_cancel_once_active(client: NemoClient, workspace: str, image: Calla
     )
 
 
-@pytest.mark.skip(reason="Subprocess backend does not support pause/resume")
+def _cooperative_pause_step(name: str, image: Callable[[str], str]) -> HelixJobStep:
+    return HelixJobStep(
+        name=name,
+        lifecycle=StepLifecycle(pause_deadline_seconds=180),
+        executor=CPUExecutionProviderSpec(
+            provider="cpu",
+            container=ContainerSpec(
+                image=image("nhx-tasks"),
+                entrypoint=["python3"],
+                command=["-c", _COOPERATIVE_PAUSE_SCRIPT],
+            ),
+        ),
+    )
+
+
 @pytest.mark.flaky(reruns=3, reruns_delay=5)
 def test_job_pause_resume(client: NemoClient, workspace: str, image: Callable[[str], str]):
-    """Test that a job can be paused and then resumed after being paused."""
-
+    """A workload pauses by exiting 75, then resume reads the token it saved."""
     job = (
         JobsClient.from_client(client)
         .create_job(
@@ -563,60 +620,43 @@ def test_job_pause_resume(client: NemoClient, workspace: str, image: Callable[[s
                 source=JOB_SOURCE,
                 spec={"test": "value"},
                 platform_spec=HelixJobSpec(
-                    steps=[
-                        HelixJobStep(
-                            name="long-running-step-pause-resume",
-                            executor=CPUExecutionProviderSpec(
-                                provider="cpu",
-                                container=ContainerSpec(
-                                    image=image("nhx-tasks"),
-                                    entrypoint=["nemo-helix"],
-                                    command=[
-                                        "run",
-                                        "task",
-                                        "--task",
-                                        "nhx.hello_world.tasks.hello_world",
-                                    ],
-                                ),
-                            ),
-                        ),
-                    ],
+                    steps=[_cooperative_pause_step("long-running-step-pause-resume", image)],
                 ),
             ),
         )
         .data()
     )
+    token = hashlib.sha256(job.id.encode()).hexdigest()
 
-    # Wait for job to become active
     active_job = wait_for_platform_job(client, job.name, workspace, status_to_check="active")
-    assert active_job.status == "active", f"Job did not become active, status: {active_job.status}"
-
-    # Pause the job
-    JobsClient.from_client(client).pause_job(workspace=workspace, name=job.name)
-
-    # Wait for job to reach paused status
-    paused_job = wait_for_platform_job(client, job.name, workspace, status_to_check="paused")
-    assert paused_job.status == "paused", f"Job should have been paused but has status: {paused_job.status}"
-
-    # Resume the job
-    JobsClient.from_client(client).resume_job(workspace=workspace, name=job.name)
-
-    # Wait for job to reach active status (may complete before we observe active if task is fast)
-    resumed_job = wait_for_platform_job(client, job.name, workspace, status_to_check="active")
-    assert resumed_job.status in ("active", "completed"), (
-        f"Job should have been resumed but has status: {resumed_job.status}"
+    assert active_job.status == "active", _job_diagnostic_message(
+        client, active_job, workspace, f"Job did not become active, status: {active_job.status}"
     )
 
-    # Wait for job to reach completed status
+    JobsClient.from_client(client).pause_job(workspace=workspace, name=job.name)
+
+    paused_job = wait_for_platform_job(client, job.name, workspace, status_to_check="paused")
+    assert paused_job.status == "paused", _job_diagnostic_message(
+        client, paused_job, workspace, f"Job should have been paused but has status: {paused_job.status}"
+    )
+
+    JobsClient.from_client(client).resume_job(workspace=workspace, name=job.name)
+
     completed_job = wait_for_platform_job(client, job.name, workspace)
-    assert completed_job.status == "completed", f"Job failed with status: {completed_job.status}"
+    assert completed_job.status == "completed", _job_diagnostic_message(
+        client, completed_job, workspace, f"Job failed with status: {completed_job.status}"
+    )
+
+    logs = wait_for_job_logs(client, job.name, workspace)
+    messages = "\n".join(entry.message or "" for entry in logs.data)
+    assert token in messages, _job_diagnostic_message(
+        client, completed_job, workspace, f"Resumed job did not print the saved job-id hash {token}"
+    )
 
 
-@pytest.mark.skip(reason="Subprocess backend does not support pause/resume")
 @pytest.mark.flaky(reruns=3, reruns_delay=5)
 def test_job_pause_and_cancel(client: NemoClient, workspace: str, image: Callable[[str], str]):
     """Test that a job can be paused and then cancelled after being paused."""
-
     job = (
         JobsClient.from_client(client)
         .create_job(
@@ -625,24 +665,7 @@ def test_job_pause_and_cancel(client: NemoClient, workspace: str, image: Callabl
                 source=JOB_SOURCE,
                 spec={"test": "value"},
                 platform_spec=HelixJobSpec(
-                    steps=[
-                        HelixJobStep(
-                            name="long-running-step-pause-cancel",
-                            executor=CPUExecutionProviderSpec(
-                                provider="cpu",
-                                container=ContainerSpec(
-                                    image=image("nhx-tasks"),
-                                    entrypoint=["nemo-helix"],
-                                    command=[
-                                        "run",
-                                        "task",
-                                        "--task",
-                                        "nhx.hello_world.tasks.hello_world",
-                                    ],
-                                ),
-                            ),
-                        ),
-                    ],
+                    steps=[_cooperative_pause_step("long-running-step-pause-cancel", image)],
                 ),
             ),
         )

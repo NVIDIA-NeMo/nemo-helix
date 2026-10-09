@@ -60,6 +60,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
     HelixJobSecretEnvironmentVariableRef,
     HelixJobStepSpec,
+    StepLifecycle,
 )
 from nhx.core.jobs.controllers.backends.base import (
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
@@ -531,13 +532,18 @@ def test_docker_job_sync_active_missing_container_prefers_terminal_task_over_ttl
 
 
 def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_job_step):
-    """Test that the cancel method stops the container."""
+    """A clean exit while pausing becomes paused without stopping the container again."""
 
     test_job_step.status = HelixJobStatus.PAUSING
+    test_job_step.status_details = {
+        "pause_requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
     container_mock = MagicMock()
     container_mock.id = "16-character-uid"
     container_mock.status = "exited"
-    container_mock.attrs = {"State": {"ExitCode": 0}}  # SIGTERM will set exit code 0 if exited gracefully
+    container_mock.image.id = "sha256:paused"
+    container_mock.attrs = {"State": {"ExitCode": 75}, "Image": "sha256:paused"}
     task_id = uuid.uuid4().hex
     container_mock.labels = owned_container_labels(
         {
@@ -556,6 +562,49 @@ def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_jo
     assert update.status == "paused"
     docker_client_mock.containers.get.assert_called_with("job-test-job-id-test-step")
     container_mock.remove.assert_not_called()
+    container_mock.stop.assert_not_called()
+    container_mock.kill.assert_not_called()
+
+
+def test_docker_job_sync_pausing_leaves_running_container(docker_job, docker_client_mock, test_job_step):
+    test_job_step.status = HelixJobStatus.PAUSING
+    test_job_step.status_details = {
+        "pause_requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
+    container_mock = MagicMock()
+    container_mock.status = "running"
+    container_mock.image.id = "sha256:running"
+    container_mock.attrs = {"State": {"ExitCode": 0}, "Image": "sha256:running"}
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(test_job_step)
+
+    assert update.status == HelixJobStatus.PAUSING
+    assert update.status_details["image_digest"] == "sha256:running"
+    container_mock.stop.assert_not_called()
+    container_mock.kill.assert_not_called()
+
+
+def test_docker_schedule_removes_stopped_container_before_creating(docker_job, docker_client_mock, test_job_step):
+    stopped = MagicMock()
+    stopped.status = "exited"
+    stopped.name = "job-test-job-id-test-step"
+    original = docker_client_mock.containers.get.side_effect
+
+    def get_container(name):
+        if name == "docker123":
+            return original(name)
+        return stopped
+
+    docker_client_mock.containers.get.side_effect = get_container
+    docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+    docker_job._container_run_threadpool.shutdown(wait=True)
+    docker_job._container_run_threadpool = MagicMock()
+
+    stopped.remove.assert_called_once_with(force=True)
+    assert docker_client_mock.containers.create.call_count == 2
 
 
 def test_docker_job_sync_cancelling_sigterm(docker_job, docker_client_mock, test_job_step):
