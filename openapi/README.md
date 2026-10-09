@@ -14,14 +14,7 @@ uv run --frozen python -m script.generate_openapi_spec
 
 The generator no longer emits one spec per microservice and merges them. It now produces:
 
-**One aggregate platform spec**, built from the platform runner (`nhx.platform_runner.server:create_platform_openapi_app`) with plugin services deliberately excluded (`NEMO_PLUGIN_SERVICES_ALLOWLIST=""` — see `SERVICES` in `script/generate_openapi_spec.py`). This aggregate covers the core Helix services (entities, jobs, models, inference gateway, secrets, files, platform-common, etc.) and lands in:
-
-| File | Contents |
-|------|----------|
-| `openapi/openapi.yaml` | Final merged GA + EA platform spec |
-| `openapi/ga/openapi.yaml` | GA-only platform spec |
-| `openapi/ea/openapi.yaml` | EA-only platform spec |
-| `openapi/ga/individual/platform.openapi.yaml` | The platform spec before GA/EA merge |
+**One aggregate platform spec**, built from the platform runner (`nhx.platform_runner.server:create_platform_openapi_app`) with plugin services deliberately excluded (`NEMO_PLUGIN_SERVICES_ALLOWLIST=""` — see `SERVICES` in `script/generate_openapi_spec.py`). This aggregate covers the core Helix services (entities, jobs, models, inference gateway, secrets, files, platform-common, etc.) and lands in `openapi/openapi.yaml`.
 
 **One spec per opted-in plugin**, written next to each plugin — never merged into the platform spec. A plugin opts in by declaring a `[tool.nemo.openapi]` table in its own `pyproject.toml`; `discover_plugins()` (`script/openapi_helper/plugin_config.py`) enumerates those, builds each plugin's FastAPI app via the convention loader (or a `factory_override`), and emits:
 
@@ -37,8 +30,6 @@ The generator no longer emits one spec per microservice and merges them. It now 
 | Safe Synthesizer | `plugins/nemo-safe-synthesizer/openapi/openapi.yaml` |
 
 The Customization spec is assembled at generation time from whichever customization contributors (`nemo.customization.contributors` entry points — e.g. `automodel`, `rl`, `unsloth`) are installed in the workspace, so its route surface depends on the synced environment. To add a new plugin to this list, add an (empty is fine) `[tool.nemo.openapi]` table to its `pyproject.toml`; if the plugin has more than one `nemo.services` entry point, set `service_name` in that table to disambiguate.
-
-The platform GA and EA specs are merged with the `--keep-versions` flag to preserve version information in the final `openapi.yaml`.
 
 ### Conflicts
 
@@ -62,4 +53,4 @@ Currently, the examples are manually generated from notebooks. A robust system t
 
 ## NOTE
 
-The aggregate platform spec is now generated directly from the platform runner (`nhx.platform_runner.server`), so it corresponds to what is actually mounted at runtime. Only the GA and EA variants of that single platform spec are merged; individual core services are no longer emitted and merged separately.
+The aggregate platform spec is generated directly from the platform runner (`nhx.platform_runner.server`), so it corresponds to what is actually mounted at runtime. Individual core service specs are no longer emitted and merged separately.
