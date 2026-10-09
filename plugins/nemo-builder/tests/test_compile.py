@@ -180,10 +180,10 @@ class TestTheSandboxIsToldNothingAboutPublishing:
         assert SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox.image == SANDBOX_IMAGE
 
     def test_the_sandbox_is_sized_by_the_deployment_not_the_request(self) -> None:
-        config = _config(cpu="1", memory="2Gi")
+        config = _config(cpu="1", memory="2Gi", ephemeral_storage="5Gi")
         spec = _compile(_set(), config=config)
         sandbox = SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox
-        assert (sandbox.cpu, sandbox.memory) == ("1", "2Gi")
+        assert (sandbox.cpu, sandbox.memory, sandbox.ephemeral_storage) == ("1", "2Gi", "5Gi")
 
     def test_the_sandbox_mounts_the_fetch_steps_work_volume_on_its_nodes(self) -> None:
         profiles = _profiles(node_selector={"nhx.nvidia.com/build-node": "true"})

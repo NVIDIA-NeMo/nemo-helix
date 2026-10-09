@@ -37,6 +37,7 @@ def _sandbox(**overrides: object) -> SandboxSpec:
         "dns_nameservers": ["8.8.8.8", "1.1.1.1"],
         "cpu": "2",
         "memory": "8Gi",
+        "ephemeral_storage": "20Gi",
     }
     base.update(overrides)
     return SandboxSpec.model_validate(base)
@@ -58,6 +59,25 @@ def _pod():
         pvc="nhx-build-work",
         job_sub_path="jobs/default/abc",
     )
+
+
+class TestOneDockerfileCannotTakeTheNode:
+    def test_cpu_memory_and_ephemeral_storage_are_requested_and_limited(self) -> None:
+        resources = _pod().spec.containers[0].resources
+        expected = {"cpu": "2", "memory": "8Gi", "ephemeral-storage": "20Gi"}
+        assert (resources.requests, resources.limits) == (expected, expected)
+
+    def test_a_spec_from_before_ephemeral_storage_neither_requests_nor_limits_it(self) -> None:
+        pod = _pod_manifest(
+            name="nhx-sbx-abc-g0",
+            namespace="nhx-builds",
+            group=_group(),
+            sandbox=_sandbox(ephemeral_storage=None),
+            pvc="nhx-build-work",
+            job_sub_path="jobs/default/abc",
+        )
+        resources = pod.spec.containers[0].resources
+        assert resources.requests == resources.limits == {"cpu": "2", "memory": "8Gi"}
 
 
 class TestTheSandboxPullsItsImage:

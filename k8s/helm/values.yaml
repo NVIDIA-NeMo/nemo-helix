@@ -95,6 +95,68 @@ rbac:
   # -- Specifies whether to enable the core Controller to have RBAC permissions to Volcano for scheduling distributed jobs.
   volcanoEnabled: true
 
+# -- Container image builds: the builder plugin, which every platform image includes. Builds run in a namespace of
+# their own, which the chart creates with the builder's Jobs execution profiles when this is enabled. Set the
+# builder itself, such as the registry builds publish to, in `platformConfig.builder`. See the builder plugin's README.
+builder:
+  # -- Create the build namespace and the builder's Jobs execution profiles.
+  enabled: false
+  # -- Namespace builds run in, which the chart creates. Empty is `<release namespace>-builds`. Each release needs its own,
+  # and it can't be the release namespace.
+  namespace: ""
+  # -- Extra labels for the build namespace, such as one that has a cluster tool copy an image pull secret into it.
+  namespaceLabels: {}
+  # -- The work volume every build step and sandbox mounts.
+  # @default -- This object has the following default values for the work volume.
+  workVolume:
+    # -- StorageClass for the work volume. Empty uses the cluster's default.
+    storageClass: ""
+    # -- Access modes for the work volume. With ReadWriteOnce, every build pod has to run on the volume's one node.
+    accessModes:
+      - ReadWriteMany
+    # -- Size of the work volume.
+    size: 100Gi
+  # -- Resources for each container in the build namespace that sets none, so that no build goes unbounded.
+  # @default -- This object has the following default values for the build namespace's LimitRange.
+  limitRange:
+    # -- Create the LimitRange.
+    enabled: true
+    # -- Limits for a container that sets none.
+    default:
+      cpu: "2"
+      memory: 8Gi
+      ephemeral-storage: 20Gi
+    # -- Requests for a container that sets none.
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 1Gi
+  # -- What all builds together may use in the build namespace. Needs `limitRange`, whose defaults it relies on.
+  # @default -- This object has the following default values for the build namespace's ResourceQuota.
+  resourceQuota:
+    # -- Create the ResourceQuota.
+    enabled: true
+    # -- The quota's hard limits.
+    hard:
+      requests.cpu: "16"
+      requests.memory: 64Gi
+      limits.cpu: "32"
+      limits.memory: 128Gi
+      limits.ephemeral-storage: 400Gi
+      pods: "50"
+  # -- A registry in the release namespace for kind and minikube: plain HTTP, one username and password, and storage
+  # that doesn't survive a restart. Never for a shared cluster.
+  # @default -- This object has the following default values for the development registry.
+  devRegistry:
+    # -- Deploy the registry, and set `builder.registry` to it.
+    enabled: false
+    # -- The registry's image.
+    image: docker.io/library/registry:3.0.0
+    # -- The username the registry takes.
+    username: builder
+    # -- The password the registry takes. Required when enabled.
+    password: null
+
 # -- Multi-node networking configuration for distributed GPU training.
 # These settings control Kyverno policies that inject cloud-specific networking and NCCL configurations.
 #
