@@ -4,7 +4,7 @@
 """SQLAlchemy implementation of FilterRepository."""
 
 from datetime import datetime
-from typing import Any, List, Optional, Set
+from typing import Any, List, NamedTuple, Optional, Set
 
 from nemo_helix_plugin.filter_ops import ElemMatchCondition
 from nhx.common.api.filter import FilterOperation, FilterOperator, FilterRepository
@@ -12,6 +12,7 @@ from sqlalchemy import (
     JSON,
     ColumnElement,
     DateTime,
+    Float,
     String,
     and_,
     case,
@@ -19,12 +20,22 @@ from sqlalchemy import (
     false,
     func,
     literal,
+    literal_column,
     not_,
     or_,
     select,
     type_coerce,
 )
 from sqlalchemy.orm import aliased
+
+
+class _ElementValue(NamedTuple):
+    """An array element as decoded text, with SQL predicates for its JSON type."""
+
+    text: Any
+    is_number: Any
+    is_bool: Any
+    is_string: Any
 
 
 class SQLAlchemyFilterRepository(FilterRepository):
@@ -109,18 +120,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
 
         return value
 
-    @staticmethod
-    def _escape_like(text: str) -> str:
-        for ch in ("\\", "%", "_"):
-            text = text.replace(ch, f"\\{ch}")
-        return text
-
     def _cast_json_to_raw_text(self, column: Any) -> Any:
         """Cast a JSON column element to its raw serialized text, quotes and all.
 
         Unlike ``_cast_json_to_text``, this keeps JSON's surrounding double quotes. Use it when the
-        quotes carry meaning — e.g. matching a quote-delimited array element (``$contains``) or comparing
-        against the literal ``"null"``/``"true"``/``"false"`` tokens both backends render.
+        quotes carry meaning — e.g. comparing against the literal ``"null"``/``"true"``/``"false"``
+        tokens both backends render.
         """
         return cast(column, String)
 
@@ -151,18 +156,16 @@ class SQLAlchemyFilterRepository(FilterRepository):
 
     _STRING_OPS = frozenset({FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH})
 
-    def _compare(
-        self, element: Any, is_json: bool, operator: FilterOperator, value: Any, *, null_never_matches: bool = False
-    ) -> Any:
-        """One comparison against a column, or against a JSON field or array element when ``is_json``.
+    def _compare(self, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
+        """One comparison against a column, or against a JSON field when ``is_json``.
 
-        A missing or null JSON value renders as the text ``null``; with ``null_never_matches`` (always,
-        for ``$startsWith``/``$endsWith``) it matches no comparison other than ``$eq``.
+        A missing or null JSON value renders as the text ``null``; it never satisfies
+        ``$startsWith``/``$endsWith``.
         """
         if operator == FilterOperator.EQ:
             return self._json_eq(element, value) if is_json else element == value
         comparison = self._non_eq_compare(element, is_json, operator, value)
-        if is_json and (null_never_matches or operator in self._STRING_OPS):
+        if is_json and operator in self._STRING_OPS:
             return and_(not_(self._json_eq(element, None)), comparison)
         return comparison
 
@@ -249,21 +252,13 @@ class SQLAlchemyFilterRepository(FilterRepository):
         return self._field_compare(field, FilterOperator.ENDS_WITH, suffix)
 
     def contains(self, field: str, value: Any) -> Any:
-        """Array membership: true when the JSON array at ``field`` contains scalar ``value``.
-
-        Portable across SQLite (JSON) and PostgreSQL (JSONB) without a dialect branch: the
-        array element serializes as a quote-delimited token (e.g. ``"g1"``) in both backends'
-        text rendering, so we match that token in the serialized array text. Quoting makes it
-        collision-safe against prefixes (``"g1"`` does not match ``["g10"]``). ``value`` is
-        coerced to text and LIKE wildcards are escaped, so only exact elements match.
-
-        Intended for array-valued JSON fields (e.g. ``data.experiment_ids``); values are
-        assumed to be JSON scalars without embedded double quotes (entity ids qualify).
-        """
-        column, is_json = self._get_column(field)
+        """Array membership: some scalar element of the JSON array at ``field`` is ``$eq`` to ``value``."""
+        array, is_json = self._get_column(field)
         if not is_json:
             raise ValueError(f"$contains requires a JSON array field, got non-JSON field '{field}'")
-        return self._cast_json_to_raw_text(column).like(f'%"{self._escape_like(str(value))}"%', escape="\\")
+        return self._any_element_matches(
+            array, FilterOperator.CONTAINS, [ElemMatchCondition(None, FilterOperator.EQ, value)]
+        )
 
     def has_key(self, field: str, key: str) -> Any:
         column, is_json = self._get_column(field)
@@ -286,7 +281,10 @@ class SQLAlchemyFilterRepository(FilterRepository):
         array, is_json = self._get_column(field)
         if not is_json:
             raise ValueError(f"$elemMatch requires a JSON array field, got non-JSON field '{field}'")
-        elements = self._array_elements(array, FilterOperator.ELEM_MATCH)
+        return self._any_element_matches(array, FilterOperator.ELEM_MATCH, conditions)
+
+    def _any_element_matches(self, array: Any, operator: FilterOperator, conditions: List[ElemMatchCondition]) -> Any:
+        elements = self._array_elements(array, operator)
         element_type = elements.c.type if self._dialect_name == "sqlite" else func.json_typeof(elements.c.value)
         if conditions[0].key is None:
             is_target = element_type.not_in(["object", "array"])
@@ -294,14 +292,62 @@ class SQLAlchemyFilterRepository(FilterRepository):
             is_target = element_type == "object"
         # SQLite may evaluate a comparison before the type check, and raises on a key lookup into a
         # scalar; NULL out non-target elements first.
-        element = type_coerce(case((is_target, elements.c.value)), JSON)
+        target = case((is_target, elements.c.value))
         matches = [
-            self._compare(
-                element if c.key is None else element[c.key], True, c.operator, c.value, null_never_matches=True
-            )
-            for c in conditions
+            self._compare_element(self._element_value(elements, target, condition.key), condition)
+            for condition in conditions
         ]
         return select(literal(1)).select_from(elements).where(is_target, *matches).exists()
+
+    def _element_value(self, elements: Any, target: Any, key: str | None) -> _ElementValue:
+        """An array element (or its ``key`` field) as decoded text, with its JSON type."""
+        if self._dialect_name == "sqlite":
+            if key is None:
+                text, kind = cast(target, String), elements.c.type
+            else:
+                text = cast(type_coerce(target, JSON)[key].as_string(), String)
+                kind = func.json_type(type_coerce(target, String).op("->")(key))
+            return _ElementValue(text, kind.in_(["integer", "real"]), kind.in_(["true", "false"]), kind == "text")
+        if key is None:
+            text, kind = target.op("#>>")(literal_column("'{}'::text[]")), func.json_typeof(elements.c.value)
+        else:
+            element = type_coerce(target, JSON)
+            text, kind = element[key].as_string(), func.json_typeof(element[key])
+        return _ElementValue(text, kind == "number", kind == "boolean", kind == "string")
+
+    def _compare_element(self, element: _ElementValue, condition: ElemMatchCondition) -> Any:
+        """One condition against an element, by JSON type: a string never equals a number or boolean.
+
+        Null or missing (SQL NULL) matches only ``$eq`` null.
+        """
+        operator, value, text = condition.operator, condition.value, element.text
+        if operator == FilterOperator.EQ:
+            return self._element_equals(element, value)
+        if operator in (FilterOperator.IN, FilterOperator.NIN):
+            matches = or_(false(), *(self._element_equals(element, v) for v in value if v is not None))
+            return matches if operator == FilterOperator.IN else and_(text.is_not(None), not_(matches))
+        if operator == FilterOperator.LIKE:
+            comparison = text.ilike(f"%{value}%")
+        elif operator == FilterOperator.STARTS_WITH:
+            comparison = func.substr(text, 1, len(value)) == value
+        elif operator == FilterOperator.ENDS_WITH:
+            comparison = func.substr(text, func.length(text) - len(value) + 1) == value
+        elif isinstance(value, (int, float)):
+            # Cast only numbers: PostgreSQL raises casting other text to a float.
+            numeric = cast(case((element.is_number, text)), Float)
+            return and_(element.is_number, getattr(numeric, self._ORDERED_OPS[operator])(value))
+        else:
+            comparison = getattr(text, self._ORDERED_OPS[operator])(value)
+        return and_(element.is_string, comparison)
+
+    def _element_equals(self, element: _ElementValue, value: Any) -> Any:
+        if value is None:
+            return element.text.is_(None)
+        if isinstance(value, bool):
+            return and_(element.is_bool, element.text.in_(["1", "true"] if value else ["0", "false"]))
+        if isinstance(value, (int, float)):
+            return and_(element.is_number, cast(case((element.is_number, element.text)), Float) == value)
+        return and_(element.is_string, element.text == value)
 
     def and_op(self, operations: List[Any]) -> Any:
         """Logical AND."""

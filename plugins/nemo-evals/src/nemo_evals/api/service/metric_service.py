@@ -32,6 +32,7 @@ from nemo_evals.api.schemas import (
 from nemo_evals.entities import MetricBundleEntity
 from nemo_evals.metric_storage import delete_bundle_by_ref, store_bundle
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle as RuntimeMetricBundle
+from nemo_evals.shared.metric_bundles.cloudpickle import CLOUDPICKLE_KIND, require_cloudpickle_metrics_allowed
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClientProtocol,
@@ -121,6 +122,11 @@ def _entity_from_bundle(
     )
 
 
+def _require_payload_allowed(metric: MetricInline) -> None:
+    if metric.payload.kind == CLOUDPICKLE_KIND:
+        require_cloudpickle_metrics_allowed()
+
+
 class MetricService:
     """Service layer for stored metric CRUD."""
 
@@ -140,6 +146,7 @@ class MetricService:
         logger.debug(
             "Creating metric", extra={"workspace": sanitize_for_log(workspace), "metric_name": sanitize_for_log(name)}
         )
+        _require_payload_allowed(metric)
 
         # Cheap pre-check to avoid uploading a (potentially large) bundle we would
         # only discard. The entity create below remains the authoritative,
@@ -191,6 +198,7 @@ class MetricService:
         just ``payload.digest`` — so two metrics that share scoring code but differ in secrets or
         output contracts get distinct names and are never silently collapsed onto each other.
         """
+        _require_payload_allowed(metric)
         runtime_bundle = RuntimeMetricBundle.model_validate_json(metric.model_dump_json())
         canonical = json.dumps(runtime_bundle.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
         content_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()

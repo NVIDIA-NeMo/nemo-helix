@@ -16,7 +16,7 @@ import pytest
 from nemo_evals.jobs.evaluate import EvaluateInputSpec, EvaluateJob
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
@@ -35,12 +35,11 @@ WORKSPACE = "default"
 def _offline_exact_match_spec() -> dict:
     """An offline row-eval: a built-in metric scores inline rows that already carry expected/output.
 
-    ExactMatch is a built-in (importable in the submit-backend subprocess), so a cloudpickle bundle
-    round-trips fine there. No target → the dataset's ``model_output`` is scored directly.
+    ExactMatch is a built-in, so it bundles inline. No target → the dataset's ``model_output`` is scored directly.
     """
     bundle = bundle_metric(
         ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.model_output}}"),
-        CloudpickleMetricBundlePackager(),
+        InlineMetricBundlePackager(),
     )
     return EvaluateInputSpec.model_validate(
         {

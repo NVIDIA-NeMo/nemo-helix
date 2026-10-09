@@ -51,7 +51,7 @@ from anonymizer.config.anonymizer_config import AnonymizerConfig
 from anonymizer.config.replace_strategies import Redact
 from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
-from nemo_anonymizer_plugin.app.task_config import AnonymizerConfigRequest, AnonymizerRequest
+from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest
 from nemo_anonymizer_plugin.sdk.resources import AnonymizerResource
 from nemo_helix_plugin.client.client import NemoClient
 
@@ -73,7 +73,7 @@ model_configs = [
 ]
 
 request = AnonymizerRequest(
-    config=AnonymizerConfigRequest.model_validate(config),
+    config=config,
     data=AnonymizerInputSpec(
         source=f"fileset://{WORKSPACE}/anonymizer-inputs#anonymizer-input.csv",
         text_column="biography",

@@ -59,7 +59,7 @@ from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
 from nemo_evals.metric_refs import MetricRef
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.tasks.agent_evaluate import main as agent_eval_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -119,7 +119,7 @@ from typer.testing import CliRunner
 def _inline_metric() -> MetricInline:
     bundle = bundle_metric(
         ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.model_output}}"),
-        CloudpickleMetricBundlePackager(),
+        HybridMetricBundlePackager(),
     )
     return MetricInline.model_validate(bundle.model_dump(mode="json"))
 

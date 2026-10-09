@@ -27,6 +27,7 @@ from nemo_evals.sdk.types import (
 )
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_helix_plugin.client import errors as files_errors
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import ConflictError as ClientConflictError
@@ -432,7 +433,7 @@ async def _evaluate_metric(
         metric=metric,
         dataset=dataset,
         config=config,
-        metric_bundle_packager=CloudpickleMetricBundlePackager(),
+        metric_bundle_packager=HybridMetricBundlePackager(),
         **run_kwargs,
     )
     print(f"Submitted evals plugin job: {job.name}")
@@ -581,7 +582,7 @@ def run_nhx_online_metric_example_sync_client(
             metric=metric,
             dataset=dataset,
             config=config,
-            metric_bundle_packager=CloudpickleMetricBundlePackager(),
+            metric_bundle_packager=HybridMetricBundlePackager(),
             **run_kwargs,
         )
         print(f"Submitted evals plugin job: {job.name}")

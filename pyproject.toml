@@ -106,7 +106,7 @@ dev = [
   # agent-hardener itself, which stays in its own venv (garak pulls litellm/torch, incompatible pins).
   "nemo-agent-hardener-plugin",
   "nemo-agents-plugin[deepagents]", # Fabric agent E2E runtime
-  "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for agentic-use trajectory validation
+  "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for intake ATIF ingest
   "nemo-helix-tools",               # License and package-layout maintenance tooling
   "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
   "nhx-dev-mcp",                                    # Include MCP dev tools
@@ -600,14 +600,6 @@ extraPaths = [
   "plugins/nemo-guardrails/src",
   "plugins/nemo-evals/src",
   "plugins/nemo-insights/src",
-  "tests/agentic-use",
-  "tests/agentic-use/shared",
-]
-executionEnvironments = [
-  { root = "tests/agentic-use", extraPaths = [
-    "tests/agentic-use",
-    "tests/agentic-use/shared",
-  ] },
 ]
 
 [tool.ty.environment]
@@ -650,10 +642,6 @@ extra-paths = [
   "plugins/nemo-builder/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
-  # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared
-  # on sys.path in tests/conftest.py.
-  "tests/agentic-use",
-  "tests/agentic-use/shared",
 ]
 
 [tool.ty.src]

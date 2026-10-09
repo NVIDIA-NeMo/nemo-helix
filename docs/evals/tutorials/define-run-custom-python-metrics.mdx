@@ -395,6 +395,50 @@ The `nhx_evals_sdk` package provides metric and runtime types, such as `Metric`,
 
 Pass `CloudpickleMetricBundlePackager()` to `helix_evaluator.submit(...)` so the SDK serializes the metric object into the evaluator job spec. The job runtime hydrates the metric bundle before scoring rows. Use `ModelRef` to reference the platform model entity you configured with `NHX_EVAL_MODEL_REF`.
 
+### Enable Cloudpickle Metrics on the Deployment
+
+Cloudpickle bundles let you run your own Python metrics on the Evals service, the same way you run them on your machine. This is useful when a built-in metric does not fit your evaluation. The bundle runs with the Evals service's credentials, so it can read secrets and entities in every workspace on the deployment, not only yours. The feature is off by default. Enable it only if you trust everyone who can create metrics or submit Evals jobs, and the environment itself, such as a single-user local install.
+
+Until a deployment enables them, creating a cloudpickle metric, a task with an inline cloudpickle metric, a job that uses one, or a `/live` request that uses one fails with HTTP 422 and the message `cloudpickle metrics are disabled on this deployment`.
+
+The setting has two parts, because Evals job workers do not read the platform config file. Set both, and change them together:
+
+- `evals.allow_insecure_cloudpickle_metrics: true` in the platform config, read by the API.
+- `NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "true"` in `jobs.executor_defaults.<backend>.env` for every job backend that runs Evals jobs, read by the job worker.
+
+For a local install, edit both values in your platform config file and restart NeMo Helix:
+
+```yaml
+jobs:
+  executor_defaults:
+    subprocess:
+      env:
+        NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "true"
+    docker:
+      env:
+        NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "true"
+
+evals:
+  allow_insecure_cloudpickle_metrics: true
+```
+
+For a Helm install, set one value. The chart applies it to the API and to the Kubernetes and Volcano job backends:
+
+```yaml
+evals:
+  allowInsecureCloudpickleMetrics: true
+```
+
+If you define an executor profile under `jobs.executors` with its own `env`, add the variable there too: a profile's `env` replaces the default `env` rather than merging with it. Without it, jobs on that profile fail with the same `disabled on this deployment` error.
+
+The API setting is the access control. Leaving some executor profiles opted out does not restrict who can run cloudpickle metrics: anyone submitting a job chooses its profile, so once the API setting is on, any submitter can pick an opted-in profile.
+
+To run the job locally in the CLI process instead, set `NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS=true` in that shell.
+
+Users cannot grant this to their own jobs: secret environment names that start with `NHX_` or `NEMO_EVALS_` are rejected at submission.
+
+### Submit the Job
+
 <Note>
 
 Submit from a Python 3.13 environment. A bundle created on another minor version fails when the job hydrates it, with `cloudpickle metric payload was created with Python 3.12.x, but this runtime is Python 3.13.x; recreate the metric bundle with the runtime Python version.`
@@ -436,7 +480,7 @@ remote_result.print_summary()
 
 <Warning>
 
-Cloudpickle metric bundles execute serialized Python code when the job hydrates the metric. Use this path only for metric code that you fully understand and trust.
+Cloudpickle metric bundles execute serialized Python code with the Evals service's credentials when the metric is loaded. Use this path only for metric code that you fully understand and trust.
 
 </Warning>
 

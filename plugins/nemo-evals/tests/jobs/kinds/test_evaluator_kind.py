@@ -25,7 +25,7 @@ from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evals.jobs.kinds.types import LoadedTask, PrepareContext, SubmitContext
 from nemo_evals.jobs.metric_resolution import to_inline
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx_evals_sdk.agent_eval.tasks import SemanticView
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
@@ -122,7 +122,7 @@ async def test_stored_adapter_returns_definition_with_selected_revision_origin()
 
 def metric_bundle(metric=None):
     return to_inline(
-        bundle_metric(metric or ExactMatchMetric(reference="yes", candidate="yes"), CloudpickleMetricBundlePackager())
+        bundle_metric(metric or ExactMatchMetric(reference="yes", candidate="yes"), HybridMetricBundlePackager())
     )
 
 

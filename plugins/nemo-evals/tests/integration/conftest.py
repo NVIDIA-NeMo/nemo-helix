@@ -17,13 +17,14 @@ import socket
 import subprocess
 import time
 import urllib.request
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 import yaml
+from nemo_evals.shared.metric_bundles.cloudpickle import ALLOW_CLOUDPICKLE_METRICS_ENV_VAR
 from nhx.testing import igw_mock_provider_mode
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -47,6 +48,9 @@ AGENT_DOCKER_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_DOCKER_BASE_URL", "ht
 #: Base URL for the auth-enabled subprocess platform (own port, coexists with the others).
 AGENT_AUTH_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_AUTH_BASE_URL", "http://localhost:8092")
 
+#: Base URL for the platform whose cloudpickle opt-in is toggled across restarts (own port).
+CLOUDPICKLE_TOGGLE_PLATFORM_BASE_URL = os.environ.get("NHX_CLOUDPICKLE_TOGGLE_BASE_URL", "http://localhost:8093")
+
 # xdist ``loadgroup`` does not infer shared fixtures; it only groups tests that
 # carry the same ``xdist_group`` marker. Any evaluator test that depends on the
 # ClickHouse fixture uses Intake's fixed local container, so keep those tests on
@@ -60,6 +64,7 @@ PLATFORM_XDIST_FIXTURES = (
     "subprocess_platform",
     "auth_subprocess_platform",
     "docker_platform",
+    "cloudpickle_toggle_platform",
 )
 
 
@@ -165,7 +170,24 @@ def _igw_mock_prefix() -> Iterator[None]:
         yield
 
 
-def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabled: bool = False) -> Path:
+#: Executor profile on the opted-in harness platforms whose workers are left opted out, so a test
+#: can prove the worker enforces the setting itself.
+CLOUDPICKLE_OFF_PROFILE = "cloudpickle-off"
+
+
+@pytest.fixture
+def cloudpickle_off_profile() -> str:
+    return CLOUDPICKLE_OFF_PROFILE
+
+
+@pytest.fixture(autouse=True)
+def _cloudpickle_metrics_enabled(allow_cloudpickle_metrics: None) -> None:
+    """Match the harness platforms' opt-in in the test process, where sync jobs hydrate metrics."""
+
+
+def _materialize_subprocess_config(
+    work_root: Path, *, base_url: str, auth_enabled: bool = False, allow_cloudpickle_metrics: bool = True
+) -> Path:
     """Write a self-contained subprocess-backend platform config under ``work_root``.
 
     Owned here rather than borrowed from ``e2e/configs`` (legacy, not run in CI). It pins
@@ -176,6 +198,10 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
 
     ``auth_enabled`` turns on the PDP so the auth-forwarding test can prove a submitted task's
     ``X-NHX-*`` service-principal identity actually authenticates its IGW inference.
+
+    ``allow_cloudpickle_metrics`` opts the API and the executors in to cloudpickle metrics, the two
+    places an operator must set it. These are single-user dev platforms, so the custom-metric tests
+    opt in; the ``cloudpickle-off`` profile always stays opted out.
     """
     jobs_work_dir = str(work_root / "subprocess-jobs")
     subprocess_executor_config = {
@@ -184,6 +210,11 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
         "ttl_seconds_before_active": 60,
         "ttl_seconds_active": 3600,
         "ttl_seconds_after_finished": 300,
+        "env": {ALLOW_CLOUDPICKLE_METRICS_ENV_VAR: str(allow_cloudpickle_metrics).lower()},
+    }
+    cloudpickle_off_executor_config = {
+        **subprocess_executor_config,
+        "env": {ALLOW_CLOUDPICKLE_METRICS_ENV_VAR: "false"},
     }
     config = {
         "platform": {"runtime": "none", "base_url": base_url},
@@ -202,10 +233,17 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
                     "backend": "subprocess",
                     "config": subprocess_executor_config,
                 },
+                {
+                    "provider": "subprocess",
+                    "profile": CLOUDPICKLE_OFF_PROFILE,
+                    "backend": "subprocess",
+                    "config": cloudpickle_off_executor_config,
+                },
             ],
             "executor_defaults": {"subprocess": subprocess_executor_config},
         },
         "secrets": {"allow_key_creation": True},
+        "evals": {"allow_insecure_cloudpickle_metrics": allow_cloudpickle_metrics},
         "files": {"default_storage_config": {"type": "local", "path": str(work_root / "files")}},
     }
     config_path = work_root / "subprocess-platform.yaml"
@@ -273,6 +311,39 @@ def auth_subprocess_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterat
         yield base_url
 
 
+@pytest.fixture(scope="session")
+def cloudpickle_toggle_platform(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Callable[..., AbstractContextManager[str]]:
+    """Start a subprocess platform with cloudpickle metrics on or off, keeping its data across restarts.
+
+    Restarting with the opt-in flipped is how an operator disables cloudpickle metrics on a
+    deployment that already stored some, so tests use it to seed with the flag on and assert with
+    it off. Starts are sequential: each one binds the same port.
+    """
+    work_root = tmp_path_factory.mktemp("cloudpickle-toggle-platform")
+
+    @contextmanager
+    def start(*, allow_cloudpickle_metrics: bool) -> Iterator[str]:
+        config_path = _materialize_subprocess_config(
+            work_root,
+            base_url=CLOUDPICKLE_TOGGLE_PLATFORM_BASE_URL,
+            allow_cloudpickle_metrics=allow_cloudpickle_metrics,
+        )
+        with running_platform(
+            run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
+            base_url=CLOUDPICKLE_TOGGLE_PLATFORM_BASE_URL,
+            env_vars={
+                "NHX_CONFIG_FILE_PATH": str(config_path),
+                DATA_DIR_ENVVAR: str(work_root / "data"),
+                MOCK_PROVIDER_PREFIX_ENVVAR: MOCK_PROVIDER_PREFIX,
+            },
+        ) as base_url:
+            yield base_url
+
+    return start
+
+
 def _materialize_docker_config(work_root: Path, *, base_url: str) -> Path:
     """Write a docker-backend platform config: ``cpu/default`` routes to the docker jobs backend.
 
@@ -296,6 +367,7 @@ def _materialize_docker_config(work_root: Path, *, base_url: str) -> Path:
         "ttl_seconds_before_active": 60,
         "ttl_seconds_active": 3600,
         "ttl_seconds_after_finished": 300,
+        "env": {ALLOW_CLOUDPICKLE_METRICS_ENV_VAR: "true"},
     }
     config = {
         "platform": {"runtime": "docker", "base_url": base_url},
@@ -308,6 +380,7 @@ def _materialize_docker_config(work_root: Path, *, base_url: str) -> Path:
             "executor_defaults": {"docker": docker_executor_config},
         },
         "secrets": {"allow_key_creation": True},
+        "evals": {"allow_insecure_cloudpickle_metrics": True},
         "files": {"default_storage_config": {"type": "local", "path": str(work_root / "files")}},
     }
     config_path = work_root / "docker-platform.yaml"

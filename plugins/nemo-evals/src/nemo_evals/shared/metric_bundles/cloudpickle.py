@@ -12,6 +12,7 @@ import sys
 from typing import Annotated, Literal
 
 import cloudpickle
+from nemo_evals.config import get_config
 from nemo_evals.shared.metric_bundles.bundles import (
     MetricBundlePackager,
     MetricBundlePayload,
@@ -21,6 +22,8 @@ from nemo_evals.shared.metric_bundles.bundles import (
 from nhx_evals_sdk.metrics.protocol import Metric
 from pydantic import ConfigDict, Field, computed_field, field_validator
 
+CLOUDPICKLE_KIND = "cloudpickle"
+ALLOW_CLOUDPICKLE_METRICS_ENV_VAR = "NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS"
 MAX_CLOUDPICKLE_PAYLOAD_BYTES = 10 * 1024 * 1024
 CloudpickleBlob = Annotated[bytes, Field(min_length=1, max_length=MAX_CLOUDPICKLE_PAYLOAD_BYTES)]
 
@@ -36,6 +39,26 @@ def _validate_payload_size(blob: bytes) -> bytes:
             f"{_format_bytes(len(blob))}; maximum allowed is {_format_bytes(MAX_CLOUDPICKLE_PAYLOAD_BYTES)}"
         )
     return blob
+
+
+class CloudpickleMetricsDisabledError(MetricBundlingError):
+    """Raised when a cloudpickle metric reaches a deployment that has not enabled them."""
+
+
+def require_cloudpickle_metrics_allowed() -> None:
+    """Refuse cloudpickle metrics unless the deployment has opted in.
+
+    Raises:
+        CloudpickleMetricsDisabledError: ``allow_insecure_cloudpickle_metrics`` is not enabled.
+    """
+    if not get_config().allow_insecure_cloudpickle_metrics:
+        raise CloudpickleMetricsDisabledError(
+            "cloudpickle metrics are disabled on this deployment because they run caller-supplied Python "
+            "with the Evals service's credentials. Bundle built-in metrics inline instead "
+            "(HybridMetricBundlePackager keeps them inline), or ask an operator to enable "
+            "`evals.allow_insecure_cloudpickle_metrics` and set "
+            f"{ALLOW_CLOUDPICKLE_METRICS_ENV_VAR}=true in the job executor environment."
+        )
 
 
 def _python_major_minor(version: str) -> tuple[int, int]:
@@ -75,7 +98,7 @@ class CloudpickleMetricPayload(MetricBundlePayload):
     @property
     def kind(self) -> Literal["cloudpickle"]:
         """Payload discriminator used by the metric bundle registry."""
-        return "cloudpickle"
+        return CLOUDPICKLE_KIND
 
     @computed_field
     @property
@@ -111,7 +134,8 @@ class CloudpickleMetricBundlePackager(MetricBundlePackager):
         return CloudpickleMetricPayload.from_blob(blob)
 
     def load(self, payload: MetricBundlePayload) -> Metric:
-        """Hydrate a metric from a cloudpickle payload."""
+        """Hydrate a metric from a cloudpickle payload, if the deployment allows cloudpickle metrics."""
+        require_cloudpickle_metrics_allowed()
         cloudpickle_payload = CloudpickleMetricPayload.model_validate(payload.model_dump(mode="python"))
         _validate_python_version(cloudpickle_payload)
         hydrated_metric = cloudpickle.loads(cloudpickle_payload.blob)
@@ -121,7 +145,7 @@ class CloudpickleMetricBundlePackager(MetricBundlePackager):
 
 
 register_metric_bundle_kind(
-    "cloudpickle",
+    CLOUDPICKLE_KIND,
     payload_type=CloudpickleMetricPayload,
     packager_factory=CloudpickleMetricBundlePackager,
 )

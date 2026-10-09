@@ -46,7 +46,7 @@ Available preview surfaces:
 
 ## Step 1: Build a `PreviewRequest`
 
-A preview request bundles the `AnonymizerConfig` (converted to the plugin's `AnonymizerConfigRequest`), the input spec, and `model_configs` / `selected_models`.
+A preview request bundles the `AnonymizerConfig`, the input spec, and `model_configs` / `selected_models`.
 
 ```python
 import os
@@ -54,7 +54,7 @@ from anonymizer.config.anonymizer_config import AnonymizerConfig
 from anonymizer.config.replace_strategies import Redact
 from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
-from nemo_anonymizer_plugin.app.task_config import AnonymizerConfigRequest, PreviewRequest
+from nemo_anonymizer_plugin.app.task_config import PreviewRequest
 from nemo_anonymizer_plugin.sdk.resources import AnonymizerResource
 from nemo_helix_plugin.client.client import NemoClient
 
@@ -76,7 +76,7 @@ model_configs = [
 ]
 
 request = PreviewRequest(
-    config=AnonymizerConfigRequest.model_validate(config),
+    config=config,
     data=AnonymizerInputSpec(
         source=f"fileset://{WORKSPACE}/anonymizer-inputs#anonymizer-input.csv",
         text_column="biography",
@@ -91,7 +91,7 @@ Field reference:
 
 | Field             | Type                                  | Notes                                                                                                                  |
 |-------------------|---------------------------------------|------------------------------------------------------------------------------------------------------------------------|
-| `config`          | `AnonymizerConfigRequest` | The library [`AnonymizerConfig`](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs), converted with `AnonymizerConfigRequest.model_validate(config)`. The example uses `Redact`; the plugin also supports `substitute`, `annotate`, `hash`, and `rewrite`. |
+| `config`          | [`AnonymizerConfig`](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs) | The library config. The example uses `Redact`; the plugin also supports `substitute`, `annotate`, `hash`, and `rewrite`. |
 | `data.source`     | string                                | `http(s)` URL or fileset reference. See [input source forms](#input-source-forms).                                    |
 | `data.text_column`| string                                | Column containing text to anonymize. Defaults to `text`.                                                               |
 | `data.id_column`  | string                                | Optional record identifier column.                                                                                     |
