@@ -422,7 +422,7 @@ export const useCustomizationDatasetValidation = ({
     allResults.map((r) => [r.file.path, r.rowCount])
   );
   const bytesReadByPath: Record<string, number> = Object.fromEntries(
-    perFile.map((r) => [r.file.path, r.bytesRead])
+    allResults.map((r) => [r.file.path, r.bytesRead])
   );
   const annotate = (file: FilesetFileOutput): AnnotatedFilesetFile => ({
     ...file,
