@@ -91,7 +91,7 @@ export const flagDefinitions = {
   settingsEnabled: previewFlag('VITE_FF_SETTINGS_ENABLED', true),
   toolCallingEnabled: booleanFlag('VITE_FF_TOOL_CALLING_ENABLED'),
   tourEnabled: booleanFlag('VITE_FF_TOUR_ENABLED', true),
-  traceGraphEnabled: booleanFlag('VITE_FF_TRACE_GRAPH_ENABLED'),
+  traceGraphEnabled: booleanFlag('VITE_FF_TRACE_GRAPH_ENABLED', true),
 } as const;
 
 // --- Types ---
