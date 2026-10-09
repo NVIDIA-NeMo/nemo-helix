@@ -485,8 +485,9 @@ sequenceDiagram
    set does. It downloads each archive to the work volume and unpacks it, once, with Python's
    `data` filter, which keeps every entry inside the archive's directory. It refuses an archive that
    unpacks to more than 4 GiB or 100,000 entries.
-3. **`build`** creates one sandbox per distinct fileset, archive and `context_path`, one at a time,
-   and deletes each when it ends. The sandbox runs kaniko
+3. **`build`** first deletes any sandboxes an earlier attempt of the same job left. Then it creates
+   one sandbox per distinct fileset, archive and `context_path`, one at a time, and deletes each when
+   it ends. The sandbox runs kaniko
    once per image with `--no-push`, writing an OCI layout to that image's output directory. The
    sandbox has:
    - no ServiceAccount token, no secret, and no credential in its environment
@@ -619,9 +620,10 @@ builder:
 die in a pod. Set `repository_prefix` to a path dedicated to builds: left empty, each workspace name
 is a top-level namespace in the registry. The steps run the release's `nhx-builder-tasks` image, and
 the sandboxes its `nhx-kaniko`, both from the platform's `image_registry` at its `image_tag`;
-`sandbox.image` names another kaniko image. The other sandbox settings are `cpu`, `memory`, `ephemeral_storage` and
-`dns_nameservers`, each described on `SandboxConfig` in `config.py`. Where the sandboxes run isn't a builder setting:
-it comes from the
+`sandbox.image` names another kaniko image. `sandbox.provider` picks what runs the sandboxes;
+`kubernetes_pod`, a plain pod, is the only one so far. The other sandbox settings are `cpu`, `memory`,
+`ephemeral_storage` and `dns_nameservers`, each described on `SandboxConfig` in `config.py`. Where the
+sandboxes run isn't a builder setting: it comes from the
 [Jobs execution profiles](#jobs-execution-profiles). From the environment, the `sandbox` section is
 one JSON value, `NEMO_BUILDER_SANDBOX`: only its one-word settings can be set on their own.
 
@@ -705,10 +707,9 @@ volume and `node_selector`, so the profiles must agree with each other:
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
   `build` stops watching it after an hour, and the kubelet ends it five minutes later; its
   unfinished images fail.
-- **`build` gives up on a dropped watch, and on a leftover sandbox.** If its watch on a sandbox
-  closes early, the sandbox's unfinished images fail. A retried `build` step fails while the
-  previous attempt's sandbox still exists, and a sandbox whose `build` was killed is never deleted:
-  it stays until someone deletes it.
+- **`build` gives up on a dropped watch.** If its watch on a sandbox closes early, the sandbox's
+  unfinished images fail. A sandbox whose `build` was killed ends at its deadline, and the job's next
+  attempt deletes it before building.
 - **The work volume fills up.** Jobs deletes a job's directory only when the push step's profile
   sets `cleanup_completed_jobs_immediately`, and only after the job's last step succeeds. The chart's
   profiles set it, so a failed build's contexts and layouts stay until someone deletes them.
@@ -811,6 +812,6 @@ The tests need no cluster, registry or running platform.
 | `entities.py` | `ContainerImage` |
 | `identity.py` | Registry hosts, repository paths and tags, and the system tag |
 | `config.py` | `BuilderConfig` |
-| `run/` | The programs: `fetch.py`, `supervise.py` and `push.py`; `main.py`, the `nhx-build` entry point; `utils.py`, what the steps share; and `tools.py`, which runs crane for `push` |
+| `run/` | The programs: `fetch.py`, `supervise.py` and `push.py`; `main.py`, the `nhx-build` entry point; `utils.py`, what the steps share; `tools.py`, which runs crane for `push`; and the sandbox providers, `sandbox.py`, what they share, with `pod_sandbox.py` |
 | `docker/builder/`, at the repository root | The `nhx-builder-tasks` and `nhx-kaniko` images |
 | `config/` | The chart values for the minikube quickstart |
