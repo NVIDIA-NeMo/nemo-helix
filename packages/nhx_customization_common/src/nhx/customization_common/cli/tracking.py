@@ -3,7 +3,7 @@
 
 """Post-submit feedback for Customizer backends.
 
-After ``submit`` creates a job, :func:`follow_job` optionally blocks until the
+After ``--job-json`` creates a job, :func:`follow_job` optionally blocks until the
 job reaches a terminal state, for ``--wait`` (status only) and ``--watch``
 (status and logs). Both show a spinner, so a phase that produces no output still
 looks alive. The commands for tracking the job later are printed by the submit

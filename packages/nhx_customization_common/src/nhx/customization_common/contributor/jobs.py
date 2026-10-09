@@ -94,7 +94,7 @@ def require_distributed_runtime(backend_label: str) -> None:
 
 
 class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
-    """Shared submit-only job scaffold.
+    """Shared Jobs-service-only job scaffold.
 
     Subclasses set the ``NemoJob`` ClassVars (``name``, ``description``,
     ``job_collection_path``, ``input_spec_schema``, ``spec_schema``), implement
@@ -102,6 +102,7 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
     """
 
     dependencies: ClassVar[list[str]] = ["entities", "auth", "jobs", "secrets", "files", "models"]
+    generate_legacy_verbs: ClassVar[bool] = False
     #: Human-readable backend name used in the runtime guard messages.
     runtime_label: ClassVar[str] = "Training"
 

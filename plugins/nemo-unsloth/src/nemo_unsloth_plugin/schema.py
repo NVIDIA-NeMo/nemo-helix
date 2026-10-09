@@ -71,7 +71,7 @@ class OutputRequest(UnslothSchema):
 
 
 class UnslothJobInput(UnslothSchema):
-    """POST body / CLI JSON for ``nemo customization unsloth submit``."""
+    """POST body / CLI JSON for ``nemo customization unsloth --job-json``."""
 
     name: str | None = None
     model: ModelLoadSpec
