@@ -29,9 +29,12 @@ import pytest
 from nemo_agents_plugin.sdk import AgentsResource
 from nemo_agents_plugin.service import AgentsService
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelEntityRequest
+from nemo_insights_plugin.entities import EthosSource
 from nemo_insights_plugin.sdk import InsightsPluginResource
 from nemo_insights_plugin.service import InsightsService
 from nhx.core.entities.service import EntitiesService
@@ -153,6 +156,30 @@ def test_the_submitted_job_carries_the_analyst_config_the_facade_built(
     assert settings["agent"] == "scoped-agent"
     assert settings["ethos"] == ETHOS
     assert settings["evaluation_id"] == "eval-123"
+
+
+def test_a_run_without_an_ethos_inlines_the_agents_stored_one(
+    insights: InsightsPluginResource, agents: AgentsResource, client_context: ClientContext
+) -> None:
+    files = FilesClient.from_client(client_context.client)
+    files.create_fileset(body=CreateFilesetRequest(name="stored-agent-ethos"), workspace=WORKSPACE)
+    files.upload_file(name="stored-agent-ethos", path="ETHOS.md", content=ETHOS.encode(), workspace=WORKSPACE)
+
+    created = _create(insights, agent="stored-agent")
+
+    assert created.run.ethos_source == EthosSource.STORED
+    settings = _backing_job(agents, created.run.name)["spec"]["agent"]["config"]["harnesses"]["insights"]["settings"]
+    assert settings["ethos"] == ETHOS
+
+
+def test_a_run_for_an_agent_with_no_stored_ethos_runs_without_one(
+    insights: InsightsPluginResource, agents: AgentsResource
+) -> None:
+    created = _create(insights, agent="no-ethos-agent")
+
+    assert created.run.ethos_source == EthosSource.NONE
+    settings = _backing_job(agents, created.run.name)["spec"]["agent"]["config"]["harnesses"]["insights"]["settings"]
+    assert "ethos" not in settings
 
 
 def test_the_sdk_serializes_a_since_bound_the_route_accepts(

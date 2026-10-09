@@ -50,6 +50,11 @@ An `ETHOS.md` file is optional. It gives the Analyst the agent's intent,
 constraints, and success criteria. Code and traces don't contain that context.
 Without it, the Analyst can only judge an agent against itself.
 
+Every run, scheduled or on demand, uses the `ETHOS.md` stored with the agent
+(`<workspace>/<agent>-ethos#ETHOS.md`) unless one is supplied with `--ethos`. The run's `ethos_source` records what it used:
+`request`, `stored`, `none` (the agent has no stored Ethos), or `unavailable`
+(the stored Ethos could not be read, so the run went ahead without it).
+
 ## What it produces
 
 Analyze an agent's behavior from its own telemetry and record what recurs as
@@ -79,7 +84,7 @@ Replace the quoted placeholders below with the target agent and workspace.
 nemo insights analysis-runs create --agent "<agent-name>" --workspace "<workspace>" --wait
 ```
 
-Add `--ethos ETHOS.md` to supply the agent's intended behavior, `--since` for
+Add `--ethos ETHOS.md` to override the agent's stored Ethos, `--since` for
 an ISO-8601 lower time bound, or `--evaluation-id` to select an evaluation.
 The command submits an AnalysisRun backed by an `agents.execute` job. Expect
 several minutes. `--wait` exits non-zero unless the job completes successfully.

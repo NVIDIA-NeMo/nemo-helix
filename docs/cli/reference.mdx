@@ -10183,7 +10183,7 @@ nemo insights analysis-runs create [OPTIONS]
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
 * `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
 * `--since`: ISO-8601 lower bound enforced on the analyst's trace/span reads.
-* `--ethos <PATH>`: Path to the agent's Ethos Markdown. Its contents are sent with the run.
+* `--ethos <PATH>`: Path to the agent's Ethos Markdown. Its contents are sent with the run. Defaults to the agent's stored ETHOS.md, if it has one.
 * `--evaluation-id`: Restrict the run to spans from one evaluation.
 * `--timeout-seconds <FLOAT>`: Timeout applied to the backing execute-agent job.
 * `--wait`: Poll the run until its backing job reaches a terminal state.
