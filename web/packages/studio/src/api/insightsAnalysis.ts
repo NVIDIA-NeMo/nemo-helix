@@ -3,7 +3,12 @@
 
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
 import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
-import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import type {
+  AnalysisConfig,
+  AnalysisRunResponseJob,
+  CreateAnalysisRunRequest,
+} from '@nemo/sdk/generated/insights/schema';
+import { type AtifIngestRequest, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import { AxiosError } from 'axios';
 
@@ -34,12 +39,32 @@ export interface InsightsModelOverrides {
   fast_model?: string;
 }
 
+/** `evaluation_id` takes an evaluation's name. */
+export interface AnalysisRunOptions extends Pick<
+  CreateAnalysisRunRequest,
+  'since' | 'evaluation_id'
+> {
+  /** Skips the config lookup when the caller already holds the agent's config. */
+  storedConfig?: AnalysisConfig;
+}
+
 /**
  * Studio stores Model Entity references in `workspace/name` format.
  */
 export const isQualifiedModelRef = (ref: string): boolean => {
   const [workspace, ...rest] = ref.split('/');
   return rest.length === 1 && workspace.length > 0 && rest[0].length > 0;
+};
+
+const isHelixJobStatus = (value: unknown): value is HelixJobStatus =>
+  Object.values<unknown>(HelixJobStatus).includes(value);
+
+/** The analysis run's backing job is typed as an open object, so its status is narrowed here. */
+export const analysisJobStatus = (
+  job?: AnalysisRunResponseJob | null
+): HelixJobStatus | undefined => {
+  const status = job?.status;
+  return isHelixJobStatus(status) ? status : undefined;
 };
 
 const statusOf = (error: unknown): number | undefined =>
@@ -66,7 +91,8 @@ const messageOf = (error: unknown): string => {
 export const triggerInsightsRun = async (
   workspace: string,
   agent: string,
-  overrides: InsightsModelOverrides = {}
+  overrides: InsightsModelOverrides = {},
+  { since, evaluation_id, storedConfig }: AnalysisRunOptions = {}
 ): Promise<InsightsTriggerResult> => {
   const invalidOverride = [overrides.default_model, overrides.fast_model]
     .map((ref) => ref?.trim())
@@ -81,7 +107,7 @@ export const triggerInsightsRun = async (
 
   let config;
   try {
-    config = await insightsGetAnalysisConfig(workspace, agent);
+    config = storedConfig ?? (await insightsGetAnalysisConfig(workspace, agent));
   } catch (error) {
     if (statusOf(error) === 404) {
       return {
@@ -121,6 +147,8 @@ export const triggerInsightsRun = async (
       default_model: defaultModel,
       fast_model: fastModel,
       ...(ethos ? { ethos } : {}),
+      ...(since ? { since } : {}),
+      ...(evaluation_id ? { evaluation_id } : {}),
     });
     if (!response.job) {
       return {

@@ -22,7 +22,13 @@ import {
 } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import { queryClient } from '@studio/api/queryClient';
-import { useTriggerInsightsRun } from '@studio/api/useTriggerInsightsRun';
+import { useLatestAnalysisRun } from '@studio/api/useLatestAnalysisRun';
+import {
+  type TriggerInsightsRunVariables,
+  useTriggerInsightsRun,
+} from '@studio/api/useTriggerInsightsRun';
+import { LatestAnalysisRun } from '@studio/routes/agents/AgentDetailRoute/analysis/LatestAnalysisRun';
+import { RunAnalysisModal } from '@studio/routes/agents/AgentDetailRoute/analysis/RunAnalysisModal';
 import { saveAnalysisConfig } from '@studio/routes/agents/AgentDetailRoute/analysis/saveAnalysisConfig';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { type FC, useEffect, useState } from 'react';
@@ -43,7 +49,9 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
   const [enabled, setEnabled] = useState(false);
   const [defaultModel, setDefaultModel] = useState('');
   const [fastModel, setFastModel] = useState('');
+  const [runModalOpen, setRunModalOpen] = useState(false);
   const triggerRun = useTriggerInsightsRun(workspace);
+  const { latestRun, isActive: runActive, blocksNewRun } = useLatestAnalysisRun(workspace, agent);
 
   const {
     data: config,
@@ -98,12 +106,12 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
     }
   };
 
-  const handleRunNow = () => {
-    if (!agent) return;
-    triggerRun.mutate(agent, {
+  const handleRun = (variables: TriggerInsightsRunVariables) => {
+    triggerRun.mutate(variables, {
       onSuccess: ({ status, jobName, message }) => {
         if (status === 'started') {
           toast.success(`Queued analysis run "${jobName}".`);
+          setRunModalOpen(false);
         } else {
           toast.error(message ?? 'Failed to start the analysis run.');
         }
@@ -146,9 +154,9 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
               color="neutral"
               size="small"
               height={28}
-              onClick={handleRunNow}
+              onClick={() => setRunModalOpen(true)}
               loading={triggerRun.isPending}
-              disabled={!config}
+              disabled={!config || blocksNewRun}
             >
               Run analysis now
             </LoadingButton>
@@ -164,6 +172,16 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
         )
       }
     >
+      {runModalOpen && config ? (
+        <RunAnalysisModal
+          workspace={workspace}
+          agent={agent}
+          config={config}
+          running={triggerRun.isPending}
+          onClose={() => setRunModalOpen(false)}
+          onRun={handleRun}
+        />
+      ) : null}
       {isLoading ? (
         <Text className="text-secondary" kind="body/regular/sm">
           Loading analysis config...
@@ -190,11 +208,8 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
             <FormField
               slotLabel="Default model"
               slotHelp="Used for quality-critical analysis work."
-              slotError={
-                defaultModel && !isQualifiedModelRef(defaultModel)
-                  ? `Stored value "${defaultModel}" is not workspace-qualified. Pick a model to replace it.`
-                  : undefined
-              }
+              status={defaultModel && !isQualifiedModelRef(defaultModel) ? 'error' : undefined}
+              slotError={`Stored value "${defaultModel}" is not workspace-qualified. Pick a model to replace it.`}
             >
               <WorkspaceModelSelect
                 workspace={workspace}
@@ -209,11 +224,8 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
             <FormField
               slotLabel="Fast model"
               slotHelp="Used for latency-sensitive analysis work."
-              slotError={
-                fastModel && !isQualifiedModelRef(fastModel)
-                  ? `Stored value "${fastModel}" is not workspace-qualified. Pick a model to replace it.`
-                  : undefined
-              }
+              status={fastModel && !isQualifiedModelRef(fastModel) ? 'error' : undefined}
+              slotError={`Stored value "${fastModel}" is not workspace-qualified. Pick a model to replace it.`}
             >
               <WorkspaceModelSelect
                 workspace={workspace}
@@ -234,6 +246,11 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
         </Text>
       ) : (
         <Grid cols={{ base: 1, md: 2 }} gap="4">
+          {latestRun ? (
+            <div className="md:col-span-2">
+              <LatestAnalysisRun workspace={workspace} run={latestRun} isActive={runActive} />
+            </div>
+          ) : null}
           <KVPair
             orientation="vertical"
             label="Periodic analysis"
