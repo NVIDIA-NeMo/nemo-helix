@@ -31,7 +31,6 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
     name: ClassVar[str] = "retrieval-preview"
     description: ClassVar[str] = "Preview retrieval SDG generation without publishing a full job fileset."
     spec_schema: ClassVar[type[RetrievalPreviewSpec]] = RetrievalPreviewSpec
-    generate_legacy_verbs: ClassVar[bool] = False
 
     async def run(
         self,

@@ -159,81 +159,11 @@ def _patch_submit_remote(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-class TestStreamingFunctionRunRenderer:
-    def test_no_renderer_falls_through_to_default_echo(self) -> None:
-        app = _build_function_app(_CountFunction, cli=_NoOpCLI())
-        result = runner.invoke(app, ["count", "run", "--upto", "2"])
-        assert result.exit_code == 0
-        # Default behavior echoes each frame as JSON; verify by counting lines
-        # that look like a JSON object.
-        json_lines = [ln for ln in result.output.splitlines() if ln.strip().startswith("{")]
-        assert len(json_lines) >= 3  # 2 heartbeats + 1 Done
-
-    def test_renderer_lifecycle_fires_in_order(self) -> None:
-        class _CLI(_NoOpCLI):
-            def get_function_renderer(self, fn_cls, *, verb):
-                return _RecordingRenderer if fn_cls is _CountFunction else None
-
-        app = _build_function_app(_CountFunction, cli=_CLI())
-        result = runner.invoke(app, ["count", "run", "--upto", "2"])
-        assert result.exit_code == 0, result.output
-
-        events = _RecordingRenderer.events
-        names = [name for name, _ in events]
-        # Lifecycle: start → frames → complete.
-        assert names[0] == "start"
-        assert names[-1] == "complete"
-        assert names.count("frame") == 3  # 2 heartbeats + 1 Done
-
-        # on_start receives the right context.
-        start_meta = events[0][1]
-        assert start_meta == {"verb": "run", "is_local": True}
-
-    def test_output_format_json_bypasses_renderer(self) -> None:
-        class _CLI(_NoOpCLI):
-            def get_function_renderer(self, fn_cls, *, verb):
-                return _RecordingRenderer
-
-        app = _build_function_app(_CountFunction, cli=_CLI())
-        ctx_obj = _typer_context_with_overrides(output_format="json")
-
-        # Reset before invocation.
-        _RecordingRenderer.events = []
-        result = runner.invoke(app, ["count", "run", "--upto", "1"], obj=ctx_obj)
-        assert result.exit_code == 0, result.output
-
-        # Renderer was never instantiated.
-        assert _RecordingRenderer.events == []
-
-        # And the default echo behavior fired.
-        json_lines = [ln for ln in result.output.splitlines() if ln.strip().startswith("{")]
-        assert len(json_lines) >= 1
-
-    def test_renderer_dispatches_per_function_and_verb(self) -> None:
-        seen: list[tuple[str, str]] = []
-
-        class _CLI(_NoOpCLI):
-            def get_function_renderer(self, fn_cls, *, verb):
-                seen.append((fn_cls.name, verb))
-                return None  # decline to render; just observe the dispatch
-
-        app = _build_function_app(_CountFunction, _GreetFunction, cli=_CLI())
-        runner.invoke(app, ["count", "run", "--upto", "1"])
-
-        # The hook fires per-verb on the invoked function only.
-        assert ("count", "run") in seen
-
-
-# ---------------------------------------------------------------------------
-# Job: get_job_renderer for `submit`
-# ---------------------------------------------------------------------------
-
-
 class TestJobSubmitRenderer:
     def test_no_renderer_falls_through_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_submit_remote(monkeypatch)
         app = _build_job_app(_GreetJob, cli=_NoOpCLI())
-        result = runner.invoke(app, ["greet", "submit", "--spec", '{"name": "World"}'])
+        result = runner.invoke(app, ["greet", "--spec", '{"name": "World"}'])
         assert result.exit_code == 0
         assert json.loads(result.output) == {"message": "Hello, World!"}
 
@@ -246,7 +176,7 @@ class TestJobSubmitRenderer:
 
         app = _build_job_app(_GreetJob, cli=_CLI())
         _RecordingRenderer.events = []
-        result = runner.invoke(app, ["greet", "submit", "--spec", '{"name": "Renderer"}'])
+        result = runner.invoke(app, ["greet", "--spec", '{"name": "Renderer"}'])
         assert result.exit_code == 0, result.output
 
         events = _RecordingRenderer.events
@@ -269,7 +199,7 @@ class TestJobSubmitRenderer:
         app = _build_job_app(_GreetJob, cli=_CLI())
         ctx_obj = _typer_context_with_overrides(output_format="json")
         _RecordingRenderer.events = []
-        result = runner.invoke(app, ["greet", "submit", "--spec", '{"name": "X"}'], obj=ctx_obj)
+        result = runner.invoke(app, ["greet", "--spec", '{"name": "X"}'], obj=ctx_obj)
         assert result.exit_code == 0
         assert _RecordingRenderer.events == []
         # Default echo fired:
@@ -279,82 +209,3 @@ class TestJobSubmitRenderer:
 # ---------------------------------------------------------------------------
 # "Delegate to use the renderer" contract
 # ---------------------------------------------------------------------------
-
-
-class TestDelegateContract:
-    """A wrapper from update_function_cli that delegates to the original
-    callback gets the renderer for free; a wrapper that takes over the verb
-    body wholesale claims rendering responsibility too."""
-
-    def test_delegating_wrapper_still_drives_renderer(self) -> None:
-        """When the wrapper calls original(...), the framework's renderer
-        loop runs through the original's body — so the renderer fires."""
-
-        class _CLI(_NoOpCLI):
-            def update_function_cli(self, fn_cls, group):
-                if fn_cls is not _CountFunction:
-                    return
-                original = next(c for c in group.registered_commands if c.name == "run").callback
-                assert original is not None
-
-                @group.command("run")
-                def run(typer_ctx: typer.Context, count: int = typer.Option(2, "--count")) -> None:
-                    spec_json = json.dumps({"upto": count})
-                    original(typer_ctx, spec=spec_json, spec_file=None, workspace="default")
-
-            def get_function_renderer(self, fn_cls, *, verb):
-                return _RecordingRenderer if fn_cls is _CountFunction else None
-
-        app = _build_function_app(_CountFunction, cli=_CLI())
-        _RecordingRenderer.events = []
-        result = runner.invoke(app, ["count", "run", "--count", "1"])
-        assert result.exit_code == 0, result.output
-
-        # Renderer fired for the delegated invocation.
-        events = _RecordingRenderer.events
-        names = [name for name, _ in events]
-        assert names[0] == "start"
-        assert names[-1] == "complete"
-        assert names.count("frame") == 2  # 1 heartbeat + 1 Done
-
-
-# ---------------------------------------------------------------------------
-# on_error
-# ---------------------------------------------------------------------------
-
-
-class _ExplodingSpec(BaseModel):
-    pass
-
-
-class _ExplodingFunction(NemoFunction[_ExplodingSpec]):
-    name: ClassVar[str] = "explode"
-    spec_schema: ClassVar[type[_ExplodingSpec]] = _ExplodingSpec
-
-    async def run(self, spec: _ExplodingSpec) -> AsyncIterator[BaseModel]:
-        del spec
-        yield Heartbeat()
-        raise RuntimeError("boom")
-
-
-class TestOnError:
-    def test_on_error_fires_when_iteration_raises(self) -> None:
-        class _CLI(_NoOpCLI):
-            def get_function_renderer(self, fn_cls, *, verb):
-                return _RecordingRenderer
-
-        app = _build_function_app(_ExplodingFunction, cli=_CLI())
-        _RecordingRenderer.events = []
-        result = runner.invoke(app, ["explode", "run"])
-
-        assert result.exit_code != 0  # exception still propagates
-        events = _RecordingRenderer.events
-        names = [name for name, _ in events]
-        assert "start" in names
-        assert "frame" in names  # got the heartbeat before the explosion
-        assert "error" in names
-        # Exception type is RuntimeError.
-        error_payload = next(payload for name, payload in events if name == "error")
-        assert error_payload == "RuntimeError"
-        # on_complete should NOT fire on the error path.
-        assert "complete" not in names

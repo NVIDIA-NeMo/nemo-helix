@@ -161,7 +161,6 @@ nemo my-plugin process explain
 # Prints the job's schemas and submit route.
 ```
 
-If `ProcessJob` sets `generate_legacy_verbs = False`, the generated submit command is `nemo my-plugin process --spec ...` instead.
 
 Mount the routes from your service:
 

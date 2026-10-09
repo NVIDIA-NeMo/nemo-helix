@@ -102,7 +102,6 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
     """
 
     dependencies: ClassVar[list[str]] = ["entities", "auth", "jobs", "secrets", "files", "models"]
-    generate_legacy_verbs: ClassVar[bool] = False
     #: Human-readable backend name used in the runtime guard messages.
     runtime_label: ClassVar[str] = "Training"
 

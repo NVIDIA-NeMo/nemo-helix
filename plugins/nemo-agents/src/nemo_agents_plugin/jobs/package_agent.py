@@ -200,7 +200,6 @@ class PackageAgentJob(NemoJob):
     job_collection_path: ClassVar[str | None] = "/jobs/package"
     description: ClassVar[str] = "Build a container image for an agent stored on the platform."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
     input_spec_schema: ClassVar[type[BaseModel] | None] = PackageAgentInput
     spec_schema: ClassVar[type[BaseModel] | None] = PackageAgentSpec
 

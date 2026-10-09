@@ -91,7 +91,6 @@ class PromptMasterOptimizeJob(NemoJob):
         description="Rewrite the agent's system prompt using https://github.com/nidhinjs/prompt-master.",
     )
     description: ClassVar[str] = "Optimize a platform agent's system prompt with Prompt Master."
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = PromptMasterOptimizeSpec
 
     @classmethod

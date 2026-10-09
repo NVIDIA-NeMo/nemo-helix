@@ -57,7 +57,6 @@ class AnalyzeBatchJob(NemoJob):
     name: ClassVar[str] = "analyze"
     description: ClassVar[str] = "Analyze a batch of eval-suite results (clusters, regressions, hypotheses)."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = AnalyzeBatchConfig
 
     @classmethod

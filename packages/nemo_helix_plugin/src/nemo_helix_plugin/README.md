@@ -17,7 +17,6 @@ Build NeMo Helix plugins in Python.
 |---|---|---|---|
 | HTTP service | `NemoService` | `nemo.services` | Contributes FastAPI routers mounted at `/apis/<name>/...` |
 | CLI | `NemoCLI` | `nemo.cli` | Contributes `nemo <name> <cmd>` subcommands |
-| Job | `NemoJob` | `nemo.jobs` | Contributes schedulable, container-executable jobs. Generates submission and `explain` commands; jobs can opt into a flat submit callback with `generate_legacy_verbs = False`. |
 | Controller | `NemoController` | `nemo.controllers` | Contributes background reconcile-loop controllers |
 | Configuration | `NemoConfig` | — | Typed plugin configuration with env var / YAML loading |
 | Entity | `NemoEntity` | — | Entity definitions stored in the NeMo Helix entity store |

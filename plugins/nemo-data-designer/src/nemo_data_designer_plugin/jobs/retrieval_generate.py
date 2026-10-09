@@ -21,7 +21,6 @@ class RetrievalGenerateJob(NemoJob):
     name: ClassVar[str] = "retrieval-generate"
     description: ClassVar[str] = "Generate retrieval Q&A JSONL from a document corpus (Nemotron Stage 0)."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
 
     input_spec_schema = RetrievalGenerateJobConfig
     spec_schema = RetrievalGenerateStepConfig

@@ -112,7 +112,6 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
     description: ClassVar[str] = "Streaming preview of an Anonymizer config."
     spec_schema: ClassVar[type[BaseModel]] = PreviewSpec
     frame_schema: ClassVar[Any] = PreviewFrame
-    generate_legacy_verbs: ClassVar[bool] = False
 
     async def run(
         self,

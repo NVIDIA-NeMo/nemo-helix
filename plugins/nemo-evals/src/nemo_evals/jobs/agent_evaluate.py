@@ -198,7 +198,6 @@ class _AgentEvalJobBase(NemoJob):
     input_spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
     job_collection_path: ClassVar[str | None] = "/agent-evaluate/jobs"
-    generate_legacy_verbs: ClassVar[bool] = False
     adapters: ClassVar[Mapping[str, TaskKindAdapter]] = KIND_ADAPTERS
 
     @classmethod

@@ -87,7 +87,6 @@ class SwitchyardOptimizeJob(NemoJob):
         "one agent config per model pair and routing strategy.",
     )
     description: ClassVar[str] = "Build Switchyard-routed variants of a platform agent."
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = SwitchyardOptimizeSpec
 
     @classmethod
