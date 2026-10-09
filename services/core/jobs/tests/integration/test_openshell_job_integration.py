@@ -102,12 +102,9 @@ def make_backend() -> Iterator[Callable[..., OpenShellJobBackend]]:
     def factory(**config_overrides: object) -> OpenShellJobBackend:
         settings: dict[str, object] = {"tls": TLS, "egress_proxy": EGRESS_PROXY, **config_overrides}
         config = OpenShellJobExecutionProfileConfig(gateway_endpoint=GATEWAY, image=IMAGE, **settings)
-        with (
-            patch("nhx.core.jobs.controllers.backends.base.client_from_platform"),
-            patch(
-                "nhx.core.jobs.controllers.backends.openshell.backend._resolve_jobs_controller_instance_id",
-                return_value=f"itest-{uuid.uuid4().hex[:8]}",
-            ),
+        with patch(
+            "nhx.core.jobs.controllers.backends.openshell.backend._resolve_jobs_controller_instance_id",
+            return_value=f"itest-{uuid.uuid4().hex[:8]}",
         ):
             b = OpenShellJobBackend(MagicMock(), config, profile_name="default")
         # The jobs API is mocked; tests set the step status cleanup should observe.
