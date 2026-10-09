@@ -9,9 +9,11 @@ The stock OpenSandbox server builds a BatchSandbox manifest whose pod has the ta
 start in the order, and with the readiness gating, that Compose would have used:
 
 * Long-running services become native sidecars: init containers with ``restartPolicy:
-  Always``. Kubernetes starts init containers one at a time, in list order, and holds the
-  next one (and the sandbox container) until a sidecar's startup probe passes. That gives
-  Compose's ``depends_on: condition: service_healthy`` without any extra controller.
+  Always``. Kubernetes starts init containers one at a time, in list order. A sidecar with
+  ``readiness`` gets a startup probe, and Kubernetes holds the next init container (and the
+  sandbox container) until it passes, which gives Compose's ``depends_on: condition:
+  service_healthy`` without any extra controller. A sidecar without ``readiness`` only holds
+  the next one until its process starts, like ``condition: service_started``.
 * ``run_once`` services become plain init containers, which must exit 0 before the next one
   starts (Compose's ``condition: service_completed_successfully``).
 * ``after_main`` services become regular containers that start next to the sandbox container.

@@ -157,8 +157,10 @@ class Service(_Strict):
           services wait on with ``condition: service_completed_successfully`` (e.g. a migration).
         * ``after_main``: starts next to ``main`` instead of before it, for services that depend
           on ``main`` being up.
-        * ``sidecar`` (the default): starts before ``main`` and keeps running; ``main`` waits
-          until its readiness check passes, like Compose's ``condition: service_healthy``.
+        * ``sidecar`` (the default): starts before ``main`` and keeps running. With
+          ``readiness``, ``main`` waits until the check passes, like Compose's
+          ``condition: service_healthy``. Without it, ``main`` only waits for the process to
+          start, like ``condition: service_started``.
         """
         if self.run_once:
             return "run_once"
