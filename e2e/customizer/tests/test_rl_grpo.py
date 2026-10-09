@@ -26,7 +26,6 @@ pytestmark = [
     pytest.mark.platform("kubernetes"),
     pytest.mark.feature("gpu", "rl", "grpo", "uplift"),
     pytest.mark.timeout(TRAINING_TIMEOUT + 1800),
-    pytest.mark.skip(reason="Disabled until the GPU runner supports OpenSandbox"),
 ]
 
 RlJobInput = pytest.importorskip("nemo_rl_plugin.schema").RlJobInput

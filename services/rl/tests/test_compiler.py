@@ -108,13 +108,22 @@ def _steps(spec: Any) -> list[Any]:
     return list(spec["steps"])
 
 
+def _no_in_flight_jobs() -> MagicMock:
+    """Jobs client whose in-flight output-name check finds no pending or running job."""
+    page = MagicMock()
+    page.items.return_value.__aiter__.return_value = []
+    jobs = MagicMock()
+    jobs.list_jobs = AsyncMock(return_value=page)
+    return jobs
+
+
 @pytest.fixture
 def platform_clients() -> AsyncCustomizationHelixClients:
     models = AsyncMock()
     # Default to "no adapter with this output name exists", which is what every test that is
     # not about adapter re-parenting assumes.
     models.get_adapter.side_effect = _not_found()
-    return AsyncCustomizationHelixClients(files=AsyncMock(), models=models, jobs=MagicMock())
+    return AsyncCustomizationHelixClients(files=AsyncMock(), models=models, jobs=_no_in_flight_jobs())
 
 
 # --------------------------------------------------------------------------- #

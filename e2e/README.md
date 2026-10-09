@@ -159,7 +159,7 @@ full mined set take hours) or `h100` (needs 4x 80GB H100s).
 GRPO needs OpenSandbox, which the platform chart does not install. The `customizer-grpo`
 `workflow_dispatch` input installs it on the Kubernetes GPU runner
 (`e2e/k8s/scripts/install_opensandbox_minikube.sh`), installs the platform with `sandboxClusterCapable=true`,
-and selects `grpo`. It is off by default, including on schedules.
+and selects `grpo`. The nightly and weekly schedules always run it; manual runs opt in.
 
 GRPO smoke trains every environment format (`wheels-v1`, `adapter-wheels-v1`, `native-v1`, and
 `native-v1` reference-only) with DTensor full weights, Automodel full weights, and Automodel LoRA,
@@ -169,8 +169,8 @@ forcing the wheels formats offline, so the job runs in two phases: the wheels fo
 a Helm upgrade with `platformConfig.rl.sandbox_allow_internet=true` and the `native-v1` formats
 (feature `grpo-internet`).
 
-The GRPO uplift test (`test_rl_grpo.py`) and the `h100` test (`test_automodel_nemotron.py`) are
-disabled in code with `pytest.mark.skip`; remove the marker to enable each one.
+The `h100` test (`test_automodel_nemotron.py`) is disabled in code with `pytest.mark.skip`;
+remove the marker to enable it.
 
 **Test assets.** SQuAD, HelpSteer3, the mined NVDocs data, the GRPO math datasets, and the
 Qwen3-0.6B, Nemotron 3 Embed 1B, and Nemotron 3.5 Lightning snapshots are staged from
