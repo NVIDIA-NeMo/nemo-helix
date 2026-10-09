@@ -127,6 +127,13 @@ install, and the package's `wheels/` directory supplies everything their `requir
 add. Only `native-v1` custom environments install from an index at job start; for those, allow
 `pypi.org:443` and `files.pythonhosted.org:443`, or whichever index mirror the cluster uses.
 
+When `sandbox_egress_allow` is empty and the job runs a `wheels-v1` environment on the OpenSandbox
+provider, Evaluator starts the host in offline mode: `uv` never consults an index and the Hugging Face libraries read only
+from the cache the package vendored. A dependency or dataset the package forgot then fails with a
+named error at startup instead of a blocked connection later. Any entry in `sandbox_egress_allow`
+leaves the host online. The run records the decision as `environment_offline` in its runner
+provenance.
+
 Submitters cannot extend these lists from `GymRunnerTarget`. This prevents an environment from
 widening its own network access.
 
