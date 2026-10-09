@@ -948,6 +948,7 @@ def test_chat_completion_request_preserves_single_user_turn() -> None:
 
     assert invocation_request.input == "Say hello."
     assert invocation_request.caller_context == {"session_id": "session-1"}
+    assert invocation_request.relay_session_root == server._relay_session_root("session-1")
 
 
 def test_chat_completion_request_serializes_full_transcript() -> None:
@@ -967,6 +968,23 @@ def test_chat_completion_request_serializes_full_transcript() -> None:
 
     assert invocation_request.input == ("system: Be concise.\n\nassistant: How can I help?\n\nuser: Say hello.")
     assert invocation_request.caller_context == {"session_id": "session-1"}
+    assert invocation_request.relay_session_root == server._relay_session_root("session-1")
+
+
+def test_turns_of_one_session_share_a_relay_session_root() -> None:
+    request = ChatCompletionRequest.model_validate(
+        {"messages": [{"role": "user", "content": "Say hello."}], "model": "test-model"}
+    )
+
+    first = server._to_fabric_invocation_request(request, session_id="agent-session-1")
+    second = server._to_fabric_invocation_request(request, session_id="agent-session-1")
+    other = server._to_fabric_invocation_request(request, session_id="agent-session-2")
+
+    root = first.relay_session_root
+    assert root is not None
+    assert second.relay_session_root == root
+    assert other.relay_session_root != root
+    assert any(uuid.UUID(root).bytes[8:])
 
 
 def test_stateless_chat_completion_request_serializes_full_transcript_without_session_context() -> None:
@@ -984,6 +1002,7 @@ def test_stateless_chat_completion_request_serializes_full_transcript_without_se
 
     assert invocation_request.input == ("system: Be concise.\n\nassistant: How can I help?\n\nuser: Say hello.")
     assert invocation_request.caller_context == {}
+    assert invocation_request.relay_session_root is None
 
 
 def test_close_session_stops_registered_runtime(
