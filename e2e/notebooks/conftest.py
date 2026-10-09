@@ -7,7 +7,7 @@ Provides fixtures that start the quickstart backend and expose
 NHX_BASE_URL so notebooks executed via papermill can reach the API.
 
 By default every notebook runs inside an **isolated virtualenv** that
-contains only the public SDK (``sdk/python/nemo-helix/``, installed
+contains only the public ``nemo-helix`` package (``packages/nemo_helix/``, installed
 as editable) and ``ipykernel``.  This catches accidental imports of
 internal packages and mirrors what end-users have installed.
 
@@ -45,7 +45,7 @@ from nhx.testing.notebooks import cleanup_temp_venv_and_kernel, create_temp_venv
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SDK_PACKAGE = REPO_ROOT / "sdk/python/nemo-helix"
+SDK_PACKAGE = REPO_ROOT / "packages/nemo_helix"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -79,7 +79,7 @@ def notebook_kernel(request: pytest.FixtureRequest) -> Iterator[str]:
 
     When ``--notebook-kernel sandbox`` (the default), creates an isolated
     virtualenv via :func:`nhx.testing.notebooks.create_temp_venv_with_kernel`
-    containing only ``sdk/python/nemo-helix/`` (editable with extras)
+    containing only ``packages/nemo_helix/`` (editable with extras)
     and ``ipykernel``, then registers a temporary Jupyter kernel pointing
     at that venv.
 
@@ -96,7 +96,7 @@ def notebook_kernel(request: pytest.FixtureRequest) -> Iterator[str]:
         yield requested
         return
 
-    sdk_spec = f"{SDK_PACKAGE}[safe-synthesizer,data-designer]"
+    sdk_spec = f"{SDK_PACKAGE}[nemo-safe-synthesizer-plugin,nemo-data-designer-plugin]"
     kernel_name, venv_dir, kernel_spec_dir = create_temp_venv_with_kernel(
         extra_pip_args=["pip", "-e", sdk_spec],
     )

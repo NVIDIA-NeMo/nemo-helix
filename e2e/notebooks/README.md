@@ -86,8 +86,8 @@ Tests that are missing required env vars are automatically skipped with a clear 
 
 ## Kernel Modes
 
-**Sandbox (default):** Creates an isolated virtualenv with only the public SDK
-(`sdk/python/nemo-helix/`) and `ipykernel`. This catches accidental imports of internal
+**Sandbox (default):** Creates an isolated virtualenv with only the public `nemo-helix` package
+(`packages/nemo_helix/`) and `ipykernel`. This catches accidental imports of internal
 packages and mirrors what end-users have installed. `%%bash` cells installing packages via
 `pip`/`uv pip` target the sandbox.
 
