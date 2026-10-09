@@ -47,6 +47,7 @@ SEED = [
         id=1,
         name="llama",
         data={
+            "typed": [True, {"key": "flag", "value": True}],
             "score": 5,
             "tier": "free",
             "flag": True,
@@ -55,12 +56,22 @@ SEED = [
             "meta": [{"key": "owner", "value": "alice"}, {"key": "team", "value": "eval"}],
             "members": ["ws/task_a#d1", "ws/task-b#d2"],
             "tag_map": {"latest": 2, "v1.2": 1},
+            # Strings JSON escapes, plain and keyed; "n" is a string here and a number in row 2.
+            "escaped": [
+                'a"b',
+                "café",
+                '"quoted"',
+                "back\\slash",
+                {"key": "city", "value": "café"},
+                {"key": "n", "value": "abc"},
+            ],
         },
     ),
     dict(
         id=2,
         name="Llama-2",
         data={
+            "typed": ["true", {"key": "flag", "value": "true"}],
             "score": 9,
             "tier": "pro",
             "flag": False,
@@ -70,6 +81,7 @@ SEED = [
             # and the prefix after an escaped quote inside an element.
             "members": ["other-ws/task_a#d1", "ws/taskXa#d1", 'x"ws/task_a#d1'],
             "tag_map": {"latest": 1, "v1": 1},
+            "escaped": [{"key": "n", "value": 5}, "plain"],
         },
     ),
     # "redish" is a deliberate prefix near-miss for "red" — quote-delimited matching must exclude it.
@@ -77,6 +89,7 @@ SEED = [
         id=3,
         name="zephyr",
         data={
+            "typed": [1, {"key": "flag", "value": 1}],
             "score": 10,
             "tier": "pro",
             "flag": True,
@@ -92,6 +105,7 @@ SEED = [
         id=4,
         name="mistral",
         data={
+            "typed": ["1", {"key": "flag", "value": "1"}],
             "score": 100,
             "tier": "enterprise",
             "flag": False,
@@ -103,7 +117,14 @@ SEED = [
     dict(
         id=5,
         name=None,
-        data={"score": 1, "tier": "free", "flag": False, "tags": ["blue"], "meta": ["red", 3, None, True]},
+        data={
+            "typed": [3.0, {"key": "flag", "value": 3.0}],
+            "score": 1,
+            "tier": "free",
+            "flag": False,
+            "tags": ["blue"],
+            "meta": ["red", 3, None, True],
+        },
     ),
 ]
 
@@ -157,6 +178,37 @@ CASES = [
     ("contains_tags_blue", C(FilterOperator.CONTAINS, "data.tags", "blue")),
     ("contains_tags_absent", C(FilterOperator.CONTAINS, "data.tags", "nope")),
     ("not_contains_tags_red", NOT(C(FilterOperator.CONTAINS, "data.tags", "red"))),
+    # Row 2 holds 'x"ws/task_a#d1', whose serialized text contains '"ws/task_a#d1"'.
+    ("contains_skips_escaped_quote_near_miss", C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1")),
+    # Rows 4 and 5 have no members field; under $not they match on both databases.
+    ("not_contains_missing_field", NOT(C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1"))),
+    # JSON types: true is not 1 or "true", "1" is not 1, and 3 equals 3.0.
+    ("contains_typed_true", C(FilterOperator.CONTAINS, "data.typed", True)),
+    ("contains_typed_one", C(FilterOperator.CONTAINS, "data.typed", 1)),
+    ("contains_typed_string_one", C(FilterOperator.CONTAINS, "data.typed", "1")),
+    ("contains_typed_int_matches_float", C(FilterOperator.CONTAINS, "data.typed", 3)),
+    ("elem_match_typed_keyed_true", C(FilterOperator.ELEM_MATCH, "data.typed", {"key": "flag", "value": True})),
+    (
+        "elem_match_typed_keyed_gt_skips_bool",
+        C(FilterOperator.ELEM_MATCH, "data.typed", {"key": "flag", "value": {"$gt": 0}}),
+    ),
+    ("elem_match_typed_scalar_gt_skips_bool", C(FilterOperator.ELEM_MATCH, "data.typed", {"$gt": 0})),
+    ("elem_match_typed_keyed_in", C(FilterOperator.ELEM_MATCH, "data.typed", {"key": "flag", "value": {"$in": [1]}})),
+    ("elem_match_typed_keyed_nin", C(FilterOperator.ELEM_MATCH, "data.typed", {"key": "flag", "value": {"$nin": [1]}})),
+    (
+        "elem_match_typed_starts_with_strings_only",
+        C(FilterOperator.ELEM_MATCH, "data.typed", {"key": "flag", "value": {"$startsWith": "t"}}),
+    ),
+    ("contains_escaped_quote", C(FilterOperator.CONTAINS, "data.escaped", 'a"b')),
+    ("contains_non_ascii", C(FilterOperator.CONTAINS, "data.escaped", "café")),
+    ("contains_value_wrapped_in_quotes", C(FilterOperator.CONTAINS, "data.escaped", '"quoted"')),
+    ("contains_backslash", C(FilterOperator.CONTAINS, "data.escaped", "back\\slash")),
+    ("elem_match_keyed_non_ascii", C(FilterOperator.ELEM_MATCH, "data.escaped", {"key": "city", "value": "café"})),
+    (
+        "elem_match_numeric_gt_skips_strings",
+        C(FilterOperator.ELEM_MATCH, "data.escaped", {"key": "n", "value": {"$gt": 2}}),
+    ),
+    ("elem_match_scalar_numeric_gt_on_strings", C(FilterOperator.ELEM_MATCH, "data.escaped", {"$gt": 2})),
     (
         "and_contains_tags",
         AND(C(FilterOperator.CONTAINS, "data.tags", "blue"), C(FilterOperator.EQ, "data.tier", "free")),
@@ -283,6 +335,18 @@ def test_element_operators_reject_unknown_dialect(op):
         (C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "level", "value": {"$gt": 2}}), {2}),
         (C(FilterOperator.STARTS_WITH, "name", "Llama"), {2}),
         (C(FilterOperator.ENDS_WITH, "data.tier", "ree"), {1, 5}),
+        (C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1"), {1}),
+        (NOT(C(FilterOperator.CONTAINS, "data.members", "ws/task_a#d1")), {2, 3, 4, 5}),
+        (C(FilterOperator.CONTAINS, "data.typed", True), {1}),
+        (C(FilterOperator.CONTAINS, "data.typed", 1), {3}),
+        (C(FilterOperator.CONTAINS, "data.typed", "1"), {4}),
+        (C(FilterOperator.CONTAINS, "data.typed", 3), {5}),
+        (C(FilterOperator.ELEM_MATCH, "data.typed", {"key": "flag", "value": {"$gt": 0}}), {3, 5}),
+        (C(FilterOperator.ELEM_MATCH, "data.typed", {"key": "flag", "value": {"$startsWith": "t"}}), {2}),
+        (C(FilterOperator.CONTAINS, "data.escaped", 'a"b'), {1}),
+        (C(FilterOperator.CONTAINS, "data.escaped", "café"), {1}),
+        (C(FilterOperator.CONTAINS, "data.escaped", '"quoted"'), {1}),
+        (C(FilterOperator.ELEM_MATCH, "data.escaped", {"key": "n", "value": {"$gt": 2}}), {2}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "v1.2"), {1}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "v1"), {2}),
         (C(FilterOperator.HAS_KEY, "data.tag_map", "latest"), {1, 2}),

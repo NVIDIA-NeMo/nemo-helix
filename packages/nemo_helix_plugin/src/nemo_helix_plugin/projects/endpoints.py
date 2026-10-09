@@ -3,8 +3,7 @@
 
 """Typed endpoint definitions for Projects (Entity Store).
 
-Single source of truth for the HTTP contract. Replaces the Stainless-generated
-``nemo_helix.resources.projects`` resource.
+Single source of truth for the HTTP contract.
 """
 
 from __future__ import annotations

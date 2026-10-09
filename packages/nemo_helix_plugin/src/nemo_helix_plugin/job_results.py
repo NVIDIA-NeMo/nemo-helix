@@ -180,7 +180,7 @@ class HelixJobResults(JobResults):
     :meth:`save` call forwards to ``ResultManager.create_result``, which
     uploads into the job's fileset under
     ``results/<attempt_id>/<result_name>`` and registers the result via
-    ``jobs.results.create`` (conflict-idempotent).
+    ``JobsClient.create_job_result`` (conflict-idempotent).
 
     Args:
         job_name: Platform job name this sink publishes results for.

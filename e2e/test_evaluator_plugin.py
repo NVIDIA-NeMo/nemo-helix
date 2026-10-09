@@ -30,7 +30,6 @@ from nemo_evals.jobs.evaluate import EvaluateInputSpec
 from nemo_evals.sdk.job_resources import EvaluatorJobResource
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
@@ -775,7 +774,7 @@ GYM_MCQA_FIXTURE = (
 
 def _gym_task_payloads(limit: int) -> list[dict[str, object]]:
     tasks = discover_gym_tasks(GYM_MCQA_FIXTURE)[:limit]
-    bundled_reward = bundle_metric(GymRewardMetric(), CloudpickleMetricBundlePackager()).model_dump(mode="json")
+    bundled_reward = bundle_metric(GymRewardMetric(), InlineMetricBundlePackager()).model_dump(mode="json")
     return [
         {
             "id": task.id,
@@ -923,7 +922,7 @@ def _greeting_wheels_v1_package(root: Path) -> dict[str, bytes]:
 
 
 def _greeting_task_payloads(greeting: str, count: int) -> list[dict[str, object]]:
-    bundled_reward = bundle_metric(GymRewardMetric(), CloudpickleMetricBundlePackager()).model_dump(mode="json")
+    bundled_reward = bundle_metric(GymRewardMetric(), InlineMetricBundlePackager()).model_dump(mode="json")
     rows_path = Path(os.environ.get("TMPDIR", "/tmp")) / f"greeting-rows-{short_unique_name('e2e')}.jsonl"
     rows_path.write_text(
         "".join(

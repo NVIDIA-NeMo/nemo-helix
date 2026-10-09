@@ -205,7 +205,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --output /usr/share/nemo-helix/source-distributions/nhx-safe-synthesizer-tasks \
         --lock-file /build/uv.lock \
         --skip-package nemo-safe-synthesizer-plugin \
-        --skip-package nemo-helix-sdk \
         --skip-package nemo-helix-plugin \
         --label app-venv && \
     bash /usr/local/bin/collect-apt-sources.sh /usr/share/nemo-helix/source-distributions/nhx-safe-synthesizer-tasks/apt --installed && \

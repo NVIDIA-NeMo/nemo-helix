@@ -14,7 +14,6 @@ def test_main_help_lists_preserved_command_groups() -> None:
     assert result.exit_code == 0
     assert "generate-cli" not in result.output
     assert "license" in result.output
-    assert "openapi-stainless" not in result.output
     assert "post-generation" not in result.output
     assert "publish" not in result.output
     assert "vendor" in result.output

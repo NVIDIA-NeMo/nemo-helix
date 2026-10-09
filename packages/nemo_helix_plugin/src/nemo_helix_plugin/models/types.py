@@ -5,12 +5,11 @@
 
 These models mirror the HTTP contract for model entities, adapters, model
 providers, prompts, model deployments, and model deployment configs. The
-Models service remains the authoritative wire-schema owner; this plugin module
-keeps client DTOs independent of the Stainless-generated SDK.
+Models service remains the authoritative wire-schema owner.
 
 The plugin package must stay free of an ``nhx_common`` dependency because that
 would create a reverse service dependency. Server-only pieces are handled per
-the data-vs-behavior split documented in ``client/MIGRATION.md``:
+the data-vs-behavior split documented in the package ``AGENTS.md``:
 
 - **Constants** (name regex, max lengths) that live in
   ``nhx.common.entities.constants`` are inlined here with a comment pointing at

@@ -1560,7 +1560,7 @@ def test_as_service_returns_new_client_without_mutating_the_original():
 
 
 def test_as_service_preserves_the_platform_url_resolver():
-    """The regression the Stainless path needed a dedicated helper to avoid."""
+    """``as_service`` keeps the platform URL resolver on the cloned client."""
 
     def resolver(url: str) -> str:
         return url.replace("http://platform", "http://uds-resolved")

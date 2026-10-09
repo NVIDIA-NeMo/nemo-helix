@@ -27,6 +27,8 @@ existing ``LogViewer`` component without a new schema.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -41,7 +43,7 @@ from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.entities import AgentDeployment
-from nemo_agents_plugin.runner.registry import get_runner_backend
+from nemo_agents_plugin.runner.registry import get_runner_registry
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from pydantic import BaseModel, Field
@@ -52,9 +54,11 @@ router = APIRouter()
 
 
 # Match the timestamp prefix written by ``logging.basicConfig``-style emitters
-# (e.g. ``2026-05-19 21:04:28 - INFO     - foo:11 - message``). Falls back to
-# the empty string when the line is plain (uvicorn debug, tracebacks, …).
-_TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)")
+# (e.g. ``2026-05-19 21:04:28 - INFO     - foo:11 - message``) and substrate
+# logs that include RFC3339 timestamps (e.g. Kubernetes ``timestamps=True``).
+# Falls back to the empty string when the line is plain (uvicorn debug,
+# tracebacks, …).
+_TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)")
 
 
 class LogLine(BaseModel):
@@ -72,8 +76,8 @@ class DeploymentLogsResponse(BaseModel):
 
     data: list[LogLine]
     total_lines: int = Field(description="Number of lines actually returned.")
-    next_offset: int = Field(
-        description="Byte offset just past the returned tail; pass as Last-Event-ID to resume the stream without gaps.",
+    next_offset: int | str = Field(
+        description="Resume cursor; pass as Last-Event-ID to continue the stream without gaps.",
     )
 
 
@@ -93,7 +97,7 @@ async def _resolve_log_path(
 ) -> Path:
     # Auth first — entity lookup scopes to the caller's workspace.
     try:
-        await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+        deployment = await entity_client.get(AgentDeployment, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -101,7 +105,7 @@ async def _resolve_log_path(
         ) from exc
     from nemo_agents_plugin.runner.backend import ExternalLog, LocalLog, NotYetAvailable
 
-    location = get_runner_backend().get_log_location(workspace, name)
+    location = get_runner_registry().backend_for(deployment.deployment_mode).get_log_location(workspace, name)
     if isinstance(location, LocalLog):
         return location.path
     if isinstance(location, NotYetAvailable):
@@ -115,6 +119,53 @@ async def _resolve_log_path(
             detail=f"Logs for {name!r} ship through a backend channel. {location.hint}".rstrip(),
         )
     raise HTTPException(status_code=404, detail=f"No log channel available for {name!r}.")
+
+
+async def _resolve_external_log_getter(
+    workspace: str,
+    name: str,
+    entity_client: NemoEntitiesClient,
+):  # noqa: ANN202 — structural runner-backend hook
+    """Return a container log fetcher when the runner backend supports one."""
+    try:
+        deployment = await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Deployment {name!r} not found in workspace {workspace!r}.",
+        ) from exc
+
+    backend = get_runner_registry().backend_for(deployment.deployment_mode)
+    return getattr(backend, "get_logs", None)
+
+
+async def _resolve_external_logs(
+    workspace: str,
+    name: str,
+    tail: int,
+    entity_client: NemoEntitiesClient,
+) -> DeploymentLogsResponse | None:
+    """Return logs for container-backed deployments when the runner can fetch them.
+
+    Subprocess deployments expose a local file and use ``_resolve_log_path``.
+    Docker/Kubernetes deployments are managed by ``DeploymentsRunnerBackend``;
+    it can bridge to the deployments plugin's ``get_logs`` API. Older/custom
+    runner backends may still only return ``ExternalLog`` hints, so absence of a
+    ``get_logs`` coroutine means the caller should keep the existing 404 path.
+    """
+    get_logs = await _resolve_external_log_getter(workspace, name, entity_client)
+    if get_logs is None:
+        return None
+    try:
+        log_result = await get_logs(workspace=workspace, name=name, tail=tail)
+    except Exception as exc:
+        logger.exception("Failed to read deployment logs")
+        raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
+    lines = [line.rstrip("\n") for line in list(getattr(log_result, "lines", []) or [])]
+    cursors = _external_line_cursors(lines)
+    parsed = [_parse_line(line) for line in lines]
+    next_offset = cursors[-1] if cursors else ""
+    return DeploymentLogsResponse(data=parsed, total_lines=len(parsed), next_offset=next_offset)
 
 
 _TAIL_READ_BLOCK = 8192
@@ -162,7 +213,11 @@ async def get_deployment_logs(
     tail: int = Query(default=500, ge=0, le=_TAIL_LINE_CAP),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> DeploymentLogsResponse:
-    """Return the most recent *tail* lines from the deployment's log file."""
+    """Return the most recent *tail* lines from the deployment's logs."""
+    external = await _resolve_external_logs(workspace, name, tail, entity_client)
+    if external is not None:
+        return external
+
     path = await _resolve_log_path(workspace, name, entity_client)
     raw_lines, end_offset = await asyncio.to_thread(_read_tail, path, tail)
     parsed = [_parse_line(line) for line in raw_lines]
@@ -177,6 +232,92 @@ def _parse_last_event_id(value: str | None) -> int | None:
     except ValueError:
         return None
     return offset if offset >= 0 else None
+
+
+_EXTERNAL_CURSOR_PREFIX = "v2:"
+_LEGACY_EXTERNAL_CURSOR_PREFIX = "v1:"
+
+
+def _external_line_hash(raw: str) -> str:
+    return hashlib.sha256(raw.rstrip("\n").encode("utf-8", errors="replace")).hexdigest()
+
+
+def _external_line_identity(raw: str) -> tuple[str, str]:
+    """Return a bounded timestamp+hash identity for an external log line."""
+    line = raw.rstrip("\n")
+    parsed = _parse_line(line)
+    return parsed.timestamp, _external_line_hash(line)
+
+
+def _encode_external_cursor(raw: str, occurrence: int) -> str:
+    """Return an opaque, per-line external-log cursor safe for SSE ids."""
+    timestamp, line_hash = _external_line_identity(raw)
+    payload = json.dumps({"ts": timestamp, "h": line_hash, "n": occurrence}, separators=(",", ":"))
+    encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"{_EXTERNAL_CURSOR_PREFIX}{encoded}"
+
+
+def _decode_external_cursor(cursor: str) -> tuple[str, str, int] | None:
+    """Decode an external-log cursor, returning None for legacy cursors."""
+    if cursor.startswith(_EXTERNAL_CURSOR_PREFIX):
+        encoded = cursor[len(_EXTERNAL_CURSOR_PREFIX) :]
+        hash_field = "h"
+    elif cursor.startswith(_LEGACY_EXTERNAL_CURSOR_PREFIX):
+        encoded = cursor[len(_LEGACY_EXTERNAL_CURSOR_PREFIX) :]
+        hash_field = "line"
+    else:
+        return None
+    padded = encoded + "=" * (-len(encoded) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    timestamp = payload.get("ts")
+    line_hash = payload.get(hash_field)
+    occurrence = payload.get("n")
+    if not isinstance(timestamp, str) or not isinstance(line_hash, str) or not isinstance(occurrence, int):
+        return None
+    return timestamp, line_hash, occurrence
+
+
+def _external_line_cursors(lines: list[str]) -> list[str]:
+    """Build stable, per-line cursors for a fetched external log window."""
+    occurrences: dict[tuple[str, str], int] = {}
+    cursors: list[str] = []
+    for line in lines:
+        identity = _external_line_identity(line)
+        occurrence = occurrences.get(identity, 0) + 1
+        occurrences[identity] = occurrence
+        cursors.append(_encode_external_cursor(line, occurrence))
+    return cursors
+
+
+def _last_external_cursor_index(lines: list[str], cursor: str | None) -> int:
+    """Return the index just after the exact external cursor in a fetched window."""
+    if not cursor:
+        return 0
+    decoded = _decode_external_cursor(cursor)
+    if decoded is not None:
+        timestamp, line_hash, wanted_occurrence = decoded
+        occurrence = 0
+        for index, candidate in enumerate(lines):
+            if _external_line_identity(candidate) != (timestamp, line_hash):
+                continue
+            occurrence += 1
+            if occurrence == wanted_occurrence:
+                return index + 1
+        return 0
+
+    # Legacy cursor support for clients that reconnected with a timestamp or
+    # raw-line cursor from an earlier server version. Prefer the first match to
+    # avoid skipping later lines with the same timestamp.
+    for index, line in enumerate(lines):
+        timestamp, line_hash = _external_line_identity(line)
+        if cursor in (timestamp, line_hash, line):
+            return index + 1
+    return 0
 
 
 def _open_at(path: Path, start_offset: int | None):  # noqa: ANN202 — TextIO handle
@@ -209,6 +350,47 @@ def _read_next(fh) -> tuple[str | None, int, bool]:  # noqa: ANN001 — TextIO h
         return line, fh.tell(), False
     fh.seek(pos)  # partial line still being written — re-read once the newline lands
     return None, pos, False
+
+
+async def _stream_external_log_lines(
+    get_logs,  # noqa: ANN001 — structural runner-backend hook
+    *,
+    workspace: str,
+    name: str,
+    start_cursor: str | None,
+    initial_lines: list[str] | None = None,
+    is_deployment_present: Callable[[], Awaitable[bool]] | None = None,
+    is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncIterator[str]:
+    """Poll external substrate logs and yield SSE events after a log-line cursor."""
+    poll_interval = 0.5
+    keepalive_interval = 15.0
+    cursor = start_cursor
+    pending_lines = initial_lines
+    last_keepalive = asyncio.get_running_loop().time()
+    while True:
+        if is_disconnected is not None and await is_disconnected():
+            return
+        if is_deployment_present is not None and not await is_deployment_present():
+            return
+        if pending_lines is None:
+            log_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
+            lines = [line.rstrip("\n") for line in list(getattr(log_result, "lines", []) or [])]
+        else:
+            lines = pending_lines
+            pending_lines = None
+        cursors = _external_line_cursors(lines)
+        start = _last_external_cursor_index(lines, cursor)
+        for line, line_cursor in zip(lines[start:], cursors[start:], strict=True):
+            payload = _parse_line(line).model_dump()
+            cursor = line_cursor
+            yield f"id: {cursor}\ndata: {json.dumps(payload)}\n\n"
+            last_keepalive = asyncio.get_running_loop().time()
+        now = asyncio.get_running_loop().time()
+        if now - last_keepalive >= keepalive_interval:
+            yield f": keepalive {datetime.now(UTC).isoformat()}\n\n"
+            last_keepalive = now
+        await asyncio.sleep(poll_interval)
 
 
 async def _stream_log_lines(
@@ -260,9 +442,43 @@ async def stream_deployment_logs(
     request: Request,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> StreamingResponse:
-    """SSE tail-follow of the deployment's log file; resumes via ``Last-Event-ID``."""
+    """SSE tail-follow of deployment logs; resumes via ``Last-Event-ID``."""
+    last_event_id = request.headers.get("last-event-id")
+    get_logs = await _resolve_external_log_getter(workspace, name, entity_client)
+    if get_logs is not None:
+
+        async def _is_deployment_present() -> bool:
+            try:
+                await entity_client.get(AgentDeployment, name=name, workspace=workspace)
+            except NemoEntityNotFoundError:
+                return False
+            return True
+
+        try:
+            initial_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
+        except Exception as exc:
+            logger.exception("Failed to open deployment log stream")
+            raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
+        initial_lines = [line.rstrip("\n") for line in list(getattr(initial_result, "lines", []) or [])]
+        return StreamingResponse(
+            _stream_external_log_lines(
+                get_logs,
+                workspace=workspace,
+                name=name,
+                start_cursor=last_event_id,
+                initial_lines=initial_lines,
+                is_deployment_present=_is_deployment_present,
+                is_disconnected=request.is_disconnected,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",  # disable proxy buffering so events flush immediately
+            },
+        )
+
+    start_offset = _parse_last_event_id(last_event_id)
     path = await _resolve_log_path(workspace, name, entity_client)
-    start_offset = _parse_last_event_id(request.headers.get("last-event-id"))
     return StreamingResponse(
         _stream_log_lines(path, start_offset, request.is_disconnected),
         media_type="text/event-stream",

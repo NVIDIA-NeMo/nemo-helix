@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import ClassVar, cast
 
+from anonymizer.config.anonymizer_config import AnonymizerConfig
 from anonymizer.interface.anonymizer import Anonymizer
 from anonymizer.interface.errors import InvalidConfigError
 from data_designer_nemo.errors import NDDInvalidConfigError
@@ -17,7 +18,6 @@ from nemo_anonymizer_plugin.app.model_configs import (
     validate_selected_models_have_model_configs,
 )
 from nemo_anonymizer_plugin.app.task_config import (
-    AnonymizerConfigRequest,
     AnonymizerRequest,
     AnonymizerStepConfig,
 )
@@ -35,7 +35,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.image import get_qualified_image
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 
 class RunJob(NemoJob):
@@ -85,15 +85,14 @@ class RunJob(NemoJob):
         )
 
     @classmethod
-    def _validate_anonymizer_config(cls, config: AnonymizerConfigRequest) -> None:
+    def _validate_anonymizer_config(cls, config: AnonymizerConfig) -> None:
         # ``Anonymizer.validate_config`` cross-checks the user-supplied config
         # against the model selection (e.g. that a ``Substitute`` strategy has
         # a ``replacement_generator`` model defined). Doing it here gives the
         # caller a synchronous 422 instead of an async job failure.
         try:
-            anonymizer_config = config.to_anonymizer_config()
-            Anonymizer().validate_config(anonymizer_config)
-        except (InvalidConfigError, ValidationError) as e:
+            Anonymizer().validate_config(config)
+        except InvalidConfigError as e:
             raise AnonymizerInvalidConfigError(str(e)) from e
 
     @classmethod

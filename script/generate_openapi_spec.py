@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import copy
 import importlib.metadata
 import inspect
 import json
@@ -20,7 +19,6 @@ import traceback
 from collections.abc import Collection
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from enum import Enum
 from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -38,8 +36,6 @@ from .openapi_helper.openapi_tools import (
     hoist_nested_defs,
     include_examples,
     load_openapi_spec,
-    mark_direct_span_json_value_for_stainless,
-    merge_specs,
     order_endpoints_by_tags,
     remove_endpoint,
     remove_invalid_components,
@@ -152,12 +148,6 @@ def plugin_multiprocessing_context():
     return multiprocessing.get_context(start_method)
 
 
-class SpecType(Enum):
-    GA = "ga"
-    EA = "ea"
-    UTIL = "util"
-
-
 @dataclass
 class ServiceConfig:
     """Configuration for a service's OpenAPI spec generation."""
@@ -168,25 +158,9 @@ class ServiceConfig:
     app_dir: Optional[str] = None
     env_vars: Optional[Dict[str, str]] = None
     copy_from: Optional[str] = None  # For deployment-management
-    spec_type: SpecType = SpecType.GA
-
-    def is_ga(self) -> bool:
-        return self.spec_type == SpecType.GA or self.spec_type == SpecType.UTIL
-
-    def is_ea(self) -> bool:
-        return self.spec_type == SpecType.EA
 
     def temp_output_path(self) -> str:
         return f"openapi/{self.output_file}"
-
-    def final_output_path(self) -> str | None:
-        match self.spec_type:
-            case SpecType.GA:
-                return "openapi/ga/individual/" + self.output_file
-            case SpecType.EA:
-                return "openapi/ea/individual/" + self.output_file
-            case SpecType.UTIL:
-                return None
 
 
 # Define all service configurations
@@ -202,11 +176,7 @@ SERVICES = [
 ]
 
 
-FINAL_SPEC_FILES = [
-    "openapi/openapi.yaml",
-    "openapi/ga/openapi.yaml",
-    "openapi/ea/openapi.yaml",
-]
+FINAL_SPEC_FILES = ["openapi/openapi.yaml"]
 
 
 def extract_openapi_spec(service: ServiceConfig) -> tuple[str, bool, str]:
@@ -639,7 +609,6 @@ def apply_standard_schema_fixes(spec: dict, apply_reorder: bool = True) -> dict:
     spec = remove_invalid_components(spec)
     spec = fix_recursive_schemas(spec)
     spec = update_object_type(spec)
-    spec = mark_direct_span_json_value_for_stainless(spec)
     spec["openapi"] = "3.1.0"
     spec["info"]["version"] = platform_api_version
 
@@ -709,41 +678,6 @@ def apply_schema_fixes(spec_files: List[str], apply_reorder: bool = True) -> Non
             save_openapi_spec(spec, spec_file)
 
 
-def merge_and_process_specs() -> None:
-    """Merge OpenAPI specs and apply final processing."""
-    print_green("=== STEP 3: Merging all OpenAPI specs into a single file ===")
-
-    # Create directories
-    os.makedirs("openapi/ga", exist_ok=True)
-    os.makedirs("openapi/ea", exist_ok=True)
-
-    # GA specs
-    ga_specs = [service.temp_output_path() for service in SERVICES if service.is_ga()]
-
-    # Load and merge GA specs
-    ga_specs_with_files = []
-    for spec_file in ga_specs:
-        if os.path.exists(spec_file):
-            ga_specs_with_files.append((load_openapi_spec(spec_file), spec_file))
-
-    if ga_specs_with_files:
-        merged_ga = merge_specs(ga_specs_with_files, keep_versions=True)
-        save_openapi_spec(merged_ga, "openapi/ga/openapi.yaml")
-
-    # EA specs
-    ea_specs = [service.temp_output_path() for service in SERVICES if service.is_ea()]
-
-    # Load and merge EA specs
-    ea_specs_with_files = []
-    for spec_file in ea_specs:
-        if os.path.exists(spec_file):
-            ea_specs_with_files.append((load_openapi_spec(spec_file), spec_file))
-
-    if ea_specs_with_files:
-        merged_ea = merge_specs(ea_specs_with_files, keep_versions=True)
-        save_openapi_spec(merged_ea, "openapi/ea/openapi.yaml")
-
-
 def apply_schema_removals_to_spec(spec: dict) -> dict:
     """Apply schema removals to fix inconsistencies."""
     # Remove schemas and update references
@@ -765,36 +699,6 @@ def apply_schema_removals_to_spec(spec: dict) -> dict:
     return spec
 
 
-def apply_schema_removals() -> None:
-    """Apply schema removals to fix inconsistencies."""
-    ga_spec_file = "openapi/ga/openapi.yaml"
-    if os.path.exists(ga_spec_file):
-        spec = load_openapi_spec(ga_spec_file)
-        spec = apply_schema_removals_to_spec(spec)
-        save_openapi_spec(spec, ga_spec_file)
-
-
-def merge_final_specs() -> None:
-    """Merge GA and EA specs into final spec."""
-    print_green("=== Merging EA and GA specs ===")
-
-    final_specs = []
-    for spec_file in ["openapi/ga/openapi.yaml", "openapi/ea/openapi.yaml"]:
-        if os.path.exists(spec_file):
-            final_specs.append((load_openapi_spec(spec_file), spec_file))
-
-    if final_specs:
-        merged_final = merge_specs(final_specs, keep_versions=True)
-        save_openapi_spec(merged_final, "openapi/openapi.yaml")
-
-
-def apply_final_fixes() -> None:
-    """Apply final schema fixes and cleanup."""
-    print_green("=== Final removing of unused schemas ===")
-
-    apply_schema_fixes(FINAL_SPEC_FILES)
-
-
 def remove_guardrail_endpoints_from_spec(spec: dict) -> dict:
     """Remove guardrail models endpoints from all final specs."""
 
@@ -811,65 +715,6 @@ def remove_guardrail_endpoints_from_spec(spec: dict) -> dict:
     return apply_standard_schema_fixes(spec, apply_reorder=False)
 
 
-def remove_guardrail_endpoints() -> None:
-    """Remove guardrail models endpoints from all final specs."""
-
-    for spec_file in FINAL_SPEC_FILES:
-        if os.path.exists(spec_file):
-            spec = load_openapi_spec(spec_file)
-            spec = remove_guardrail_endpoints_from_spec(spec)
-            save_openapi_spec(spec, spec_file)
-
-
-def add_examples_and_finalize() -> None:
-    """Add examples, copy tags, and order endpoints for all final specs in one pass."""
-    print_green("=== Adding examples and finalizing specs ===")
-
-    example_files = list(sorted(Path("openapi/api-examples").glob("*.json")))
-    source_file = "openapi/nhx-common.openapi.yaml"
-
-    # Load source spec once for tag copying
-    source_spec = None
-    if os.path.exists(source_file):
-        source_spec = load_openapi_spec(source_file)
-
-    for spec_file in FINAL_SPEC_FILES:
-        if os.path.exists(spec_file):
-            print_verbose(f"Finalizing {spec_file}")
-            spec = load_openapi_spec(spec_file)
-
-            # Add examples
-            for example_file in example_files:
-                print_verbose(f"  Adding examples from {example_file}...")
-                with open(example_file, encoding="utf-8") as f:
-                    examples = json.load(f)
-                spec = include_examples(spec, examples)
-
-            # Copy tags and order endpoints
-            if source_spec:
-                print_verbose(f"  Copying tags and ordering endpoints for {spec_file}")
-                spec = copy_tags(source_spec, spec)
-                spec = order_endpoints_by_tags(spec)
-
-            save_openapi_spec(spec, spec_file)
-
-
-def move_individual_specs() -> None:
-    """Move individual OpenAPI specs to separate folders."""
-    print_green("=== STEP 4: Moving individual specs to separate folder ===")
-
-    # GA individual specs
-    os.makedirs("openapi/ga/individual", exist_ok=True)
-    os.makedirs("openapi/ea/individual", exist_ok=True)
-    file_paths = [(service.temp_output_path(), service.final_output_path()) for service in SERVICES]
-
-    for start, end in file_paths:
-        if not end:  # Don't copy util files
-            os.remove(start)
-        elif os.path.exists(start):
-            shutil.move(start, end)
-
-
 def fix_ref_not_allowed_errors(spec_files: List[str]) -> None:
     """Fix ref not allowed errors in the given spec files."""
     print_green("=== Fixing ref not allowed errors ===")
@@ -884,9 +729,8 @@ def fix_ref_not_allowed_errors(spec_files: List[str]) -> None:
 def validate_final_specs(spec_files: List[str]) -> None:
     """Fail loudly if any of the given specs contains a dangling `$ref`.
 
-    Must run before SDK generation — Stainless and Orval produce broken imports
-    when they encounter refs that don't resolve, so we gate spec publishing on
-    this check.
+    Must run before SDK generation: Orval produces broken imports when it
+    encounters refs that don't resolve, so we gate spec publishing on this check.
     """
     print_green("=== Validating specs for dangling $refs ===")
 
@@ -908,22 +752,12 @@ def validate_final_specs(spec_files: List[str]) -> None:
 
 
 def can_process_single_platform_spec_in_memory(services: list[ServiceConfig]) -> bool:
-    """Return true when platform outputs are known to be identical."""
+    """Return true when there is one generated platform spec to publish."""
     if len(services) != 1:
         return False
 
     service = services[0]
-    if not service.is_ga() or service.final_output_path() is None or service.copy_from:
-        return False
-
-    # Tags/examples are final-spec-only transformations in the generic path.
-    # Keep that path if those inputs exist so individual and aggregate outputs
-    # retain their existing semantics.
-    return (
-        not Path("openapi/ea/openapi.yaml").exists()
-        and not Path("openapi/nhx-common.openapi.yaml").exists()
-        and not any(Path("openapi/api-examples").glob("*.json"))
-    )
+    return not service.copy_from
 
 
 def process_single_platform_spec_in_memory(services: list[ServiceConfig]) -> bool:
@@ -933,34 +767,40 @@ def process_single_platform_spec_in_memory(services: list[ServiceConfig]) -> boo
 
     service = services[0]
     temp_path = service.temp_output_path()
-    final_path = service.final_output_path()
-    if final_path is None or not os.path.exists(temp_path):
+    if not os.path.exists(temp_path):
         return False
 
-    print_green("=== Processing single platform OpenAPI spec in memory ===")
+    print_green("=== Processing platform OpenAPI spec in memory ===")
     spec = load_openapi_spec(temp_path)
     spec = apply_schema_fixes_to_spec(spec, temp_path)
-    individual_spec = fix_ref_with_additional_props(copy.deepcopy(spec))
+    spec = apply_schema_removals_to_spec(spec)
+    spec = apply_schema_fixes_to_spec(spec, "openapi/openapi.yaml")
+    spec = remove_guardrail_endpoints_from_spec(spec)
 
-    final_spec = apply_schema_removals_to_spec(spec)
-    final_spec = apply_schema_fixes_to_spec(final_spec, "openapi/openapi.yaml")
-    final_spec = remove_guardrail_endpoints_from_spec(final_spec)
-    final_spec = fix_ref_with_additional_props(final_spec)
+    example_files = list(sorted(Path("openapi/api-examples").glob("*.json")))
+    for example_file in example_files:
+        print_verbose(f"  Adding examples from {example_file}...")
+        with open(example_file, encoding="utf-8") as f:
+            examples = json.load(f)
+        spec = include_examples(spec, examples)
 
-    dangling_specs = [
-        ("platform individual OpenAPI spec", validate_refs(individual_spec)),
-        ("platform OpenAPI spec", validate_refs(final_spec)),
-    ]
-    for spec_name, dangling in dangling_specs:
-        if dangling:
-            print_red(f"Found dangling $refs in the {spec_name}:")
-            for ref in dangling:
-                print_red(f"  - {ref}")
-            raise RuntimeError(f"{len(dangling)} dangling $refs detected")
+    source_file = "openapi/nhx-common.openapi.yaml"
+    if os.path.exists(source_file):
+        print_verbose("  Copying tags and ordering endpoints")
+        source_spec = load_openapi_spec(source_file)
+        spec = copy_tags(source_spec, spec)
+        spec = order_endpoints_by_tags(spec)
 
-    for output_path in ["openapi/openapi.yaml", "openapi/ga/openapi.yaml"]:
-        save_openapi_spec(final_spec, output_path)
-    save_openapi_spec(individual_spec, final_path)
+    spec = fix_ref_with_additional_props(spec)
+
+    dangling = validate_refs(spec)
+    if dangling:
+        print_red("Found dangling $refs in the platform OpenAPI spec:")
+        for ref in dangling:
+            print_red(f"  - {ref}")
+        raise RuntimeError(f"{len(dangling)} dangling $refs detected")
+
+    save_openapi_spec(spec, "openapi/openapi.yaml")
 
     os.remove(temp_path)
     return True
@@ -1058,36 +898,11 @@ def main():
             extract_openapi_specs_auto(services_to_generate)  # Uses ProcessPool with sequential fallback
         elif args.execution_mode == "sequential":
             extract_openapi_specs_sequential(services_to_generate)
-        # Apply all schema fixes in one consolidated pass
-        all_spec_files = [service.temp_output_path() for service in SERVICES]
         if args.only_gen_schema:
             return
 
         if not process_single_platform_spec_in_memory(services_to_generate):
-            apply_schema_fixes(all_spec_files)
-
-            # Merge and process specs - use same logic for both modes
-            merge_and_process_specs()
-
-            apply_schema_removals()
-
-            merge_final_specs()
-
-            # Apply final fixes - use same logic for consistency
-            apply_final_fixes()
-
-            add_examples_and_finalize()
-
-            # Remove health endpoints and apply final processing (after tag ordering)
-            remove_guardrail_endpoints()
-
-            move_individual_specs()
-
-            platform_spec_files = [
-                path for path in (service.final_output_path() for service in SERVICES) if path is not None
-            ] + FINAL_SPEC_FILES
-            fix_ref_not_allowed_errors(platform_spec_files)
-            validate_final_specs(platform_spec_files)
+            raise RuntimeError("Expected a single generated platform OpenAPI spec")
 
         process_plugin_specs(plugin_workers=args.plugin_workers)
 

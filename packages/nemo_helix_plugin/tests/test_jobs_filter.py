@@ -423,8 +423,8 @@ class TestForwardedFilterSurvivesSdkSerialization:
     querystring serializer can encode it onto the wire without mangling.
 
     The typed client forwards ``filter`` as a single JSON-string query param
-    (not through the Stainless deep-object serializer, which mangled
-    ``$and``-style list-of-dict values). These tests take that forwarded value
+    (not deep-object serialized, which mangles ``$and``-style list-of-dict
+    values). These tests take that forwarded value
     and run it through ``make_filter_dep``'s parsing path, asserting the
     resulting ``FilterOperation`` tree matches what the plugin composed.
 

@@ -36,6 +36,17 @@ Before writing any plugin code, load the relevant skill. Skills contain exact im
 - **Build system**: Always use hatchling with `packages = ["src/nemo_my_plugin"]` — use the exact package directory name.
 - **Run tests**: `uv run pytest`
 
+## Typed client types vs server types
+
+`nemo_helix_plugin.<service>.types` holds pure-pydantic wire shapes. The plugin package must not depend on `nhx_common` or a service package, so any behavior that needs server modules or runtime deps (kubernetes, docker, jinja2) lives on a server-side subclass. For example, the plugin has `class KubernetesVolume(BaseModel)` with data only, and the server subclasses it to add `to_k8s()`.
+
+- **Behavior that pulls deps stays on the server subclass**: methods that build `kubernetes.client.V1*` objects, validators that import auth or config modules.
+- **Import-time env defaults stay server-side.** A field defaulting to `os.getenv(...)` gets a plain literal default in the plugin; the server subclass restores the env-driven one.
+- **Re-type nested fields on the server.** A field `additional_volumes: list[KubernetesVolume]` on another config still resolves to the behavior-less plugin type, so `.to_k8s()` fails at runtime. The server subclass must override nested fields all the way up the config tree. The type checker does not catch this; the service's backend tests do.
+- **Same-named pydantic classes are not interchangeable.** A field typed as the plugin `AuthContext` rejects a server `AuthContext` instance. The server subclass overrides the field with the server type, and the server schemas module must not re-export the plugin class under the same name (it shadows the server import).
+- **Some types are server-only.** Filters that subclass `nhx.common.entities.Filter` or responses that wrap raw entity instances stay server-side; the client passes filter query-param strings and DTO equivalents.
+- **Constants** from `nhx.common.entities.constants` (name regex, max lengths) are inlined in the plugin module with a comment pointing at the origin.
+
 ## Available Skills
 
 - [`creating-a-plugin`](src/nemo_helix_plugin/.agents/skills/creating-a-plugin/SKILL.md) — Creates a new NeMo plugin from scratch. Use when starting plugin development, setting up a plugin package, registering surfaces via entry points, or asking how plugins are discovered by the platform. _Trigger keywords: create plugin, new plugin, plugin setup, entry-points, plugin structure, get started, plugin discovered, entry point._

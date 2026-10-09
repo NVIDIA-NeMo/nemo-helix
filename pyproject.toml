@@ -106,7 +106,7 @@ dev = [
   # agent-hardener itself, which stays in its own venv (garak pulls litellm/torch, incompatible pins).
   "nemo-agent-hardener-plugin",
   "nemo-agents-plugin[deepagents]", # Fabric agent E2E runtime
-  "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for agentic-use trajectory validation
+  "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for intake ATIF ingest
   "nemo-helix-tools",               # License and package-layout maintenance tooling
   "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
   "nhx-dev-mcp",                                    # Include MCP dev tools
@@ -389,7 +389,7 @@ override-dependencies = [
   "simpleeval>=1.0.5",        # High – nhx-api + nhx-gpu-tasks
   "ujson>=5.12.0",            # High – nhx-api/cpu-tasks/gpu-tasks
   "xgrammar>=0.1.32",         # High – customizer + nhx-gpu-tasks
-  "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High); overrides vendored sdk/python/nemo-helix <3 constraint
+  "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High)
   "wandb>=0.30.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
   "cryptography>=50.0.0,<51", # GHSA-g6cj-pr64-35w5; overrides nvidia-nat-core's <47 cap after changelog review
   "click>=8.2.0",             # Below CVEs are based on constraints that garak has
@@ -600,14 +600,6 @@ extraPaths = [
   "plugins/nemo-guardrails/src",
   "plugins/nemo-evals/src",
   "plugins/nemo-insights/src",
-  "tests/agentic-use",
-  "tests/agentic-use/shared",
-]
-executionEnvironments = [
-  { root = "tests/agentic-use", extraPaths = [
-    "tests/agentic-use",
-    "tests/agentic-use/shared",
-  ] },
 ]
 
 [tool.ty.environment]
@@ -650,10 +642,6 @@ extra-paths = [
   "plugins/nemo-builder/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
-  # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared
-  # on sys.path in tests/conftest.py.
-  "tests/agentic-use",
-  "tests/agentic-use/shared",
 ]
 
 [tool.ty.src]

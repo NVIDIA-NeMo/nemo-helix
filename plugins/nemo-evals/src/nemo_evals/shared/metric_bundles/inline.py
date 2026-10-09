@@ -28,6 +28,8 @@ from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.metrics.types import MetricsUnion, MetricVariants
 from pydantic import ConfigDict, TypeAdapter, computed_field, field_validator
 
+INLINE_KIND = "inline"
+
 # Discriminated union (keyed on ``type``) used to serialize and reconstruct the
 # concrete built-in metric. Reconstruction is pure data validation — no code is
 # executed — so inline bundles are safe to hydrate.
@@ -61,7 +63,7 @@ class InlineMetricPayload(MetricBundlePayload):
     @property
     def kind(self) -> Literal["inline"]:
         """Payload discriminator used by the metric bundle registry."""
-        return "inline"
+        return INLINE_KIND
 
     @computed_field
     @property
@@ -101,7 +103,7 @@ class InlineMetricBundlePackager(MetricBundlePackager):
 
 
 register_metric_bundle_kind(
-    "inline",
+    INLINE_KIND,
     payload_type=InlineMetricPayload,
     packager_factory=InlineMetricBundlePackager,
 )

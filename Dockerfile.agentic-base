@@ -59,7 +59,7 @@ RUN runuser -u harbor -- bash -lc "curl -fsSL https://claude.ai/install.sh | bas
     chmod +x /home/harbor/.local/bin/claude && \
     chown harbor:harbor /home/harbor/.local/bin/claude /home/harbor/.local/bin/claude-real
 
-# Install pinned headless coding agents used by the agentic-use benchmark matrix.
+# Install pinned headless coding agents used by agent benchmark runs.
 # Cursor Agent releases are published under
 # downloads.cursor.com/lab/<version>/linux/<arch>/agent-cli-package.tar.gz.
 RUN npm install -g "@openai/codex@${CODEX_VERSION}" && \
@@ -90,9 +90,8 @@ RUN uv sync --all-packages && \
     chown -R harbor:harbor /app/.venv
 
 # Add workspace package source directories to PYTHONPATH as fallback for editable installs.
-# /switchyard is the container mount point for agentic-use runs that need a
-# sibling Switchyard checkout; nat_runner passes the bind mount through
-# DOCKER_EXTRA_ARGS from the notebook/.env environment.
+# /switchyard is the container mount point for runs that need a sibling
+# Switchyard checkout; callers pass the bind mount through DOCKER_EXTRA_ARGS.
 ENV PYTHONPATH="/switchyard:/app/services/core/jobs/src:/app/services/core/entities/src:/app/services/core/auth/src:/app/services/core/models/src:/app/services/core/files/src:/app/services/core/secrets/src:/app/services/core/inference-gateway/src:/app/services/core/mcp/src:/app/packages/nhx_platform/src:/app/packages/nhx_common/src"
 
 # Verify critical modules can be imported (fail build early if not)
@@ -134,7 +133,7 @@ EXPOSE 8080
 # Use ENTRYPOINT to start the NeMo Helix API server, wait for it to become healthy,
 # then exec the provided command as the harbor user.
 #
-# The nat_runner.py orchestrator invokes backend-specific commands in this image
+# Callers invoke backend-specific commands in this image
 # (AUT via `nemo agents invoke`, workflow via `nat run`, or `claude -p`).
 #
 # NVIDIA_API_KEY must be provided at runtime via ``docker run -e NVIDIA_API_KEY=...``

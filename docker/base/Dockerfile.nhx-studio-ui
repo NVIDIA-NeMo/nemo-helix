@@ -62,6 +62,9 @@ COPY web/packages/studio/src packages/studio/src
 COPY web/packages/studio/*.ts packages/studio/
 COPY web/packages/studio/*.json packages/studio/
 COPY web/packages/studio/index.html packages/studio/index.html
+# Studio inlines the customizer skill's references into its "Describe with AI" prompt at
+# build time (the `@customizer-skill` alias). Source, not a dependency, so after install.
+COPY plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references /app/plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references
 
 # --------------- BUILD --------------- #
 FROM base AS build

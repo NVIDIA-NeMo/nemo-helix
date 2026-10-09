@@ -1,7 +1,0 @@
-{"type":"thread.started","thread_id":"thread_fixture"}
-{"type":"turn.started"}
-{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"I will inspect files."}}
-{"type":"item.started","item":{"id":"cmd-1","type":"command_execution","command":"rg Evaluator"}}
-{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"rg Evaluator","aggregated_output":"tests/agentic-use/example.py:Evaluator","exit_code":0}}
-{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Finished inspection."}}
-{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":10,"output_tokens":20}}

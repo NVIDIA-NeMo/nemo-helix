@@ -1,4 +1,0 @@
-{"type":"user","message":{"content":[{"type":"text","text":"Run the failing command."}]}}
-{"type":"assistant","message":{"content":[{"type":"text","text":"I will try it."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"false"}}]}}
-{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Command failed with exit code 1","is_error":true}]}}
-{"type":"assistant","message":{"content":[{"type":"text","text":"The command failed."}]}}

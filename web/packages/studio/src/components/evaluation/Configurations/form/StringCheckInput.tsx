@@ -6,6 +6,7 @@ import {
   FormField,
   SelectContent,
   SelectItem,
+  SelectListbox,
   SelectRoot,
   SelectTrigger,
   Stack,
@@ -57,11 +58,13 @@ export const StringCheckInput: FC<StringCheckInputProps> = ({
               >
                 <SelectTrigger placeholder="Select operator" />
                 <SelectContent>
-                  {STRING_CHECK_OPERATORS.map((operator) => (
-                    <SelectItem key={operator} value={operator}>
-                      {operator}
-                    </SelectItem>
-                  ))}
+                  <SelectListbox>
+                    {STRING_CHECK_OPERATORS.map((operator) => (
+                      <SelectItem key={operator} value={operator}>
+                        {operator}
+                      </SelectItem>
+                    ))}
+                  </SelectListbox>
                 </SelectContent>
               </SelectRoot>
             </FormField>

@@ -79,9 +79,9 @@ To evaluate the rail outcomes for a `GuardrailConfig`, query the rails subsystem
 and disabling it or, if needed, redacting captured data before storing or using
 logs in production environments.
 
-## Testing without a real LLM (agentic-use mock harness)
+## Testing without a real LLM (mock provider)
 
-`default/mock-llm` is **not** pre-configured platform-wide. The agentic-use harness wires it up via `tests/agentic-use/guardrails-content-safety-cli/environment/setup-mock.py`:
+`default/mock-llm` is **not** pre-configured platform-wide. To test without a real LLM, set it up yourself:
 
 - IGW runs in mock-provider mode (config `mock_provider_prefix="igw-mock-"`).
 - A provider named `igw-mock-mock-llm` is registered with a static response-map header that always returns `{"role":"assistant","content":"Yes"}`.
@@ -100,7 +100,7 @@ nemo guardrail check \
   --max-tokens 256
 ```
 
-Outside the agentic-use harness, `default/mock-llm` won't resolve — either set up the mock provider yourself or point the rail at a real model.
+Without that setup, `default/mock-llm` won't resolve — set up the mock provider or point the rail at a real model.
 
 ## Failure-case deep dives
 

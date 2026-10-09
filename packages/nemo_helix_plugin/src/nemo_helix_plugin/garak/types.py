@@ -3,8 +3,7 @@
 
 """Shared request/response types for the Garak service.
 
-Single source of truth for the HTTP contract. Replaces the Stainless-generated
-garak resource from ``nemo_garak.sdk``.
+Single source of truth for the HTTP contract.
 """
 
 from __future__ import annotations

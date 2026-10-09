@@ -20,9 +20,14 @@ CLI) rely on:
 
 from __future__ import annotations
 
+import asyncio
 import os
+import socket
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
@@ -194,7 +199,8 @@ def test_write_config_creates_system_dir(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_records_log_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize("requested_port", [0, 49200])
+async def test_create_deployment_records_log_path(tmp_path: Path, requested_port: int) -> None:
     """``DeploymentInfo.log_path`` is populated and matches ``log_path_for``."""
     backend = _backend(tmp_path)
 
@@ -210,13 +216,18 @@ async def test_create_deployment_records_log_path(tmp_path: Path) -> None:
     fake = _FakeProc()
 
     def _fake_spawn(self_, name, config_path, log_path, port):  # noqa: ANN001
+        assert port == (requested_port or 49200)
         # Touch the log file so callers can locate it — mirrors real spawn.
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return fake
 
-    with patch.object(InMemoryRunnerBackend, "_spawn", _fake_spawn):
-        info = await backend.create_deployment("ws", "calc-1", {"workflow": {}}, port=49200)
+    with (
+        patch.object(InMemoryRunnerBackend, "_spawn", _fake_spawn),
+        patch.object(backend, "allocate_port", return_value=49200) as allocate,
+    ):
+        info = await backend.create_deployment("ws", "calc-1", {"workflow": {}}, port=requested_port)
+        assert allocate.call_count == (1 if requested_port == 0 else 0)
 
     assert info.log_path == str(backend.log_path_for("ws", "calc-1"))
     assert Path(info.log_path).exists()
@@ -249,7 +260,7 @@ async def test_create_deployment_validates_platform_agent_config(tmp_path: Path)
 
     fake_process = SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
 
-    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port
         assert credential_env == {"NVIDIA_API_KEY": "not-used"}
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -263,8 +274,8 @@ async def test_create_deployment_validates_platform_agent_config(tmp_path: Path)
         info = await backend.create_deployment("ws", "fabric-dep", config, port=49210)
 
     assert info.status == "starting"
-    assert info.endpoint == "http://127.0.0.1:49210"
-    assert info.port == 49210
+    assert info.endpoint == f"http://127.0.0.1:{info.port}"
+    assert info.port > 0
     assert info.pid == 4242
     assert Path(info.log_path).exists()
     assert validation_calls == [
@@ -294,7 +305,7 @@ async def test_delete_deployment_removes_fabric_deployment(tmp_path: Path) -> No
     fake_process = SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
     terminate_calls: list[tuple[str, Any]] = []
 
-    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port, credential_env
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -320,34 +331,11 @@ async def test_delete_deployment_removes_fabric_deployment(tmp_path: Path) -> No
     assert await backend.get_deployment_status("ws", "fabric-dep") is None
 
 
-@pytest.mark.asyncio
-async def test_create_deployment_cleans_fabric_base_dir_on_validation_failure(tmp_path: Path) -> None:
-    backend = _backend(tmp_path)
-    config = {
-        "config_format": "nemo-agents-spec-v1",
-        "name": "fabric-agent",
-        "default_harness": "hermes",
-        "harnesses": {"hermes": {"kind": "hermes"}},
-        "models": {"default": {"provider": "openai", "model": "openai/gpt-5.4"}},
-    }
-    base_dir = tmp_path / "system" / "ws" / "fabric-dep-fabric"
-
-    async def _validate_platform_agent_config(config_: dict[str, Any], *, base_dir: Path) -> Any:
-        del config_
-        (base_dir / "validation.txt").write_text("created during validation")
-        raise ValueError("bad fabric config")
-
-    with patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate_platform_agent_config):
-        with pytest.raises(ValueError, match="bad fabric config"):
-            await backend.create_deployment("ws", "fabric-dep", config, port=0)
-
-    assert not base_dir.exists()
-    assert await backend.get_deployment_status("ws", "fabric-dep") is None
-
-
+@pytest.mark.parametrize("spawn_fails", [False, True], ids=["success", "spawn-failure"])
 def test_spawn_fabric_uses_current_python_and_platform_server(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    spawn_fails: bool,
 ) -> None:
     backend = _backend(tmp_path)
     config_path = tmp_path / "agent.yaml"
@@ -356,16 +344,22 @@ def test_spawn_fabric_uses_current_python_and_platform_server(
     process = SimpleNamespace()
     monkeypatch.setenv("NVIDIA_API_KEY", "real-controller-key")
 
-    with patch("nemo_agents_plugin.runner.in_memory.subprocess.Popen", return_value=process) as popen:
-        spawned = backend._spawn_fabric(
-            "fabric-dep",
-            config_path,
-            log_path,
-            49212,
-            {"NVIDIA_API_KEY": "not-used"},
-        )
+    with patch(
+        "nemo_agents_plugin.runner.in_memory.subprocess.Popen",
+        return_value=process,
+        side_effect=OSError("spawn failed") if spawn_fails else None,
+    ) as popen:
+        with pytest.raises(OSError, match="spawn failed") if spawn_fails else nullcontext():
+            spawned = backend._spawn_fabric(
+                "fabric-dep",
+                config_path,
+                log_path,
+                49212,
+                {"NVIDIA_API_KEY": "not-used"},
+                socket_fd=123,
+            )
+            assert spawned is process
 
-    assert spawned is process
     popen.assert_called_once_with(
         [
             sys.executable,
@@ -377,12 +371,16 @@ def test_spawn_fabric_uses_current_python_and_platform_server(
             "127.0.0.1",
             "--port",
             "49212",
+            "--socket-fd",
+            "123",
         ],
         stdout=ANY,
         stderr=subprocess.STDOUT,
         env=ANY,
+        pass_fds=(123,),
     )
     assert popen.call_args.kwargs["env"]["NVIDIA_API_KEY"] == "not-used"
+    assert popen.call_args.kwargs["stdout"].closed
     assert os.environ["NVIDIA_API_KEY"] == "real-controller-key"
 
 
@@ -600,7 +598,7 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
 
     fake_process = SimpleNamespace(pid=4343, returncode=None, poll=lambda: None)
 
-    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port, credential_env
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -689,7 +687,7 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
 
     fake_process = SimpleNamespace(pid=5150, returncode=None, poll=lambda: None)
 
-    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port, credential_env
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -761,7 +759,7 @@ async def _deploy_and_read_staged_config(
         del config_, base_dir
         return SimpleNamespace(agent_config=SimpleNamespace(name="fabric-agent"))
 
-    def _spawn_fabric(self_, name, config_path, log_path, port_, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port_, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port_, credential_env
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -911,3 +909,151 @@ async def test_fabric_deployment_probes_adapter_when_config_is_silent(tmp_path: 
 
     probe.assert_called_once()
     assert staged["telemetry"]["atif"]["storage"] == [{"type": "http", "endpoint": _INTAKE_ENDPOINT}]
+
+
+def test_spawn_fabric_inherits_socket_after_parent_closes(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+    popen = subprocess.Popen
+
+    def spawn_probe(cmd: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        fd = cmd[cmd.index("--socket-fd") + 1]
+        kwargs["stdin"] = subprocess.PIPE
+        kwargs["stdout"] = subprocess.PIPE
+        return popen(
+            [
+                sys.executable,
+                "-c",
+                "import socket, sys; sys.stdin.read(); "
+                "s = socket.socket(fileno=int(sys.argv[1])); s.listen(); "
+                "print(s.getsockname()[1])",
+                fd,
+            ],
+            **kwargs,
+        )
+
+    proc = None
+    try:
+        with backend.reserve_socket() as reserved:
+            port = reserved.getsockname()[1]
+            with patch("nemo_agents_plugin.runner.in_memory.subprocess.Popen", spawn_probe):
+                proc = backend._spawn_fabric(
+                    "probe",
+                    tmp_path / "agent.yaml",
+                    tmp_path / "agent.log",
+                    port,
+                    socket_fd=reserved.fileno(),
+                )
+        assert reserved.fileno() == -1
+        stdout, _ = proc.communicate(input=b"", timeout=10)
+        assert proc.returncode == 0
+        assert stdout.strip() == str(port).encode()
+        with socket.socket() as replacement:
+            replacement.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            replacement.bind(("127.0.0.1", port))
+            replacement.listen()
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    ["stage", "validation", "spawn", "cancel_stage", "cancel_validation", "cancel_spawn", "cancel_spawn_twice", None],
+)
+async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) -> None:
+    backend = _backend(tmp_path)
+    sockets: list[socket.socket] = []
+    addresses: list[tuple[str, int]] = []
+    reserve = backend.reserve_socket
+    spawn_started = threading.Event()
+    allow_spawn = threading.Event()
+    process = SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
+
+    @contextmanager
+    def track_reservation() -> Iterator[socket.socket]:
+        with reserve() as sock:
+            sockets.append(sock)
+            addresses.append(sock.getsockname())
+            yield sock
+
+    async def stage(*args: Any) -> None:
+        assert sockets[0].fileno() >= 0
+        with socket.socket() as competitor:
+            with pytest.raises(OSError):
+                competitor.bind(sockets[0].getsockname())
+        if failure == "cancel_stage":
+            raise asyncio.CancelledError
+        if failure == "stage":
+            raise ValueError("stage failed")
+
+    async def validate(*args: Any, base_dir: Path) -> None:
+        (base_dir / "validation.txt").write_text("created during validation")
+        if failure == "cancel_validation":
+            raise asyncio.CancelledError
+        if failure == "validation":
+            raise ValueError("validation failed")
+
+    def spawn(*args: Any, socket_fd: int) -> Any:
+        assert socket_fd == sockets[0].fileno()
+        if failure == "spawn":
+            raise OSError("spawn failed")
+        if failure in {"cancel_spawn", "cancel_spawn_twice"}:
+            spawn_started.set()
+            assert allow_spawn.wait(5)
+            os.fstat(socket_fd)
+        return process
+
+    with (
+        patch.object(backend, "reserve_socket", track_reservation),
+        patch.object(backend, "_stage_ethos", stage),
+        patch.object(backend, "_spawn_fabric", spawn),
+        patch.object(backend, "_terminate") as terminate,
+        patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", validate),
+        patch(
+            "nemo_agents_plugin.runner.in_memory.configure_intake_telemetry", side_effect=lambda config, **kw: config
+        ),
+        patch("nemo_agents_plugin.runner.in_memory.platform_gateway_credential_env", return_value={}),
+    ):
+        task = asyncio.create_task(
+            backend.create_deployment(
+                "ws",
+                "dep",
+                {"config_format": "nemo-agents-spec-v1"},
+                port=0,
+            )
+        )
+        if failure in {"cancel_spawn", "cancel_spawn_twice"}:
+            try:
+                assert await asyncio.to_thread(spawn_started.wait, 5)
+                task.cancel()
+                await asyncio.sleep(0)
+                if failure == "cancel_spawn_twice":
+                    task.cancel()
+                    await asyncio.sleep(0)
+                assert sockets[0].fileno() >= 0
+            finally:
+                allow_spawn.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            terminate.assert_called_once_with("dep", process)
+        elif failure in {"cancel_stage", "cancel_validation"}:
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            terminate.assert_not_called()
+        elif failure:
+            with pytest.raises((ValueError, OSError), match=failure):
+                await task
+        else:
+            info = await task
+            assert info.port > 0
+            assert info.endpoint == f"http://127.0.0.1:{info.port}"
+        assert sockets[0].fileno() == -1
+        if failure:
+            with socket.socket() as replacement:
+                replacement.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                replacement.bind(addresses[0])
+                replacement.listen()
+            assert not backend._fabric_base_dir_for("ws", "dep").exists()
+            assert await backend.get_deployment_status("ws", "dep") is None

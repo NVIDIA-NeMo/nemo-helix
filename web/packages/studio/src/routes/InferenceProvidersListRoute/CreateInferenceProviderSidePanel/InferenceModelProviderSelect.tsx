@@ -120,7 +120,7 @@ export const InferenceModelProviderSelect: FC<InferenceModelProviderSelectProps>
             }}
           />
         </Block>
-        <Stack className="max-h-[320px] w-full overflow-auto" gap="0">
+        <Stack className="max-h-[320px] w-full overflow-auto overscroll-contain" gap="0">
           {showEmpty ? (
             <Flex align="center" justify="center" className="py-4">
               <Text kind="body/regular/sm" className="text-subtle">

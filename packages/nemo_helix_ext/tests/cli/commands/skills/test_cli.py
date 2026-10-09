@@ -127,9 +127,8 @@ class TestList:
         data = json.loads(result.stdout)
         by_name = {item["name"]: item for item in data}
 
-        # Platform skills always come from the `nemo-helix-ext` (or
-        # vendored `nemo-helix-sdk`) distribution; both collapse to
-        # `nemo-helix` in the user-facing column.
+        # Platform skills come from the `nemo-helix-ext` distribution,
+        # which renders as `nemo-helix` in the user-facing column.
         assert by_name["inference"]["source"] == "nemo-helix"
         # Raw entry-point name preserved for programmatic consumers.
         assert by_name["inference"]["source_plugin"] == "platform"

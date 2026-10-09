@@ -77,6 +77,13 @@ imagePullSecrets: []
 # See the OpenSandbox section in this README.
 sandboxClusterCapable: false
 
+evals:
+  # -- Accept and run cloudpickle metric bundles. A cloudpickle metric is caller-supplied Python that runs
+  # with the Evals service's credentials, so enable this only when everyone who can create metrics or
+  # submit Evals jobs is trusted to run code as the platform. Sets both the API setting
+  # (`evals.allow_insecure_cloudpickle_metrics`) and the Kubernetes and Volcano job environment.
+  allowInsecureCloudpickleMetrics: false
+
 # -- Connection settings for an already-installed OpenSandbox server.
 # Used when sandboxClusterCapable is true. Copy the API-key Secret into the Helm
 # release namespace (the namespace jobs run in). Override domain for a Kata Service.
@@ -546,6 +553,8 @@ baseHelixConfig: |
           pvc_name: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
           volume_permissions_image: {{ .Values.core.storage.volumePermissionsImage | quote }}
         pod_security_context: {{ .Values.podSecurityContext | toYaml | nindent 10 }}
+        env:
+          NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: {{ .Values.evals.allowInsecureCloudpickleMetrics | toString | quote }}
       volcano_job:
         service_account_name: {{ include "nhx-core.jobsServiceAccountName" . | quote }}
         launcher_image: {{ include "nhx-core.image" . | quote }}
@@ -553,6 +562,8 @@ baseHelixConfig: |
           pvc_name: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
           volume_permissions_image: {{ .Values.core.storage.volumePermissionsImage | quote }}
         pod_security_context: {{ .Values.podSecurityContext | toYaml | nindent 10 }}
+        env:
+          NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: {{ .Values.evals.allowInsecureCloudpickleMetrics | toString | quote }}
         {{- if include "nemo-helix.multinodeNetworkingEnabled" . }}
         # Enable multi-node networking (triggers Kyverno policies for cloud-specific configuration)
         enable_multi_node_networking: true
@@ -640,7 +651,8 @@ baseHelixConfig: |
     container_image: nhx-safe-synthesizer-tasks
 
   # -- evals is the configuration specific to the Evals service
-  evals: {}
+  evals:
+    allow_insecure_cloudpickle_metrics: {{ .Values.evals.allowInsecureCloudpickleMetrics }}
 
   # -- guardrails is the configuration specific to the Guardrails service
   guardrails: {}
@@ -787,7 +799,7 @@ api:
   # -- Platform API server settings.
   server:
     # -- Seconds Uvicorn keeps idle HTTP connections open. Must be greater than envoyProxy.timeouts.upstreamIdle when Envoy is enabled.
-    keepAliveTimeoutSeconds: 5
+    keepAliveTimeoutSeconds: 10
 
   # -- Predefined service group passed to `nemo services run` with `--service-group`. Ignored when api.services is non-empty.
   serviceGroup: all

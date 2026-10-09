@@ -305,7 +305,7 @@ def test_duplicate_entry_points_with_same_path_collapse(monkeypatch, tmp_path: P
     _write_skill_dir(shared_root, "shared-skill")
     fake_eps = [
         _fake_provider_ep("platform", "nemo-helix-ext", shared_root),
-        _fake_provider_ep("platform", "nemo-helix-sdk", shared_root),
+        _fake_provider_ep("platform", "nemo-helix", shared_root),
     ]
     monkeypatch.setattr(
         "nemo_helix_plugin.discovery.discover_entry_points",
@@ -323,20 +323,20 @@ def test_duplicate_entry_points_with_same_path_collapse(monkeypatch, tmp_path: P
 
 def test_duplicate_entry_points_prefer_ext_when_content_matches(monkeypatch, tmp_path: Path):
     """When same-named providers resolve to different on-disk paths but ship
-    byte-identical SKILL.md content (the source-vs-vendored case in this
+    byte-identical SKILL.md content (the source-vs-wrapper case in this
     monorepo), the preferred distribution wins per
     ``_PROVIDER_PREFERENCE_RANKS``. The resulting skill's ``source_dist``
     reflects that choice."""
     ext_root = tmp_path / "ext-skills"
-    sdk_root = tmp_path / "sdk-skills"
+    wrapper_root = tmp_path / "wrapper-skills"
     _write_skill_dir(ext_root, "mirrored", body="# identical\n")
-    _write_skill_dir(sdk_root, "mirrored", body="# identical\n")
+    _write_skill_dir(wrapper_root, "mirrored", body="# identical\n")
 
-    # SDK ordered first deliberately: a naive last-wins dedup would pick `ext`
+    # Wrapper ordered first deliberately: a naive last-wins dedup would pick `ext`
     # by accident here; the explicit preference ranking is what makes this
     # deterministic.
     fake_eps = [
-        _fake_provider_ep("platform", "nemo-helix-sdk", sdk_root),
+        _fake_provider_ep("platform", "nemo-helix", wrapper_root),
         _fake_provider_ep("platform", "nemo-helix-ext", ext_root),
     ]
     monkeypatch.setattr(
@@ -356,19 +356,19 @@ def test_duplicate_entry_points_prefer_ext_when_content_matches(monkeypatch, tmp
 
 def test_duplicate_entry_points_prefer_superset_when_subset_subsumed(monkeypatch, tmp_path: Path):
     """When same-named providers differ only by one side having *additional*
-    skills (the common case: source defines a new skill that hasn't been
-    vendored yet), pick the superset so users see every skill the source
+    skills (e.g. source defines a new skill the wrapper doesn't carry yet),
+    pick the superset so users see every skill the source
     declares. Subset semantics override the ext-rank tiebreaker — even an
-    sdk-only superset wins over an ext subset."""
+    wrapper-only superset wins over an ext subset."""
     ext_root = tmp_path / "ext-skills"
-    sdk_root = tmp_path / "sdk-skills"
+    wrapper_root = tmp_path / "wrapper-skills"
     _write_skill_dir(ext_root, "shared", body="# identical\n")
-    _write_skill_dir(sdk_root, "shared", body="# identical\n")
-    _write_skill_dir(sdk_root, "sdk-only", body="# bonus\n")
+    _write_skill_dir(wrapper_root, "shared", body="# identical\n")
+    _write_skill_dir(wrapper_root, "wrapper-only", body="# bonus\n")
 
     fake_eps = [
         _fake_provider_ep("platform", "nemo-helix-ext", ext_root),
-        _fake_provider_ep("platform", "nemo-helix-sdk", sdk_root),
+        _fake_provider_ep("platform", "nemo-helix", wrapper_root),
     ]
     monkeypatch.setattr(
         "nemo_helix_plugin.discovery.discover_entry_points",
@@ -381,8 +381,8 @@ def test_duplicate_entry_points_prefer_superset_when_subset_subsumed(monkeypatch
 
     skills = load_skills()
 
-    assert {"shared", "sdk-only"} <= skills.keys()
-    assert skills["sdk-only"].source_dist == "nemo-helix-sdk"
+    assert {"shared", "wrapper-only"} <= skills.keys()
+    assert skills["wrapper-only"].source_dist == "nemo-helix"
 
 
 def test_duplicate_entry_points_raise_on_content_drift(monkeypatch, tmp_path: Path):
@@ -392,14 +392,14 @@ def test_duplicate_entry_points_raise_on_content_drift(monkeypatch, tmp_path: Pa
     each provider has a skill the other lacks AND an overlapping skill with
     different bytes, ruling out the superset-wins shortcut."""
     ext_root = tmp_path / "ext-skills"
-    sdk_root = tmp_path / "sdk-skills"
+    wrapper_root = tmp_path / "wrapper-skills"
     _write_skill_dir(ext_root, "drifted", body="# fresh content\n")
     _write_skill_dir(ext_root, "ext-only", body="# ext extra\n")
-    _write_skill_dir(sdk_root, "drifted", body="# stale content\n")
-    _write_skill_dir(sdk_root, "sdk-only", body="# sdk extra\n")
+    _write_skill_dir(wrapper_root, "drifted", body="# stale content\n")
+    _write_skill_dir(wrapper_root, "wrapper-only", body="# wrapper extra\n")
     fake_eps = [
         _fake_provider_ep("platform", "nemo-helix-ext", ext_root),
-        _fake_provider_ep("platform", "nemo-helix-sdk", sdk_root),
+        _fake_provider_ep("platform", "nemo-helix", wrapper_root),
     ]
     monkeypatch.setattr(
         "nemo_helix_plugin.discovery.discover_entry_points",

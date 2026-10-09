@@ -274,7 +274,7 @@ export const getTimeRelativeToNow = (time?: DateStringISO, abbreviated = false) 
   // >= 55 minutes AND < 21 hours (or 12 hours if days exist) → hours
   const hourThreshold = days > 0 ? 12 : 21;
   if (hours < hourThreshold) {
-    const count = hours;
+    const count = Math.max(hours, 1);
     if (count === 1) {
       return abbreviated ? (isPast ? '1 h ago' : 'in 1 h') : isPast ? 'an hour ago' : 'in an hour';
     }

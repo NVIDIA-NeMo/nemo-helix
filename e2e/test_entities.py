@@ -409,6 +409,7 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
         f"{prefix}-split": {"metadata": [{"key": "owner", "value": "someone-else"}, {"key": "suite", "value": owner}]},
         f"{prefix}-object": {"metadata": {"key": "owner", "value": owner}},
         f"{prefix}-scalars": {"metadata": ["red", 3, None]},
+        f"{prefix}-escaped": {"metadata": [{"key": "city", "value": "café"}, 'a"b', {"key": "n", "value": "abc"}]},
         f"{prefix}-none": {},
     }
 
@@ -433,6 +434,7 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
             f"{prefix}-split",
             f"{prefix}-object",
             f"{prefix}-scalars",
+            f"{prefix}-escaped",
             f"{prefix}-none",
         }
         assert names_matching({"data.metadata": {"$elemMatch": {"value": None}}}) == set()
@@ -443,6 +445,14 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
         assert names_matching({"data.metadata": {"$elemMatch": owner_prefix}}) == {f"{prefix}-match"}
         assert names_matching({"data.metadata": {"$elemMatch": {"$startsWith": "re"}}}) == {f"{prefix}-scalars"}
         assert names_matching({"data.metadata": {"$elemMatch": {"$eq": 3}}}) == {f"{prefix}-scalars"}
+        # Strings compare decoded, and a numeric comparison skips string values instead of failing.
+        city = {"key": "city", "value": "café"}
+        assert names_matching({"data.metadata": {"$elemMatch": city}}) == {f"{prefix}-escaped"}
+        assert names_matching({"data.metadata": {"$contains": 'a"b'}}) == {f"{prefix}-escaped"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "n", "value": {"$gt": 2}}}}) == set()
+        # JSON types: a boolean is neither the string "true" nor a number.
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": "true"}}}) == set()
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": {"$gt": 0}}}}) == set()
     finally:
         for name in rows:
             try:
@@ -485,6 +495,9 @@ def test_entity_prefix_suffix_and_object_key_filters(entity_store_client: Entiti
         assert names_matching({"name": {"$endsWith": "-pins"}}) == {f"{prefix}-pins"}
         assert names_matching({"name": {"$endsWith": "-PINS"}}) == set()
         assert names_matching({"created_at": {"$startsWith": "20"}}) == set(rows)
+        has_exact_member = {"data.tasks": {"$contains": "ws/task_a#d1"}}
+        assert names_matching(has_exact_member) == {f"{prefix}-pins"}
+        assert names_matching({"$not": has_exact_member}) == {f"{prefix}-near", f"{prefix}-none"}
         assert names_matching({"data.tags": {"$hasKey": "v1.2"}}) == {f"{prefix}-pins"}
         assert names_matching({"data.tags": {"$hasKey": "v1"}}) == {f"{prefix}-near"}
     finally:
