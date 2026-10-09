@@ -142,7 +142,7 @@ describe('server-side browser sessions', () => {
     );
   });
 
-  it('does not restart broker login after an explicit server-session logout', () => {
+  it('offers sign-in after an explicit server-session logout', () => {
     discoveryResult = { data: confidentialAuthentication, isPending: false, isError: false };
     sessionResult = { data: undefined, isPending: false, isError: false };
     window.sessionStorage.setItem(AUTH_EXPLICIT_LOGOUT_STORAGE_KEY, 'true');
@@ -150,7 +150,15 @@ describe('server-side browser sessions', () => {
     const login = renderHook(() => useAuthAutoLogin(), { wrapper }).result;
 
     expect(login.current.isAuthPending).toBe(false);
+    expect(login.current.isSignedOut).toBe(true);
     expect(window.location.assign).not.toHaveBeenCalled();
+
+    act(() => login.current.signIn());
+
+    expect(window.sessionStorage.getItem(AUTH_EXPLICIT_LOGOUT_STORAGE_KEY)).toBeNull();
+    expect(window.location.assign).toHaveBeenCalledWith(
+      'http://localhost:8080/apis/auth/v2/login?client=confidential&return_to=%2Fstudio%2Fworkspaces%2Fexample%3Ftab%3Dmodels%23details'
+    );
   });
 
   it('clears explicit logout suppression once a server session exists again', async () => {

@@ -60,7 +60,10 @@ export const parseOidcBrowserAuthentication = (value: unknown): OidcBrowserAuthe
 
 const discoverOidcBrowserAuthentication = async (): Promise<OidcBrowserAuthentication> => {
   const baseUrl = resolveBrowserBaseUrl(import.meta.env.VITE_PLATFORM_BASE_URL);
-  const response = await fetch(`${baseUrl}/apis/auth/discovery`, { credentials: 'include' });
+  const response = await fetch(`${baseUrl}/apis/auth/discovery`, { credentials: 'omit' });
+  if (response.status === 404) {
+    return { authEnabled: false };
+  }
   if (!response.ok) {
     throw new OidcBrowserAuthenticationError(
       `Auth discovery failed with status ${response.status}`,

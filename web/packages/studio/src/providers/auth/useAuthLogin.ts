@@ -12,7 +12,7 @@ import {
   isExplicitLogoutAutoLoginSuppressed,
   useWebSession,
 } from '@studio/providers/auth/useWebSession';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { hasAuthParams, useAuth } from 'react-oidc-context';
 import { useLocation } from 'react-router';
 
@@ -23,7 +23,31 @@ import { useLocation } from 'react-router';
  *
  * @returns `isAuthPending` - true when auth is enabled and the user is not yet authenticated (UI should be hidden)
  */
-export const useAuthAutoLogin = (): { isAuthPending: boolean } => {
+export interface AuthAutoLoginState {
+  isAuthPending: boolean;
+  isSignedOut: boolean;
+  signIn: () => void;
+}
+
+const getServerSessionReturnTo = (pathname: string, search: string, hash: string): string => {
+  const studioBasePath = BASE_URL.replace(/\/+$/, '');
+  return `${studioBasePath}${pathname}${search}${hash}`;
+};
+
+const getServerSessionLoginUrl = (
+  serverSessionClient: string,
+  pathname: string,
+  search: string,
+  hash: string
+): string => {
+  const params = new URLSearchParams({
+    client: serverSessionClient,
+    return_to: getServerSessionReturnTo(pathname, search, hash),
+  });
+  return `${PLATFORM_BASE_URL}/apis/auth/v2/login?${params.toString()}`;
+};
+
+export const useAuthAutoLogin = (): AuthAutoLoginState => {
   const auth = useAuth();
   const [hasAttemptedLogin, setHasAttemptedLogin] = useState(false);
   const [isExplicitLogoutSuppressed, setIsExplicitLogoutSuppressed] = useState(
@@ -55,15 +79,41 @@ export const useAuthAutoLogin = (): { isAuthPending: boolean } => {
     !webSession.isError &&
     !isE2E;
 
+  const signIn = useCallback(() => {
+    clearExplicitLogoutAutoLoginSuppression();
+    setIsExplicitLogoutSuppressed(false);
+    setHasAttemptedLogin(true);
+
+    if (webSession.serverSessionClient) {
+      window.location.assign(
+        getServerSessionLoginUrl(
+          webSession.serverSessionClient,
+          location.pathname,
+          location.search,
+          location.hash
+        )
+      );
+      return;
+    }
+
+    void auth.signinRedirect({
+      state: {
+        path: location.pathname,
+        search: location.search,
+      },
+    });
+  }, [auth, location.hash, location.pathname, location.search, webSession.serverSessionClient]);
+
   useEffect(() => {
     if (webSession.serverSessionClient && shouldAttemptLogin) {
-      const studioBasePath = BASE_URL.replace(/\/+$/, '');
-      const returnTo = `${studioBasePath}${location.pathname}${location.search}${location.hash}`;
-      const params = new URLSearchParams({
-        client: webSession.serverSessionClient,
-        return_to: returnTo,
-      });
-      window.location.assign(`${PLATFORM_BASE_URL}/apis/auth/v2/login?${params.toString()}`);
+      window.location.assign(
+        getServerSessionLoginUrl(
+          webSession.serverSessionClient,
+          location.pathname,
+          location.search,
+          location.hash
+        )
+      );
       setHasAttemptedLogin(true);
       return;
     }
@@ -103,5 +153,5 @@ export const useAuthAutoLogin = (): { isAuthPending: boolean } => {
     !shouldSuppressServerSessionLogin &&
     (webSession.isLoading || webSession.isError || (isAuthEnabled && !isAuthenticated));
 
-  return { isAuthPending };
+  return { isAuthPending, isSignedOut: shouldSuppressServerSessionLogin, signIn };
 };

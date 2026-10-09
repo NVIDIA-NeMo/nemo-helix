@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  getOidcBrowserAuthentication,
   parseOidcBrowserAuthentication,
   withOidcServerSessionRequest,
 } from './oidcBrowserAuthentication';
+
+const importFreshBrowserAuthentication = async () => {
+  vi.resetModules();
+  return import('./oidcBrowserAuthentication');
+};
 
 describe('parseOidcBrowserAuthentication', () => {
   it('prefers the confidential client when discovery advertises multiple clients', () => {
@@ -105,9 +109,38 @@ describe('withOidcServerSessionRequest', () => {
 describe('getOidcBrowserAuthentication', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('fetches discovery without credentials', async () => {
+    vi.stubEnv('VITE_PLATFORM_BASE_URL', 'https://platform.example.test');
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        auth_enabled: false,
+        oidc: null,
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { getOidcBrowserAuthentication } = await importFreshBrowserAuthentication();
+
+    await expect(getOidcBrowserAuthentication()).resolves.toEqual({ authEnabled: false });
+
+    expect(fetchMock).toHaveBeenCalledWith('https://platform.example.test/apis/auth/discovery', {
+      credentials: 'omit',
+    });
+  });
+
+  it('treats a missing discovery endpoint as disabled authentication', async () => {
+    vi.stubEnv('VITE_PLATFORM_BASE_URL', 'https://platform.example.test');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { getOidcBrowserAuthentication } = await importFreshBrowserAuthentication();
+
+    await expect(getOidcBrowserAuthentication()).resolves.toEqual({ authEnabled: false });
   });
 
   it('retries discovery after a failed request', async () => {
+    const { getOidcBrowserAuthentication } = await importFreshBrowserAuthentication();
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new Error('network down'))
