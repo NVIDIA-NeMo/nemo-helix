@@ -38,20 +38,27 @@ from nemo_helix_plugin.client.constants import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     subject_token_type_for_exchange,
 )
-from nemo_helix_plugin.client.tls import client_verify_from_env
+from nemo_helix_plugin.client.tls import httpx_tls_config_from_env
 
 logger = logging.getLogger(__name__)
 
 BearerTokenSource = Literal["access_token", "id_token"]
+OidcClientName = Literal["public", "confidential"]
+OidcClientAuthentication = Literal["public", "client_secret_basic"]
+TokenRefreshKind = Literal["provider", "broker"]
 
 
-def _parse_bearer_token_source(value: object) -> BearerTokenSource:
+def parse_bearer_token_source(value: object) -> BearerTokenSource:
     """Validate a bearer-token response field received from discovery."""
     if value == "access_token":
         return "access_token"
     if value == "id_token":
         return "id_token"
     raise ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'")
+
+
+def _parse_bearer_token_source(value: object) -> BearerTokenSource:
+    return parse_bearer_token_source(value)
 
 
 class TokenRefreshError(RuntimeError):
@@ -61,6 +68,10 @@ class TokenRefreshError(RuntimeError):
         self.error = error
         self.error_description = error_description
         super().__init__(f"Token refresh failed: {error} - {error_description}")
+
+
+class TokenPersistenceError(RuntimeError):
+    """Raised when a rotated refresh token cannot be persisted safely."""
 
 
 def _select_bearer_token(token_data: dict, source: BearerTokenSource) -> str:
@@ -156,26 +167,213 @@ ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 
 
 @dataclass(frozen=True)
+class AdvertisedOidcClient:
+    """One user-login client from auth discovery."""
+
+    name: OidcClientName
+    client_id: str
+    client_authentication: OidcClientAuthentication
+    default: bool
+    server_side_sessions: bool = False
+    default_scopes: str = DEFAULT_OAUTH_SCOPES
+    bearer_token_source: BearerTokenSource = "access_token"
+    scope_prefix: str | None = None
+    authorization_endpoint: str | None = None
+    token_endpoint: str | None = None
+    device_authorization_endpoint: str | None = None
+    device_authorization_requires_device_id: bool = False
+    device_authorization_display_name: str | None = None
+    device_token_request_includes_scope: bool = True
+    authorization_start_endpoint: str | None = None
+    broker_token_endpoint: str | None = None
+
+
+@dataclass(frozen=True)
 class NHXOIDCConfig:
     """OIDC configuration discovered from the NeMo Helix."""
 
     auth_enabled: bool
     issuer: str | None = None
-    client_id: str | None = None
-    token_endpoint: str | None = None
-    device_authorization_endpoint: str | None = None
-    default_scopes: str = DEFAULT_OAUTH_SCOPES
-    scope_prefix: str | None = None
+    clients: tuple[AdvertisedOidcClient, ...] = ()
     workload_token_exchange_enabled: bool = False
     workload_client_id: str | None = None
     workload_token_endpoint: str | None = None
     workload_audience: str | None = None
     workload_scope: str | None = None
-    cli_client_id: str | None = None
-    bearer_token_source: BearerTokenSource = "access_token"
-    device_authorization_requires_device_id: bool = False
-    device_authorization_display_name: str | None = None
-    device_token_request_includes_scope: bool = True
+
+
+def select_advertised_client(config: NHXOIDCConfig, name: OidcClientName | None = None) -> AdvertisedOidcClient:
+    """Return the named client, or the deployment's one default client."""
+    if name is not None:
+        for client in config.clients:
+            if client.name == name:
+                return client
+        known = ", ".join(client.name for client in config.clients) or "none"
+        raise ValueError(f"OIDC client '{name}' is not configured on this deployment. Configured clients: {known}")
+
+    defaults = [client for client in config.clients if client.default]
+    if len(defaults) != 1:
+        raise ValueError("OIDC discovery must advertise exactly one default client")
+    return defaults[0]
+
+
+def refresh_client(config: NHXOIDCConfig, token_broker_url: str | None) -> AdvertisedOidcClient:
+    """Return the client contract that owns a stored refresh token."""
+    if token_broker_url is None:
+        return select_advertised_client(config, "public")
+    matches = [client for client in config.clients if client.broker_token_endpoint == token_broker_url]
+    if len(matches) != 1:
+        raise ValueError("OIDC discovery must advertise exactly one client for the stored broker endpoint")
+    return matches[0]
+
+
+def refresh_target(config: NHXOIDCConfig, token_broker_url: str | None) -> tuple[str, str]:
+    """Return the token endpoint and client id for a stored login.
+
+    Server-side sessions refresh at the auth service. Direct public-client
+    sessions refresh at the identity provider.
+    """
+    client = refresh_client(config, token_broker_url)
+    if token_broker_url:
+        return token_broker_url, client.client_id
+    return client.token_endpoint or "", client.client_id
+
+
+def _parse_advertised_clients(raw: object) -> tuple[AdvertisedOidcClient, ...]:
+    if not isinstance(raw, list):
+        raise ValueError("OIDC discovery clients must be a list")
+    clients: list[AdvertisedOidcClient] = []
+    names: set[OidcClientName] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("OIDC discovery client entries must be objects")
+        name = _parse_oidc_client_name(item.get("name"))
+        if name in names:
+            raise ValueError(f"OIDC discovery advertises duplicate '{name}' clients")
+        names.add(name)
+        client_id = item.get("client_id")
+        method = _parse_oidc_client_authentication(item.get("client_authentication"))
+        if not isinstance(client_id, str) or not client_id:
+            raise ValueError("OIDC advertised client_id must be a non-empty string")
+        default_scopes = item.get("default_scopes")
+        if not isinstance(default_scopes, str) or not default_scopes:
+            raise ValueError("OIDC advertised default_scopes must be a non-empty string")
+        bearer_token_source = _parse_bearer_token_source(item.get("bearer_token_source"))
+        if name == "public" and method != "public":
+            raise ValueError("OIDC public client must use public authentication")
+        if name == "confidential" and method != "client_secret_basic":
+            raise ValueError("OIDC confidential client must use client_secret_basic authentication")
+        clients.append(
+            AdvertisedOidcClient(
+                name=name,
+                client_id=client_id,
+                client_authentication=method,
+                default=item.get("default") is True,
+                server_side_sessions=_boolean(
+                    item.get("server_side_sessions", False),
+                    field_name="server_side_sessions",
+                )
+                if name == "public"
+                else True,
+                default_scopes=default_scopes,
+                bearer_token_source=bearer_token_source,
+                scope_prefix=_optional_string(item.get("scope_prefix")),
+                authorization_endpoint=_optional_string(item.get("authorization_endpoint")),
+                token_endpoint=_optional_string(item.get("token_endpoint")),
+                device_authorization_endpoint=_optional_string(item.get("device_authorization_endpoint")),
+                device_authorization_requires_device_id=_boolean(
+                    item.get("device_authorization_requires_device_id"),
+                    field_name="device_authorization_requires_device_id",
+                )
+                if name == "public"
+                else False,
+                device_authorization_display_name=_optional_string(item.get("device_authorization_display_name")),
+                device_token_request_includes_scope=_boolean(
+                    item.get("device_token_request_includes_scope"),
+                    field_name="device_token_request_includes_scope",
+                )
+                if name == "public"
+                else True,
+                authorization_start_endpoint=_optional_string(item.get("authorization_start_endpoint")),
+                broker_token_endpoint=_optional_string(item.get("broker_token_endpoint")),
+            )
+        )
+    defaults = [client for client in clients if client.default]
+    if len(defaults) != 1:
+        raise ValueError("OIDC discovery must advertise exactly one default client")
+    for client in clients:
+        if (client.name == "confidential" or client.server_side_sessions) and (
+            client.authorization_start_endpoint is None or client.broker_token_endpoint is None
+        ):
+            raise ValueError(
+                f"OIDC {client.name} server-side client must advertise authorization_start_endpoint and "
+                "broker_token_endpoint"
+            )
+    return tuple(clients)
+
+
+def _parse_oidc_client_name(value: object) -> OidcClientName:
+    if value == "public":
+        return "public"
+    if value == "confidential":
+        return "confidential"
+    raise ValueError("OIDC advertised client name must be 'public' or 'confidential'")
+
+
+def _parse_oidc_client_authentication(value: object) -> OidcClientAuthentication:
+    if value == "public":
+        return "public"
+    if value == "client_secret_basic":
+        return "client_secret_basic"
+    raise ValueError("OIDC client_authentication must be 'public' or 'client_secret_basic'")
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("OIDC advertised endpoint and scope-prefix values must be strings or null")
+    return value or None
+
+
+def _boolean(value: object, *, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"OIDC advertised {field_name} must be a boolean")
+    return value
+
+
+def parse_nhx_config(data: object) -> NHXOIDCConfig:
+    """Parse a NeMo Helix auth discovery response."""
+    if not isinstance(data, dict):
+        raise ValueError("NeMo Helix auth discovery response must be an object")
+    auth_enabled = data.get("auth_enabled", False)
+    if not isinstance(auth_enabled, bool):
+        raise ValueError("auth_enabled must be a boolean")
+    raw_oidc = data.get("oidc")
+    if raw_oidc is None:
+        return NHXOIDCConfig(auth_enabled=auth_enabled)
+    if not isinstance(raw_oidc, dict):
+        raise ValueError("oidc discovery must be an object or null")
+    oidc: dict[str, object] = {}
+    for key, value in raw_oidc.items():
+        if not isinstance(key, str):
+            raise ValueError("oidc discovery field names must be strings")
+        oidc[key] = value
+    issuer = oidc.get("issuer")
+    if not isinstance(issuer, str) or not issuer:
+        raise ValueError("OIDC discovery issuer must be a non-empty string")
+    return NHXOIDCConfig(
+        auth_enabled=auth_enabled,
+        issuer=issuer,
+        clients=_parse_advertised_clients(oidc.get("clients")),
+        workload_token_exchange_enabled=_boolean(
+            oidc.get("workload_token_exchange_enabled", False), field_name="workload_token_exchange_enabled"
+        ),
+        workload_client_id=_optional_string(oidc.get("workload_client_id")),
+        workload_token_endpoint=_optional_string(oidc.get("workload_token_endpoint")),
+        workload_audience=_optional_string(oidc.get("workload_audience")),
+        workload_scope=_optional_string(oidc.get("workload_scope")),
+    )
 
 
 def discover_nhx_config(base_url: str, timeout: float = 10.0) -> NHXOIDCConfig:
@@ -183,31 +381,10 @@ def discover_nhx_config(base_url: str, timeout: float = 10.0) -> NHXOIDCConfig:
     response = httpx.get(
         f"{base_url.rstrip('/')}/apis/auth/discovery",
         timeout=timeout,
-        verify=client_verify_from_env(),
+        **httpx_tls_config_from_env(),
     )
     response.raise_for_status()
-    data = response.json()
-
-    oidc = data.get("oidc") or {}
-    return NHXOIDCConfig(
-        auth_enabled=data.get("auth_enabled", False),
-        issuer=oidc.get("issuer"),
-        client_id=oidc.get("client_id"),
-        cli_client_id=oidc.get("cli_client_id"),
-        bearer_token_source=_parse_bearer_token_source(oidc.get("bearer_token_source", "access_token")),
-        token_endpoint=oidc.get("token_endpoint"),
-        device_authorization_endpoint=oidc.get("device_authorization_endpoint"),
-        device_authorization_requires_device_id=oidc.get("device_authorization_requires_device_id", False),
-        device_authorization_display_name=oidc.get("device_authorization_display_name"),
-        device_token_request_includes_scope=oidc.get("device_token_request_includes_scope", True),
-        default_scopes=oidc.get("default_scopes", DEFAULT_OAUTH_SCOPES),
-        scope_prefix=oidc.get("scope_prefix"),
-        workload_token_exchange_enabled=oidc.get("workload_token_exchange_enabled", False),
-        workload_client_id=oidc.get("workload_client_id"),
-        workload_token_endpoint=oidc.get("workload_token_endpoint"),
-        workload_audience=oidc.get("workload_audience"),
-        workload_scope=oidc.get("workload_scope"),
-    )
+    return parse_nhx_config(response.json())
 
 
 def _discover_oidc_client_settings(base_url: str) -> NHXOIDCConfig:
@@ -218,10 +395,6 @@ def _discover_oidc_client_settings(base_url: str) -> NHXOIDCConfig:
         logger.debug("Could not discover OIDC settings from %s", base_url, exc_info=True)
         return NHXOIDCConfig(
             auth_enabled=False,
-            client_id="",
-            token_endpoint="",
-            default_scopes="openid profile email",
-            scope_prefix=None,
         )
 
 
@@ -245,12 +418,64 @@ def build_effective_scope(requested_scopes: str, scope_prefix: str | None) -> st
     return " ".join(expanded)
 
 
+@dataclass(frozen=True)
+class OIDCRefreshSettings:
+    """Resolved refresh grant settings for a stored OIDC login."""
+
+    token_endpoint: str
+    client_id: str
+    refresh_kind: TokenRefreshKind
+    refresh_scope: str | None
+    bearer_token_source: BearerTokenSource
+
+
+def resolve_refresh_settings(config: NHXOIDCConfig, token_broker_url: str | None) -> OIDCRefreshSettings:
+    """Resolve OIDC discovery plus stored broker URL into refresh settings.
+
+    Missing settings are returned for stale discovery so valid access tokens can
+    keep working until an actual refresh attempt needs a relogin.
+    """
+    refresh_kind: TokenRefreshKind = "broker" if token_broker_url else "provider"
+    if not config.clients:
+        return OIDCRefreshSettings(
+            token_endpoint="",
+            client_id="",
+            refresh_kind=refresh_kind,
+            refresh_scope=None,
+            bearer_token_source="access_token",
+        )
+
+    try:
+        token_endpoint, client_id = refresh_target(config, token_broker_url)
+        advertised_client = refresh_client(config, token_broker_url)
+    except ValueError:
+        return OIDCRefreshSettings(
+            token_endpoint="",
+            client_id="",
+            refresh_kind=refresh_kind,
+            refresh_scope=None,
+            bearer_token_source="access_token",
+        )
+
+    return OIDCRefreshSettings(
+        token_endpoint=token_endpoint,
+        client_id=client_id,
+        refresh_kind=refresh_kind,
+        refresh_scope=build_effective_scope(advertised_client.default_scopes, advertised_client.scope_prefix),
+        bearer_token_source=advertised_client.bearer_token_source,
+    )
+
+
 # ---------------------------------------------------------------------------
 # OAuth refresh_token grant
 # ---------------------------------------------------------------------------
 
 # Refresh proactively when less than this many seconds remain before expiry.
 DEFAULT_REFRESH_MARGIN_SECONDS = 60
+_MISSING_REFRESH_CONFIGURATION_MESSAGE = (
+    "Stored OIDC refresh credentials do not match this cluster's auth discovery. "
+    "Re-authenticate before refreshing tokens."
+)
 
 
 def _is_loopback_host(hostname: str | None) -> bool:
@@ -283,19 +508,34 @@ def refresh_token_grant(
     refresh_token: str,
     *,
     scope: str | None = None,
+    refresh_kind: TokenRefreshKind = "provider",
+    certificate_authority: str | None = None,
     timeout: float = 30.0,
 ) -> dict[str, Any]:
     """Execute OAuth refresh_token grant and return token response JSON."""
     _validate_token_endpoint(token_endpoint)
-    data: dict[str, str] = {
-        "grant_type": "refresh_token",
-        "client_id": client_id,
-        "refresh_token": refresh_token,
-    }
-    if scope:
-        data["scope"] = scope
-
-    response = httpx.post(token_endpoint, data=data, timeout=timeout, verify=client_verify_from_env())
+    tls_config = httpx_tls_config_from_env(certificate_authority)
+    if refresh_kind == "broker":
+        response = httpx.post(
+            token_endpoint,
+            json={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            timeout=timeout,
+            **tls_config,
+        )
+    else:
+        data: dict[str, str] = {
+            "grant_type": "refresh_token",
+            "client_id": client_id,
+            "refresh_token": refresh_token,
+        }
+        if scope:
+            data["scope"] = scope
+        response = httpx.post(
+            token_endpoint,
+            data=data,
+            timeout=timeout,
+            **tls_config,
+        )
 
     if response.status_code != 200:
         error_data: dict[str, str] = {}
@@ -354,7 +594,7 @@ def token_exchange_grant(
     if scope:
         data["scope"] = scope
 
-    response = httpx.post(token_endpoint, data=data, timeout=timeout, verify=client_verify_from_env())
+    response = httpx.post(token_endpoint, data=data, timeout=timeout, **httpx_tls_config_from_env())
     if response.status_code != 200:
         error_data: dict[str, object] = {}
         if response.headers.get("content-type", "").startswith("application/json"):
@@ -494,6 +734,9 @@ class OIDCTokenProvider:
     refresh_lock: Callable[[], AbstractContextManager[None]] | None = None
     on_tokens_refreshed: Callable[[TokenSet], None] | None = None
     bearer_token_source: BearerTokenSource = "access_token"
+    refresh_kind: TokenRefreshKind = "provider"
+    certificate_authority: str | None = None
+    missing_refresh_configuration_message: str = _MISSING_REFRESH_CONFIGURATION_MESSAGE
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def get_access_token(self) -> str:
@@ -533,6 +776,10 @@ class OIDCTokenProvider:
         logger.debug("Reloaded shared tokens (expires_at=%s)", self.tokens.expires_at)
         return True
 
+    def _require_refresh_configuration(self) -> None:
+        if not self.token_endpoint or not self.client_id:
+            raise RuntimeError(self.missing_refresh_configuration_message)
+
     def _refresh(self, *, force: bool = False) -> None:
         """Refresh the access token using the refresh_token grant."""
         lock_context = self.refresh_lock() if self.refresh_lock is not None else nullcontext()
@@ -547,6 +794,7 @@ class OIDCTokenProvider:
                     "Re-authenticate with `nemo auth login` to obtain new tokens."
                 )
 
+            self._require_refresh_configuration()
             logger.debug("Refreshing access token via %s", self.token_endpoint)
 
             token_data: dict
@@ -556,6 +804,8 @@ class OIDCTokenProvider:
                     client_id=self.client_id,
                     refresh_token=self.tokens.refresh_token,
                     scope=self.refresh_scope,
+                    refresh_kind=self.refresh_kind,
+                    certificate_authority=self.certificate_authority,
                 )
             except TokenRefreshError as exc:
                 if exc.error != "invalid_grant":
@@ -574,11 +824,14 @@ class OIDCTokenProvider:
                         "Re-authenticate with `nemo auth login` to obtain new tokens."
                     )
 
+                self._require_refresh_configuration()
                 token_data = refresh_token_grant(
                     token_endpoint=self.token_endpoint,
                     client_id=self.client_id,
                     refresh_token=self.tokens.refresh_token,
                     scope=self.refresh_scope,
+                    refresh_kind=self.refresh_kind,
+                    certificate_authority=self.certificate_authority,
                 )
 
             new_access_token = _select_bearer_token(token_data, self.bearer_token_source)
@@ -595,12 +848,14 @@ class OIDCTokenProvider:
             if self.on_tokens_refreshed:
                 try:
                     self.on_tokens_refreshed(self.tokens)
-                except Exception:
+                except Exception as exc:
                     if refresh_token_rotated:
-                        # The IdP rotated the refresh token but we failed to
-                        # persist it. The old refresh token is now invalid, so
-                        # swallowing this would silently lose the user's session.
-                        raise
+                        # The previous refresh token may already be invalid. Do not hide
+                        # a failure to persist its replacement.
+                        raise TokenPersistenceError(
+                            "The identity provider rotated the refresh token, but the refreshed credentials "
+                            "could not be saved. Re-authenticate before attempting another refresh."
+                        ) from exc
                     logger.warning("Failed to persist refreshed tokens", exc_info=True)
 
     def force_refresh(self) -> str:

@@ -17,7 +17,7 @@ from nhx.common.auth.workload_tokens import (
     resolve_workload_subject_token,
 )
 from nhx.common.config import AuthConfig, Configuration
-from nhx.common.config.base import OIDCConfig, TokenSigningConfig
+from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
 
 
 def _write_private_key(path: Path) -> None:
@@ -47,9 +47,11 @@ def _token_exchange_config(tmp_path: Path) -> AuthConfig:
         ),
         oidc=OIDCConfig(
             enabled=True,
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
-            workload_scope="openid email groups",
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-workload",
+                audience="nemo-helix",
+                scope="openid email groups",
+            ),
         ),
     )
 
@@ -66,7 +68,7 @@ async def test_service_workload_access_token_resolves_to_service_principal(tmp_p
     config = _token_exchange_config(tmp_path)
 
     token = await issue_service_workload_access_token_async(config, service_name="models")
-    resolved = await resolve_workload_access_token(config, None, token)
+    resolved = await resolve_workload_access_token(config, token)
 
     assert resolved is not None
     assert resolved.token_kind == "workload_access_token"
@@ -85,7 +87,7 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
     )
 
     token = await issue_service_workload_access_token_async(config, service_name="jobs", on_behalf_of=creator)
-    resolved = await resolve_workload_access_token(config, None, token)
+    resolved = await resolve_workload_access_token(config, token)
 
     assert resolved is not None
     assert resolved.principal.id == "service:jobs"
@@ -124,11 +126,11 @@ async def test_workload_subject_token_resolves_with_configured_subject_issuer(tm
         oidc=OIDCConfig(
             enabled=True,
             issuer="https://sso.example.test/application/o/nemo/",
-            client_id="nemo-helix",
-            workload_token_exchange_enabled=True,
-            workload_client_id="nemo-helix-workload",
-            workload_subject_jwks_uri="https://sso.example.test/application/o/nemo-workload/jwks/",
-            workload_subject_issuers=["https://sso.example.test/application/o/nemo-workload/"],
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-helix-workload",
+                subject_jwks_uri="https://sso.example.test/application/o/nemo-workload/jwks/",
+                subject_issuers=["https://sso.example.test/application/o/nemo-workload/"],
+            ),
         ),
     )
 

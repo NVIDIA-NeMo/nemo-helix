@@ -57,7 +57,7 @@ def _service_workload_token_headers(existing_headers: dict[str, str], *, interna
 
 def _uses_service_workload_token() -> bool:
     config = get_auth_config()
-    return bool(config.enabled and config.oidc.workload_token_exchange_enabled)
+    return bool(config.enabled and config.oidc.workload is not None)
 
 
 def _async_client_as_service(

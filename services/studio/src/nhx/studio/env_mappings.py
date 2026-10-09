@@ -40,14 +40,14 @@ ENV_MAPPINGS: list[EnvMapping] = [
     ),
     EnvMapping(marker="STUDIO_UI_VITE_APP_ENV", config_path="studio.app_env", default="production"),
     EnvMapping(marker="STUDIO_UI_VITE_AUTH_AUTHORITY", config_path="auth.oidc.issuer"),
-    EnvMapping(marker="STUDIO_UI_VITE_AUTH_CLIENT_ID", config_path="auth.oidc.client_id"),
+    EnvMapping(marker="STUDIO_UI_VITE_AUTH_CLIENT_ID", config_path="auth.oidc.public_client.client_id"),
     EnvMapping(
         marker="STUDIO_UI_VITE_AUTH_BEARER_TOKEN_SOURCE",
-        config_path="auth.oidc.bearer_token_source",
+        config_path="auth.oidc.public_client.bearer_token_source",
         default="access_token",
     ),
-    EnvMapping(marker="STUDIO_UI_VITE_AUTH_SCOPES", config_path="auth.oidc.default_scopes"),
-    EnvMapping(marker="STUDIO_UI_VITE_AUTH_SCOPE_PREFIX", config_path="auth.oidc.scope_prefix"),
+    EnvMapping(marker="STUDIO_UI_VITE_AUTH_SCOPES", config_path="auth.oidc.public_client.default_scopes"),
+    EnvMapping(marker="STUDIO_UI_VITE_AUTH_SCOPE_PREFIX", config_path="auth.oidc.public_client.scope_prefix"),
     EnvMapping(marker="STUDIO_UI_VITE_DATA_STORE_MICROSERVICE_URL", config_path="studio.data_store_url"),
     EnvMapping(
         marker="STUDIO_UI_VITE_NIM_PROXY_MICROSERVICE_INTERNAL_URL", config_path="studio.nim_proxy_internal_url"

@@ -157,7 +157,7 @@ def test_scoped_access_key_created_by_auth_service_authenticates_platform_reques
     private_key_file = tmp_path / "access-key-private.pem"
     _write_private_key(private_key_file)
     platform_config, shared_config, service_config = _auth_configs(str(private_key_file))
-    assert shared_config.oidc.workload_token_exchange_enabled is False
+    assert shared_config.oidc.workload is None
 
     with create_test_client(
         client_type=TestClient,

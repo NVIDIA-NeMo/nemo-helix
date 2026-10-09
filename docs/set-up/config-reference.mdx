@@ -17,8 +17,10 @@ Platform-wide configuration settings.
 platform:
   # Runtime used by the platform. Used to auto-detect default backends to use. | default: 'docker' | values: 'kubernetes' | 'docker' | 'none'
   runtime: docker
-  # Base URL for the NeMo Helix api. Used as the default URL for all services. | default: 'http://localhost:8080'
+  # Connection endpoint for the NeMo Helix API. Used as the default endpoint for all services; supported transports include HTTP, HTTPS, and Unix domain sockets. | default: 'http://localhost:8080'
   base_url: http://localhost:8080
+  # Absolute HTTP or HTTPS base URL advertised to clients. Defaults to base_url when it is HTTP or HTTPS. Use this when services connect through an internal URL but clients reach a different gateway origin.
+  advertised_base_url:
   # Optional loopback address override for job containers to reach Helix services. If not specified, automatically determined based on platform: macOS uses 'host.docker.internal', Docker containers use container hostname, Linux host network uses no override. Can be set via config file or NHX_LOOPBACK_ADDRESS env var.
   loopback_address:
   # Global image pull secrets for the platform
@@ -95,31 +97,17 @@ auth:
     issuer: ''
     # Additional valid issuers for token validation. Useful for Azure AD where access tokens use v1.0 issuer format (https://sts.windows.net/{tenant}/) while endpoints use v2.0.
     additional_issuers: []
-    # OAuth client ID for this NeMo Helix deployment and its default interactive login flows. | default: ''
-    client_id: ''
-    # OAuth client ID for interactive CLI user authentication. Defaults to client_id when unset.
-    cli_client_id:
-    # Token returned by the identity provider that clients send to NeMo Helix APIs. Use 'access_token' for standard OAuth resource access, or 'id_token' only when the provider documents its signed ID token as the backend bearer. | default: 'access_token' | values: 'access_token' | 'id_token'
-    bearer_token_source: access_token
-    # Override authorization endpoint (defaults to discovery).
-    authorization_endpoint:
-    # Override token endpoint (defaults to discovery).
-    token_endpoint:
-    # Override device authorization endpoint (defaults to discovery).
-    device_authorization_endpoint:
-    # Include a stable, locally generated device_id parameter in CLI device authorization requests. Enable only for identity providers that require this extension. | default: False
-    device_authorization_requires_device_id: false
-    # Optional display_name sent with CLI device authorization requests.
-    device_authorization_display_name:
-    # Include the requested scope in CLI device-flow token polling requests. Disable for identity providers whose token endpoint rejects this extension. | default: True
-    device_token_request_includes_scope: true
+    public_client:
+    confidential_client:
+    server_sessions:
+    workload:
     # Override JWKS URI for token validation (defaults to discovery).
     jwks_uri:
     # Fall back to RFC 7662 token introspection when a bearer token is not a JWT (some IdPs issue opaque access tokens). Requires introspection_endpoint to be set or discoverable, and typically introspection_client_secret_env_var pointing at a secret-backed environment variable. | default: False
     introspect_opaque_tokens: false
     # Override RFC 7662 token introspection endpoint (defaults to discovery). Only used when introspect_opaque_tokens is enabled.
     introspection_endpoint:
-    # Client ID used to authenticate RFC 7662 introspection requests. Defaults to client_id when unset.
+    # Client ID used to authenticate RFC 7662 introspection requests. Defaults to the confidential client ID, then the public client ID, when unset.
     introspection_client_id:
     # Environment variable containing the client secret used to authenticate RFC 7662 introspection requests. Required by most IdPs when introspect_opaque_tokens is enabled. Store only the environment variable name here; the secret value must come from the process environment.
     introspection_client_secret_env_var:
@@ -135,38 +123,6 @@ auth:
     groups_claim: groups
     # JWT claim to use as principal ID (maps to X-NHX-Principal-Id). Set explicitly for your IdP. | default: 'sub'
     subject_claim: sub
-    # Space-separated OAuth scopes to request during authentication. Include short NeMo Helix API scopes such as 'platform:read platform:write' only when the IdP application exposes them. If the IdP requires resource-qualified API scope names, set scope_prefix instead of putting qualified values here. | default: 'openid profile email offline_access'
-    default_scopes: openid profile email offline_access
-    # Enable SDK workload identity token exchange using NHX_WORKLOAD_IDENTITY_TOKEN_FILE subject tokens. | default: False
-    workload_token_exchange_enabled: false
-    # OAuth client ID to use for workload identity token exchange. Defaults to client_id when unset.
-    workload_client_id:
-    # OAuth token endpoint to use for workload identity token exchange. Defaults to token_endpoint.
-    workload_token_endpoint:
-    # RFC 8693 audience requested for workload identity token exchange.
-    workload_audience:
-    # Space-separated OAuth scopes requested for workload identity token exchange.
-    workload_scope:
-    # Issuer to stamp on workload identity access tokens minted by the NeMo auth service. Defaults to the platform auth endpoint origin serving the token exchange request.
-    workload_token_issuer:
-    # Lifetime in seconds for workload identity access tokens minted by the NeMo auth service. | default: 300
-    workload_token_ttl_seconds: 300
-    # Workload-specific JWT key id advertised by the NeMo auth service workload identity JWKS endpoint. When unset, workload token exchange uses auth.token_signing.key_id.
-    workload_token_key_id:
-    # Path to a PEM-encoded RSA private key used by the NeMo auth service to sign workload identity access tokens. Intended for mounted shared secrets.
-    workload_token_private_key_file:
-    # Additional RFC 8693 audience values accepted by the NeMo auth service workload token exchange endpoint. The configured workload_audience is always accepted.
-    workload_allowed_audiences: []
-    # JWKS URI used by the NeMo auth service to validate JWT subject tokens for workload token exchange. Leave unset when only Kubernetes TokenReview subject validation is enabled.
-    workload_subject_jwks_uri:
-    # Allowed JWT subject token issuers for workload token exchange. Required when workload_subject_jwks_uri is set.
-    workload_subject_issuers: []
-    # TTL in seconds for caching workload subject JWKS responses. Set to 0 to disable caching. | default: 3600
-    workload_subject_jwks_cache_ttl_seconds: 3600
-    # Allow the NeMo auth service workload token exchange endpoint to validate Kubernetes projected service account subject tokens using the TokenReview API. | default: False
-    workload_kubernetes_token_review_enabled: false
-    # Optional provider prefix for NeMo Helix API scopes. Clients prepend it to short API scopes during login, and NeMo Helix strips it from returned token scopes before authorization. For example, if IdP scopes use 'api://my-app/models:read', set prefix to 'api://my-app/' so NeMo Helix normalizes the value to 'models:read'. If not set, scopes are used as-is.
-    scope_prefix:
     # TTL in seconds for caching IdP discovery document responses. Used by the discovery endpoint to avoid per-request IdP calls. Set to 0 to disable caching. | default: 300
     discovery_cache_ttl: 300
   # Shared token signing configuration for NeMo Helix-minted JWTs.
@@ -419,7 +375,7 @@ jobs:
       workload_identity:
         # Requested expirationSeconds for the projected service account token used as the workload identity subject token. | default: 600
         token_expiration_seconds: 600
-        # Audience for the projected service account token. Defaults to auth.oidc.workload_client_id, auth.oidc.client_id, then 'nemo-helix'.
+        # Audience for the projected service account token. Defaults to auth.oidc.workload.client_id, then 'nemo-helix'.
         token_audience:
     # Default Volcano execution profile configuration
     volcano_job:
@@ -501,7 +457,7 @@ jobs:
       workload_identity:
         # Requested expirationSeconds for the projected service account token used as the workload identity subject token. | default: 600
         token_expiration_seconds: 600
-        # Audience for the projected service account token. Defaults to auth.oidc.workload_client_id, auth.oidc.client_id, then 'nemo-helix'.
+        # Audience for the projected service account token. Defaults to auth.oidc.workload.client_id, then 'nemo-helix'.
         token_audience:
       # The Volcano queue to submit the job to. | default: 'default'
       queue: default

@@ -15,7 +15,7 @@ principal_contract:
   internal_service_prefix_reserved: "service:"
 interactive_user_identity:
   username: nemo-user
-  password: nemo-user-password-dev
+  password_env_var: AUTHENTIK_INTERACTIVE_USER_PASSWORD
   expected_email: nemo-user@example.com
 workload_identity:
   principal_id: svc-nemo
@@ -40,9 +40,9 @@ token_acquisition:
   e2e_setup_password_grant:
     grant_type: password
     client_id: nemo-helix
-    client_secret: nemo-helix-secret-dev
+    client_secret_env_var: AUTHENTIK_SETUP_CLIENT_SECRET
     username: nemo-setup
-    password: nemo-setup-token-secret-dev
+    password_env_var: AUTHENTIK_SETUP_PASSWORD
     scope: "openid email groups"
   workload_provider_password_grant:
     grant_type: password
@@ -76,6 +76,7 @@ test_runtimes:
       - workload_deployment
       - managed_workload_deployment_obo
       - device_flow
+      - confidential_oidc
   - id: authentik-kubernetes
     backend: kubernetes
     command: k8s
@@ -94,4 +95,5 @@ test_runtimes:
       - workload_deployment
       - managed_workload_deployment_obo
       - device_flow
+      - confidential_oidc
       - kubernetes_token_review

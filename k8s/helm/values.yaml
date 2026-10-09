@@ -297,9 +297,10 @@ postgresql:
     username: nemo
     password: nemo
     database: nemohelix
-    # -- Name of an existing secret containing a "password" key (or use existingSecretPasswordKey). If set, the chart does not create a secret.
+    # -- Name of an existing secret containing the PostgreSQL password. If set, the chart does not create a secret.
     existingSecret: ""
-
+    # -- Key in the existing secret containing the PostgreSQL password.
+    existingSecretPasswordKey: password
 
   # -- PostgreSQL service configuration.
   service:

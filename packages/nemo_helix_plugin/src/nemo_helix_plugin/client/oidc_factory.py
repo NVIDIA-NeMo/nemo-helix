@@ -22,11 +22,13 @@ from nemo_helix_plugin.client.auth import AuthError
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.client.oidc import (
     DEFAULT_REFRESH_MARGIN_SECONDS,
+    BearerTokenSource,
     OIDCTokenProvider,
+    TokenRefreshKind,
     TokenSet,
     WorkloadTokenExchangeProvider,
     _discover_oidc_client_settings,
-    build_effective_scope,
+    resolve_refresh_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,7 +46,8 @@ class _ProviderCacheKey:
     token_endpoint: str
     client_id: str
     refresh_scope: str | None
-    bearer_token_source: str
+    bearer_token_source: BearerTokenSource
+    refresh_kind: TokenRefreshKind
 
 
 # Process-wide cache: (config_path, context) → shared OIDCTokenProvider.
@@ -157,6 +160,7 @@ def resolve_oidc_provider(
     access_token: str,
     refresh_token: str | None,
     expires_at: float | None,
+    token_broker_url: str | None = None,
     config_exists: bool,
     config_path: Path,
     explicit_access_token: bool = False,
@@ -167,16 +171,7 @@ def resolve_oidc_provider(
     """
     oidc_config = _discover_oidc_client_settings(base_url)
     tokens = TokenSet.from_access_token(access_token, refresh_token, expires_at=expires_at)
-
-    token_endpoint = oidc_config.token_endpoint or ""
-    client_id = oidc_config.cli_client_id or oidc_config.client_id or ""
-    refresh_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
-
-    if refresh_token and (not token_endpoint or not client_id):
-        raise AuthError(
-            "OIDC discovery did not return token_endpoint/client_id; "
-            "cannot refresh OAuth tokens. Check cluster auth configuration."
-        )
+    refresh_settings = resolve_refresh_settings(oidc_config, token_broker_url)
 
     # Only share the provider (and enable persistence/locking) when reading
     # from an actual config file.  If the caller passed an explicit
@@ -188,10 +183,11 @@ def resolve_oidc_provider(
         provider_key = _ProviderCacheKey(
             config_path=normalized_config_path,
             context_name=context_name,
-            token_endpoint=token_endpoint,
-            client_id=client_id,
-            refresh_scope=refresh_scope,
-            bearer_token_source=oidc_config.bearer_token_source,
+            token_endpoint=refresh_settings.token_endpoint,
+            client_id=refresh_settings.client_id,
+            refresh_scope=refresh_settings.refresh_scope,
+            bearer_token_source=refresh_settings.bearer_token_source,
+            refresh_kind=refresh_settings.refresh_kind,
         )
         on_refreshed = _make_config_persister(context_name, config_path)
         load_tokens_cb = _make_config_token_loader(context_name, config_path)
@@ -200,12 +196,13 @@ def resolve_oidc_provider(
         return _get_or_create_provider(
             provider_key,
             lambda: OIDCTokenProvider(
-                token_endpoint=token_endpoint,
-                client_id=client_id,
+                token_endpoint=refresh_settings.token_endpoint,
+                client_id=refresh_settings.client_id,
                 tokens=tokens,
                 refresh_margin_seconds=DEFAULT_REFRESH_MARGIN_SECONDS,
-                refresh_scope=refresh_scope,
-                bearer_token_source=oidc_config.bearer_token_source,
+                refresh_scope=refresh_settings.refresh_scope,
+                bearer_token_source=refresh_settings.bearer_token_source,
+                refresh_kind=refresh_settings.refresh_kind,
                 load_tokens=load_tokens_cb,
                 refresh_lock=refresh_lock,
                 on_tokens_refreshed=on_refreshed,
@@ -214,12 +211,13 @@ def resolve_oidc_provider(
 
     # Ephemeral provider: no persistence, no file locking, no caching.
     return OIDCTokenProvider(
-        token_endpoint=token_endpoint,
-        client_id=client_id,
+        token_endpoint=refresh_settings.token_endpoint,
+        client_id=refresh_settings.client_id,
         tokens=tokens,
         refresh_margin_seconds=DEFAULT_REFRESH_MARGIN_SECONDS,
-        refresh_scope=refresh_scope,
-        bearer_token_source=oidc_config.bearer_token_source,
+        refresh_scope=refresh_settings.refresh_scope,
+        bearer_token_source=refresh_settings.bearer_token_source,
+        refresh_kind=refresh_settings.refresh_kind,
     )
 
 
@@ -231,16 +229,12 @@ def resolve_workload_exchange_provider(*, base_url: str, subject_token_file: Pat
             f"{WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR} is set but workload token exchange is not enabled by auth discovery"
         )
 
-    token_endpoint = oidc_config.workload_token_endpoint or oidc_config.token_endpoint or ""
-    client_id = oidc_config.workload_client_id or oidc_config.client_id or ""
+    token_endpoint = oidc_config.workload_token_endpoint or ""
+    client_id = oidc_config.workload_client_id or ""
     if not token_endpoint:
-        raise AuthError(
-            "Workload token exchange is enabled but auth discovery did not return workload_token_endpoint or token_endpoint"
-        )
+        raise AuthError("Workload token exchange is enabled but auth discovery did not return workload_token_endpoint")
     if not client_id:
-        raise AuthError(
-            "Workload token exchange is enabled but auth discovery did not return workload_client_id or client_id"
-        )
+        raise AuthError("Workload token exchange is enabled but auth discovery did not return workload_client_id")
 
     return WorkloadTokenExchangeProvider(
         token_endpoint=token_endpoint,

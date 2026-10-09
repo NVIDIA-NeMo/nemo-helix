@@ -20,28 +20,31 @@ from __future__ import annotations
 import base64
 import json
 import time
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from nhx.common.auth.discovery import (
-    DEFAULT_AUTH_DISCOVERY_SCOPES,
-    AuthDiscoveryBearerTokenSourceError,
-    AuthDiscoveryResponse,
-    BearerTokenSource,
-    OIDCDiscoveryResponse,
+from nemo_helix_plugin.authz_format import is_valid_nhx_scope_id
+from nemo_helix_plugin.client.oidc import (
+    AdvertisedOidcClient as AdvertisedOidcClient,
 )
-from nhx.common.auth.discovery import (
-    parse_bearer_token_source as _parse_bearer_token_source,
+from nemo_helix_plugin.client.oidc import (
+    BearerTokenSource as BearerTokenSource,
 )
-from pydantic import ValidationError
-
-DEFAULT_OAUTH_SCOPES = DEFAULT_AUTH_DISCOVERY_SCOPES
-
-
-def parse_bearer_token_source(value: object) -> BearerTokenSource:
-    """Validate a bearer-token response field received from discovery."""
-    return _parse_bearer_token_source(value)
+from nemo_helix_plugin.client.oidc import (
+    NHXOIDCConfig as NHXOIDCConfig,
+)
+from nemo_helix_plugin.client.oidc import (
+    parse_bearer_token_source as parse_bearer_token_source,
+)
+from nemo_helix_plugin.client.oidc import (
+    parse_nhx_config,
+)
+from nemo_helix_plugin.client.oidc import (
+    refresh_target as refresh_target,
+)
+from nemo_helix_plugin.client.oidc import (
+    select_advertised_client as select_advertised_client,
+)
 
 
 class AuthError(Exception):
@@ -148,29 +151,6 @@ def generate_unsigned_jwt(
     return f"{header_segment}.{claims_segment}."
 
 
-@dataclass(frozen=True)
-class NHXOIDCConfig:
-    """OIDC configuration discovered from the NeMo Helix."""
-
-    auth_enabled: bool
-    issuer: str | None = None
-    client_id: str | None = None
-    token_endpoint: str | None = None
-    device_authorization_endpoint: str | None = None
-    default_scopes: str = DEFAULT_OAUTH_SCOPES
-    scope_prefix: str | None = None
-    workload_token_exchange_enabled: bool = False
-    workload_client_id: str | None = None
-    workload_token_endpoint: str | None = None
-    workload_audience: str | None = None
-    workload_scope: str | None = None
-    cli_client_id: str | None = None
-    bearer_token_source: BearerTokenSource = "access_token"
-    device_authorization_requires_device_id: bool = False
-    device_authorization_display_name: str | None = None
-    device_token_request_includes_scope: bool = True
-
-
 def discover_nhx_config(
     base_url: str,
     http_client: httpx.Client,
@@ -182,7 +162,7 @@ def discover_nhx_config(
     # codeql[py/request-without-cert-validation]
     response = http_client.get(url, timeout=timeout)
     response.raise_for_status()
-    return _nhx_oidc_config_from_payload(response.json())
+    return _parse_nhx_config(response.json())
 
 
 async def discover_nhx_config_async(
@@ -196,45 +176,16 @@ async def discover_nhx_config_async(
     # codeql[py/request-without-cert-validation]
     response = await http_client.get(url, timeout=timeout)
     response.raise_for_status()
-    return _nhx_oidc_config_from_payload(response.json())
+    return _parse_nhx_config(response.json())
 
 
-def _nhx_oidc_config_from_payload(data: object) -> NHXOIDCConfig:
+def _parse_nhx_config(payload: object) -> NHXOIDCConfig:
     try:
-        discovery = AuthDiscoveryResponse.model_validate(data)
-    except AuthDiscoveryBearerTokenSourceError as exc:
-        raise ValueError(str(exc)) from exc
-    except ValidationError as exc:
+        return parse_nhx_config(payload)
+    except ValueError as exc:
+        if "bearer_token_source" in str(exc):
+            raise
         raise AttributeError("auth discovery response did not match expected shape") from exc
-    return _nhx_oidc_config_from_discovery(discovery)
-
-
-def _nhx_oidc_config_from_discovery(discovery: AuthDiscoveryResponse) -> NHXOIDCConfig:
-    if discovery.oidc is None:
-        return NHXOIDCConfig(auth_enabled=discovery.auth_enabled)
-    return _nhx_oidc_config_from_oidc_discovery(discovery.auth_enabled, discovery.oidc)
-
-
-def _nhx_oidc_config_from_oidc_discovery(auth_enabled: bool, oidc: OIDCDiscoveryResponse) -> NHXOIDCConfig:
-    return NHXOIDCConfig(
-        auth_enabled=auth_enabled,
-        issuer=oidc.issuer,
-        client_id=oidc.client_id,
-        cli_client_id=oidc.cli_client_id,
-        bearer_token_source=oidc.bearer_token_source,
-        token_endpoint=oidc.token_endpoint,
-        device_authorization_endpoint=oidc.device_authorization_endpoint,
-        device_authorization_requires_device_id=oidc.device_authorization_requires_device_id,
-        device_authorization_display_name=oidc.device_authorization_display_name,
-        device_token_request_includes_scope=oidc.device_token_request_includes_scope,
-        default_scopes=oidc.default_scopes or DEFAULT_OAUTH_SCOPES,
-        scope_prefix=oidc.scope_prefix,
-        workload_token_exchange_enabled=oidc.workload_token_exchange_enabled,
-        workload_client_id=oidc.workload_client_id,
-        workload_token_endpoint=oidc.workload_token_endpoint,
-        workload_audience=oidc.workload_audience,
-        workload_scope=oidc.workload_scope,
-    )
 
 
 def build_effective_scope(requested_scopes: str, scope_prefix: str | None) -> str:
@@ -261,7 +212,7 @@ def validate_requested_scopes_granted(
     Compares in short form so IdPs (e.g. Azure AD) that return scp as "platform:read"
     match requested "api://nhx/platform:read".
     """
-    requested_platform = {s for s in effective_scope.split() if ":" in s}
+    requested_platform = {s for s in effective_scope.split() if is_valid_nhx_scope_id(scope_short(s, scope_prefix))}
     requested_short = {scope_short(s, scope_prefix) for s in requested_platform}
     granted_set = set(granted_scopes)
     granted_short = {scope_short(s, scope_prefix) for s in granted_set}

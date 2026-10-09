@@ -1453,6 +1453,7 @@ jobs:
           docker pull envoyproxy/envoy:v1.36.2
           helm dependency build k8s/helm
           helm dependency build contrib/auth/authentik/helm
+          helm dependency build contrib/auth/zitadel/helm
           uv run --frozen pytest tests/auth_idp/static -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
@@ -1493,18 +1494,33 @@ jobs:
           - provider: authentik
             runtime: authentik-compose
             backend: compose
-            command: test compose
+            command: test compose --gateway-port 18080
+            namespace: nemo-authentik
           - provider: authentik
             runtime: authentik-kubernetes
             backend: kubernetes
-            command: test k8s
+            command: test k8s --runtime kind --gateway-port 18082
+            namespace: nemo-authentik
+          - provider: zitadel
+            runtime: zitadel-kubernetes
+            backend: kubernetes
+            command: test k8s --runtime kind --gateway-port 18084
+            namespace: nemo-zitadel
     env:
+      AUTH_IDP_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
+      AUTH_IDP_K8S_NAMESPACE: ${{ matrix.namespace }}
       NHX_AUTHENTIK_K8S_RUNTIME: kind
-      NHX_AUTHENTIK_K8S_NAMESPACE: nemo-authentik
+      NHX_AUTHENTIK_K8S_NAMESPACE: ${{ matrix.namespace }}
       NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ghcr-pull
       NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET: ngc-api
       NHX_AUTHENTIK_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
       NHX_AUTHENTIK_K8S_REUSE_CLUSTER: "1"
+      NHX_ZITADEL_K8S_RUNTIME: kind
+      NHX_ZITADEL_K8S_NAMESPACE: ${{ matrix.namespace }}
+      NHX_ZITADEL_K8S_IMAGE_PULL_SECRET: ghcr-pull
+      NHX_ZITADEL_K8S_NGC_EXISTING_SECRET: ngc-api
+      NHX_ZITADEL_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}
+      NHX_ZITADEL_K8S_REUSE_CLUSTER: "1"
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1519,13 +1535,15 @@ jobs:
           python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: uv.lock
+      - name: Install auth browser
+        run: uv run --frozen --group auth-idp-e2e playwright install --with-deps chromium
       - name: Setup Kind cluster
         if: matrix.backend == 'kubernetes'
         uses: ./.github/actions/setup-kind-cluster
         with:
-          kind-cluster-name: ${{ env.NHX_AUTHENTIK_K8S_CLUSTER_NAME }}
+          kind-cluster-name: ${{ env.AUTH_IDP_K8S_CLUSTER_NAME }}
           install-nemo-helix: "false"
-          kube-namespace: ${{ env.NHX_AUTHENTIK_K8S_NAMESPACE }}
+          kube-namespace: ${{ env.AUTH_IDP_K8S_NAMESPACE }}
           image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
           image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
@@ -1553,6 +1571,19 @@ jobs:
         shell: bash
         run: |
           helm show chart authentik --repo https://charts.goauthentik.io --version 2026.5.4
+      - name: Lint ZITADEL umbrella Helm chart
+        if: matrix.provider == 'zitadel' && matrix.backend == 'kubernetes'
+        shell: bash
+        run: |
+          helm repo add zitadel https://charts.zitadel.com --force-update
+          helm dependency build k8s/helm
+          helm dependency build contrib/auth/zitadel/helm
+          helm lint --strict contrib/auth/zitadel/helm
+      - name: Verify official ZITADEL Helm chart is reachable
+        if: matrix.provider == 'zitadel' && matrix.backend == 'kubernetes'
+        shell: bash
+        run: |
+          helm show chart zitadel --repo https://charts.zitadel.com --version 10.0.6
       - name: Download policy WASM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1571,6 +1602,9 @@ jobs:
           NHX_AUTHENTIK_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
           NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET }}
           NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
+          NHX_ZITADEL_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
+          NHX_ZITADEL_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_ZITADEL_K8S_IMAGE_PULL_SECRET }}
+          NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
       - name: Collect Kubernetes logs
         if: always() && matrix.backend == 'kubernetes'
         shell: bash
@@ -1590,8 +1624,8 @@ jobs:
         if: always() && matrix.backend == 'kubernetes'
         shell: bash
         run: |
-          docker rm -f "cloud-provider-kind-${NHX_AUTHENTIK_K8S_CLUSTER_NAME}" || true
-          kind delete cluster --name "${NHX_AUTHENTIK_K8S_CLUSTER_NAME}" || true
+          docker rm -f "cloud-provider-kind-${AUTH_IDP_K8S_CLUSTER_NAME}" || true
+          kind delete cluster --name "${AUTH_IDP_K8S_CLUSTER_NAME}" || true
 
   # Build wheels for all packages × python versions. Downstream jobs
   # (wheel-test, python-e2e-test) download these artifacts instead

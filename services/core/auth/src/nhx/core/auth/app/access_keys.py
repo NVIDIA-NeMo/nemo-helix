@@ -36,7 +36,14 @@ from nhx.common.auth.token_claims import TokenClaims
 from nhx.common.config import AuthConfig
 from nhx.common.entities import EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.common.service.dependencies import get_entity_client
+from nhx.core.auth.app.access_key_credentials import AccessKeyCredentialAdapter
+from nhx.core.auth.app.account_resolution import get_account_session_maker
 from nhx.core.auth.entities import AccessKeyEntity
+from nhx.core.entities.app.repository import (
+    AccountCredentialConflictError,
+    AccountCredentialStore,
+    AccountIdentityStore,
+)
 
 ACCESS_KEY_WORKSPACE = "system"
 logger = logging.getLogger(__name__)
@@ -97,31 +104,46 @@ class AccessKeyStateConflictError(Exception):
 
 
 class AccessKeyRegistry:
-    """Durable access-key lifecycle records stored by the entities service."""
+    """Durable access-key lifecycle records with a legacy entity fallback."""
 
-    def __init__(self, entity_client: EntityClient) -> None:
+    def __init__(
+        self,
+        entity_client: EntityClient,
+        credential_adapter: AccessKeyCredentialAdapter | None = None,
+    ) -> None:
         self._entity_client = entity_client
+        self._credential_adapter = credential_adapter
 
-    async def add(self, key: AccessKeyCreateResponse, *, owner_principal: str | None = None) -> None:
+    async def add(
+        self,
+        key: AccessKeyCreateResponse,
+        *,
+        owner_principal: str | None = None,
+        owner_account_id: str | None = None,
+    ) -> None:
         owner = owner_principal or key.principal
-        await self._entity_client.create(
-            AccessKeyEntity(
-                name=key.jti,
-                workspace=ACCESS_KEY_WORKSPACE,
-                key_name=key.name,
-                description=key.description,
-                principal=owner,
-                subject_principal=key.principal if key.principal != owner else None,
-                entity_type=key.entity_type,
-                issuer=key.issuer,
-                audiences=key.audiences,
-                scope=key.scope,
-                issued_at=key.created_at,
-                expires_at=key.expires_at,
-            )
+        record = AccessKeyEntity(
+            name=key.jti,
+            workspace=ACCESS_KEY_WORKSPACE,
+            key_name=key.name,
+            description=key.description,
+            principal=owner,
+            subject_principal=key.principal if key.principal != owner else None,
+            entity_type=key.entity_type,
+            issuer=key.issuer,
+            audiences=key.audiences,
+            scope=key.scope,
+            issued_at=key.created_at,
+            expires_at=key.expires_at,
         )
+        if self._credential_adapter is not None:
+            await self._credential_adapter.create(record, owner_account_id=owner_account_id)
+            return
+        await self._entity_client.create(record)
 
     async def discard_unreturned(self, jti: str) -> None:
+        if self._credential_adapter is not None and await self._credential_adapter.delete(jti):
+            return
         try:
             await self._entity_client.delete(
                 AccessKeyEntity,
@@ -132,7 +154,13 @@ class AccessKeyRegistry:
             pass
 
     async def list_for_principal(
-        self, principal: str, *, page: int, page_size: int, include_service_accounts: bool = False
+        self,
+        principal: str,
+        *,
+        page: int,
+        page_size: int,
+        include_service_accounts: bool = False,
+        owner_account_id: str | None = None,
     ) -> AccessKeyListResponse:
         # Service-bound keys are platform-owned, not creator-owned: a
         # HelixAdmin other than the creator can already revoke/suspend one via
@@ -164,10 +192,26 @@ class AccessKeyRegistry:
         records = result.data
         if not include_service_accounts:
             records = [record for record in records if record.entity_type != "SERVICE_ACCOUNT"]
+        credential_has_more = False
+        if self._credential_adapter is not None and owner_account_id is not None:
+            credential_records, credential_has_more = await self._credential_adapter.list_for_owner(
+                owner_account_id,
+                include_service_accounts=include_service_accounts,
+                offset=(page - 1) * page_size,
+                limit=page_size,
+            )
+            records = sorted(
+                [*credential_records, *records],
+                key=lambda record: record.issued_at,
+                reverse=True,
+            )
+        # During the dual-store migration window, a page can exceed page_size:
+        # both stores already applied the requested offset and limit, so trimming
+        # here would permanently hide a fetched row without a merged cursor.
         # Short non-admin pages after Python filtering are intentional: favor never hiding valid keys over exact pagination; no fix needed.
         return AccessKeyListResponse(
             data=[self._metadata(record) for record in records],
-            has_more=page < result.pagination.total_pages,
+            has_more=credential_has_more or page < result.pagination.total_pages,
         )
 
     async def _retry_on_conflict(
@@ -206,7 +250,7 @@ class AccessKeyRegistry:
             return False
 
         async def do_attempt() -> bool:
-            await self._entity_client.update(record.model_copy(update={"status": "REVOKED"}))
+            await self._update(record.model_copy(update={"status": "REVOKED"}))
             return True
 
         async def handle_conflict() -> bool | _Retry:
@@ -277,7 +321,7 @@ class AccessKeyRegistry:
 
         async def do_attempt() -> tuple[bool, AccessKeyReversibleStatus]:
             updated = record.model_copy(update={"status": target_status})
-            await self._entity_client.update(updated)
+            await self._update(updated)
             return True, self._reversible_status(updated)
 
         async def handle_conflict() -> tuple[bool, AccessKeyReversibleStatus] | _Retry:
@@ -344,7 +388,7 @@ class AccessKeyRegistry:
                     "rotation_successor_jti": successor_jti,
                 }
             )
-            await self._entity_client.update(updated)
+            await self._update(updated)
             return updated
 
         async def handle_conflict() -> AccessKeyEntity | _Retry:
@@ -382,8 +426,15 @@ class AccessKeyRegistry:
             raise AccessKeyStateConflictError(f"Scoped Access Key {jti} is being rotated and cannot be {action}")
 
     async def is_active(self, jti: str, principal: str, *, claims: TokenClaims | None = None) -> bool:
+        record: AccessKeyEntity | None = None
+        if self._credential_adapter is not None:
+            stored = await self._credential_adapter.get(jti)
+            if stored is not None:
+                record = await self._credential_adapter.get_active(jti)
+                if record is None or (record.subject_principal or record.principal) != principal:
+                    return False
         try:
-            record = await self._get_for_subject(jti, principal)
+            record = record or await self._get_for_subject(jti, principal)
         except AccessKeyNotFoundError:
             if claims is None:
                 return False
@@ -405,9 +456,7 @@ class AccessKeyRegistry:
             current_record = record
 
             async def do_attempt() -> bool:
-                await self._entity_client.update(
-                    current_record.model_copy(update={"last_used_at": datetime.now(tz=UTC)})
-                )
+                await self._update(current_record.model_copy(update={"last_used_at": datetime.now(tz=UTC)}))
                 return True
 
             async def handle_conflict() -> bool | _Retry:
@@ -471,6 +520,10 @@ class AccessKeyRegistry:
         raise AccessKeyNotFoundError(f"Scoped Access Key {jti} was not found")
 
     async def _get(self, jti: str) -> AccessKeyEntity:
+        if self._credential_adapter is not None:
+            record = await self._credential_adapter.get(jti)
+            if record is not None:
+                return record
         try:
             return await self._entity_client.get(
                 AccessKeyEntity,
@@ -479,6 +532,15 @@ class AccessKeyRegistry:
             )
         except EntityNotFoundError as exc:
             raise AccessKeyNotFoundError(f"Scoped Access Key {jti} was not found") from exc
+
+    async def _update(self, record: AccessKeyEntity) -> None:
+        if self._credential_adapter is not None and await self._credential_adapter.get(record.name) is not None:
+            try:
+                await self._credential_adapter.update(record)
+            except AccountCredentialConflictError as exc:
+                raise EntityConflictError(str(exc)) from exc
+            return
+        await self._entity_client.update(record)
 
     @staticmethod
     def _metadata(record: AccessKeyEntity) -> AccessKeyMetadataResponse:
@@ -623,8 +685,13 @@ class AccessKeyRegistry:
         return None
 
 
-def get_access_key_registry(entity_client: EntityClient = Depends(get_entity_client)) -> AccessKeyRegistry:
-    return AccessKeyRegistry(entity_client.as_service("auth", internal=True))
+async def get_access_key_registry(entity_client: EntityClient = Depends(get_entity_client)) -> AccessKeyRegistry:
+    session_maker = await get_account_session_maker()
+    adapter = AccessKeyCredentialAdapter(
+        AccountCredentialStore(session_maker),
+        AccountIdentityStore(session_maker),
+    )
+    return AccessKeyRegistry(entity_client.as_service("auth", internal=True), adapter)
 
 
 class PersistentAccessKeyIssuer:
@@ -645,6 +712,7 @@ class PersistentAccessKeyIssuer:
         self._registry = registry
         self._workspaces_client = workspaces_client
         self.principal = principal.id
+        self.account_id = principal.account_id
         # Lets any current HelixAdmin revoke or suspend a service-bound key;
         # see AdminOverride. Memoized for the lifetime of this issuer
         # instance (one per request, see get_access_key_issuer) so that an endpoint-level
@@ -715,7 +783,11 @@ class PersistentAccessKeyIssuer:
         self._enforce_caller_scope(request)
         key = await self._issuer.create_async(request, allow_service_account=allow_service_account)
         try:
-            await self._registry.add(key, owner_principal=self.principal)
+            await self._registry.add(
+                key,
+                owner_principal=self.principal,
+                owner_account_id=self.account_id,
+            )
         except Exception:
             logger.warning(
                 "Failed to persist Scoped Access Key lifecycle record; the signed JWT will not be returned to the caller",
@@ -879,7 +951,11 @@ class PersistentAccessKeyIssuer:
             )
             include_service_accounts = False
         return await self._registry.list_for_principal(
-            self.principal, page=page, page_size=page_size, include_service_accounts=include_service_accounts
+            self.principal,
+            page=page,
+            page_size=page_size,
+            include_service_accounts=include_service_accounts,
+            owner_account_id=self.account_id,
         )
 
     async def revoke_async(self, jti: str) -> bool:
@@ -974,7 +1050,11 @@ class PersistentAccessKeyIssuer:
         self._enforce_caller_scope(request)
         new_key = await self._issuer.create_async(request, allow_service_account=allow_service_account)
         try:
-            await self._registry.add(new_key, owner_principal=self.principal)
+            await self._registry.add(
+                new_key,
+                owner_principal=self.principal,
+                owner_account_id=self.account_id,
+            )
         except Exception:
             try:
                 await self._registry.get_status(

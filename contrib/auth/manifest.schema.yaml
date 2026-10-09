@@ -17,6 +17,15 @@ $defs:
           - client_secret
       - required:
           - client_secret_env_var
+    allOf:
+      - not:
+          required:
+            - password
+            - password_env_var
+      - not:
+          required:
+            - client_secret
+            - client_secret_env_var
     properties:
       grant_type:
         type: string
@@ -53,12 +62,19 @@ $defs:
           - password
       - required:
           - password_env_var
+    allOf:
+      - not:
+          required:
+            - client_secret
+            - client_secret_env_var
     properties:
       grant_type:
         type: string
       client_id:
         type: string
       client_secret:
+        type: string
+      client_secret_env_var:
         type: string
       username:
         type: string

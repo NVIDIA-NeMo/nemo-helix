@@ -304,7 +304,7 @@ def should_use_service_workload_token(
     *,
     as_service: str | None,
 ) -> bool:
-    return bool(as_service is not None and config.enabled and config.oidc.workload_token_exchange_enabled)
+    return bool(as_service is not None and config.enabled and config.oidc.workload is not None)
 
 
 def internal_request_headers(*, internal: bool) -> dict[str, str]:
@@ -315,7 +315,7 @@ def current_principal_auth_headers() -> dict[str, str]:
     auth_client = auth_client_context.get()
     if auth_client is None or not auth_client.principal:
         return {}
-    if auth_client.config.enabled and auth_client.config.oidc.workload_token_exchange_enabled:
+    if auth_client.config.enabled and auth_client.config.oidc.workload is not None:
         if auth_client.bearer_token:
             return {AUTHORIZATION_HEADER: f"Bearer {auth_client.bearer_token}"}
         return {}
@@ -420,7 +420,7 @@ def _service_principal_auth_context() -> tuple[AuthConfig, Principal | None]:
 
 def service_principal_auth_headers(service_name: str) -> dict[str, str]:
     config, on_behalf_of = _service_principal_auth_context()
-    if config.enabled and config.oidc.workload_token_exchange_enabled:
+    if config.enabled and config.oidc.workload is not None:
         require_authorization_header_destination(
             purpose=f"service principal headers for {service_name!r}",
         )
@@ -432,7 +432,7 @@ def service_principal_auth_headers(service_name: str) -> dict[str, str]:
 
 async def service_principal_auth_headers_async(service_name: str) -> dict[str, str]:
     config, on_behalf_of = _service_principal_auth_context()
-    if config.enabled and config.oidc.workload_token_exchange_enabled:
+    if config.enabled and config.oidc.workload is not None:
         require_authorization_header_destination(
             purpose=f"service principal headers for {service_name!r}",
         )

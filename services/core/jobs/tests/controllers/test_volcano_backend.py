@@ -169,8 +169,7 @@ def volcano_job(
 def workload_exchange_auth_config():
     return SimpleNamespace(
         oidc=SimpleNamespace(
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
+            workload=SimpleNamespace(client_id="nemo-helix-workload", audience="nemo-helix"),
             audience=None,
         )
     )
