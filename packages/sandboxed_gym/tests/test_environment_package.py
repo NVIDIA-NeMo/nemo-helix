@@ -533,10 +533,15 @@ def test_wheels_v1_may_declare_no_config_paths(tmp_path: Path) -> None:
     assert inspect_environment_components(package) == inspect_environment_components(package)
 
 
-def test_native_v1_still_needs_a_config_path() -> None:
-    """native-v1 ships source, so a package with nothing to run is a mistake, not an extras bundle."""
+@pytest.mark.parametrize("config_paths_line", ["config_paths: []\n", ""], ids=["empty", "omitted"])
+def test_native_v1_still_needs_a_config_path(config_paths_line: str) -> None:
+    """native-v1 ships source, so a package with nothing to run is a mistake, not an extras bundle.
+
+    Omitted counts too: pydantic skips field validators for an omitted field unless the default is
+    validated, which is what let a config-less native-v1 manifest through.
+    """
     with pytest.raises(EnvironmentPackageError, match="at least one config"):
-        parse_environment_manifest("format: native-v1\nconfig_paths: []\nmetadata:\n  name: x\n")
+        parse_environment_manifest(f"format: native-v1\n{config_paths_line}metadata:\n  name: x\n")
 
 
 def test_listing_checks_shipped_server_directories_even_when_the_config_lives_elsewhere() -> None:

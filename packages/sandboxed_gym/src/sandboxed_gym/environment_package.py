@@ -76,7 +76,7 @@ class _ManifestBase(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    config_paths: tuple[str, ...] = Field(default=())
+    config_paths: tuple[str, ...] = Field(default=(), validate_default=True)
     metadata: EnvironmentMetadata
 
     @field_validator("config_paths")

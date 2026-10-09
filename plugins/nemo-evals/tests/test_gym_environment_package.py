@@ -170,9 +170,11 @@ def test_an_extras_only_wheels_v1_listing_is_accepted() -> None:
     )
 
 
-def test_native_v1_without_config_paths_is_rejected() -> None:
+@pytest.mark.parametrize("config_paths_line", ["config_paths: []\n", ""], ids=["empty", "omitted"])
+def test_native_v1_without_config_paths_is_rejected(config_paths_line: str) -> None:
+    """Pydantic skips field validators for an omitted field unless the default is validated too."""
     with pytest.raises(GymEnvironmentPackageError, match="at least one config"):
-        parse_environment_manifest("format: native-v1\nconfig_paths: []\nmetadata:\n  name: x\n")
+        parse_environment_manifest(f"format: native-v1\n{config_paths_line}metadata:\n  name: x\n")
 
 
 def test_a_shipped_server_directory_needs_its_marker_even_when_the_config_lives_elsewhere() -> None:
