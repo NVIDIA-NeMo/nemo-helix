@@ -6,9 +6,9 @@
 import logging
 import math
 import re
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
 from nemo_helix_plugin.log_utils import sanitize_for_log
@@ -67,6 +67,29 @@ from pydantic import ValidationError
 from starlette.responses import FileResponse
 
 logger = logging.getLogger(__name__)
+
+_CREATE_JOB_OPENAPI_EXAMPLES = {
+    "job": {
+        "summary": "Create a CPU container job",
+        "value": {
+            "name": "hello-world",
+            "spec": {},
+            "source": "api-reference",
+            "platform_spec": {
+                "steps": [
+                    {
+                        "name": "run",
+                        "executor": {
+                            "provider": "cpu",
+                            "container": {"image": "python:3.11"},
+                        },
+                        "config": {},
+                    }
+                ]
+            },
+        },
+    }
+}
 
 router = APIRouter()
 
@@ -259,7 +282,7 @@ async def get_execution_profiles() -> list[ExecutionProfileT]:
 )
 async def create_job(
     workspace: str,
-    request: CreateHelixJobRequest,
+    request: Annotated[CreateHelixJobRequest, Body(openapi_examples=_CREATE_JOB_OPENAPI_EXAMPLES)],
     auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobResponse:
