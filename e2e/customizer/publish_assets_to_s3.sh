@@ -17,6 +17,11 @@
 # Layout produced in the bucket:
 #   s3://<bucket>/assets_manifest.json
 #   s3://<bucket>/datasets/{chat_format,prompt_completion,dpo}/*.jsonl
+#   s3://<bucket>/datasets/embedding_nvdocs/{training.jsonl,eval_beir/}
+#   s3://<bucket>/datasets/embedding_nvdocs_smoke/training.jsonl
+#       (only when mined beforehand with mine_embedding_data.py; needs a GPU platform)
+#   s3://<bucket>/datasets/{grpo_math_smoke,grpo_math_uplift}/*.jsonl
+#       (only when built beforehand with generate_grpo_assets.py)
 #   s3://<bucket>/models/<model-folder>/   (full HF snapshot)
 #
 # Environment Variables (optional overrides):
@@ -142,8 +147,10 @@ if [ ! -d "${DATASET_SRC_DIR}" ]; then
     exit 1
 fi
 
+# grpo_math_env is not uploaded: CI builds it from the platform checkout (generate_grpo_assets.py
+# --env-only) so its wheels match the NeMo-RL pin the training image is built from.
 s3_upload_dir "${DATASET_SRC_DIR}/" "s3://${S3_BUCKET}/datasets/" \
-    --exclude "*" --include "*.jsonl"
+    --exclude "*" --include "*.jsonl" --include "*.tsv"
 
 # --------------------------------------------------------------------------- #
 # Models (list from manifest)

@@ -15,7 +15,7 @@ from e2e.customizer.customization_helpers import unique_name
 
 logger = logging.getLogger(__name__)
 
-pytestmark = [pytest.mark.platform("docker", "kubernetes"), pytest.mark.feature("gpu", "automodel")]
+pytestmark = [pytest.mark.platform("docker", "kubernetes"), pytest.mark.feature("gpu", "automodel", "uplift")]
 
 
 @pytest.mark.parametrize("finetuning_type", ["lora", "all_weights"])

@@ -6,13 +6,17 @@
 CI and local GPU tests must not pull datasets or model weights from Hugging Face.
 Assets are pre-published to ``s3://<bucket>/`` (see ``publish_assets_to_s3.sh``);
 this module syncs the needed prefixes locally, then uploads into dataset/model
-filesets through the typed platform client.
+filesets via the typed Files and Models clients.
+
+A dataset whose manifest entry sets ``"s3_published": false`` has not been
+published yet; it is read from the local ``generation.output_dir`` instead of S3.
 """
 
 import logging
 import os
 import subprocess
-from collections.abc import Mapping
+import tempfile
+from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
 
 import pytest
@@ -24,8 +28,8 @@ from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelEntityRequest
 from nhx.testing.e2e.customizer import wait_for_model_spec
 
+from e2e.customizer.assets_manifest import generation_config, local_only_formats, s3_bucket
 from e2e.customizer.assets_manifest import load as load_manifest
-from e2e.customizer.assets_manifest import s3_bucket
 from e2e.customizer.customization_helpers import assert_fileset_has_files, unique_name
 
 logger = logging.getLogger(__name__)
@@ -59,12 +63,40 @@ def _aws_sync(s3_uri: str, local_dir: Path) -> None:
         pytest.fail(f"S3 sync failed for {s3_uri}: {exc}")
 
 
+def fixtures_to_prefetch(items: Iterable[pytest.Item], asset_fixtures: Collection[str]) -> set[str]:
+    """The ``asset_fixtures`` that tests which will run (not marked skip) depend on."""
+    return {
+        name
+        for item in items
+        if item.get_closest_marker("skip") is None
+        for name in getattr(item, "fixturenames", ())
+        if name in asset_fixtures
+    }
+
+
 def sync_dataset_format(format_name: str, *, manifest: dict | None = None) -> Path:
     """Sync ``s3://<bucket>/datasets/<format_name>/`` into the local cache."""
     manifest = manifest or load_manifest()
+    if format_name in local_only_formats(manifest):
+        return _local_dataset_format(format_name, manifest)
     bucket = s3_bucket(manifest)
     local_dir = cache_dir() / "datasets" / format_name
     _aws_sync(f"s3://{bucket}/datasets/{format_name}/", local_dir)
+    return local_dir
+
+
+def _local_dataset_format(format_name: str, manifest: dict) -> Path:
+    local_dir = generation_config(manifest)["output_dir"] / format_name
+    if not local_dir.is_dir() or not any(local_dir.iterdir()):
+        generator = next(
+            (d["generator"] for d in manifest["datasets"].values() if format_name in d["outputs"] and "generator" in d),
+            "e2e/customizer/mine_embedding_data.py",
+        )
+        pytest.fail(
+            f"Dataset {format_name!r} is not published to S3 yet and {local_dir} is empty. "
+            f"Generate it locally first (see {generator})."
+        )
+    logger.info("Using local (unpublished) dataset %s from %s", format_name, local_dir)
     return local_dir
 
 
@@ -85,32 +117,54 @@ def stage_dataset_fileset(
     name_prefix: str,
     files: Mapping[str, str],
     purpose: FilesetPurpose = FilesetPurpose.DATASET,
+    max_rows: int | None = None,
 ) -> str:
-    """Upload ``files`` (remote_name -> local filename) from ``local_dir`` into a new fileset."""
-    files_client = FilesClient.from_client(client)
+    """Upload ``files`` (remote_name -> local path relative to ``local_dir``) into a new fileset.
+
+    A local path may be a directory; it is uploaded recursively under its remote name.
+    ``max_rows`` uploads only the first rows of each JSONL file, for smoke runs.
+    """
     fileset_name = unique_name(name_prefix)
+    files_client = FilesClient.from_client(client)
     files_client.create_fileset(
         workspace=workspace,
         body=CreateFilesetRequest(
             name=fileset_name,
             purpose=purpose,
-            description=f"E2E dataset staged from {local_dir.name}",
+            description=f"E2E {purpose.value} staged from {local_dir.name}",
         ),
     )
-    for remote_name, local_name in files.items():
-        source = local_dir / local_name
-        if not source.is_file():
-            pytest.fail(f"Staged dataset file missing after S3 sync: {source}")
-        logger.info("Uploading %s -> %s/%s#%s", source, workspace, fileset_name, remote_name)
-        transfer.upload(
-            files_client,
-            local_path=str(source),
-            remote_path=remote_name,
-            fileset=fileset_name,
-            workspace=workspace,
-        )
+    with tempfile.TemporaryDirectory(prefix="e2e-stage-") as tmp:
+        for remote_name, local_name in files.items():
+            source = local_dir / local_name
+            if not source.exists():
+                pytest.fail(f"Staged dataset path missing after S3 sync: {source}")
+            if max_rows is not None and source.suffix == ".jsonl":
+                source = _head_jsonl(source, Path(tmp) / remote_name, max_rows)
+            logger.info("Uploading %s -> %s/%s#%s", source, workspace, fileset_name, remote_name)
+            transfer.upload(
+                files_client,
+                local_path=f"{source}/" if source.is_dir() else str(source),
+                remote_path=remote_name,
+                fileset=fileset_name,
+                workspace=workspace,
+            )
     assert_fileset_has_files(client, workspace, fileset_name)
     return fileset_name
+
+
+def _head_jsonl(source: Path, dest: Path, max_rows: int) -> Path:
+    """Write the first ``max_rows`` non-empty lines of ``source`` to ``dest``."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with source.open(encoding="utf-8") as src, dest.open("w", encoding="utf-8") as dst:
+        kept = 0
+        for line in src:
+            if kept >= max_rows:
+                break
+            if line.strip():
+                dst.write(line if line.endswith("\n") else line + "\n")
+                kept += 1
+    return dest
 
 
 def stage_model_entity(
@@ -123,8 +177,8 @@ def stage_model_entity(
     wait_timeout: int = 600,
 ) -> str:
     """Upload a model snapshot directory into a weights fileset and register a model entity."""
-    files_client = FilesClient.from_client(client)
     weights_fileset = f"{entity_name}-weights"
+    files_client = FilesClient.from_client(client)
     files_client.create_fileset(
         workspace=workspace,
         body=CreateFilesetRequest(
@@ -156,13 +210,12 @@ def stage_model_entity(
     if uploaded == 0:
         pytest.fail(f"No model files found to upload under {snapshot_dir}")
 
-    custom_fields = {"hf_model_id": hf_repo} if hf_repo else None
     ModelsClient.from_client(client).create_model(
         workspace=workspace,
         body=CreateModelEntityRequest(
             name=entity_name,
             fileset=f"{workspace}/{weights_fileset}",
-            custom_fields=custom_fields,
+            custom_fields={"hf_model_id": hf_repo} if hf_repo else None,
         ),
         exist_ok=True,
     )
