@@ -51,7 +51,6 @@ def _cli_state(base_url: str) -> _CliState:
 class _RunJob(NemoJob):
     name: ClassVar[str] = "run"
     description: ClassVar[str] = "Run test job."
-    generate_legacy_verbs: ClassVar[bool] = False
 
     def run(self, config: dict) -> dict:
         return {"config": config}

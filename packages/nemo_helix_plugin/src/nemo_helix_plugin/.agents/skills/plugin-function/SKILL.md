@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-function
-description: Creates in-process NemoFunction surfaces for NeMo Helix plugins. Use when adding a function, declaring spec_schema, mounting function routes with add_function_routes, understanding the generated CLI command, or streaming NDJSON frames. Trigger keywords - function, NemoFunction, spec_schema, add_function_routes, nemo_helix_plugin.functions, generate_legacy_verbs, submit, streaming, NDJSON, FunctionContext.
+description: Creates NemoFunction HTTP surfaces for NeMo Helix plugins. Use when adding a function, declaring spec_schema, mounting function routes with add_function_routes, understanding the generated flat CLI command, or streaming NDJSON frames. Trigger keywords - function, NemoFunction, spec_schema, add_function_routes, nemo_helix_plugin.functions, streaming, NDJSON, FunctionContext.
 ---
 
 # Plugin Functions (NemoFunction)
@@ -17,7 +17,6 @@ nemo <plugin> <fn> [--spec '{...}' | --spec-file FILE] [--workspace W] [--reques
 The command POSTs to the plugin service's auto-derived route on the platform selected by the global
 `nemo --base-url` / `nemo --context` flags and the active CLI context. There is no `explain` — a function's only schema is `spec_schema`, and `--help` is the introspection surface.
 
-Always set `generate_legacy_verbs = False`. The default `True` generates a deprecated `<fn> run` / `<fn> submit` group whose `run` verb executes the function locally, in-process; that local execution mode is deprecated and new functions must not use it.
 
 ## CLI introspection — auto-generated per-field flags
 
@@ -58,14 +57,13 @@ class GreetResponse(BaseModel):
 class GreetFunction(NemoFunction[GreetSpec]):
     name:        ClassVar[str] = "greet"
     description: ClassVar[str] = "Say hello to a name."
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> GreetResponse:
         return GreetResponse(message=f"Hello, {spec.name}!")
 ```
 
-Required: `name`, `spec_schema`, `async def run()`, and `generate_legacy_verbs = False`. Optional: `description`, `endpoint`.
+Required: `name`, `spec_schema`, and `async def run()`. Optional: `description`, `endpoint`.
 
 ## Method colours — `run` is **always** `async def`
 

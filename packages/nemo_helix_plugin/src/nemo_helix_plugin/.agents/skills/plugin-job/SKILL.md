@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-job
-description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding generated job CLI shapes and generate_legacy_verbs, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, generated job CLI, submit, explain, generate_legacy_verbs, NemoJobScheduler.
+description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding generated job CLI shape, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, generated job CLI, explain, NemoJobScheduler.
 ---
 
 # Plugin Jobs (NemoJob)
 
-A `NemoJob` drives job CLI commands that the platform auto-generates from the class. When a job sets `generate_legacy_verbs = False`, submission is exposed as the job command itself:
+A `NemoJob` drives job CLI commands that the platform auto-generates from the class. Submission is exposed as the job command itself, and schema introspection is exposed as `explain`:
 
 ```
 nemo <plugin> <job>          [--profile <p>] \
@@ -17,7 +17,7 @@ nemo <plugin> <job>          [--profile <p>] \
 nemo <plugin> <job> explain  [--profile <p>]
 ```
 
-The generated submit command POSTs to the plugin service (on the platform selected by the global `nemo --base-url` / `nemo --context` flags), which compiles the spec and hands it off to the Jobs service for cluster execution; `explain` prints the schemas locally. Jobs still implement `run()` for container execution and programmatic local scheduling. Leaving `generate_legacy_verbs` at its default `True` preserves the nested `<job> submit` / `<job> explain` command group for compatibility.
+The generated job command POSTs to the plugin service (on the platform selected by the global `nemo --base-url` / `nemo --context` flags), which compiles the spec and hands it off to the Jobs service for cluster execution. `explain` prints the schemas locally. Jobs still implement `run()` for container execution and programmatic local scheduling.
 
 ## Class Signature
 

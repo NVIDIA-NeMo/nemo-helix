@@ -86,7 +86,6 @@ class OptimizeJob(NemoJob):
     description: ClassVar[str] = "Optimize a Fabric agent workflow."
     container: ClassVar[str] = "cpu-tasks"
     job_collection_path: ClassVar[str | None] = None
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = OptimizeSpec
     input_spec_schema: ClassVar[type[BaseModel]] = OptimizeSubmitSpec
 

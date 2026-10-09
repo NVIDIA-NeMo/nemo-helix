@@ -290,7 +290,6 @@ class ExecuteAgentJob(NemoJob):
     name: ClassVar[str] = "execute"
     description: ClassVar[str] = "Execute an agent to completion as a scheduled platform job."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
     input_spec_schema: ClassVar[type[BaseModel]] = ExecuteAgentJobConfig
     spec_schema: ClassVar[type[BaseModel]] = ExecuteAgentStepConfig
 

@@ -8,38 +8,30 @@ Two parallel helpers, one per primitive:
 - :func:`add_job_commands` — job submit callbacks plus ``explain`` per
   :class:`~nemo_helix_plugin.job.NemoJob`, routed through
   :class:`~nemo_helix_plugin.scheduler.NemoJobScheduler`.
-- :func:`add_function_commands` — two-verb subgroups
-  (``run``/``submit``) per :class:`~nemo_helix_plugin.function.NemoFunction`.
-  Functions don't have an ``explain`` verb because their only schema
+- :func:`add_function_commands` — flat remote callbacks per
+  :class:`~nemo_helix_plugin.function.NemoFunction`. Functions don't have an ``explain`` verb because their only schema
   is :attr:`~nemo_helix_plugin.function.NemoFunction.spec_schema` and that's
   introspected through ``--help`` directly.
 
 :func:`add_job_commands` is the bridge between the ``nemo.jobs`` and
 ``nemo.cli`` surfaces. The platform calls it at startup for each plugin that
 has registered both a CLI group and jobs, injecting generated job commands into
-the plugin's :class:`typer.Typer` group. Legacy jobs expose a sub-group with
-``submit`` and ``explain``; non-legacy jobs expose flat submit callbacks while
-retaining ``explain`` as a schema subcommand.
-
-Plugin authors do **not** call this themselves — it is called automatically
-by the platform's CLI loader. Jobs that set ``generate_legacy_verbs = False``
-become available as::
+the plugin's :class:`typer.Typer` group. Jobs expose flat remote callbacks while
+retaining ``explain`` as a schema subcommand::
 
     nemo <plugin> <job-name>          [--profile ...] [-o ...]
     nemo <plugin> <job-name> explain  [--profile ...]
 
-The platform comes from the global ``nemo --base-url`` / ``nemo --context``
-flags and the active CLI context, like every other ``nemo`` command.
-
-Legacy jobs that keep ``generate_legacy_verbs = True`` use
-``nemo <plugin> <job-name> submit`` for remote submission instead.
+Plugin authors do **not** call this themselves — it is called automatically
+by the platform's CLI loader. The platform comes from the global ``nemo --base-url`` /
+``nemo --context`` flags and the active CLI context, like every other ``nemo``
+command.
 
 Generated command interface
 ---------------------------
 
-``submit``
-    Submit the job to a cluster. For non-legacy jobs this is the group
-    callback; for legacy jobs this is a nested ``submit`` command.
+``<job-name>``
+    Submit the job to the Jobs service through the selected platform.
 
 ``explain``
     Print the job's spec / options schemas.
@@ -73,7 +65,6 @@ The platform generates::
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import json
 import logging
@@ -99,10 +90,8 @@ from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_helix_plugin.cli_options import workspace_help, workspace_option
 from nemo_helix_plugin.cli_renderer import CLIRenderer, RendererContext
-from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_local_cli_sdks
-from nemo_helix_plugin.errors import LocalRunError
-from nemo_helix_plugin.function import NemoFunction, returns_async_iterator
-from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace
+from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.functions.frames import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs._cli_options import (
@@ -326,33 +315,12 @@ def _register_job_subgroup(
     cli: NemoCLI | None = None,
 ) -> None:
     """Register a ``<job-name>`` command surface for submit / explain."""
-    if not job_cls.generate_legacy_verbs:
-        job_group = typer.Typer(
-            name=job_cls.name,
-            help=job_cls.description or f"Manage the {job_cls.name} job.",
-            no_args_is_help=False,
-        )
-        _add_submit_command(job_group, job_cls, scheduler, cli=cli, as_callback=True)
-        _add_explain_command(job_group, job_cls, scheduler)
-        if cli is not None:
-            cli.update_job_cli(job_cls, job_group)
-        cli_app.add_typer(job_group, name=job_cls.name, rich_help_panel="Jobs")
-        return
-
     job_group = typer.Typer(
         name=job_cls.name,
         help=job_cls.description or f"Manage the {job_cls.name} job.",
-        no_args_is_help=False,  # we override bare behavior to exit non-zero
+        no_args_is_help=False,
     )
-
-    @job_group.callback(invoke_without_command=True)
-    def _root(ctx: typer.Context) -> None:  # pragma: no cover - trivial delegation
-        """Stub callback — prints usage and exits 1 when no verb is given."""
-        if ctx.invoked_subcommand is None:
-            typer.echo(ctx.get_help())
-            raise typer.Exit(code=1)
-
-    _add_submit_command(job_group, job_cls, scheduler, cli=cli)
+    _add_submit_command(job_group, job_cls, scheduler, cli=cli, as_callback=True)
     _add_explain_command(job_group, job_cls, scheduler)
 
     if cli is not None:
@@ -731,7 +699,7 @@ def _merge_options_inputs(options: list[str], options_file: Path | None) -> dict
 
 
 # ---------------------------------------------------------------------------
-# NemoFunction CLI — two verbs (run / submit), no `explain`
+# NemoFunction CLI — flat remote invocation, no `explain`
 # ---------------------------------------------------------------------------
 
 
@@ -775,222 +743,10 @@ def _register_function_subgroup(
     *,
     cli: NemoCLI | None = None,
 ) -> None:
-    """Register a ``<fn-name>`` sub-group with run / submit verbs."""
-    if not fn_cls.generate_legacy_verbs:
-        _add_function_submit_command(cli_app, fn_cls, cli=cli, command_name=fn_cls.name, rich_help_panel="Functions")
-        if cli is not None:
-            cli.update_function_cli(fn_cls, cli_app)
-        return
-
-    fn_group = typer.Typer(
-        name=fn_cls.name,
-        help=fn_cls.description or f"Manage the {fn_cls.name} function.",
-        no_args_is_help=False,
-    )
-
-    @fn_group.callback(invoke_without_command=True)
-    def _root(ctx: typer.Context) -> None:  # pragma: no cover - trivial delegation
-        """Stub callback — prints usage and exits 1 when no verb is given."""
-        if ctx.invoked_subcommand is None:
-            typer.echo(ctx.get_help())
-            raise typer.Exit(code=1)
-
-    _add_function_run_command(fn_group, fn_cls, cli=cli)
-    _add_function_submit_command(fn_group, fn_cls, cli=cli)
-
+    """Register a flat ``<fn-name>`` remote invocation command."""
+    _add_function_submit_command(cli_app, fn_cls, cli=cli, command_name=fn_cls.name, rich_help_panel="Functions")
     if cli is not None:
-        cli.update_function_cli(fn_cls, fn_group)
-
-    cli_app.add_typer(fn_group, name=fn_cls.name, rich_help_panel="Functions")
-
-
-# ---- run --------------------------------------------------------- #
-
-
-def _add_function_run_command(
-    group: typer.Typer,
-    fn_cls: type[NemoFunction],
-    *,
-    cli: NemoCLI | None = None,
-) -> None:
-    """Register the ``run`` verb. Generates per-field flags from ``spec_schema``.
-
-    Each scalar leaf in ``spec_schema`` becomes a Typer option named
-    after its dotted path, kebab-cased per segment (``--name``,
-    ``--target.url``).  Precedence at runtime is ``--spec-file`` (base)
-    → ``--spec`` JSON (overlay) → per-field flags (top overlay).
-    Validation happens after the merge — surfaces a single
-    ``ValidationError`` for the merged spec rather than per-overlay.
-
-    When *cli* supplies a renderer via ``get_function_renderer(verb="run")``
-    (and ``--output-format json`` is not set), the renderer's lifecycle
-    drives the streamed output instead of the default per-frame echo.
-    """
-    unavailable: list[str] = []
-    leaves = walk_spec_leaves(fn_cls.spec_schema, reserved=_FN_RUN_RESERVED_FLAGS, unavailable=unavailable)
-
-    def _run(typer_ctx: typer.Context, **kwargs: object) -> None:
-        original_kwargs = dict(kwargs)
-        spec_str: str = cast(str, kwargs.pop("spec", "{}"))
-        spec_file: Path | None = cast("Path | None", kwargs.pop("spec_file", None))
-        workspace = resolve_cli_workspace(typer_ctx, cast("str | None", kwargs.pop("workspace", None)))
-        original_kwargs["workspace"] = workspace
-
-        base = _load_spec(spec_str, spec_file)
-        overlay = build_overlay(leaves, kwargs, unset_sentinel=UNSET)
-        merged = deep_merge(base, overlay)
-        try:
-            spec_obj = fn_cls.spec_schema.model_validate(merged, context={"is_local": True})
-        except ValidationError as exc:
-            typer.echo(f"Error: invalid spec for {fn_cls.name}: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
-
-        sdk, async_sdk = resolve_local_cli_sdks(typer_ctx)
-        ctx = FunctionContext(workspace=workspace)
-        renderer_cls: type[CLIRenderer] | None = None
-        if cli is not None and not _output_format_is_json(typer_ctx):
-            renderer_cls = cli.get_function_renderer(fn_cls, verb="run")
-        try:
-            outcome = asyncio.run(
-                _invoke_function_locally(
-                    fn_cls,
-                    spec_obj,
-                    ctx,
-                    sdk=sdk,
-                    async_sdk=async_sdk,
-                    renderer_cls=renderer_cls,
-                    cli_kwargs=original_kwargs,
-                )
-            )
-        except LocalRunError as exc:
-            typer.echo(f"Error: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
-        except KeyboardInterrupt as exc:  # pragma: no cover - terminal-only
-            typer.echo("Interrupted.", err=True)
-            raise typer.Exit(code=130) from exc
-
-        # Fire on_complete *outside* asyncio.run so renderers using event-loop-bound
-        # libraries (e.g. prompt_toolkit's Application.run for an interactive
-        # record browser) don't collide with the loop we just tore down.
-        if outcome is not None:
-            renderer, rctx = outcome
-            renderer.on_complete(ctx=rctx)
-
-    help_text = f"Run {fn_cls.name} locally, in-process."
-    epilog = build_epilog(schema=fn_cls.spec_schema, leaves=leaves, kind="Function", unavailable=unavailable)
-    setattr(_run, "__signature__", _build_function_run_signature(leaves))
-    group.command(name="run", help=help_text, epilog=epilog)(_run)
-
-
-def _build_function_run_signature(leaves: list[SpecLeafField]) -> inspect.Signature:
-    """Compose the synthetic signature for the function ``run`` verb."""
-    static_params = [
-        # ``typer.Context`` is auto-injected by Click via ``pass_context``,
-        # which passes it as the first positional argument. Hand-built
-        # rather than via ``kw()`` because ``kw()`` only emits
-        # ``KEYWORD_ONLY`` params (which Click's positional injection
-        # would reject).
-        inspect.Parameter(
-            "typer_ctx",
-            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=typer.Context,
-        ),
-        kw(
-            "spec",
-            str,
-            typer.Option(
-                "{}",
-                "--spec",
-                help="Spec as a JSON string.",
-                rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-        kw(
-            "spec_file",
-            Optional[Path],
-            typer.Option(
-                None,
-                "--spec-file",
-                help="Path to a YAML or JSON spec file (used as base; per-flag values override).",
-                rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-        kw(
-            "workspace",
-            Optional[str],
-            workspace_option(
-                help=workspace_help("Workspace identity passed to the function as ctx.workspace."),
-                rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-    ]
-    return build_callback_signature(
-        static_params,
-        leaves,
-        rich_help_panel=_PANEL_FUNCTION_SPEC,
-    )
-
-
-async def _invoke_function_locally(
-    fn_cls: type[NemoFunction],
-    spec_obj: BaseModel,
-    ctx: FunctionContext,
-    *,
-    sdk: object | None,
-    async_sdk: object | None,
-    renderer_cls: type[CLIRenderer] | None = None,
-    cli_kwargs: Mapping[str, Any] | None = None,
-) -> tuple[CLIRenderer, RendererContext] | None:
-    """Call ``fn_cls().run(spec, ...)`` and print result(s) to stdout.
-
-    Injects SDK parameters when the function declares them, leaves optional
-    parameters unbound so Python defaults apply, and raises
-    :class:`LocalRunError` only when the function declared a required SDK
-    parameter that we can't satisfy.
-
-    When *renderer_cls* is supplied, drive the renderer's ``on_start`` +
-    ``on_frame`` around the streamed iterator and return ``(renderer, rctx)``
-    so the caller can fire ``on_complete`` *after* :func:`asyncio.run`
-    returns — see :func:`_drive_async_renderer`. Renderers don't apply to
-    non-streaming returns — those still echo via
-    :func:`_format_value_for_stdout` and this function returns ``None``.
-    """
-    instance = fn_cls()
-    run_params = fn_cls.run_signature().parameters
-    kwargs: dict[str, Any] = {}
-    if "ctx" in run_params:
-        kwargs["ctx"] = ctx
-    if "is_local" in run_params:
-        kwargs["is_local"] = True
-    for param_name, value in (("sdk", sdk), ("async_sdk", async_sdk)):
-        param = run_params.get(param_name)
-        if param is None:
-            continue
-        if value is not None:
-            kwargs[param_name] = value
-            continue
-        if param.default is inspect.Parameter.empty:
-            raise LocalRunError(
-                f"{fn_cls.__name__}.run requires a `{param_name}` argument; "
-                f"configure your `nemo` CLI context (e.g. `nemo config use-context ...`) "
-                f"or pass `{param_name}` to the local invoker."
-            )
-
-    result = instance.run(spec_obj, **kwargs)
-    if returns_async_iterator(result):
-        if renderer_cls is not None:
-            rctx = _make_renderer_context(
-                cli_kwargs=cli_kwargs or {},
-                verb="run",
-                is_local=True,
-            )
-            renderer = await _drive_async_renderer(result, renderer_cls, rctx=rctx)
-            return renderer, rctx
-        async for frame in result:
-            typer.echo(_format_frame_for_stdout(frame))
-        return
-    awaited = await result
-    typer.echo(_format_value_for_stdout(awaited))
+        cli.update_function_cli(fn_cls, cli_app)
 
 
 def resolve_submit_auth_headers(typer_ctx: typer.Context) -> dict[str, str]:
@@ -1075,14 +831,14 @@ def _add_function_submit_command(
             typer.echo(f"Error: submit {fn_cls.name} failed: {exc}", err=True)
             raise typer.Exit(code=2) from exc
 
-    help_text = f"Submit {fn_cls.name} over HTTP."
+    help_text = f"Invoke {fn_cls.name} over HTTP."
     epilog = build_epilog(schema=fn_cls.spec_schema, leaves=leaves, kind="Function", unavailable=unavailable)
     setattr(_submit, "__signature__", _build_function_submit_signature(leaves))
     group.command(name=command_name, help=help_text, epilog=epilog, rich_help_panel=rich_help_panel)(_submit)
 
 
 def _build_function_submit_signature(leaves: list[SpecLeafField]) -> inspect.Signature:
-    """Compose the synthetic signature for the function ``submit`` verb."""
+    """Compose the synthetic signature for the function command."""
     static_params = [
         inspect.Parameter(
             "typer_ctx",

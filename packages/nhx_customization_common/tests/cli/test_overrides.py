@@ -3,7 +3,7 @@
 
 """Tests for the shared customization submit override.
 
-Focus: the hand-written ``submit`` verb installed by
+Focus: the hand-written flat backend command installed by
 ``apply_job_cli_overrides`` must resolve ``--workspace`` the same way the
 auto-generated verbs do — explicit flag > ``$NHX_WORKSPACE`` > the active
 CLI context's configured workspace > ``"default"``.
@@ -76,7 +76,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file)])
+        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "my-team-ws"
@@ -86,7 +86,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file), "--workspace", "acme-corp"])
+        result = CliRunner().invoke(parent, ["plugin", "--workspace", "acme-corp", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "acme-corp"
@@ -97,7 +97,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file), "-w", "default"])
+        result = CliRunner().invoke(parent, ["plugin", "-w", "default", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "default"
@@ -107,7 +107,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), None)
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file)])
+        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "env-ws"
@@ -117,7 +117,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), None)
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file)])
+        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "default"

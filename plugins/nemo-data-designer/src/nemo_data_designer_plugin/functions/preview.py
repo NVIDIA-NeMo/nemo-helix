@@ -46,7 +46,6 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
     name: ClassVar[str] = "preview"
     description: ClassVar[str] = "Generate a small preview dataset by streaming NDJSON frames."
     spec_schema: ClassVar[type[PreviewSpec]] = PreviewSpec
-    generate_legacy_verbs: ClassVar[bool] = False
 
     async def run(
         self,

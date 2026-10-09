@@ -32,7 +32,6 @@ class EvaluationExecutionJob(NemoJob):
 
     name: ClassVar[str] = "evaluation-execution"
     description: ClassVar[str] = "Execute one scaled-evals evaluation attempt."
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = EvaluationExecutionSpec
 
     @classmethod
