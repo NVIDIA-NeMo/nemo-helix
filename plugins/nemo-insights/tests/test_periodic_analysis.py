@@ -3,6 +3,7 @@
 
 """Tests for periodic insights analysis plumbing."""
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -15,6 +16,12 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import yaml
+from nemo_helix_plugin.api.filter import (
+    ComparisonOperation,
+    FilterOperator,
+    LogicalOperation,
+    parse_json_filter,
+)
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
@@ -91,7 +98,7 @@ def test_merge_since_filter_adds_lower_bound() -> None:
 
     assert result == {
         "agent_name": "research-agent",
-        "started_at": {"gte": "2026-06-04T12:00:00+00:00"},
+        "started_at": {"$gte": "2026-06-04T12:00:00+00:00"},
     }
 
 
@@ -99,20 +106,33 @@ def test_merge_since_filter_keeps_later_existing_lower_bound() -> None:
     since = datetime(2026, 6, 4, 12, tzinfo=timezone.utc)
 
     result = _merge_since_filter(
-        {"started_at": {"gte": "2026-06-04T13:00:00+00:00"}},
+        {"started_at": {"$gte": "2026-06-04T13:00:00+00:00"}},
         since=since,
     )
 
-    assert result == {"started_at": {"gte": "2026-06-04T13:00:00+00:00"}}
+    assert result == {"started_at": {"$gte": "2026-06-04T13:00:00+00:00"}}
 
 
 def test_merge_since_filter_compares_equivalent_iso_representations() -> None:
     since = datetime(2026, 6, 4, 12, tzinfo=timezone.utc)
     current = "2026-06-04T07:00:00-05:00"
 
-    result = _merge_since_filter({"started_at": {"gte": current}}, since=since)
+    result = _merge_since_filter({"started_at": {"$gte": current}}, since=since)
 
-    assert result == {"started_at": {"gte": current}}
+    assert result == {"started_at": {"$gte": current}}
+
+
+def test_merge_since_filter_parses_as_gte_on_the_server() -> None:
+    since = datetime(2026, 6, 4, 12, tzinfo=timezone.utc)
+
+    merged = _merge_since_filter({"agent_name": "research-agent"}, since=since)
+    operation = parse_json_filter(json.dumps(merged))
+
+    assert isinstance(operation, LogicalOperation)
+    started_at = next(
+        op for op in operation.operations if isinstance(op, ComparisonOperation) and op.field == "started_at"
+    )
+    assert started_at.operator == FilterOperator.GTE
 
 
 _STAMP = datetime(2026, 6, 4, 12, tzinfo=timezone.utc)
@@ -493,7 +513,7 @@ async def test_count_agent_sessions_uses_server_side_session_groups(monkeypatch:
             by="session_id",
             filter={
                 "agent_name": "research-agent",
-                "started_at": {"gte": "2026-06-04T12:00:00+00:00"},
+                "started_at": {"$gte": "2026-06-04T12:00:00+00:00"},
             },
             page=1,
             page_size=1,
@@ -541,7 +561,7 @@ async def test_list_span_groups_fans_out_over_sessions(monkeypatch: pytest.Monke
             by="session_id",
             filter={
                 "agent_name": "research-agent",
-                "started_at": {"gte": "2026-06-04T12:00:00+00:00"},
+                "started_at": {"$gte": "2026-06-04T12:00:00+00:00"},
             },
             page=1,
             page_size=100,

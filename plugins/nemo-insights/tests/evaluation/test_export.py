@@ -163,11 +163,11 @@ def test_export_epoch_lower_bound_when_since_omitted(tmp_path, monkeypatch):
 
     epoch = "1970-01-01T00:00:00+00:00"
     (span_call,) = client.calls_for("spans")
-    assert span_call["filter"] == {"started_at": {"gte": epoch}}
+    assert span_call["filter"] == {"started_at": {"$gte": epoch}}
     (ann_call,) = client.calls_for("annotations")
-    assert ann_call["filter"] == {"created_at": {"gte": epoch}}
+    assert ann_call["filter"] == {"created_at": {"$gte": epoch}}
     (res_call,) = client.calls_for("evaluator_results")
-    assert res_call["filter"] == {"created_at": {"gte": epoch}}
+    assert res_call["filter"] == {"created_at": {"$gte": epoch}}
 
 
 def test_export_since_becomes_lower_bound(tmp_path, monkeypatch):
@@ -176,9 +176,9 @@ def test_export_since_becomes_lower_bound(tmp_path, monkeypatch):
     export.export_workspaces("http://localhost:8080", ["ws-a"], tmp_path, since=since)
 
     (span_call,) = client.calls_for("spans")
-    assert span_call["filter"] == {"started_at": {"gte": "2026-07-01T00:00:00+00:00"}}
+    assert span_call["filter"] == {"started_at": {"$gte": "2026-07-01T00:00:00+00:00"}}
     (ann_call,) = client.calls_for("annotations")
-    assert ann_call["filter"] == {"created_at": {"gte": "2026-07-01T00:00:00+00:00"}}
+    assert ann_call["filter"] == {"created_at": {"$gte": "2026-07-01T00:00:00+00:00"}}
 
 
 def test_export_detailed_mode_and_generous_pages(tmp_path, monkeypatch):
