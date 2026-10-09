@@ -45,7 +45,7 @@ def _make_preview(
         dd_providers=dd_providers,
         use_in_process_detector=use_in_process_detector,
     )
-    config: AnonymizerConfig = spec.config.to_anonymizer_config()
+    config: AnonymizerConfig = spec.config
 
     # Do NOT stop the in-process GLiNER runtime here: it is owned by the long-lived
     # Anonymizer service and shared across previews, so tearing it down per request
