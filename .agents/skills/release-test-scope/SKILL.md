@@ -203,15 +203,21 @@ Write the reviewable test plan into the repository:
 tests/plans/<version>.md
 ```
 
-Use the exact release version string for `<version>`, including the patch component when provided. The artifact must be readable by all release stakeholders. Use one section per consolidated feature and include the description, user impact, release-snapshot docs, applicable Studio or CLI entry points, expected result, risks, and draft release-note text. State clearly that it is a consolidated feature scope, not an exhaustive PR manifest.
+Use the exact release version string for `<version>`, including the patch component when provided. The artifact must be readable by all release stakeholders and must follow the section order of the template exactly: metadata table, release collection summary, forwarding exceptions, **Highest Priorities**, numbered **Proposed test scope**, manual additions, exclusions, gaps and warnings, draft release notes. Do not add a status blockquote, approver fields, or generation notes.
 
-Draft release notes must use one structured block per included user-visible capability: `Description`, `Documentation`, and `Use it`. Under `Use it`, include verified CLI commands and/or Studio navigation as applicable; state explicitly when neither surface applies. Keep internal-only maintenance compact and do not invent an interface to fill the template.
+Write **Highest Priorities** after the consolidated capabilities are settled, so every item traces to a capability section. Group by Platform, Agents, Evaluation, Fine-tuning, and Other; order by release risk; name Studio/CLI surfaces in parentheses; mark renames and rewrites `please regression test`. Items with no supporting capability go under **Manual additions**, not here.
 
-In the metadata table, set `Review deadline` to the report generation date. Keep the artifact as a draft review input: if approvals or final scope decisions are needed, point reviewers to the external release tracker instead of adding approver fields, an approval section, or generation notes.
+Use one numbered section per consolidated feature (`### 1. <name>`) and include the description, user impact, release-snapshot docs, applicable Studio or CLI entry points, expected result, additional validation, and draft release-note text. Cite sources as `<short SHA>` (#PR) and docs as repo paths. Write expected results as outcomes a tester can observe, including Studio/CLI parity when both surfaces exist. State clearly that it is a consolidated feature scope, not an exhaustive PR manifest.
+
+Draft release notes must use one structured block per included user-visible capability: `Description`, `Documentation`, and `Use it`. Under `Use it`, include verified CLI commands and/or Studio navigation as applicable; state explicitly when neither surface applies, and flag unverified Studio labels as needing final UI verification. Documentation links must be absolute URLs with a real host. Keep internal-only maintenance compact and do not invent an interface to fill the template.
+
+In the metadata table, write dates as `YYYY-MM-DD` and set `Review deadline` to the report generation date. Keep the artifact as a draft review input: if approvals or final scope decisions are needed, point reviewers to the external release tracker.
+
+For a pre-cut run where the release branch does not exist yet, `release_ref` may be the main ref. Record that in **Boundary warnings** and state in the forwarding section that both refs resolve to the same SHA. When the user supplies a release branch rather than a SemVer tag as `previous_ref`, accept it and record the same kind of boundary warning.
 
 If the artifact already exists, read it first and preserve human decisions, manual additions, exclusions, notes, and execution status.
 
-For maintainers reviewing this skill, [the 0.6.0 example report](references/0.6.0-example-report.md) shows a complete generated artifact. Treat it as a dated review snapshot, not as input or an authoritative scope for later releases.
+For maintainers reviewing this skill, [the 0.6.0 example report](references/0.6.0-example-report.md) shows a complete generated artifact in the earlier format, without **Highest Priorities** or numbered sections. The template takes precedence over it wherever they differ. Treat it as a dated review snapshot, not as input or an authoritative scope for later releases.
 
 ### 7. Verify before handoff
 
@@ -220,6 +226,7 @@ Verify:
 - All refs still resolve to the recorded SHAs.
 - Candidate discovery used only `previous_ref..release_ref`.
 - Main was queried only for release-derived work.
+- Every **Highest Priorities** item maps to a capability section or a manual addition.
 - Every capability has one forward-merge state.
 - Every user-visible cherry-equivalent group has a documented disposition.
 - No unrelated main-only PR appears.
