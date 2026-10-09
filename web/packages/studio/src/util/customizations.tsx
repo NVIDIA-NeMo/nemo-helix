@@ -23,7 +23,7 @@ import { formatElapsedTime } from '@studio/util/date';
 import { formatStepDuration, GRPO_METRIC, medianValue, readSeries } from '@studio/util/grpoMetrics';
 import { getTextWithCount } from '@studio/util/strings';
 import { Circle /* TODO: replace with a proper icon (was Circle) */, Gpu } from 'lucide-react';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 export { formatFinetuningType };
 
@@ -49,6 +49,12 @@ export const getFormattedTrainingType = (type?: string) => {
     }
     case 'distillation': {
       return 'Distillation';
+    }
+    case 'dpo': {
+      return 'DPO';
+    }
+    case 'grpo': {
+      return 'GRPO';
     }
     default: {
       return type;
