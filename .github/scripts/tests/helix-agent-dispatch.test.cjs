@@ -3,7 +3,11 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { dispatchAgent, parseTrigger, EVENT_TYPE } = require("../helix-agent-dispatch.cjs");
+const {
+  dispatchAgent,
+  parseTrigger,
+  EVENT_TYPE,
+} = require("../helix-agent-dispatch.cjs");
 
 function fakeContext(body) {
   return {
@@ -29,8 +33,12 @@ test("no trigger token -> no reaction, no dispatch", async () => {
     core: { info: () => {}, warning: () => {} },
     github: {
       rest: {
-        reactions: { createForIssueComment: async (r) => calls.push(["react", r]) },
-        repos: { createDispatchEvent: async (r) => calls.push(["dispatch", r]) },
+        reactions: {
+          createForIssueComment: async (r) => calls.push(["react", r]),
+        },
+        repos: {
+          createDispatchEvent: async (r) => calls.push(["dispatch", r]),
+        },
       },
     },
     context: fakeContext("just a normal comment"),
@@ -47,8 +55,12 @@ test("ACT reports the envelope and does not dispatch or react", async () => {
     core: { info: (m) => logs.push(m), warning: () => {} },
     github: {
       rest: {
-        reactions: { createForIssueComment: async (r) => calls.push(["react", r]) },
-        repos: { createDispatchEvent: async (r) => calls.push(["dispatch", r]) },
+        reactions: {
+          createForIssueComment: async (r) => calls.push(["react", r]),
+        },
+        repos: {
+          createDispatchEvent: async (r) => calls.push(["dispatch", r]),
+        },
       },
     },
     context: fakeContext("/helix-review go"),
@@ -67,8 +79,12 @@ test("a /helix-* comment reacts 👀 and dispatches with PR context", async () =
     core: { info: () => {}, warning: () => {} },
     github: {
       rest: {
-        reactions: { createForIssueComment: async (r) => calls.push(["react", r]) },
-        repos: { createDispatchEvent: async (r) => calls.push(["dispatch", r]) },
+        reactions: {
+          createForIssueComment: async (r) => calls.push(["react", r]),
+        },
+        repos: {
+          createDispatchEvent: async (r) => calls.push(["dispatch", r]),
+        },
       },
     },
     context: fakeContext("/helix-review"),

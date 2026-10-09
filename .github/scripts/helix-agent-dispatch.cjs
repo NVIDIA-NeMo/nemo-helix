@@ -20,11 +20,15 @@ async function dispatchAgent({ core, github, context, env }) {
   const issue = context.payload.issue;
   const trigger = parseTrigger(comment?.body);
   if (!trigger) {
-    core.info("No /helix-* trigger token at the start of the comment; skipping.");
+    core.info(
+      "No /helix-* trigger token at the start of the comment; skipping.",
+    );
     return null;
   }
 
-  const [owner, repo] = (context.payload.repository?.full_name ?? "").split("/");
+  const [owner, repo] = (context.payload.repository?.full_name ?? "").split(
+    "/",
+  );
   const clientPayload = {
     trigger,
     repo: context.payload.repository?.full_name,
@@ -55,7 +59,9 @@ async function dispatchAgent({ core, github, context, env }) {
 
   const envelope = { action: EVENT_TYPE, client_payload: clientPayload };
   if (env.ACT === "true") {
-    core.info(`ACT=true; repository_dispatch event:\n${JSON.stringify(envelope, null, 2)}`);
+    core.info(
+      `ACT=true; repository_dispatch event:\n${JSON.stringify(envelope, null, 2)}`,
+    );
     return envelope;
   }
 
@@ -69,7 +75,9 @@ async function dispatchAgent({ core, github, context, env }) {
     event_type: EVENT_TYPE,
     client_payload: clientPayload,
   });
-  core.info(`Dispatched ${trigger} for ${clientPayload.repo}#${clientPayload.pr_number}`);
+  core.info(
+    `Dispatched ${trigger} for ${clientPayload.repo}#${clientPayload.pr_number}`,
+  );
   return envelope;
 }
 
