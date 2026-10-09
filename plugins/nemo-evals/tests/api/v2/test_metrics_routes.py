@@ -23,7 +23,6 @@ from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.api.v2 import metrics as metrics_routes
 from nemo_evals.entities import MetricBundleEntity
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.entities import ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
@@ -181,7 +180,7 @@ def client(metrics_route_harness: _MetricsRouteHarness) -> TestClient:
 def _create_body() -> dict:
     """The create request body is a bare MetricInline (name comes from the path)."""
     metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
-    runtime_bundle = bundle_metric(metric, CloudpickleMetricBundlePackager())
+    runtime_bundle = bundle_metric(metric, InlineMetricBundlePackager())
     return MetricInline.model_validate_json(runtime_bundle.model_dump_json()).model_dump(mode="json")
 
 
@@ -195,7 +194,7 @@ def test_create_then_get(client: TestClient) -> None:
 
     got = client.get(f"{_BASE}/exact")
     assert got.status_code == 200
-    assert got.json()["payload_kind"] == "cloudpickle"
+    assert got.json()["payload_kind"] == "inline"
 
 
 def test_create_duplicate_returns_409(client: TestClient) -> None:
@@ -275,3 +274,13 @@ def test_metric_filter_translates_custom_fields_to_data_namespace() -> None:
     assert MetricFilter.translate_operation(op).to_dict() == {
         "$and": [{"data.metric_type": {"$eq": "exact-match"}}, {"name": {"$eq": "m"}}]
     }
+
+
+def test_create_cloudpickle_metric_is_rejected_by_default(
+    client: TestClient, detonating_cloudpickle_metric: dict
+) -> None:
+    resp = client.post(f"{_BASE}/custom", json=detonating_cloudpickle_metric)
+
+    assert resp.status_code == 422
+    assert "cloudpickle metrics are disabled on this deployment" in resp.json()["detail"]
+    assert client.get(f"{_BASE}/custom").status_code == 404

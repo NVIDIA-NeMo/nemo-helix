@@ -52,12 +52,18 @@ jobs:
       ttl_seconds_before_active: 60
       ttl_seconds_active: 3600
       ttl_seconds_after_finished: 300
+      # Job workers read the cloudpickle opt-in from here, not from the `evals` config. Change both together.
+      env:
+        NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "false"
     subprocess:
       working_directory: /tmp/nhx-subprocess-jobs
       cleanup_completed_jobs_immediately: false
       ttl_seconds_before_active: 60
       ttl_seconds_active: 3600
       ttl_seconds_after_finished: 300
+      # Job workers read the cloudpickle opt-in from here, not from the `evals` config. Change both together.
+      env:
+        NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: "false"
 
 models:
   controller:

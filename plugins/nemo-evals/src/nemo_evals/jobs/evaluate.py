@@ -20,6 +20,7 @@ from nemo_evals.api.schemas import MetricInline
 from nemo_evals.filesets import FilesetRef, download_dataset, download_dataset_sync
 from nemo_evals.jobs.agent_spec import target_agent_identity
 from nemo_evals.jobs.metric_resolution import (
+    require_resolved_model_refs,
     resolve_metrics_to_inline,
     to_runtime_bundle,
     unresolved_model_refs,
@@ -32,6 +33,7 @@ from nemo_evals.jobs.token_usage import report_row_evaluation_usage
 from nemo_evals.jobs.utils import async_client_from_sync_client, job_evaluator, run_with_isolated_async_client
 from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_evals.shared.metric_bundles.bundles import unbundle_metric
+from nemo_evals.shared.metric_bundles.inline import INLINE_KIND
 from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities import EntityClient
@@ -203,7 +205,8 @@ class EvaluateSpec(_EvaluateSpecCommon):
 
     @model_validator(mode="after")
     def reject_unresolved_metric_model_refs(self) -> Self:
-        unresolved_refs = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in self.metrics])
+        inline = [metric for metric in self.metrics if metric.payload.kind == INLINE_KIND]
+        unresolved_refs = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in inline])
         if unresolved_refs:
             raise ValueError(
                 "EvaluateSpec metric models must be resolved before compile/run: " + ", ".join(unresolved_refs)
@@ -327,6 +330,7 @@ class _EvaluateJobBase(NemoJob):
         evaluator = job_evaluator()
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
+        require_resolved_model_refs(metrics, subject="EvaluateSpec")
         if isinstance(spec.target, Model):
             if not isinstance(params, RunConfigOnlineModel):
                 raise TypeError("model target requires RunConfigOnlineModel")

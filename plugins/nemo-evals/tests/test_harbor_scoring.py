@@ -17,7 +17,7 @@ from nemo_evals.jobs.kinds.types import SubmitContext
 from nemo_evals.jobs.metric_resolution import to_inline
 from nemo_evals.revisions import publish_revision
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.task_refs import snapshot_task, validate_execution_support, validate_scoring
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx_evals_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
@@ -49,7 +49,7 @@ def _metric(metric=None):
     return to_inline(
         bundle_metric(
             metric if metric is not None else ExactMatchMetric(reference="yes", candidate="yes"),
-            CloudpickleMetricBundlePackager(),
+            HybridMetricBundlePackager(),
         )
     )
 
