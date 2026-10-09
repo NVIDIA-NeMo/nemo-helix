@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import weakref
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
@@ -126,6 +127,12 @@ def _get_job_mutation_lock(job_name: str, workspace: str) -> asyncio.Lock:
     return lock
 
 
+def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime | None:
+    # Status changes only rewrite the attempt, so the job entity's own timestamp stays at creation.
+    timestamps = [ts for ts in (job.updated_at, attempt.updated_at) if ts is not None]
+    return max(timestamps) if timestamps else None
+
+
 def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> HelixJobResponse:
     """Helper to create HelixJobResponse from job and attempt entities."""
     ownership = job.ownership
@@ -139,7 +146,7 @@ def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> Hel
         workspace=job.workspace,
         project=job.project,
         created_at=job.created_at,  # type: ignore
-        updated_at=job.updated_at,  # type: ignore
+        updated_at=_job_updated_at(job, attempt),  # type: ignore
         source=job.source,
         spec=job.spec,
         platform_spec=job.platform_spec,
@@ -257,7 +264,7 @@ def _build_virtual_job_entity(job: HelixJob, attempt: HelixJobAttempt) -> dict[s
         "project": job.project,
         "entity_type": HelixJob.__entity_type__,
         "created_at": job.created_at,
-        "updated_at": job.updated_at,
+        "updated_at": _job_updated_at(job, attempt),
         "data": data,
     }
 

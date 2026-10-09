@@ -771,6 +771,30 @@ async def test_create_then_delete_auto_fileset_round_trip(
 
 
 @pytest.mark.asyncio
+async def test_get_job_updated_at_tracks_attempt_status_change(
+    mock_dispatcher: JobDispatcher,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+
+    step, _ = await mock_dispatcher.update_job_status_from_step(step=step, status=HelixJobStatus.ACTIVE)
+    await asyncio.sleep(0.01)
+    _, attempt = await mock_dispatcher.update_job_status_from_step(
+        step=step,
+        status=HelixJobStatus.COMPLETED,
+        error_details={},
+    )
+    assert attempt.status == HelixJobStatus.COMPLETED
+
+    updated_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
+    assert updated_job is not None
+    assert updated_job.updated_at == attempt.updated_at
+    assert updated_job.updated_at > updated_job.created_at
+
+
+@pytest.mark.asyncio
 async def test_rerun_job_success(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
