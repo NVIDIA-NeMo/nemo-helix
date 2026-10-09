@@ -15,6 +15,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.api.v2 import deployment_logs as module
+from nemo_agents_plugin.entities import AgentDeployment
+
+
+def _registry_for(backend):  # noqa: ANN001, ANN202 — lightweight structural test double
+    return type("_Registry", (), {"backend_for": staticmethod(lambda _mode: backend)})()
 
 
 @pytest.fixture
@@ -39,7 +44,7 @@ def fake_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             ),
         },
     )()
-    monkeypatch.setattr(module, "get_runner_backend", lambda: backend)
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(backend))
     return log_path
 
 
@@ -53,7 +58,7 @@ def client(fake_log: Path) -> Iterator[TestClient]:  # noqa: ARG001 — fixture 
     # the path-resolution and tail behavior. A separate test asserts the
     # 404 from a missing entity.
     fake_client = AsyncMock()
-    fake_client.get = AsyncMock(return_value=object())
+    fake_client.get = AsyncMock(return_value=AgentDeployment(name="test", workspace="default"))
     app.dependency_overrides[module.get_entity_client] = lambda: fake_client
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
@@ -92,7 +97,7 @@ def test_logs_returns_404_when_log_not_yet_available(client: TestClient, monkeyp
         (),
         {"get_log_location": staticmethod(lambda _workspace, _name: NotYetAvailable())},
     )()
-    monkeypatch.setattr(module, "get_runner_backend", lambda: backend)
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(backend))
     resp = client.get("/apis/agents/v2/workspaces/default/deployments/missing/logs")
     assert resp.status_code == 404
 
@@ -100,7 +105,7 @@ def test_logs_returns_404_when_log_not_yet_available(client: TestClient, monkeyp
 def test_logs_returns_404_with_hint_for_external_log_backend(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Remote backends (Docker/K8s) surface their fetch hint in the detail."""
+    """Remote backends without API log fetch support surface their fetch hint in the detail."""
     from nemo_agents_plugin.runner.backend import ExternalLog
 
     backend = type(
@@ -110,11 +115,106 @@ def test_logs_returns_404_with_hint_for_external_log_backend(
             "get_log_location": staticmethod(lambda _workspace, _name: ExternalLog(hint="Run: docker logs abc123")),
         },
     )()
-    monkeypatch.setattr(module, "get_runner_backend", lambda: backend)
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(backend))
     resp = client.get("/apis/agents/v2/workspaces/default/deployments/missing/logs")
     assert resp.status_code == 404
     assert "docker logs abc123" in resp.json()["detail"]
     assert ".log" not in resp.json()["detail"]
+
+
+def test_logs_fetches_external_backend_lines(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Container backends can bridge Docker/Kubernetes pod logs into the Studio logs API."""
+    from nemo_agents_plugin.runner.backend import ExternalLog
+    from nemo_deployments_plugin.backends.base import LogResult
+
+    class _RemoteBackend:
+        @staticmethod
+        def get_log_location(_workspace: str, _name: str) -> ExternalLog:
+            return ExternalLog(hint="kubectl logs ...")
+
+        @staticmethod
+        async def get_logs(*, workspace: str, name: str, tail: int) -> LogResult:
+            assert (workspace, name, tail) == ("default", "test", 2)
+            return LogResult(
+                lines=[
+                    "2026-05-19T21:00:00.123456Z pod started",
+                    "2026-05-19T21:00:01Z request served",
+                ]
+            )
+
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(_RemoteBackend()))
+    resp = client.get("/apis/agents/v2/workspaces/default/deployments/test/logs?tail=2")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_lines"] == 2
+    cursor = module._decode_external_cursor(body["next_offset"])
+    assert cursor == (
+        "2026-05-19T21:00:01Z",
+        module._external_line_hash("2026-05-19T21:00:01Z request served"),
+        1,
+    )
+    assert body["data"][0]["timestamp"] == "2026-05-19T21:00:00.123456Z"
+    assert body["data"][0]["message"] == "pod started"
+    assert body["data"][1]["message"] == "request served"
+
+
+async def test_stream_external_logs_resumes_from_exact_line_cursor() -> None:
+    """External log streaming resumes after the exact cursor line, even with duplicate timestamps."""
+    from nemo_deployments_plugin.backends.base import LogResult
+
+    calls = 0
+    lines = [
+        "2026-05-19T21:00:00Z already delivered",
+        "2026-05-19T21:00:00Z first new line",
+        "2026-05-19T21:00:01Z second new line",
+    ]
+    start_cursor = module._external_line_cursors(lines[:1])[-1]
+
+    async def get_logs(*, workspace: str, name: str, tail: int) -> LogResult:  # noqa: ARG001
+        nonlocal calls
+        calls += 1
+        return LogResult(lines=lines)
+
+    events = await _collect(
+        module._stream_external_log_lines(
+            get_logs,
+            workspace="default",
+            name="test",
+            start_cursor=start_cursor,
+        ),
+        n=2,
+    )
+    parsed = [_parse_event(event) for event in events]
+    assert [module._decode_external_cursor(event_id) for event_id, _payload in parsed if event_id] == [
+        ("2026-05-19T21:00:00Z", module._external_line_hash("2026-05-19T21:00:00Z first new line"), 1),
+        ("2026-05-19T21:00:01Z", module._external_line_hash("2026-05-19T21:00:01Z second new line"), 1),
+    ]
+    assert [payload["message"] for _event_id, payload in parsed if payload is not None] == [
+        "first new line",
+        "second new line",
+    ]
+    assert calls == 1
+
+
+async def test_stream_external_logs_emits_after_empty_initial_page() -> None:
+    """An empty initial cursor should not suppress later external log lines."""
+    from nemo_deployments_plugin.backends.base import LogResult
+
+    async def get_logs(*, workspace: str, name: str, tail: int) -> LogResult:  # noqa: ARG001
+        return LogResult(lines=["2026-05-19T21:00:00Z first line"])
+
+    events = await _collect(
+        module._stream_external_log_lines(
+            get_logs,
+            workspace="default",
+            name="test",
+            start_cursor="",
+            initial_lines=[],
+        ),
+        n=1,
+    )
+    parsed = [_parse_event(event) for event in events]
+    assert [payload["message"] for _event_id, payload in parsed if payload is not None] == ["first line"]
 
 
 def test_logs_rejects_negative_tail(client: TestClient) -> None:
@@ -165,12 +265,12 @@ def test_logs_workspace_namespacing_separates_same_named_deployments(
         return LocalLog(path=target) if target is not None else NotYetAvailable()
 
     backend = type("_PerWorkspaceBackend", (), {"get_log_location": staticmethod(_resolve)})()
-    monkeypatch.setattr(module, "get_runner_backend", lambda: backend)
+    monkeypatch.setattr(module, "get_runner_registry", lambda: _registry_for(backend))
 
     app = FastAPI()
     app.include_router(module.router, prefix="/apis/agents/v2/workspaces/{workspace}")
     fake_client = AsyncMock()
-    fake_client.get = AsyncMock(return_value=object())
+    fake_client.get = AsyncMock(return_value=AgentDeployment(name="test", workspace="default"))
     app.dependency_overrides[module.get_entity_client] = lambda: fake_client
 
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -203,13 +303,13 @@ def test_logs_404_when_deployment_not_in_workspace(fake_log: Path) -> None:  # n
 # --- SSE streaming (id cursor / Last-Event-ID resume / termination) ---------
 
 
-def _parse_event(raw: str) -> tuple[int | None, dict | None]:
+def _parse_event(raw: str) -> tuple[str | None, dict | None]:
     """Split a raw SSE event into (id, parsed-data) — keepalives return (None, None)."""
-    event_id: int | None = None
+    event_id: str | None = None
     payload: dict | None = None
     for field in raw.strip().split("\n"):
         if field.startswith("id:"):
-            event_id = int(field[len("id:") :].strip())
+            event_id = field[len("id:") :].strip()
         elif field.startswith("data:"):
             payload = json.loads(field[len("data:") :].strip())
     return event_id, payload
@@ -247,7 +347,7 @@ async def test_stream_emits_byte_offset_ids_from_start(tmp_path: Path) -> None:
 
     assert [pl["message"] for _eid, pl in data_events] == ["alpha", "beta"]
     # id is the byte offset after each line: len("alpha\n")=6, +len("beta\n")=11.
-    assert [eid for eid, _pl in data_events] == [6, 11]
+    assert [eid for eid, _pl in data_events] == ["6", "11"]
 
 
 async def test_stream_resumes_from_last_event_id_without_gaps(tmp_path: Path) -> None:
