@@ -46,6 +46,7 @@ Replace `REPLACE_WITH_RELEASE_NAMESPACE` in the server values before install.
 | `opensandbox-server-kata-qemu.yaml` | Kata QEMU server (`[secure_runtime] type=kata`) |
 | `batchsandbox-template.yaml` | ConfigMap — exclude control-plane; pull Secret name `nvcrimagepullsecret`; [Harbor directories](#harbor-directories) |
 | `batchsandbox-template-kata-qemu.yaml` | ConfigMap — example Kata node selectors; same pull Secret name; [Harbor directories](#harbor-directories) |
+| `opensandbox-ext-rbac.yaml` | Role — `pods/exec` and `pods/log` in the release namespace for the [Compose services](#compose-services) extension |
 
 `[secure_runtime]` is server-global. Install **one** server for production
 (shared-kernel **or** Kata). Dual releases are only for proving both paths.
@@ -133,6 +134,44 @@ Follow the Kata page for `kata-deploy` and CRI-O retrofit, then the same
 controller install plus `-f opensandbox-server-kata-qemu.yaml`. Override
 `opensandbox.domain` to `opensandbox-server-kata.opensandbox-system.svc.cluster.local`.
 
+## Compose services
+
+Benchmark tasks that ship a Docker Compose file (a database or a mock API next
+to the agent's container) need those services in the sandbox. The optional
+NeMo Compose services extension adds them to the sandbox pod as Kubernetes
+native sidecars when a create request carries
+`extensions["opensandbox.extensions.nemo-compose-services"]`. It runs inside
+the stock server image: the server values above put `/opt/nemo-opensandbox-ext`
+on `PYTHONPATH` and mount the `nemo-opensandbox-ext` ConfigMap there. Without
+the ConfigMap the server runs unchanged. With it, the server refuses to start
+if the extension can't load, rather than silently ignoring Compose requests.
+
+The extension adds three routes behind the server's API key:
+`GET /v1/nemo-ext/health`, `GET /v1/nemo-ext/sandboxes/{id}/services` (which
+services are ready, and the first one that failed, with its last log lines),
+and `POST /v1/nemo-ext/sandboxes/{id}/services/{service}/exec`, which runs a
+command in one service container (and only those).
+
+```bash
+EXT=plugins/_temporary-scaled-evals/opensandbox_ext
+kubectl create configmap nemo-opensandbox-ext -n opensandbox-system \
+  --from-file="${EXT}/sitecustomize.py" \
+  --from-file="${EXT}/nemo_ext_server.py" \
+  --from-file="${EXT}/nemo_ext_pod.py" \
+  --from-file=plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_services.py \
+  --dry-run=client -o yaml | kubectl apply -f -
+sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NHX_NAMESPACE}/g" \
+  "${EXAMPLES}/opensandbox-ext-rbac.yaml"
+kubectl apply -f "${EXAMPLES}/opensandbox-ext-rbac.yaml"
+kubectl rollout restart deploy/opensandbox-server -n opensandbox-system
+kubectl logs -n opensandbox-system deploy/opensandbox-server | grep nemo-ext
+```
+
+The log shows the registered provider and routes. Repeat the ConfigMap apply
+and restart after changing those sources. The extension is tested against the
+server version in the values files (`v0.2.1`); upgrade the server and the
+extension together.
+
 ## Verify
 
 ```bash
@@ -140,4 +179,6 @@ export OPEN_SANDBOX_WORKLOAD_NS="${NHX_NAMESPACE}"
 ./k8s/helm/examples/opensandbox/verify/shared-kernel.sh
 # or, after installing the Kata server:
 ./k8s/helm/examples/opensandbox/verify/kata-qemu.sh
+# with the Compose services extension installed:
+./k8s/helm/examples/opensandbox/verify/services.sh
 ```

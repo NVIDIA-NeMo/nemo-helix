@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Extra permissions for the NeMo Compose services extension (see README, "Compose services").
+#
+# The extension's exec route runs commands in a sandbox's service containers, and
+# its services route reads a failed service's last log lines. The upstream server
+# ClusterRole grants neither pods/exec nor pods/log, so this Role adds them in the
+# sandbox namespace only. Platform job pods get no new permissions.
+#
+# RBAC can't limit pods/exec to sandbox pods, so this covers every pod in the
+# namespace; the extension itself only execs into service containers it added.
+# The stock server ClusterRole already allows creating pods and reading secrets
+# in all namespaces, so this adds little beyond what the server can already do.
+#
+# Replace REPLACE_WITH_RELEASE_NAMESPACE (the NeMo Helix release namespace, the
+# same value as [kubernetes] namespace in the server values) and, if the server
+# is not in opensandbox-system, the subject namespace. For the Kata server, add a
+# second subject named opensandbox-server-kata.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nemo-opensandbox-ext
+  namespace: REPLACE_WITH_RELEASE_NAMESPACE
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Kubernetes checks "create" for exec over WebSocket on current versions and
+  # "get" on older ones.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nemo-opensandbox-ext
+  namespace: REPLACE_WITH_RELEASE_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nemo-opensandbox-ext
+subjects:
+  - kind: ServiceAccount
+    name: opensandbox-server
+    namespace: opensandbox-system
