@@ -95,6 +95,7 @@ def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
     assert "sandboxed_gym" not in harbor_target
     assert "src/scaled_evals/harbor_opensandbox_environment.py" in harbor_target
     assert "src/scaled_evals/harbor_opensandbox_cleanup.py" in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_services.py" in harbor_target
     assert 'nemo-extensions" > "${site}/nemo-extensions.pth"' in harbor_target
     assert "from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment" in harbor_target
 
