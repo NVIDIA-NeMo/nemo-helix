@@ -49,7 +49,7 @@ name — never serialized into the payload. Agents read `GH_TOKEN` to drive the 
 ## Onboarding a new GitHub-triggered agent
 
 Follow these in order. Steps 1–3 are the Helix-cluster legwork (done once, out of
-band); step 4 is the ~1-line PR to this repo; step 5 installs the trigger.
+band); step 4 is the ~1-line PR to the WORKER repo's registry; step 5 installs the trigger.
 
 **1. Create the GitHub-token secret in your Helix workspace** (once per workspace).
 The agent reads this to drive the `gh` CLI. The registry entry references it by name
@@ -89,7 +89,8 @@ the system prompt to consume it and act via `gh`.
 nemo agents create --agent agent.yaml --workspace <workspace>
 ```
 
-**4. Add a registry row** in `dispatch-registry.yaml` (this repo) — see the
+**4. Add a registry row** in the WORKER repo's `.github/dispatch-registry.yaml`
+(the dispatcher only reads the registry there, not the target repo) — see the
 `/helix-review` entry below as a template:
 ```yaml
   - trigger: "/helix-<name>"
@@ -103,6 +104,9 @@ nemo agents create --agent agent.yaml --workspace <workspace>
 **5. Install the trigger workflow** on the target repo(s): the generic
 `.github/workflows/helix-agent-dispatch.yaml` + `.github/scripts/helix-agent-dispatch.cjs`
 (from the nemo-helix PR), plus the `CI_DISPATCH_TOKEN` / `CI_DISPATCH_REPO` secrets.
+`CI_DISPATCH_TOKEN` needs `issues: write` on the TARGET repo for the 👀 reaction AND
+`repository_dispatch` to the worker repo; if it lacks the former the reaction is
+silently skipped (caught) while dispatch still succeeds.
 
 **Test it:** comment `/helix-<name>` on a PR in an allowed repo (as a repo
 collaborator — the trigger is author-gated). You should see a 👀 reaction, then the
