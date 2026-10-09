@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2';
-import { FormField, Stack, Text } from '@nvidia/foundations-react-core';
+import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import { Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import type { FC } from 'react';
 
@@ -17,6 +18,11 @@ export interface InsightsModelPairFieldsProps {
   fastModel: string;
   onDefaultModelChange: (value: string) => void;
   onFastModelChange: (value: string) => void;
+  /**
+   * The stored pair a blank picker stands for. When given, the pickers start blank, show the
+   * stored model as their placeholder, and can be cleared back to it.
+   */
+  stored?: { defaultModel?: string; fastModel?: string };
 }
 
 /**
@@ -28,9 +34,47 @@ const errorFor = (value: string): string | undefined =>
     ? `Stored value "${value}" is not a workspace-qualified Model Entity ID. Pick a model to replace it.`
     : undefined;
 
+const defaultLabel = (ref?: string) =>
+  ref ? `Default (${getPartsFromReference(ref).name || ref})` : 'Default';
+
+interface ModelFieldProps {
+  workspace: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  /** Present when blank means "use the stored model", so the field can be cleared back to it. */
+  storedRef?: string | null;
+}
+
+const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, storedRef }) => {
+  const clearable = storedRef !== undefined;
+  return (
+    <FormField slotLabel={label} slotError={errorFor(value)}>
+      <Flex gap="density-sm" align="center">
+        <WorkspaceModelSelect
+          workspace={workspace}
+          value={value ? { model: value } : null}
+          onValueChange={({ model }) => onChange(model)}
+          placeholder={
+            clearable ? defaultLabel(storedRef ?? undefined) : `Select a ${label.toLowerCase()}`
+          }
+          hideAdapters
+          fullWidth
+          aria-label={label}
+        />
+        {clearable && value ? (
+          <Button kind="tertiary" size="small" onClick={() => onChange('')}>
+            Use default
+          </Button>
+        ) : null}
+      </Flex>
+    </FormField>
+  );
+};
+
 /**
- * Shows the default/fast pair the analysis run will use, prefilled from the agent's stored
- * AnalysisConfig, and lets either half be replaced for this run without editing the stored config.
+ * Shows the default/fast pair the analysis run will use and lets either half be replaced for this
+ * run without editing the stored config. Without `stored`, the pickers are prefilled by the caller.
  */
 export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
   workspace,
@@ -40,38 +84,32 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
   fastModel,
   onDefaultModelChange,
   onFastModelChange,
+  stored,
 }) => (
   <Stack gap="density-md">
     <Text className="text-secondary" kind="body/regular/xs">
       {unresolved
         ? 'The stored model pair could not be read, so both models are required for this run.'
-        : agent
-          ? `Prefilled from the stored analysis config for "${agent}". Changing either one applies to this run only.`
-          : 'Applied to every agent in this import, replacing each stored analysis config pair. Leave unset to keep each stored value.'}
+        : stored
+          ? `Leave a model on Default to use the stored analysis config for "${agent}". A choice here applies to this run only.`
+          : agent
+            ? `Prefilled from the stored analysis config for "${agent}". Changing either one applies to this run only.`
+            : 'Applied to every agent in this import, replacing each stored analysis config pair. Leave unset to keep each stored value.'}
     </Text>
 
-    <FormField slotLabel="Default model" slotError={errorFor(defaultModel)}>
-      <WorkspaceModelSelect
-        workspace={workspace}
-        value={defaultModel ? { model: defaultModel } : null}
-        onValueChange={({ model }) => onDefaultModelChange(model)}
-        placeholder="Select a default model"
-        hideAdapters
-        fullWidth
-        aria-label="Default model"
-      />
-    </FormField>
-
-    <FormField slotLabel="Fast model" slotError={errorFor(fastModel)}>
-      <WorkspaceModelSelect
-        workspace={workspace}
-        value={fastModel ? { model: fastModel } : null}
-        onValueChange={({ model }) => onFastModelChange(model)}
-        placeholder="Select a fast model"
-        hideAdapters
-        fullWidth
-        aria-label="Fast model"
-      />
-    </FormField>
+    <ModelField
+      workspace={workspace}
+      label="Default model"
+      value={defaultModel}
+      onChange={onDefaultModelChange}
+      storedRef={stored ? (stored.defaultModel ?? null) : undefined}
+    />
+    <ModelField
+      workspace={workspace}
+      label="Fast model"
+      value={fastModel}
+      onChange={onFastModelChange}
+      storedRef={stored ? (stored.fastModel ?? null) : undefined}
+    />
   </Stack>
 );

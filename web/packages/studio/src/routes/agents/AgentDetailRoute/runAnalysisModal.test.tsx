@@ -35,9 +35,11 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
     value: { model: string } | null;
     onValueChange: (next: { model: string }) => void;
     'aria-label': string;
+    placeholder?: string;
   }) => (
     <input
       aria-label={props['aria-label']}
+      placeholder={props.placeholder}
       value={value?.model ?? ''}
       onChange={(event) => onValueChange({ model: event.target.value })}
     />
@@ -114,14 +116,19 @@ const expectAbout = (since: string | undefined, expectedMs: number) => {
 };
 
 describe('Run analysis modal', () => {
-  it('opens from Run analysis now with the stored model pair and the Ethos included', async () => {
+  it('opens with blank model pickers that name the stored models and no Ethos control', async () => {
     const { dialog } = await openModal();
 
     await waitFor(() => expect(dialog.getByRole('button', { name: 'Run analysis' })).toBeEnabled());
-    expect(dialog.getByLabelText('Default model')).toHaveValue(mockAnalysisConfig.default_model);
-    expect(dialog.getByLabelText('Fast model')).toHaveValue(mockAnalysisConfig.fast_model);
-    expect(await dialog.findByText('From react-agent-ethos/ETHOS.md.')).toBeInTheDocument();
-    expect(dialog.getByRole('checkbox', { name: "Include the agent's Ethos" })).toBeChecked();
+    expect(dialog.getByLabelText('Default model')).toHaveValue('');
+    expect(dialog.getByLabelText('Default model')).toHaveAttribute(
+      'placeholder',
+      'Default (nvidia-nemotron-mini-4b-instruct)'
+    );
+    expect(dialog.getByLabelText('Fast model')).toHaveValue('');
+    expect(dialog.queryByRole('button', { name: 'Use default' })).not.toBeInTheDocument();
+    expect(dialog.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(dialog.queryByText(/ETHOS\.md/)).not.toBeInTheDocument();
   });
 
   it('defaults to the last 24 hours when the agent has no completed run', async () => {
@@ -210,7 +217,6 @@ describe('Run analysis modal', () => {
   it('sends overridden models for this run without saving them to the config', async () => {
     const { user, dialog } = await openModal();
 
-    await user.clear(dialog.getByLabelText('Default model'));
     await user.type(dialog.getByLabelText('Default model'), 'default/override-model');
     const body = await submit(user, dialog);
 
@@ -220,23 +226,21 @@ describe('Run analysis modal', () => {
     expect(screen.getAllByText(mockAnalysisConfig.default_model).length).toBeGreaterThan(0);
   });
 
-  it('leaves the Ethos out when unchecked', async () => {
+  it('returns an overridden model to the stored default with Use default', async () => {
     const { user, dialog } = await openModal();
 
-    await user.click(
-      await dialog.findByRole('checkbox', { name: "Include the agent's Ethos", checked: true })
-    );
+    await user.type(dialog.getByLabelText('Fast model'), 'default/override-model');
+    await user.click(dialog.getByRole('button', { name: 'Use default' }));
+    expect(dialog.getByLabelText('Fast model')).toHaveValue('');
     const body = await submit(user, dialog);
 
-    expect(body).not.toHaveProperty('ethos');
+    expect(body.fast_model).toBe(mockAnalysisConfig.fast_model);
   });
 
-  it('disables the Ethos checkbox when the agent has no ETHOS.md', async () => {
+  it('omits the Ethos when the agent has no ETHOS.md', async () => {
     server.use(...agentEthosHandlers('react-agent', null));
     const { user, dialog } = await openModal();
 
-    expect(await dialog.findByText('No ETHOS.md found in react-agent-ethos.')).toBeInTheDocument();
-    expect(dialog.getByRole('checkbox', { name: "Include the agent's Ethos" })).toBeDisabled();
     const body = await submit(user, dialog);
 
     expect(body).not.toHaveProperty('ethos');

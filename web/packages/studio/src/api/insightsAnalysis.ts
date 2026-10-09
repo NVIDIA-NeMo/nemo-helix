@@ -39,13 +39,7 @@ export interface InsightsModelOverrides {
 }
 
 /** What one run reads beyond the model pair. `evaluation_id` takes an evaluation's name. */
-export interface AnalysisRunOptions extends Pick<
-  CreateAnalysisRunRequest,
-  'since' | 'evaluation_id'
-> {
-  /** Defaults to true: send the agent's ETHOS.md when it has one. */
-  includeEthos?: boolean;
-}
+export type AnalysisRunOptions = Pick<CreateAnalysisRunRequest, 'since' | 'evaluation_id'>;
 
 /**
  * Studio stores Model Entity references in `workspace/name` format.
@@ -91,7 +85,7 @@ export const triggerInsightsRun = async (
   workspace: string,
   agent: string,
   overrides: InsightsModelOverrides = {},
-  { since, evaluation_id, includeEthos = true }: AnalysisRunOptions = {}
+  { since, evaluation_id }: AnalysisRunOptions = {}
 ): Promise<InsightsTriggerResult> => {
   const invalidOverride = [overrides.default_model, overrides.fast_model]
     .map((ref) => ref?.trim())
@@ -138,7 +132,7 @@ export const triggerInsightsRun = async (
     };
   }
 
-  const ethos = includeEthos ? await readAgentEthos(workspace, agent) : undefined;
+  const ethos = await readAgentEthos(workspace, agent);
 
   try {
     const response = await insightsCreateAnalysisRun(workspace, {

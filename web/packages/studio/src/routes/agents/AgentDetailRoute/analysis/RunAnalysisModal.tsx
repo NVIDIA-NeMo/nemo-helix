@@ -6,7 +6,6 @@ import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import {
   Button,
-  Checkbox,
   Flex,
   FormField,
   Modal,
@@ -15,7 +14,6 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import { useLastCompletedAnalysisRun } from '@studio/api/useLastCompletedAnalysisRun';
 import type { TriggerInsightsRunVariables } from '@studio/api/useTriggerInsightsRun';
@@ -27,8 +25,6 @@ import {
   sinceFor,
   toDateTimeLocalValue,
 } from '@studio/routes/agents/AgentDetailRoute/analysis/analysisSince';
-import { AGENT_ETHOS_FILE } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
-import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { formatDateTime } from '@studio/util/date';
 import { type FC, useState } from 'react';
 
@@ -60,19 +56,10 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
   const preset = chosenPreset ?? (lastRunAt ? 'last-run' : 'day');
   const [custom, setCustom] = useState(() => toDateTimeLocalValue(new Date(Date.now() - DAY_MS)));
   const [evaluation, setEvaluation] = useState(ALL_TRACES);
-  const [defaultModel, setDefaultModel] = useState(config.default_model ?? '');
-  const [fastModel, setFastModel] = useState(config.fast_model ?? '');
-  const [includeEthos, setIncludeEthos] = useState(true);
-
-  const ethosFileset = agentSpecFilesetName(agent);
-  const { data: ethos, isLoading: ethosLoading } = useDatasetFileContent({
-    workspace,
-    name: ethosFileset,
-    path: AGENT_ETHOS_FILE,
-    fullContent: true,
-    retry: false,
-  });
-  const hasEthos = !!ethos?.trim();
+  const [defaultModel, setDefaultModel] = useState('');
+  const [fastModel, setFastModel] = useState('');
+  const runDefaultModel = defaultModel || config.default_model || '';
+  const runFastModel = fastModel || config.fast_model || '';
 
   const { data: evaluations } = useListEvaluations(workspace, {
     page_size: DEFAULT_LARGE_PAGE_SIZE,
@@ -83,7 +70,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
 
   const since = sinceFor(preset, { now: new Date(), lastRunAt, custom });
   const invalidCustom = preset === 'custom' && !since;
-  const invalidModels = [defaultModel, fastModel].some((ref) => !isQualifiedModelRef(ref));
+  const invalidModels = [runDefaultModel, runFastModel].some((ref) => !isQualifiedModelRef(ref));
 
   const presetItems = [
     ...(lastRunAt
@@ -103,11 +90,10 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
   const handleRun = () =>
     onRun({
       agent,
-      overrides: { default_model: defaultModel, fast_model: fastModel },
+      overrides: { default_model: runDefaultModel, fast_model: runFastModel },
       options: {
         since,
         evaluation_id: evaluation === ALL_TRACES ? undefined : evaluation,
-        includeEthos: hasEthos && includeEthos,
       },
     });
 
@@ -201,23 +187,8 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
           fastModel={fastModel}
           onDefaultModelChange={setDefaultModel}
           onFastModelChange={setFastModel}
+          stored={{ defaultModel: config.default_model, fastModel: config.fast_model }}
         />
-
-        <Stack gap="density-xs">
-          <Checkbox
-            checked={hasEthos && includeEthos}
-            disabled={!hasEthos}
-            onChange={(event) => setIncludeEthos(event.target.checked)}
-            slotLabel="Include the agent's Ethos"
-          />
-          <Text className="text-secondary" kind="body/regular/xs">
-            {ethosLoading
-              ? `Looking for ${AGENT_ETHOS_FILE}...`
-              : hasEthos
-                ? `From ${ethosFileset}/${AGENT_ETHOS_FILE}.`
-                : `No ${AGENT_ETHOS_FILE} found in ${ethosFileset}.`}
-          </Text>
-        </Stack>
       </Stack>
     </Modal>
   );
