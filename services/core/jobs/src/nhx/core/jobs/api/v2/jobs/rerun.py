@@ -16,6 +16,7 @@ router = APIRouter()
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
+        status.HTTP_409_CONFLICT: {"description": "The job cannot be rerun"},
     },
 )
 async def rerun_job(

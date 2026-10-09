@@ -5717,6 +5717,8 @@ paths:
                 $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
+        '409':
+          description: The job cannot be rerun
         '422':
           description: Validation Error
           content:
