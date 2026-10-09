@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared CLI completion renderer for customization ``submit``.
+"""Shared CLI completion renderer for customization ``--job-json``.
 
 All three customization backends (``automodel``, ``unsloth``, ``rl``) submit
 through the same :class:`~nhx.customization_common.contributor.base.BaseContributor`
@@ -101,7 +101,7 @@ def _job_name_from_result(result: Any) -> str | None:
 
 
 class CustomizationSubmitRenderer(CLIRenderer):
-    """Completion renderer for ``nemo customization <backend> submit``.
+    """Completion renderer for ``nemo customization <backend> --job-json``.
 
     Captures the submit response (delivered once via :meth:`on_frame`), then on
     :meth:`on_complete` echoes the raw response as JSON to **stdout** (byte-for-byte

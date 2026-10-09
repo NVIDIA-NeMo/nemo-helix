@@ -68,7 +68,7 @@ class UnslothContributor(BaseContributor):
         runs_on="a GPU execution profile, on the docker or kubernetes_job backend. One job uses one GPU.",
         job_json="model, dataset, training, schedule, batch, optimizer, hardware.",
         use_when="you need Unsloth's 4-bit LoRA path on a single GPU.",
-        command="nemo customization unsloth submit job.json",
+        command="nemo customization unsloth --job-json job.json",
     )
     jobs_router_description: ClassVar[str] = "Unsloth GPU fine-tuning jobs (container submit)."
 

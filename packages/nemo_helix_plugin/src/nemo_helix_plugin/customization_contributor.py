@@ -41,7 +41,7 @@ class CustomizationCLISummary:
 
     The fields are fixed rather than free text so that every backend reads the
     same way in the overview. Keep each value to one or two short sentences. The
-    full description belongs on the backend's own ``--help`` and ``submit --help``.
+    full description belongs on the backend's own ``--help``.
     """
 
     #: What the backend trains, for example ``"SFT or LoRA fine-tuning."``.
@@ -52,7 +52,7 @@ class CustomizationCLISummary:
     job_json: str
     #: When to choose this backend over another one.
     use_when: str
-    #: The command to run next, for example ``"nemo customization rl submit job.json"``.
+    #: The command to run next, for example ``"nemo customization rl --job-json job.json"``.
     command: str
 
     def render(self, name: str, *, width: int = 78) -> str:
@@ -68,7 +68,7 @@ class CustomizationCLISummary:
             ("Runs on", self.runs_on),
             ("Job JSON", self.job_json),
             ("Use it when", self.use_when),
-            ("Submit", self.command),
+            ("Command", self.command),
         )
         lines = [name]
         for label, value in fields:

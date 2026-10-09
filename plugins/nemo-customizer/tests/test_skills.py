@@ -18,6 +18,6 @@ def test_nemo_customizer_skill_present() -> None:
     assert tests.is_file()
     text = skill.read_text()
     assert "name: nemo-customizer" in text
-    assert "nemo customization automodel submit" in text
-    assert "nemo customization unsloth submit" in text
+    assert "nemo customization automodel --job-json" in text
+    assert "nemo customization unsloth --job-json" in text
     assert "run --venv" not in text

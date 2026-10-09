@@ -3,8 +3,8 @@
 
 """Tests for the Unsloth CLI overrides (``apply_unsloth_job_cli_overrides``).
 
-Pins the post-2026 submit-only contract: generated ``run`` is removed, while
-``submit`` accepts a positional ``JOB_JSON`` and delegates to the auto-generated
+Pins the post-2026 Jobs-service-only contract: generated ``run`` is removed, while
+``--job-json`` accepts a positional ``JOB_JSON`` and delegates to the auto-generated
 callback with ``--spec`` set to the validated JSON.
 """
 
@@ -105,16 +105,16 @@ class TestCommandRegistration:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         plain = _plain(result.output)
-        assert "submit" in plain
+        assert "--job-json" in plain
         assert "explain" in plain
-        assert "run" not in plain
+        assert {cmd.name for cmd in app.registered_commands} == {"explain"}
 
 
 class TestSubmitOverride:
     def test_help_lists_job_json_workspace_and_profile(self) -> None:
         app = _build_app()
         runner = CliRunner()
-        result = runner.invoke(app, ["submit", "--help"])
+        result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0, result.output
         plain = _plain(result.output)
         assert "JOB_JSON" in plain
@@ -160,10 +160,10 @@ class TestSubmitOverride:
         result = runner.invoke(
             unsloth_cli,
             [
-                "submit",
-                str(path),
                 "--workspace",
                 "acme-corp",
+                "--job-json",
+                str(path),
             ],
             obj=_platform("https://nhx.test"),
         )

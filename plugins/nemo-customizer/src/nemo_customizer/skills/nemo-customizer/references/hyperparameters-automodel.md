@@ -5,7 +5,7 @@
 
 # Automodel job JSON
 
-Job JSON for `nemo customization automodel submit` uses **`AutomodelJobInput`** (`plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). For per-model values (LR, LoRA rank, batch, MoE layout), start from the model's recipe in **`recipes.md`**.
+Job JSON for `nemo customization automodel --job-json` uses **`AutomodelJobInput`** (`plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). For per-model values (LR, LoRA rank, batch, MoE layout), start from the model's recipe in **`recipes.md`**.
 
 **Schema dump:**
 

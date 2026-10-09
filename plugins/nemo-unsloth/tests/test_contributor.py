@@ -9,7 +9,7 @@ Pin the contract the customization-router hub depends on:
 - ``get_routers`` returns the jobs router under the right prefix, with
   ``@path_rule`` authz stamped on the generated job routes (the platform
   derives the policy from those rules — there is no ``get_authz_contribution``).
-- ``get_cli`` exposes ``submit`` / ``explain`` and the submit group accepts the
+- ``get_cli`` exposes ``--job-json`` / ``explain`` and the submit group accepts the
   ``JOB_JSON`` positional.
 """
 
@@ -101,11 +101,11 @@ class TestCLI:
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
         plain = _plain(result.output)
-        assert "submit" in plain
+        assert "--job-json" in plain
         assert "explain" in plain
         # Match on the registered verbs, not the rendered text: the help prose
         # legitimately contains words like "runs".
-        assert {cmd.name for cmd in cli.registered_commands} == {"submit", "explain"}
+        assert {cmd.name for cmd in cli.registered_commands} == {"explain"}
 
     def test_submit_help_shows_job_json_positional(self, contributor: CustomizationContributor) -> None:
         try:
@@ -114,7 +114,7 @@ class TestCLI:
             pytest.skip(f"CLI deps unavailable in this env: {exc}")
         assert cli is not None
         runner = CliRunner()
-        result = runner.invoke(cli, ["submit", "--help"])
+        result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0, result.output
         plain = _plain(result.output)
         assert "JOB_JSON" in plain
@@ -145,7 +145,7 @@ class TestCLIHelp:
         assert summary is not None
         assert "SFT" in summary.trains and "LoRA" in summary.trains
         assert "One job uses one GPU." in summary.runs_on
-        assert summary.command == "nemo customization unsloth submit job.json"
+        assert summary.command == "nemo customization unsloth --job-json job.json"
 
     def test_cli_summary_fits_the_rendered_width(self, unsloth: UnslothContributor) -> None:
         """The router prints the summary through an 80-column Rich console."""
@@ -168,8 +168,8 @@ class TestCLIHelp:
 
     def test_submit_help_explains_the_job_json(self, unsloth: UnslothContributor) -> None:
         cli = unsloth.get_cli()
-        submit = next(cmd for cmd in cli.registered_commands if cmd.name == "submit")
-        assert submit.help is not None
+        submit = cli.registered_callback
+        assert submit is not None and submit.help is not None
         assert "UnslothJobInput" in submit.help
         assert "nemo customization unsloth explain" in submit.help
 
@@ -182,7 +182,7 @@ def test_cli_overrides_label_the_backend(monkeypatch: pytest.MonkeyPatch) -> Non
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         overrides,
-        "_replace_job_submit",
+        "_replace_job_callback",
         lambda group, backend, *args, **kwargs: captured.update(backend=backend),
     )
     from nemo_unsloth_plugin.cli.inputs import apply_unsloth_job_cli_overrides
