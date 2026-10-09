@@ -12,12 +12,19 @@ from nemo_builder_plugin.compile import compile_build_set
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.identity import compose_system_tag, validate_repository
 from nemo_builder_plugin.plan import BuildPlan, Destination, PlannedImage
+from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     KubernetesJobExecutionProfileConfig,
 )
+from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
+
+#: The images each release publishes for builds, from `platform.image_registry` at `platform.image_tag`: the
+#: one the steps run in, and the sandbox's kaniko.
+STEP_IMAGE = "nhx-builder-tasks"
+SANDBOX_IMAGE = "nhx-kaniko"
 
 
 class ExecutionBackend:
@@ -34,11 +41,16 @@ class ExecutionBackend:
         return self._config.registry
 
     def _sandbox_image(self) -> str:
-        if not self._config.sandbox.image:
-            raise BackendRejectedError(
-                "builder.sandbox.image is not configured; there is no kaniko image to build with"
-            )
-        return self._config.sandbox.image
+        return self._config.sandbox.image or get_qualified_image(SANDBOX_IMAGE)
+
+    def _image_pull_secrets(self) -> list[str]:
+        """What Jobs gives the build step's pod, so its sandboxes pull from the registries it can.
+
+        The platform's, then the build step's profile's: a sandbox is a pod the build step creates, not one Jobs does.
+        """
+        control = self._profile(self._config.control_profile)
+        secrets = [*get_platform_config().image_pull_secrets, *control.image_pull_secrets]
+        return list(dict.fromkeys(secret.name for secret in secrets))
 
     def _profile(self, name: str) -> KubernetesJobExecutionProfileConfig:
         profile = next((p for p in self._profiles if (p.provider, p.profile) == ("cpu", name)), None)
@@ -74,7 +86,6 @@ class ExecutionBackend:
     def check(self, plan: BuildPlan) -> None:
         """Refuse every request while a setting with no default is unset, or the build's profiles disagree."""
         self._registry()
-        self._sandbox_image()
         self._work_profile()
 
     def destination(self, image: PlannedImage) -> Destination:
@@ -99,6 +110,8 @@ class ExecutionBackend:
             plan,
             config=self._config,
             registry=self._registry(),
+            step_image=get_qualified_image(STEP_IMAGE),
             sandbox_image=self._sandbox_image(),
+            image_pull_secrets=self._image_pull_secrets(),
             work_profile=self._work_profile(),
         )

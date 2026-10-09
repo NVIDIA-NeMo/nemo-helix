@@ -16,6 +16,7 @@ from kubernetes.client.exceptions import ApiException
 from nemo_builder_plugin.run import supervise
 from nemo_builder_plugin.run.supervise import (
     KANIKO_CAPABILITIES,
+    KANIKO_FEATURE_FLAGS,
     RESULT_MARKER,
     SANDBOX_ROOT,
     _build_group,
@@ -59,13 +60,33 @@ def _pod():
     )
 
 
+class TestTheSandboxPullsItsImage:
+    def test_with_the_secrets_its_spec_names(self) -> None:
+        pod = _pod_manifest(
+            name="nhx-sbx-abc-g0",
+            namespace="nhx-builds",
+            group=_group(),
+            sandbox=_sandbox(image_pull_secrets=["nvcr", "mirror"]),
+            pvc="nhx-build-work",
+            job_sub_path="jobs/default/abc",
+        )
+        assert pod.spec.image_pull_secrets == [
+            k8s.V1LocalObjectReference(name="nvcr"),
+            k8s.V1LocalObjectReference(name="mirror"),
+        ]
+
+    def test_with_none_from_a_spec_that_names_none(self) -> None:
+        assert _pod().spec.image_pull_secrets is None
+
+
 class TestTheSandboxHoldsNothing:
     def test_no_service_account_token(self) -> None:
         assert _pod().spec.automount_service_account_token is False
 
-    def test_no_environment_and_no_secret_volume(self) -> None:
+    def test_no_environment_but_kanikos_flags_and_no_secret_volume(self) -> None:
         container = _pod().spec.containers[0]
-        assert not container.env
+        assert {e.name: e.value for e in container.env} == KANIKO_FEATURE_FLAGS
+        assert all(e.value_from is None for e in container.env)
         assert not container.env_from
         # Nor the `<SERVICE>_SERVICE_HOST` variables the kubelet injects by default.
         assert _pod().spec.enable_service_links is False
@@ -159,6 +180,17 @@ class TestTheBuildScript:
         script = _build_script(_group(), _sandbox())
         assert "--no-push" in script
         assert "crane" not in script and "cosign" not in script
+
+    def test_reproducible_with_kanikos_credential_helpers_off(self) -> None:
+        script = _build_script(_group(2), _sandbox())
+        assert script.count("--reproducible") == 2
+        # An empty value turns them all off; without the flag, all of them are on.
+        assert script.count("--credential-helpers= ") == 2
+
+    def test_reproducible_keeps_the_base_format_and_layers(self) -> None:
+        """Without these, the fork's `--reproducible` writes Docker v2s2 and re-tars every base layer."""
+        assert KANIKO_FEATURE_FLAGS["FF_KANIKO_REPRODUCIBLE_PRESERVE_FORMAT"] == "true"
+        assert KANIKO_FEATURE_FLAGS["FF_KANIKO_REPRODUCIBLE_PRESERVE_BASE_LAYERS"] == "true"
 
     def test_one_invocation_per_image_with_cleanup_between(self) -> None:
         script = _build_script(_group(3), _sandbox())

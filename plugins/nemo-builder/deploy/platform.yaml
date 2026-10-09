@@ -94,7 +94,7 @@ spec:
       serviceAccountName: nemo-helix
       containers:
         - name: platform
-          image: nhx-api-builder:local
+          image: my-registry/nhx-api:local
           imagePullPolicy: IfNotPresent
           command: ["/app/.venv/bin/nemo"]
           args:

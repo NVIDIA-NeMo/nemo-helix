@@ -53,8 +53,7 @@ jobs:
         namespace: nhx-builds
         service_account_name: nhx-build-fetch
         # The platform image ships /tools/jobs-launcher.
-        launcher_image: nhx-api-builder:local
-        default_task_image: nhx-build:local
+        launcher_image: my-registry/nhx-api:local
         storage:
           pvc_name: nhx-build-work
         # The work volume is ReadWriteOnce, so every build pod, sandboxes included, runs on the node
@@ -89,7 +88,6 @@ jobs:
 
 builder:
   sandbox:
-    image: nhx-kaniko:local
     cpu: "500m"
     memory: 1Gi
 

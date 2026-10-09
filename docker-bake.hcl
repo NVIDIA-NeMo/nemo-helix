@@ -379,6 +379,8 @@ group "docker-cpu" {
     "nhx-api-docker",
     "nhx-tasks-docker",
     "nhx-gym-tasks-docker",
+    "nhx-builder-tasks-docker",
+    "nhx-kaniko-docker",
   ]
 }
 
@@ -391,6 +393,10 @@ group "docker-cpu-ci" {
     "nhx-tasks-smoke-test",
     "nhx-tasks-openshell-smoke-test",
     "nhx-gym-tasks-smoke-test",
+    "nhx-builder-tasks-docker",
+    "nhx-builder-tasks-smoke-test",
+    "nhx-kaniko-docker",
+    "nhx-kaniko-smoke-test",
   ]
 }
 
@@ -897,6 +903,65 @@ target "nhx-gym-host-smoke-test" {
     NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
   }
   cache-from = maybe_registry_cache_from("nhx-gym-host")
+  output     = ["type=cacheonly"]
+  platforms  = get_platforms()
+}
+
+# The builder's step image: `nhx-build fetch|supervise|push`, and crane. Its push step holds a
+# workspace's registry credential and signing key.
+target "nhx-builder-tasks-docker" {
+  target     = "runtime"
+  context    = "."
+  dockerfile = "docker/builder/Dockerfile.nhx-builder-tasks"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+    nhx-workspace   = "target:nhx-workspace"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    NHX_PYTHON_IMAGE    = NHX_PYTHON_IMAGE
+  }
+  cache-to   = maybe_registry_cache_to("nhx-builder-tasks")
+  cache-from = maybe_registry_cache_from("nhx-builder-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-builder-tasks")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+target "nhx-builder-tasks-smoke-test" {
+  target     = "smoke-test"
+  context    = "."
+  dockerfile = "docker/builder/Dockerfile.nhx-builder-tasks"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+    nhx-workspace   = "target:nhx-workspace"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    NHX_PYTHON_IMAGE    = NHX_PYTHON_IMAGE
+  }
+  cache-from = maybe_registry_cache_from("nhx-builder-tasks")
+  output     = ["type=cacheonly"]
+  platforms  = get_platforms()
+}
+
+# The builder's sandbox: the osscontainertools kaniko fork's debug image, pinned by digest and republished.
+target "nhx-kaniko-docker" {
+  target     = "runtime"
+  context    = "."
+  dockerfile = "docker/builder/Dockerfile.nhx-kaniko"
+  cache-to   = maybe_registry_cache_to("nhx-kaniko")
+  cache-from = maybe_registry_cache_from("nhx-kaniko")
+  tags       = sha_and_maybe_latest_tags("nhx-kaniko")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+target "nhx-kaniko-smoke-test" {
+  target     = "smoke-test"
+  context    = "."
+  dockerfile = "docker/builder/Dockerfile.nhx-kaniko"
+  cache-from = maybe_registry_cache_from("nhx-kaniko")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }

@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The sandbox's kaniko image: the osscontainertools fork's `debug` image
+# (github.com/osscontainertools/kaniko), pinned by digest and republished, so a release runs its own
+# copy. It has the layout `supervise` relies on: /kaniko/executor, and a shell at /busybox/sh. kaniko
+# replaces the root filesystem as it builds, except /kaniko and volumes, so busybox is a volume. Its
+# credential helpers stay unused: `supervise` turns them off, and the sandbox holds no credential.
+#
+# `supervise` pins the fork's feature flags. Check them against the fork's release notes when this
+# version changes.
+
+ARG KANIKO_VERSION=v1.28.5
+
+FROM ghcr.io/osscontainertools/kaniko:${KANIKO_VERSION}-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS runtime
+
+# The binary runs on the image's platform, and `supervise`'s shell, /busybox/sh, is there.
+FROM runtime AS smoke-test
+ARG KANIKO_VERSION
+RUN ["/bin/sh", "-c", "/kaniko/executor version | grep -qF \"$KANIKO_VERSION\" && test -x /busybox/sh"]
+
+FROM runtime

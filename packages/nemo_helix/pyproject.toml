@@ -338,6 +338,15 @@ nemo-automodel-plugin = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
+nemo-builder-plugin = [
+  "nemo-helix-plugin",
+  "pydantic>=2.0.0",
+  "cryptography>=42.0.0",
+  "httpx>=0.27.0",
+  "kubernetes>=29.0.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-customizer-plugin = [
   "nemo-helix-plugin",
   "pydantic>=2.10.6",
@@ -582,6 +591,7 @@ plugins = [
     "nemo-helix[nemo-agents-plugin]",
     "nemo-helix[nemo-anonymizer-plugin]",
     "nemo-helix[nemo-automodel-plugin]",
+    "nemo-helix[nemo-builder-plugin]",
     "nemo-helix[nemo-customizer-plugin]",
     "nemo-helix[nemo-data-designer-plugin]",
     "nemo-helix[nemo-deployments-plugin]",
@@ -789,6 +799,7 @@ evals = "nemo_evals.service:EvaluatorPluginService"
 insights = "nemo_insights_plugin.service:InsightsService"
 deployments = "nemo_deployments_plugin.service:DeploymentsService"
 customization = "nemo_customizer.router:CustomizationRouterService"
+builder = "nemo_builder_plugin.service:BuilderService"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.skills"]
@@ -866,6 +877,8 @@ nemo-garak-plugin = { source = "../../plugins/nemo-garak/src/nemo_garak", module
 # Customization router plus its backend contributors. Heavy ML stacks stay in the
 # training images; these carry only compile-side deps, so they are safe to bundle.
 nemo-automodel-plugin = { source = "../../plugins/nemo-automodel/src/nemo_automodel_plugin", module = "nemo_automodel_plugin", inherit = { "entry-points" = ["nemo.*"] } }
+# The builder's service only. Its job steps run in the nhx-builder-tasks image, not from this wheel.
+nemo-builder-plugin = { source = "../../plugins/nemo-builder/src/nemo_builder_plugin", module = "nemo_builder_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-customizer-plugin = { source = "../../plugins/nemo-customizer/src/nemo_customizer", module = "nemo_customizer", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-data-designer-plugin = { source = "../../plugins/nemo-data-designer/src/nemo_data_designer_plugin", module = "nemo_data_designer_plugin", inherit = { "entry-points" = ["nemo.*", "data_designer.plugins"] } }
 nemo-deployments-plugin = { source = "../../plugins/nemo-deployments/src/nemo_deployments_plugin", module = "nemo_deployments_plugin", inherit = { "entry-points" = ["nemo.*"] } }
