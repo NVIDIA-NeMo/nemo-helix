@@ -21,13 +21,16 @@ from e2e.customizer import customizer_eval as ceval
 from e2e.customizer import customizer_jobs as jobs
 from e2e.customizer.customization_helpers import assert_output_registered, unique_name
 
-RlJobInput = pytest.importorskip("nemo_rl_plugin.schema").RlJobInput
-
 MAX_STEPS = 5
 GRPO_MAX_STEPS = 3
 JOB_TIMEOUT_SECONDS = 2700
 
 ServeCheck = Callable[[NemoClient, str, str, str], None]
+
+
+def _rl_job_input() -> type[BaseModel]:
+    """``RlJobInput``, skipping only the calling RL test when the RL plugin is not installed."""
+    return pytest.importorskip("nemo_rl_plugin.schema").RlJobInput
 
 
 def _train_and_serve(
@@ -137,7 +140,7 @@ def test_rl_dpo_smoke(
     jobs.require_kubernetes_backend(client)
     ws = customizer_workspace
     output = unique_name("qwen3-dpo-smoke")
-    spec = RlJobInput.model_validate(
+    spec = _rl_job_input().model_validate(
         {
             "model": f"{ws}/{rl_base_entity}",
             "dataset": f"{ws}/{helpsteer_dpo_smoke_fileset}",
@@ -180,7 +183,7 @@ def _grpo_smoke(
 ) -> None:
     jobs.require_kubernetes_backend(client)
     output = unique_name(f"qwen3-grpo-{cell}-{policy}")
-    spec = RlJobInput.model_validate(
+    spec = _rl_job_input().model_validate(
         {
             "model": f"{workspace}/{base_entity}",
             "dataset": f"{workspace}/{dataset}",

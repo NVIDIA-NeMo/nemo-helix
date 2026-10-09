@@ -210,7 +210,8 @@ jobs:
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
-        needs.changes.outputs.auth-idp == 'true'
+        needs.changes.outputs.auth-idp == 'true' ||
+        needs.changes.outputs.customization-auth == 'true'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 90

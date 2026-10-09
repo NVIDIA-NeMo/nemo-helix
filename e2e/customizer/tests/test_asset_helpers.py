@@ -141,7 +141,7 @@ def _unpublished_manifest(output_dir: Path) -> dict:
 
 
 def test_fixtures_only_stage_assets_the_manifest_publishes() -> None:
-    """Every S3 prefix the fixtures sync is one ``publish_assets_to_s3.sh`` uploads."""
+    """Every format the fixtures sync is either uploaded by ``publish_assets_to_s3.sh`` or built locally."""
     tree = ast.parse((Path(__file__).parent / "conftest.py").read_text())
     synced: dict[str, set[str]] = {"sync_dataset_format": set(), "sync_model": set()}
     for node in ast.walk(tree):
@@ -151,9 +151,16 @@ def test_fixtures_only_stage_assets_the_manifest_publishes() -> None:
             synced[node.func.attr].add(prefix.value)
     manifest = load()
 
-    published_formats = {name for dataset in manifest["datasets"].values() for name in dataset["outputs"]}
+    published_formats = {
+        name
+        for dataset in manifest["datasets"].values()
+        if dataset.get("s3_published", True)
+        for name in dataset["outputs"]
+    }
     published_models = {model["s3_folder"] for model in manifest["models"]}
-    assert synced["sync_dataset_format"] and synced["sync_dataset_format"] <= published_formats
+    assert synced["sync_dataset_format"] and synced["sync_dataset_format"] <= (
+        published_formats | local_only_formats(manifest)
+    )
     assert synced["sync_model"] and synced["sync_model"] <= published_models
 
 
@@ -181,23 +188,32 @@ def test_prefetch_covers_every_fixture_that_syncs_from_s3() -> None:
 
 def test_fixtures_to_prefetch_skips_tests_that_will_not_run() -> None:
     class _Item:
-        def __init__(self, fixturenames: list[str], skipped: bool = False) -> None:
+        def __init__(self, fixturenames: list[str], *marks: pytest.MarkDecorator) -> None:
             self.fixturenames = fixturenames
-            self._skipped = skipped
+            self._marks = [mark.mark for mark in marks]
 
-        def get_closest_marker(self, name: str) -> object | None:
-            return object() if name == "skip" and self._skipped else None
+        def iter_markers(self, name: str) -> Iterator[pytest.Mark]:
+            return (mark for mark in self._marks if mark.name == name)
 
     items = [
         _Item(["client", "customizer_asset_cache", "embed_model_cache"]),
-        _Item(["grpo_math_env_cache", "customizer_asset_cache"], skipped=True),
+        _Item(["grpo_math_env_cache", "customizer_asset_cache"], pytest.mark.skip(reason="disabled")),
+        _Item(["nemotron_lightning_model_cache"], pytest.mark.skipif(True, reason="no H100")),
+        _Item(["grpo_math_smoke_cache"], pytest.mark.skipif(False, reason="runs")),
         _Item(["client"]),
     ]
-    assets = ("customizer_asset_cache", "embed_model_cache", "grpo_math_env_cache")
+    assets = (
+        "customizer_asset_cache",
+        "embed_model_cache",
+        "grpo_math_env_cache",
+        "nemotron_lightning_model_cache",
+        "grpo_math_smoke_cache",
+    )
 
     assert stage_assets.fixtures_to_prefetch(cast(list[pytest.Item], items), assets) == {
         "customizer_asset_cache",
         "embed_model_cache",
+        "grpo_math_smoke_cache",
     }
 
 

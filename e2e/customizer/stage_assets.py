@@ -20,6 +20,7 @@ from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
 
 import pytest
+from _pytest.skipping import evaluate_skip_marks
 from filesets import transfer
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
@@ -64,11 +65,11 @@ def _aws_sync(s3_uri: str, local_dir: Path) -> None:
 
 
 def fixtures_to_prefetch(items: Iterable[pytest.Item], asset_fixtures: Collection[str]) -> set[str]:
-    """The ``asset_fixtures`` that tests which will run (not marked skip) depend on."""
+    """The ``asset_fixtures`` that tests which will run (no active skip or skipif) depend on."""
     return {
         name
         for item in items
-        if item.get_closest_marker("skip") is None
+        if evaluate_skip_marks(item) is None
         for name in getattr(item, "fixturenames", ())
         if name in asset_fixtures
     }

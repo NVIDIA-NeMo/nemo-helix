@@ -264,7 +264,9 @@ runs:
             - '.github/scripts/tests/test_ngc_metadata.py'
             - '.github/assets/ngc/**'
           customization-auth:
+            - 'packages/nhx_common/**'
             - 'services/core/auth/**'
+            - 'services/core/entities/**'
             - 'services/core/files/**'
             - 'services/core/jobs/**'
             - 'services/core/models/**'
