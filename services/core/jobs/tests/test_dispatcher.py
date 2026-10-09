@@ -10,6 +10,7 @@ These tests verify that the JobDispatcher correctly manages job lifecycle operat
 import asyncio
 import gc
 import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1869,6 +1870,27 @@ async def test_list_jobs_filter_status_single_excludes_non_matching(
 
     assert len(jobs) == 1
     assert jobs[0].id == active_job.id
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_filter_updated_at_matches_attempt_change(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+):
+    job = await _make_job(mock_dispatcher, mock_store, "job-updated", HelixJobStatus.ACTIVE)
+    await asyncio.sleep(0.01)
+    cutoff = datetime.now(timezone.utc)
+    await asyncio.sleep(0.01)
+    await _set_attempt_status(mock_store, job.attempt_id, HelixJobStatus.COMPLETED)
+
+    jobs, _ = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(
+            operation=ComparisonOperation(field="updated_at", operator=FilterOperator.GTE, value=cutoff.isoformat()),
+        ),
+        workspace=DEFAULT_WORKSPACE,
+    )
+
+    assert [j.id for j in jobs] == [job.id]
 
 
 @pytest.mark.asyncio
