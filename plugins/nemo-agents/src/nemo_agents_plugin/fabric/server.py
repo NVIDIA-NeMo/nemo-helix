@@ -18,9 +18,10 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
+from nemo_agents_plugin.client_disconnect import cancel_on_disconnect
 from nemo_agents_plugin.fabric.environment import release_runtime_base_dir, resolve_runtime_base_dir
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
@@ -376,6 +377,7 @@ def create_fabric_serving_app(
     @app.post("/v1/chat/completions", response_model=None, response_model_exclude_none=True)
     async def chat_completions(
         request: ChatCompletionRequest,
+        raw_request: Request,
         response: Response,
         session_id: Annotated[str | None, Header(alias=SESSION_ID_HEADER)] = None,
     ) -> ChatCompletionResponse | StreamingResponse:
@@ -399,7 +401,7 @@ def create_fabric_serving_app(
         if request.stream:
             stream_context = stream(invocation_request)
             try:
-                fabric_stream = await stream_context.__aenter__()
+                fabric_stream = await cancel_on_disconnect(raw_request, stream_context.__aenter__())
             except FabricRuntimeStartError as error:
                 raise HTTPException(status_code=503, detail=str(error), headers=response_headers) from error
             except FabricSessionNotFoundError as error:
@@ -427,7 +429,7 @@ def create_fabric_serving_app(
             )
 
         try:
-            result = await invoke(invocation_request)
+            result = await cancel_on_disconnect(raw_request, invoke(invocation_request))
         except FabricRuntimeStartError as error:
             raise HTTPException(status_code=503, detail=str(error), headers=response_headers) from error
         except FabricSessionNotFoundError as error:
