@@ -187,6 +187,11 @@ def models_for_native_config(config_type: str, config: dict[str, Any]) -> dict[s
     return models_map_from_config(config, required=native_model_categories(config_type))
 
 
+def _max_output_tokens_kwargs(config: dict[str, Any]) -> dict[str, int]:
+    value = config.get("max_output_tokens")
+    return {} if value is None else {"max_output_tokens": int(value)}
+
+
 def _build_stage_router(libsy: Any, config: dict[str, Any]) -> Any:
     classifier = None
     raw = config.get("classifier")
@@ -199,7 +204,7 @@ def _build_stage_router(libsy: Any, config: dict[str, Any]) -> Any:
                 threshold_step=float(classifier_cfg.get("threshold_step", 0.0)),
                 recent_turn_window=classifier_cfg.get("recent_turn_window"),
                 prompt=classifier_cfg.get("prompt"),
-                max_output_tokens=classifier_cfg.get("max_output_tokens"),
+                **_max_output_tokens_kwargs(classifier_cfg),
             )
         )
     return libsy.stage_router(
@@ -225,6 +230,6 @@ def _build_llm_classifier(libsy: Any, config: dict[str, Any]) -> Any:
         recent_turn_window=config.get("recent_turn_window"),
         prompt=config.get("prompt"),
         response_format_type=config.get("response_format_type", "json_schema"),
-        max_output_tokens=config.get("max_output_tokens"),
+        **_max_output_tokens_kwargs(config),
     )
     return libsy.llm_classifier(libsy.LlmClassifierConfig.capability(config=task))
