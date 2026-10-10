@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledCheckbox';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
@@ -125,8 +126,8 @@ const startItems = (rerunDisabled: boolean) => [
           )}
         </Flex>
         <Text className="text-secondary" kind="body/regular/sm">
-          Reuses the eval config saved on a previous run. The new run joins that run&apos;s
-          experiment, so the two sit side by side on its leaderboard.
+          Reuses the eval config saved on a previous run, this agent&apos;s or another&apos;s. The
+          new run joins that run&apos;s experiment, so the two sit side by side on its leaderboard.
         </Text>
       </Stack>
     ),
@@ -160,6 +161,9 @@ const MAX_PARALLELISM = 16;
 const NO_EVALUATIONS_MESSAGE =
   'No evaluations with a reusable eval config yet. Go back and create an experiment instead — its run is re-runnable from here afterwards.';
 
+const NO_AGENT_EVALUATIONS_MESSAGE =
+  "This agent has no evaluations with a reusable eval config yet. Include other agents' evaluations to run this one against theirs.";
+
 const submitEvaluationBaseSchema = z.object({
   agent: z.string().min(1, 'Agent is required'),
   judgeModel: z.string(),
@@ -173,6 +177,8 @@ const submitEvaluationBaseSchema = z.object({
   evaluationRecordName: entityNameField(),
   /** Name of the existing evaluation whose eval config is reused on the re-run path. */
   evaluationName: z.string(),
+  /** Offer other agents' evaluations on the re-run path, e.g. a tuned agent's baseline. */
+  includeOtherAgents: z.boolean(),
   datasetFileset: z.string(),
   datasetFile: z.string(),
   datasetBatchGlob: z.string(),
@@ -235,6 +241,7 @@ const makeDefaultValues = (
   newName: '',
   evaluationRecordName: '',
   evaluationName: sourceEvaluation ?? '',
+  includeOtherAgents: false,
   datasetFileset: '',
   datasetFile: '',
   datasetBatchGlob: '',
@@ -447,28 +454,38 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
 
   const agentFieldError = errors.agent?.message;
   const evaluationName = useWatch({ control, name: 'evaluationName' });
+  const includeOtherAgents = useWatch({ control, name: 'includeOtherAgents' });
 
-  // Every reusable evaluation for this agent, resolved to its experiment. One list feeds the
-  // picker, its section headings, and the lookup that resolves the chosen run.
+  // Every reusable evaluation for this agent (and other agents' when asked for), resolved to its
+  // experiment. One list feeds the picker, its section headings, and the lookup that resolves the
+  // chosen run.
   const sources = useEvaluationSources({
     workspace,
     agent: selectedAgent || undefined,
+    includeOtherAgents,
     enabled: open && !!selectedAgent,
   });
   const selectedSource = sources.byName[evaluationName];
   const selectedEvaluation = selectedSource?.evaluation;
   const hasNoEvaluations = mode === MODE_EXPERIMENT && sources.isEmpty;
-  // Only a settled, agent-scoped, genuinely empty list disables re-run: a disabled query reports
-  // isLoading false, which would read as empty before anything was fetched.
-  const rerunUnavailable = !!selectedAgent && !sources.isLoading && sources.isEmpty;
+  const hasAnySources = sources.hasAgentSources || sources.hasOtherAgentSources;
+  // Only a settled, genuinely empty list disables re-run: a disabled query reports isLoading
+  // false, which would read as empty before anything was fetched.
+  const rerunUnavailable = !!selectedAgent && !sources.isLoading && !hasAnySources;
 
   // Default the start mode once the list resolves; `selectedAgent` gates it because a disabled
   // query reports isLoading false, which would read as empty before anything was fetched.
   useEffect(() => {
     if (!open || !selectedAgent || sources.isLoading || modeDefaultApplied.current) return;
     modeDefaultApplied.current = true;
-    if (sources.isEmpty) setValue('mode', MODE_DEFAULT);
-  }, [open, selectedAgent, sources.isLoading, sources.isEmpty, setValue]);
+    if (!hasAnySources) setValue('mode', MODE_DEFAULT);
+    else if (!sources.hasAgentSources) setValue('includeOtherAgents', true);
+  }, [open, selectedAgent, sources.isLoading, sources.hasAgentSources, hasAnySources, setValue]);
+
+  // A run hidden by unticking "other agents" must not stay picked out of sight.
+  useEffect(() => {
+    if (!includeOtherAgents && selectedSource?.fromOtherAgent) setValue('evaluationName', '');
+  }, [includeOtherAgents, selectedSource, setValue]);
 
   // Nothing is preselected here. A step whose whole job is "choose the run to re-run" should not
   // answer itself — Next stays disabled until the user picks, and stepBlocker says why. (A run
@@ -834,6 +851,10 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     onClose();
   };
 
+  const noEvaluationsMessage = sources.hasOtherAgentSources
+    ? NO_AGENT_EVALUATIONS_MESSAGE
+    : NO_EVALUATIONS_MESSAGE;
+
   // What the current step still needs before Next means anything. Kept separate from the zod
   // schema: the schema judges the whole submission, and a step must only answer for its own
   // fields — otherwise step one would refuse to advance over a field two steps away.
@@ -849,7 +870,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     // The re-run path picks its source on this step too, so the source's own problems are
     // reported here rather than swallowed by a Submit that quietly does nothing.
     if (step === 'evaluation' && mode === MODE_EXPERIMENT) {
-      if (hasNoEvaluations) return NO_EVALUATIONS_MESSAGE;
+      if (hasNoEvaluations) return noEvaluationsMessage;
       if (!selectedEvaluation) return 'Pick an evaluation to re-run.';
       if (isValidatingEvaluation) return 'Checking the saved eval config...';
       return evaluationConfigIssue ?? undefined;
@@ -1019,10 +1040,23 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
             <>
               {/* Which run to base this one on, and what to call the result, are one decision:
                   the name is derived from the pick, so the two belong on the same screen. */}
+              {mode === MODE_EXPERIMENT && sources.hasOtherAgentSources ? (
+                <ControlledCheckbox
+                  useControllerProps={{ control, name: 'includeOtherAgents' }}
+                  slotLabel="Include other agents' evaluations"
+                  formFieldProps={{
+                    status: undefined,
+                    slotHelp:
+                      "Run this agent against another agent's eval config. The run joins that evaluation's experiment, so both compare on its leaderboard.",
+                  }}
+                  disabled={isPending}
+                />
+              ) : null}
+
               {mode === MODE_EXPERIMENT &&
                 (hasNoEvaluations ? (
                   <Text className="text-secondary" kind="body/regular/md">
-                    {NO_EVALUATIONS_MESSAGE}
+                    {noEvaluationsMessage}
                   </Text>
                 ) : (
                   <EvaluationSourceSelect<SubmitEvaluationFormData>

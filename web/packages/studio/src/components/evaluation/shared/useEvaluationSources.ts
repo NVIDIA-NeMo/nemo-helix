@@ -23,27 +23,34 @@ export interface EvaluationSource {
   experiment?: ExperimentResponse;
   /** The experiment's name, or undefined when it could not be resolved. */
   experimentName?: string;
+  /** No run of this evaluation is tagged with the agent the list is scoped to. */
+  fromOtherAgent: boolean;
 }
 
 export interface UseEvaluationSourcesResult {
-  /** Every evaluation that carries a reusable eval config, newest first. */
+  /** Every evaluation in view that carries a reusable eval config, newest first. */
   sources: EvaluationSource[];
   /** Options for a single grouped picker: sections are experiments, items are their evaluations. */
   options: SelectItemOption[];
   /** Section headings, keyed by the group each option carries. */
   groupLabels: Record<string, string>;
+  /** Every reusable evaluation in the workspace, in view or not, so a pick always resolves. */
   byName: Record<string, EvaluationSource>;
   /** Every experiment loaded, for a "which experiment" filter or lookup. */
   experiments: ExperimentResponse[];
   isLoading: boolean;
-  /** True once loading has settled and nothing reusable came back. */
+  /** True once loading has settled and nothing reusable is in view. */
   isEmpty: boolean;
+  hasAgentSources: boolean;
+  hasOtherAgentSources: boolean;
 }
 
 interface UseEvaluationSourcesParams {
   workspace: string;
   /** Scope the list to one agent's evaluations. Omitted lists the whole workspace. */
   agent?: string;
+  /** Also list evaluations of other agents, so a run can join another agent's experiment. */
+  includeOtherAgents?: boolean;
   enabled?: boolean;
 }
 
@@ -57,17 +64,13 @@ interface UseEvaluationSourcesParams {
 export const useEvaluationSources = ({
   workspace,
   agent,
+  includeOtherAgents = false,
   enabled = true,
 }: UseEvaluationSourcesParams): UseEvaluationSourcesResult => {
-  // agent_name matches the Evaluation's denormalized agent_names (populated from ingested span
-  // telemetry), so an evaluation only appears once it has runs tagged with this agent.
+  // Scoped client-side, so one request also answers whether other agents have runs to offer.
   const { data: evaluationsResponse, isLoading: isEvaluationsLoading } = useListEvaluations(
     workspace,
-    {
-      page_size: LIST_PAGE_SIZE,
-      sort: '-created_at',
-      ...(agent ? { filter: { agent_name: agent } } : {}),
-    },
+    { page_size: LIST_PAGE_SIZE, sort: '-created_at' },
     { query: { enabled } }
   );
 
@@ -83,7 +86,9 @@ export const useEvaluationSources = ({
   return useMemo(() => {
     const experimentById = new Map(experiments.map((experiment) => [experiment.id, experiment]));
 
-    const sources: EvaluationSource[] = evaluations
+    // agent_names is denormalized from ingested span telemetry, so an evaluation only counts as
+    // this agent's once it has runs tagged with it.
+    const allSources: EvaluationSource[] = evaluations
       .filter((evaluation) => evaluationFilesetName(evaluation) != null)
       .map((evaluation) => {
         // An evaluation can belong to several experiments; the first resolvable one names its
@@ -91,8 +96,16 @@ export const useEvaluationSources = ({
         const experiment = evaluation.experiment_ids
           .map((id) => experimentById.get(id))
           .find((candidate): candidate is ExperimentResponse => candidate !== undefined);
-        return { evaluation, experiment, experimentName: experiment?.name };
+        return {
+          evaluation,
+          experiment,
+          experimentName: experiment?.name,
+          fromOtherAgent: !!agent && !(evaluation.agent_names ?? []).includes(agent),
+        };
       });
+    const sources = includeOtherAgents
+      ? allSources
+      : allSources.filter((source) => !source.fromOtherAgent);
 
     const groupLabels: Record<string, string> = {};
     for (const source of sources) {
@@ -107,11 +120,16 @@ export const useEvaluationSources = ({
       // Typing an experiment's name narrows the list to that section; typing an evaluation's
       // name keeps every experiment that has a run by that name. Matching both in one string is
       // what lets a single picker stand in for an experiment filter plus an evaluation filter.
-      searchText: `${source.experimentName ?? UNGROUPED_LABEL} ${source.evaluation.name}`,
+      // Agent names join in so another agent's runs are findable by who they evaluated.
+      searchText: [
+        source.experimentName ?? UNGROUPED_LABEL,
+        source.evaluation.name,
+        ...(source.evaluation.agent_names ?? []),
+      ].join(' '),
     }));
 
     const byName: Record<string, EvaluationSource> = {};
-    for (const source of sources) byName[source.evaluation.name] = source;
+    for (const source of allSources) byName[source.evaluation.name] = source;
 
     const isLoading = isEvaluationsLoading || isExperimentsLoading;
     return {
@@ -122,6 +140,15 @@ export const useEvaluationSources = ({
       experiments,
       isLoading,
       isEmpty: !isLoading && sources.length === 0,
+      hasAgentSources: allSources.some((source) => !source.fromOtherAgent),
+      hasOtherAgentSources: allSources.some((source) => source.fromOtherAgent),
     };
-  }, [evaluations, experiments, isEvaluationsLoading, isExperimentsLoading]);
+  }, [
+    evaluations,
+    experiments,
+    agent,
+    includeOtherAgents,
+    isEvaluationsLoading,
+    isExperimentsLoading,
+  ]);
 };
