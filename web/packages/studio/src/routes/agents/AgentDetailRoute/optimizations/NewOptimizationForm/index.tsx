@@ -5,7 +5,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { Button, FormField, Stack, Stepper, Text, TextInput } from '@nvidia/foundations-react-core';
-import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { BudgetSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/BudgetSection';
 import { EvaluationSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/EvaluationSection';
 import {
@@ -17,7 +16,6 @@ import { IntentSection } from '@studio/routes/agents/AgentDetailRoute/optimizati
 import { buildOptimizationName } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationName';
 import { optimizationTargets } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
 import { RunSummaryPanel } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/RunSummaryPanel';
-import { useStudyRowCount } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useStudyRowCount';
 import {
   budgetById,
   intentById,
@@ -59,7 +57,6 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   onBack,
   onSubmit,
 }) => {
-  const workspace = useWorkspaceFromPath();
   const targets = useMemo(() => optimizationTargets(evals), [evals]);
 
   const methods = useForm<OptimizationFormValues, unknown, OptimizationFormOutput>({
@@ -115,7 +112,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   }, [experimentId, targets, setValue]);
 
   const target = targets.find((candidate) => candidate.experimentId === experimentId);
-  const { rowCount, error: rowsError } = useStudyRowCount(workspace, target);
+  const rowCount = target?.evaluation.test_case_count || undefined;
 
   const nameError = touchedFields.name ? errors.name?.message : undefined;
 
@@ -229,11 +226,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             searchSpace={searchSpace}
             rows={rowCount}
             blockingReason={blockingReason}
-            submitError={
-              rowsError && submitError && rowsError !== submitError
-                ? `${rowsError} ${submitError}`
-                : (rowsError ?? submitError)
-            }
+            submitError={submitError}
             isSubmitting={isSubmitting}
             onRun={() => void submit()}
           />

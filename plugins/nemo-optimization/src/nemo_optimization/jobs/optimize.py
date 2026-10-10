@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from collections.abc import Iterator, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
@@ -27,6 +28,7 @@ from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
@@ -49,9 +51,19 @@ from nemo_helix_plugin.refs import (
     LocalDir,
     classify_output_target,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from nemo_optimization.agents import resolve_agent_config
+from nemo_optimization.evaluation_study import (
+    EvaluationStudyError,
+    apply_study_evaluation,
+    build_study_evaluation,
+    config_judge,
+    judge_model_config,
+    load_fileset_dataset,
+    parse_eval_config,
+    write_study_dataset,
+)
 from nemo_optimization.preflight import preflight_validate_llm_models
 from nemo_optimization.router import OptimizeRouter
 from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
@@ -100,10 +112,13 @@ class OptimizeJob(NemoJob):
         async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> OptimizeSpec:
-        del entity_client, async_sdk
+        del entity_client
         payload = input_spec.model_dump(mode="json")
         payload["workspace"] = workspace
-        return OptimizeSpec.model_validate(payload, context={"is_local": is_local})
+        spec = OptimizeSpec.model_validate(payload, context={"is_local": is_local})
+        if spec.evaluation_config is not None and not is_local:
+            await _validate_evaluation_config(spec.evaluation_config, workspace=workspace, async_sdk=async_sdk)
+        return spec
 
     @classmethod
     async def compile(  # ty: ignore[invalid-method-override]  (narrows the spec types)
@@ -152,8 +167,10 @@ class OptimizeJob(NemoJob):
 
     def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | None = None) -> dict:
         spec = OptimizeSpec.model_validate(config)
-        with _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root):
-            optimize_config = _load_yaml(config_path)
+        with (
+            _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root),
+            _evaluation_scoring(_load_yaml(config_path), spec=spec, ctx=ctx, sdk=sdk) as optimize_config,
+        ):
             agent_config = resolve_agent_config(spec.agent, workspace=spec.workspace, sdk=sdk)
             preflight_validate_llm_models(
                 optimize_config,
@@ -303,6 +320,57 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError(f"optimize config must be a mapping: {path}")
     return _expand_env(raw)
+
+
+def _split_object_ref(ref: str) -> tuple[str, str, str]:
+    fileset, _, path = ref.partition("#")
+    workspace, _, name = fileset.partition("/")
+    return workspace, name, path
+
+
+async def _validate_evaluation_config(ref: str, *, workspace: str, async_sdk: AsyncNemoClient) -> None:
+    """Reject at submit an evaluation the study cannot reproduce, before any trial runs."""
+    ws, name, path = _split_object_ref(ref)
+    try:
+        response = await AsyncFilesClient.from_client(async_sdk).download_file(workspace=ws, name=name, path=path)
+        config = parse_eval_config((await response.read()).decode("utf-8"))
+        judge = config_judge(config)
+        judge_model_config(workspace, judge.metric.model)
+    except (EvaluationStudyError, ValidationError) as exc:
+        raise HelixJobCompilationError(f"Evaluation config {ref} cannot score an optimize study: {exc}") from exc
+
+
+@contextlib.contextmanager
+def _evaluation_scoring(
+    optimize_config: dict[str, Any],
+    *,
+    spec: OptimizeSpec,
+    ctx: JobContext,
+    sdk: NemoClient | None,
+) -> Iterator[dict[str, Any]]:
+    """Yield *optimize_config* scored by ``spec.evaluation_config``, or unchanged when it is unset."""
+    if spec.evaluation_config is None:
+        yield optimize_config
+        return
+    if sdk is None:
+        raise LocalRunError(
+            "Scoring an optimize study from an evaluation config requires a sync platform client, but none "
+            "was available. Set NHX_BASE_URL before using evaluation_config."
+        )
+    ws, name, path = _split_object_ref(spec.evaluation_config)
+    text = FilesClient.from_client(sdk).download_file(workspace=ws, name=name, path=path).read().decode("utf-8")
+    config = parse_eval_config(text)
+    with tempfile.TemporaryDirectory(prefix=".optimize-evaluation-", dir=str(ctx.storage.ephemeral)) as tmp:
+        staging = Path(tmp)
+        study = build_study_evaluation(
+            config,
+            lambda dataset: load_fileset_dataset(dataset, sdk=sdk, destination=staging / "source"),
+        )
+        dataset_path = write_study_dataset(study, staging)
+        logger.info(
+            "Scoring optimize study with %d rows from evaluation config %s", len(study.rows), spec.evaluation_config
+        )
+        yield apply_study_evaluation(optimize_config, study, dataset_path=dataset_path, workspace=spec.workspace)
 
 
 @contextlib.contextmanager

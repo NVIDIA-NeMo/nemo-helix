@@ -59,43 +59,12 @@ const SubmitForm = ({ evaluation = EVALUATION }: { evaluation?: AgentEvaluationR
 };
 
 describe('optimization form submission', () => {
-  it('renders the original rubric into a legacy optimize bundle without requiring a new judge', async () => {
+  it('stages the optimize config and hands the job the evaluation config to score with', async () => {
     const uploaded = new Map<string, string>();
     const submitted: unknown[] = [];
     server.use(
       http.get(`${FILESETS_URL}/eval-data/files`, () =>
         HttpResponse.json({ data: [{ path: 'eval-config.json' }] })
-      ),
-      http.get(`${FILESETS_URL}/eval-data/-/eval-config.json`, () =>
-        HttpResponse.text(
-          JSON.stringify({
-            tasks: [
-              {
-                id: 'row-1',
-                intent: 'Classify this email',
-                reference: { answer: 'phishing' },
-                metrics: [
-                  {
-                    metric_type: 'llm-judge',
-                    outputs: [{ name: 'accuracy', value_json_schema: { type: 'number' } }],
-                    payload: {
-                      kind: 'inline',
-                      metric: {
-                        type: 'llm-judge',
-                        model: 'default/original-judge',
-                        scores: [{ name: 'accuracy', minimum: 0, maximum: 1 }],
-                        inference: { max_tokens: 1024 },
-                        prompt_template:
-                          'Compare {{ item.reference.answer }} against {{ sample.output_text }}.',
-                      },
-                    },
-                  },
-                ],
-                inputs: { instruction: 'Classify this email' },
-              },
-            ],
-          })
-        )
       ),
       http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents/${AGENT}`, () =>
         HttpResponse.json({
@@ -157,22 +126,20 @@ describe('optimization form submission', () => {
         optimize_config_fileset: expect.stringMatching(
           new RegExp(`^${DEFAULT_WORKSPACE}/${AGENT}-optimize-`)
         ),
+        evaluation_config: `${DEFAULT_WORKSPACE}/eval-data#eval-config.json`,
       },
     });
+    expect([...uploaded.keys()]).toEqual(['optimize.yaml']);
     const config = parse(uploaded.get('optimize.yaml')!);
     const baseUrl = `\${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/${DEFAULT_WORKSPACE}/openai/-/v1`;
-    expect(config.models.default).toMatchObject({
-      model: 'agent-model',
-      base_url: baseUrl,
-      api_key_env: 'NEMO_AGENTS_IGW_API_KEY',
+    expect(config.models).toEqual({
+      default: expect.objectContaining({
+        model: 'agent-model',
+        base_url: baseUrl,
+        api_key_env: 'NEMO_AGENTS_IGW_API_KEY',
+      }),
     });
-    expect(config.models.judge.model).toBe('default/original-judge');
-    expect(config.eval.original_evaluation).toBeUndefined();
-    expect(config.eval.evaluators.accuracy).toMatchObject({
-      _type: 'tunable_rag_evaluator',
-      default_scoring: false,
-      inference: { max_tokens: 1024 },
-    });
+    expect(config.eval).toBeUndefined();
     expect(config.optimizer.eval_metrics.average_score.direction).toBe('maximize');
     expect(config.optimizer.search_space.gateway_credential).toEqual({
       type: 'fabric',
@@ -181,16 +148,10 @@ describe('optimization form submission', () => {
     });
     expect(config.optimizer.numeric.n_trials).toBe(4);
     expect(config.optimizer.experiment_id).toBe('exp-quality');
-    expect(JSON.parse(uploaded.get('dataset.json')!)[0]).toMatchObject({
-      id: 'row-1',
-      question: 'Classify this email',
-      answer: expect.stringContaining(
-        'Compare phishing against __OPTIMIZATION_CANDIDATE_OUTPUT__.'
-      ),
-    });
   });
 
-  it('says why the evaluation cannot be staged before the user runs the study', async () => {
+  it('says why an evaluation without a stored config cannot score the study', async () => {
+    const user = userEvent.setup();
     renderRoute(undefined, {
       history: getAgentOptimizeRoute(DEFAULT_WORKSPACE, AGENT),
       routes: [
@@ -200,6 +161,9 @@ describe('optimization form submission', () => {
         },
       ],
     });
+
+    await screen.findByText('baseline');
+    await user.click(screen.getByRole('button', { name: 'Run optimization' }));
 
     expect(await screen.findByText(/has no stored eval config/)).toBeInTheDocument();
   });

@@ -4,11 +4,6 @@
 import { FilesetEntry } from '@studio/api/files/types';
 import type { OptimizationFormOutput } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
 import {
-  mimicEvaluation,
-  MIMICKED_JUDGE_PROMPT,
-} from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/mimicEvaluation';
-import type { StudyEvaluation } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/studyDataset';
-import {
   budgetById,
   type SearchParameter,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
@@ -16,7 +11,6 @@ import { asRecord } from '@studio/util/guards';
 import { Document, Scalar } from 'yaml';
 
 export const OPTIMIZE_CONFIG_PATH = 'optimize.yaml';
-export const STUDY_DATASET_PATH = 'dataset.json';
 
 /** The gateway holds the provider key; Fabric still requires a credential env value at startup. */
 const IGW_API_KEY_ENV = 'NEMO_AGENTS_IGW_API_KEY';
@@ -68,49 +62,16 @@ export const gatewayAgentModel = (
 };
 
 export interface BuildOptimizeConfigParams {
-  workspace: string;
   values: OptimizationFormOutput;
   agentModel?: Record<string, unknown>;
-  evaluationData: StudyEvaluation;
 }
 
-const originalJudgeModel = (workspace: string, model: unknown): Record<string, unknown> => {
-  if (typeof model === 'string') {
-    const modelWorkspace = model.includes('/') ? model.slice(0, model.indexOf('/')) : workspace;
-    return { provider: 'nvidia', model, base_url: gatewayBaseUrl(modelWorkspace) };
-  }
-  const inline = asRecord(model);
-  if (
-    typeof inline?.url !== 'string' ||
-    typeof inline.name !== 'string' ||
-    inline.api_key_secret ||
-    inline.default_headers
-  ) {
-    throw new Error(
-      'Frontend-generated optimization requires a registered judge model or an inline model without custom authentication.'
-    );
-  }
-  return {
-    provider: 'openai',
-    model: inline.served_model_name ?? inline.name,
-    base_url: inline.url,
-  };
-};
-
-/** The job merges only optimizer, eval and models onto the agent; metadata would be dropped.
+/** The job merges only optimizer, eval and models onto the agent; metadata would be dropped. The
+ *  study's dataset, judge and evaluator come from the evaluation config it is submitted with.
  *  One repetition per row keeps the run count equal to trials × rows. */
-export const buildOptimizeConfig = ({
-  workspace,
-  values,
-  agentModel,
-  evaluationData,
-}: BuildOptimizeConfigParams): string => {
-  const mimicked = mimicEvaluation(evaluationData);
+export const buildOptimizeConfig = ({ values, agentModel }: BuildOptimizeConfigParams): string => {
   const config = {
-    models: {
-      ...(agentModel ? { default: agentModel } : {}),
-      judge: originalJudgeModel(workspace, mimicked.model),
-    },
+    ...(agentModel ? { models: { default: agentModel } } : {}),
     optimizer: {
       experiment_id: values.experimentId,
       numeric: {
@@ -137,41 +98,16 @@ export const buildOptimizeConfig = ({
         },
       },
     },
-    eval: {
-      general: {
-        dataset: { file_path: STUDY_DATASET_PATH },
-      },
-      evaluators: {
-        accuracy: {
-          _type: 'tunable_rag_evaluator',
-          llm_name: 'judge',
-          default_scoring: false,
-          inference: mimicked.inference,
-          judge_llm_prompt: MIMICKED_JUDGE_PROMPT,
-        },
-      },
-    },
   };
 
   return new Document(config).toString();
 };
 
-/** The two files a study's bundle fileset holds: the optimize config and the rows it scores. */
 export const buildStudyBundle = (params: BuildOptimizeConfigParams): FilesetEntry[] => [
   {
     path: OPTIMIZE_CONFIG_PATH,
     file: new File([buildOptimizeConfig(params)], OPTIMIZE_CONFIG_PATH, {
       type: 'application/yaml',
     }),
-  },
-  {
-    path: STUDY_DATASET_PATH,
-    file: new File(
-      [JSON.stringify(mimicEvaluation(params.evaluationData).rows, null, 2)],
-      STUDY_DATASET_PATH,
-      {
-        type: 'application/json',
-      }
-    ),
   },
 ];

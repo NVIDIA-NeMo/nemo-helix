@@ -115,6 +115,17 @@ describe('launchOptimizeStudy', () => {
     });
   });
 
+  it('passes an evaluation config through to the strategy', async () => {
+    await launchOptimizeStudy({ ...params(), evaluationConfig: 'ws/eval-data#eval-config.yaml' });
+
+    expect(agentOptimizationCreateRunStrategyJob).toHaveBeenCalledWith(
+      'ws',
+      expect.objectContaining({
+        spec: expect.objectContaining({ evaluation_config: 'ws/eval-data#eval-config.yaml' }),
+      })
+    );
+  });
+
   it('keeps the bundle name within a fileset name for a long agent name', () => {
     const name = optimizeBundleFilesetName(`${'a'.repeat(50)}-b`, 1_700_000_000_000);
 
