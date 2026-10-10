@@ -16,12 +16,12 @@ from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
     HelixJobStatusUpdateRequest,
     HelixJobTaskUpdate,
+    JobControl,
     JobLogsQueryParams,
     JobStatusDetailsUpdate,
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     ListStepsQueryParams,
-    PauseTTLUpdate,
 )
 
 from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
@@ -274,13 +274,13 @@ def _render_source_jobs_call(resource_path: list[str], method: str) -> list[str]
             "response = jobs_client.rerun_job(job=args['name'], workspace=args.get('workspace'))",
             "print(response.data())",
         ]
-    if operation == (("jobs",), "pause_ttl"):
+    if operation == (("jobs",), "control"):
         return [
-            "from nemo_helix_plugin.jobs.types import PauseTTLUpdate",
-            "response = jobs_client.update_pause_ttl(",
+            "from nemo_helix_plugin.jobs.types import JobControl",
+            "response = jobs_client.update_job_control(",
             "    name=args['name'],",
             "    workspace=args.get('workspace'),",
-            "    body=PauseTTLUpdate(pause_ttl_seconds=args['pause_ttl_seconds']),",
+            "    body=JobControl(pause_ttl_seconds=args['pause_ttl_seconds']),",
             ")",
             "print(response.data())",
         ]
@@ -1011,31 +1011,35 @@ def rerun_jobs(
     )
 
 
-@app.command("pause-ttl")
+@app.command("control")
 @collect_warnings
 @handle_errors
-def update_pause_ttl(
+def update_job_control(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
     pause_ttl_seconds: Annotated[
-        int, typer.Option("--seconds", help="How long to keep storage, measured from the pause.")
+        int,
+        typer.Option(
+            "--pause-ttl-seconds",
+            help="How long to keep storage after a pause, measured from the pause. Cannot exceed the platform maximum.",
+        ),
     ],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Change how long a paused job keeps its storage."""
+    """Change mutable job behavior, such as how long a pause keeps storage."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, "pause_ttl_seconds": pause_ttl_seconds, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "pause_ttl", kwargs, resolved_output_format, state):
+    if handle_code_generation(["jobs"], "control", kwargs, resolved_output_format, state):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.update_pause_ttl(
+    result = jobs_client.update_job_control(
         name=name,
         workspace=workspace,
-        body=PauseTTLUpdate(pause_ttl_seconds=pause_ttl_seconds),
+        body=JobControl(pause_ttl_seconds=pause_ttl_seconds),
     ).data()
 
     format_output(

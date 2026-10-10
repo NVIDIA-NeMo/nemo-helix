@@ -126,14 +126,6 @@ class HelixJobSpec(JobSpecModel):
 
     steps: list[HelixJobStepSpec] = Field(description="List of steps to be executed in the job")
     secrets: Optional[list[HelixJobSecret]] = Field(default=None, description="Secrets referenced by the job")
-    pause_ttl_seconds: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description="Per-job override for how long storage is kept after a step becomes paused, measured from "
-        "that step's stopped_at. Ignored on create. When unset, the platform paused-storage TTL applies. "
-        "A value of 0 reclaims storage on the next retention pass. While the job is paused, this value can "
-        "be changed without moving the start time.",
-    )
 
     @model_validator(mode="after")
     def validate_steps(self) -> Self:

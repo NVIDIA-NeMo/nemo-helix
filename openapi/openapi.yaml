@@ -6312,13 +6312,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/pause-ttl:
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control:
     patch:
       tags:
       - Jobs
-      summary: Update Pause Ttl
-      description: Change how long a paused job keeps its storage.
-      operationId: update_pause_ttl_apis_jobs_v2_workspaces__workspace__jobs__name__pause_ttl_patch
+      summary: Update Job Control
+      description: Change mutable job behavior, such as how long a pause keeps storage.
+      operationId: update_job_control_apis_jobs_v2_workspaces__workspace__jobs__name__control_patch
       parameters:
       - name: name
         in: path
@@ -6337,7 +6337,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PauseTTLUpdate'
+              $ref: '#/components/schemas/JobControl'
       responses:
         '200':
           description: Successful Response
@@ -6348,7 +6348,7 @@ paths:
         '404':
           description: Job not Found
         '409':
-          description: The pause window can only be changed while the job is paused
+          description: Storage has been reclaimed
         '422':
           description: Validation Error
           content:
@@ -11006,6 +11006,11 @@ components:
           title: Spec
         platform_spec:
           $ref: '#/components/schemas/HelixJobSpec'
+        control:
+          allOf:
+          - $ref: '#/components/schemas/JobControl'
+          description: Mutable job behavior, including how long storage is kept after
+            a pause. When omitted, the platform paused-storage TTL applies.
         source:
           type: string
           title: Source
@@ -14592,6 +14597,9 @@ components:
           description: Job Spec
         platform_spec:
           $ref: '#/components/schemas/HelixJobSpec'
+        control:
+          $ref: '#/components/schemas/JobControl'
+          description: Mutable job behavior. This is not part of the execution spec.
         fileset:
           type: string
           title: Fileset
@@ -14768,15 +14776,6 @@ components:
           items:
             $ref: '#/components/schemas/HelixJobSecret'
           type: array
-        pause_ttl_seconds:
-          title: Pause Ttl Seconds
-          description: Per-job override for how long storage is kept after a step
-            becomes paused, measured from that step's stopped_at. Ignored on create.
-            When unset, the platform paused-storage TTL applies. A value of 0 reclaims
-            storage on the next retention pass. While the job is paused, this value
-            can be changed without moving the start time.
-          type: integer
-          minimum: 0.0
       type: object
       required:
       - steps
@@ -18443,20 +18442,20 @@ components:
       type: object
       title: PatronusRailConfig
       description: Configuration data for the Patronus Evaluate API
-    PauseTTLUpdate:
+    JobControl:
       properties:
         pause_ttl_seconds:
           type: integer
           minimum: 0.0
           title: Pause Ttl Seconds
-          description: Seconds to keep storage, measured from stopped_at. This overrides
-            the platform paused-storage TTL and does not move the start time. 0 reclaims
-            on the next pass.
+          description: How long this job keeps storage after it pauses, measured from
+            stopped_at. When unset, the platform paused-storage TTL applies. Cannot
+            exceed the platform maximum. 0 reclaims on the next retention pass. Changing
+            this value does not move the start time.
       type: object
-      required:
-      - pause_ttl_seconds
-      title: PauseTTLUpdate
-      description: Request body for changing how long a paused job keeps its storage.
+      title: JobControl
+      description: Mutable job behavior, stored on the job and kept off the execution
+        spec.
     PolygrafDetection:
       properties:
         server_endpoint:

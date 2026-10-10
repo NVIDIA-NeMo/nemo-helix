@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
+from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.entities import (
@@ -30,6 +31,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobResponse,
     HelixJobTaskUpdate,
 )
+from nhx.core.jobs.app.constants import IMAGE_DIGEST_AT_SAVE
 from nhx.core.jobs.app.dispatcher import (
     JobDeletionConflictError,
     JobDispatcher,
@@ -38,6 +40,7 @@ from nhx.core.jobs.app.dispatcher import (
 )
 from nhx.core.jobs.app.schemas import (
     HelixJobStepSpec,
+    StepLifecycle,
 )
 from nhx.core.jobs.app.test_helpers import TestConstants
 from nhx.core.jobs.entities import (
@@ -1281,8 +1284,8 @@ async def test_resume_and_rerun_reject_reclaimed_storage(
 
     with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
         await mock_dispatcher.resume_job(job.name, DEFAULT_WORKSPACE)
-    with pytest.raises(JobOperationConflictError, match="paused with storage"):
-        await mock_dispatcher.update_pause_ttl(job.name, DEFAULT_WORKSPACE, 10)
+    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
+        await mock_dispatcher.update_job_control(job.name, DEFAULT_WORKSPACE, JobControl(pause_ttl_seconds=10))
 
     failed = await mock_dispatcher.create_job(
         sample_platform_job_request.model_copy(update={"name": "reclaimed-error"}), DEFAULT_WORKSPACE
@@ -1295,6 +1298,70 @@ async def test_resume_and_rerun_reject_reclaimed_storage(
     )
     with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
         await mock_dispatcher.rerun_job(failed.name, DEFAULT_WORKSPACE)
+
+
+@pytest.mark.asyncio
+async def test_pause_targets_a_live_step_before_an_idempotent_return(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A created, pending, or active step is paused even if another step is already paused."""
+    spec = sample_platform_job_request.platform_spec.model_copy(deep=True)
+    spec.steps[0].lifecycle = StepLifecycle(pause_deadline_seconds=60)
+    spec.steps.append(
+        HelixJobStepSpec(
+            name="second-step",
+            executor=spec.steps[0].executor,
+            config={},
+            lifecycle=StepLifecycle(pause_deadline_seconds=60),
+        )
+    )
+    request = sample_platform_job_request.model_copy(update={"name": "pause-live-step", "platform_spec": spec})
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    first_step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert first_step is not None
+    await mock_dispatcher.update_job_status_from_step(first_step, HelixJobStatus.PAUSED)
+    second_step = await mock_store.add(
+        HelixJobStep(
+            attempt_id=job.attempt_id,
+            name="second-step",
+            workspace=DEFAULT_WORKSPACE,
+            config={},
+            status=HelixJobStatus.ACTIVE,
+        )
+    )
+
+    paused = await mock_dispatcher.pause_job(job.name, DEFAULT_WORKSPACE)
+    assert paused is not None
+    updated_second = await mock_store.get_by_id(HelixJobStep, second_step.id)
+    assert updated_second is not None
+    assert updated_second.status == HelixJobStatus.PAUSING
+    updated_first = await mock_store.get_by_id(HelixJobStep, first_step.id)
+    assert updated_first is not None
+    assert updated_first.status == HelixJobStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_error_copies_saved_image_digest_onto_the_attempt(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """Rerun reads the saved digest from the attempt, so the step snapshot has to land there."""
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    await mock_dispatcher.update_job_status_from_step(
+        step,
+        HelixJobStatus.ERROR,
+        status_details={"image_digest": "sha256:saved"},
+    )
+
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt is not None
+    assert attempt.status_details[IMAGE_DIGEST_AT_SAVE] == "sha256:saved"
 
 
 @pytest.mark.asyncio

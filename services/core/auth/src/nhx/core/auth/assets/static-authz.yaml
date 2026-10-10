@@ -371,8 +371,6 @@ authz:
       - jobs.cancel
       - jobs.create
       - jobs.delete
-      - jobs.jobs.create
-      - jobs.jobs.update
       - jobs.update
       - models.adapters.create
       - models.adapters.delete
@@ -1062,6 +1060,42 @@ authz:
         scopes:
         - intake:read
         - platform:read
+    /apis/intake/v2/workspaces/{workspace}/experiments:
+      get:
+        permissions:
+        - intake.experiments.read
+        scopes:
+        - intake:read
+        - platform:read
+      post:
+        permissions:
+        - intake.experiments.create
+        scopes:
+        - intake:write
+        - platform:write
+    /apis/intake/v2/workspaces/{workspace}/experiments/{name}:
+      delete:
+        permissions:
+        - intake.experiments.delete
+        scopes:
+        - intake:write
+        - platform:write
+      get:
+        permissions:
+        - intake.experiments.read
+        scopes:
+        - intake:read
+        - platform:read
+      put:
+        permissions:
+        - intake.experiments.update
+        scopes:
+        - intake:write
+        - platform:write
+    # Deprecated /experiment-groups aliases: the parent resource moved to /experiments, but the old
+    # paths are kept as hidden back-compat routes (include_in_schema=False), so they are absent from
+    # the OpenAPI-derived bundle. Map them to the intake.experiments.* permissions and mark
+    # x-not-in-openapi so the orphan check skips them. Remove alongside the router aliases.
     /apis/intake/v2/workspaces/{workspace}/experiment-groups:
       get:
         x-not-in-openapi: true
@@ -1099,42 +1133,6 @@ authz:
         scopes:
         - intake:write
         - platform:write
-    /apis/intake/v2/workspaces/{workspace}/experiments:
-      get:
-        permissions:
-        - intake.experiments.read
-        scopes:
-        - intake:read
-        - platform:read
-      post:
-        permissions:
-        - intake.experiments.create
-        scopes:
-        - intake:write
-        - platform:write
-    /apis/intake/v2/workspaces/{workspace}/experiments/{name}:
-      delete:
-        permissions:
-        - intake.experiments.delete
-        scopes:
-        - intake:write
-        - platform:write
-      get:
-        permissions:
-        - intake.experiments.read
-        scopes:
-        - intake:read
-        - platform:read
-      put:
-        permissions:
-        - intake.experiments.update
-        scopes:
-        - intake:write
-        - platform:write
-    # Deprecated /experiment-groups aliases: the parent resource moved to /experiments, but the old
-    # paths are kept as hidden back-compat routes (include_in_schema=False), so they are absent from
-    # the OpenAPI-derived bundle. Map them to the intake.experiments.* permissions and mark
-    # x-not-in-openapi so the orphan check skips them. Remove alongside the router aliases.
     /apis/intake/v2/workspaces/{workspace}/ingest/atif:
       post:
         permissions:
@@ -1242,7 +1240,7 @@ authz:
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
       post:
         permissions:
-        - jobs.jobs.create
+        - jobs.create
         scopes:
         - jobs:write
         - platform:write
@@ -1334,10 +1332,10 @@ authz:
         scopes:
         - jobs:write
         - platform:write
-    /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/pause-ttl:
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control:
       patch:
         permissions:
-        - jobs.jobs.update
+        - jobs.update
         scopes:
         - jobs:write
         - platform:write
