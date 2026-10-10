@@ -6803,8 +6803,12 @@ components:
           default: false
         request_timeout:
           title: Request Timeout
-          description: The timeout to be used for requests made to the model.
+          description: Timeout in seconds for each request to the evaluation target.
+            When unset, agent targets wait 300 seconds and model targets use the client
+            default. LLM-as-judge requests take their timeout from the judge's inference
+            settings instead.
           type: integer
+          minimum: 1.0
         max_retries:
           type: integer
           minimum: 0.0
@@ -6838,8 +6842,12 @@ components:
           default: false
         request_timeout:
           title: Request Timeout
-          description: The timeout to be used for requests made to the model.
+          description: Timeout in seconds for each request to the evaluation target.
+            When unset, agent targets wait 300 seconds and model targets use the client
+            default. LLM-as-judge requests take their timeout from the judge's inference
+            settings instead.
           type: integer
+          minimum: 1.0
         max_retries:
           type: integer
           minimum: 0.0

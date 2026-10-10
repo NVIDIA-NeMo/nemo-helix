@@ -77,6 +77,7 @@ import {
   buildAgentEvalRequestBody,
   buildDatasetEvalRequestBody,
   DEFAULT_PARALLELISM,
+  DEFAULT_REQUEST_TIMEOUT_SECONDS,
   type DatasetEvalSpec,
   type EvalConfigFormat,
   type EvalSpec,
@@ -156,6 +157,7 @@ const DATASET_SOURCE_ITEMS = [
 ];
 
 const MAX_PARALLELISM = 16;
+const MAX_REQUEST_TIMEOUT_SECONDS = 3600;
 
 const NO_EVALUATIONS_MESSAGE =
   'No evaluations with a reusable eval config yet. Go back and create an experiment instead — its run is re-runnable from here afterwards.';
@@ -181,6 +183,11 @@ const submitEvaluationBaseSchema = z.object({
     .int('Use a whole number')
     .min(1, 'At least 1')
     .max(MAX_PARALLELISM, `At most ${MAX_PARALLELISM}`),
+  requestTimeoutSeconds: z.coerce
+    .number()
+    .int('Use a whole number')
+    .min(1, 'At least 1 second')
+    .max(MAX_REQUEST_TIMEOUT_SECONDS, `At most ${MAX_REQUEST_TIMEOUT_SECONDS} seconds`),
   ...experimentSettingsSchemaShape,
 });
 
@@ -239,6 +246,7 @@ const makeDefaultValues = (
   datasetFile: '',
   datasetBatchGlob: '',
   parallelism: DEFAULT_PARALLELISM,
+  requestTimeoutSeconds: DEFAULT_REQUEST_TIMEOUT_SECONDS,
   ...EXPERIMENT_SETTINGS_DEFAULTS,
 });
 
@@ -769,6 +777,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
           experimentName: nameStem,
           evaluationId,
           parallelism: formData.parallelism,
+          requestTimeoutSeconds: formData.requestTimeoutSeconds,
         };
         const created = isDatasetEvalSpec(spec)
           ? await evalsCreateEvaluateJob(
@@ -1154,6 +1163,17 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                   slotInfo:
                     'Rows sent to the agent at once. Lower it for a slow agent: a deployment that answers one request at a time fails rows that wait too long in its queue.',
                   slotError: errors.parallelism?.message,
+                }}
+              />
+
+              <ControlledTextInput
+                useControllerProps={{ control, name: 'requestTimeoutSeconds' }}
+                name="requestTimeoutSeconds"
+                label="Agent request timeout (seconds)"
+                type="number"
+                formFieldProps={{
+                  slotInfo: `How long to wait for the agent to answer one row (default ${DEFAULT_REQUEST_TIMEOUT_SECONDS}). A row that times out is not retried. Waiting longer also needs the platform's agent gateway timeout, NEMO_AGENTS_GATEWAY_READ_TIMEOUT, raised to match.`,
+                  slotError: errors.requestTimeoutSeconds?.message,
                 }}
               />
             </>

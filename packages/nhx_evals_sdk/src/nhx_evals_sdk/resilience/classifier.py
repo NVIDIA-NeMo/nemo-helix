@@ -11,7 +11,7 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 import openai
-from nhx_evals_sdk.resilience.types import ClassifierResult, FailureClass
+from nhx_evals_sdk.resilience.types import AbandonedRequestTimeoutError, ClassifierResult, FailureClass
 
 _HARD_OVERLOAD_STATUS_CODES = frozenset({429, 503})
 _TRANSIENT_STATUS_CODES = frozenset({408, 500, 502, 504})
@@ -81,6 +81,14 @@ def classify_exception(exc: Exception) -> ClassifierResult:
     status_code = _status_code_from_exception(exc)
     error_type = type(exc).__name__
 
+    if isinstance(exc, AbandonedRequestTimeoutError):
+        return ClassifierResult(
+            failure_class=FailureClass.SOFT_OVERLOAD,
+            retryable=False,
+            retry_after_seconds=retry_after,
+            status_code=status_code,
+            error_type=error_type,
+        )
     if isinstance(exc, (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout, openai.APITimeoutError)):
         return ClassifierResult(
             failure_class=FailureClass.SOFT_OVERLOAD,

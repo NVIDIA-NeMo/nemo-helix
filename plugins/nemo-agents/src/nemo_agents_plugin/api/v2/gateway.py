@@ -48,6 +48,7 @@ from nemo_agents_plugin.api.v2.openai_errors import (
 )
 from nemo_agents_plugin.api.v2.session_access import get_owned_session_by_id
 from nemo_agents_plugin.authz import scope
+from nemo_agents_plugin.client_disconnect import cancel_on_disconnect
 from nemo_agents_plugin.deployment_routing import get_deployment_endpoint, is_deployment_routable
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
@@ -782,13 +783,31 @@ async def _proxy(
         finally:
             await _complete_activity_once()
 
-    # Prime: triggers the HTTP request, populates response_headers / status_code_holder,
-    # and catches the most common failure modes before we commit to a StreamingResponse.
+    def _content_type() -> str:
+        return response_headers.get("content-type", "application/json")
+
+    async def _read_until_response_ready() -> None:
+        # Prime: triggers the HTTP request, populates response_headers / status_code_holder,
+        # and catches the most common failure modes before we commit to a StreamingResponse.
+        try:
+            chunks.append(await stream_gen.__anext__())
+        except StopAsyncIteration:
+            return  # empty body — still valid (e.g. 204)
+        # NAT's ChatResponse.from_string() defaults model to "unknown-model" when
+        # the agent wrapper doesn't supply one (the wrapper code lives in
+        # nvidia-nat-core and doesn't have access to the platform entity name).
+        # For non-streaming JSON responses, patch the model field to the
+        # agent/deployment name the client addressed.  This is a gateway-level
+        # workaround; the proper upstream fix belongs in nvidia-nat-core's
+        # NemoAgentWrapperFunction.convert_to_chat_response where the LLM's
+        # response_metadata carries the real model name.
+        if model_name and not _content_type().startswith("text/event-stream"):
+            async for remaining in stream_gen:
+                chunks.append(remaining)
+
+    # Starlette only notices a client disconnect once a StreamingResponse is sending.
     try:
-        first_chunk = await stream_gen.__anext__()
-        chunks.append(first_chunk)
-    except StopAsyncIteration:
-        pass  # empty body — still valid (e.g. 204)
+        await cancel_on_disconnect(request, _read_until_response_ready())
     except HTTPException:
         await _complete_activity_once()
         raise  # 5xx → 502 translation raised inside the generator; propagate as-is
@@ -799,23 +818,9 @@ async def _proxy(
         await _complete_activity_once()
         raise
 
-    content_type = response_headers.get("content-type", "application/json")
+    content_type = _content_type()
 
-    # NAT's ChatResponse.from_string() defaults model to "unknown-model" when
-    # the agent wrapper doesn't supply one (the wrapper code lives in
-    # nvidia-nat-core and doesn't have access to the platform entity name).
-    # For non-streaming JSON responses, patch the model field to the
-    # agent/deployment name the client addressed.  This is a gateway-level
-    # workaround; the proper upstream fix belongs in nvidia-nat-core's
-    # NemoAgentWrapperFunction.convert_to_chat_response where the LLM's
-    # response_metadata carries the real model name.
     if model_name and not content_type.startswith("text/event-stream"):
-        try:
-            async for remaining in stream_gen:
-                chunks.append(remaining)
-        except BaseException:
-            await _complete_activity_once()
-            raise
         raw = b"".join(chunks)
         try:
             data = json.loads(raw)

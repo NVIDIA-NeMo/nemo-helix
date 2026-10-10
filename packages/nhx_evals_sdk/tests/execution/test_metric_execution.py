@@ -751,6 +751,22 @@ class TestBenchmarkPathStructuredOutput:
 
 class TestGenerateOnlineSample:
     @pytest.mark.asyncio
+    async def test_passes_run_config_timeout_and_retries_to_agent_call(self, mocker: MockerFixture):
+        inference_fn = mocker.AsyncMock(return_value={"choices": [{"message": {"content": "done"}}]})
+
+        await generate_online_sample(
+            target=_make_agent(),
+            row={"prompt": "hello"},
+            index=0,
+            prompt_template={"prompt": "{{item.prompt}}"},
+            params=RunConfigOnline(request_timeout=600, max_retries=1),
+            inference_fn=inference_fn,
+        )
+
+        assert inference_fn.await_args.kwargs["timeout"] == 600
+        assert inference_fn.await_args.kwargs["max_retries"] == 1
+
+    @pytest.mark.asyncio
     async def test_returns_empty_sample_when_response_and_output_text_are_empty(self, mocker: MockerFixture):
         inference_fn = mocker.AsyncMock(return_value={})
         mocker.patch(
