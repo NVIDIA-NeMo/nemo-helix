@@ -302,23 +302,6 @@ def render_prometheus_metrics() -> str:
     )
     samples.extend(
         _metric_family(
-            "scaled_evals_switchyard_teardown_resources",
-            "gauge",
-            "Switchyard runtime resources pending drain or retry after delete failure.",
-            [
-                (
-                    (("state", "draining"),),
-                    dispatch_snapshot["switchyard_teardown"].get("draining", 0),
-                ),
-                (
-                    (("state", "delete_failed"),),
-                    dispatch_snapshot["switchyard_teardown"].get("delete_failed", 0),
-                ),
-            ],
-        )
-    )
-    samples.extend(
-        _metric_family(
             "scaled_evals_dependency_ready",
             "gauge",
             "Required dependency readiness from the latest readiness probe.",
@@ -453,7 +436,6 @@ def _dispatch_observability_snapshot() -> dict:
         "oldest_worker_lease_seconds": 0.0,
         "stuck_jobs": [],
         "backend_failures": [],
-        "switchyard_teardown": {"draining": 0, "delete_failed": 0},
     }
     try:
         with pooled_connection(timeout=3) as conn:

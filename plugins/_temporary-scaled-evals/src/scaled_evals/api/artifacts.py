@@ -503,11 +503,6 @@ def build_evaluation_archive(evaluation_id: str) -> dict[str, Any]:
     }
 
 
-def upload_context_archive(archive_path: Path, object_key: str) -> None:
-    """Upload a local build-context archive to its fileset (server-side put)."""
-    _files_backend.upload_file(archive_path, object_key, content_type="application/gzip")
-
-
 def download_object(object_key: str, dest_path: str) -> None:
     """Download a file to a local path (server-side fetch, e.g. the task build reading a pack)."""
     _files_backend.download_object(object_key, dest_path)

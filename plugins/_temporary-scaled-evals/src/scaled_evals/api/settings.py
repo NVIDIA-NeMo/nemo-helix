@@ -563,24 +563,6 @@ class Settings(BaseSettings):
     gym_job_memory_limit: str = "8Gi"
     gym_job_shm_size: str = "2Gi"
 
-    # --- Per-evaluation Switchyard dispatch --------------------------------
-    # When an evaluation sets switchyard_profile_id, dispatch provisions one
-    # Switchyard Deployment/Service/Secret/ConfigMap before launching the runner.
-    # The profile should normally supply the image and namespace; these settings
-    # are service defaults/fallbacks for local compose and cluster deployments.
-    switchyard_image: str | None = None
-    # Comma-separated imagePullSecret names automatically applied to every
-    # ephemeral Switchyard Deployment. Hosted deployments point this at a
-    # platform-provided pull secret so end users never need registry credentials.
-    switchyard_image_pull_secrets: str = ""
-    switchyard_namespace: str | None = None
-    switchyard_kube_context: str | None = None
-    switchyard_kube_insecure_skip_tls_verify: bool = False
-    switchyard_drain_seconds: float = 300.0
-    # Comma-separated exact hosts or leading-wildcard DNS suffixes approved for
-    # external Switchyard profiles. Empty disables external endpoints.
-    switchyard_external_allowed_hosts: str = ""
-
     # --- NHX Intake (post-run ATIF upload) ---------------------------------
     # Platform root; the client appends ``/apis/intake/v2/...``. No default: an
     # upload target is deployment-specific, and a wrong one would silently ship

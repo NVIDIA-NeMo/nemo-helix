@@ -11,18 +11,14 @@ evaluation. Auth and endpoint resolve as flag > env var > default.
 from __future__ import annotations
 
 import json
-import re
 import shlex
-import subprocess
 import tempfile
 import time
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 import click
 
-from scaled_evals.api.build.errors import BuildError
-from scaled_evals.api.build.uploaded_context import archive_context_directory
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.benchmark_import import (
     import_id_from_legacy_state,
@@ -48,8 +44,8 @@ from .client import (
 )
 
 VISIBILITY = ["private", "team", "org", "public"]
-CREDENTIAL_PROVIDER = ["openai", "anthropic", "nvidia", "nhx", "openshift", "switchyard"]
-CONFIG_PROFILE_TYPE = ["harbor", "gym", "switchyard", "intake"]
+CREDENTIAL_PROVIDER = ["openai", "anthropic", "nvidia", "nhx", "openshift"]
+CONFIG_PROFILE_TYPE = ["harbor", "gym", "intake"]
 FRAMEWORK = ["harbor", "nemo_gym"]
 ORDER = ["asc", "desc"]
 KNOWN_RUNTIME_HINT = (
@@ -716,208 +712,6 @@ def _emit_wait_result(ctx: click.Context, data: dict[str, Any]) -> None:
         for label in ("artifacts", "provenance", "sbom", "archive"):
             if links.get(label):
                 click.echo(f"  {label}: {links[label]}")
-
-
-# ---------- Switchyard ----------------------------------------------------
-
-
-@cli.group()
-def switchyard() -> None:
-    """Publish and manage Switchyard runtime images."""
-
-
-def _git_head(path: Path) -> str:
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise click.ClickException("--source-ref is required when --context-dir is not inside a git checkout") from exc
-    return proc.stdout.strip()
-
-
-def _git_dirty(path: Path) -> bool:
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(path), "status", "--porcelain", "--untracked-files=all"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise click.ClickException("--context-dir must be inside a git checkout") from exc
-    return bool(proc.stdout.strip())
-
-
-def _clean_relative_path(value: str, *, label: str) -> str:
-    normalized = value.strip() or "."
-    path = PurePosixPath(normalized)
-    if path.is_absolute() or ".." in path.parts:
-        raise click.ClickException(f"{label} must stay within --context-dir")
-    return path.as_posix()
-
-
-def _default_switchyard_dockerfile_path(
-    context_dir: Path,
-    *,
-    context_path: str,
-    requested: str | None,
-) -> str:
-    if requested:
-        return _clean_relative_path(requested, label="--dockerfile-path")
-    context_dockerfile = "Dockerfile" if context_path == "." else f"{context_path.rstrip('/')}/Dockerfile"
-    official_dockerfile = "benchmark/switchyard-rust-server.Dockerfile"
-    if (
-        context_path == "."
-        and not (context_dir / context_dockerfile).is_file()
-        and (context_dir / official_dockerfile).is_file()
-    ):
-        return official_dockerfile
-    return context_dockerfile
-
-
-@switchyard.command("publish")
-@click.option(
-    "--source-project",
-    default="NVIDIA-NeMo/Switchyard",
-    show_default=True,
-    help="GitHub Switchyard project path to publish from.",
-)
-@click.option(
-    "--source-ref",
-    default=None,
-    help="Full 40-character GitHub Switchyard commit SHA; defaults to --context-dir HEAD.",
-)
-@click.option(
-    "--context-path",
-    default=".",
-    show_default=True,
-    help="Build context path inside --context-dir.",
-)
-@click.option(
-    "--dockerfile-path",
-    default=None,
-    help=(
-        "Dockerfile path inside --context-dir. Defaults to Dockerfile, or "
-        "benchmark/switchyard-rust-server.Dockerfile for the GitHub Switchyard repo."
-    ),
-)
-@click.option(
-    "--context-dir",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="Local Switchyard build-context directory checked out at --source-ref.",
-)
-@click.option(
-    "--profile-name",
-    default=None,
-    help="Optional name for the reusable Switchyard config profile.",
-)
-@click.option("--wait/--no-wait", default=True, help="Wait for the publication to finish.")
-@click.option(
-    "--poll-interval",
-    type=click.FloatRange(min=1.0),
-    default=5.0,
-    show_default=True,
-    help="Seconds between asynchronous publication status checks.",
-)
-@click.option(
-    "--timeout",
-    type=click.FloatRange(min=1.0),
-    default=2400.0,
-    show_default=True,
-    help="Maximum seconds to wait for an asynchronous publication.",
-)
-@click.pass_context
-def switchyard_publish(
-    ctx: click.Context,
-    source_project: str,
-    source_ref: str | None,
-    context_path: str,
-    dockerfile_path: str | None,
-    context_dir: Path,
-    profile_name: str | None,
-    wait: bool,
-    poll_interval: float,
-    timeout: float,
-) -> None:
-    """Build/sign a Switchyard commit and create or reuse a run profile."""
-    context_path = _clean_relative_path(context_path, label="--context-path")
-    context_head = _git_head(context_dir).lower()
-    source_ref = source_ref.lower() if source_ref else context_head
-    if not re.fullmatch(r"[0-9a-fA-F]{40}", source_ref):
-        raise click.ClickException("--source-ref must be a full 40-character commit SHA")
-    if source_ref != context_head:
-        raise click.ClickException("--source-ref must match --context-dir HEAD")
-    if _git_dirty(context_dir):
-        raise click.ClickException("--context-dir must be clean to publish a committed source ref")
-    dockerfile_path = _default_switchyard_dockerfile_path(
-        context_dir,
-        context_path=context_path,
-        requested=dockerfile_path,
-    )
-    try:
-        archive = archive_context_directory(context_dir, dockerfile_path=dockerfile_path)
-    except BuildError as exc:
-        raise click.ClickException(str(exc)) from exc
-    form: dict[str, str] = {
-        "source_project": source_project,
-        "source_ref": source_ref.lower(),
-        "context_path": context_path,
-        "dockerfile_path": dockerfile_path,
-    }
-    if profile_name:
-        form["profile_name"] = profile_name
-    started = time.monotonic()
-    data = request(
-        ctx.obj["client"],
-        "POST",
-        "/switchyard/publish",
-        data=form,
-        files={"context": ("context.tar.gz", archive, "application/gzip")},
-    )
-    build_id = str(data.get("build_id") or "")
-    if build_id and not wait:
-        emit(
-            data,
-            ctx.obj["json"],
-            [f"switchyard publication {build_id}", f"  status: {data.get('status')}"],
-        )
-        return
-    while build_id:
-        status = str(data.get("status") or "")
-        if status == "succeeded":
-            result = data.get("result")
-            if not isinstance(result, dict):
-                raise click.ClickException("completed Switchyard publication has no profile")
-            data = result
-            break
-        if status == "failed":
-            raise click.ClickException(str(data.get("build_error") or "Switchyard publication failed"))
-        if time.monotonic() - started >= timeout:
-            raise click.ClickException(
-                f"timed out waiting for Switchyard publication {build_id}; the Cloud Build "
-                f"continues and remains available at /v1/switchyard/publishes/{build_id}"
-            )
-        time.sleep(poll_interval)
-        data = request(ctx.obj["client"], "GET", f"/switchyard/publishes/{build_id}")
-    emit(
-        data,
-        ctx.obj["json"],
-        [
-            f"switchyard profile {data.get('profile_id')}",
-            f"  name:       {data.get('profile_name')}",
-            f"  source:     {data.get('source_project')}@{data.get('source_ref')}",
-            f"  context:    {data.get('context_path')} ({data.get('context_hash')})",
-            f"  dockerfile: {data.get('dockerfile_path')}",
-            f"  image:      {data.get('image_ref')}",
-            f"  digest:     {data.get('image_digest')}",
-            f"  reused:     {data.get('reused_profile')}",
-        ],
-    )
 
 
 # ---------- tasks ----------------------------------------------------
@@ -1985,7 +1779,6 @@ def evaluation_preflight(ctx: click.Context, request_body: str) -> None:
     default=None,
     help="Compatibility alias for --framework-profile-id on harbor requests.",
 )
-@click.option("--switchyard-profile-id", default=None, help="Optional Switchyard profile id.")
 @click.option("--intake-profile-id", default=None, help="Optional Intake profile id.")
 @click.option(
     "--credential",
@@ -2053,7 +1846,6 @@ def evaluation_create(
     framework_version: str | None,
     framework_profile_id: str | None,
     harbor_profile_id: str | None,
-    switchyard_profile_id: str | None,
     intake_profile_id: str | None,
     credentials: tuple[str, ...],
     agent_bundle: str | None,
@@ -2094,7 +1886,6 @@ def evaluation_create(
         ("framework_profile_id", framework_profile_id),
         ("framework_version", framework_version),
         ("harbor_profile_id", harbor_profile_id),
-        ("switchyard_profile_id", switchyard_profile_id),
         ("intake_profile_id", intake_profile_id),
         ("runtime", runtime),
         ("network_policy", network_policy),
@@ -2472,7 +2263,6 @@ def _reproduce_command(body: dict[str, object]) -> list[str]:
         command.extend(["--network-policy-config", json.dumps(network_policy_config, separators=(",", ":"))])
     for option, key in (
         ("--framework-profile-id", "framework_profile_id"),
-        ("--switchyard-profile-id", "switchyard_profile_id"),
         ("--intake-profile-id", "intake_profile_id"),
     ):
         if value := body.get(key):
@@ -2974,7 +2764,6 @@ def benchmark_run_preflight(ctx: click.Context, request_body: str) -> None:
     help="Per-member framework profile override, repeatable.",
 )
 @click.option("--harbor-profile-id", default=None)
-@click.option("--switchyard-profile-id", default=None)
 @click.option("--intake-profile-id", default=None)
 @click.option(
     "--credential",
@@ -3013,15 +2802,6 @@ def benchmark_run_preflight(ctx: click.Context, request_body: str) -> None:
     help="Trials within each member task (cross-task concurrency comes from the worker pool).",
 )
 @click.option("--n-attempts", type=int, default=None, help="Attempts for each member task.")
-@click.option(
-    "--max-concurrent-members",
-    type=int,
-    default=None,
-    help=(
-        "Maximum active benchmark member evaluations. Also caps members sharing "
-        "one managed Switchyard gateway when a Switchyard profile is set."
-    ),
-)
 @click.option("--visibility", type=click.Choice(VISIBILITY), default=None)
 @click.option("--framework", type=click.Choice(FRAMEWORK), default=None)
 @click.option(
@@ -3042,7 +2822,6 @@ def benchmark_run_create(
     framework_profile_id: str | None,
     member_framework_profiles: tuple[str, ...],
     harbor_profile_id: str | None,
-    switchyard_profile_id: str | None,
     intake_profile_id: str | None,
     credentials: tuple[str, ...],
     agent_bundle: str | None,
@@ -3055,7 +2834,6 @@ def benchmark_run_create(
     network_policy_config: str | None,
     parallelism: int | None,
     n_attempts: int | None,
-    max_concurrent_members: int | None,
     visibility: str | None,
     framework: str | None,
     preflight: bool,
@@ -3093,7 +2871,6 @@ def benchmark_run_create(
         ("framework_profile_id", framework_profile_id),
         ("framework_version", framework_version),
         ("harbor_profile_id", harbor_profile_id),
-        ("switchyard_profile_id", switchyard_profile_id),
         ("intake_profile_id", intake_profile_id),
         ("runtime", runtime),
         ("network_policy", network_policy),
@@ -3101,7 +2878,6 @@ def benchmark_run_create(
         ("instruction_postfix", instruction_postfix),
         ("n_attempts", n_attempts),
         ("parallelism", parallelism),
-        ("max_concurrent_members", max_concurrent_members),
         ("visibility", visibility),
         ("framework", framework),
     ):
@@ -3326,12 +3102,10 @@ def _benchmark_reproduce_command(body: dict[str, object]) -> list[str]:
     for option, key in (
         ("--framework-version", "framework_version"),
         ("--framework-profile-id", "framework_profile_id"),
-        ("--switchyard-profile-id", "switchyard_profile_id"),
         ("--intake-profile-id", "intake_profile_id"),
         ("--agent-bundle", "agent_bundle_id"),
         ("--instruction-prefix", "instruction_prefix"),
         ("--instruction-postfix", "instruction_postfix"),
-        ("--max-concurrent-members", "max_concurrent_members"),
     ):
         value = body.get(key)
         if value is not None:

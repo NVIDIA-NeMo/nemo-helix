@@ -127,7 +127,6 @@ def _reference_shape_error(body: CreateEvaluationRequest | CreateBenchmarkRunReq
     for field_name, value in (
         ("framework_profile_id", body.framework_profile_id),
         ("harbor_profile_id", body.harbor_profile_id),
-        ("switchyard_profile_id", body.switchyard_profile_id),
         ("intake_profile_id", body.intake_profile_id),
     ):
         if value is not None and not value.startswith("cfg_"):
@@ -152,7 +151,6 @@ def _append_reference_checks(
 ) -> PreflightBlocker | None:
     profile_slots = [
         (body.framework_profile_id, _framework_profile_type(body.framework)),
-        (body.switchyard_profile_id, "switchyard"),
         (body.intake_profile_id, "intake"),
     ]
     if isinstance(body, CreateBenchmarkRunRequest):

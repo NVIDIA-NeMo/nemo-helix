@@ -178,8 +178,6 @@ def preflight(spec: LaunchSpec) -> None:
     # sandbox_k8s features this runtime hasn't implemented.
     if spec.agent_bundle:
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} does not support agent bundles yet")
-    if spec.switchyard is not None:
-        raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} does not support Switchyard leases yet")
 
     # The task must be an uploaded pack with a prebuilt image: submit stages the pack, and
     # OpenSandbox can only run existing images.

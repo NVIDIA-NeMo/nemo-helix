@@ -72,17 +72,10 @@ from scaled_evals.api.repositories.execution_telemetry_repository import (
     ExecutionTelemetryRepository,
 )
 from scaled_evals.api.repositories.resource_usage_repository import ResourceUsageRepository
-from scaled_evals.api.repositories.runtime_resource_repository import (
-    RuntimeResourceRepository,
-    switchyard_lease_from_row,
-)
-from scaled_evals.api.repositories.switchyard_campaign_repository import (
-    SwitchyardCampaignRepository,
-)
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import build_benchmark_archive
 from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives as cleanup_archive_objects
-from scaled_evals.dispatch.credentials import materialize_credential_envs
+from scaled_evals.dispatch.credentials import materialize_credential_env
 from scaled_evals.dispatch.harbor_dataset_images import (
     dataset_configs,
     effective_image_mode,
@@ -97,23 +90,12 @@ from scaled_evals.dispatch.runtime_backend import (
     RuntimeBackend,
     RuntimeStatus,
 )
-from scaled_evals.dispatch.switchyard import (
-    SwitchyardProvisioner,
-    SwitchyardProvisionError,
-    SwitchyardReadinessError,
-    SwitchyardRender,
-    build_switchyard_provisioner,
-    switchyard_routing_runner_env,
-    switchyard_runner_env,
-)
-from scaled_evals.dispatch.switchyard_archive import check_campaign_evidence
-from scaled_evals.dispatch.switchyard_run_manifest import write_switchyard_run_manifest
 from scaled_evals.harbor_runners import resolve_harbor_runner
 from scaled_evals.harbor_viewer import (
     publish_harbor_job_archive,
     result_with_harbor_viewer_publication,
 )
-from scaled_evals.intake.config import resolve_intake_target, resolve_routing_task
+from scaled_evals.intake.config import resolve_intake_target
 from scaled_evals.intake.experiments import ExperimentRequest, build_experiment_name, str_metadata
 from scaled_evals.intake.upload import upload_job_atif_warn
 from scaled_evals.models.evaluations import EvaluationResultWrite
@@ -124,7 +106,6 @@ from scaled_evals.models.execution_snapshot import (
 )
 from scaled_evals.models.gym_identity import snapshot_evaluation
 from scaled_evals.models.provenance import write_run_provenance_manifest
-from scaled_evals.models.runtime import SwitchyardLease
 from scaled_evals.telemetry import summarize_job_telemetry
 
 LOG = logging.getLogger(__name__)
@@ -135,22 +116,6 @@ _TERMINAL_PHASES = frozenset({"succeeded", "failed"})
 _DB_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 # Rows the worker may pick up (including resume after a restart).
 _RESUMABLE_STATUSES = frozenset({"queued", "provisioning", "running"})
-_MODEL_ROUTE_ENV_KEYS = frozenset(
-    {
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "NVIDIA_API_KEY",
-        "NVIDIA_BASE_URL",
-        "NGC_INFERENCE_API_KEY",
-        "POLICY_API_KEY",
-        "POLICY_BASE_URL",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_BASE_URL",
-        "SWITCHYARD_API_KEY",
-    }
-)
-
 ConnFactory = Callable[[], AbstractContextManager[psycopg.Connection]]
 BackendResolver = Callable[[str], RuntimeBackend]
 _DATABASE_CONNECT_RETRY_SECONDS = 300.0
@@ -285,71 +250,49 @@ def _artifact_root(evaluation_id: str, runtime: str) -> Path:
     return get_backend_capabilities(runtime).artifact_root(evaluation_id)
 
 
-def _switchyard_capture_session_ids(
-    artifact_root: Path,
-    evaluation_id: str,
-) -> tuple[str, ...]:
-    """Return native Harbor trial session candidates before Switchyard teardown."""
-    candidates: list[str] = []
-    if artifact_root.is_dir():
-        for trial_dir in sorted(path for path in artifact_root.iterdir() if path.is_dir()):
-            trajectory_path = trial_dir / "agent" / "trajectory.json"
-            result_path = trial_dir / "result.json"
-            if not trajectory_path.is_file() and not result_path.is_file():
-                continue
-
-            if trajectory_path.is_file():
-                try:
-                    trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError) as exc:
-                    LOG.warning("failed to read Switchyard session from %s: %s", trajectory_path, exc)
-                else:
-                    if isinstance(trajectory, dict):
-                        session_id = trajectory.get("session_id")
-                        if isinstance(session_id, str) and session_id.strip():
-                            candidates.append(session_id.strip())
-
-            if result_path.is_file():
-                try:
-                    trial_result = json.loads(result_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError) as exc:
-                    LOG.warning("failed to read Switchyard session from %s: %s", result_path, exc)
-                else:
-                    if isinstance(trial_result, dict):
-                        for key in ("trial_name", "id"):
-                            value = trial_result.get(key)
-                            if isinstance(value, str) and value.strip():
-                                candidates.append(value.strip())
-
-            candidates.append(trial_dir.name)
-
-    candidates.append(evaluation_id)
-    return tuple(dict.fromkeys(candidates))
-
-
 def _execution_id(evaluation_id: str, execution_number: int) -> str:
     return f"{evaluation_id}-x{execution_number}"
-
-
-def _switchyard_topology(
-    row: Mapping[str, Any],
-    execution_number: int | None = None,
-) -> str | None:
-    if not row.get("switchyard_profile_id"):
-        return None
-    number = execution_number or int(row.get("execution_number") or row.get("current_execution") or 1)
-    shared_benchmark = bool(row.get("benchmark_run_id") and row.get("max_concurrent_members"))
-    if shared_benchmark and number == 1:
-        return "shared_campaign"
-    if shared_benchmark:
-        return "dedicated_retry"
-    return "dedicated"
 
 
 def _retry_delay_seconds(evaluation_id: str, execution_number: int) -> float:
     base = min(30, 5 * (2 ** (execution_number - 1)))
     jitter = int(hashlib.sha256(evaluation_id.encode()).hexdigest()[:2], 16) % 5
     return float(base + jitter)
+
+
+def teardown_orphaned_execution(
+    cleanup: Mapping[str, Any],
+    *,
+    worker_id: str,
+    connect: ConnFactory,
+    resolve: BackendResolver = _resolve_backend,
+) -> None:
+    """Teardown one claimed orphaned runtime, then release its evaluation for retry."""
+    try:
+        backend = resolve(str(cleanup["runtime"]))
+        raw_handle = cleanup.get("backend_handle")
+        if isinstance(raw_handle, str):
+            raw_handle = json.loads(raw_handle)
+        if not isinstance(raw_handle, Mapping):
+            raise ValueError("execution cleanup backend handle is not an object")
+        backend.teardown(LaunchHandle.model_validate(raw_handle))
+    except Exception as exc:  # noqa: BLE001 - durable cleanup retries with backoff
+        detail = redact_secret_text(str(exc))
+        LOG.warning(
+            "execution cleanup failed for %s execution %s: %s",
+            cleanup["evaluation_id"],
+            cleanup["execution_number"],
+            detail,
+        )
+        with connect() as conn:
+            ExecutionCleanupRepository(conn).mark_failed(int(cleanup["id"]), worker_id=worker_id, detail=detail)
+        return
+    with connect() as conn:
+        EvaluationRepository(conn).complete_execution_cleanup(
+            int(cleanup["id"]),
+            worker_id=worker_id,
+            retry_delay_seconds=_retry_delay_seconds(str(cleanup["evaluation_id"]), int(cleanup["execution_number"])),
+        )
 
 
 def _copy_runtime_logs_to_artifact_root(evaluation_id: str, runtime: str) -> None:
@@ -467,7 +410,6 @@ class Dispatcher:
     poll_interval: float = field(default_factory=lambda: settings.dispatch_run_poll_interval_seconds)
     max_polls: int = field(default_factory=lambda: settings.dispatch_run_max_polls)
     claim_timeout: float = 30.0
-    switchyard: SwitchyardProvisioner = field(default_factory=build_switchyard_provisioner)
     worker_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{time.time_ns()}")
     job_launcher: Callable[[str], None] | None = None
     job_reconciler: Callable[[], bool] | None = None
@@ -511,31 +453,11 @@ class Dispatcher:
                 did_work = reconciler() or did_work
             except Exception:  # noqa: BLE001 - reconciliation must not stop queue dispatch
                 LOG.exception("Kubernetes evaluation Job reconciliation failed")
-        if settings.dispatch_kubernetes_jobs_enabled or settings.platform_evaluation_jobs_enabled:
+        if settings.dispatch_kubernetes_jobs_enabled and not settings.platform_evaluation_jobs_enabled:
             execution_cleanup = self.claim_next_execution_cleanup()
             if execution_cleanup is not None:
                 self.cleanup_failed_execution(execution_cleanup)
                 did_work = True
-
-        # Lifecycle work must run before admitting more evaluations. Otherwise a
-        # continuously non-empty evaluation queue can retain credentialed
-        # Switchyard gateways indefinitely and exhaust cluster capacity.
-        switchyard_resource = self.claim_next_switchyard_teardown()
-        if switchyard_resource is not None:
-            self.teardown_switchyard_resource(switchyard_resource)
-            return True
-        cleanup = self.claim_next_switchyard_campaign_cleanup()
-        if cleanup is not None:
-            self.cleanup_switchyard_campaign_member(cleanup)
-            return True
-        campaign = self.claim_next_switchyard_campaign_finalization()
-        if campaign is not None:
-            self.finalize_switchyard_campaign(campaign)
-            return True
-        campaign = self.claim_next_switchyard_campaign_deletion()
-        if campaign is not None:
-            self.delete_switchyard_campaign(campaign)
-            return True
 
         evaluation_id = None if settings.platform_evaluation_jobs_enabled else self.claim_next()
         if evaluation_id is not None:
@@ -609,7 +531,7 @@ class Dispatcher:
         try:
             with self.connect() as conn:
                 BenchmarkArchiveRepository(conn).validate_members(job["benchmark_run_id"], job["members"])
-            archive = build_benchmark_archive(job, check_claim=check_claim, evidence_checks=(check_campaign_evidence,))
+            archive = build_benchmark_archive(job, check_claim=check_claim)
             check_claim()
             with self.connect() as conn:
                 published = BenchmarkArchiveRepository(conn).finish(job, **archive)
@@ -638,291 +560,7 @@ class Dispatcher:
 
     def cleanup_failed_execution(self, cleanup: Mapping[str, Any]) -> None:
         """Teardown one orphaned runtime before its logical evaluation retries."""
-        try:
-            backend = self.resolve(str(cleanup["runtime"]))
-            raw_handle = cleanup.get("backend_handle")
-            if isinstance(raw_handle, str):
-                raw_handle = json.loads(raw_handle)
-            if not isinstance(raw_handle, Mapping):
-                raise ValueError("execution cleanup backend handle is not an object")
-            handle = LaunchHandle.model_validate(raw_handle)
-            backend.teardown(handle)
-        except Exception as exc:  # noqa: BLE001 - durable cleanup retries with backoff
-            detail = redact_secret_text(str(exc))
-            LOG.warning(
-                "execution cleanup failed for %s execution %s: %s",
-                cleanup["evaluation_id"],
-                cleanup["execution_number"],
-                detail,
-            )
-            with self.connect() as conn:
-                ExecutionCleanupRepository(conn).mark_failed(
-                    int(cleanup["id"]),
-                    worker_id=self.worker_id,
-                    detail=detail,
-                )
-            return
-        with self.connect() as conn:
-            EvaluationRepository(conn).complete_execution_cleanup(
-                int(cleanup["id"]),
-                worker_id=self.worker_id,
-                retry_delay_seconds=_retry_delay_seconds(
-                    str(cleanup["evaluation_id"]),
-                    int(cleanup["execution_number"]),
-                ),
-            )
-
-    def claim_next_switchyard_campaign_cleanup(self) -> dict | None:
-        with self.connect() as conn:
-            return SwitchyardCampaignRepository(conn).claim_cleanup(
-                worker_id=self.worker_id,
-                claim_seconds=self.claim_timeout,
-            )
-
-    def cleanup_switchyard_campaign_member(self, cleanup: Mapping[str, Any]) -> None:
-        evaluation_id = str(cleanup["evaluation_id"])
-        try:
-            with self.connect() as conn:
-                row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
-            if row is None:
-                raise RuntimeError("campaign member evaluation is missing")
-            backend = self.resolve(str(row["runtime"]))
-            raw_handle = cleanup.get("backend_handle")
-            if isinstance(raw_handle, str):
-                raw_handle = json.loads(raw_handle)
-            handle = (
-                LaunchHandle.model_validate(raw_handle)
-                if isinstance(raw_handle, Mapping)
-                else LaunchHandle(backend=str(row["runtime"]), external_id=evaluation_id)
-            )
-            backend.teardown(handle)
-        except Exception as exc:  # noqa: BLE001 — durable cleanup retries
-            with self.connect() as conn:
-                repo = SwitchyardCampaignRepository(conn)
-                if int(cleanup.get("cleanup_attempts") or 0) >= 5:
-                    repo.abandon_cleanup(evaluation_id, detail=str(exc))
-                else:
-                    repo.mark_cleanup_failed(evaluation_id, detail=str(exc))
-            return
-        with self.connect() as conn:
-            SwitchyardCampaignRepository(conn).acknowledge_cleanup(evaluation_id)
-        # Artifact recovery is best effort and must not keep a successfully
-        # removed runtime in cleanup_pending. In particular, a retried
-        # evaluation's handle may refer to a later execution number.
-        self._sync_artifacts_warn(
-            evaluation_id,
-            str(row["runtime"]),
-            execution_id=handle.external_id,
-            replace=False,
-        )
-
-    def claim_next_switchyard_campaign_finalization(self) -> dict | None:
-        with self.connect() as conn:
-            return SwitchyardCampaignRepository(conn).claim_finalizable(
-                worker_id=self.worker_id,
-                claim_seconds=max(self.claim_timeout, 900.0),
-            )
-
-    def finalize_switchyard_campaign(self, campaign: Mapping[str, Any]) -> None:
-        benchmark_run_id = str(campaign["benchmark_run_id"])
-        lease = _campaign_lease_from_row(campaign)
-        if lease is None:
-            if campaign.get("resource_name"):
-                self._fail_campaign_finalization(
-                    benchmark_run_id,
-                    "Switchyard campaign lease metadata missing or invalid",
-                )
-                return
-            error = str(campaign.get("evidence_error") or "gateway provisioning failed")
-            with self.connect() as conn:
-                repo = SwitchyardCampaignRepository(conn)
-                members = repo.member_ids(benchmark_run_id)
-            reference = {
-                "schema_version": "scaled-evals-switchyard-campaign-evidence-v1",
-                "benchmark_run_id": benchmark_run_id,
-                "status": "unavailable",
-                "routing_stats_object_key": None,
-                "routing_stats_sha256": None,
-                "error": error,
-            }
-            try:
-                for evaluation_id in members:
-                    self._write_campaign_member_reference(evaluation_id, reference)
-                with self.connect() as conn:
-                    repo = SwitchyardCampaignRepository(conn)
-                    marked = repo.mark_evidence(
-                        benchmark_run_id,
-                        status="unavailable",
-                        object_key=None,
-                        sha256=None,
-                        error=error,
-                        drain_seconds=0,
-                        worker_id=self.worker_id,
-                    )
-                    if marked:
-                        repo.release_member_evidence(benchmark_run_id)
-            except Exception as exc:  # noqa: BLE001
-                self._retry_or_finish_campaign_unavailable(campaign, str(exc), drain_seconds=0)
-            return
-        try:
-            with self.connect() as conn:
-                repo = SwitchyardCampaignRepository(conn)
-                member_ids = repo.member_ids(benchmark_run_id)
-            with tempfile.TemporaryDirectory(prefix=f"scaled-evals-switchyard-{benchmark_run_id}-") as tmp:
-                root = Path(tmp)
-                capture_note = self.switchyard.capture(
-                    lease,
-                    root,
-                    final=True,
-                    session_ids=member_ids,
-                )
-                stats_path = root / "switchyard" / "routing_stats_final.json"
-                evidence_status = "ready" if stats_path.is_file() else "unavailable"
-                evidence_error = (
-                    None if stats_path.is_file() else (capture_note or "routing stats artifact was not produced")
-                )
-                prefix = f"benchmark-runs/{benchmark_run_id}/artifacts/"
-                artifacts.sync_directory_to_prefix(root, prefix)
-                object_key = f"{prefix}switchyard/routing_stats_final.json" if stats_path.is_file() else None
-                sha256 = _file_hash(stats_path) if stats_path.is_file() else None
-                reference = {
-                    "schema_version": "scaled-evals-switchyard-campaign-evidence-v1",
-                    "benchmark_run_id": benchmark_run_id,
-                    "status": evidence_status,
-                    "routing_stats_object_key": object_key,
-                    "routing_stats_sha256": sha256,
-                    "error": evidence_error,
-                }
-                for evaluation_id in member_ids:
-                    self._write_campaign_member_reference(evaluation_id, reference)
-                with self.connect() as conn:
-                    repo = SwitchyardCampaignRepository(conn)
-                    marked = repo.mark_evidence(
-                        benchmark_run_id,
-                        status=evidence_status,
-                        object_key=object_key,
-                        sha256=sha256,
-                        error=evidence_error,
-                        drain_seconds=lease.drain_seconds
-                        if lease.drain_seconds is not None
-                        else settings.switchyard_drain_seconds,
-                        worker_id=self.worker_id,
-                    )
-                    if marked:
-                        repo.release_member_evidence(benchmark_run_id)
-        except Exception as exc:  # noqa: BLE001 — durable finalizer retries
-            self._retry_or_finish_campaign_unavailable(
-                campaign,
-                str(exc),
-                drain_seconds=(
-                    lease.drain_seconds if lease.drain_seconds is not None else settings.switchyard_drain_seconds
-                ),
-            )
-
-    def _retry_or_finish_campaign_unavailable(
-        self,
-        campaign: Mapping[str, Any],
-        detail: str,
-        *,
-        drain_seconds: float,
-    ) -> None:
-        benchmark_run_id = str(campaign["benchmark_run_id"])
-        if int(campaign.get("claim_attempt") or 0) < 5:
-            self._fail_campaign_finalization(benchmark_run_id, detail)
-            return
-        LOG.error(
-            "Switchyard campaign evidence unavailable after bounded retries for %s: %s",
-            benchmark_run_id,
-            detail,
-        )
-        with self.connect() as conn:
-            repo = SwitchyardCampaignRepository(conn)
-            marked = repo.mark_evidence(
-                benchmark_run_id,
-                status="unavailable",
-                object_key=None,
-                sha256=None,
-                error=f"campaign evidence unavailable after 5 attempts: {detail}",
-                drain_seconds=drain_seconds,
-                worker_id=self.worker_id,
-            )
-            if marked:
-                repo.release_member_evidence(benchmark_run_id)
-
-    def _fail_campaign_finalization(self, benchmark_run_id: str, detail: str) -> None:
-        LOG.warning("Switchyard campaign finalization failed for %s: %s", benchmark_run_id, detail)
-        with self.connect() as conn:
-            SwitchyardCampaignRepository(conn).mark_finalization_failed(
-                benchmark_run_id,
-                worker_id=self.worker_id,
-                detail=detail,
-            )
-
-    @staticmethod
-    def _write_campaign_member_reference(
-        evaluation_id: str,
-        reference: dict[str, Any],
-    ) -> None:
-        reference_key = artifacts.evaluation_artifact_key(
-            evaluation_id,
-            "switchyard/campaign_evidence.json",
-        )
-        artifacts.put_json_object(reference_key, reference)
-        manifest_key = artifacts.evaluation_artifact_key(
-            evaluation_id,
-            "switchyard/run_manifest.json",
-        )
-        try:
-            manifest = artifacts.read_json_object(manifest_key)
-        except Exception:  # noqa: BLE001 — reference remains independently durable
-            return
-        outcomes = manifest.setdefault("outcomes", {})
-        if isinstance(outcomes, dict):
-            outcomes["campaign_routing_stats"] = reference
-            artifacts.put_json_object(manifest_key, manifest)
-
-    def claim_next_switchyard_campaign_deletion(self) -> dict | None:
-        with self.connect() as conn:
-            return SwitchyardCampaignRepository(conn).claim_due_deletion(
-                worker_id=self.worker_id,
-                claim_seconds=max(self.claim_timeout, 900.0),
-            )
-
-    def delete_switchyard_campaign(self, campaign: Mapping[str, Any]) -> None:
-        benchmark_run_id = str(campaign["benchmark_run_id"])
-        lease = _campaign_lease_from_row(campaign)
-        if lease is None:
-            detail = "Switchyard campaign cannot be deleted without durable managed-resource lease metadata"
-            with self.connect() as conn:
-                repo = SwitchyardCampaignRepository(conn)
-                if int(campaign.get("claim_attempt") or 0) >= 5:
-                    repo.mark_delete_unavailable(
-                        benchmark_run_id,
-                        worker_id=self.worker_id,
-                        detail=f"{detail} after 5 attempts",
-                    )
-                else:
-                    repo.mark_delete_failed(
-                        benchmark_run_id,
-                        worker_id=self.worker_id,
-                        detail=detail,
-                    )
-            return
-        try:
-            self.switchyard.delete(lease)
-        except Exception as exc:  # noqa: BLE001 — durable deletion retries
-            with self.connect() as conn:
-                SwitchyardCampaignRepository(conn).mark_delete_failed(
-                    benchmark_run_id,
-                    worker_id=self.worker_id,
-                    detail=str(exc),
-                )
-            return
-        with self.connect() as conn:
-            SwitchyardCampaignRepository(conn).mark_deleted(
-                benchmark_run_id,
-                worker_id=self.worker_id,
-            )
+        teardown_orphaned_execution(cleanup, worker_id=self.worker_id, connect=self.connect, resolve=self.resolve)
 
     def claim_next_archive(self) -> str | None:
         """Claim one terminal evaluation that requested an archive rebuild."""
@@ -965,25 +603,9 @@ class Dispatcher:
                     **row,
                     "framework_config": framework_config,
                     "harbor_config": harbor_config,
-                    "switchyard_config": self._profile_config(conn, row, snapshot=snapshot, role="switchyard"),
                     "intake_config": self._profile_config(conn, row, snapshot=snapshot, role="intake"),
                 }
                 execution_number = int(row.get("current_execution") or 1)
-                row["switchyard_topology"] = _switchyard_topology(row, execution_number)
-                if row["switchyard_topology"] == "shared_campaign":
-                    resource_row = SwitchyardCampaignRepository(conn).get(str(row["benchmark_run_id"]))
-                    switchyard_lease = _campaign_lease_from_row(resource_row)
-                else:
-                    resource_row = RuntimeResourceRepository(conn).get_switchyard(
-                        evaluation_id,
-                        execution_number,
-                    )
-                    switchyard_lease = switchyard_lease_from_row(resource_row)
-                row = _row_with_switchyard(
-                    row,
-                    switchyard_lease,
-                    resource_row,
-                )
                 try:
                     skill_materials = artifacts.read_json_object(
                         artifacts.evaluation_artifact_key(
@@ -1047,94 +669,6 @@ class Dispatcher:
             already_claimed=True,
             execution_number=execution_number,
         )
-
-    def claim_next_switchyard_teardown(self) -> dict | None:
-        """Claim one due per-run Switchyard resource after its drain window."""
-        with self.connect() as conn:
-            return RuntimeResourceRepository(conn).claim_due_switchyard_teardown(
-                claim_timeout=self.claim_timeout,
-                worker_id=self.worker_id,
-            )
-
-    def teardown_switchyard_resource(self, resource_row: Mapping[str, Any]) -> None:
-        """Delete a drained Switchyard resource and refresh artifacts/archive."""
-        evaluation_id = str(resource_row["evaluation_id"])
-        execution_number = int(resource_row.get("execution_number") or 1)
-        execution_id = _execution_id(evaluation_id, execution_number)
-        resource_id = int(resource_row["id"])
-        lease = switchyard_lease_from_row(dict(resource_row))
-        if lease is None:
-            with self.connect() as conn:
-                RuntimeResourceRepository(conn).mark_delete_failed(
-                    resource_id,
-                    "switchyard lease metadata missing or invalid",
-                )
-                self._append_switchyard_event(
-                    conn,
-                    evaluation_id,
-                    status=self._event_status_for(conn, evaluation_id),
-                    detail="switchyard teardown failed: lease metadata missing or invalid",
-                )
-            return
-
-        runtime_row = self._load_status_runtime(evaluation_id)
-        runtime = None if runtime_row is None else runtime_row.get("runtime")
-        status = "succeeded" if runtime_row is None else str(runtime_row.get("status"))
-        artifact_root: Path | None = None
-        if runtime:
-            try:
-                artifact_root = _artifact_root(execution_id, str(runtime))
-            except Exception:  # noqa: BLE001 — teardown should still delete Switchyard
-                LOG.warning(
-                    "could not resolve artifact root for %s runtime=%s",
-                    execution_id,
-                    runtime,
-                )
-        try:
-            # Every managed resource is captured before it is marked draining.
-            # Teardown may run in a later worker turn whose local artifact root
-            # is empty; recapturing here would overwrite the uploaded live
-            # snapshot after rollback or drain.
-            self.switchyard.delete(lease)
-        except Exception as exc:  # noqa: BLE001 — retryable resource cleanup
-            detail = f"switchyard teardown failed: {exc}"
-            with self.connect() as conn:
-                RuntimeResourceRepository(conn).mark_delete_failed(resource_id, detail)
-                self._append_switchyard_event(
-                    conn,
-                    evaluation_id,
-                    status=status,
-                    detail=detail,
-                )
-            return
-
-        with self.connect() as conn:
-            RuntimeResourceRepository(conn).mark_deleted(resource_id)
-            self._append_switchyard_event(
-                conn,
-                evaluation_id,
-                status=status,
-                detail=f"switchyard deleted: {lease.name}",
-            )
-        is_current_execution = (
-            artifact_root is not None
-            and runtime_row is not None
-            and int(runtime_row.get("current_execution") or 1) == execution_number
-        )
-        if is_current_execution:
-            self._sync_artifacts_warn(
-                evaluation_id,
-                str(runtime),
-                execution_id=execution_id,
-                execution_number=execution_number,
-                replace=False,
-            )
-            self._build_archive_warn(
-                evaluation_id,
-                runtime=str(runtime),
-                artifact_root=artifact_root,
-                execution_number=execution_number,
-            )
 
     def work_forever(self, *, idle_sleep: float = 2.0) -> None:
         """Run the durable queue worker loop."""
@@ -1241,54 +775,6 @@ class Dispatcher:
                 self._claim_lost.set()
             raise DispatchClaimLost(evaluation_id)
 
-    @contextmanager
-    def _maintain_campaign_provisioning_claim(
-        self,
-        benchmark_run_id: str,
-        *,
-        claim_attempt: int,
-    ):
-        stop = threading.Event()
-        lost = threading.Event()
-        interval = max(0.01, min(self.claim_timeout / 3, 10.0))
-
-        def keep_alive() -> None:
-            while not stop.wait(interval):
-                try:
-                    with self.connect() as heartbeat_conn:
-                        owned = SwitchyardCampaignRepository(heartbeat_conn).renew_provisioning_claim(
-                            benchmark_run_id,
-                            worker_id=self.worker_id,
-                            claim_attempt=claim_attempt,
-                            claim_seconds=self.claim_timeout,
-                        )
-                except Exception:  # noqa: BLE001 - transient DB errors do not lose ownership
-                    LOG.exception(
-                        "Switchyard campaign provisioning heartbeat failed for %s",
-                        benchmark_run_id,
-                    )
-                    continue
-                if not owned:
-                    lost.set()
-                    return
-
-        keeper = threading.Thread(
-            target=keep_alive,
-            name=f"switchyard-campaign-lease-{benchmark_run_id}",
-            daemon=True,
-        )
-        keeper.start()
-        try:
-            yield lost
-        finally:
-            stop.set()
-            keeper.join(timeout=min(interval + 1.0, 5.0))
-            if keeper.is_alive():
-                LOG.warning(
-                    "Switchyard campaign lease keeper did not stop promptly for %s",
-                    benchmark_run_id,
-                )
-
     def _run_claimed(
         self,
         evaluation_id: str,
@@ -1349,6 +835,18 @@ class Dispatcher:
                 return
 
             execution_number = int(row.get("current_execution") or 1)
+            if row.get("switchyard_profile_id"):
+                # Closed- and open-book runs relied on Switchyard to fence model
+                # traffic; running them without it would silently lift that fence.
+                self._set_status(
+                    conn,
+                    evaluation_id,
+                    "failed",
+                    execution_number=execution_number,
+                    detail="switchyard_unsupported: Switchyard profiles are no longer supported",
+                    failure_code="switchyard_unsupported",
+                )
+                return
             if expected_execution_number is not None and execution_number != expected_execution_number:
                 LOG.info(
                     "execution %s for %s is stale; current execution is %s",
@@ -1452,16 +950,12 @@ class Dispatcher:
                 )
                 if row.get("framework") == "harbor" and not framework_config:
                     framework_config = harbor_config
-                switchyard_config = self._load_switchyard_config(conn, row)
                 intake_config = self._load_intake_config(conn, row)
-                materialized_credentials = materialize_credential_envs(
+                credential_env = materialize_credential_env(
                     conn,
                     row["credentials"] or {},
-                    switchyard_bindings=switchyard_config.get("credential_bindings") or None,
                     expected=expected_credentials,
                 )
-                credential_env = materialized_credentials.runner
-                switchyard_credential_env = materialized_credentials.switchyard
             except Exception as exc:  # noqa: BLE001 — record profile load/validation failure
                 self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
                 self._sync_artifacts_warn(
@@ -1490,258 +984,8 @@ class Dispatcher:
                 **row,
                 "framework_config": framework_config,
                 "harbor_config": harbor_config,
-                "switchyard_config": switchyard_config,
                 "intake_config": intake_config,
-                "switchyard_topology": _switchyard_topology(row, execution_number),
             }
-
-            routing_env = switchyard_routing_runner_env(
-                task=resolve_routing_task(
-                    intake_config,
-                    task_slug=row.get("task_slug"),
-                ),
-                session_id=evaluation_id,
-            )
-            shared_campaign_id = (
-                str(row["benchmark_run_id"]) if row.get("switchyard_topology") == "shared_campaign" else None
-            )
-            repair_shared_campaign: Callable[[str], dict[str, Any] | None] | None = None
-            switchyard_lease: SwitchyardLease | None = None
-            if resume:
-                if shared_campaign_id is not None:
-                    resource_row = SwitchyardCampaignRepository(conn).get(shared_campaign_id)
-                    switchyard_lease = _campaign_lease_from_row(resource_row)
-                else:
-                    resource_row = RuntimeResourceRepository(conn).get_switchyard(
-                        evaluation_id,
-                        execution_number,
-                    )
-                    switchyard_lease = switchyard_lease_from_row(resource_row)
-                row = _row_with_switchyard(row, switchyard_lease, resource_row)
-                if switchyard_lease is not None:
-                    credential_env = _runner_env_with_switchyard(
-                        credential_env,
-                        {
-                            **switchyard_runner_env(switchyard_lease),
-                            **routing_env,
-                        },
-                    )
-            elif row.get("switchyard_profile_id"):
-                try:
-                    effective_switchyard_config = _switchyard_config_for_network_policy(
-                        switchyard_config,
-                        str(row.get("network_policy") or "unrestricted"),
-                    )
-                    resource_row = None
-                    if shared_campaign_id is not None:
-                        if effective_switchyard_config.get("mode", "managed") != "managed":
-                            raise ValueError("shared Switchyard campaigns require managed mode")
-                        campaign_repo = SwitchyardCampaignRepository(conn)
-                        campaign, owns_provisioning = campaign_repo.ensure_and_claim_provisioning(
-                            benchmark_run_id=shared_campaign_id,
-                            profile_id=str(row["switchyard_profile_id"]),
-                            config_hash=_stable_hash(effective_switchyard_config),
-                            credential_hash=_stable_hash(
-                                {
-                                    "credential_ids": row.get("credentials") or {},
-                                    "snapshot": expected_credentials,
-                                }
-                            ),
-                            max_concurrent_members=int(row["max_concurrent_members"]),
-                            worker_id=self.worker_id,
-                            claim_seconds=self.claim_timeout,
-                        )
-
-                        def repair_shared(detail: str) -> dict[str, Any] | None:
-                            return self._repair_shared_campaign(
-                                conn,
-                                shared_campaign_id,
-                                detail=detail,
-                                evaluation_id=evaluation_id,
-                                profile_id=str(row["switchyard_profile_id"]),
-                                raw_config=effective_switchyard_config,
-                                credential_env=switchyard_credential_env,
-                                artifact_root=artifact_root,
-                            )
-
-                        repair_shared_campaign = repair_shared
-                        if owns_provisioning:
-                            resource_row, switchyard_render = self._provision_shared_campaign(
-                                conn,
-                                campaign,
-                                evaluation_id=evaluation_id,
-                                profile_id=str(row["switchyard_profile_id"]),
-                                raw_config=effective_switchyard_config,
-                                credential_env=switchyard_credential_env,
-                                artifact_root=artifact_root,
-                            )
-                        else:
-                            resource_row = self._wait_for_campaign_ready(
-                                conn,
-                                shared_campaign_id,
-                                evaluation_id=evaluation_id,
-                                repair=repair_shared_campaign,
-                            )
-                        switchyard_lease = _campaign_lease_from_row(resource_row)
-                        if switchyard_lease is None:
-                            raise RuntimeError("Switchyard campaign lease is missing")
-                        switchyard_render = None
-                    else:
-                        resource_repo = RuntimeResourceRepository(conn)
-                        resource_row = (
-                            resource_repo.get_switchyard(evaluation_id, execution_number)
-                            if execution_number > 1
-                            else None
-                        )
-                        switchyard_lease = switchyard_lease_from_row(resource_row)
-                        switchyard_render = None
-                        if (
-                            switchyard_lease is None
-                            or resource_row is None
-                            or resource_row.get("status") != "provisioned"
-                        ):
-
-                            def persist_lease(lease: SwitchyardLease) -> None:
-                                nonlocal resource_row
-                                if lease.mode != "managed":
-                                    return
-                                resource_row = resource_repo.upsert_switchyard_provisioned(
-                                    evaluation_id=evaluation_id,
-                                    execution_number=execution_number,
-                                    lease=lease,
-                                )
-
-                            switchyard_render = self.switchyard.provision(
-                                evaluation_id=(execution_id if execution_number > 1 else evaluation_id),
-                                profile_id=str(row["switchyard_profile_id"]),
-                                raw_config=effective_switchyard_config,
-                                credential_env=switchyard_credential_env,
-                                artifact_root=artifact_root,
-                                persist_lease=persist_lease,
-                            )
-                            switchyard_lease = switchyard_render.lease
-                            # Test doubles and older provisioners may not invoke
-                            # the pre-apply callback. Preserve the post-success
-                            # upsert as a compatibility fallback.
-                            if switchyard_lease.mode == "managed" and resource_row is None:
-                                resource_row = resource_repo.upsert_switchyard_provisioned(
-                                    evaluation_id=evaluation_id,
-                                    execution_number=execution_number,
-                                    lease=switchyard_lease,
-                                )
-                    self._append_switchyard_event(
-                        conn,
-                        evaluation_id,
-                        status="provisioning",
-                        detail=(
-                            f"switchyard {switchyard_lease.mode}: "
-                            f"{switchyard_lease.name or switchyard_lease.endpoint} "
-                            f"({switchyard_lease.endpoint_identity or switchyard_lease.endpoint})"
-                        ),
-                    )
-                    if switchyard_lease.trust_warning:
-                        self._append_switchyard_event(
-                            conn,
-                            evaluation_id,
-                            status="provisioning",
-                            detail=f"warning: {switchyard_lease.trust_warning}",
-                        )
-                    if switchyard_lease.mode == "external" and row.get("network_policy") == "default_deny":
-                        self._append_switchyard_event(
-                            conn,
-                            evaluation_id,
-                            status="provisioning",
-                            detail=(
-                                "warning: network_policy=default_deny blocks the external "
-                                "Switchyard endpoint; use scoped_egress with an explicit "
-                                "destination grant or an operator-managed cluster egress path"
-                            ),
-                        )
-                    if switchyard_config.get("book_mode") == "closed" and row.get("network_policy") != "default_deny":
-                        self._append_switchyard_event(
-                            conn,
-                            evaluation_id,
-                            status="provisioning",
-                            detail=(
-                                "warning: Switchyard book_mode=closed restricts configured "
-                                f"model traffic, but network_policy={row.get('network_policy')} "
-                                "may permit direct gateway bypass; use default_deny for "
-                                "proxy-only isolation"
-                            ),
-                        )
-                    row = _row_with_switchyard(row, switchyard_lease, resource_row)
-                    credential_env = _runner_env_with_switchyard(
-                        credential_env,
-                        {
-                            **(
-                                switchyard_render.runner_env
-                                if switchyard_render is not None
-                                else switchyard_runner_env(switchyard_lease)
-                            ),
-                            **routing_env,
-                        },
-                    )
-                    self._write_switchyard_run_manifest_warn(
-                        row,
-                        status="provisioning",
-                        artifact_root=artifact_root,
-                    )
-                except Exception as exc:  # noqa: BLE001 — record switchyard provisioning failure
-                    detail = f"switchyard provision failed: {exc}"
-                    readiness_failure = isinstance(exc, SwitchyardReadinessError) or (
-                        "switchyard readiness failed" in str(exc).lower()
-                    )
-                    if shared_campaign_id is None:
-                        resource_row = RuntimeResourceRepository(conn).get_switchyard(
-                            evaluation_id,
-                            execution_number,
-                        )
-                        failed_lease = switchyard_lease_from_row(resource_row)
-                        if failed_lease is not None:
-                            row = _row_with_switchyard(row, failed_lease, resource_row)
-                            cleanup_note = self._capture_and_drain_switchyard_warn(
-                                conn,
-                                row,
-                                artifact_root,
-                                status="failed",
-                                drain_seconds_override=0,
-                                capture=not isinstance(exc, SwitchyardProvisionError),
-                            )
-                            if cleanup_note:
-                                detail = f"{detail}; {cleanup_note}"
-                    self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
-                    self._sync_artifacts_warn(
-                        evaluation_id,
-                        row["runtime"],
-                        execution_id=execution_id,
-                        execution_number=execution_number,
-                    )
-                    self._build_archive_warn(
-                        evaluation_id,
-                        runtime=row["runtime"],
-                        artifact_root=artifact_root,
-                        execution_number=execution_number,
-                    )
-                    if readiness_failure:
-                        scheduled = EvaluationRepository(conn).schedule_retry(
-                            evaluation_id,
-                            execution_number=execution_number,
-                            failure_code="SwitchyardReadinessError",
-                            failure_category="infrastructure",
-                            delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
-                            expected_dispatch_owner=self._expected_dispatch_owner,
-                        )
-                        if scheduled is not None:
-                            return
-                    self._set_status(
-                        conn,
-                        evaluation_id,
-                        "failed",
-                        execution_number=execution_number,
-                        detail=detail,
-                        failure_code=("SwitchyardReadinessError" if readiness_failure else type(exc).__name__),
-                    )
-                    return
 
             # validate_execution_snapshot already guarantees an evaluation object.
             snapshot_evaluation: Mapping[str, Any] = snapshot["evaluation"] if snapshot is not None else row
@@ -1792,9 +1036,6 @@ class Dispatcher:
                 harbor_profile_id=row["harbor_profile_id"],
                 framework_config=framework_config,
                 harbor_config=harbor_config,
-                switchyard_profile_id=row["switchyard_profile_id"],
-                switchyard_config=switchyard_config,
-                switchyard=switchyard_lease,
                 intake_profile_id=row["intake_profile_id"],
                 credentials=row["credentials"] or {},
                 credential_env=credential_env,
@@ -1802,13 +1043,6 @@ class Dispatcher:
             try:
                 backend = self.resolve(row["runtime"])
             except Exception as exc:  # noqa: BLE001 — record any launch failure
-                self._capture_and_drain_switchyard_warn(conn, row, artifact_root, status="failed")
-                self._write_switchyard_run_manifest_warn(
-                    row,
-                    status="failed",
-                    artifact_root=artifact_root,
-                    harbor_rc=1,
-                )
                 self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
                 self._sync_artifacts_warn(
                     evaluation_id,
@@ -1853,51 +1087,17 @@ class Dispatcher:
                         spec = spec.model_copy(
                             update={"harbor_dataset_image_imports": [asdict(item) for item in imports]}
                         )
-                    should_launch = True
-                    if shared_campaign_id is not None:
-                        should_launch = self._wait_for_campaign_permit(
-                            conn,
-                            shared_campaign_id,
-                            evaluation_id=evaluation_id,
-                            execution_number=execution_number,
-                            repair=repair_shared_campaign,
-                        )
-                    if should_launch:
-                        verify_launch_images(spec)
-                        handle = backend.launch(spec)
-                    else:
-                        handle = LaunchHandle(backend=row["runtime"], external_id=execution_id)
+                    verify_launch_images(spec)
+                    handle = backend.launch(spec)
                     try:
                         self._renew_inline_claim(evaluation_id)
                     except DispatchClaimLost:
-                        if should_launch:
-                            self._teardown_failed_runtime_warn(backend, handle)
+                        self._teardown_failed_runtime_warn(backend, handle)
                         raise
                 except Exception as exc:  # noqa: BLE001 — record any launch failure
                     if isinstance(exc, DispatchClaimLost):
                         raise
                     detail = str(exc)
-                    if shared_campaign_id is not None:
-                        SwitchyardCampaignRepository(conn).acknowledge_cleanup(
-                            evaluation_id,
-                            not_launched=True,
-                        )
-                    self._capture_switchyard_warn(
-                        row,
-                        artifact_root,
-                    )
-                    self._write_switchyard_run_manifest_warn(
-                        row,
-                        status="failed",
-                        artifact_root=artifact_root,
-                        harbor_rc=1,
-                    )
-                    self._capture_and_drain_switchyard_warn(
-                        conn,
-                        row,
-                        artifact_root,
-                        status="failed",
-                    )
                     self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
                     self._sync_artifacts_warn(
                         evaluation_id,
@@ -1920,13 +1120,6 @@ class Dispatcher:
                         failure_code=type(exc).__name__,
                     )
                     return
-                if switchyard_lease is not None:
-                    handle = _handle_with_switchyard(handle, switchyard_lease)
-                if shared_campaign_id is not None:
-                    SwitchyardCampaignRepository(conn).mark_launch_running(
-                        evaluation_id,
-                        handle,
-                    )
 
             db_status = EvaluationRepository(conn).load_runtime_status(
                 evaluation_id,
@@ -1971,26 +1164,9 @@ class Dispatcher:
             raise
         except Exception as exc:  # noqa: BLE001 — record any status-read failure
             with self.connect() as conn:
-                switchyard_note = self._capture_and_drain_switchyard_warn(
-                    conn,
-                    row,
-                    artifact_root,
-                    handle=handle,
-                    status="failed",
-                )
-                switchyard_manifest_note = self._write_switchyard_run_manifest_warn(
-                    row,
-                    status="failed",
-                    artifact_root=artifact_root,
-                    handle=handle,
-                    harbor_rc=1,
-                )
                 # Tear down before syncing: the terminator stops the runner and may write
                 # artifacts (such as the OpenSandbox applied-egress summary) that must be uploaded.
-                self._mark_campaign_cleanup_pending(conn, row)
                 teardown_note = self._teardown_failed_runtime_warn(backend, handle)
-                if teardown_note is None:
-                    self._acknowledge_campaign_cleanup(conn, row)
                 self._write_provenance_warn(row, status="failed", artifact_root=artifact_root, handle=handle)
                 self._sync_artifacts_warn(
                     evaluation_id,
@@ -2005,10 +1181,6 @@ class Dispatcher:
                     execution_number=execution_number,
                 )
                 detail = f"status read failed: {exc}"
-                if switchyard_note:
-                    detail = f"{detail}; {switchyard_note}"
-                if switchyard_manifest_note:
-                    detail = f"{detail}; {switchyard_manifest_note}"
                 if teardown_note:
                     detail = f"{detail}; {teardown_note}"
                 self._set_status(
@@ -2051,39 +1223,11 @@ class Dispatcher:
                         next(iter(summary.exception_counts)),
                     )
                 failure_code = failure_code or "unknown"
-                switchyard_capture_note = self._capture_switchyard_warn(
-                    row,
-                    artifact_root,
-                    handle=handle,
-                )
-                switchyard_manifest_note = self._write_switchyard_run_manifest_warn(
-                    row,
-                    status="failed",
-                    artifact_root=artifact_root,
-                    handle=handle,
-                    harbor_rc=1,
-                )
                 detail = status.detail or "run reported failure"
-                if switchyard_capture_note:
-                    detail = f"{detail}; {switchyard_capture_note}"
-                if switchyard_manifest_note:
-                    detail = f"{detail}; {switchyard_manifest_note}"
-                self._mark_campaign_cleanup_pending(conn, row)
                 teardown_note = self._teardown_failed_runtime_warn(backend, handle)
-                if teardown_note is None:
-                    self._acknowledge_campaign_cleanup(conn, row)
-                else:
+                if teardown_note is not None:
                     detail = f"{detail}; {teardown_note}"
                 if is_retryable_failure(failure_code, detail):
-                    switchyard_retry_note = self._capture_and_drain_switchyard_warn(
-                        conn,
-                        row,
-                        artifact_root,
-                        handle=handle,
-                        status="failed",
-                    )
-                    if switchyard_retry_note:
-                        detail = f"{detail}; {switchyard_retry_note}"
                     scheduled = EvaluationRepository(conn).schedule_retry(
                         evaluation_id,
                         execution_number=execution_number,
@@ -2095,13 +1239,6 @@ class Dispatcher:
                     if scheduled is not None:
                         return
 
-                switchyard_note = self._capture_and_drain_switchyard_warn(
-                    conn,
-                    row,
-                    artifact_root,
-                    handle=handle,
-                    status="failed",
-                )
                 provenance_note = self._write_provenance_warn(
                     row, status="failed", artifact_root=artifact_root, handle=handle
                 )
@@ -2118,7 +1255,7 @@ class Dispatcher:
                     artifact_root=artifact_root,
                     execution_number=execution_number,
                 )
-                for note in (switchyard_note, provenance_note, artifact_note, intake_note):
+                for note in (provenance_note, artifact_note, intake_note):
                     if note:
                         detail = f"{detail}; {note}"
                 if raw_result:
@@ -2152,20 +1289,6 @@ class Dispatcher:
                 return
 
             # --- terminal success: artifact sync, optional Intake ATIF, then write-back ---
-            switchyard_note = self._capture_and_drain_switchyard_warn(
-                conn,
-                row,
-                artifact_root,
-                handle=handle,
-                status="succeeded",
-            )
-            switchyard_manifest_note = self._write_switchyard_run_manifest_warn(
-                row,
-                status="succeeded",
-                artifact_root=artifact_root,
-                handle=handle,
-                harbor_rc=0,
-            )
             provenance_note = self._write_provenance_warn(
                 row, status="succeeded", artifact_root=artifact_root, handle=handle
             )
@@ -2190,8 +1313,6 @@ class Dispatcher:
             # The backend reduces its own framework-typed result to the generic
             # summary — the worker stays framework-agnostic.
             summary = backend.summarize(status.raw)
-            self._mark_campaign_cleanup_pending(conn, row)
-            self._acknowledge_campaign_cleanup(conn, row)
             cleanup_note = self._teardown_succeeded_sandbox_warn(
                 evaluation_id,
                 str(row["runtime"]),
@@ -2202,8 +1323,6 @@ class Dispatcher:
             extra_detail = "; ".join(
                 note
                 for note in [
-                    switchyard_note,
-                    switchyard_manifest_note,
                     provenance_note,
                     artifact_note,
                     intake_note,
@@ -2263,7 +1382,6 @@ class Dispatcher:
                 execution_number,
                 live_log_signature,
             )
-            self._capture_switchyard_warn(row, artifact_root, handle=handle)
             if status.phase in _TERMINAL_PHASES:
                 return status
             now = time.monotonic()
@@ -2342,226 +1460,6 @@ class Dispatcher:
                 raise DispatchClaimLost(evaluation_id)
             return status
 
-    def _provision_shared_campaign(
-        self,
-        conn: psycopg.Connection,
-        campaign: Mapping[str, Any],
-        *,
-        evaluation_id: str,
-        profile_id: str,
-        raw_config: Mapping[str, Any],
-        credential_env: Mapping[str, str],
-        artifact_root: Path,
-    ) -> tuple[dict[str, Any], SwitchyardRender | None]:
-        benchmark_run_id = str(campaign["benchmark_run_id"])
-        claim_attempt = int(campaign["claim_attempt"])
-        repo = SwitchyardCampaignRepository(conn)
-
-        def persist_lease(lease: SwitchyardLease) -> None:
-            if not repo.record_provisioning_lease(
-                benchmark_run_id,
-                worker_id=self.worker_id,
-                claim_attempt=claim_attempt,
-                lease=lease,
-            ):
-                raise RuntimeError("Switchyard campaign provisioning ownership was lost before apply")
-
-        try:
-            with self._maintain_campaign_provisioning_claim(
-                benchmark_run_id,
-                claim_attempt=claim_attempt,
-            ):
-                render = self.switchyard.provision(
-                    evaluation_id=benchmark_run_id,
-                    benchmark_run_id=benchmark_run_id,
-                    profile_id=profile_id,
-                    raw_config=raw_config,
-                    credential_env=credential_env,
-                    artifact_root=artifact_root,
-                    persist_lease=persist_lease,
-                )
-        except Exception as exc:
-            failed_lease = _switchyard_lease_from_artifact_root(artifact_root)
-            if repo.mark_provision_failed(
-                benchmark_run_id,
-                worker_id=self.worker_id,
-                claim_attempt=claim_attempt,
-                detail=str(exc),
-                lease=failed_lease,
-            ):
-                raise
-            return (
-                self._wait_for_campaign_ready(
-                    conn,
-                    benchmark_run_id,
-                    evaluation_id=evaluation_id,
-                ),
-                None,
-            )
-
-        resource_row = repo.mark_ready(
-            benchmark_run_id,
-            worker_id=self.worker_id,
-            claim_attempt=claim_attempt,
-            lease=render.lease,
-        )
-        if resource_row is not None:
-            return resource_row, render
-
-        # Ownership may have moved while an external rollout was completing.
-        # The database row is authoritative: a stale owner must never delete a
-        # deterministic shared resource name that a newer owner may have adopted.
-        current = repo.get(benchmark_run_id)
-        if current is not None and current.get("cancel_requested_at") is not None:
-            self.switchyard.delete(render.lease, artifact_root=artifact_root)
-            raise RuntimeError("Switchyard campaign was cancelled during provisioning")
-        if current is not None and current["status"] == "ready":
-            self._ensure_shared_campaign_ready(current)
-            return current, None
-        return (
-            self._wait_for_campaign_ready(
-                conn,
-                benchmark_run_id,
-                evaluation_id=evaluation_id,
-            ),
-            None,
-        )
-
-    def _repair_shared_campaign(
-        self,
-        conn: psycopg.Connection,
-        benchmark_run_id: str,
-        *,
-        detail: str,
-        evaluation_id: str,
-        profile_id: str,
-        raw_config: Mapping[str, Any],
-        credential_env: Mapping[str, str],
-        artifact_root: Path,
-    ) -> dict[str, Any] | None:
-        claimed = SwitchyardCampaignRepository(conn).claim_ready_reprovisioning(
-            benchmark_run_id,
-            worker_id=self.worker_id,
-            claim_seconds=self.claim_timeout,
-            detail=detail,
-        )
-        if claimed is None:
-            return None
-        repaired, _render = self._provision_shared_campaign(
-            conn,
-            claimed,
-            evaluation_id=evaluation_id,
-            profile_id=profile_id,
-            raw_config=raw_config,
-            credential_env=credential_env,
-            artifact_root=artifact_root,
-        )
-        return repaired
-
-    def _wait_for_campaign_ready(
-        self,
-        conn: psycopg.Connection,
-        benchmark_run_id: str,
-        *,
-        evaluation_id: str,
-        repair: Callable[[str], dict[str, Any] | None] | None = None,
-    ) -> dict[str, Any]:
-        repo = SwitchyardCampaignRepository(conn)
-        last_ready_error: Exception | None = None
-        for _ in range(self.max_polls):
-            campaign = repo.get(benchmark_run_id)
-            if campaign is None:
-                raise RuntimeError("Switchyard campaign disappeared during provisioning")
-            if campaign["status"] == "ready" and campaign.get("cancel_requested_at") is None:
-                try:
-                    self._ensure_shared_campaign_ready(campaign)
-                except RuntimeError as exc:
-                    last_ready_error = exc
-                    if (
-                        repair is not None
-                        and _switchyard_resources_are_missing(exc)
-                        and (repaired := repair(str(exc))) is not None
-                    ):
-                        return repaired
-                else:
-                    return campaign
-            if campaign.get("cancel_requested_at") is not None:
-                raise RuntimeError("Switchyard campaign was cancelled during provisioning")
-            if campaign["status"] == "provision_failed":
-                raise RuntimeError(f"Switchyard campaign provisioning failed: {campaign.get('evidence_error')}")
-            self._renew_inline_claim(evaluation_id)
-            self.sleep(self.poll_interval)
-        detail = "timed out waiting for shared Switchyard readiness"
-        if last_ready_error is not None:
-            detail = f"{detail}: {last_ready_error}"
-        raise TimeoutError(detail)
-
-    def _wait_for_campaign_permit(
-        self,
-        conn: psycopg.Connection,
-        benchmark_run_id: str,
-        *,
-        evaluation_id: str,
-        execution_number: int,
-        repair: Callable[[str], dict[str, Any] | None] | None = None,
-    ) -> bool:
-        repo = SwitchyardCampaignRepository(conn)
-        last_ready_error: Exception | None = None
-        for _ in range(self.max_polls):
-            campaign = repo.get(benchmark_run_id)
-            if campaign is None or campaign["status"] != "ready" or campaign.get("cancel_requested_at") is not None:
-                if campaign is not None and campaign.get("cancel_requested_at") is not None:
-                    raise RuntimeError("Switchyard campaign cancelled before member launch")
-                raise RuntimeError("Switchyard campaign is not ready for member launch")
-            try:
-                self._ensure_shared_campaign_ready(campaign)
-            except RuntimeError as exc:
-                last_ready_error = exc
-                if repair is not None and _switchyard_resources_are_missing(exc) and repair(str(exc)) is not None:
-                    continue
-                self._renew_inline_claim(evaluation_id)
-                self.sleep(self.poll_interval)
-                continue
-            decision = repo.acquire_launch_permit(
-                benchmark_run_id=benchmark_run_id,
-                evaluation_id=evaluation_id,
-                worker_id=self.worker_id,
-                lease_seconds=max(self.claim_timeout, self.poll_interval * 3),
-            )
-            if decision == "launch":
-                return True
-            if decision == "resume":
-                return False
-            status = EvaluationRepository(conn).load_runtime_status(
-                evaluation_id,
-                expected_execution_number=execution_number,
-            )
-            if status is None:
-                raise DispatchClaimLost(evaluation_id)
-            campaign = repo.get(benchmark_run_id)
-            if status == "cancelled" or (campaign is not None and campaign.get("cancel_requested_at") is not None):
-                raise RuntimeError("Switchyard campaign cancelled before member launch")
-            if campaign is None or campaign["status"] != "ready":
-                raise RuntimeError("Switchyard campaign is not ready for member launch")
-            self._renew_inline_claim(evaluation_id)
-            self.sleep(self.poll_interval)
-        detail = "timed out waiting for a Switchyard campaign member permit"
-        if last_ready_error is not None:
-            detail = f"{detail}: {last_ready_error}"
-        raise TimeoutError(detail)
-
-    def _ensure_shared_campaign_ready(
-        self,
-        campaign: Mapping[str, Any],
-    ) -> None:
-        lease = _campaign_lease_from_row(campaign)
-        if lease is None:
-            raise RuntimeError("shared Switchyard campaign lease metadata missing or invalid")
-        try:
-            self.switchyard.ensure_ready(lease)
-        except Exception as exc:  # noqa: BLE001 — preserve the provider's readiness detail
-            raise RuntimeError(f"shared Switchyard campaign resources unavailable: {exc}") from exc
-
     def _teardown_cancelled_runtime(
         self,
         evaluation_id: str,
@@ -2571,8 +1469,6 @@ class Dispatcher:
         row: dict,
         artifact_root: Path,
     ) -> None:
-        with self.connect() as conn:
-            self._mark_campaign_cleanup_pending(conn, row)
         try:
             backend.teardown(handle)
         except Exception as exc:  # noqa: BLE001 — cancellation must stay durable
@@ -2583,21 +1479,6 @@ class Dispatcher:
                 )
         else:
             with self.connect() as conn:
-                self._acknowledge_campaign_cleanup(conn, row)
-                self._capture_and_drain_switchyard_warn(
-                    conn,
-                    row,
-                    artifact_root,
-                    handle=handle,
-                    status="cancelled",
-                )
-                self._write_switchyard_run_manifest_warn(
-                    row,
-                    status="cancelled",
-                    artifact_root=artifact_root,
-                    handle=handle,
-                    harbor_rc=1,
-                )
                 self._write_provenance_warn(
                     row,
                     status="cancelled",
@@ -2673,156 +1554,10 @@ class Dispatcher:
         return LaunchHandle(backend=row["runtime"], external_id=row["id"])
 
     @staticmethod
-    def _load_switchyard_config(conn: psycopg.Connection, row: dict) -> dict:
-        """Load the selected Switchyard profile's non-secret config."""
-        snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
-        return Dispatcher._profile_config(conn, row, snapshot=snapshot, role="switchyard")
-
-    @staticmethod
     def _load_intake_config(conn: psycopg.Connection, row: dict) -> dict:
         """Load the selected Intake profile's non-secret config."""
         snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
         return Dispatcher._profile_config(conn, row, snapshot=snapshot, role="intake")
-
-    def _capture_switchyard_warn(
-        self,
-        row: dict,
-        artifact_root: Path,
-        *,
-        handle: LaunchHandle | None = None,
-        final: bool = False,
-        session_ids: tuple[str, ...] = (),
-    ) -> str | None:
-        lease = _switchyard_lease_from(row, handle=handle)
-        if lease is None:
-            return None
-        try:
-            return self.switchyard.capture(
-                lease,
-                artifact_root,
-                final=final,
-                session_ids=session_ids,
-            )
-        except Exception as exc:  # noqa: BLE001 — logs are best-effort
-            LOG.warning("switchyard capture failed for %s: %s", row["id"], exc)
-            return f"switchyard capture failed: {exc}"
-
-    def _capture_and_drain_switchyard_warn(
-        self,
-        conn: psycopg.Connection,
-        row: dict,
-        artifact_root: Path,
-        *,
-        handle: LaunchHandle | None = None,
-        status: str,
-        drain_seconds_override: float | None = None,
-        capture: bool = True,
-    ) -> str | None:
-        lease = _switchyard_lease_from(row, handle=handle)
-        if lease is None:
-            return None
-
-        session_ids = _switchyard_capture_session_ids(artifact_root, str(row["id"]))
-        # Shared campaign evidence and draining are owned by the durable
-        # benchmark finalizer after every member runtime has stopped. Capture
-        # this member's session before its post-run Intake upload, without
-        # draining the shared gateway.
-        if row.get("switchyard_topology") == "shared_campaign":
-            return self._capture_switchyard_warn(
-                row,
-                artifact_root,
-                handle=handle,
-                final=True,
-                session_ids=session_ids,
-            )
-
-        notes: list[str] = []
-        if capture and (
-            capture_note := self._capture_switchyard_warn(
-                row,
-                artifact_root,
-                handle=handle,
-                final=True,
-                session_ids=session_ids,
-            )
-        ):
-            notes.append(capture_note)
-            self._append_switchyard_event(
-                conn,
-                row["id"],
-                status=status,
-                detail=capture_note,
-            )
-
-        if lease.mode == "external":
-            return "; ".join(notes) if notes else None
-
-        drain_seconds = (
-            drain_seconds_override
-            if drain_seconds_override is not None
-            else (lease.drain_seconds if lease.drain_seconds is not None else settings.switchyard_drain_seconds)
-        )
-        try:
-            resource_row = RuntimeResourceRepository(conn).mark_switchyard_draining(
-                row["id"],
-                int(row.get("execution_number") or row.get("current_execution") or 1),
-                drain_seconds=drain_seconds,
-            )
-        except Exception as exc:  # noqa: BLE001 — terminal status must still be recorded
-            detail = f"switchyard drain mark failed: {exc}"
-            LOG.warning("%s for %s", detail, row["id"])
-            self._append_switchyard_event(conn, row["id"], status=status, detail=detail)
-            notes.append(detail)
-            return "; ".join(notes)
-
-        if resource_row is None:
-            return "; ".join(notes) if notes else None
-
-        row["switchyard_resource"] = resource_row
-        row["switchyard_drain_until"] = resource_row.get("drain_until")
-        detail = _switchyard_drain_detail(lease, resource_row)
-        self._append_switchyard_event(conn, row["id"], status=status, detail=detail)
-        notes.append(detail)
-        return "; ".join(notes)
-
-    @staticmethod
-    def _mark_campaign_cleanup_pending(conn: psycopg.Connection, row: Mapping[str, Any]) -> None:
-        if row.get("switchyard_topology") == "shared_campaign":
-            SwitchyardCampaignRepository(conn).mark_cleanup_pending(str(row["id"]))
-
-    @staticmethod
-    def _acknowledge_campaign_cleanup(conn: psycopg.Connection, row: Mapping[str, Any]) -> None:
-        if row.get("switchyard_topology") == "shared_campaign":
-            SwitchyardCampaignRepository(conn).acknowledge_cleanup(str(row["id"]))
-
-    @staticmethod
-    def _append_switchyard_event(
-        conn: psycopg.Connection,
-        evaluation_id: str,
-        *,
-        status: str,
-        detail: str | None,
-    ) -> None:
-        try:
-            EvaluationRepository(conn).append_event(
-                evaluation_id,
-                status=status,
-                detail=detail,
-                type="switchyard",
-            )
-        except Exception:  # noqa: BLE001 — observability event must not break dispatch
-            LOG.exception("failed to append switchyard event for %s", evaluation_id)
-
-    def _load_status_runtime(self, evaluation_id: str) -> dict | None:
-        with self.connect() as conn:
-            return EvaluationRepository(conn).load_status_runtime(evaluation_id)
-
-    @staticmethod
-    def _event_status_for(conn: psycopg.Connection, evaluation_id: str) -> str:
-        row = EvaluationRepository(conn).load_status_runtime(evaluation_id)
-        if row is None:
-            return "succeeded"
-        return str(row["status"])
 
     @staticmethod
     def _load_harbor_config(conn: psycopg.Connection, row: dict) -> dict:
@@ -2992,30 +1727,6 @@ class Dispatcher:
         except Exception as exc:  # noqa: BLE001 — terminal status must still be recorded
             LOG.warning("provenance manifest failed for %s: %s", row["id"], exc)
             return f"provenance manifest failed: {exc}"
-        return None
-
-    @staticmethod
-    def _write_switchyard_run_manifest_warn(
-        row: dict,
-        *,
-        status: str,
-        artifact_root: Path,
-        handle: LaunchHandle | None = None,
-        harbor_rc: int | None = None,
-    ) -> str | None:
-        """Write the Switchyard benchmark-compatible manifest, warning on errors."""
-        try:
-            write_switchyard_run_manifest(
-                artifact_root,
-                row,
-                status=status,
-                backend=None if handle is None else handle.backend,
-                handle=None if handle is None else handle.external_id,
-                harbor_rc=harbor_rc,
-            )
-        except Exception as exc:  # noqa: BLE001 — terminal status must still be recorded
-            LOG.warning("switchyard run manifest failed for %s: %s", row["id"], exc)
-            return f"switchyard run manifest failed: {exc}"
         return None
 
     def _sync_artifacts_warn(
@@ -3306,125 +2017,6 @@ class Dispatcher:
             if self._claim_lost is not None:
                 self._claim_lost.set()
             raise DispatchClaimLost(evaluation_id)
-
-
-def _switchyard_config_for_network_policy(config: Mapping[str, Any], network_policy: str) -> dict[str, Any]:
-    """Render Switchyard reachability without overriding unrestricted egress."""
-    rendered = dict(config)
-    if rendered.get("mode", "managed") == "external":
-        return rendered
-    rendered["sandbox_egress_network_policy"] = network_policy != "unrestricted"
-    return rendered
-
-
-def _runner_env_with_switchyard(
-    credential_env: Mapping[str, str],
-    switchyard_env: Mapping[str, str],
-) -> dict[str, str]:
-    """Preserve non-model env while routing all model calls through Switchyard."""
-    env = {key: value for key, value in credential_env.items() if key not in _MODEL_ROUTE_ENV_KEYS}
-    env.update({str(key): str(value) for key, value in switchyard_env.items()})
-    return env
-
-
-def _row_with_switchyard(
-    row: Mapping[str, Any],
-    lease: SwitchyardLease | None,
-    resource_row: Mapping[str, Any] | None = None,
-) -> dict:
-    updated = dict(row)
-    if lease is not None:
-        updated["switchyard"] = lease.model_dump(mode="json", exclude_none=True)
-    if resource_row is not None:
-        updated["switchyard_resource"] = dict(resource_row)
-        updated["switchyard_drain_until"] = resource_row.get("drain_until")
-    return updated
-
-
-def _handle_with_switchyard(handle: LaunchHandle, lease: SwitchyardLease) -> LaunchHandle:
-    raw = dict(handle.raw)
-    raw["switchyard"] = lease.model_dump(mode="json", exclude_none=True)
-    return handle.model_copy(update={"raw": raw})
-
-
-def _switchyard_lease_from(
-    row: Mapping[str, Any],
-    *,
-    handle: LaunchHandle | None = None,
-) -> SwitchyardLease | None:
-    for value in (
-        row.get("switchyard"),
-        row.get("switchyard_lease"),
-        (row.get("switchyard_resource") or {}).get("metadata")
-        if isinstance(row.get("switchyard_resource"), Mapping)
-        else None,
-        None if handle is None else handle.raw.get("switchyard"),
-    ):
-        lease = _parse_switchyard_lease(value)
-        if lease is not None:
-            return lease
-    return None
-
-
-def _parse_switchyard_lease(value: Any) -> SwitchyardLease | None:
-    if value is None:
-        return None
-    if isinstance(value, SwitchyardLease):
-        return value
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(value, Mapping):
-        return None
-    try:
-        return SwitchyardLease.model_validate(value)
-    except Exception:  # noqa: BLE001 — invalid persisted metadata is handled by callers
-        return None
-
-
-def _campaign_lease_from_row(row: Mapping[str, Any] | None) -> SwitchyardLease | None:
-    if row is None:
-        return None
-    return _parse_switchyard_lease(row.get("metadata"))
-
-
-def _switchyard_resources_are_missing(exc: Exception) -> bool:
-    detail = str(exc).lower()
-    return "notfound" in detail or "not found" in detail or "lease metadata missing" in detail
-
-
-def _switchyard_lease_from_artifact_root(artifact_root: Path) -> SwitchyardLease | None:
-    lease_path = artifact_root / "switchyard" / "lease.json"
-    try:
-        return SwitchyardLease.model_validate_json(lease_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-
-
-def _stable_hash(value: Any) -> str:
-    body = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
-    return f"sha256:{hashlib.sha256(body).hexdigest()}"
-
-
-def _file_hash(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return f"sha256:{digest.hexdigest()}"
-
-
-def _switchyard_drain_detail(lease: SwitchyardLease, resource_row: Mapping[str, Any]) -> str:
-    drain_until = resource_row.get("drain_until")
-    if hasattr(drain_until, "isoformat"):
-        drain_text = drain_until.isoformat()
-    elif drain_until is not None:
-        drain_text = str(drain_until)
-    else:
-        drain_text = "unknown"
-    return f"switchyard draining until {drain_text}: {lease.name}"
 
 
 def get_dispatcher() -> Dispatcher:
