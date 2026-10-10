@@ -9,7 +9,7 @@ import {
 import { FilesetDatasetPicker } from '@studio/components/evaluation/shared/FilesetDatasetPicker';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
-import { render, screen } from '@studio/tests/util/render';
+import { render, screen, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { useForm, useWatch } from 'react-hook-form';
@@ -114,6 +114,50 @@ describe('FilesetDatasetPicker', () => {
     expect(screen.queryByRole('option', { name: 'notes.txt' })).not.toBeInTheDocument();
   });
 
+  it('hides job log files', async () => {
+    mockFilesets([
+      'logs/job=eval/job_attempt=a1/job_step=s1/part-0.parquet',
+      'logs/job=eval/job_attempt=a1/job_step=s1/part-1.parquet',
+      'logs/job=eval/events.jsonl',
+      'results/batch_00000.parquet',
+    ]);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+    await user.click(await screen.findByRole('combobox', { name: 'File' }));
+
+    const options = await screen.findAllByRole('option');
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveAccessibleName('results/batch_00000.parquet');
+  });
+
+  it('says when a fileset only has job log files', async () => {
+    mockFilesets(['logs/job=eval/events.jsonl']);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+
+    expect(
+      await screen.findByText('This fileset has no JSONL, JSON, CSV, or Parquet files.')
+    ).toBeVisible();
+  });
+
+  it('shows the picked path with its file name kept whole', async () => {
+    const path = 'results/platform-job-attempt-8nFYTJqRkvZuHx9SSunQf3/batch_00000.parquet';
+    mockFilesets([path]);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, path);
+
+    const trigger = screen.getByRole('combobox', { name: 'File' });
+    expect(within(trigger).getByTitle(path)).toBeInTheDocument();
+    expect(within(trigger).getByText('batch_00000.parquet')).toBeInTheDocument();
+  });
+
   it('says when a fileset has no dataset files', async () => {
     mockFilesets(['README.md']);
     const user = userEvent.setup();
@@ -141,13 +185,15 @@ describe('FilesetDatasetPicker', () => {
     await chooseFileset(user, 'generated');
     await user.click(await screen.findByRole('combobox', { name: 'File' }));
 
-    const options = await screen.findAllByRole('option');
-    expect(options.map((option) => option.textContent)).toEqual([
+    const expected = [
       'All 2 Parquet files in out/',
       'out/batch_00000.parquet',
       'out/batch_00001.parquet',
       'rows.jsonl',
-    ]);
+    ];
+    const options = await screen.findAllByRole('option');
+    expect(options).toHaveLength(expected.length);
+    options.forEach((option, index) => expect(option).toHaveAccessibleName(expected[index]));
   });
 
   it('writes the glob and the first batch when the folder option is picked', async () => {

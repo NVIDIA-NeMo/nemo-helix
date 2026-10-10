@@ -4,8 +4,12 @@
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
-import { parquetBatchGroups } from '@studio/components/evaluation/shared/parquetBatchGroups';
+import {
+  JOB_LOGS_PREFIX,
+  parquetBatchGroups,
+} from '@studio/components/evaluation/shared/parquetBatchGroups';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
+import { MiddleTruncatedPath } from '@studio/components/MiddleTruncatedPath';
 import { type ReactElement } from 'react';
 import {
   type Control,
@@ -64,15 +68,27 @@ export function FilesetDatasetPicker<T extends FieldValues>({
   const filesetPaths = (filesQuery.data?.data ?? []).map((file) => file.path);
   const batchGroups = parquetBatchGroups(filesetPaths);
 
-  const fileItems = [
+  const fileOptions = [
     ...batchGroups.map((group) => ({
       value: group.glob,
-      children: `All ${group.count} Parquet files in ${group.dir || 'the fileset root'}`,
+      label: `All ${group.count} Parquet files in ${group.dir || 'the fileset root'}`,
     })),
     ...filesetPaths
-      .filter((path) => DATASET_FORMATS.includes(formatFromFileName(path)))
-      .map((path) => ({ value: path, children: path })),
+      .filter(
+        (path) =>
+          !path.startsWith(JOB_LOGS_PREFIX) && DATASET_FORMATS.includes(formatFromFileName(path))
+      )
+      .map((path) => ({ value: path, label: path })),
   ];
+  const fileItems = fileOptions.map(({ value, label }) => ({
+    value,
+    filterValue: label,
+    children: <MiddleTruncatedPath>{label}</MiddleTruncatedPath>,
+  }));
+  const renderFileValue = (value: string | string[] | undefined) => {
+    const label = fileOptions.find((option) => option.value === value)?.label;
+    return label ? <MiddleTruncatedPath>{label}</MiddleTruncatedPath> : undefined;
+  };
 
   const pickItem = (value: string) => {
     const group = batchGroups.find((candidate) => candidate.glob === value);
@@ -114,6 +130,7 @@ export function FilesetDatasetPicker<T extends FieldValues>({
           items={fileItems}
           value={batchGlobField.value || fileField.value}
           onValueChange={pickItem}
+          renderValue={renderFileValue}
           placeholder={placeholder}
         />
       </FormField>
