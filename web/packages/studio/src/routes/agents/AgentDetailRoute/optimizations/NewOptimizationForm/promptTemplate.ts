@@ -112,12 +112,12 @@ const lookup = (context: Context, path: string): unknown => {
   return value;
 };
 
-/** Python's `str()` for the JSON values a dataset row can hold. */
+/** Python's `str()` for the values a dataset row can hold; Parquet INT64 decodes as BigInt. */
 const pythonStr = (value: unknown): string => {
   if (typeof value === 'string') return value;
   if (value === null) return 'None';
   if (typeof value === 'boolean') return value ? 'True' : 'False';
-  if (typeof value === 'number') return String(value);
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
   return unsupported('rendering a list or mapping directly');
 };
 
