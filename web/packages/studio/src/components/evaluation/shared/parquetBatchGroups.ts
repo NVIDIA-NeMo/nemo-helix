@@ -4,7 +4,7 @@
 const PARQUET_EXTENSION = '.parquet';
 const GLOB_CHARS = /[*?[\]]/;
 /** Job filesets keep their log shards here, beside the job's actual output. */
-const JOB_LOGS_PREFIX = 'logs/';
+export const JOB_LOGS_PREFIX = 'logs/';
 
 export interface ParquetBatches {
   /** Fileset-relative glob matching every Parquet file in the directory, as the evaluator resolves it. */
