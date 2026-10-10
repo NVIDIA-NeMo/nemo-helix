@@ -89,12 +89,8 @@ class ScaledEvalsJobsController(NemoController):
     async def on_startup(self) -> None:
         client = get_async_nemo_client(as_service="scaled-evals", internal=True)
         self._jobs = AsyncJobsClient.from_client(client)
-        if (
-            settings.platform_jobs_provider == "cpu"
-            and (settings.platform_build_jobs_enabled or settings.platform_evaluation_jobs_enabled)
-            and not settings.platform_jobs_image
-        ):
-            raise RuntimeError("SCALED_EVALS_PLATFORM_JOBS_IMAGE is required when Platform Jobs are enabled")
+        if settings.platform_jobs_provider == "cpu" and not settings.platform_jobs_image:
+            raise RuntimeError("SCALED_EVALS_PLATFORM_JOBS_IMAGE is required for the cpu Platform Jobs provider")
         if settings.entity_store_projection_enabled:
             entities = EntitiesClient.from_client(get_nemo_client(as_service="scaled-evals", internal=True))
             self._projection = EvaluationProjectionWriter(
@@ -129,24 +125,19 @@ class ScaledEvalsJobsController(NemoController):
             self._healthy = True
 
     def _phases(self) -> list[tuple[str, Callable[[], Awaitable[None]]]]:
-        """Return the enabled reconciliation phases, in execution order."""
-        phases: list[tuple[str, Callable[[], Awaitable[None]]]] = []
-        if settings.platform_build_jobs_enabled:
-            phases += [
-                ("submit_build", self._drain(self._submit_one_build)),
-                ("reconcile_builds", self._reconcile_builds),
-            ]
-        if settings.platform_evaluation_jobs_enabled:
-            phases += [
-                ("submit_evaluation", self._drain(self._submit_one_evaluation)),
-                ("reconcile_evaluation", self._drain(self._reconcile_one_evaluation)),
-                ("cancel_evaluations", self._cancel_evaluation_jobs),
-                ("cleanup_executions", self._drain(self._cleanup_one_execution)),
-                ("build_evidence", self._drain(self._build_one_evidence)),
-                ("build_archives", self._drain(self._build_one_archive)),
-                ("submit_benchmark_archives", self._submit_benchmark_archives),
-                ("cleanup_benchmark_archives", self._drain(self._cleanup_one_benchmark_archive)),
-            ]
+        """Return the reconciliation phases, in execution order."""
+        phases: list[tuple[str, Callable[[], Awaitable[None]]]] = [
+            ("submit_build", self._drain(self._submit_one_build)),
+            ("reconcile_builds", self._reconcile_builds),
+            ("submit_evaluation", self._drain(self._submit_one_evaluation)),
+            ("reconcile_evaluation", self._drain(self._reconcile_one_evaluation)),
+            ("cancel_evaluations", self._cancel_evaluation_jobs),
+            ("cleanup_executions", self._drain(self._cleanup_one_execution)),
+            ("build_evidence", self._drain(self._build_one_evidence)),
+            ("build_archives", self._drain(self._build_one_archive)),
+            ("submit_benchmark_archives", self._submit_benchmark_archives),
+            ("cleanup_benchmark_archives", self._drain(self._cleanup_one_benchmark_archive)),
+        ]
         if self._projection is not None:
             phases.append(("project_evaluations", self._project_evaluations))
         return phases

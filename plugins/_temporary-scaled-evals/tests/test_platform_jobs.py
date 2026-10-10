@@ -197,7 +197,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
         "evaluation_id": "eval_1",
         "execution_number": 4,
     }
-    dispatcher.run.assert_called_once_with("eval_1", maintain_claim=False, expected_execution_number=4)
+    dispatcher.run.assert_called_once_with("eval_1", expected_execution_number=4)
     dispatcher.finalize.assert_called_once_with("eval_1")
 
 
@@ -281,27 +281,3 @@ def test_evaluation_task_creates_in_cluster_kubeconfig(monkeypatch, tmp_path) ->
     assert config["clusters"][0]["cluster"]["server"] == "https://10.0.0.1:6443"
     assert config["contexts"][0]["context"]["namespace"] == "test-namespace"
     assert config["users"][0]["user"]["tokenFile"].endswith("/serviceaccount/token")
-
-
-def test_platform_jobs_default_on_and_legacy_workers_stand_down() -> None:
-    """Both flags ship enabled, and the legacy workers refuse to claim under them.
-
-    The GKE acceptance matrix passed end to end, so Platform Jobs is the
-    default execution path. The legacy in-process workers must not race it:
-    the build queue worker returns without claiming, and the dispatcher skips
-    evaluation claims and leaves the evidence and archive queues to the controller.
-    """
-    from scaled_evals.api.settings import Settings
-
-    # The declared defaults, not the live instance, which env vars may override.
-    declared = Settings.model_fields
-    assert declared["platform_build_jobs_enabled"].default is True
-    assert declared["platform_evaluation_jobs_enabled"].default is True
-
-    # Legacy build worker stands down without touching the queue.
-    from scaled_evals.api.build.queue_worker import TaskBuildWorker
-
-    worker = MagicMock(spec=TaskBuildWorker)
-    worker.claim_next.side_effect = AssertionError("legacy build worker must not claim")
-    assert TaskBuildWorker.work_once(worker) is False
-    worker.claim_next.assert_not_called()

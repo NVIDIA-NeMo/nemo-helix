@@ -146,8 +146,6 @@ def submit_evaluation_now(evaluation_id: str) -> None:
         evaluation_id: the evaluation whose row was just committed.
 
     """
-    if not settings.platform_evaluation_jobs_enabled:
-        return
     try:
         jobs = AsyncJobsClient.from_client(get_async_nemo_client(as_service="scaled-evals", internal=True))
         submitter = EvaluationSubmitter(jobs, f"scaled-evals-api:{socket.gethostname()}")

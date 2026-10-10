@@ -1,33 +1,23 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The dispatch worker: queued evaluation row -> launched run.
+"""The dispatcher: evaluation row -> launched run.
 
 The durable dispatch queue is the ``evaluations`` table itself: ``POST
-/evaluations`` inserts a row at ``status='queued'`` and returns. A separate
-``scaled-evals-dispatch-worker`` process repeatedly claims one active row with
-``SELECT … FOR UPDATE SKIP LOCKED`` and calls :meth:`Dispatcher.run`.
+/evaluations`` inserts a row at ``status='queued'`` and submits a Platform Job,
+which calls :meth:`Dispatcher.run` and then :meth:`Dispatcher.finalize`. The
+Jobs controller resubmits any active row that has no live Job, so
+``provisioning`` / ``running`` rows are resumed through the backend status reader
+instead of launching a new run.
 
-Recovery is table-driven. Worker startup (and every polling pass) considers
-``queued``, ``provisioning``, and ``running`` rows. ``queued`` rows are claimed
-and launched; ``provisioning`` / ``running`` rows are treated as restart
-recovery and resumed via the backend status reader instead of launching a new
-run. If a worker process dies, no in-memory queue state is lost; the next
-worker pass will see the still-active row.
-
-:class:`Dispatcher` is the unit of work. ``claim_next`` selects durable work from
-Postgres; ``run`` performs one evaluation end-to-end: load the evaluation, build a
-:class:`~scaled_evals.dispatch.runtime_backend.LaunchSpec`, hand it to the
+:class:`Dispatcher` is the unit of work. ``run`` performs one evaluation
+end-to-end: load the evaluation, build a :class:`~scaled_evals.dispatch.runtime_backend.LaunchSpec`, hand it to the
 backend, advance ``evaluations.status`` to ``running``, poll the backend to a
 terminal state, sync per-run artifacts to the object store, write the result
 envelope back to Postgres (``result`` JSONB plus derived summary columns),
 optionally upload post-run ATIF trajectories to NHX Intake when
 ``intake_profile_id`` is set, and set a terminal ``status`` of ``succeeded`` or
 ``failed``.
-
-The synchronous poll-to-terminal loop blocks the worker slot for the whole run.
-Run multiple worker containers/processes for a small worker pool; row claiming
-uses ``SKIP LOCKED`` so only one worker owns a row at a time.
 
 Both the backend resolver and the DB connection factory are injected so the
 whole path runs in unit tests with a fake backend and a fake connection — no
@@ -411,92 +401,8 @@ class Dispatcher:
     max_polls: int = field(default_factory=lambda: settings.dispatch_run_max_polls)
     claim_timeout: float = 30.0
     worker_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{time.time_ns()}")
-    job_launcher: Callable[[str], None] | None = None
-    job_reconciler: Callable[[], bool] | None = None
     _expected_dispatch_owner: str | None = field(default=None, init=False, repr=False)
     _claim_lost: threading.Event | None = field(default=None, init=False, repr=False)
-
-    def claim_next(self) -> str | None:
-        """Claim one active evaluation row for this worker process.
-
-        The claim is a short conditional update. Long-running backend work
-        happens in :meth:`run`; status transitions on the row are the durable
-        recovery marker if the process exits mid-run.
-        """
-        with self.connect() as conn:
-            row = EvaluationRepository(conn).claim_next(
-                claim_timeout=self.claim_timeout,
-                worker_id=self.worker_id,
-            )
-            return None if row is None else row["id"]
-
-    def work_once(self) -> bool:
-        """Claim and process one unit of worker-owned work.
-
-        Evaluation dispatch has priority; archive builds run only when no active
-        evaluation row was claimable. Both paths use Postgres leases and
-        ``SKIP LOCKED`` so multiple workers can scale out safely.
-        """
-        did_work = False
-        if settings.dispatch_kubernetes_jobs_enabled and not settings.platform_evaluation_jobs_enabled:
-            reconciler = self.job_reconciler
-            if reconciler is None:
-                from scaled_evals.dispatch.kubernetes_job import (
-                    KubernetesEvaluationJobLauncher,
-                )
-
-                def reconcile_job() -> bool:
-                    return KubernetesEvaluationJobLauncher().reconcile_one(worker_id=self.worker_id)
-
-                reconciler = reconcile_job
-            try:
-                did_work = reconciler() or did_work
-            except Exception:  # noqa: BLE001 - reconciliation must not stop queue dispatch
-                LOG.exception("Kubernetes evaluation Job reconciliation failed")
-        if settings.dispatch_kubernetes_jobs_enabled and not settings.platform_evaluation_jobs_enabled:
-            execution_cleanup = self.claim_next_execution_cleanup()
-            if execution_cleanup is not None:
-                self.cleanup_failed_execution(execution_cleanup)
-                did_work = True
-
-        evaluation_id = None if settings.platform_evaluation_jobs_enabled else self.claim_next()
-        if evaluation_id is not None:
-            if settings.dispatch_kubernetes_jobs_enabled:
-                launcher = self.job_launcher
-                if launcher is None:
-                    from scaled_evals.dispatch.kubernetes_job import (
-                        KubernetesEvaluationJobLauncher,
-                    )
-
-                    launcher = KubernetesEvaluationJobLauncher().launch
-                launcher(evaluation_id)
-            else:
-                self.run(evaluation_id, maintain_claim=True)
-            return True
-        if did_work or settings.platform_evaluation_jobs_enabled:
-            return did_work
-        evidence_evaluation_id = self.claim_next_evidence()
-        if evidence_evaluation_id is not None:
-            self.build_evidence(evidence_evaluation_id)
-            return True
-        archive_evaluation_id = self.claim_next_archive()
-        if archive_evaluation_id is not None:
-            self.build_archive(archive_evaluation_id)
-            return True
-        with self.connect() as conn:
-            benchmark_archive = BenchmarkArchiveRepository(conn).claim(claim_timeout=self.claim_timeout)
-        if benchmark_archive is not None:
-            if benchmark_archive["status"] == "building":
-                self.build_benchmark_archive(benchmark_archive)
-            return True
-        with self.connect() as conn:
-            cleanup_run_id = BenchmarkArchiveRepository(conn).claim_cleanup(
-                interval_seconds=settings.benchmark_archive_cleanup_interval_seconds,
-            )
-        if cleanup_run_id is not None:
-            self.cleanup_benchmark_archives(cleanup_run_id)
-            return True
-        return did_work
 
     def cleanup_benchmark_archives(self, run_id: str, *, object_keys: list[str] | None = None) -> None:
         """Best-effort immediate cleanup; durable periodic sweeps retry failures."""
@@ -550,17 +456,6 @@ class Dispatcher:
                 # A commit acknowledgement can fail after the row became ready.
                 # Recheck authoritative references under lock before deleting.
                 self.cleanup_benchmark_archives(job["benchmark_run_id"], object_keys=[archive["object_key"]])
-
-    def claim_next_execution_cleanup(self) -> dict | None:
-        with self.connect() as conn:
-            return ExecutionCleanupRepository(conn).claim_one(
-                worker_id=self.worker_id,
-                claim_timeout=self.claim_timeout,
-            )
-
-    def cleanup_failed_execution(self, cleanup: Mapping[str, Any]) -> None:
-        """Teardown one orphaned runtime before its logical evaluation retries."""
-        teardown_orphaned_execution(cleanup, worker_id=self.worker_id, connect=self.connect, resolve=self.resolve)
 
     def claim_next_archive(self, evaluation_id: str | None = None) -> str | None:
         """Claim one terminal evaluation that requested an archive rebuild."""
@@ -679,95 +574,12 @@ class Dispatcher:
             execution_number=execution_number,
         )
 
-    def work_forever(self, *, idle_sleep: float = 2.0) -> None:
-        """Run the durable queue worker loop."""
-        while True:
-            if not self.work_once():
-                self.sleep(idle_sleep)
-
-    def run(
-        self,
-        evaluation_id: str,
-        *,
-        maintain_claim: bool = False,
-        expected_execution_number: int | None = None,
-    ) -> None:
-        """Run one evaluation, maintaining the lease only for inline dispatch.
-
-        Kubernetes evaluation Jobs are fenced by ``dispatch_job_name`` and call
-        this method with the default. Inline Compose workers call it with
-        ``maintain_claim=True`` because task staging and backend launch can take
-        longer than the queue's recovery timeout.
-        """
-        if not maintain_claim:
-            if expected_execution_number is None:
-                self._run_claimed(evaluation_id)
-            else:
-                self._run_claimed(
-                    evaluation_id,
-                    expected_execution_number=expected_execution_number,
-                )
-            return
-
-        if self.claim_timeout <= 0:
-            raise ValueError("claim_timeout must be positive")
-        stop = threading.Event()
-        lost = threading.Event()
-        interval = max(0.01, min(self.claim_timeout / 3, 10.0))
-        self._expected_dispatch_owner = self.worker_id
-        self._claim_lost = lost
-        try:
-            self._renew_inline_claim(evaluation_id)
-        except DispatchClaimLost:
-            LOG.warning("dispatch claim lost for %s before inline run started", evaluation_id)
-            self._expected_dispatch_owner = None
-            self._claim_lost = None
-            return
-        keeper = threading.Thread(
-            target=self._keep_inline_claim_alive,
-            args=(evaluation_id, stop, lost, interval),
-            name=f"dispatch-lease-{evaluation_id}",
-            daemon=True,
-        )
-        keeper.start()
-        try:
-            if expected_execution_number is None:
-                self._run_claimed(evaluation_id)
-            else:
-                self._run_claimed(
-                    evaluation_id,
-                    expected_execution_number=expected_execution_number,
-                )
-        except DispatchClaimLost:
-            LOG.warning("dispatch claim lost for %s; stale worker stopped", evaluation_id)
-        finally:
-            stop.set()
-            keeper.join(timeout=min(interval + 1.0, 5.0))
-            if keeper.is_alive():
-                LOG.warning("dispatch lease keeper did not stop promptly for %s", evaluation_id)
-            self._expected_dispatch_owner = None
-            self._claim_lost = None
-
-    def _keep_inline_claim_alive(
-        self,
-        evaluation_id: str,
-        stop: threading.Event,
-        lost: threading.Event,
-        interval: float,
-    ) -> None:
-        while not stop.wait(interval):
-            try:
-                with self.connect() as conn:
-                    owned = EvaluationRepository(conn).heartbeat_claim(
-                        evaluation_id,
-                        worker_id=self.worker_id,
-                    )
-            except Exception:  # noqa: BLE001 - a transient DB failure is not proof of lease loss
-                LOG.exception("dispatch lease heartbeat failed for %s", evaluation_id)
-                continue
-            if not owned:
-                lost.set()
-                return
+    def run(self, evaluation_id: str, *, expected_execution_number: int | None = None) -> None:
+        """Run one evaluation execution, fenced by its ``dispatch_job_name``."""
+        if expected_execution_number is None:
+            self._run_claimed(evaluation_id)
+        else:
+            self._run_claimed(evaluation_id, expected_execution_number=expected_execution_number)
 
     def _renew_inline_claim(self, evaluation_id: str) -> None:
         if self._expected_dispatch_owner is None:
