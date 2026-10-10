@@ -63,8 +63,8 @@ class CreateBenchmarkRunRequest(BaseModel):
         ge=1,
         le=4096,
         description=(
-            "Benchmark-run member concurrency cap. With a Switchyard profile, the same cap "
-            "also limits members sharing the managed Switchyard gateway."
+            "Caps members concurrently sharing the managed Switchyard gateway. Only "
+            "enforced with a Switchyard profile; otherwise members are not throttled."
         ),
     )
     visibility: Visibility = "private"

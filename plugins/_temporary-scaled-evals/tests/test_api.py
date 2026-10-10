@@ -273,11 +273,7 @@ def test_dispatch_worker_health_endpoint_is_required_when_configured(monkeypatch
     ops._dispatch_worker_probe()
 
 
-def test_users_me_reports_owner_backed_capacity(
-    monkeypatch: pytest.MonkeyPatch,
-    _user_db_override: MagicMock,
-) -> None:
-    monkeypatch.setattr(settings, "control_plane_per_user_run_limit", 50)
+def test_users_me_reports_owner_backed_capacity(_user_db_override: MagicMock) -> None:
     _user_db_override.users.quota_usage.return_value = {
         "evaluations_active": 72,
         "sandbox_slots_active": 49,
@@ -288,10 +284,8 @@ def test_users_me_reports_owner_backed_capacity(
 
     assert response.status_code == 200
     assert response.json()["quotas"] == {
-        "evaluations_active_max": 50,
         "evaluations_active": 72,
         "tasks_owned": 11,
-        "sandbox_slots_max": 50,
         "sandbox_slots_active": 49,
     }
     _user_db_override.users.quota_usage.assert_called_once_with("dev")

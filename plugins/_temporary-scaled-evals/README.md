@@ -346,8 +346,9 @@ docker rm -f scaled-evals-pg
 With `SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED=true` and
 `SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED=true`, the
 `scaled-evals-jobs` controller submits task builds and evaluation executions to
-Platform Jobs. Postgres remains the admission queue and metadata source of
-truth during this migration.
+Platform Jobs. Postgres remains the metadata source of truth during this
+migration. Nothing limits how many evaluations run at once; the controller
+submits every queued evaluation, bounded only by its per-pass batch size.
 
 `scaled-evals-dispatch-worker` remains deployed for cleanup, provenance, and
 SBOM queues. The legacy `scaled-evals-build-worker` command remains available

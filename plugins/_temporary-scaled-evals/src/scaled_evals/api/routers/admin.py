@@ -19,7 +19,6 @@ from scaled_evals.api.schemas.common import (
     page_from_rows,
 )
 from scaled_evals.api.schemas.evaluations import Evaluation
-from scaled_evals.api.settings import settings
 from scaled_evals.api.tenancy import require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -67,11 +66,7 @@ def admin_user_evaluations(
 
 @router.get("/capacity", response_model=AdminCapacityResponse)
 def admin_capacity(db: Db, _admin: Admin) -> AdminCapacityResponse:
-    return AdminCapacityResponse(
-        **db.users.capacity(),
-        cluster_limit=settings.control_plane_cluster_run_limit,
-        per_user_limit=settings.control_plane_per_user_run_limit,
-    )
+    return AdminCapacityResponse(**db.users.capacity())
 
 
 @router.get("/usage", response_model=AdminUsageSummaryResponse)
