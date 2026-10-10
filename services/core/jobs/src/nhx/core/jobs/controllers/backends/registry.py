@@ -21,6 +21,7 @@ from nhx.core.jobs.controllers.backends.kubernetes import (
     GPUKubernetesJobBackend,
     VolcanoJobBackend,
 )
+from nhx.core.jobs.controllers.backends.openshell import OpenShellJobBackend
 from nhx.core.jobs.controllers.backends.subprocess import SubprocessJobBackend
 from nhx.core.jobs.controllers.backends.test import TestE2ECPUJobBackend, TestE2EGPUJobBackend
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -29,10 +30,9 @@ from requests.exceptions import Timeout as RequestsTimeout
 logger = logging.getLogger(__name__)
 
 # Skip Docker backends only for daemon/connection failures after probe_docker()
-# was True, or when init raises CapabilityUnavailableError. ValidationError and
+# was True. CapabilityUnavailableError has its own handler. ValidationError and
 # other programming/config errors must still fail startup.
 _DOCKER_BACKEND_INIT_SKIPPABLE_ERRORS = (
-    CapabilityUnavailableError,
     DockerException,
     RequestsConnectionError,
     RequestsTimeout,
@@ -75,6 +75,7 @@ BackendRegistryT = dict[BackendKey, type[JobBackend]]
 backend_registry: BackendRegistryT = {
     BackendKey("cpu", "docker"): CPUDockerJobBackend,
     BackendKey("gpu", "docker"): GPUDockerJobBackend,
+    BackendKey("cpu", "openshell"): OpenShellJobBackend,
     BackendKey("cpu", "kubernetes_job"): CPUKubernetesJobBackend,
     BackendKey("gpu", "kubernetes_job"): GPUKubernetesJobBackend,
     BackendKey("gpu_distributed", "kubernetes_job"): GPUKubernetesJobBackend,
@@ -167,6 +168,19 @@ class BackendRegistry:
             # config into the backend's expected format and validate it
             try:
                 registry[registry_key] = backend(nemo_client, executor.config, executor.profile)
+            except CapabilityUnavailableError as exc:
+                # A missing optional dependency (e.g. the openshell package) means
+                # the backend cannot run; skip it so the controller starts and the
+                # advertised profiles match what registered.
+                if executor.backend not in ("docker", "openshell"):
+                    raise
+                logger.warning(
+                    "Skipping job executor profile %s/%s using backend '%s' because %s.",
+                    executor.provider,
+                    executor.profile,
+                    executor.backend,
+                    exc,
+                )
             except _DOCKER_BACKEND_INIT_SKIPPABLE_ERRORS as exc:
                 if executor.backend != "docker":
                     raise

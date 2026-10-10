@@ -36,6 +36,11 @@ dependencies = [
 ]
 version = "0.0.0"
 
+[project.optional-dependencies]
+# OpenShell job backend. Platform-restricted wheels, so kept out of the default
+# install like the deployments plugin's matching extra.
+openshell = ["grpcio>=1.78.0", "openshell>=0.1.2", "protobuf>=6.31.1"]
+
 [project.scripts]
 jobs-server = "nhx.core.jobs.main:run_standalone"
 

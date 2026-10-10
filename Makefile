@@ -575,6 +575,12 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 	$(UV) run --frozen --package nemo-deployments-plugin --extra openshell \
 		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
 
+.PHONY: test-jobs-openshell
+test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed
+	$(UV) run --frozen --all-packages --extra openshell \
+		pytest -v services/core/jobs/tests/controllers/test_openshell_backend.py \
+		services/core/jobs/tests/integration/test_openshell_job_integration.py
+
 .PHONY: test-service
 test-service: ## Run tests for a specific service (usage: make test-service SERVICE=evaluator)
 ifndef SERVICE

@@ -103,6 +103,11 @@ RUN --mount=type=bind,source=docker/scripts/smoke-test-cpu-tasks.py,target=/tmp/
 # at the default JobExecutionProfileConfig.launcher_tool_path. /app/.venv stays
 # read-only: chowning it would duplicate the venv layer, and PYTHONDONTWRITEBYTECODE
 # is already set. /var/run/scratch holds the default task/job/config storage paths.
+# The base runtime image has /var/run as a symlink to /run. The OpenShell k8s
+# driver mounts an empty dir at /run (for its proxy CA), which would hide our
+# scratch; and it runs the workload as uid/fsGroup 10001 while the docker driver
+# runs our sandbox user (999). So /var/run gets a real directory here and the
+# scratch tree is world-writable (1777) so either runtime identity can write it.
 FROM runtime AS openshell
 USER 0
 # runtime has already run cve-cleanup.sh: perl is purged (debconf stays registered
@@ -117,11 +122,16 @@ RUN --mount=type=bind,from=builder,source=/usr/bin/tar,target=/usr/bin/tar \
     test -x /usr/sbin/ip && test -x /usr/sbin/nft && \
     groupadd --system sandbox && \
     useradd --system --gid sandbox --create-home --home-dir /home/sandbox --shell /bin/bash sandbox && \
-    mkdir -p /var/run/scratch/task /var/run/scratch/job /var/run/scratch/config && \
-    chown -R sandbox:sandbox /var/run/scratch
+    rm -f /var/run && \
+    mkdir -p /var/run/scratch/task /var/run/scratch/job /var/run/scratch/config /var/run/lock && \
+    chown -R sandbox:sandbox /var/run && \
+    chmod 1777 /var/run/lock /var/run/scratch /var/run/scratch/task /var/run/scratch/job /var/run/scratch/config
 COPY --chmod=0755 --from=nhx-jobs-launcher /artifacts/jobs-launcher /tools/jobs-launcher
 ENV USERNAME=sandbox \
     HOME=/home/sandbox
+# The docker driver validates the image WORKDIR is writable by the sandbox
+# identity before starting the supervisor; /app is the root-owned venv.
+WORKDIR /home/sandbox
 
 FROM openshell AS openshell-smoke-test
 # Mimic the OpenShell launch contract: non-root `sandbox` user, PATH reset to the

@@ -45,6 +45,24 @@ jobs:
       backend: docker
       config:
         launcher_tool_path: ./services/core/jobs/jobs-launcher/jobs-launcher
+    # OpenShell job backend: runs CPU job steps as OpenShell sandboxes via a
+    # local gateway. Opt-in per job (profile "openshell"); the sandbox runs the
+    # jobs-launcher, which fetches the step config from the platform, so
+    # platform_egress must point at the running platform. Defaults match the
+    # deployments openshell executor; on Linux hosts where host.docker.internal
+    # does not resolve inside the sandbox, use the docker bridge gateway
+    # (e.g. 172.17.0.1) instead.
+    - provider: cpu
+      profile: openshell
+      backend: openshell
+      config:
+        gateway_endpoint: http://127.0.0.1:17670
+        # The docker driver gives sandboxes no network of their own; all egress goes
+        # through the supervisor's proxy. Unset for a k8s-hosted gateway.
+        egress_proxy: http://127.0.0.1:3128
+        platform_egress:
+          host: host.docker.internal
+          port: 8080
 
   executor_defaults:
     docker:

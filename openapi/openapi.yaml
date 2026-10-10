@@ -5587,6 +5587,7 @@ paths:
                   - $ref: '#/components/schemas/VolcanoJobExecutionProfile'
                   - $ref: '#/components/schemas/SubprocessJobExecutionProfile'
                   - $ref: '#/components/schemas/E2EJobExecutionProfile'
+                  - $ref: '#/components/schemas/OpenShellJobExecutionProfile'
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
@@ -18142,6 +18143,229 @@ components:
       title: OpenAIModelResp
       description: Duplicated structure for an OpenAI /v1/models individual model
         response.
+    OpenShellJobEgressConfig:
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Platform host reachable from inside a sandbox.
+          default: host.docker.internal
+        port:
+          type: integer
+          minimum: 1.0
+          title: Port
+          description: Platform port (the inference gateway / API listener).
+          default: 8080
+        protocol:
+          type: string
+          enum:
+          - rest
+          - websocket
+          - graphql
+          - sql
+          - ''
+          title: Protocol
+          description: 'OpenShell L7 protocol: "rest", "websocket", "graphql", "sql",
+            or "" for L4-only.'
+          default: rest
+        tls:
+          type: string
+          enum:
+          - ''
+          - skip
+          title: Tls
+          description: 'TLS handling: "" (default) for automatic inspection, "skip"
+            to disable inspection.'
+          default: ''
+        access:
+          type: string
+          enum:
+          - read-only
+          - read-write
+          - full
+          title: Access
+          description: 'OpenShell access preset: "read-only", "read-write", or "full".'
+          default: full
+        binaries:
+          items:
+            type: string
+          type: array
+          title: Binaries
+          description: Binaries permitted to open the egress connection. Empty uses
+            the backend default set, which must include the jobs-launcher and the
+            task venv python.
+      additionalProperties: false
+      type: object
+      title: OpenShellJobEgressConfig
+      description: 'The NeMo Helix endpoint a job sandbox must be able to reach directly.
+
+
+        Becomes the platform egress rule in the generated sandbox policy. This shape
+
+        is separate from the deployments plugin''s ``HelixEgressConfig`` so the jobs
+
+        service does not depend on that plugin; the values track it.'
+    OpenShellJobExecutionProfile:
+      properties:
+        provider:
+          type: string
+          title: Provider
+          description: The compute provider for the executor, e.g., cpu, gpu
+          default: cpu
+        profile:
+          type: string
+          title: Profile
+          description: The profile name for the executor, e.g., high_priority_a100,
+            low_priority, etc.
+          default: default
+        backend:
+          type: string
+          const: openshell
+          title: Backend
+          default: openshell
+        config:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobExecutionProfileConfig'
+          description: Additional configuration for the OpenShell executor
+      type: object
+      required:
+      - config
+      title: OpenShellJobExecutionProfile
+      description: Execution configuration for an OpenShell job.
+    OpenShellJobExecutionProfileConfig:
+      properties:
+        ttl_seconds_before_active:
+          type: integer
+          title: Ttl Seconds Before Active
+          default: 1800
+        ttl_seconds_active:
+          type: integer
+          title: Ttl Seconds Active
+          default: 86400
+        ttl_seconds_after_finished:
+          type: integer
+          title: Ttl Seconds After Finished
+          default: 3600
+        cleanup_completed_jobs_immediately:
+          type: boolean
+          title: Cleanup Completed Jobs Immediately
+          default: true
+        launcher_tool_path:
+          type: string
+          title: Launcher Tool Path
+          description: Path to the jobs launcher tool
+          default: /tools/jobs-launcher
+        default_task_image:
+          title: Default Task Image
+          description: Default container image for job task pods. Used when a job
+            step omits container.image. When unset, falls back to the platform CPU
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
+          type: string
+          minLength: 1
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
+            must not conflict with platform-reserved names. Job steps may override
+            these variables.
+        gateway_endpoint:
+          type: string
+          title: Gateway Endpoint
+          description: OpenShell gateway endpoint as a URL (http://host:port or https://host:port).
+            The gRPC target is the same host:port; http implies plaintext, https implies
+            TLS.
+          default: http://127.0.0.1:17670
+        workspace:
+          type: string
+          title: Workspace
+          description: OpenShell gateway workspace that every sandbox RPC is scoped
+            to. The gateway creates 'default'.
+          default: default
+        insecure:
+          title: Insecure
+          description: Force plaintext (True) or TLS (False). When None, derived from
+            the endpoint scheme.
+          type: boolean
+        tls:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobTLSConfig'
+          description: mTLS material for an https gateway.
+        request_timeout_seconds:
+          type: integer
+          minimum: 1.0
+          title: Request Timeout Seconds
+          description: Per-RPC deadline for control-plane calls (create/get/delete/list).
+          default: 120
+        platform_egress:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobEgressConfig'
+          description: Platform endpoint a job sandbox reaches directly. Drives the
+            generated default sandbox policy and is injected into a policy_path policy
+            as a mandatory egress rule. Set to null to grant the sandbox NO direct
+            egress (breaks secrets fetch and OTLP log export).
+        policy_path:
+          title: Policy Path
+          description: Path to a hand-written OpenShell SandboxPolicy YAML applied
+            to created sandboxes. When unset, a default-deny policy is generated from
+            platform_egress plus the sandbox filesystem defaults.
+          type: string
+        image:
+          title: Image
+          description: Sandbox image for job steps. When unset, falls back to the
+            platform CPU tasks image (nhx-tasks); OpenShell needs the openshell variant
+            (nhx-tasks-openshell).
+          type: string
+        default_entrypoint:
+          title: Default Entrypoint
+          description: Entrypoint for job steps that do not declare one. The OpenShell
+            supervisor ignores the image ENTRYPOINT, so the sandbox command must name
+            the binary explicitly. When unset, defaults to the nhx-tasks entrypoint
+            (/app/.venv/bin/nemo-helix).
+          items:
+            type: string
+          type: array
+        egress_proxy:
+          title: Egress Proxy
+          description: 'HTTP proxy URL injected as HTTP_PROXY/HTTPS_PROXY for the
+            sandbox workload. The docker driver gives sandboxes no network of their
+            own: all egress goes through the supervisor''s proxy at http://127.0.0.1:3128,
+            which enforces the sandbox policy. The k8s driver fences with NetworkPolicies
+            instead, so leave this unset there.'
+          type: string
+      additionalProperties: false
+      type: object
+      title: OpenShellJobExecutionProfileConfig
+      description: 'Configuration for the OpenShell job execution profile.
+
+
+        Schedules job steps as OpenShell sandboxes via the gateway gRPC API. The
+
+        sandbox runs the jobs-launcher as its canonical main process
+
+        (``SandboxSpec.command``), which fetches the step config from the platform
+
+        (``jobs-launcher run --fetch-step-config``) and then runs the task command.'
+    OpenShellJobTLSConfig:
+      properties:
+        ca_cert_path:
+          title: Ca Cert Path
+          description: Path to the CA bundle that signed the gateway cert.
+          type: string
+        client_cert_path:
+          title: Client Cert Path
+          description: Path to the client certificate (mTLS).
+          type: string
+        client_key_path:
+          title: Client Key Path
+          description: Path to the client private key (mTLS).
+          type: string
+      additionalProperties: false
+      type: object
+      title: OpenShellJobTLSConfig
+      description: mTLS material for an https OpenShell gateway. Unused for plaintext
+        gateways.
     OtelExportLogsPartialSuccess:
       properties:
         rejectedLogRecords:
