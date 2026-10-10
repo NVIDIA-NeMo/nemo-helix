@@ -24,7 +24,7 @@ const timestamp = (now: Date): string =>
  */
 export const buildOptimizationName = (
   agentName: string,
-  intent: IntentId,
+  intent: IntentId | 'routing',
   now: Date = new Date()
 ): string => {
   const suffix = `${intent}-${timestamp(now)}`;
