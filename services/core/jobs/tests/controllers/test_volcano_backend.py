@@ -37,6 +37,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
     HelixJobSecretEnvironmentVariableRef,
     HelixJobStepSpec,
+    StepLifecycle,
 )
 from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
@@ -1661,3 +1662,87 @@ def test_volcano_job_not_backing_off_keeps_its_scheduling_ttl(volcano_job, test_
 
     assert update.status == HelixJobStatus.PENDING
     remove.assert_not_called()
+
+
+def _cooperative_pausing_step(step, *, requested_ago_seconds: int = 0, deadline_seconds: int = 3600):
+    pausing = step.model_copy(deep=True)
+    pausing.status = HelixJobStatus.PAUSING
+    requested_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=requested_ago_seconds)
+    pausing.status_details = {"pause_requested_at": requested_at.isoformat()}
+    pausing.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=deadline_seconds)
+    return pausing
+
+
+def test_volcano_pausing_running_stays_pausing(volcano_job, test_step_pausing):
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Running"}}, "metadata": {"name": "vj"}}
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels",
+            return_value=[],
+        ),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSING
+    terminate.assert_not_called()
+
+
+def test_volcano_pausing_completed_is_training_finished(volcano_job, test_step_pausing):
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Completed"}}, "metadata": {"name": "vj"}}
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels",
+            return_value=[],
+        ),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.COMPLETED
+    terminate.assert_not_called()
+
+
+def test_volcano_pausing_exit_75_deletes_job(volcano_job, test_step_pausing):
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Failed"}}, "metadata": {"name": "vj"}}
+    terminated = SimpleNamespace(exit_code=75)
+    container = SimpleNamespace(image_id=None, state=SimpleNamespace(terminated=terminated))
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Failed"))
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels",
+            return_value=[pod],
+        ),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+    terminate.assert_called_once_with(job)
+
+
+def test_volcano_pausing_deadline_returns_error(volcano_job, test_step_pausing):
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    job = {"status": {"state": {"phase": "Running"}}, "metadata": {"name": "vj"}}
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+    assert update.error_details["message"] == "Pause deadline exceeded"
+    terminate.assert_called_once_with(job)

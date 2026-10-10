@@ -73,6 +73,12 @@ class StepLifecycle(JobSpecModel):
         description="If every active task in the step goes this many seconds without an update, the step is terminated. "
         "A value of 0 disables staleness detection.",
     )
+    pause_deadline_seconds: int = Field(
+        default=0,
+        ge=0,
+        description="How long a pause may stay in progress before the workload is deleted and the step fails. "
+        "A value of 0 means this step cannot be paused.",
+    )
 
 
 class HelixJobStepSpec(JobSpecModel):

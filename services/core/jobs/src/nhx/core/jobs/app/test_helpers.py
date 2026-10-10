@@ -11,6 +11,7 @@ from nhx.core.jobs.app.providers import ComputeResources, ComputeResourceSpec, C
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
     HelixJobStepSpec,
+    StepLifecycle,
 )
 
 
@@ -62,7 +63,16 @@ class TestConstants:
     )
 
     # Standard platform_spec dictionaries
-    PLATFORM_SPEC = HelixJobSpec(steps=[HelixJobStepSpec(name="basic", executor=TEST_EXECUTOR, config={})])
+    PLATFORM_SPEC = HelixJobSpec(
+        steps=[
+            HelixJobStepSpec(
+                name="basic",
+                executor=TEST_EXECUTOR,
+                config={},
+                lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+            )
+        ]
+    )
 
     # Standard ownership dictionaries
     OWNERSHIP_BASIC = {"user": "test-user", "team": "test-team"}

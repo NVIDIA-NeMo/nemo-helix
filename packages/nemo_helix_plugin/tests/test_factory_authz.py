@@ -144,6 +144,8 @@ def test_job_factory_stamps_pause_resume_when_enabled() -> None:
     base = "/apis/customization/v2/workspaces/{workspace}/widget-jobs"
     _assert_single_rule(rules[(f"{base}/{{name}}/pause", "post")], "customization.jobs.pause", _WRITE)
     _assert_single_rule(rules[(f"{base}/{{name}}/resume", "post")], "customization.jobs.resume", _WRITE)
+    _assert_single_rule(rules[(f"{base}/{{name}}/rerun", "post")], "customization.jobs.rerun", _WRITE)
+    _assert_single_rule(rules[(f"{base}/{{name}}/control", "patch")], "customization.jobs.control", _WRITE)
 
 
 def test_job_factory_core_only_omits_pause_resume() -> None:

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import datetime
 import logging
 import threading
 import time
@@ -12,12 +13,17 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import (
     HelixJobStatusUpdateRequest,
     HelixJobStepWithContext,
+    JobStatusDetailsUpdate,
     ListStepsQueryParams,
 )
 from nhx.common.controller import Controller, HeartbeatMixin
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import scoped_app_ctx, start_span_with_ctx
+from nhx.core.jobs.app.constants import STOPPED_AT, STORAGE_RECLAIMED_AT
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
+from nhx.core.jobs.app.lifecycle import effective_pause_ttl_seconds, parse_timestamp, storage_window_expired
+from nhx.core.jobs.config import JobsStorageConfig
+from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.controllers.backends import extract_provider_profile
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
@@ -34,9 +40,11 @@ class JobReconciler(HeartbeatMixin, Controller):
         backend_registry: BackendRegistry,
         nemo_client: NemoClient,
         stop_signal: threading.Event | None = None,
+        storage_config: JobsStorageConfig | None = None,
     ) -> None:
         self._backend_registry = backend_registry
         self._nemo_client = nemo_client
+        self._storage_config = storage_config or jobs_config.storage
         # Typed Jobs client sharing the platform client's transport; every call passes
         # ``workspace=`` explicitly (incl. cross-workspace "-"), so the client's
         # default workspace is never relied upon.
@@ -182,6 +190,71 @@ class JobReconciler(HeartbeatMixin, Controller):
                 finally:
                     self.emit_heartbeat()
 
+        self._enforce_storage_retention()
+
+    def _enforce_storage_retention(self) -> None:
+        """Reclaim storage for paused and failed jobs whose TTL has elapsed."""
+        if self._stop_signal and self._stop_signal.is_set():
+            return
+        try:
+            steps = self.get_steps_for_reconciliation(
+                [HelixJobStatus.PAUSED.value, HelixJobStatus.ERROR.value, HelixJobStatus.CANCELLED.value]
+            )
+        except NemoClientError:
+            logger.exception("Could not fetch paused and failed steps for storage retention")
+            return
+
+        for step in steps:
+            try:
+                self._retain_step_storage(step)
+            except Exception:
+                logger.exception(
+                    "Could not enforce storage retention",
+                    extra={"job": step.job, "step": step.name, "workspace": step.workspace},
+                )
+            finally:
+                self.emit_heartbeat()
+
+    def _retain_step_storage(self, step: HelixJobStepWithContext) -> None:
+        job = self._jobs.get_job(name=step.job, workspace=step.workspace).data()
+        # An older attempt's stopped step must not reclaim storage from under a rerun.
+        current_attempt_id = getattr(job, "attempt_id", None)
+        if current_attempt_id is not None and step.attempt_id != current_attempt_id:
+            return
+        if (job.status_details or {}).get(STORAGE_RECLAIMED_AT):
+            return
+        if step.status == HelixJobStatus.CANCELLED:
+            pass
+        elif step.status == HelixJobStatus.PAUSED:
+            # A job may set its own pause window. Otherwise the platform default applies.
+            # Both are capped by the platform maximum.
+            requested = getattr(getattr(job, "control", None), "pause_ttl_seconds", None)
+            ttl_seconds = effective_pause_ttl_seconds(
+                requested,
+                default_seconds=self._storage_config.paused_storage_ttl_seconds,
+                maximum_seconds=self._storage_config.maximum_pause_ttl_seconds,
+            )
+            if not storage_window_expired(_storage_clock(step), ttl_seconds):
+                return
+        elif step.status == HelixJobStatus.ERROR:
+            ttl_seconds = self._storage_config.failed_storage_ttl_seconds
+            if not storage_window_expired(_storage_clock(step), ttl_seconds):
+                return
+        else:
+            return
+
+        provider, profile = extract_provider_profile(step)
+        backend = self._backend_registry.get_backend(provider=provider, profile=profile)
+        backend.reclaim_persistent_storage(step.workspace, step.job)
+        reclaimed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self._jobs.update_job_status_details(
+            name=step.job,
+            workspace=step.workspace,
+            body=JobStatusDetailsUpdate({STORAGE_RECLAIMED_AT: reclaimed_at}),
+        )
+        if step.status == HelixJobStatus.PAUSED:
+            self._jobs.cancel_job(name=step.job, workspace=step.workspace)
+
     def _update_step_status_with_timing(
         self,
         *,
@@ -258,3 +331,11 @@ class JobReconciler(HeartbeatMixin, Controller):
         ).items():
             steps.append(step)
         return steps
+
+
+def _storage_clock(step: HelixJobStepWithContext) -> datetime.datetime | None:
+    """Prefer ``stopped_at``. Fall back to ``updated_at`` for steps stopped before it was written."""
+    stopped_at = parse_timestamp((step.status_details or {}).get(STOPPED_AT))
+    if stopped_at is not None:
+        return stopped_at
+    return step.updated_at

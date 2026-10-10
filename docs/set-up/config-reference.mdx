@@ -493,6 +493,14 @@ jobs:
   schedule_interval_seconds: 5
   # Register the subprocess/default execution profile. When unset, defaults to true for docker/none runtimes and false for kubernetes.
   enable_subprocess_executor:
+  # How long paused and failed jobs keep their storage.
+  storage:
+    # How long storage is kept after a job pauses, unless that job sets its own pause window. Measured from the paused step's stopped_at. 0 reclaims on the next retention pass. | default: 604800
+    paused_storage_ttl_seconds: 604800
+    # Longest pause window a job may set, measured from stopped_at. A longer pause_ttl_seconds is rejected. The platform paused-storage TTL still applies when a job does not set its own window, and that default is also capped by this maximum. | default: 2592000
+    maximum_pause_ttl_seconds: 2592000
+    # How long storage is kept after a job fails, measured from the failed step's stopped_at. 0 reclaims on the next retention pass. | default: 14400
+    failed_storage_ttl_seconds: 14400
   # Include raw job log lines in controller diagnostics snapshots. Disabled by default because job logs may contain secrets or PII. Enable only for local debugging or test environments. | default: False
   include_job_logs_in_diagnostics: false
 ```
@@ -503,8 +511,8 @@ Consolidated configuration for the Models service.
 
 ```yaml wordWrap
 models:
-  # Image used to pull model weights. Its entrypoint is overridden to the Hugging Face CLI ('hf download ...'), so any image with the 'hf' CLI on PATH works. Defaults to the platform's nhx-api image (registry/tag from platform config); override to use a different puller image.
-  huggingface_model_puller: my-registry/nhx-api:local
+  # Image used to pull model weights. Its entrypoint is overridden to the Hugging Face CLI ('hf download ...'), so any image with the 'hf' CLI on PATH works. When unset, the platform image platform.image_registry/nhx-api:platform.image_tag is used.
+  huggingface_model_puller:
   # Controller service configuration
   controller:
     # Interval in seconds for the Models Controller to run its control loop | default: 5

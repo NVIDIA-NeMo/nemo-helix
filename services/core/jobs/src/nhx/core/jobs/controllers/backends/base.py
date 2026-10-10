@@ -44,6 +44,7 @@ from nhx.common.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nhx.common.platform_endpoint import parse_platform_endpoint
+from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware
 from nhx.core.jobs.app.providers import ComputeResources
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
@@ -357,6 +358,10 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
     @abstractmethod
     def shutdown(self): ...
 
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
+        """Delete a job's persistent storage. Backends with durable storage override this."""
+        return None
+
     def __str__(self) -> str:
         return self.BACKEND_NAME
 
@@ -432,7 +437,8 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             raise RuntimeError(f"Failed to fetch job '{workspace}/{job}' to check storage cleanup eligibility") from e
 
         job_status = getattr(job_response.status, "value", job_response.status)
-        if job_status not in ("cancelled", "error", "completed"):
+        # Failed jobs keep storage until the retention pass. Completed and cancelled jobs reclaim here.
+        if job_status not in ("cancelled", "completed"):
             return False
 
         try:
@@ -466,16 +472,23 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         )
         return False
 
-    def check_step_ttl(self, step: HelixJobStepWithContext, ttl_seconds: int) -> bool:
-        # Ensure created_at is timezone-aware (assume UTC if naive)
-        if step.created_at is None:
+    def check_step_ttl(
+        self,
+        step: HelixJobStepWithContext,
+        ttl_seconds: int,
+        now: datetime.datetime | None = None,
+    ) -> bool:
+        """Return whether the step exceeded ``ttl_seconds`` of active time.
+
+        The clock is ``max(created_at, resumed_at)``, so time spent paused does
+        not count. Kubernetes ``activeDeadlineSeconds`` restarts with each pod;
+        this clock is for backends that measure the TTL themselves.
+        """
+        anchor = active_ttl_anchor(step)
+        if anchor is None:
             return False
-
-        created_at = step.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=datetime.timezone.utc)
-
-        return (created_at + datetime.timedelta(seconds=ttl_seconds)) < datetime.datetime.now(datetime.timezone.utc)
+        current = ensure_aware(now) or datetime.datetime.now(datetime.timezone.utc)
+        return (anchor + datetime.timedelta(seconds=ttl_seconds)) < current
 
     @staticmethod
     def should_enforce_before_active_ttl(step: HelixJobStepWithContext) -> bool:

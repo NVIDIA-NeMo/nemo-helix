@@ -3,8 +3,9 @@
 
 import pytest
 from httpx import AsyncClient
+from nemo_helix_plugin.jobs.types import JobControl
 from nhx.core.jobs.api.v2.jobs.schemas import CreateHelixJobRequest
-from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
+from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec, StepLifecycle
 from nhx.core.jobs.app.test_helpers import TestConstants
 
 
@@ -17,7 +18,12 @@ async def test_job_pause_functionality(test_client: AsyncClient):
         spec={"param1": "value1"},
         platform_spec=HelixJobSpec(
             steps=[
-                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                ),
             ]
         ),
     )
@@ -65,7 +71,12 @@ async def test_job_resume_functionality(test_client: AsyncClient):
         spec={"param1": "value1"},
         platform_spec=HelixJobSpec(
             steps=[
-                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                ),
             ]
         ),
     )
@@ -117,8 +128,18 @@ async def test_job_pause_resume_lifecycle(test_client: AsyncClient):
         spec={"param1": "value1"},
         platform_spec=HelixJobSpec(
             steps=[
-                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
-                HelixJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                ),
+                HelixJobStepSpec(
+                    name="step2",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                ),
             ]
         ),
     )
@@ -221,7 +242,12 @@ async def test_job_pause_pending_job(test_client: AsyncClient):
         spec={"param1": "value1"},
         platform_spec=HelixJobSpec(
             steps=[
-                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                ),
             ]
         ),
     )
@@ -245,14 +271,19 @@ async def test_job_pause_pending_job(test_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_job_resume_no_paused_steps(test_client: AsyncClient):
-    """Test resuming a job with no paused steps (should handle gracefully)."""
+    """Resuming a job that is already active leaves it active."""
     req = CreateHelixJobRequest(
         name="test-job-no-paused",
         source="test-source",
         spec={"param1": "value1"},
         platform_spec=HelixJobSpec(
             steps=[
-                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                ),
             ]
         ),
     )
@@ -268,12 +299,148 @@ async def test_job_resume_no_paused_steps(test_client: AsyncClient):
     )
     assert response.status_code == 200
 
-    # Try to resume a job that's not paused
+    # Resume of a job that is already active is a no-op.
     response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/resume")
     assert response.status_code == 200
 
-    # The job should remain in its current state since there's no paused step to resume
     response = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}")
     assert response.status_code == 200
     job_data = response.json()
     assert job_data["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_job_pause_rejects_step_without_deadline(test_client: AsyncClient):
+    """A step with no pause deadline cannot be paused."""
+    req = CreateHelixJobRequest(
+        name="test-job-unpausable",
+        source="test-source",
+        spec={"param1": "value1"},
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="model-and-dataset-download", executor=TestConstants.TEST_EXECUTOR, config={})]
+        ),
+    )
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
+    assert response.status_code == 201
+    job_name = response.json()["name"]
+    response = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/model-and-dataset-download/status",
+        json={"status": "active"},
+    )
+    assert response.status_code == 200
+
+    response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/pause")
+    assert response.status_code == 409
+    assert "model-and-dataset-download" in response.json()["detail"]
+    assert "does not support pause" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_job_pause_is_idempotent_and_records_request_time(test_client: AsyncClient):
+    req = CreateHelixJobRequest(
+        name="test-job-pause-idempotent",
+        source="test-source",
+        spec={"param1": "value1"},
+        platform_spec=HelixJobSpec(
+            steps=[
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                )
+            ]
+        ),
+    )
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
+    job_name = response.json()["name"]
+    await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status", json={"status": "active"}
+    )
+    first = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/pause")
+    assert first.status_code == 200
+    second = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/pause")
+    assert second.status_code == 200
+    assert second.json()["status"] == "pausing"
+
+    step = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1")
+    assert step.json()["status_details"]["pause_requested_at"]
+
+
+@pytest.mark.asyncio
+async def test_job_control_pause_window(test_client: AsyncClient):
+    """A caller can set the pause window at create and change it later, up to the platform maximum."""
+    too_long = CreateHelixJobRequest(
+        name="test-job-pause-ttl-too-long",
+        source="test-source",
+        spec={"param1": "value1"},
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
+        ),
+        control=JobControl(pause_ttl_seconds=31 * 24 * 3600),
+    )
+    rejected_create = await test_client.post(
+        "/apis/jobs/v2/workspaces/default/jobs", json=too_long.model_dump(mode="json")
+    )
+    assert rejected_create.status_code == 422
+
+    req = CreateHelixJobRequest(
+        name="test-job-pause-ttl",
+        source="test-source",
+        spec={"param1": "value1"},
+        platform_spec=HelixJobSpec(
+            steps=[
+                HelixJobStepSpec(
+                    name="step1",
+                    executor=TestConstants.TEST_EXECUTOR,
+                    config={},
+                    lifecycle=StepLifecycle(pause_deadline_seconds=3600),
+                )
+            ]
+        ),
+        control=JobControl(pause_ttl_seconds=3600),
+    )
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump(mode="json"))
+    assert response.status_code == 201
+    created = response.json()
+    job_name = created["name"]
+    assert created["control"]["pause_ttl_seconds"] == 3600
+    assert "pause_ttl_seconds" not in created["platform_spec"]
+
+    await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status", json={"status": "active"}
+    )
+    updated = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/control", json={"pause_ttl_seconds": 10}
+    )
+    assert updated.status_code == 200
+    assert updated.json()["control"]["pause_ttl_seconds"] == 10
+
+    over_max = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/control",
+        json={"pause_ttl_seconds": 31 * 24 * 3600},
+    )
+    assert over_max.status_code == 422
+
+    await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/pause")
+    await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status", json={"status": "paused"}
+    )
+    paused_step = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1")
+    paused_at = paused_step.json()["updated_at"]
+    while_paused = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/control", json={"pause_ttl_seconds": 20}
+    )
+    assert while_paused.status_code == 200
+    assert while_paused.json()["status"] == "paused"
+    paused_step = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1")
+    assert paused_step.json()["updated_at"] == paused_at
+
+    await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details",
+        json={"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"},
+    )
+    reclaimed = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/control", json={"pause_ttl_seconds": 30}
+    )
+    assert reclaimed.status_code == 409

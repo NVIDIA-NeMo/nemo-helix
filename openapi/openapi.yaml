@@ -5689,6 +5689,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
+    post:
+      tags:
+      - Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_jobs_v2_workspaces__workspace__jobs__job__rerun_post
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: The job cannot be rerun
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
     post:
       tags:
@@ -6268,6 +6304,51 @@ paths:
                 $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
+        '409':
+          description: The running step cannot be paused
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control:
+    patch:
+      tags:
+      - Jobs
+      summary: Update Job Control
+      description: Change mutable job behavior, such as how long a pause keeps storage.
+      operationId: update_job_control_apis_jobs_v2_workspaces__workspace__jobs__name__control_patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobControl'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: Storage has been reclaimed
         '422':
           description: Validation Error
           content:
@@ -6349,6 +6430,8 @@ paths:
                 $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
+        '409':
+          description: The job cannot be resumed
         '422':
           description: Validation Error
           content:
@@ -10923,6 +11006,11 @@ components:
           title: Spec
         platform_spec:
           $ref: '#/components/schemas/HelixJobSpec'
+        control:
+          allOf:
+          - $ref: '#/components/schemas/JobControl'
+          description: Mutable job behavior, including how long storage is kept after
+            a pause. When omitted, the platform paused-storage TTL applies.
         source:
           type: string
           title: Source
@@ -14509,6 +14597,9 @@ components:
           description: Job Spec
         platform_spec:
           $ref: '#/components/schemas/HelixJobSpec'
+        control:
+          $ref: '#/components/schemas/JobControl'
+          description: Mutable job behavior. This is not part of the execution spec.
         fileset:
           type: string
           title: Fileset
@@ -18351,6 +18442,20 @@ components:
       type: object
       title: PatronusRailConfig
       description: Configuration data for the Patronus Evaluate API
+    JobControl:
+      properties:
+        pause_ttl_seconds:
+          type: integer
+          minimum: 0.0
+          title: Pause Ttl Seconds
+          description: How long this job keeps storage after it pauses, measured from
+            stopped_at. When unset, the platform paused-storage TTL applies. Cannot
+            exceed the platform maximum. 0 reclaims on the next retention pass. Changing
+            this value does not move the start time.
+      type: object
+      title: JobControl
+      description: Mutable job behavior, stored on the job and kept off the execution
+        spec.
     PolygrafDetection:
       properties:
         server_endpoint:
@@ -19900,6 +20005,13 @@ components:
           title: Staleness Timeout Seconds
           description: If every active task in the step goes this many seconds without
             an update, the step is terminated. A value of 0 disables staleness detection.
+          default: 0
+        pause_deadline_seconds:
+          type: integer
+          minimum: 0.0
+          title: Pause Deadline Seconds
+          description: How long a pause may stay in progress before the workload is
+            deleted and the step fails. A value of 0 means this step cannot be paused.
           default: 0
       type: object
       title: StepLifecycle

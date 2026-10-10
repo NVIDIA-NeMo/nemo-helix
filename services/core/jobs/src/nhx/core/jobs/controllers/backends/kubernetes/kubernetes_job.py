@@ -23,6 +23,7 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
+from nhx.core.jobs.app.lifecycle import describe_paused_exit, image_digest_updates, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import (
     ComputeResources,
     ContainerSpec,
@@ -42,14 +43,17 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     aggregate_pod_statuses_for_job_step,
     build_event_field_selector,
     build_metadata,
+    classify_task_containers,
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
     delete_configmap,
+    first_task_image_id,
     get_namespace_from_environment,
     image_pull_backoff_failure,
     list_pod_status,
+    list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
     update_all_tasks,
@@ -201,12 +205,20 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         # or the job was deleted out of band. In either case, we create a new job.
         if step.status == HelixJobStatus.RESUMING:
             k8s_job: V1Job | None = self.get_job_by_name(job_name)
-            if k8s_job is not None:
+            if k8s_job is not None and k8s_job.spec is not None and k8s_job.spec.suspend:
+                # Jobs paused before cooperative pause left a suspended Job object.
                 self.resume_job(k8s_job)
                 return JobUpdate(
                     status=HelixJobStatus.PENDING,
                     status_details={"message": "Job resumed with Kubernetes Job backend"},
                 )
+            if k8s_job is not None:
+                # A completed Job cannot be unsuspended. Delete it and create a new one.
+                logger.info(
+                    "Removing finished Kubernetes job before scheduling the step again",
+                    extra={"job_name": job_name, "namespace": self.namespace},
+                )
+                self.terminate_job(k8s_job)
             else:
                 logger.warning(
                     "Kubernetes job not found for step, creating a new Kubernetes job",
@@ -325,15 +337,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 )
             return self.sync_terminate_job(step, k8s_job)
         elif step.status == HelixJobStatus.PAUSING:
-            # If the job doesn't exist, we can't suspend it, so we will
-            # move it immediately to cancelled. When it is resumed, a new job will be created.
-            # This can happen if a job is created and then immediately paused before it is scheduled on the k8s cluster.
-            if k8s_job is None:
-                return JobUpdate(
-                    status=HelixJobStatus.PAUSED,
-                    status_details={"message": "Job is paused"},
-                )
-            return self.sync_suspend_job(step, k8s_job)
+            return self.sync_pausing(step, k8s_job)
         else:
             raise ValueError(f"Unhandled job step status: {step.status}")
 
@@ -378,6 +382,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         if status == HelixJobStatus.ERROR:
             error_message = _status_details_message(status_details, "Job encountered an error")
         status_details["events"] = self.get_kube_job_events(job)
+        status_details.update(image_digest_updates(step.status_details, _task_image_id(self._core_v1, job, step)))
         task_has_error = update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
         teardown_lifecycle_statuses = {
             HelixJobStatus.PAUSING,
@@ -548,6 +553,40 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 self._cancel_active_step_tasks(step)
             return update
 
+    def sync_pausing(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
+        """Leave a pausing workload running until it exits or the pause deadline passes.
+
+        Exit 75 is a pause. Exit 0 means training finished. Any other exit is an error.
+        """
+        if pause_deadline_exceeded(step):
+            if job is not None:
+                self.terminate_job(job)
+            message = "Pause deadline exceeded"
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={"message": message},
+                error_details={"message": message},
+            )
+        if job is None:
+            return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
+
+        pods = _pods_for_job(self._core_v1, job, step)
+        digest_details = image_digest_updates(step.status_details, first_task_image_id(pods))
+        running, exit_code = classify_task_containers(pods)
+        if running:
+            return JobUpdate(
+                status=HelixJobStatus.PAUSING,
+                status_details={"message": "Job is being paused", **digest_details},
+            )
+        if exit_code is None:
+            exit_code = _job_object_pause_exit_code(job)
+        if exit_code is None:
+            return JobUpdate(
+                status=HelixJobStatus.PAUSING,
+                status_details={"message": "Job is being paused", **digest_details},
+            )
+        return _pause_exit_update(self, job, exit_code, digest_details)
+
     def sync_suspend_job(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:
             # Job not found
@@ -615,6 +654,25 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             core_v1=self._core_v1,
             namespace=self.namespace,
             name=job_name,
+        )
+
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
+        storage = self._execution_profile_config.storage
+        if storage is None:
+            return
+        cleanup_job_persistent_storage(
+            namespace=self.namespace,
+            batch_v1=self._batch_v1,
+            pvc_name=storage.pvc_name,
+            workspace=workspace,
+            job_id=job,
+            step_name="retention",
+            permissions_image=storage.volume_permissions_image,
+            execution_backend=self.BACKEND_NAME,
+            execution_profile=self._profile_name,
+            job_metadata=self._execution_profile_config.job_metadata,
+            pod_metadata=self._execution_profile_config.pod_metadata,
+            pod_security_context=self._execution_profile_config.pod_security_context,
         )
 
     def cleanup_steps(self):
@@ -882,3 +940,41 @@ def map_kubernetes_job_status_to_step_status(
             },
         )
     return mapped_status, details
+
+
+def _pods_for_job(core_v1: client.CoreV1Api, job: V1Job, step: HelixJobStepWithContext) -> list:
+    namespace = job.metadata.namespace if job.metadata is not None else None
+    if namespace is None:
+        return []
+    return list_pods_by_labels(core_v1, namespace, common_labels_for_step(step))
+
+
+def _task_image_id(core_v1: client.CoreV1Api, job: V1Job, step: HelixJobStepWithContext) -> str | None:
+    return first_task_image_id(_pods_for_job(core_v1, job, step))
+
+
+def _positive_count(value: object) -> bool:
+    return isinstance(value, int) and value > 0
+
+
+def _job_object_pause_exit_code(job: V1Job) -> int | None:
+    """Fall back to the Job object when no task container exit code is readable."""
+    status: V1JobStatus | None = job.status
+    if status is None:
+        return None
+    if status.completion_time is not None or _positive_count(status.succeeded):
+        return 0
+    if _positive_count(status.failed):
+        return 1
+    return None
+
+
+def _pause_exit_update(backend: KubernetesJobBackend, job: V1Job, exit_code: int, digest_details: dict) -> JobUpdate:
+    status, message, error_details = describe_paused_exit(exit_code)
+    if status == HelixJobStatus.PAUSED:
+        backend.terminate_job(job)
+    return JobUpdate(
+        status=status,
+        status_details={"message": message, **digest_details},
+        error_details=error_details or None,
+    )

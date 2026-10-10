@@ -133,6 +133,26 @@ def test_resume_job() -> None:
     assert prepared.path_template.endswith("/jobs/{name}/resume")
 
 
+def test_rerun_job() -> None:
+    prepared = endpoints.rerun_job(workspace="default", job="j-1")
+    assert prepared.method == "POST"
+    assert prepared.path_template.endswith("/jobs/{job}/rerun")
+    assert prepared.response_type is HelixJobResponse
+
+
+def test_update_job_control() -> None:
+    from nemo_helix_plugin.jobs.types import JobControl
+
+    prepared = endpoints.update_job_control(
+        workspace="default",
+        name="j-1",
+        body=JobControl(pause_ttl_seconds=3600),
+    )
+    assert prepared.method == "PATCH"
+    assert prepared.path_template.endswith("/jobs/{name}/control")
+    assert prepared.response_type is HelixJobResponse
+
+
 # ---------------------------------------------------------------------------
 # Job status
 # ---------------------------------------------------------------------------
