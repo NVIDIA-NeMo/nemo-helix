@@ -75,10 +75,15 @@ export function deriveTrendMetrics(rows: readonly EvaluationRow[]): TrendMetric[
   const evaluatorNames = [
     ...new Set(rows.flatMap((row) => Object.keys(row.aggregate_scores ?? {}))),
   ];
+  const shortLabels = evaluatorNames.map((name) => snakeCaseToTitleCase(evaluatorLabel(name)));
+  // `correctness.score` and `tool_use.score` both shorten to "Score"; keep the full key when they clash.
+  const isAmbiguous = (label: string) => shortLabels.filter((l) => l === label).length > 1;
   const evaluatorMetrics = evaluatorNames
-    .map<TrendMetric>((name) => ({
+    .map<TrendMetric>((name, index) => ({
       id: `evaluators.${name}`,
-      label: snakeCaseToTitleCase(evaluatorLabel(name)),
+      label: isAmbiguous(shortLabels[index] ?? '')
+        ? snakeCaseToTitleCase(name.replaceAll('.', '_'))
+        : (shortLabels[index] ?? name),
       // Scores carry no scale metadata, so they are shown as-is rather than as a percentage.
       format: formatScore,
       accessor: (row) => row.aggregate_scores?.[name]?.mean,

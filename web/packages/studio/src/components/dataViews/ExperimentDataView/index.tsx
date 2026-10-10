@@ -25,6 +25,11 @@ import type { EvaluationFilter, ExperimentResponse } from '@nemo/sdk/generated/p
 import { Button, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { EVAL_DURATION_METADATA_KEY, evalDurationMs } from '@studio/api/evaluation/utils';
 import { ChangesetBadge } from '@studio/components/ChangesetBadge';
+import { EvaluationCompareChart } from '@studio/components/charts/EvaluationCompareChart';
+import {
+  MAX_COMPARED_EVALUATIONS,
+  MIN_COMPARED_EVALUATIONS,
+} from '@studio/components/charts/EvaluationCompareChart/utils';
 import { ExperimentParetoChart } from '@studio/components/charts/ExperimentParetoChart';
 import { ExperimentTrendChart } from '@studio/components/charts/ExperimentTrendChart';
 import { AddToGroupModal } from '@studio/components/dataViews/ExperimentDataView/AddToGroupModal';
@@ -46,7 +51,7 @@ import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvalu
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
-import { Columns3, FolderMinus, FolderPlus, Pin, Repeat2 } from 'lucide-react';
+import { ChartColumn, Columns3, FolderMinus, FolderPlus, Pin, Repeat2 } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 export type { EvaluationRow };
@@ -181,6 +186,8 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   // the form is closed. Re-running is reachable from here as well as from the agent page, because
   // this leaderboard is where you notice a run worth varying.
   const [rerunSource, setRerunSource] = useState<EvaluationRow | null>(null);
+
+  const [comparedEvaluations, setComparedEvaluations] = useState<EvaluationRow[] | null>(null);
 
   // Seed the sort from default_sort so its column header reflects the order on load. Memoized so the
   // reference is stable across renders (until default_sort changes).
@@ -605,6 +612,15 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
 
   return (
     <>
+      {comparedEvaluations && (
+        <div className="mb-4">
+          <EvaluationCompareChart
+            workspace={workspace}
+            evaluations={comparedEvaluations}
+            onClose={() => setComparedEvaluations(null)}
+          />
+        </div>
+      )}
       {trendVisible && (
         <div className="mb-4">
           {/* Key by group id for the same reason as the Pareto chart: re-seed the selected metric
@@ -639,20 +655,36 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
           openRow(event, getEvaluationDetailRoute(workspace, experimentName, row.name))
         }
         renderBulkActions={({ selectedRows, table }) => (
-          <Button
-            kind="tertiary"
-            color="neutral"
-            size="small"
-            onClick={() =>
-              setAddToGroupState({
-                evaluations: selectedRows,
-                clearSelection: () => table.resetRowSelection(),
-              })
-            }
-          >
-            <FolderPlus />
-            Add to experiment
-          </Button>
+          <>
+            <Button
+              kind="tertiary"
+              color="neutral"
+              size="small"
+              disabled={
+                selectedRows.length < MIN_COMPARED_EVALUATIONS ||
+                selectedRows.length > MAX_COMPARED_EVALUATIONS
+              }
+              title={`Select ${MIN_COMPARED_EVALUATIONS} to ${MAX_COMPARED_EVALUATIONS} evaluations to compare`}
+              onClick={() => setComparedEvaluations(selectedRows)}
+            >
+              <ChartColumn />
+              Compare
+            </Button>
+            <Button
+              kind="tertiary"
+              color="neutral"
+              size="small"
+              onClick={() =>
+                setAddToGroupState({
+                  evaluations: selectedRows,
+                  clearSelection: () => table.resetRowSelection(),
+                })
+              }
+            >
+              <FolderPlus />
+              Add to experiment
+            </Button>
+          </>
         )}
         toolbarSlotStart={
           columnLayout.hasUnsavedLayout ? (
