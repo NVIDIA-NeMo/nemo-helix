@@ -21,9 +21,8 @@ _FAILED_STORAGE_TTL_SECONDS = 4 * 3600
 class JobsStorageConfig(BaseModel):
     """How long a paused or failed job keeps its storage.
 
-    These are platform settings. A paused job can still be given a longer or
-    shorter window after it pauses; that override does not change this default,
-    and a failed job always uses ``failed_storage_ttl_seconds``.
+    A job may set its own pause window, up to ``maximum_pause_ttl_seconds``.
+    A failed job always uses ``failed_storage_ttl_seconds``.
     """
 
     paused_storage_ttl_seconds: int = Field(
@@ -31,6 +30,13 @@ class JobsStorageConfig(BaseModel):
         ge=0,
         description="How long storage is kept after a job pauses, unless that job sets its own pause window. "
         "Measured from the paused step's stopped_at. 0 reclaims on the next retention pass.",
+    )
+    maximum_pause_ttl_seconds: int = Field(
+        default=30 * _SECONDS_PER_DAY,
+        ge=0,
+        description="Longest pause window a job may set, measured from stopped_at. "
+        "A longer pause_ttl_seconds is rejected. The platform paused-storage TTL still applies when a job "
+        "does not set its own window, and that default is also capped by this maximum.",
     )
     failed_storage_ttl_seconds: int = Field(
         default=_FAILED_STORAGE_TTL_SECONDS,

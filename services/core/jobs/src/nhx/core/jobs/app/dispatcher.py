@@ -12,6 +12,7 @@ from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.types import JobControl
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
@@ -46,6 +47,7 @@ from nhx.core.jobs.app.lifecycle import rerun_status_details, with_lifecycle_tim
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
+from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.entities import (
     STEP_SPEC_NAME_CONFIG_KEY,
     HelixJob,
@@ -68,7 +70,15 @@ class StateTransitionConflictError(Exception):
 
 
 class JobOperationConflictError(Exception):
-    """Exception raised when pause, resume, rerun, or a pause-TTL update cannot proceed."""
+    """Exception raised when pause, resume, rerun, or a control update cannot proceed."""
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
+
+
+class PauseTTLLimitError(Exception):
+    """Exception raised when a pause window is longer than the platform maximum."""
 
     def __init__(self, detail: str):
         super().__init__(detail)
@@ -141,6 +151,15 @@ def _get_job_mutation_lock(job_name: str, workspace: str) -> asyncio.Lock:
     return lock
 
 
+def _reject_pause_ttl_over_maximum(pause_ttl_seconds: int | None) -> None:
+    """Reject a pause window longer than the platform maximum."""
+    if pause_ttl_seconds is None:
+        return
+    maximum = jobs_config.storage.maximum_pause_ttl_seconds
+    if pause_ttl_seconds > maximum:
+        raise PauseTTLLimitError(f"pause_ttl_seconds cannot exceed the platform maximum of {maximum} seconds.")
+
+
 def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime.datetime:
     # Status changes only rewrite the attempt, so the job entity's own timestamp stays at creation.
     return max(ts for ts in (job.updated_at, attempt.updated_at) if ts is not None)
@@ -163,6 +182,7 @@ def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> Hel
         source=job.source,
         spec=job.spec,
         platform_spec=job.platform_spec,
+        control=job.control,
         fileset=job.fileset,
         output_location=job.output_location,
         status=attempt.status,
@@ -361,10 +381,8 @@ class JobDispatcher:
 
         try:
             platform_spec = job_req.platform_spec
-            # A create-time pause window would let any caller hold storage. The
-            # override is applied later, only while the job is paused.
-            if platform_spec.pause_ttl_seconds is not None:
-                platform_spec = platform_spec.model_copy(update={"pause_ttl_seconds": None})
+            control = job_req.control or JobControl()
+            _reject_pause_ttl_over_maximum(control.pause_ttl_seconds)
 
             await self.validate_job_secrets(platform_spec, workspace)
 
@@ -403,6 +421,7 @@ class JobDispatcher:
                     source=job_req.source,
                     spec=job_req.spec,
                     platform_spec=platform_spec,
+                    control=control,
                     fileset=fileset_name,
                     output_location=job_req.output_location,
                     ownership=job_req.ownership,
@@ -1176,6 +1195,12 @@ class JobDispatcher:
                 attempt.status = new_attempt_status
                 if attempt.status == HelixJobStatus.ERROR:
                     attempt.error_details = saved_step.error_details
+                if attempt.status in (HelixJobStatus.PAUSED, HelixJobStatus.ERROR):
+                    saved_digest = (saved_step.status_details or {}).get(IMAGE_DIGEST_AT_SAVE)
+                    if isinstance(saved_digest, str) and saved_digest:
+                        attempt.status_details = self._update_status_details_object(
+                            attempt.status_details, {IMAGE_DIGEST_AT_SAVE: saved_digest}
+                        )
                 attempt = await self.store.update(attempt)
                 if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
                     try:
@@ -1368,17 +1393,18 @@ class JobDispatcher:
         if attempt is None:
             raise Exception(f"Job Attempt with Job ID {job_entity.id} does not exist.")
 
-        already_pausing = await self._get_step_by_status(
-            job_entity, workspace, [HelixJobStatus.PAUSING, HelixJobStatus.PAUSED]
-        )
-        if already_pausing is not None:
-            operations_counter.add(1, attributes={"operation": "pause_job"})
-            return create_platform_job_response(job_entity, attempt)
-
+        # A live step is paused even when another step is already pausing or paused.
+        # The idempotent return applies only when nothing is still created, pending, or active.
         active_or_pending_step = await self._get_step_by_status(
             job_entity, workspace, [HelixJobStatus.CREATED, HelixJobStatus.PENDING, HelixJobStatus.ACTIVE]
         )
         if active_or_pending_step is None:
+            already_pausing = await self._get_step_by_status(
+                job_entity, workspace, [HelixJobStatus.PAUSING, HelixJobStatus.PAUSED]
+            )
+            if already_pausing is not None:
+                operations_counter.add(1, attributes={"operation": "pause_job"})
+                return create_platform_job_response(job_entity, attempt)
             raise JobOperationConflictError(f"Cannot pause job '{job_entity.name}': the job is {attempt.status.value}.")
 
         step_spec_name = get_step_spec_name(active_or_pending_step.config, active_or_pending_step.name)
@@ -1441,18 +1467,22 @@ class JobDispatcher:
             return f"Cannot resume job '{job_name}': a pause is in flight."
         return f"Cannot resume job '{job_name}' from status '{status.value}'."
 
-    async def update_pause_ttl(
-        self, identifier: str, workspace: str, pause_ttl_seconds: int
+    async def update_job_control(
+        self,
+        identifier: str,
+        workspace: str,
+        update: JobControl,
+        auth_context: AuthContext | None = None,
     ) -> HelixJobResponse | None:
-        """Change how long a paused job keeps its storage.
+        """Change mutable job behavior without rewriting the attempt spec.
 
-        The duration is measured from the paused step's ``stopped_at``, so a
-        longer or shorter value does not move the start of the window. The
-        attempt spec stays unchanged; only the live job spec is updated. When
-        this override is absent, the platform paused-storage TTL applies.
+        The pause window is measured from the paused step's ``stopped_at``, so
+        a longer or shorter value does not move the start. Fields omitted from
+        ``update`` stay as they are. A null pause window clears the override
+        and the platform default applies again.
         """
-        if pause_ttl_seconds < 0:
-            raise JobOperationConflictError("pause_ttl_seconds must be greater than or equal to 0.")
+        if "pause_ttl_seconds" in update.model_fields_set:
+            _reject_pause_ttl_over_maximum(update.pause_ttl_seconds)
 
         job = await self._resolve_job(identifier, workspace)
         if job is None:
@@ -1461,14 +1491,23 @@ class JobDispatcher:
         attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
         if attempt is None:
             raise Exception(f"Job Attempt with Job ID {job.id} does not exist.")
-        if attempt.status != HelixJobStatus.PAUSED or (attempt.status_details or {}).get(STORAGE_RECLAIMED_AT):
+        if (attempt.status_details or {}).get(STORAGE_RECLAIMED_AT):
             raise JobOperationConflictError(
-                f"Cannot update the pause window for job '{job.name}': the job must be paused with storage still available."
+                f"Cannot update control for job '{job.name}': storage has been reclaimed. Create a new job."
             )
 
-        job.platform_spec = job.platform_spec.model_copy(update={"pause_ttl_seconds": pause_ttl_seconds})
+        control = job.control.model_copy()
+        if "pause_ttl_seconds" in update.model_fields_set:
+            control.pause_ttl_seconds = update.pause_ttl_seconds
+        job.control = control
+        # Restore auth context around the write. The store can sanitize it for
+        # non-service principals, and the next run still needs the caller.
+        if auth_context is not None:
+            job.with_auth_context(auth_context)
         job = await self.store.update(job)
-        operations_counter.add(1, attributes={"operation": "update_pause_ttl"})
+        if auth_context is not None:
+            job.with_auth_context(auth_context)
+        operations_counter.add(1, attributes={"operation": "update_job_control"})
         return create_platform_job_response(job, attempt)
 
     # =========================================================================

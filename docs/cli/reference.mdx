@@ -4129,7 +4129,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
 * `rerun`: Rerun a failed platform job from surviving storage.
-* `pause-ttl`: Change how long a paused job keeps its storage.
+* `control`: Change mutable job behavior, such as how long a pause keeps storage.
 * `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
 * `watch`: Watch a platform job until it reaches a terminal status.
@@ -4452,14 +4452,14 @@ nemo jobs rerun [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-#### nemo jobs pause-ttl
+#### nemo jobs control
 
-Change how long a paused job keeps its storage.
+Change mutable job behavior, such as how long a pause keeps storage.
 
 **Usage:**
 
 ```shell
-nemo jobs pause-ttl [OPTIONS] NAME
+nemo jobs control [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -4468,7 +4468,7 @@ nemo jobs pause-ttl [OPTIONS] NAME
 
 **Options:**
 
-* `--seconds <INTEGER>`: How long to keep storage, measured from the pause.
+* `--pause-ttl-seconds <INTEGER>`: How long to keep storage after a pause, measured from the pause. Cannot exceed the platform maximum.
 * `--workspace`
 
 **Help:**

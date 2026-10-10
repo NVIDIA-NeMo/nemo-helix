@@ -497,6 +497,8 @@ jobs:
   storage:
     # How long storage is kept after a job pauses, unless that job sets its own pause window. Measured from the paused step's stopped_at. 0 reclaims on the next retention pass. | default: 604800
     paused_storage_ttl_seconds: 604800
+    # Longest pause window a job may set, measured from stopped_at. A longer pause_ttl_seconds is rejected. The platform paused-storage TTL still applies when a job does not set its own window, and that default is also capped by this maximum. | default: 2592000
+    maximum_pause_ttl_seconds: 2592000
     # How long storage is kept after a job fails, measured from the failed step's stopped_at. 0 reclaims on the next retention pass. | default: 14400
     failed_storage_ttl_seconds: 14400
   # Include raw job log lines in controller diagnostics snapshots. Disabled by default because job logs may contain secrets or PII. Enable only for local debugging or test environments. | default: False

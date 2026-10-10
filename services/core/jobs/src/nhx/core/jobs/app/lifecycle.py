@@ -221,6 +221,16 @@ def active_ttl_anchor(step: TimedStep) -> datetime.datetime | None:
     return max(created_at, resumed_at)
 
 
+def effective_pause_ttl_seconds(requested: int | None, *, default_seconds: int, maximum_seconds: int) -> int:
+    """Return the pause window a job actually gets.
+
+    An unset request uses the platform default. Both are capped by the platform
+    maximum, so lowering that maximum shortens windows that were saved earlier.
+    """
+    chosen = default_seconds if requested is None else requested
+    return min(chosen, maximum_seconds)
+
+
 def rerun_status_details(previous: dict[str, Any] | None) -> dict[str, Any]:
     """Copy progress scalars and the metrics series onto a new attempt.
 

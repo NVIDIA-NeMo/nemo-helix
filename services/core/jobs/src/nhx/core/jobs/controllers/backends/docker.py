@@ -2320,9 +2320,11 @@ class GPUDockerJobBackend(DockerJobBackend[GPUExecutionProvider]):
         # Release GPU on any terminal state. Do not wait for cleanup_steps - that method
         # is called on the base class and has no visibility into the GPU pool!
         # Note: job_update.status may be a string or enum depending on code path
-        terminal_states = {s.value for s in HelixJobStatus.terminals()}
+        # Paused is not terminal, but the container is already gone. Leaving the
+        # allocation in place would reserve those GPUs again when the step resumes.
+        release_states = {s.value for s in HelixJobStatus.terminals()} | {HelixJobStatus.PAUSED.value}
         status_value = job_update.status.value if isinstance(job_update.status, HelixJobStatus) else job_update.status
-        if self.gpu_pool is not None and status_value in terminal_states:
+        if self.gpu_pool is not None and status_value in release_states:
             self._release_gpu_for_step_id(step.id, reason="terminal_sync")
         return job_update
 

@@ -67,6 +67,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_PATH,
+    JobUpdate,
 )
 from nhx.core.jobs.controllers.backends.docker import (
     DEFAULT_VOLUME_PERMISSIONS_IMAGE,
@@ -1866,6 +1867,30 @@ def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_
     assert executor.cancel_scheduling(step) is True
     assert executor.gpu_pool.gpu_to_workload_id[0] is None
     executor._jobs.update_job_step_status.assert_called_once()
+
+
+def test_gpu_sync_releases_allocation_when_step_pauses(mock_nemo_client, docker_client_mock):
+    """A paused step has no container, so its GPU allocation has to be released before resume."""
+    step_id = "paused-step-id"
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+        mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
+        mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
+        executor = GPUDockerJobBackend(
+            nemo_client=mock_nemo_client,
+            execution_profile_config=DockerJobExecutionProfileConfig(
+                storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
+            ),
+            profile_name="default",
+        )
+        executor._client = docker_client_mock
+
+    executor.gpu_pool.allocate_gpu(step_id)
+    assert executor.gpu_pool.gpu_to_workload_id[0] == step_id
+    step = MagicMock()
+    step.id = step_id
+    with patch.object(executor, "_sync", return_value=JobUpdate(status=HelixJobStatus.PAUSED)):
+        executor.sync(step)
+    assert executor.gpu_pool.gpu_to_workload_id[0] is None
 
 
 def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_nemo_client, docker_client_mock):

@@ -181,6 +181,22 @@ class HelixJobAttemptSortField(str, Enum):
 # ---------------------------------------------------------------------------
 
 
+class JobControl(BaseModel):
+    """Mutable job behavior, stored on the job and kept off the execution spec.
+
+    The attempt spec stays the immutable snapshot of what a run executes. Rerun
+    copies the job spec into the next attempt and keeps using this object.
+    """
+
+    pause_ttl_seconds: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="How long this job keeps storage after it pauses, measured from stopped_at. "
+        "When unset, the platform paused-storage TTL applies. Cannot exceed the platform maximum. "
+        "0 reclaims on the next retention pass. Changing this value does not move the start time.",
+    )
+
+
 class HelixJobResponse(BaseModel):
     """Response model for a platform job."""
 
@@ -193,6 +209,10 @@ class HelixJobResponse(BaseModel):
     source: str
     spec: dict[str, Any] = Field(default_factory=dict, description="Job Spec")
     platform_spec: HelixJobSpec
+    control: JobControl = Field(
+        default_factory=JobControl,
+        description="Mutable job behavior. This is not part of the execution spec.",
+    )
     fileset: str = Field(..., description="Fileset ID for storing job artifacts")
     output_location: Optional[str] = Field(
         default=None, description="Caller-supplied artifact fileset; None when the fileset was auto-created"
@@ -320,6 +340,11 @@ class CreateHelixJobRequest(BaseModel):
     project: Optional[str] = None
     spec: dict
     platform_spec: HelixJobSpec
+    control: Optional[JobControl] = Field(
+        default=None,
+        description="Mutable job behavior, including how long storage is kept after a pause. "
+        "When omitted, the platform paused-storage TTL applies.",
+    )
     source: str
     ownership: Optional[dict] = None
     custom_fields: Optional[dict] = None
@@ -358,17 +383,6 @@ HelixJobStatusDetailsUpdateRequest = dict[str, Any]
 
 class JobStatusDetailsUpdate(RootModel[dict[str, Any]]):
     """Client request body for ``update_job_status_details`` (a bare JSON object)."""
-
-
-class PauseTTLUpdate(BaseModel):
-    """Request body for changing how long a paused job keeps its storage."""
-
-    pause_ttl_seconds: int = Field(
-        ge=0,
-        description="Seconds to keep storage, measured from stopped_at. "
-        "This overrides the platform paused-storage TTL and does not move the start time. "
-        "0 reclaims on the next pass.",
-    )
 
 
 # NB: list *filter* models (``HelixJobsListFilter`` etc.) are intentionally

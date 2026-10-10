@@ -21,7 +21,7 @@ from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import scoped_app_ctx, start_span_with_ctx
 from nhx.core.jobs.app.constants import STOPPED_AT, STORAGE_RECLAIMED_AT
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
-from nhx.core.jobs.app.lifecycle import parse_timestamp, storage_window_expired
+from nhx.core.jobs.app.lifecycle import effective_pause_ttl_seconds, parse_timestamp, storage_window_expired
 from nhx.core.jobs.config import JobsStorageConfig
 from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.controllers.backends import extract_provider_profile
@@ -226,10 +226,14 @@ class JobReconciler(HeartbeatMixin, Controller):
         if step.status == HelixJobStatus.CANCELLED:
             pass
         elif step.status == HelixJobStatus.PAUSED:
-            # A paused job may carry an override. Otherwise the platform default applies.
-            ttl_seconds = job.platform_spec.pause_ttl_seconds
-            if ttl_seconds is None:
-                ttl_seconds = self._storage_config.paused_storage_ttl_seconds
+            # A job may set its own pause window. Otherwise the platform default applies.
+            # Both are capped by the platform maximum.
+            requested = getattr(getattr(job, "control", None), "pause_ttl_seconds", None)
+            ttl_seconds = effective_pause_ttl_seconds(
+                requested,
+                default_seconds=self._storage_config.paused_storage_ttl_seconds,
+                maximum_seconds=self._storage_config.maximum_pause_ttl_seconds,
+            )
             if not storage_window_expired(_storage_clock(step), ttl_seconds):
                 return
         elif step.status == HelixJobStatus.ERROR:
