@@ -202,7 +202,38 @@ def _model_payload(model: ModelConfig) -> dict[str, Any]:
     settings = payload.get("settings")
     if "base_url" not in payload and isinstance(settings, dict) and isinstance(settings.get("base_url"), str):
         payload["base_url"] = settings.pop("base_url")
+    _flatten_model_extensions(payload)
     return payload
+
+
+def _flatten_model_extensions(payload: dict[str, Any]) -> None:
+    """Spread author-supplied ``extensions`` metadata to top-level model keys.
+
+    The Fabric northbound ``ModelConfig`` collects unknown top-level keys into
+    its ``extensions`` map via ``#[serde(flatten)]``, so adapter-owned per-model
+    catalog metadata (``api``, ``context_window``, ...) must be emitted as
+    siblings of ``provider``/``model`` rather than nested under an
+    ``extensions`` object. A nested ``{"extensions": {...}}`` payload would be
+    captured as a single top-level key literally named ``extensions`` and arrive
+    double-nested at the adapter, leaving the metadata unreadable.
+    """
+    extensions = payload.pop("extensions", None)
+    if not extensions:
+        return
+    # Guard against shadowing a declared model field (which is authoritative),
+    # including one the author left unset -- an unset field is dropped from the
+    # dumped payload, so compare against the declared field names, not payload.
+    # ``extensions`` itself counts: a key literally named ``extensions`` would
+    # re-create the nested wrapper this flattening exists to remove.
+    declared_fields = set(ModelConfig.model_fields)
+    collisions = sorted(key for key in extensions if key in declared_fields)
+    if collisions:
+        raise FabricTranslationError(
+            "Model extensions may not override declared model fields: "
+            + ", ".join(collisions)
+            + ". Set these as top-level model fields instead of under extensions."
+        )
+    payload.update(extensions)
 
 
 def _validate_untranslated_shared_fields(config: AgentConfig) -> None:
