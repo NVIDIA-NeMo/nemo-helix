@@ -197,8 +197,22 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
         "evaluation_id": "eval_1",
         "execution_number": 4,
     }
-    dispatcher.run.assert_called_once_with("eval_1", expected_execution_number=4)
+    # A spec without a workspace predates the inputs entity and loads from Postgres.
+    dispatcher.run.assert_called_once_with("eval_1", expected_execution_number=4, inputs=None)
     dispatcher.finalize.assert_called_once_with("eval_1")
+
+    # Otherwise the Job launches from the entity named after it and projects as it goes.
+    dispatcher = MagicMock(on_change=None)
+    monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
+    entities = MagicMock()
+    entities.get.return_value.inputs = {"name": "eval"}
+    monkeypatch.setattr(evaluation_job_module, "platform_entities", lambda: entities)
+    spec = _evaluation_spec().model_copy(update={"inputs_workspace": "ws", "project_evaluation": True})
+    EvaluationExecutionJob().run(spec.model_dump())
+    assert entities.get.call_args.args[1] == evaluation_execution_job_name("eval_1", 4)
+    assert entities.get.call_args.kwargs == {"workspace": "ws"}
+    dispatcher.run.assert_called_once_with("eval_1", expected_execution_number=4, inputs={"name": "eval"})
+    assert dispatcher.on_change is not None
 
 
 @pytest.mark.asyncio

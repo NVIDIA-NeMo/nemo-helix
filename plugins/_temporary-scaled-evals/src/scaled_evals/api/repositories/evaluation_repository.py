@@ -128,6 +128,31 @@ _CLAIM_SQL = f"""
 # Every evaluation targets a task revision; a member evaluation of a benchmark
 # run additionally carries benchmark_run_id (so the worker can finalize the run
 # once its members finish).
+# The `_LOAD_FOR_DISPATCH_SQL` columns a run changes. Everything else in that
+# row is fixed once the evaluation is inserted.
+DISPATCH_STATE_COLUMNS = (
+    "status",
+    "backend_handle",
+    "dispatch_job_name",
+    "dispatch_job_uid",
+    "current_execution",
+    "infrastructure_retries",
+    "next_retry_at",
+    "last_failure_code",
+    "last_failure_category",
+    "status_detail",
+    "result",
+    "reward_value",
+    "reward",
+    "n_trials",
+    "n_completed",
+    "n_errored",
+    "n_failed_solve",
+    "exception_counts",
+    "updated_at",
+    "finished_at",
+)
+
 _LOAD_FOR_DISPATCH_SQL = """
     SELECT
         e.id,
@@ -199,18 +224,6 @@ _LOAD_FOR_DISPATCH_SQL = """
     JOIN tasks b ON b.id = e.task_id
     LEFT JOIN benchmark_runs br ON br.id = e.benchmark_run_id
     WHERE e.id = %s AND e.deleted_at IS NULL
-"""
-
-_HEARTBEAT_SQL = """
-    UPDATE evaluations
-    SET dispatch_claimed_at = NOW(),
-        updated_at = NOW()
-    WHERE id = %s
-      AND dispatch_claimed_by = %s
-      AND deleted_at IS NULL
-      AND status IN ('queued', 'provisioning', 'running')
-      AND (%s::integer IS NULL OR current_execution = %s::integer)
-    RETURNING 1
 """
 
 _ARCHIVE_CLAIM_SQL = """
@@ -1293,25 +1306,6 @@ class EvaluationRepository:
                 ),
             )
 
-    def heartbeat_claim(
-        self,
-        evaluation_id: str,
-        *,
-        worker_id: str,
-        expected_execution_number: int | None = None,
-    ) -> bool:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                _HEARTBEAT_SQL,
-                (
-                    evaluation_id,
-                    worker_id,
-                    expected_execution_number,
-                    expected_execution_number,
-                ),
-            )
-            return cur.fetchone() is not None
-
     def record_dispatch_job(
         self,
         evaluation_id: str,
@@ -1785,6 +1779,32 @@ class EvaluationRepository:
     def load_for_dispatch(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:
             cur.execute(_LOAD_FOR_DISPATCH_SQL, (evaluation_id,))
+            return cur.fetchone()
+
+    def load_dispatch_state(self, evaluation_id: str) -> dict | None:
+        """Return only the columns of the dispatch row that change during a run."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {', '.join(f'e.{column}' for column in DISPATCH_STATE_COLUMNS)} "
+                "FROM evaluations e WHERE e.id = %s AND e.deleted_at IS NULL",
+                (evaluation_id,),
+            )
+            return cur.fetchone()
+
+    def load_for_projection(self, evaluation_id: str) -> dict | None:
+        """Return one row shaped like `list_changed_since`, including soft-deleted rows."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {EVALUATION_DETAIL_COLUMNS}, e.deleted_at
+                FROM evaluations e
+                LEFT JOIN task_revisions r
+                  ON r.task_id = e.task_id
+                 AND r.revision = e.task_revision
+                WHERE e.id = %s
+                """,
+                (evaluation_id,),
+            )
             return cur.fetchone()
 
     def schedule_retry(

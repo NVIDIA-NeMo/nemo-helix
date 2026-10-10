@@ -15,17 +15,16 @@ from datetime import datetime
 from typing import Any
 
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
-from nemo_helix_plugin.client_provider import get_async_nemo_client, get_nemo_client
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.entities.base import SyncEntityClient
-from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
 from nemo_scaled_evals_plugin.jobs.naming import benchmark_archive_job_name, task_image_build_job_name
 from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, TaskImageBuildSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
-from nemo_scaled_evals_plugin.projection import EvaluationProjectionWriter
+from nemo_scaled_evals_plugin.projection import EvaluationProjectionWriter, platform_entities
 from nemo_scaled_evals_plugin.submitter import EvaluationSubmitter
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
@@ -63,6 +62,7 @@ class ScaledEvalsJobsController(NemoController):
     def __init__(self) -> None:
         self._jobs: AsyncJobsClient | None = None
         self._submitter: EvaluationSubmitter | None = None
+        self._entities: SyncEntityClient | None = None
         self._worker_id = f"scaled-evals-jobs:{socket.gethostname()}:{time.time_ns()}"
         self._healthy = True
         self._projection: EvaluationProjectionWriter | None = None
@@ -79,7 +79,7 @@ class ScaledEvalsJobsController(NemoController):
     @property
     def submitter(self) -> EvaluationSubmitter:
         if self._submitter is None:
-            self._submitter = EvaluationSubmitter(self.jobs, self._worker_id)
+            self._submitter = EvaluationSubmitter(self.jobs, self._worker_id, self._entities)
         return self._submitter
 
     @property
@@ -91,12 +91,9 @@ class ScaledEvalsJobsController(NemoController):
         self._jobs = AsyncJobsClient.from_client(client)
         if settings.platform_jobs_provider == "cpu" and not settings.platform_jobs_image:
             raise RuntimeError("SCALED_EVALS_PLATFORM_JOBS_IMAGE is required for the cpu Platform Jobs provider")
+        self._entities = platform_entities()
         if settings.entity_store_projection_enabled:
-            entities = EntitiesClient.from_client(get_nemo_client(as_service="scaled-evals", internal=True))
-            self._projection = EvaluationProjectionWriter(
-                SyncEntityClient(entities),
-                workspace=settings.entity_store_workspace,
-            )
+            self._projection = EvaluationProjectionWriter(self._entities, workspace=settings.entity_store_workspace)
 
     async def list_objects(self) -> list:
         """Return no objects because reconciliation is queue-oriented."""
