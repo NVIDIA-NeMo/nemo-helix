@@ -41,7 +41,7 @@ import {
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { isConflictError } from '@studio/api/evaluation/eval-config-fileset';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
-import { DATASET_FILE_ACCEPT } from '@studio/components/evaluation/consts';
+import { DATASET_FILE_ACCEPT, EVAL_CONFIG_FILE_ACCEPT } from '@studio/components/evaluation/consts';
 import {
   createRunEvaluation,
   evalConfigFilename,
@@ -70,6 +70,7 @@ import {
   experimentSettingsSchemaShape,
 } from '@studio/components/evaluation/shared/experimentSettings';
 import { ExperimentSettingsFields } from '@studio/components/evaluation/shared/ExperimentSettingsFields';
+import { FilesetConfigPicker } from '@studio/components/evaluation/shared/FilesetConfigPicker';
 import { FilesetDatasetPicker } from '@studio/components/evaluation/shared/FilesetDatasetPicker';
 import { useEvaluationSources } from '@studio/components/evaluation/shared/useEvaluationSources';
 import {
@@ -145,14 +146,14 @@ const startItems = (rerunDisabled: boolean) => [
   },
 ];
 
-const DATASET_SOURCE_UPLOAD = 'upload';
-const DATASET_SOURCE_FILESET = 'fileset';
+const FILE_SOURCE_UPLOAD = 'upload';
+const FILE_SOURCE_FILESET = 'fileset';
 
-type DatasetSource = typeof DATASET_SOURCE_UPLOAD | typeof DATASET_SOURCE_FILESET;
+type FileSource = typeof FILE_SOURCE_UPLOAD | typeof FILE_SOURCE_FILESET;
 
-const DATASET_SOURCE_ITEMS = [
-  { value: DATASET_SOURCE_UPLOAD, children: 'Upload a file' },
-  { value: DATASET_SOURCE_FILESET, children: 'Choose from a fileset' },
+const FILE_SOURCE_ITEMS = [
+  { value: FILE_SOURCE_UPLOAD, children: 'Upload a file' },
+  { value: FILE_SOURCE_FILESET, children: 'Choose from a fileset' },
 ];
 
 const MAX_PARALLELISM = 16;
@@ -176,6 +177,8 @@ const submitEvaluationBaseSchema = z.object({
   datasetFileset: z.string(),
   datasetFile: z.string(),
   datasetBatchGlob: z.string(),
+  configFileset: z.string(),
+  configFile: z.string(),
   parallelism: z.coerce
     .number()
     .int('Use a whole number')
@@ -238,6 +241,8 @@ const makeDefaultValues = (
   datasetFileset: '',
   datasetFile: '',
   datasetBatchGlob: '',
+  configFileset: '',
+  configFile: '',
   parallelism: DEFAULT_PARALLELISM,
   ...EXPERIMENT_SETTINGS_DEFAULTS,
 });
@@ -258,6 +263,18 @@ interface ConfigPick extends FilePick {
 
 const configFormatForFile = (name: string): EvalConfigFormat =>
   /\.ya?ml$/i.test(name) ? 'yaml' : 'json';
+
+const readConfigPick = async (file: File): Promise<ConfigPick> => {
+  try {
+    return {
+      file,
+      spec: parseUploadedDatasetConfig(await file.text()),
+      format: configFormatForFile(file.name),
+    };
+  } catch (err) {
+    return { file, error: err instanceof Error ? err.message : 'Could not read the file' };
+  }
+};
 
 interface SubmitEvaluationModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
@@ -417,8 +434,9 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const [step, setStep] = useState<WizardStep>(startingStep);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [datasetPick, setDatasetPick] = useState<InspectedDataset | null>(null);
-  const [datasetSource, setDatasetSource] = useState<DatasetSource>(DATASET_SOURCE_UPLOAD);
+  const [datasetSource, setDatasetSource] = useState<FileSource>(FILE_SOURCE_UPLOAD);
   const [configPick, setConfigPick] = useState<ConfigPick | null>(null);
+  const [configSource, setConfigSource] = useState<FileSource>(FILE_SOURCE_UPLOAD);
 
   // Bumped whenever a pick is replaced, removed, or reset, so an async validation that is
   // still running when that happens knows to drop its result instead of committing it.
@@ -488,7 +506,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const datasetFileset = useWatch({ control, name: 'datasetFileset' });
   const datasetFilePath = useWatch({ control, name: 'datasetFile' });
   const datasetBatchGlob = useWatch({ control, name: 'datasetBatchGlob' });
-  const isFilesetSource = datasetSource === DATASET_SOURCE_FILESET;
+  const isFilesetSource = datasetSource === FILE_SOURCE_FILESET;
   // Downloaded raw rather than through useDatasetFileContent, which hands Parquet back as JSONL
   // text; the run stores the file as-is so the evaluator reads it with its own loader.
   const filesetFile = useFilesetFile({
@@ -513,18 +531,42 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const filesetPick = isFilesetSource ? (filesetInspection.data ?? null) : null;
   const activeDatasetPick = isFilesetSource ? filesetPick : datasetPick;
 
+  const configFileset = useWatch({ control, name: 'configFileset' });
+  const configFilePath = useWatch({ control, name: 'configFile' });
+  const isConfigFromFileset = configSource === FILE_SOURCE_FILESET;
+  const configFilesetFile = useFilesetFile({
+    workspace,
+    fileset: configFileset,
+    path: configFilePath,
+    enabled: open && isConfigFromFileset,
+  });
+  const downloadedConfig = configFilesetFile.data;
+  const filesetConfigRead = useQuery({
+    queryKey: [
+      'evaluation-config-pick',
+      workspace,
+      configFileset,
+      configFilePath,
+      configFilesetFile.dataUpdatedAt,
+    ],
+    queryFn: downloadedConfig ? () => readConfigPick(downloadedConfig) : skipToken,
+    gcTime: 0,
+  });
+  const isLoadingFilesetConfig = configFilesetFile.isFetching || filesetConfigRead.isFetching;
+  const activeConfigPick = isConfigFromFileset ? (filesetConfigRead.data ?? null) : configPick;
+
   const uploads: UploadedEvalInputs | null =
     activeDatasetPick?.storedName &&
     !activeDatasetPick.error &&
-    configPick?.spec &&
-    !configPick.error
+    activeConfigPick?.spec &&
+    !activeConfigPick.error
       ? {
           ...(isFilesetSource && datasetBatchGlob
             ? { datasetFiles: [], datasetRef: `${workspace}/${datasetFileset}#${datasetBatchGlob}` }
             : { datasetFiles: activeDatasetPick.stored }),
           datasetPath: activeDatasetPick.storedName,
-          spec: configPick.spec,
-          configFormat: configPick.format ?? 'json',
+          spec: activeConfigPick.spec,
+          configFormat: activeConfigPick.format ?? 'json',
         }
       : null;
 
@@ -578,8 +620,11 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     (isFilesetSource ? filesetFile.error?.message : undefined) ??
     (submitAttempted && !activeDatasetPick && !isLoadingFilesetFile ? 'Add a dataset' : undefined);
   const configError =
-    configPick?.error ??
-    (submitAttempted && !configPick ? 'Select an evaluator config' : undefined);
+    activeConfigPick?.error ??
+    (isConfigFromFileset ? configFilesetFile.error?.message : undefined) ??
+    (submitAttempted && !activeConfigPick && !isLoadingFilesetConfig
+      ? 'Select an evaluator config'
+      : undefined);
 
   const experimentNameStatus = nameCheckStatus(
     experimentPreview,
@@ -615,7 +660,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   // have a model written into it — not just for the llm-judge type. Every match is collected,
   // not just the first: the override rewrites all of them, so all of them must be checked.
   const judgeMetrics =
-    configPick?.spec?.metrics.filter(
+    activeConfigPick?.spec?.metrics.filter(
       (metric) => metric.metric_type === 'llm-judge' || 'model' in metric.payload.metric
     ) ?? [];
 
@@ -691,21 +736,17 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     clearConfigPick();
     if (!item?.file) return;
     const token = configToken.current;
-    let pick: ConfigPick;
-    try {
-      pick = {
-        file: item.file,
-        spec: parseUploadedDatasetConfig(await item.file.text()),
-        format: configFormatForFile(item.file.name),
-      };
-    } catch (err) {
-      pick = {
-        file: item.file,
-        error: err instanceof Error ? err.message : 'Could not read the file',
-      };
-    }
+    const pick = await readConfigPick(item.file);
     if (token !== configToken.current) return;
     setConfigPick(pick);
+  };
+
+  const handleConfigSourceChanged = (value: string) => {
+    setValue('judgeModel', '');
+    clearConfigPick();
+    setValue('configFileset', '');
+    setValue('configFile', '');
+    setConfigSource(value as FileSource);
   };
 
   const {
@@ -804,8 +845,9 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     datasetToken.current += 1;
     configToken.current += 1;
     setDatasetPick(null);
-    setDatasetSource(DATASET_SOURCE_UPLOAD);
+    setDatasetSource(FILE_SOURCE_UPLOAD);
     setConfigPick(null);
+    setConfigSource(FILE_SOURCE_UPLOAD);
     setSubmitAttempted(false);
   }, [open, agentProp, sourceEvaluation, resetForm, startingStep]);
 
@@ -828,8 +870,9 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     seededForSource.current = null;
     modeDefaultApplied.current = false;
     clearDatasetPick();
-    setDatasetSource(DATASET_SOURCE_UPLOAD);
+    setDatasetSource(FILE_SOURCE_UPLOAD);
     clearConfigPick();
+    setConfigSource(FILE_SOURCE_UPLOAD);
     setSubmitAttempted(false);
     onClose();
   };
@@ -1077,12 +1120,12 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                       setValue('datasetFileset', '');
                       setValue('datasetFile', '');
                       setValue('datasetBatchGlob', '');
-                      setDatasetSource(value as DatasetSource);
+                      setDatasetSource(value as FileSource);
                     }}
-                    items={DATASET_SOURCE_ITEMS}
+                    items={FILE_SOURCE_ITEMS}
                   />
 
-                  {datasetSource === DATASET_SOURCE_FILESET ? (
+                  {datasetSource === FILE_SOURCE_FILESET ? (
                     <FilesetDatasetPicker<SubmitEvaluationFormData>
                       workspace={workspace}
                       control={control}
@@ -1113,23 +1156,49 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                     />
                   )}
 
-                  <Upload
-                    accept=".json,.yaml,.yml"
-                    onValueChange={handleConfigPicked}
-                    onFileRemove={clearConfigPick}
-                    status={configError ? 'error' : undefined}
-                    renderInput={(slotInput) => (
-                      <FormField
-                        name="evalConfig"
-                        slotLabel="Select Evaluator Config"
-                        slotHelp="Select a JSON or YAML config."
-                        slotError={configError}
-                        status={configError ? 'error' : undefined}
-                      >
-                        {configPick ? null : slotInput}
-                      </FormField>
-                    )}
+                  <Text className="text-secondary" kind="label/bold/sm">
+                    Select evaluator config
+                  </Text>
+
+                  <SegmentedControl
+                    aria-label="Evaluator config source"
+                    size="tiny"
+                    className="w-full"
+                    value={configSource}
+                    onValueChange={handleConfigSourceChanged}
+                    items={FILE_SOURCE_ITEMS}
                   />
+
+                  {isConfigFromFileset ? (
+                    <FilesetConfigPicker<SubmitEvaluationFormData>
+                      workspace={workspace}
+                      control={control}
+                      filesetName="configFileset"
+                      fileName="configFile"
+                      onPick={() => setValue('judgeModel', '')}
+                      disabled={isPending}
+                      loading={isLoadingFilesetConfig}
+                      error={configError}
+                    />
+                  ) : (
+                    <Upload
+                      accept={EVAL_CONFIG_FILE_ACCEPT}
+                      onValueChange={handleConfigPicked}
+                      onFileRemove={clearConfigPick}
+                      status={configError ? 'error' : undefined}
+                      renderInput={(slotInput) => (
+                        <FormField
+                          name="evalConfig"
+                          slotLabel="Select Evaluator Config"
+                          slotHelp="Select a JSON or YAML config."
+                          slotError={configError}
+                          status={configError ? 'error' : undefined}
+                        >
+                          {configPick ? null : slotInput}
+                        </FormField>
+                      )}
+                    />
+                  )}
 
                   {isLlmJudge && (
                     <JudgeModelSelect<SubmitEvaluationFormData>

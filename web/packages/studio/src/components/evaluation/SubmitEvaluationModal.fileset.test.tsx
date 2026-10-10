@@ -21,7 +21,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { PARQUET, parquetFile } from '@studio/tests/util/parquetFixtures';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -77,6 +77,22 @@ metrics:
         right_template: "{{ item.expected }}"
 `;
 
+const CONFIG_FILESET = 'eval-configs';
+
+const CONFIG_FILESET_FILES: Record<string, string> = {
+  'eval-config.yaml': EVAL_CONFIG,
+  'configs/strict.json': JSON.stringify({ prompt_template: '{{ item.prompt }}' }),
+  'logs/eval-config.yaml': EVAL_CONFIG,
+  'notes.txt': 'not a config',
+};
+
+const filesetFile = (fileset: string, path: string) => ({
+  file_ref: `${DEFAULT_WORKSPACE}/${fileset}#${path}`,
+  file_url: `/${path}`,
+  path,
+  size: 10,
+});
+
 const mockListApis = () => {
   server.use(
     http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), () =>
@@ -87,24 +103,29 @@ const mockListApis = () => {
     ),
     http.get(mockApiUrl(getFilesListFilesetsQueryKey, ':workspace'), () =>
       HttpResponse.json({
-        data: [{ name: 'generated', workspace: DEFAULT_WORKSPACE }],
-        pagination: { total: 1, page: 1, page_size: 20 },
+        data: [
+          { name: 'generated', workspace: DEFAULT_WORKSPACE },
+          { name: CONFIG_FILESET, workspace: DEFAULT_WORKSPACE },
+        ],
+        pagination: { total: 2, page: 1, page_size: 20 },
       })
     ),
-    http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
-      HttpResponse.json({
-        data: [
-          {
-            file_ref: `${DEFAULT_WORKSPACE}/generated#output/part-0.parquet`,
-            file_url: '/output/part-0.parquet',
-            path: 'output/part-0.parquet',
-            size: 10,
-          },
-        ],
-      })
+    http.get(
+      mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'),
+      ({ params: { name } }) =>
+        HttpResponse.json({
+          data:
+            name === CONFIG_FILESET
+              ? Object.keys(CONFIG_FILESET_FILES).map((path) => filesetFile(CONFIG_FILESET, path))
+              : [filesetFile('generated', 'output/part-0.parquet')],
+        })
     )
   );
 };
+
+const datasetSource = () => within(screen.getByRole('radiogroup', { name: 'Dataset source' }));
+const configSource = () =>
+  within(screen.getByRole('radiogroup', { name: 'Evaluator config source' }));
 
 const openDatasetStep = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
@@ -115,7 +136,7 @@ const openDatasetStep = async (user: ReturnType<typeof userEvent.setup>) => {
 };
 
 const pickFilesetFile = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
+  await user.click(datasetSource().getByRole('radio', { name: 'Choose from a fileset' }));
   await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
   await user.click(await screen.findByRole('option', { name: 'generated' }));
   await user.click(await screen.findByRole('combobox', { name: 'File' }));
@@ -143,7 +164,11 @@ const renderModal = () =>
 
 beforeEach(() => {
   mockListApis();
-  vi.mocked(filesDownloadFile).mockResolvedValue(parquetFile(PARQUET.twoRows));
+  vi.mocked(filesDownloadFile).mockImplementation(async (_workspace, fileset, path) =>
+    fileset === CONFIG_FILESET
+      ? new Blob([CONFIG_FILESET_FILES[path] ?? ''])
+      : parquetFile(PARQUET.twoRows)
+  );
   vi.mocked(evalsCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
   vi.mocked(createExperiment).mockResolvedValue({
     id: 'grp_new',
@@ -201,7 +226,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
-    await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
+    await user.click(datasetSource().getByRole('radio', { name: 'Choose from a fileset' }));
     await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
     await user.click(await screen.findByRole('option', { name: 'generated' }));
     await user.click(await screen.findByRole('combobox', { name: 'File' }));
@@ -231,7 +256,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
     await pickFilesetFile(user);
-    await user.click(screen.getByRole('radio', { name: 'Upload a file' }));
+    await user.click(datasetSource().getByRole('radio', { name: 'Upload a file' }));
     await user.upload(
       screen.getByLabelText('Select Evaluator Config'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
@@ -360,7 +385,7 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
-    await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
+    await user.click(datasetSource().getByRole('radio', { name: 'Choose from a fileset' }));
     await user.upload(
       screen.getByLabelText('Select Evaluator Config'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
@@ -368,6 +393,79 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
     expect(await screen.findByText('Add a dataset')).toBeVisible();
+    expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
+  });
+});
+
+const pickFilesetConfig = async (user: ReturnType<typeof userEvent.setup>, path: string) => {
+  await user.click(configSource().getByRole('radio', { name: 'Choose from a fileset' }));
+  await user.click(await screen.findByRole('combobox', { name: 'Config Fileset' }));
+  await user.click(await screen.findByRole('option', { name: CONFIG_FILESET }));
+  await user.click(await screen.findByRole('combobox', { name: 'Config File' }));
+  await user.click(await screen.findByRole('option', { name: path }));
+};
+
+describe('SubmitEvaluationModal evaluator config from a fileset', () => {
+  it('offers only JSON and YAML files outside logs/', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.click(configSource().getByRole('radio', { name: 'Choose from a fileset' }));
+    await user.click(await screen.findByRole('combobox', { name: 'Config Fileset' }));
+    await user.click(await screen.findByRole('option', { name: CONFIG_FILESET }));
+    await user.click(await screen.findByRole('combobox', { name: 'Config File' }));
+
+    const options = await screen.findAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([
+      'configs/strict.json',
+      'eval-config.yaml',
+    ]);
+  });
+
+  it('submits a YAML config picked from a fileset like an uploaded one', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await pickFilesetFile(user);
+    await pickFilesetConfig(user, 'eval-config.yaml');
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, request] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
+    expect(request.spec).toMatchObject({ prompt_template: '{{ item.prompt }}' });
+    expect(vi.mocked(filesUploadFile).mock.calls.map(([, , name]) => name)).toContain(
+      'eval-config.yaml'
+    );
+  });
+
+  it('shows why a fileset config is not a usable eval config', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await pickFilesetConfig(user, 'configs/strict.json');
+
+    expect(await screen.findByText(/must contain a non-empty "metrics" array/)).toBeVisible();
+  });
+
+  it('forgets the fileset config after switching back to upload', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await pickFilesetFile(user);
+    await pickFilesetConfig(user, 'eval-config.yaml');
+    await user.click(configSource().getByRole('radio', { name: 'Upload a file' }));
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    expect(screen.getByLabelText('Select Evaluator Config')).toBeInTheDocument();
+    expect(await screen.findByText('Select an evaluator config')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
 });
