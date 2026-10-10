@@ -5,6 +5,7 @@ import asyncio
 
 import httpx
 import pytest
+from nhx_evals_sdk.resilience.attempt_timing import time_successful_attempt
 from nhx_evals_sdk.resilience.config import ResilienceConfig
 from nhx_evals_sdk.resilience.scheduler import (
     ResilienceDeadlineExceededError,
@@ -251,3 +252,59 @@ async def test_scheduler_retry_budget_exhaustion_does_not_leak_inflight_or_queue
     controller = await scheduler._get_controller(endpoint)  # noqa: SLF001
     assert controller.state.inflight == 0
     assert controller.state.queued == 0
+
+
+class _ManualClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def _no_wait_config() -> ResilienceConfig:
+    return ResilienceConfig(
+        backoff_initial_ms=0.0,
+        backoff_cap_ms=0.0,
+        cooldown_seconds_soft=0.0,
+        cooldown_seconds_hard=0.0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_attempt_timing_measures_only_the_successful_attempt():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+    call_count = 0
+
+    async def slow_failure_then_success() -> str:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            clock.now += 50.0
+            raise httpx.ReadTimeout("timeout")
+        clock.now += 7.0
+        return "ok"
+
+    with time_successful_attempt() as timing:
+        result = await scheduler.run_with_resilience(
+            "endpoint-timing", slow_failure_then_success, max_attempts=2, deadline_at=None
+        )
+
+    assert result == "ok"
+    assert timing.seconds == 7.0
+
+
+@pytest.mark.asyncio
+async def test_attempt_timing_stays_unset_when_every_attempt_fails():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+
+    async def always_fails() -> str:
+        clock.now += 3.0
+        raise ValueError("boom")
+
+    with time_successful_attempt() as timing, pytest.raises(ValueError, match="boom"):
+        await scheduler.run_with_resilience("endpoint-timing-fail", always_fails, max_attempts=1, deadline_at=None)
+
+    assert timing.seconds is None

@@ -43,6 +43,7 @@ from nhx_evals_sdk.agent_eval.usage_keys import (
     _first_nonnegative_int,
     _first_usage_details,
 )
+from nhx_evals_sdk.execution.samples import sample_runtime_sec
 from nhx_evals_sdk.values.dataset_schemas import _KNOWN_BINDING_FIELDS
 from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nhx_evals_sdk.values.results import EvaluationResult, RowScore
@@ -259,7 +260,9 @@ def row_result_to_agent_eval_result(
                 task_id=task_id,
                 status=AgentEvalTrialStatus.COMPLETED if output is not None else AgentEvalTrialStatus.FAILED,
                 output=output,
-                measurements=_token_measurements(row),
+                measurements=_token_measurements(row).model_copy(
+                    update={"runtime_sec": sample_runtime_sec(row.sample)}
+                ),
             )
         )
         scores.extend(_scores(row, run_id=run_id, task_id=task_id, trial_id=trial_id))

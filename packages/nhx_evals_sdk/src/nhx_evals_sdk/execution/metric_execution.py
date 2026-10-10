@@ -33,7 +33,7 @@ from nhx_evals_sdk.execution.pipeline import (
     GeneratedSampleScoringPipeline,
     PipelineRuntime,
 )
-from nhx_evals_sdk.execution.samples import build_offline_sample, build_retrieval_sample
+from nhx_evals_sdk.execution.samples import SAMPLE_RUNTIME_SEC_KEY, build_offline_sample, build_retrieval_sample
 from nhx_evals_sdk.execution.scoring import (
     empty_evaluation_result,
     finalize_evaluation_result,
@@ -49,6 +49,7 @@ from nhx_evals_sdk.metrics.protocol import (
 )
 from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resilience.api import run_indexed_tasks, use_resilience_session
+from nhx_evals_sdk.resilience.attempt_timing import time_successful_attempt
 from nhx_evals_sdk.resilience.errors import get_evaluation_error
 from nhx_evals_sdk.session import begin_evaluation_session
 from nhx_evals_sdk.structured_output import (
@@ -404,26 +405,27 @@ async def generate_online_sample(
     # runtime (both expose only ``__call__``), so ``isinstance`` can't
     # discriminate them. ``target`` is the real discriminator and the
     # overloads statically pin the pairing — ``cast`` just records that.
-    if isinstance(target, Model):
-        model_fn = cast(inference.InferenceFn, inference_fn)
-        response = await model_fn(
-            target,
-            request,
-            max_retries,
-            client=cast(AsyncOpenAI | None, client),
-            default_headers=default_headers,
-            timeout=timeout,
-        )
-    else:
-        agent_fn = cast(AgentInferenceFn, inference_fn)
-        response = await agent_fn(
-            target,
-            request,
-            client=cast(httpx.AsyncClient | None, client),
-            max_retries=max_retries,
-            default_headers=default_headers,
-            timeout=timeout,
-        )
+    with time_successful_attempt() as attempt:
+        if isinstance(target, Model):
+            model_fn = cast(inference.InferenceFn, inference_fn)
+            response = await model_fn(
+                target,
+                request,
+                max_retries,
+                client=cast(AsyncOpenAI | None, client),
+                default_headers=default_headers,
+                timeout=timeout,
+            )
+        else:
+            agent_fn = cast(AgentInferenceFn, inference_fn)
+            response = await agent_fn(
+                target,
+                request,
+                client=cast(httpx.AsyncClient | None, client),
+                max_retries=max_retries,
+                default_headers=default_headers,
+                timeout=timeout,
+            )
 
     if isinstance(response, AgentInvocationResult):
         invocation = response
@@ -455,6 +457,8 @@ async def generate_online_sample(
         sample["invocation_metadata"] = invocation.metadata
         if invocation.evidence is not None:
             sample["evidence"] = invocation.evidence
+    if attempt.seconds is not None:
+        sample[SAMPLE_RUNTIME_SEC_KEY] = attempt.seconds
     return sample
 
 

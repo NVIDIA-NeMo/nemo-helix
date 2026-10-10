@@ -368,3 +368,14 @@ def test_mixed_cache_conventions_omit_ambiguous_prompt_and_cache(caplog: pytest.
 
     assert measurements == {"completion_tokens": 2}
     assert "both inclusive cache details and separate cache fields" in caplog.text
+
+
+def test_recorded_generation_runtime_becomes_the_trial_runtime() -> None:
+    trial = _adapt([_row(sample={"output_text": "4", "response": {}, "runtime_sec": 18.5})]).trials[0]
+    assert trial.measurements.runtime_sec == 18.5
+
+
+@pytest.mark.parametrize("runtime", [None, "18.5", True, -1.0, float("nan"), float("inf"), 10**400])
+def test_unusable_runtime_leaves_the_trial_runtime_unmeasured(runtime: object) -> None:
+    trial = _adapt([_row(sample={"output_text": "4", "response": {}, "runtime_sec": runtime})]).trials[0]
+    assert trial.measurements.runtime_sec is None

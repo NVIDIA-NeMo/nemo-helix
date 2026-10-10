@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import nhx_evals_sdk.inference as inference
 import pyarrow as pa
 import pytest
-from nhx_evals_sdk.agent_inference import AgentInvocationResult, AgentInvocationStatus
+from nhx_evals_sdk.agent_inference import AgentInvocationResult, AgentInvocationStatus, invoke_agent
 from nhx_evals_sdk.datasets.loader import discover_files, normalize_dataset, rows_from_dataset, split_glob_path
 from nhx_evals_sdk.enums import AgentFormat, MetricType, ModelFormat
 from nhx_evals_sdk.execution.backends.local.backend import LocalBackend
@@ -36,13 +37,14 @@ from nhx_evals_sdk.execution.metric_execution import (
     run_sync,
 )
 from nhx_evals_sdk.execution.pipeline import PipelineRuntime
-from nhx_evals_sdk.execution.samples import build_metric_input
+from nhx_evals_sdk.execution.samples import SAMPLE_RUNTIME_SEC_KEY, build_metric_input
 from nhx_evals_sdk.execution.scoring import empty_evaluation_result, finalize_evaluation_result
 from nhx_evals_sdk.execution.values import EvaluationError, EvaluationPhase
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.hooks import HooksBase
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric as RuntimeLLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nhx_evals_sdk.metrics.template_rendering import build_template_context
 from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resolvers import LocalSecretResolver, _candidate_env_names
 from nhx_evals_sdk.structured_output import StructuredOutputMode
@@ -852,6 +854,34 @@ class TestGenerateOnlineSample:
         assert sample["response"] == processed_response
         assert sample["invocation_status"] == "completed"
         hook.postprocess.assert_called_once_with(raw_response, id="0")
+
+    @pytest.mark.asyncio
+    async def test_records_how_long_the_agent_took_to_answer(self):
+        async def slow_agent(request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(0.05)
+            return httpx.Response(200, json={"output": "done"})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(slow_agent)) as client:
+            sample = await generate_online_sample(
+                target=_make_agent(),
+                row={"prompt": "hello"},
+                index=0,
+                prompt_template={"messages": [{"role": "user", "content": "{{item.prompt}}"}]},
+                inference_fn=invoke_agent,
+                client=client,
+            )
+
+        assert sample["output_text"] == "done"
+        assert sample[SAMPLE_RUNTIME_SEC_KEY] > 0
+
+    def test_recorded_runtime_does_not_shadow_a_dataset_column_in_metric_templates(self):
+        row = {"prompt": "hello", SAMPLE_RUNTIME_SEC_KEY: 120}
+        metric_input = build_metric_input(row, {"output_text": "done", SAMPLE_RUNTIME_SEC_KEY: 3.2}, 0)
+
+        context = build_template_context(row, metric_input.candidate)
+
+        assert context[SAMPLE_RUNTIME_SEC_KEY] == 120
+        assert SAMPLE_RUNTIME_SEC_KEY not in context["sample"]
 
 
 class TestGenerateOnlineSampleAgent:
