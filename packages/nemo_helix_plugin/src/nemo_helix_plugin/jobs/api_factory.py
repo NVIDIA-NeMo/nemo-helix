@@ -76,10 +76,10 @@ from nemo_helix_plugin.jobs.spec import (
 from nemo_helix_plugin.jobs.telemetry import stamp_job_telemetry_plugins
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    JobControl,
     JobLogsQueryParams,
     JobName,
     ListJobsQueryParams,
-    PauseTTLUpdate,
     validate_job_name_fits_derived_fileset,
     validate_output_location,
 )
@@ -120,6 +120,8 @@ _JOB_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     "cancel": "Cancel {ns} jobs",
     "pause": "Pause {ns} jobs",
     "resume": "Resume {ns} jobs",
+    "rerun": "Rerun {ns} jobs",
+    "control": "Update {ns} job control settings",
 }
 
 JobConfigT = TypeVar("JobConfigT", bound=BaseModel)
@@ -1452,17 +1454,17 @@ def job_route_factory(
             job_resp = (await AsyncJobsClient.from_client(async_client).rerun_job(job=name, workspace=workspace)).data()
             return from_response(job_resp)
 
-        @router.patch("/jobs/{name}/pause-ttl")
-        async def update_pause_ttl(
+        @router.patch("/jobs/{name}/control")
+        async def update_job_control(
             name: str,
             workspace: str,
-            body: PauseTTLUpdate,
+            body: JobControl,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> TypedJobResponse:
-            f"""Change how long a paused job keeps its storage for the {service_name} microservice."""
+            f"""Change mutable job behavior for the {service_name} microservice."""
 
             job_resp = (
-                await AsyncJobsClient.from_client(async_client).update_pause_ttl(
+                await AsyncJobsClient.from_client(async_client).update_job_control(
                     name=name, workspace=workspace, body=body
                 )
             ).data()
@@ -1471,6 +1473,6 @@ def job_route_factory(
         _stamp(pause_job, perm="pause", write=True)
         _stamp(resume_job, perm="resume", write=True)
         _stamp(rerun_job, perm="rerun", write=True)
-        _stamp(update_pause_ttl, perm="pause", write=True)
+        _stamp(update_job_control, perm="control", write=True)
 
     return router

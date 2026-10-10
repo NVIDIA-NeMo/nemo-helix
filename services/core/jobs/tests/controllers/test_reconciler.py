@@ -11,7 +11,6 @@ from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
-from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
 from nhx.core.jobs.config import JobsStorageConfig
 from nhx.core.jobs.controllers.backends import JobUpdate
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
@@ -187,16 +186,7 @@ def _job(
     return SimpleNamespace(
         attempt_id=attempt_id,
         status_details=status_details or {},
-        platform_spec=HelixJobSpec(
-            steps=[
-                HelixJobStepSpec(
-                    name="test-step",
-                    executor=SubprocessExecutionProvider(provider="subprocess", profile="default", command=["true"]),
-                    config={},
-                )
-            ],
-            pause_ttl_seconds=pause_ttl_seconds,
-        ),
+        control=SimpleNamespace(pause_ttl_seconds=pause_ttl_seconds),
     )
 
 
@@ -226,6 +216,13 @@ def test_storage_retention_uses_live_job_ttl(
         (paused_inside, _job(), platform_defaults, False, False),
         (paused_default, _job(), platform_defaults, True, True),
         (paused_extended, _job(pause_ttl_seconds=14 * 24 * 3600), platform_defaults, False, False),
+        (
+            paused_extended,
+            _job(pause_ttl_seconds=14 * 24 * 3600),
+            JobsStorageConfig(maximum_pause_ttl_seconds=5 * 24 * 3600),
+            True,
+            True,
+        ),
         (paused_short, _job(pause_ttl_seconds=3600), platform_defaults, True, True),
         (error_inside, _job(), platform_defaults, False, False),
         (error_default, _job(), platform_defaults, True, False),

@@ -37,12 +37,12 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobStepWithContext,
     HelixJobTaskResponse,
     HelixJobTaskUpdate,
+    JobControl,
     JobLogsQueryParams,
     JobStatusDetailsUpdate,
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     ListStepsQueryParams,
-    PauseTTLUpdate,
 )
 
 # The execution-profiles endpoint returns a union over all configured backend
@@ -112,9 +112,9 @@ def resume_job(*, workspace: str | None = None, name: str) -> HelixJobResponse: 
 def rerun_job(*, workspace: str | None = None, job: str) -> HelixJobResponse: ...
 
 
-@patch("/apis/jobs/v2/workspaces/{workspace}/jobs/{name}/pause-ttl")
+@patch("/apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control")
 @abstractmethod
-def update_pause_ttl(*, workspace: str | None = None, name: str, body: PauseTTLUpdate) -> HelixJobResponse: ...
+def update_job_control(*, workspace: str | None = None, name: str, body: JobControl) -> HelixJobResponse: ...
 
 
 # ---------------------------------------------------------------------------

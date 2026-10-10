@@ -10,6 +10,7 @@ Jobs are identified by ID rather than by a unique name within a namespace.
 from collections.abc import Mapping
 from typing import Any, ClassVar, Dict, Optional, Self
 
+from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityBase
 from nhx.common.jobs.schemas import FileStorageType, HelixJobResultResponse, HelixJobStatus
@@ -48,6 +49,10 @@ class HelixJob(EntityBase):
     source: str = Field(..., description="Source service that created this job")
     spec: Dict[str, Any] = Field(default_factory=dict, description="Job Spec")
     platform_spec: HelixJobSpec = Field(..., description="Platform job specification")
+    control: JobControl = Field(
+        default_factory=JobControl,
+        description="Mutable job behavior. This is not part of the execution spec.",
+    )
     current_attempt_id: Optional[str] = Field(default=None, description="Current Attempt ID")
     fileset: str = Field(..., description="Fileset ID for storing job artifacts (logs, results)")
     output_location: Optional[str] = Field(
