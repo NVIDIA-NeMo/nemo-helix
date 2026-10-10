@@ -97,10 +97,10 @@ export const matchDatasetFiles = (
   return matches;
 };
 
-/** Decodes the first `rowEnd` rows of a Parquet blob into plain objects. */
+/** Decodes the first `rowEnd` rows of a Parquet blob, or all of them, into plain objects. */
 export const readParquetRows = async (
   blob: Blob,
-  rowEnd: number
+  rowEnd?: number
 ): Promise<Record<string, unknown>[]> => {
   try {
     const file = await blob.arrayBuffer();
