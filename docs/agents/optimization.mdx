@@ -526,6 +526,28 @@ compile time with a pointer back to `prepare-fileset`. Add
 `--output <fileset-or-dir>` to publish the study's artifacts (optimized config,
 trials dataframe, ATIF evidence) somewhere addressable when it finishes.
 
+### Score against an existing evaluation
+
+Instead of shipping a dataset and evaluator in the bundle, point the study at an
+evaluation's stored eval config with `evaluation_config`. The study then loads
+that evaluation's dataset (any format the evaluator reads, including Parquet,
+gzip, and globs) and grades every trial with its LLM judge, rendered per row
+with the evaluator's own templates. It generates `eval.general.dataset`,
+`eval.evaluators`, and `models.judge`, replacing any the optimize config
+declares.
+
+```bash
+nemo agents optimize run-strategy \
+  --strategy legacy \
+  --optimize-config-fileset default/hermes-optimize-chatonly \
+  --optimize-config optimize-chatonly.yaml \
+  --spec '{"evaluation_config": "default/email-triage-benchmark-data#eval-config.yaml"}' \
+  --workspace default
+```
+
+The evaluation must score with exactly one inline LLM judge that returns one
+score from 0 to 1 with the default parser; submission fails otherwise.
+
 ### Where the study runs
 
 `run-strategy` does no optimization itself: it resolves `--strategy` to the

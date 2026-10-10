@@ -27,6 +27,8 @@ export type LaunchOptimizeStudyParams = BundleSource & {
   optimizeConfig: string;
   /** Name for the study; the server generates one when omitted. */
   name?: string;
+  /** A stored eval config, as `workspace/fileset#path`, that the study generates its scoring from. */
+  evaluationConfig?: string;
 };
 
 /**
@@ -110,7 +112,7 @@ export const optimizeBundleFilesetName = (agentName: string, now = Date.now()): 
 };
 
 const createStudy = (
-  { workspace, agentName, optimizeConfig, name }: LaunchOptimizeStudyParams,
+  { workspace, agentName, optimizeConfig, name, evaluationConfig }: LaunchOptimizeStudyParams,
   filesetName: string,
   customFields?: Record<string, string>
 ): Promise<RunStrategyJob> =>
@@ -121,6 +123,7 @@ const createStudy = (
       optimize_config: optimizeConfig,
       optimize_config_fileset: `${workspace}/${filesetName}`,
       agent: agentName,
+      ...(evaluationConfig ? { evaluation_config: evaluationConfig } : {}),
     },
     ...(customFields ? { custom_fields: customFields } : {}),
   });
