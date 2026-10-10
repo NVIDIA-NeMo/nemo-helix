@@ -105,7 +105,21 @@ async def test_loads_all_pages_and_preserves_complete_traces() -> None:
                         "value": page / 10,
                         "created_at": since.isoformat(),
                         "ingested_at": since.isoformat(),
-                    }
+                    },
+                    # A judge that ran but produced no value: carries no `value`, so the snapshot's
+                    # evaluator-result model cannot hold it and the loader must leave it out.
+                    {
+                        "evaluator_result_id": f"failed-{page}",
+                        "span_id": f"{trace_id}-span-1",
+                        "session_id": "session",
+                        "workspace": "test",
+                        "name": "judge",
+                        "data_type": "NUMERIC",
+                        "status": "FAILED",
+                        "comment": "judge endpoint unreachable",
+                        "created_at": since.isoformat(),
+                        "ingested_at": since.isoformat(),
+                    },
                 ],
                 page,
                 3,
