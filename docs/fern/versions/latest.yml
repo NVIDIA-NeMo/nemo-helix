@@ -512,10 +512,14 @@ navigation:
             contents:
               - page: Configuration
                 path: ../../auth/deployment/configuration.mdx
+              - page: Deployment Secrets
+                path: ../../auth/deployment/deployment-secrets.mdx
               - page: Credential Propagation
                 path: ../../auth/deployment/credential-propagation.mdx
               - page: Gateway Integration
                 path: ../../auth/deployment/gateway.mdx
+              - page: Scoped Intake Tokens
+                path: ../../auth/deployment/scoped-intake-tokens.mdx
               - page: Production Hardening
                 path: ../../auth/deployment/hardening.mdx
           - page: Security Model

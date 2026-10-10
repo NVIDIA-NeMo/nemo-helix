@@ -28,7 +28,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 ## Gateway and Network
 
-- [ ] **Strip auth headers from external requests**: Configure your ingress/gateway to remove `X-NHX-Principal-Id`, `X-NHX-Principal-Email`, `X-NHX-Principal-Groups`, `X-NHX-Principal-On-Behalf-Of`, and `X-NHX-Scopes` from all incoming external traffic. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+- [ ] **Strip auth headers from external requests**: Configure your ingress/gateway to remove `X-NHX-Principal-Id`, `X-NHX-Principal-Email`, `X-NHX-Principal-Groups`, `X-NHX-Principal-On-Behalf-Of`, `X-NHX-Principal-On-Behalf-Of-Email`, `X-NHX-Principal-On-Behalf-Of-Groups`, and `X-NHX-Scopes` from all incoming external traffic. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 - [ ] **Enable TLS termination**: Terminate TLS at the ingress or load balancer. Tokens in `Authorization` headers are sent in the clear without TLS.
 - [ ] **Consider gateway bearer-auth callout**: To enforce bearer-token validation before requests reach Helix services, configure Envoy `ext_authz` to call `/apis/auth/ext-authz`. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 
@@ -41,6 +41,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 ## Secrets and Credentials
 
 - [ ] **Verify CLI config file permissions**: Token storage at `~/.config/nhx/config.yaml` should have permissions `0600` (owner read/write only). Avoid storing this file in cloud-synced or shared directories. See [Using Authentication — Config File](/documentation/access-control/authentication/using-authentication#config-file) for full guidance.
+- [ ] **Mount auth secrets before enabling the feature**: Create the token-signing key, session encryption key, and confidential client secret, and grant TokenReview, before the config that depends on them. See [Deployment Secrets](/documentation/access-control/deployment/deployment-secrets).
 - [ ] **Rotate IdP client secrets**: If your OIDC application uses a client secret, rotate it periodically per your organization's policy. Store it in a Kubernetes Secret or equivalent external secret manager, then inject it into the API/auth service environment as described in [Confidential OIDC Client](/documentation/access-control/authentication/confidential-client).
 - [ ] **Avoid storing tokens in source code or CI configs**: Use environment variables or secret managers for tokens in CI/CD pipelines.
 

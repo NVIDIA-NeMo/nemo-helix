@@ -57,6 +57,9 @@ auth:
       encryption_key_env_var: NHX_AUTH_SESSION_ENCRYPTION_KEY
 ```
 
+Create the session encryption key and inject it before setting
+`server_side_sessions`. See
+[Deployment Secrets](/documentation/access-control/deployment/deployment-secrets).
 The environment variable must come from a deployment secret, not from the
 platform ConfigMap. Studio does not use the login broker yet, so deployments
 that serve Studio must leave this option disabled.

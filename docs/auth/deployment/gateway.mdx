@@ -37,6 +37,7 @@ For IdP-issued tokens, enforce your IdP's revocation policy before setting NeMo 
 **Security Requirement**: Your ingress/gateway **must** strip the following headers from all incoming external requests before forwarding to NeMo Helix:
 
 - `X-NHX-Principal-Id`, `X-NHX-Principal-Email`, `X-NHX-Principal-Groups`, `X-NHX-Principal-On-Behalf-Of`
+- `X-NHX-Principal-On-Behalf-Of-Email`, `X-NHX-Principal-On-Behalf-Of-Groups`
 - `X-NHX-Scopes`
 
 If external clients can set these headers, they can forge any identity or bypass authorization entirely. The gateway should also block external access to `/internal/*` paths (used for service-to-service communication).
@@ -49,19 +50,20 @@ When the gateway has authenticated the bearer token, it must forward:
 
 | Header | Description |
 |--------|-------------|
-| `X-NHX-Principal-Id` | Principal identifier (e.g., user ID or email). Required. |
-| `X-NHX-Principal-Email` | User email (optional but recommended). |
-| `X-NHX-Principal-Groups` | Comma-separated group names (optional). |
-| `X-NHX-Scopes` | Space-separated token scopes (optional). |
+| `X-NHX-Principal-Id` | Principal identifier, such as a user ID, email, or `service-account:<id>`. Required. |
+| `X-NHX-Principal-Email` | User email, when present in the authenticated token. |
+| `X-NHX-Principal-Groups` | Comma-separated group names, when present in the authenticated token. |
+| `X-NHX-Scopes` | Space-separated token scopes, when the authenticated token has `scope` or `scp` claims. |
 
 Header names are case-insensitive; services normalize them.
 
 ## Bypass Paths
 
-The following are **not** subject to authorization checks; they are always allowed:
+The following are **not** sent through the gateway bearer-auth callout:
 
 - **Health and readiness**: `/health`, `/healthz`, `/ready`, `/readyz`, `/health/live`, `/health/ready`, `/metrics`
 - **Discovery**: `/apis/auth/discovery` (for CLI/SDK OIDC discovery)
+- **Signing keys**: `/apis/auth/jwks` (for NeMo-minted bearer-token signing keys)
 - **PDP endpoints**: Paths under `/apis/auth/v2/authz/` are restricted to service principals only. The middleware rejects external and regular-user requests automatically.
 - **Studio**: Paths under `/studio` (the Studio UI handles its own OIDC login)
 
@@ -123,6 +125,8 @@ route_config:
         - "x-nhx-principal-email"
         - "x-nhx-principal-groups"
         - "x-nhx-principal-on-behalf-of"
+        - "x-nhx-principal-on-behalf-of-email"
+        - "x-nhx-principal-on-behalf-of-groups"
         - "x-nhx-scopes"
       routes:
         - match: { prefix: "/" }

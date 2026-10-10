@@ -5,20 +5,29 @@
 title: "API Scopes"
 description: ""
 ---
-API scopes are token-level access restrictions that sit on top of role-based permissions. They control which parts of the API a bearer token can access, independent of the user's role.
+API scopes are token-level access restrictions that sit on top of role-based
+permissions. When a token carries NeMo Helix API scopes, those scopes control
+which parts of the API the token can access, independent of the token
+principal's role.
 
 For role-based permissions, see [Roles & Permissions](/documentation/access-control/authorization/roles-and-permissions). For the RBAC model, see [Authorization Concepts](/documentation/access-control/concepts).
 
 ## How Scopes Work
 
-NeMo Helix API scopes are values in a token's `scope` or `scp` claim. They can come from the configured IdP during OIDC login, or from NeMo-issued scoped tokens such as Scoped Access Keys and workload access tokens. They follow the format `resource-group:access-type`. Each API endpoint is associated with one or more required scopes.
+NeMo Helix API scopes are values in a token's `scope` or `scp` claim and follow
+the format `resource-group:access-type`. They can come from the configured IdP
+during OIDC login, from Scoped Access Keys created with `--scope`, or from
+workload access tokens. Each API endpoint is associated with one or more
+required scopes.
 
-When a request arrives, the PDP checks:
+When a request arrives with platform API scopes, the PDP checks:
 
 1. Does the token have at least one of the endpoint's required scopes?
 2. Does the principal have the required role permissions in the workspace?
 
-Both must pass. This is the **two-layer authorization** model.
+Both must pass when platform API scopes are present. Tokens with no scope claim,
+or only standard OIDC scopes, skip the scope check for compatibility and rely on
+the role-permission check.
 
 ## Scopes Are Not Groups
 
@@ -56,6 +65,7 @@ Each API has a read and write scope. A token with an API-specific scope can only
 | Files | `files:read` | `files:write` | `/apis/files/` |
 | Guardrails | `guardrails:read` | `guardrails:write` | `/apis/guardrails/` |
 | Inference | `inference:read` | `inference:write` | `/apis/inference-gateway/` |
+| Intake | `intake:read` | `intake:write` | `/apis/intake/` |
 | Jobs | `jobs:read` | `jobs:write` | `/apis/jobs/` |
 | Models | `models:read` | `models:write` | `/apis/models/` |
 | Safe Synthesizer | `safe-synthesizer:read` | `safe-synthesizer:write` | `/apis/safe-synthesizer/` |
@@ -76,7 +86,9 @@ The `platform:*` scopes act as catch-alls that grant access to **all** APIs:
 | `platform:read` | Read access to all platform APIs |
 | `platform:write` | Write access to all platform APIs |
 
-Each endpoint in the authorization policy lists both its API-specific scope and the corresponding `platform:*` scope. A token needs at least one of the listed scopes to pass the scope check.
+Each endpoint in the authorization policy lists both its API-specific scope and
+the corresponding `platform:*` scope. When a token provides platform API scopes,
+it needs at least one of the listed scopes to pass the scope check.
 
 ### Requesting Scopes
 
@@ -105,7 +117,8 @@ nemo auth access-keys create --name "intake-worker" \
 
 ## Two-Layer Authorization
 
-For a request to succeed, it must satisfy **both** requirements:
+When a token provides platform API scopes, a request must satisfy **both**
+requirements:
 
 1. **Token scope check**: The API token must have at least one of the endpoint's required scopes
 2. **Permission check**: The principal must have the required permissions through role grants in the workspace
@@ -119,11 +132,36 @@ For a request to succeed, it must satisfy **both** requirements:
 | Viewer | `platform:read platform:write` | Create model | ✗ Denied by role check |
 | Viewer | `platform:read` | List models | ✓ Allowed |
 
-This enables least-privilege tokens: a caller can use a token whose API scope is narrower than the caller's role grants.
+A caller can hold a token whose API scope is narrower than their role. An Editor
+can sign in with `platform:read` for monitoring scripts that should not modify
+resources.
 
 ## IdP Configuration
 
-Configure your IdP application with the OAuth scopes your login flow requests. At minimum this is usually `openid`, `profile`, `email`, and `offline_access`. If your deployment requests NeMo Helix API scope names during login, define those scopes on the same IdP application according to your provider's normal API-scope or consent model.
+For OIDC tokens, scopes must be registered in your IdP as custom API scopes. The
+CLI requests them during the OAuth flow, and the IdP includes granted scopes in
+the access token. For NeMo service-account access keys, see
+[Scoped Intake Tokens](/documentation/access-control/deployment/scoped-intake-tokens).
+
+Configure your IdP application with the OAuth scopes your login flow requests.
+At minimum this is usually `openid`, `profile`, `email`, and `offline_access`.
+If your deployment requests NeMo Helix API scope names during login, define
+those scopes on the same IdP application according to your provider's normal
+API-scope or consent model.
+
+If your IdP prefixes scopes, such as `api://client-id/platform:read`, configure
+`scope_prefix` in the NeMo Helix OIDC settings so the platform strips the prefix
+before authorization:
+
+```yaml
+auth:
+  oidc:
+    scope_prefix: "api://your-client-id/"
+```
+
+If you use per-API scopes, each scope, such as
+`api://<app-client-id>/models:read`, must be exposed individually in the IdP app
+registration.
 
 ## Scope Checking Behavior
 
@@ -136,11 +174,16 @@ The PDP distinguishes between external OAuth scopes and NeMo Helix API-scope syn
 
 ## When to Restrict Scoped Tokens
 
-- **CI/CD tokens**: restrict to only the service areas the pipeline needs
-- **Monitoring scripts**: prefer read-only NeMo API scopes when the token issuer supports per-action scopes
-- **Data ingestion scripts**: restrict to data intake and storage service areas
-- **Model catalog readers**: prefer model read scopes when the token issuer supports per-action scopes
-- **Shared service accounts**: limit blast radius by restricting to only the areas needed
+- **OIDC CI/CD tokens** that should only read: `platform:read`
+- **OIDC monitoring tokens** that should never modify resources: `platform:read`
+- **OIDC data ingestion tokens**: `intake:write`
+- **Scoped Access Keys for CI/CD**: restrict to only the service areas the
+  pipeline needs with `--scope`
+- **Service-account Intake keys**: grant the `service-account:<id>` principal the
+  minimum workspace role, such as Viewer for readers or Editor for OTLP writers
+- **Model catalog readers**: `models:read`
+- **Shared IdP automation identities**: limit blast radius by requesting only the
+  scopes needed by that integration
 
 ## Related
 
