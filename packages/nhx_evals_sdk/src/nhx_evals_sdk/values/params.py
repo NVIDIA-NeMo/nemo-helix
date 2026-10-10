@@ -64,6 +64,10 @@ class RunConfig(BaseModel):
     )
 
 
+# Matches the agents gateway's default upstream read timeout (NEMO_AGENTS_GATEWAY_READ_TIMEOUT).
+DEFAULT_AGENT_REQUEST_TIMEOUT_SECONDS = 300
+
+
 class RunConfigOnline(RunConfig):
     """Job parameters for online evaluation."""
 
@@ -73,7 +77,12 @@ class RunConfigOnline(RunConfig):
         "If False (default), request failures will raise an exception.",
     )
     request_timeout: int | None = Field(
-        default=None, description="The timeout to be used for requests made to the model."
+        default=None,
+        ge=1,
+        description="Timeout in seconds for each request to the evaluation target. "
+        f"When unset, agent targets wait {DEFAULT_AGENT_REQUEST_TIMEOUT_SECONDS} seconds "
+        "and model targets use the client default. "
+        "LLM-as-judge requests take their timeout from the judge's inference settings instead.",
     )
     max_retries: int = Field(default=3, ge=0, description="Maximum number of retries for failed requests.")
 

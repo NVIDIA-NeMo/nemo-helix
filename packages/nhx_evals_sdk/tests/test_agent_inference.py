@@ -27,6 +27,7 @@ from nhx_evals_sdk.agent_inference import (
     make_agent_inference_request,
 )
 from nhx_evals_sdk.enums import AgentFormat
+from nhx_evals_sdk.resilience.types import AbandonedRequestTimeoutError
 from nhx_evals_sdk.values.agents import (
     Agent,
     GenericAgent,
@@ -35,6 +36,7 @@ from nhx_evals_sdk.values.agents import (
 )
 from nhx_evals_sdk.values.common import SecretRef
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from nhx_evals_sdk.values.params import DEFAULT_AGENT_REQUEST_TIMEOUT_SECONDS
 from pydantic import TypeAdapter, ValidationError
 
 # ============================================================================
@@ -1800,3 +1802,51 @@ class AsyncContextManagerMock:
 
     async def __aexit__(self, *args):
         return False
+
+
+class TestAgentRequestTimeout:
+    @staticmethod
+    def _agent(*, stream: bool = False) -> GenericAgent:
+        return GenericAgent(
+            url="http://agent.test/invoke",
+            name="slow-agent",
+            body={"question": "{{ prompt }}"},
+            response_path="$.answer",
+            stream=stream,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("timeout", "expected_read_timeout"),
+        [(None, DEFAULT_AGENT_REQUEST_TIMEOUT_SECONDS), (42, 42)],
+    )
+    async def test_agent_call_uses_configured_or_default_timeout(
+        self, timeout: float | None, expected_read_timeout: float
+    ) -> None:
+        read_timeouts: list[float] = []
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            read_timeouts.append(request.extensions["timeout"]["read"])
+            return httpx.Response(200, json={"answer": "done"})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            await invoke_agent(self._agent(), {"prompt": "question"}, client=client, timeout=timeout)
+
+        assert read_timeouts == [expected_read_timeout]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_timed_out_agent_call_is_not_retried(self, stream: bool) -> None:
+        attempts: list[httpx.Request] = []
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            attempts.append(request)
+            raise httpx.ReadTimeout("agent still working", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            with pytest.raises(AbandonedRequestTimeoutError, match="Agent did not respond within 7s"):
+                await invoke_agent(
+                    self._agent(stream=stream), {"prompt": "question"}, client=client, max_retries=3, timeout=7
+                )
+
+        assert len(attempts) == 1
