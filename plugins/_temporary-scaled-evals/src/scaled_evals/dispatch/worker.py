@@ -473,8 +473,8 @@ class Dispatcher:
             else:
                 self.run(evaluation_id, maintain_claim=True)
             return True
-        if did_work:
-            return True
+        if did_work or settings.platform_evaluation_jobs_enabled:
+            return did_work
         evidence_evaluation_id = self.claim_next_evidence()
         if evidence_evaluation_id is not None:
             self.build_evidence(evidence_evaluation_id)
@@ -562,23 +562,32 @@ class Dispatcher:
         """Teardown one orphaned runtime before its logical evaluation retries."""
         teardown_orphaned_execution(cleanup, worker_id=self.worker_id, connect=self.connect, resolve=self.resolve)
 
-    def claim_next_archive(self) -> str | None:
+    def claim_next_archive(self, evaluation_id: str | None = None) -> str | None:
         """Claim one terminal evaluation that requested an archive rebuild."""
         with self.connect() as conn:
             row = EvaluationRepository(conn).claim_next_archive(
                 claim_timeout=self.claim_timeout,
                 worker_id=self.worker_id,
+                evaluation_id=evaluation_id,
             )
             return None if row is None else row["id"]
 
-    def claim_next_evidence(self) -> str | None:
+    def claim_next_evidence(self, evaluation_id: str | None = None) -> str | None:
         """Claim one terminal evaluation needing provenance/SBOM generation."""
         with self.connect() as conn:
             row = EvaluationRepository(conn).claim_next_evidence(
                 claim_timeout=self.claim_timeout,
                 worker_id=self.worker_id,
+                evaluation_id=evaluation_id,
             )
             return None if row is None else row["id"]
+
+    def finalize(self, evaluation_id: str) -> None:
+        """Build pending evidence, then the archive, for one terminal evaluation."""
+        if self.claim_next_evidence(evaluation_id) is not None:
+            self.build_evidence(evaluation_id)
+        if self.claim_next_archive(evaluation_id) is not None:
+            self.build_archive(evaluation_id)
 
     def build_evidence(self, evaluation_id: str) -> None:
         """Generate terminal evidence and upload it before the archive is built."""

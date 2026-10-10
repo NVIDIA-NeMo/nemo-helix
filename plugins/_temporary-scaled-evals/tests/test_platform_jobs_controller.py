@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 pytest.importorskip("scaled_evals")
@@ -216,6 +216,14 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
     monkeypatch.setattr(controller, "_submit_one_evaluation", _phase("_submit_one_evaluation"))
     monkeypatch.setattr(controller, "_reconcile_one_evaluation", _phase("_reconcile_one_evaluation"))
     monkeypatch.setattr(controller, "_cancel_evaluation_jobs", _phase("_cancel_evaluation_jobs"))
+    for name in (
+        "_cleanup_one_execution",
+        "_build_one_evidence",
+        "_build_one_archive",
+        "_submit_benchmark_archives",
+        "_cleanup_one_benchmark_archive",
+    ):
+        monkeypatch.setattr(controller, name, _phase(name))
     heartbeats: list[int] = []
     monkeypatch.setattr(controller, "_heartbeat", lambda: heartbeats.append(1))
 
@@ -230,6 +238,11 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
         "_submit_one_evaluation",
         "_reconcile_one_evaluation",
         "_cancel_evaluation_jobs",
+        "_cleanup_one_execution",
+        "_build_one_evidence",
+        "_build_one_archive",
+        "_submit_benchmark_archives",
+        "_cleanup_one_benchmark_archive",
     ]
     assert heartbeats == [1]
     assert controller.is_healthy
@@ -331,3 +344,48 @@ def test_controller_tears_down_orphaned_executions(monkeypatch: pytest.MonkeyPat
         worker_id=controller._worker_id,
         connect=controller_module.pooled_connection,
     )
+
+
+@pytest.mark.asyncio
+async def test_controller_owns_evidence_and_archive_queues(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", True)
+    monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
+    controller = ScaledEvalsJobsController()
+    controller._jobs = cast(Any, AsyncMock())
+    phases = dict(controller._phases())
+    for name in ("build_evidence", "build_archives", "submit_benchmark_archives", "cleanup_benchmark_archives"):
+        assert name in phases
+
+    dispatcher = MagicMock()
+    dispatcher.claim_next_evidence.side_effect = ["eval_1", None]
+    dispatcher.claim_next_archive.side_effect = [None]
+    controller._dispatcher = dispatcher
+    await phases["build_evidence"]()
+    await phases["build_archives"]()
+    dispatcher.build_evidence.assert_called_once_with("eval_1")
+    dispatcher.build_archive.assert_not_called()
+
+    monkeypatch.setattr(
+        controller,
+        "_list_claimable_benchmark_archives",
+        lambda: [
+            {"benchmark_run_id": "run_1", "generation": "aaaaaaaa-1", "attempts": 0},
+            {"benchmark_run_id": "run_2", "generation": "bbbbbbbb-2", "attempts": 2},
+        ],
+    )
+    create_job = AsyncMock(
+        side_effect=[None, ConflictError(httpx.Response(409, request=httpx.Request("POST", "http://jobs")))]
+    )
+    monkeypatch.setattr(controller.submitter, "create_job", create_job)
+    await phases["submit_benchmark_archives"]()
+    assert [call.args[0] for call in create_job.call_args_list] == [
+        "scaled-evals-benchmark-archive-run_1-aaaaaaaa-a1",
+        "scaled-evals-benchmark-archive-run_2-bbbbbbbb-a3",
+    ]
+    assert create_job.call_args.args[2].benchmark_run_id == "run_2"
+
+    repo = MagicMock()
+    repo.claim_cleanup.side_effect = ["run_1", None]
+    monkeypatch.setattr(controller_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    await phases["cleanup_benchmark_archives"]()
+    dispatcher.cleanup_benchmark_archives.assert_called_once_with("run_1")
