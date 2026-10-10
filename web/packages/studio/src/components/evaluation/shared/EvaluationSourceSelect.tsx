@@ -40,6 +40,9 @@ export const EvaluationSourceSelect = <T extends FieldValues>({
 }: EvaluationSourceSelectProps<T>) => {
   const selected = byName[selectedName];
   const experimentName = selected?.experimentName;
+  const otherAgentNames = selected?.fromOtherAgent
+    ? (selected.evaluation.agent_names ?? []).join(', ')
+    : '';
 
   return (
     <ControlledSearchableSelect
@@ -59,6 +62,15 @@ export const EvaluationSourceSelect = <T extends FieldValues>({
             <Text kind="body/semibold/sm" className="text-primary">
               {experimentName}
             </Text>
+            {otherAgentNames ? (
+              <>
+                {' '}
+                · Agent:{' '}
+                <Text kind="body/semibold/sm" className="text-primary">
+                  {otherAgentNames}
+                </Text>
+              </>
+            ) : null}
           </>
         ) : (
           'Search by experiment or evaluation name. The new run reuses the eval config saved on the one you pick.'

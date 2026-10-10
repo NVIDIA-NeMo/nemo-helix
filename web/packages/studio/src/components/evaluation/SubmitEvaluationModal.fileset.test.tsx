@@ -3,11 +3,7 @@
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
-import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
-import {
-  createExperiment,
-  getListExperimentsQueryKey,
-} from '@nemo/sdk/generated/platform/experiments';
+import { createExperiment } from '@nemo/sdk/generated/platform/experiments';
 import {
   filesDownloadFile,
   filesUploadFile,
@@ -18,6 +14,7 @@ import { createRunEvaluation } from '@studio/components/evaluation/experimentEva
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
+import { evaluationSourcesHandlers } from '@studio/mocks/handlers/evaluationSources';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { PARQUET, parquetFile } from '@studio/tests/util/parquetFixtures';
@@ -79,12 +76,7 @@ metrics:
 
 const mockListApis = () => {
   server.use(
-    http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), () =>
-      HttpResponse.json({ data: [] })
-    ),
-    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), () =>
-      HttpResponse.json({ data: [] })
-    ),
+    ...evaluationSourcesHandlers({}),
     http.get(mockApiUrl(getFilesListFilesetsQueryKey, ':workspace'), () =>
       HttpResponse.json({
         data: [{ name: 'generated', workspace: DEFAULT_WORKSPACE }],
