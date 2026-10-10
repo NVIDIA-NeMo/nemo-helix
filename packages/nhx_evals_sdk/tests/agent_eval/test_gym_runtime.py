@@ -1501,6 +1501,28 @@ def test_startup_timeout_says_so_when_gym_never_reported_readiness(tmp_path: Pat
     assert "mcqa" in message
 
 
+def test_startup_timeout_includes_errors_before_repeated_readiness_polls(tmp_path: Path) -> None:
+    error = "(mcqa) PermissionError: cannot create server environment"
+    poll = "0 / 4 servers ready. Waiting for servers to spin up: ['simple_agent', 'mcqa', 'mcqa_simple_agent', 'policy_model']"
+    transcript = error + "\n" + (poll + "\n") * 100
+
+    message = GymAgentTaskRunner(config=_config())._startup_timeout_message(transcript, tmp_path / "gym_env.log")
+
+    assert error in message
+    assert "0 of 4" in message
+    assert poll not in message
+
+
+def test_startup_timeout_bounds_inline_startup_output(tmp_path: Path) -> None:
+    transcript = "old diagnostic\n" + "\n".join("x" * 1000 for _ in range(LOG_TAIL_LINES + 1))
+
+    message = GymAgentTaskRunner(config=_config())._startup_timeout_message(transcript, tmp_path / "gym_env.log")
+    startup_output = message.split("characters) ---\n", 1)[1]
+
+    assert "old diagnostic" not in startup_output
+    assert len(startup_output) == 16000
+
+
 @pytest.mark.asyncio
 async def test_collection_failure_points_at_the_server_log_too(tmp_path: Path) -> None:
     # Observed on wmt_translation: `gym eval run` reports a bare HTTP 500 from the resources-server

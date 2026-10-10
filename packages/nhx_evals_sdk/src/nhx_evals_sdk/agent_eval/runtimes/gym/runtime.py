@@ -408,13 +408,21 @@ class GymAgentTaskRunner:
                 f"Search {env_log.name} for '({names[0]})' — each line is prefixed with the server "
                 "that emitted it."
             )
+        # Readiness polls can fill the tail after the actual startup error. Keep
+        # diagnostics in the task exception because CI may not retain this file.
+        diagnostic_lines = (
+            line for line in env_log_text.splitlines() if "servers ready. Waiting for servers to spin up:" not in line
+        )
+        startup_output = "\n".join(deque(diagnostic_lines, maxlen=LOG_TAIL_LINES))[-16000:]
         return (
             f"Gym servers for resources-server {cfg.resources_server!r} were not ready within "
             f"startup_timeout_s={cfg.startup_timeout_s}s. {detail}\n"
             f"Full startup output: {env_log}\n"
             "If the environment installs heavy dependencies or builds a container image on first run, "
             "this timeout is expected on a cold cache — raise GymRuntimeConfig.startup_timeout_s and "
-            "re-run; the second run reuses what the first installed."
+            "re-run; the second run reuses what the first installed.\n"
+            f"--- startup output (last {LOG_TAIL_LINES} lines excluding readiness polls, at most 16000 characters) ---\n"
+            f"{startup_output}"
         )
 
 
