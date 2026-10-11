@@ -217,9 +217,8 @@ Workload implementations can supply their own evidence checks without modifying
 archive assembly. Callers of the HTTP API cannot disable these checks.
 
 Switchyard is not managed by this plugin. Evaluations and benchmark runs no longer
-accept a Switchyard profile; migration `043_retire_switchyard.sql` soft-deletes
-existing Switchyard profiles and credentials, and any queued evaluation that still
-references one fails with `switchyard_unsupported` instead of running without its
+accept a Switchyard profile, and any queued evaluation that still references one
+fails with `switchyard_unsupported` instead of running without its
 model-traffic fence.
 
 ## Who a caller is
