@@ -36,7 +36,11 @@ import {
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import { StudyStatTiles } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyStatTiles';
 import { ArtifactFilesPanel } from '@studio/routes/JobDetailRoute/components/ArtifactFilesPanel';
-import { getAgentOptimizationsTabRoute, getAgentsListRoute } from '@studio/routes/utils';
+import {
+  getAgentDetailRoute,
+  getAgentOptimizationsTabRoute,
+  getAgentsListRoute,
+} from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery } from '@tanstack/react-query';
 import { FolderOpen, ScrollText } from 'lucide-react';
@@ -79,13 +83,16 @@ export const AgentOptimizationDetailRoute: FC = () => {
   useEffect(() => {
     setBreadcrumbs([
       { slotLabel: 'Agents', href: getAgentsListRoute(workspace) },
-      agentName
-        ? {
-            slotLabel: 'Optimizations',
-            href: getAgentOptimizationsTabRoute(workspace, agentName),
-            preserveQuery: true,
-          }
-        : { slotLabel: 'Optimizations' },
+      ...(agentName
+        ? [
+            { slotLabel: agentName, href: getAgentDetailRoute(workspace, agentName) },
+            {
+              slotLabel: 'Optimizations',
+              href: getAgentOptimizationsTabRoute(workspace, agentName),
+              preserveQuery: true,
+            },
+          ]
+        : [{ slotLabel: 'Optimizations' }]),
       { slotLabel: jobName },
     ]);
     return () => setBreadcrumbs([]);
