@@ -232,21 +232,24 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
     monkeypatch.setattr(controller, "_heartbeat", lambda: heartbeats.append(1))
 
     await controller.reconcile()
+    assert controller._cleanup is not None
+    await controller._cleanup
 
     # A failing phase must not abort the pass, skip the heartbeat, or report the
     # controller unhealthy: readiness gates the API, so either would take the
-    # control plane offline over one bad row.
+    # control plane offline over one bad row. Execution cleanup runs after the
+    # pass, in the background.
     assert calls == [
         "_submit_one_build",
         "_reconcile_builds",
         "_submit_one_evaluation",
         "_reconcile_one_evaluation",
         "_cancel_evaluation_jobs",
-        "_cleanup_one_execution",
         "_build_one_evidence",
         "_build_one_archive",
         "_submit_benchmark_archives",
         "_cleanup_one_benchmark_archive",
+        "_cleanup_one_execution",
     ]
     assert heartbeats == [1]
     assert controller.is_healthy
@@ -256,6 +259,7 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
 
     monkeypatch.setattr(controller, "_heartbeat", _unreachable_database)
     await controller.reconcile()
+    await controller._cleanup
 
     assert not controller.is_healthy
 
