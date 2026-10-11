@@ -10,7 +10,8 @@ import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { ExperimentDetailRoute } from '@studio/routes/ExperimentDetailRoute';
 import { renderRoute, screen } from '@studio/tests/util/render';
-import { waitFor } from '@testing-library/react';
+import { waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 vi.hoisted(() => {
@@ -31,7 +32,7 @@ const group = {
   evaluation_count: 0,
 } satisfies Partial<ExperimentResponse>;
 
-const mockGroup = (overrides?: Partial<ExperimentResponse>) => {
+const mockGroup = (overrides?: Partial<ExperimentResponse>, evaluations: object[] = []) => {
   const insightRequest = vi.fn();
   server.use(
     http.get(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), () =>
@@ -39,13 +40,13 @@ const mockGroup = (overrides?: Partial<ExperimentResponse>) => {
     ),
     http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), () =>
       HttpResponse.json({
-        data: [],
+        data: evaluations,
         pagination: {
           page: 1,
           page_size: 25,
-          current_page_size: 0,
-          total_pages: 0,
-          total_results: 0,
+          current_page_size: evaluations.length,
+          total_pages: evaluations.length ? 1 : 0,
+          total_results: evaluations.length,
         },
       })
     ),
@@ -150,5 +151,33 @@ describe('ExperimentDetailRoute', () => {
       expect(await screen.findByText('Editable group description')).toBeInTheDocument();
       expect(trendToggle()).toHaveAttribute('aria-pressed', 'true');
     });
+  });
+
+  it('scrolls to the comparison charts when evaluations are compared', async () => {
+    const scrollIntoView = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    onTestFinished(() => {
+      HTMLElement.prototype.scrollIntoView = original;
+    });
+    const evaluation = (name: string) => ({
+      id: name,
+      name,
+      workspace: WORKSPACE,
+      experiment_ids: [group.id],
+      dataset_name: 'dataset',
+      created_at: '2026-10-11T02:00:00Z',
+      aggregate_scores: { judge: { mean: 1 } },
+    });
+    mockGroup({ evaluation_count: 2 }, [evaluation('first'), evaluation('second')]);
+    const user = userEvent.setup();
+
+    const firstRow = await screen.findByRole('row', { name: /first/ });
+    await user.click(within(firstRow).getByRole('checkbox'));
+    await user.click(within(screen.getByRole('row', { name: /second/ })).getByRole('checkbox'));
+    await user.click(screen.getAllByRole('button', { name: 'Compare' }).at(-1)!);
+
+    expect(await screen.findByText(/Comparing 2 evaluations/)).toBeInTheDocument();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
   });
 });

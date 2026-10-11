@@ -52,7 +52,15 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
 import { ChartColumn, Columns3, FolderMinus, FolderPlus, Pin, Repeat2 } from 'lucide-react';
-import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
+import {
+  type ComponentProps,
+  type FC,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 export type { EvaluationRow };
 
@@ -188,6 +196,14 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   const [rerunSource, setRerunSource] = useState<EvaluationRow | null>(null);
 
   const [comparedEvaluations, setComparedEvaluations] = useState<EvaluationRow[] | null>(null);
+  const compareChartRef = useRef<HTMLDivElement>(null);
+
+  // The chart renders above the other charts, often far above the bulk-action bar that opens it.
+  useEffect(() => {
+    if (comparedEvaluations) {
+      compareChartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [comparedEvaluations]);
 
   // Seed the sort from default_sort so its column header reflects the order on load. Memoized so the
   // reference is stable across renders (until default_sort changes).
@@ -613,7 +629,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   return (
     <>
       {comparedEvaluations && (
-        <div className="mb-4">
+        <div ref={compareChartRef} className="mb-4">
           <EvaluationCompareChart
             workspace={workspace}
             evaluations={comparedEvaluations}
