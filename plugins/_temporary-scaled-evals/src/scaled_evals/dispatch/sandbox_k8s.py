@@ -1596,13 +1596,27 @@ def _kubectl_target_flags(recorded_path: object, context: object) -> list[str]:
     with it; otherwise kubectl fails every call on an unknown context and the
     evaluation wedges. With neither flag, kubectl resolves through the cleanup
     process's own ``KUBECONFIG`` or its in-cluster service account.
+
+    That fallback is only the same target for the Job's service-account
+    context. Any other context, such as a user-token kubeconfig, can name
+    another API server or identity; cleanup there treats "not found" as done
+    and would orphan the sandbox, so it raises instead.
+
+    Raises:
+        RuntimeError: The recorded kubeconfig is missing and its context is not
+            the in-cluster service account.
     """
-    if not recorded_path or not Path(str(recorded_path)).exists():
+    if recorded_path and Path(str(recorded_path)).exists():
+        flags = ["--kubeconfig", str(recorded_path)]
+        if context:
+            flags.extend(["--context", str(context)])
+        return flags
+    if not context or context == _IN_CLUSTER_CONTEXT:
         return []
-    flags = ["--kubeconfig", str(recorded_path)]
-    if context:
-        flags.extend(["--context", str(context)])
-    return flags
+    raise RuntimeError(
+        f"kubeconfig for kubectl context {context!r} is not available to this process; "
+        "refusing to clean up through its own cluster credentials"
+    )
 
 
 def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
@@ -1813,7 +1827,10 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
     if kubectl is None:
         return None
     base = [kubectl]
-    base.extend(_kubectl_target_flags(cleanup.get("kubeconfig_path"), cleanup.get("context")))
+    try:
+        base.extend(_kubectl_target_flags(cleanup.get("kubeconfig_path"), cleanup.get("context")))
+    except RuntimeError:
+        return None
     if cleanup.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", str(cleanup.get("namespace") or "default")])
@@ -2379,6 +2396,8 @@ def make_sandbox_k8s_docker_status_reader(
 _IN_CLUSTER_API = "https://kubernetes.default.svc"
 _IN_CLUSTER_CA = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 _USER_CONTEXT = "user"
+# The context the evaluation Job's kubeconfig gives its own service account.
+_IN_CLUSTER_CONTEXT = "incluster"
 _NAMESPACE_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 

@@ -9,7 +9,7 @@ import asyncio
 import logging
 import socket
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
@@ -50,6 +50,9 @@ _PRELAUNCH_JOB_STATUSES = {
     HelixJobStatus.CREATED,
     HelixJobStatus.PENDING,
 }
+# Outlasts the slowest teardown (OpenSandbox's cleanup timeout plus a minute, or
+# kubectl's 60 s waits) so another controller does not re-claim a live one.
+CLEANUP_CLAIM_TIMEOUT_SECONDS = 600.0
 
 
 class ScaledEvalsJobsController(NemoController):
@@ -66,6 +69,7 @@ class ScaledEvalsJobsController(NemoController):
         self._projection: EvaluationProjectionWriter | None = None
         self._projection_watermark: datetime | None = None
         self._projection_resumed = False
+        self._cleanup: asyncio.Task[None] | None = None
 
     @property
     def jobs(self) -> AsyncJobsClient:
@@ -138,13 +142,13 @@ class ScaledEvalsJobsController(NemoController):
                 ("submit_evaluation", self._drain(self._submit_one_evaluation)),
                 ("reconcile_evaluation", self._drain(self._reconcile_one_evaluation)),
                 ("cancel_evaluations", self._cancel_evaluation_jobs),
-                ("cleanup_executions", self._drain(self._cleanup_one_execution)),
+                ("cleanup_executions", self._start_cleanup),
             ]
         if self._projection is not None:
             phases.append(("project_evaluations", self._project_evaluations))
         return phases
 
-    def _drain(self, step: Callable[[], Awaitable[bool]]) -> Callable[[], Awaitable[None]]:
+    def _drain(self, step: Callable[[], Awaitable[bool]]) -> Callable[[], Coroutine[Any, Any, None]]:
         """Wrap a single-row step so one pass drains a bounded batch of rows."""
 
         async def drained() -> None:
@@ -262,6 +266,17 @@ class ScaledEvalsJobsController(NemoController):
         await asyncio.to_thread(self._fail_evaluation_job, row, detail)
         return True
 
+    async def _start_cleanup(self) -> None:
+        """Drain orphaned executions in the background, one drain at a time.
+
+        A teardown can wait minutes on kubectl or OpenSandbox. Inside the pass it
+        would delay submissions and the heartbeat, and a heartbeat older than
+        ``build_worker_stale_seconds`` fails API readiness.
+        """
+        if self._cleanup is None or self._cleanup.done():
+            self._cleanup = asyncio.create_task(self._drain(self._cleanup_one_execution)())
+            self._cleanup.add_done_callback(_log_cleanup_failure)
+
     async def _cleanup_one_execution(self) -> bool:
         """Tear down one orphaned execution runtime; return False only when none remain."""
         return await asyncio.to_thread(self._cleanup_execution)
@@ -270,7 +285,7 @@ class ScaledEvalsJobsController(NemoController):
         with pooled_connection() as conn:
             cleanup = ExecutionCleanupRepository(conn).claim_one(
                 worker_id=self._worker_id,
-                claim_timeout=TaskBuildWorker.claim_timeout,
+                claim_timeout=CLEANUP_CLAIM_TIMEOUT_SECONDS,
             )
         if cleanup is None:
             return False
@@ -396,3 +411,8 @@ class ScaledEvalsJobsController(NemoController):
     def _heartbeat(self) -> None:
         with pooled_connection() as conn:
             OperationsRepository(conn).heartbeat_service("platform_jobs_controller", self._worker_id)
+
+
+def _log_cleanup_failure(task: asyncio.Task[None]) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        LOG.error("scaled-evals Platform Jobs phase cleanup_executions failed", exc_info=task.exception())

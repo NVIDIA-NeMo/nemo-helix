@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -341,23 +342,37 @@ async def test_immediate_submission_is_best_effort(
     assert "immediate Platform Job submission failed for eval_1" in caplog.text
 
 
-def test_controller_tears_down_orphaned_executions(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_controller_tears_down_orphaned_executions_off_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     cleanup = {"id": 7, "evaluation_id": "eval_1", "execution_number": 2, "runtime": "sandbox_k8s"}
     claims = iter([cleanup, None])
+    claim_kwargs: list[dict] = []
+
+    def claim_one(**kwargs):
+        claim_kwargs.append(kwargs)
+        return next(claims)
+
     monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
     monkeypatch.setattr(
         controller_module,
         "ExecutionCleanupRepository",
-        lambda _conn: SimpleNamespace(claim_one=lambda **_kwargs: next(claims)),
+        lambda _conn: SimpleNamespace(claim_one=claim_one),
     )
-    teardown = MagicMock()
+    release = threading.Event()
+    teardown = MagicMock(side_effect=lambda *a, **k: release.wait(5))
     monkeypatch.setattr(controller_module, "teardown_orphaned_execution", teardown)
     monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", True)
     controller = ScaledEvalsJobsController()
 
-    assert "cleanup_executions" in dict(controller._phases())
-    assert controller._cleanup_execution() is True
-    assert controller._cleanup_execution() is False
+    phase = dict(controller._phases())["cleanup_executions"]
+    await asyncio.wait_for(phase(), 1)  # a teardown in progress does not hold the pass open
+    running = controller._cleanup
+    assert running is not None and not running.done()
+    await phase()
+    assert controller._cleanup is running  # one drain at a time
+    release.set()
+    await asyncio.wait_for(running, 5)
+    assert claim_kwargs[0]["claim_timeout"] == controller_module.CLEANUP_CLAIM_TIMEOUT_SECONDS
     teardown.assert_called_once_with(
         cleanup,
         worker_id=controller._worker_id,

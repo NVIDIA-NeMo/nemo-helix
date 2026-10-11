@@ -287,7 +287,9 @@ def test_deployment_owns_baseline_rbac_and_documents_scoped_overrides() -> None:
     assert "ico-path-patch" not in docs
 
 
-def test_cleanup_kubectl_flags_fall_back_when_recorded_path_is_absent(tmp_path: Path) -> None:
+def test_cleanup_kubectl_flags_fall_back_when_recorded_path_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A cleanup must not replay a kubeconfig, or its context, from another pod.
 
     Under Platform Jobs both are recorded inside the Job pod (HOME=/tmp), but the
@@ -308,6 +310,18 @@ def test_cleanup_kubectl_flags_fall_back_when_recorded_path_is_absent(tmp_path: 
     assert sandbox_k8s._kubectl_target_flags("/tmp/.kube/config", "incluster") == []
     assert sandbox_k8s._kubectl_target_flags(None, "incluster") == []
     assert sandbox_k8s._kubectl_target_flags("", None) == []
+
+    # A user-token kubeconfig can name another cluster or identity. Falling back
+    # would report "not found" as a successful cleanup and orphan the sandbox.
+    with pytest.raises(RuntimeError, match="refusing to clean up"):
+        sandbox_k8s._kubectl_target_flags("/tmp/eval_1/user-kube/config", "user")
+    monkeypatch.setattr(sandbox_k8s.shutil, "which", lambda name: "/usr/bin/kubectl" if name == "kubectl" else None)
+    handle = LaunchHandle(
+        backend="sandbox_k8s",
+        external_id="eval_1",
+        raw={"cleanup": {"selector": "s=eval_1", "kubeconfig_path": "/tmp/gone", "context": "user"}},
+    )
+    assert sandbox_k8s._sandbox_kubectl_base(handle) is None  # the best-effort sampler skips it
 
 
 def test_sandbox_kubectl_base_drops_stale_kubeconfig(monkeypatch: pytest.MonkeyPatch) -> None:
