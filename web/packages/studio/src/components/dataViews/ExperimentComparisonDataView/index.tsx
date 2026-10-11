@@ -160,7 +160,7 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
         display({
           id: `score-${metric.id}`,
           header: scoreHeader(metric.id),
-          size: 150,
+          size: 200,
           cell: ({ row }) => (
             <MetricValueCell
               value={metric.accessor(row.original)}
