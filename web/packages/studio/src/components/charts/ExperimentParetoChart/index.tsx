@@ -11,15 +11,17 @@ import { Button, Text } from '@nvidia/foundations-react-core';
 import { ParetoTooltip } from '@studio/components/charts/ExperimentParetoChart/ParetoTooltip';
 import {
   buildParetoPoints,
+  currentParetoAxes,
   deriveParetoMetrics,
-  resolveParetoAxes,
+  type PickedParetoAxes,
+  savedParetoAxisIds,
 } from '@studio/components/charts/ExperimentParetoChart/utils';
 import { MetricSelect } from '@studio/components/charts/MetricSelect';
 import { useGroupEvaluations } from '@studio/components/charts/useGroupEvaluations';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save } from 'lucide-react';
-import { type FC, useMemo, useState } from 'react';
+import { type FC, useMemo } from 'react';
 import {
   CartesianGrid,
   ResponsiveContainer,
@@ -39,11 +41,12 @@ interface ExperimentParetoChartProps {
   /** True while the caller is still loading rows it will pass via `preloadedEvaluations`; the chart
    * shows a loading state and holds off its own fetch. */
   preloadPending?: boolean;
+  /** Owned by the caller so the comparison table can mark the frontier on the same axes. */
+  pickedAxes: PickedParetoAxes;
+  onPickAxes: (picked: PickedParetoAxes) => void;
 }
 
 const CHART_HEIGHT = 360;
-const DEFAULT_X_METRIC = 'cost_usd';
-const DEFAULT_Y_METRIC = 'latency_ms';
 
 /** Compact big tick values so they don't collide with the axis title (16000 -> "16K"); keep small
  * values precise so close cost/score ticks stay distinct. */
@@ -61,6 +64,8 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
   group,
   preloadedEvaluations,
   preloadPending = false,
+  pickedAxes,
+  onPickAxes,
 }) => {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -75,16 +80,11 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
   const isLoading = hasPreloaded ? false : preloadPending || isFetching;
   const metrics = useMemo(() => deriveParetoMetrics(points), [points]);
 
-  const savedX = group.pareto?.x_metric ?? DEFAULT_X_METRIC;
-  const savedY = group.pareto?.y_metric ?? DEFAULT_Y_METRIC;
-  const [pickedXId, setPickedXId] = useState<string>();
-  const [pickedYId, setPickedYId] = useState<string>();
-  const defaultAxes = useMemo(
-    () => resolveParetoAxes(points, metrics, savedX, savedY),
-    [points, metrics, savedX, savedY]
+  const { x: savedX, y: savedY } = savedParetoAxisIds(group.pareto);
+  const { x: xMetric, y: yMetric } = useMemo(
+    () => currentParetoAxes(points, metrics, group.pareto, pickedAxes),
+    [points, metrics, group.pareto, pickedAxes]
   );
-  const xMetric = metrics.find((m) => m.id === pickedXId) ?? defaultAxes?.x;
-  const yMetric = metrics.find((m) => m.id === pickedYId) ?? defaultAxes?.y;
 
   const { mutate: saveGroup, isPending: isSaving } = useUpdateExperiment({
     mutation: {
@@ -115,7 +115,7 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
     });
   };
 
-  const hasPickedAxes = pickedXId !== undefined || pickedYId !== undefined;
+  const hasPickedAxes = pickedAxes.x !== undefined || pickedAxes.y !== undefined;
   const hasUnsavedAxes =
     hasPickedAxes &&
     xMetric !== undefined &&
@@ -207,13 +207,13 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
             label="X axis"
             value={xMetric?.id ?? ''}
             metrics={metrics}
-            onChange={setPickedXId}
+            onChange={(x) => onPickAxes({ ...pickedAxes, x })}
           />
           <MetricSelect
             label="Y axis"
             value={yMetric?.id ?? ''}
             metrics={metrics}
-            onChange={setPickedYId}
+            onChange={(y) => onPickAxes({ ...pickedAxes, y })}
           />
           <Button
             kind="primary"

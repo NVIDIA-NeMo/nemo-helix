@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 
 /** Which direction on an axis counts as "better": cost/latency/tokens minimize, evaluator scores maximize. */
@@ -33,14 +34,14 @@ const COST_METRIC: ParetoMetric = {
   accessor: (row) => row.cost_usd?.mean,
 };
 
-const LATENCY_METRIC: ParetoMetric = {
+export const LATENCY_METRIC: ParetoMetric = {
   id: 'latency_ms',
   label: metricLabel('latency_ms'),
   direction: 'min',
   accessor: (row) => row.latency_ms?.mean,
 };
 
-const TOKENS_METRIC: ParetoMetric = {
+export const TOKENS_METRIC: ParetoMetric = {
   id: 'tokens',
   label: metricLabel('tokens'),
   direction: 'min',
@@ -50,16 +51,20 @@ const TOKENS_METRIC: ParetoMetric = {
 /** Metrics selectable on either axis: cost, latency and tokens (minimized) plus one per evaluator seen
  * in the data (maximized). Evaluator names are dynamic, so they're derived from the rows. */
 export function deriveParetoMetrics(rows: readonly EvaluationRow[]): ParetoMetric[] {
+  return [COST_METRIC, LATENCY_METRIC, TOKENS_METRIC, ...deriveEvaluatorMetrics(rows)];
+}
+
+/** One maximized metric per evaluator seen in the rows, sorted by name. */
+export function deriveEvaluatorMetrics(rows: readonly EvaluationRow[]): ParetoMetric[] {
   const evaluatorNames = [
     ...new Set(rows.flatMap((row) => Object.keys(row.aggregate_scores ?? {}))),
   ].sort();
-  const evaluatorMetrics = evaluatorNames.map<ParetoMetric>((name) => ({
+  return evaluatorNames.map<ParetoMetric>((name) => ({
     id: `evaluators.${name}`,
     label: metricLabel(`evaluators.${name}`),
     direction: 'max',
     accessor: (row) => row.aggregate_scores?.[name]?.mean,
   }));
-  return [COST_METRIC, LATENCY_METRIC, TOKENS_METRIC, ...evaluatorMetrics];
 }
 
 export interface ParetoPlotPoint {
@@ -145,4 +150,36 @@ export function resolveParetoAxes(
     FALLBACK_Y_METRICS.find((m) => m !== fallbackX && plottable.includes(m)) ??
     plottable.find((m) => m !== fallbackX);
   return fallbackX && fallbackY ? { x: fallbackX, y: fallbackY } : { x, y };
+}
+
+const DEFAULT_X_METRIC = 'cost_usd';
+const DEFAULT_Y_METRIC = 'latency_ms';
+
+/** A viewer's unsaved axis picks; an axis left undefined follows the group's saved axes. */
+export interface PickedParetoAxes {
+  readonly x?: string;
+  readonly y?: string;
+}
+
+/** The group's saved axis ids, or the defaults when it has none. */
+export const savedParetoAxisIds = (
+  pareto: ExperimentResponse['pareto']
+): { x: string; y: string } => ({
+  x: pareto?.x_metric ?? DEFAULT_X_METRIC,
+  y: pareto?.y_metric ?? DEFAULT_Y_METRIC,
+});
+
+/** The axes the Pareto view is currently showing: each picked axis, else the resolved saved axis. */
+export function currentParetoAxes(
+  rows: readonly EvaluationRow[],
+  metrics: readonly ParetoMetric[],
+  pareto: ExperimentResponse['pareto'],
+  picked: PickedParetoAxes
+): Partial<ParetoAxes> {
+  const saved = savedParetoAxisIds(pareto);
+  const defaults = resolveParetoAxes(rows, metrics, saved.x, saved.y);
+  return {
+    x: metrics.find((m) => m.id === picked.x) ?? defaults?.x,
+    y: metrics.find((m) => m.id === picked.y) ?? defaults?.y,
+  };
 }

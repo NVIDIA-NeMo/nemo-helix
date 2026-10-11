@@ -22,6 +22,8 @@ Select **New experiment** from the Experiments list. In the **Create experiment*
 
 Select an experiment to open its detail page, which shows aggregate metrics across its evaluations and a table of the evaluations in the group. Toggle **Pareto view** to plot evaluations on a chart instead of the table, by default cost against latency. Change either axis to cost, latency, tokens, or any evaluator's score (`cost_usd`, `latency_ms`, `tokens`, or `evaluators.<name>`); the selection is saved per experiment. When the saved axes have no data to plot together, such as cost for a self-hosted model, the chart falls back to an evaluator's score against cost or tokens.
 
+Toggle **Compare** to see the evaluations side by side in one table: each evaluator's score and its change against a baseline evaluation, average latency, average tokens, run duration, and whether the evaluation is on the Pareto frontier for the Pareto view's current axes. The baseline defaults to the oldest evaluation in the experiment; pick another from **Baseline**. The best value in each column is highlighted, where a higher score is better and lower latency, tokens, and duration are better. Values an evaluation did not record show as a dash.
+
 Select **Edit** to update the experiment's name, description, or default sort order.
 
 If the experiment was created from an Optimizer insight, an **Insight description** card appears with a link back to that insight. See [NeMo Studio Insights](/documentation/studio/insights).

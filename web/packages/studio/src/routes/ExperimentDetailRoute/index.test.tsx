@@ -86,6 +86,20 @@ describe('ExperimentDetailRoute', () => {
     expect(screen.queryByText('Summary')).not.toBeInTheDocument();
   });
 
+  it('toggles the evaluation comparison table', async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    mockGroup();
+
+    await user.click(await screen.findByRole('button', { name: 'Compare' }));
+
+    expect(await screen.findByText('Compare Evaluations')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide comparison' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+  });
+
   describe('over-time chart visibility', () => {
     const trendToggle = () => screen.getByRole('button', { name: /over time/i });
 

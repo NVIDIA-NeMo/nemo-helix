@@ -31,7 +31,9 @@ import {
   MIN_COMPARED_EVALUATIONS,
 } from '@studio/components/charts/EvaluationCompareChart/utils';
 import { ExperimentParetoChart } from '@studio/components/charts/ExperimentParetoChart';
+import type { PickedParetoAxes } from '@studio/components/charts/ExperimentParetoChart/utils';
 import { ExperimentTrendChart } from '@studio/components/charts/ExperimentTrendChart';
+import { ExperimentComparisonDataView } from '@studio/components/dataViews/ExperimentComparisonDataView';
 import { AddToGroupModal } from '@studio/components/dataViews/ExperimentDataView/AddToGroupModal';
 import '@studio/components/dataViews/ExperimentDataView/ExperimentDataView.css';
 import { MeanValueTooltipCell } from '@studio/components/dataViews/ExperimentDataView/MeanValueTooltipCell';
@@ -161,6 +163,8 @@ interface ExperimentDataViewProps {
   /** Whether the over-time trend chart is shown. Same arrangement as `paretoVisible`: the parent
    * owns the toggle, which starts on for experiments flagged `show_evaluations_over_time`. */
   trendVisible: boolean;
+  /** Whether the evaluation comparison table is shown. Same arrangement as `paretoVisible`. */
+  compareVisible: boolean;
 }
 
 /** Lists the experiments that belong to a single experiment group. */
@@ -168,6 +172,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   group,
   paretoVisible,
   trendVisible,
+  compareVisible,
 }) => {
   const workspace = useWorkspaceFromPath();
   const openRow = useRowNavigation();
@@ -191,6 +196,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
     evaluations: EvaluationRow[];
     clearSelection: () => void;
   } | null>(null);
+  const [pickedParetoAxes, setPickedParetoAxes] = useState<PickedParetoAxes>({});
 
   // Seed the sort from default_sort so its column header reflects the order on load. Memoized so the
   // reference is stable across renders (until default_sort changes).
@@ -630,14 +636,24 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
       )}
       {paretoVisible && (
         <div className="mb-4">
-          {/* Key by group id so the axis selection resets (re-seeds from the new group's saved
-              config) when navigating between groups without a route remount. */}
           <ExperimentParetoChart
-            key={group.id}
             workspace={workspace}
             group={group}
             preloadedEvaluations={completeEvaluationSet}
             preloadPending={preloadPending}
+            pickedAxes={pickedParetoAxes}
+            onPickAxes={setPickedParetoAxes}
+          />
+        </div>
+      )}
+      {compareVisible && (
+        <div className="mb-4">
+          <ExperimentComparisonDataView
+            workspace={workspace}
+            group={group}
+            preloadedEvaluations={completeEvaluationSet}
+            preloadPending={preloadPending}
+            pickedParetoAxes={pickedParetoAxes}
           />
         </div>
       )}
