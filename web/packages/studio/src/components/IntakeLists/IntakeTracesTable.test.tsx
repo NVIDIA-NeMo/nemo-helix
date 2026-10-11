@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
+import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import { IntakeTracesTable } from '@studio/components/IntakeLists/IntakeTracesTable';
 import { ROUTES } from '@studio/constants/routes';
@@ -11,7 +12,7 @@ import { server } from '@studio/mocks/node';
 import { getAgentDetailRoute, getIntakeTracesRoute } from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -218,5 +219,69 @@ describe('IntakeTracesTable', () => {
       )
     );
     expect(help).not.toHaveTextContent('<workspace>');
+  });
+
+  describe('polling', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('shows newly ingested traces without a reload', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const [newTrace, existingTrace] = mockTracesPage.data;
+      let traces = [existingTrace];
+      server.use(
+        http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
+          HttpResponse.json({
+            ...mockTracesPage,
+            data: traces,
+            pagination: { ...mockTracesPage.pagination, total_results: traces.length },
+          })
+        )
+      );
+
+      renderRoute(<IntakeTracesTable workspace="default" />, {
+        history: '/workspaces/default/intake/traces',
+      });
+      expect(await screen.findByText('Answer customer policy question')).toBeInTheDocument();
+      expect(
+        screen.queryByText('Explain private workspace access controls')
+      ).not.toBeInTheDocument();
+
+      traces = [newTrace, existingTrace];
+      await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_LONG));
+
+      expect(
+        await screen.findByText('Explain private workspace access controls')
+      ).toBeInTheDocument();
+    });
+
+    it('keeps the current rows visible while a poll is in flight', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let requestCount = 0;
+      let releasePoll: () => void = () => {};
+      const pollHeld = new Promise<void>((resolve) => {
+        releasePoll = resolve;
+      });
+      server.use(
+        http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), async () => {
+          requestCount += 1;
+          if (requestCount > 1) await pollHeld;
+          return HttpResponse.json(mockTracesPage);
+        })
+      );
+
+      renderRoute(<IntakeTracesTable workspace="default" />, {
+        history: '/workspaces/default/intake/traces',
+      });
+      expect(await screen.findByText('Answer customer policy question')).toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_LONG));
+      await waitFor(() => expect(requestCount).toBe(2));
+
+      expect(screen.getByText('Answer customer policy question')).toBeInTheDocument();
+
+      releasePoll();
+    });
   });
 });
