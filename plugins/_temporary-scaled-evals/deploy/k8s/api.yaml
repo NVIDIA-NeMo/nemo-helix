@@ -76,6 +76,16 @@ spec:
                 secretKeyRef:
                   name: scaled-evals-credential-encryption
                   key: CREDENTIALS_ENCRYPTION_KEY
+            # Platform Secrets are stored in Postgres, so their key must outlive
+            # the pod. The default generates one on the pod's disk, and a restart
+            # leaves every stored secret undecryptable.
+            - name: NHX_SECRETS_DEFAULT_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scaled-evals-platform-secrets-key
+                  key: key
+            - name: NHX_SECRETS_ENCRYPTION
+              value: '{"current_provider":"local_v1","providers":{"secret_key":{"local_v1":{"from_env":"NHX_SECRETS_DEFAULT_ENCRYPTION_KEY"}}}}'
           ports:
             - containerPort: 8080
               name: http

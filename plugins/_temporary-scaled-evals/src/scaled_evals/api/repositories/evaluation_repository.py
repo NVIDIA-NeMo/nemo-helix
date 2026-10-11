@@ -75,17 +75,35 @@ EVALUATION_DETAIL_COLUMNS = (
 _CANCELLABLE_SQL = "('blocked', 'queued', 'provisioning', 'running')"
 RetryBlockReason = Literal["terminal_artifacts_finalizing", "benchmark_unavailable"]
 
-_DISPATCH_CLAIM_LOCK_ID = 1936024438
-_CLAIM_LOCK_SQL = "SELECT pg_advisory_xact_lock(%s)"
+_CLAIMABLE_SQL = """
+    e.deleted_at IS NULL
+    AND e.status IN ('queued', 'provisioning', 'running')
+    AND e.dispatch_job_name IS NULL
+    AND (e.next_retry_at IS NULL OR e.next_retry_at <= statement_timestamp())
+    AND (
+        e.dispatch_claimed_at IS NULL
+        OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
+    )
+"""
 
-_CLAIM_SQL = """
+# Concurrent claimants may pick the same candidate. The UPDATE re-checks the
+# claim predicates against the committed row, so exactly one wins and the rest
+# get no row.
+# ponytail: a losing claimant returns None and ends its drain pass early, so
+# replicas contend rather than cooperate. Upgrade path: return several
+# candidates and try each until one update lands.
+# ponytail: admission counts active slots without a lock, so claimants running
+# at the same time can each admit one queued evaluation past a cap. The single
+# controller claims serially, so it holds exactly. Upgrade path: a platform
+# core quota on sandboxes, then delete these caps.
+_CLAIM_SQL = f"""
     WITH active_usage AS MATERIALIZED (
         SELECT COALESCE(SUM(parallelism), 0)::BIGINT AS cluster_slots
         FROM evaluations
         WHERE deleted_at IS NULL
           AND status IN ('provisioning', 'running')
     ),
-    ranked_candidate AS MATERIALIZED (
+    candidate AS (
         SELECT e.id, e.status
         FROM evaluations e
         CROSS JOIN active_usage usage
@@ -105,14 +123,7 @@ _CLAIM_SQL = """
               AND member.status IN ('provisioning', 'running')
               AND member.benchmark_run_id = e.benchmark_run_id
         ) benchmark_usage ON e.benchmark_run_id IS NOT NULL
-        WHERE e.deleted_at IS NULL
-          AND e.status IN ('queued', 'provisioning', 'running')
-          AND e.dispatch_job_name IS NULL
-          AND (e.next_retry_at IS NULL OR e.next_retry_at <= statement_timestamp())
-          AND (
-              e.dispatch_claimed_at IS NULL
-              OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
-          )
+        WHERE {_CLAIMABLE_SQL}
           AND (
               e.status <> 'queued'
               OR (
@@ -139,17 +150,6 @@ _CLAIM_SQL = """
             CASE WHEN e.status = 'queued' THEN owner_usage.owner_slots ELSE 0 END,
             e.created_at
         LIMIT 1
-    ),
-    candidate AS (
-        -- Keep row locking in a separate, non-aggregate SELECT. PostgreSQL
-        -- rejects FOR UPDATE anywhere in the ranked query because it contains
-        -- aggregate capacity subqueries, even when the lock is qualified.
-        SELECT e.id, e.status
-        FROM evaluations e
-        JOIN ranked_candidate ranked
-          ON ranked.id = e.id
-         AND ranked.status = e.status
-        FOR UPDATE OF e SKIP LOCKED
     )
     UPDATE evaluations e
     SET status = CASE WHEN e.status = 'queued' THEN 'provisioning' ELSE e.status END,
@@ -164,10 +164,8 @@ _CLAIM_SQL = """
         updated_at = statement_timestamp()
     FROM candidate
     WHERE e.id = candidate.id
-      AND (
-          e.dispatch_claimed_at IS NULL
-          OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
-      )
+      AND e.status = candidate.status
+      AND {_CLAIMABLE_SQL}
     RETURNING e.id, candidate.status AS previous_status, e.status
 """
 
@@ -1248,13 +1246,6 @@ class EvaluationRepository:
         per_user_slot_limit: int = 50,
     ) -> dict | None:
         with self.conn.transaction(), self.conn.cursor() as cur:
-            # Take the admission lock in its own statement. PostgreSQL establishes
-            # a READ COMMITTED snapshot at statement start, so putting the lock in
-            # the claim query lets waiters retain a snapshot from before the prior
-            # worker committed. Those waiters can then all select and launch the
-            # same evaluation. Acquiring first makes the claim query start with a
-            # fresh snapshot after the previous claimant commits.
-            cur.execute(_CLAIM_LOCK_SQL, (_DISPATCH_CLAIM_LOCK_ID,))
             cur.execute(
                 _CLAIM_SQL,
                 (
@@ -1417,7 +1408,7 @@ class EvaluationRepository:
             cur.execute(
                 """
                 WITH candidate AS (
-                    SELECT e.id
+                    SELECT e.id, e.current_execution, e.dispatch_job_name, e.dispatch_job_uid
                     FROM evaluations e
                     WHERE e.deleted_at IS NULL
                       AND e.status IN ('provisioning', 'running')
@@ -1440,7 +1431,6 @@ class EvaluationRepository:
                       )
                     ORDER BY e.dispatch_claimed_at NULLS FIRST, e.created_at, e.id
                     LIMIT 1
-                    FOR UPDATE OF e SKIP LOCKED
                 )
                 UPDATE evaluations e
                 SET dispatch_reconcile_claimed_at = NOW(),
@@ -1448,10 +1438,22 @@ class EvaluationRepository:
                     updated_at = NOW()
                 FROM candidate
                 WHERE e.id = candidate.id
+                  AND e.status IN ('provisioning', 'running')
+                  AND e.current_execution = candidate.current_execution
+                  AND e.dispatch_job_name = candidate.dispatch_job_name
+                  AND e.dispatch_job_uid IS NOT DISTINCT FROM candidate.dispatch_job_uid
+                  AND (
+                      e.dispatch_claimed_at IS NULL
+                      OR e.dispatch_claimed_at < NOW() - (%s * INTERVAL '1 second')
+                  )
+                  AND (
+                      e.dispatch_reconcile_claimed_at IS NULL
+                      OR e.dispatch_reconcile_claimed_at < NOW() - (%s * INTERVAL '1 second')
+                  )
                 RETURNING e.id, e.status, e.current_execution, e.dispatch_job_name,
                           e.dispatch_job_uid
                 """,
-                (stale_seconds, claim_timeout, worker_id),
+                (stale_seconds, claim_timeout, worker_id, stale_seconds, claim_timeout),
             )
             return cur.fetchone()
 

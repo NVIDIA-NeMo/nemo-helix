@@ -124,7 +124,6 @@ class TaskBuildRepository:
                       )
                     ORDER BY build_started_at, task_id, revision
                     LIMIT 1
-                    FOR UPDATE SKIP LOCKED
                 )
                 UPDATE task_revisions r
                 SET build_claimed_at = NOW(),
@@ -134,11 +133,17 @@ class TaskBuildRepository:
                 FROM candidate
                 WHERE r.task_id = candidate.task_id
                   AND r.revision = candidate.revision
+                  AND r.status = 'building'
+                  AND r.build_attempts < %s
+                  AND (
+                      r.build_claimed_at IS NULL
+                      OR r.build_claimed_at < NOW() - (%s * INTERVAL '1 second')
+                  )
                 RETURNING r.task_id, r.revision, r.build_backend,
                           r.build_payload, r.build_credentials,
                           r.tarball_object_key, r.build_attempts
                 """,
-                (max_attempts, claim_timeout, worker_id),
+                (max_attempts, claim_timeout, worker_id, max_attempts, claim_timeout),
             )
             row = cur.fetchone()
         if row is None:

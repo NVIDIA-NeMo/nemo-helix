@@ -33,8 +33,8 @@ def test_claim_expires_stale_final_attempt_before_selecting_work() -> None:
     assert "build worker lease expired after final attempt" in expire_sql
     assert "build_attempts >= %s" in expire_sql
     assert expire_params == (3, 90)
-    assert "FOR UPDATE SKIP LOCKED" in claim_sql
-    assert claim_params == (3, 90, "worker-1")
+    assert "SKIP LOCKED" not in claim_sql
+    assert claim_params == (3, 90, "worker-1", 3, 90)
 
 
 @pytest.mark.parametrize(
