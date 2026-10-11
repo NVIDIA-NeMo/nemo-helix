@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import anyio.to_thread
 import httpx
 import pytest
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -42,14 +45,15 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
     record_evaluation = MagicMock()
     monkeypatch.setattr(controller, "_claim_build", lambda: build)
     monkeypatch.setattr(controller, "_bind_build", bind_build)
+    submitter = controller.submitter
     monkeypatch.setattr(
-        controller,
-        "_claim_evaluation",
-        lambda: {"id": "eval_1", "previous_status": "queued", "status": "provisioning"},
+        submitter,
+        "_claim",
+        lambda _evaluation_id: {"id": "eval_1", "previous_status": "queued", "status": "provisioning"},
     )
     monkeypatch.setattr(
-        controller,
-        "_load_evaluation",
+        submitter,
+        "_load",
         lambda _evaluation_id: {
             "id": "eval_1",
             "status": "provisioning",
@@ -57,7 +61,7 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
             "current_execution": 3,
         },
     )
-    monkeypatch.setattr(controller, "_record_evaluation_job", record_evaluation)
+    monkeypatch.setattr(submitter, "_record", record_evaluation)
     resolved_settings = settings._resolve()
     monkeypatch.setattr(resolved_settings, "platform_jobs_image", "registry.example/scaled-evals@sha256:def")
 
@@ -289,3 +293,49 @@ async def test_controller_drains_a_bounded_batch_per_pass(monkeypatch: pytest.Mo
 
     with pytest.raises(RuntimeError):
         await controller._drain(_poison_pill_row)()
+
+
+@pytest.mark.asyncio
+async def test_immediate_submission_is_best_effort(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import nemo_scaled_evals_plugin.submitter as submitter_module
+
+    client = MagicMock()
+    monkeypatch.setattr(submitter_module, "get_async_nemo_client", client)
+    monkeypatch.setattr(submitter_module.AsyncJobsClient, "from_client", MagicMock())
+
+    monkeypatch.setattr(submitter_module, "settings", SimpleNamespace(platform_evaluation_jobs_enabled=False))
+    submitter_module.submit_evaluation_now("eval_1")
+    client.assert_not_called()
+
+    # The committed row is the handoff: a failure here must not fail the API
+    # request, because the controller submits the row on its next pass.
+    monkeypatch.setattr(submitter_module, "settings", SimpleNamespace(platform_evaluation_jobs_enabled=True))
+    submitter_module.submit_evaluation_now("eval_1")  # no server event loop: logged, not raised
+    client.assert_not_called()
+
+    # A cancel that lands after the claim creates no Job.
+    submitter = submitter_module.EvaluationSubmitter(AsyncMock(), "worker-1")
+    create_job = AsyncMock()
+    monkeypatch.setattr(submitter, "_claim", lambda _evaluation_id: {"id": "eval_1"})
+    monkeypatch.setattr(submitter, "_load", lambda _evaluation_id: {"status": "cancelled"})
+    monkeypatch.setattr(submitter, "create_job", create_job)
+    assert await submitter.submit("eval_1") is True
+    create_job.assert_not_called()
+
+    # A hung Jobs API neither blocks the handler nor runs past the time limit.
+    async def hang(_self: object, _evaluation_id: str | None = None) -> bool:
+        await asyncio.sleep(60)
+        return True
+
+    monkeypatch.setattr(submitter_module.EvaluationSubmitter, "submit", hang)
+    monkeypatch.setattr(submitter_module, "IMMEDIATE_SUBMIT_TIMEOUT_SECONDS", 0.3)
+    started = time.monotonic()
+    await anyio.to_thread.run_sync(submitter_module.submit_evaluation_now, "eval_1")
+    assert time.monotonic() - started < 0.2
+    while submitter_module._pending:
+        await asyncio.sleep(0.01)
+    client.assert_called_once()
+    client.return_value.__aexit__.assert_awaited_once()  # the HTTP client is closed even on timeout
+    assert "immediate Platform Job submission failed for eval_1" in caplog.text
