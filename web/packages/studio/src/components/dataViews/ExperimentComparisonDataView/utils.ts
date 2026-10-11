@@ -73,3 +73,20 @@ export const columnExtremes = (
   const [high, low] = [Math.max(...values), Math.min(...values)];
   return metric.direction === 'max' ? { best: high, worst: low } : { best: low, worst: high };
 };
+
+const ACRONYMS: Readonly<Record<string, string>> = { llm: 'LLM' };
+
+const humanize = (value: string): string => {
+  const words = value.split(/[-_\s]+/).filter(Boolean);
+  const text = words.map((word) => ACRONYMS[word.toLowerCase()] ?? word.toLowerCase()).join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+/** Readable header for an evaluator score: `llm-judge.behaviour` -> "Behaviour (LLM judge)", `string-check.string-check` -> "String check". */
+export const scoreHeader = (metricId: string): string => {
+  const key = metricId.replace(/^evaluators\./, '');
+  const dot = key.indexOf('.');
+  if (dot === -1) return humanize(key);
+  const [metricType, output] = [key.slice(0, dot), key.slice(dot + 1)];
+  return output === metricType ? humanize(output) : `${humanize(output)} (${humanize(metricType)})`;
+};

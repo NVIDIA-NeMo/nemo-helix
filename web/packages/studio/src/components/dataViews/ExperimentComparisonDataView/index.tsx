@@ -25,6 +25,7 @@ import {
   describeDelta,
   DURATION_METRIC,
   scoreDelta,
+  scoreHeader,
 } from '@studio/components/dataViews/ExperimentComparisonDataView/utils';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 import { EM_DASH } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
@@ -158,7 +159,7 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
       ...scoreMetrics.flatMap((metric) => [
         display({
           id: `score-${metric.id}`,
-          header: metric.label,
+          header: scoreHeader(metric.id),
           size: 150,
           cell: ({ row }) => (
             <MetricValueCell

@@ -12,6 +12,7 @@ import {
   describeDelta,
   DURATION_METRIC,
   scoreDelta,
+  scoreHeader,
 } from '@studio/components/dataViews/ExperimentComparisonDataView/utils';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 
@@ -126,5 +127,16 @@ describe('columnExtremes', () => {
 
   it('is undefined with a single value', () => {
     expect(columnExtremes([tuned, unscored], judge)).toBeUndefined();
+  });
+});
+
+describe('scoreHeader', () => {
+  it.each([
+    { id: 'evaluators.string-check.string-check', header: 'String check' },
+    { id: 'evaluators.llm-judge.behaviour', header: 'Behaviour (LLM judge)' },
+    { id: 'evaluators.exact_match', header: 'Exact match' },
+    { id: 'evaluators.llm-judge.Tool-Use', header: 'Tool use (LLM judge)' },
+  ])('labels $id as $header', ({ id, header }) => {
+    expect(scoreHeader(id)).toBe(header);
   });
 });
