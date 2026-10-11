@@ -4,9 +4,7 @@
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
 import { evalDurationMs } from '@studio/api/evaluation/utils';
 import {
-  buildParetoPoints,
   type MetricDirection,
-  type ParetoAxes,
   type ParetoMetric,
 } from '@studio/components/charts/ExperimentParetoChart/utils';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
@@ -58,26 +56,20 @@ export const describeDelta = (
   return { text: delta > 0 ? `+${formatted}` : formatted, tone: improved ? 'better' : 'worse' };
 };
 
-/** The best value in the column, or undefined when fewer than two distinct values leave nothing to pick. */
-export const bestValue = (
+export interface ColumnExtremes {
+  readonly best: number;
+  readonly worst: number;
+}
+
+/** The column's best and worst values, or undefined when fewer than two distinct values leave nothing to pick. */
+export const columnExtremes = (
   rows: readonly EvaluationRow[],
   metric: ParetoMetric
-): number | undefined => {
+): ColumnExtremes | undefined => {
   const values = rows
     .map((row) => finiteValue(metric, row))
     .filter((value): value is number => value !== undefined);
   if (new Set(values).size < 2) return undefined;
-  return metric.direction === 'max' ? Math.max(...values) : Math.min(...values);
-};
-
-export const frontierNames = (
-  rows: readonly EvaluationRow[],
-  axes: Partial<ParetoAxes>
-): ReadonlySet<string> => {
-  if (!axes.x || !axes.y) return new Set();
-  return new Set(
-    buildParetoPoints(rows, axes.x, axes.y)
-      .filter((point) => point.onFrontier)
-      .map((point) => point.name)
-  );
+  const [high, low] = [Math.max(...values), Math.min(...values)];
+  return metric.direction === 'max' ? { best: high, worst: low } : { best: low, worst: high };
 };

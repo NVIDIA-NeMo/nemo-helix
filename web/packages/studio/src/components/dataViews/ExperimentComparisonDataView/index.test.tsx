@@ -8,11 +8,7 @@ import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataV
 import { render, screen, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 
-const group = {
-  id: 'group-id',
-  name: 'planner',
-  pareto: { x_metric: 'evaluators.judge', y_metric: 'tokens' },
-} as ExperimentResponse;
+const group = { id: 'group-id', name: 'planner' } as ExperimentResponse;
 
 const evaluation = (
   name: string,
@@ -32,7 +28,7 @@ const evaluation = (
 
 const evaluations = [
   evaluation('tuned', '2026-10-11T02:30:00', 89, 33_000, '457'),
-  evaluation('dominated', '2026-10-11T02:15:00', 50, 40_000),
+  evaluation('weakest', '2026-10-11T02:15:00', 50, 40_000),
   evaluation('baseline', '2026-10-11T02:00:00', 55, 27_000, '582'),
 ];
 
@@ -42,7 +38,6 @@ const renderTable = () =>
       workspace={DEFAULT_WORKSPACE}
       group={group}
       preloadedEvaluations={evaluations}
-      pickedParetoAxes={{}}
     />
   );
 
@@ -54,7 +49,7 @@ describe('ExperimentComparisonDataView', () => {
 
     expect(await rowFor('baseline').findByText('Baseline')).toBeInTheDocument();
     expect(rowFor('tuned').getByText('+34')).toHaveClass('text-feedback-success');
-    expect(rowFor('dominated').getByText('-5')).toHaveClass('text-feedback-danger');
+    expect(rowFor('weakest').getByText('-5')).toHaveClass('text-feedback-danger');
   });
 
   it('highlights the best value in each column by its direction', async () => {
@@ -67,19 +62,21 @@ describe('ExperimentComparisonDataView', () => {
     expect(rowFor('baseline').getByText('55')).not.toHaveTextContent('(best)');
   });
 
-  it('badges the evaluations on the Pareto frontier', async () => {
+  it('highlights the worst value in each column by its direction', async () => {
     renderTable();
 
-    expect(await rowFor('tuned').findByText('On frontier')).toBeInTheDocument();
-    expect(rowFor('baseline').getByText('On frontier')).toBeInTheDocument();
-    expect(rowFor('dominated').queryByText('On frontier')).not.toBeInTheDocument();
+    expect(await screen.findAllByText('(worst)')).toHaveLength(3);
+    expect(rowFor('weakest').getByText('50')).toHaveTextContent('(worst)');
+    expect(rowFor('weakest').getByText('40,000')).toHaveTextContent('(worst)');
+    expect(rowFor('baseline').getByText('9m 42s')).toHaveTextContent('(worst)');
+    expect(rowFor('baseline').getByText('55')).not.toHaveTextContent('(worst)');
   });
 
   it('shows an em dash for a duration that was never recorded', async () => {
     renderTable();
 
     expect(await rowFor('tuned').findByText('7m 37s')).toBeInTheDocument();
-    expect(rowFor('dominated').getAllByText('—').length).toBeGreaterThan(0);
+    expect(rowFor('weakest').getAllByText('—').length).toBeGreaterThan(0);
   });
 
   it('recomputes deltas against a newly selected baseline', async () => {

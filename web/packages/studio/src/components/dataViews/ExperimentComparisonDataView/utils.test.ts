@@ -7,11 +7,10 @@ import {
   TOKENS_METRIC,
 } from '@studio/components/charts/ExperimentParetoChart/utils';
 import {
-  bestValue,
+  columnExtremes,
   defaultBaselineName,
   describeDelta,
   DURATION_METRIC,
-  frontierNames,
   scoreDelta,
 } from '@studio/components/dataViews/ExperimentComparisonDataView/utils';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
@@ -102,19 +101,19 @@ describe('describeDelta', () => {
   });
 });
 
-describe('bestValue', () => {
+describe('columnExtremes', () => {
   const rows = [baseline, tuned, unscored];
 
-  it('takes the highest score', () => {
-    expect(bestValue(rows, judge)).toBe(89);
+  it('takes the highest score as best and the lowest as worst', () => {
+    expect(columnExtremes(rows, judge)).toEqual({ best: 89, worst: 55 });
   });
 
   it.each([
-    { metric: LATENCY_METRIC, best: 67_000 },
-    { metric: TOKENS_METRIC, best: 27_000 },
-    { metric: DURATION_METRIC, best: 457_000 },
-  ])('takes the lowest $metric.id', ({ metric, best }) => {
-    expect(bestValue(rows, metric)).toBe(best);
+    { metric: LATENCY_METRIC, best: 67_000, worst: 71_000 },
+    { metric: TOKENS_METRIC, best: 27_000, worst: 33_000 },
+    { metric: DURATION_METRIC, best: 457_000, worst: 582_000 },
+  ])('takes the lowest $metric.id as best and the highest as worst', ({ metric, best, worst }) => {
+    expect(columnExtremes(rows, metric)).toEqual({ best, worst });
   });
 
   it('is undefined when every value ties', () => {
@@ -122,25 +121,10 @@ describe('bestValue', () => {
       evaluation({ name: 'a', latency: 0 }),
       evaluation({ name: 'b', latency: 0 }),
     ];
-    expect(bestValue(zeroLatency, LATENCY_METRIC)).toBeUndefined();
+    expect(columnExtremes(zeroLatency, LATENCY_METRIC)).toBeUndefined();
   });
 
   it('is undefined with a single value', () => {
-    expect(bestValue([tuned, unscored], judge)).toBeUndefined();
-  });
-});
-
-describe('frontierNames', () => {
-  it('flags the evaluations no other one dominates on the given axes', () => {
-    const dominated = evaluation({ name: 'dominated', tokens: 40_000, scores: { judge: 50 } });
-    const rows = [baseline, tuned, dominated];
-    expect([...frontierNames(rows, { x: judge, y: TOKENS_METRIC })].sort()).toEqual([
-      'baseline',
-      'tuned',
-    ]);
-  });
-
-  it('is empty until both axes are known', () => {
-    expect(frontierNames([baseline, tuned], { x: judge }).size).toBe(0);
+    expect(columnExtremes([tuned, unscored], judge)).toBeUndefined();
   });
 });

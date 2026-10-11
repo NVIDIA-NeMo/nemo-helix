@@ -3,7 +3,6 @@
 
 import {
   buildParetoPoints,
-  currentParetoAxes,
   deriveParetoMetrics,
   type ParetoMetric,
   resolveParetoAxes,
@@ -170,38 +169,5 @@ describe('resolveParetoAxes', () => {
       'cost_usd',
       'latency_ms',
     ]);
-  });
-});
-
-describe('currentParetoAxes', () => {
-  const rows = [
-    point({ name: 'a', tokens: 10, latency: 5, evaluators: { reward: 0.5 } }),
-    point({ name: 'b', tokens: 20, latency: 3, evaluators: { reward: 0.9 } }),
-  ];
-  const metrics = deriveParetoMetrics(rows);
-
-  it('resolves the saved axes when nothing is picked', () => {
-    const axes = currentParetoAxes(
-      rows,
-      metrics,
-      { x_metric: 'tokens', y_metric: 'latency_ms' },
-      {}
-    );
-    expect([axes.x?.id, axes.y?.id]).toEqual(['tokens', 'latency_ms']);
-  });
-
-  it('falls back like resolveParetoAxes when the saved axes do not plot', () => {
-    const axes = currentParetoAxes(rows, metrics, undefined, {});
-    expect([axes.x?.id, axes.y?.id]).toEqual(['evaluators.reward', 'tokens']);
-  });
-
-  it('lets a picked axis override only that axis', () => {
-    const axes = currentParetoAxes(
-      rows,
-      metrics,
-      { x_metric: 'tokens', y_metric: 'latency_ms' },
-      { y: 'evaluators.reward' }
-    );
-    expect([axes.x?.id, axes.y?.id]).toEqual(['tokens', 'evaluators.reward']);
   });
 });

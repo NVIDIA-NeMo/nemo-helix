@@ -10,23 +10,20 @@ import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Flex, Text } from '@nvidia/foundations-react-core';
 import {
-  currentParetoAxes,
   deriveEvaluatorMetrics,
-  deriveParetoMetrics,
   LATENCY_METRIC,
   type ParetoMetric,
-  type PickedParetoAxes,
   TOKENS_METRIC,
 } from '@studio/components/charts/ExperimentParetoChart/utils';
 import { MetricSelect } from '@studio/components/charts/MetricSelect';
 import { useGroupEvaluations } from '@studio/components/charts/useGroupEvaluations';
 import {
-  bestValue,
+  type ColumnExtremes,
+  columnExtremes,
   type DeltaTone,
   defaultBaselineName,
   describeDelta,
   DURATION_METRIC,
-  frontierNames,
   scoreDelta,
 } from '@studio/components/dataViews/ExperimentComparisonDataView/utils';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
@@ -39,7 +36,6 @@ interface ExperimentComparisonDataViewProps {
   group: ExperimentResponse;
   preloadedEvaluations?: EvaluationRow[];
   preloadPending?: boolean;
-  pickedParetoAxes: PickedParetoAxes;
 }
 
 interface ResourceColumn {
@@ -74,17 +70,21 @@ const Placeholder: FC = () => (
 
 interface MetricValueCellProps {
   value: number | null | undefined;
-  best: number | undefined;
+  extremes: ColumnExtremes | undefined;
   format: (value: number) => string;
 }
 
-const MetricValueCell: FC<MetricValueCellProps> = ({ value, best, format }) => {
+const MetricValueCell: FC<MetricValueCellProps> = ({ value, extremes, format }) => {
   if (value == null || !Number.isFinite(value)) return <Placeholder />;
-  if (value !== best) return <Text>{format(value)}</Text>;
+  const extreme = value === extremes?.best ? 'best' : value === extremes?.worst ? 'worst' : null;
+  if (!extreme) return <Text>{format(value)}</Text>;
   return (
-    <Text kind="body/bold/md" className="text-brand">
+    <Text
+      kind="body/bold/md"
+      className={extreme === 'best' ? 'text-brand' : DELTA_TONE_CLASS.worse}
+    >
       {format(value)}
-      <span className="sr-only"> (best)</span>
+      <span className="sr-only"> ({extreme})</span>
     </Text>
   );
 };
@@ -94,7 +94,6 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
   group,
   preloadedEvaluations,
   preloadPending = false,
-  pickedParetoAxes,
 }) => {
   const openRow = useRowNavigation();
   const hasPreloaded = preloadedEvaluations !== undefined;
@@ -117,22 +116,16 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
   );
 
   const scoreMetrics = useMemo(() => deriveEvaluatorMetrics(rows), [rows]);
-  const bestByMetric = useMemo(
+  const extremesByMetric = useMemo(
     () =>
       new Map(
         [...scoreMetrics, ...RESOURCE_COLUMNS.map((column) => column.metric)].map((metric) => [
           metric.id,
-          bestValue(rows, metric),
+          columnExtremes(rows, metric),
         ])
       ),
     [rows, scoreMetrics]
   );
-
-  const paretoAxes = useMemo(
-    () => currentParetoAxes(rows, deriveParetoMetrics(rows), group.pareto, pickedParetoAxes),
-    [rows, group.pareto, pickedParetoAxes]
-  );
-  const frontier = useMemo(() => frontierNames(rows, paretoAxes), [rows, paretoAxes]);
 
   const dataViewState = DataView.useDataViewState({
     pagination: { paginationOptions: DEFAULT_PAGE_SIZE_OPTIONS },
@@ -170,7 +163,7 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
           cell: ({ row }) => (
             <MetricValueCell
               value={metric.accessor(row.original)}
-              best={bestByMetric.get(metric.id)}
+              extremes={extremesByMetric.get(metric.id)}
               format={formatEvaluatorScore}
             />
           ),
@@ -195,27 +188,14 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
           cell: ({ row }) => (
             <MetricValueCell
               value={metric.accessor(row.original)}
-              best={bestByMetric.get(metric.id)}
+              extremes={extremesByMetric.get(metric.id)}
               format={format}
             />
           ),
         })
       ),
-      display({
-        id: 'frontier',
-        header: 'Frontier',
-        size: 120,
-        cell: ({ row }) =>
-          frontier.has(row.original.name) ? (
-            <Badge kind="outline" color="green">
-              On frontier
-            </Badge>
-          ) : (
-            <Placeholder />
-          ),
-      }),
     ],
-    [scoreMetrics, bestByMetric, baseline, frontier]
+    [scoreMetrics, extremesByMetric, baseline]
   );
 
   const renderBody = () => {
@@ -244,13 +224,6 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
             onChange={setPickedBaselineName}
             triggerClassName="w-60"
           />
-        }
-        toolbarSlotEnd={
-          paretoAxes.x && paretoAxes.y ? (
-            <Text kind="body/regular/sm" color="subtle">
-              Frontier: {paretoAxes.x.label} vs. {paretoAxes.y.label}
-            </Text>
-          ) : undefined
         }
         attributes={{
           DataViewRoot: {
