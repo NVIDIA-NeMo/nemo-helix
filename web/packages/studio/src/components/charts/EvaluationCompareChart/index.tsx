@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ChartLegend } from '@nemo/common/src/components/charts/ChartLegend';
-import { Button, Text } from '@nvidia/foundations-react-core';
+import { Text } from '@nvidia/foundations-react-core';
 import { HeadToHeadChart } from '@studio/components/charts/EvaluationCompareChart/HeadToHeadChart';
 import { ImprovementChart } from '@studio/components/charts/EvaluationCompareChart/ImprovementChart';
 import { ScoresChart } from '@studio/components/charts/EvaluationCompareChart/ScoresChart';
@@ -19,13 +19,12 @@ import {
 import { deriveTrendMetrics } from '@studio/components/charts/ExperimentTrendChart/utils';
 import { MetricSelect } from '@studio/components/charts/MetricSelect';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
-import { Loader2, X } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { type FC, type ReactNode, useMemo, useState } from 'react';
 
 interface EvaluationCompareChartProps {
   workspace: string;
   evaluations: readonly EvaluationRow[];
-  onClose: () => void;
 }
 
 const Section: FC<{ title: string; description: string; children: ReactNode }> = ({
@@ -53,7 +52,6 @@ const Placeholder: FC<{ children: ReactNode }> = ({ children }) => (
 export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
   workspace,
   evaluations,
-  onClose,
 }) => {
   const compared = useMemo(() => toComparedEvaluations(evaluations), [evaluations]);
   const [baselineId, setBaselineId] = useState<string | undefined>(undefined);
@@ -124,29 +122,17 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded border border-base bg-surface p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <Text kind="title/xs">{`Comparing ${compared.length} evaluations`}</Text>
-        <div className="flex flex-wrap items-center gap-4">
-          <MetricSelect
-            label="Baseline"
-            value={baseline.row.id}
-            metrics={compared.map(({ row }) => ({ id: row.id, label: row.name }))}
-            onChange={setBaselineId}
-            triggerClassName="w-56"
-          />
-          <Button
-            kind="tertiary"
-            color="neutral"
-            size="small"
-            aria-label="Close comparison"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <MetricSelect
+          label="Baseline"
+          value={baseline.row.id}
+          metrics={compared.map(({ row }) => ({ id: row.id, label: row.name }))}
+          onChange={setBaselineId}
+          triggerClassName="w-56"
+        />
+        <ChartLegend items={legendItems} interactive={false} justify="end" />
       </div>
-      <ChartLegend items={legendItems} interactive={false} justify="end" />
       <Section title="Scores" description="Mean score per evaluator.">
         {scoreRows.length > 0 ? (
           <ScoresChart evaluations={compared} rows={scoreRows} />

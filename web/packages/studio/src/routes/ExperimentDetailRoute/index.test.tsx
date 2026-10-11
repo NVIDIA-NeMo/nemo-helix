@@ -153,13 +153,7 @@ describe('ExperimentDetailRoute', () => {
     });
   });
 
-  it('scrolls to the comparison charts when evaluations are compared', async () => {
-    const scrollIntoView = vi.fn();
-    const original = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-    onTestFinished(() => {
-      HTMLElement.prototype.scrollIntoView = original;
-    });
+  it('opens the comparison charts in a modal when evaluations are compared', async () => {
     const evaluation = (name: string) => ({
       id: name,
       name,
@@ -177,7 +171,8 @@ describe('ExperimentDetailRoute', () => {
     await user.click(within(screen.getByRole('row', { name: /second/ })).getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: 'Compare selected' }));
 
-    expect(await screen.findByText(/Comparing 2 evaluations/)).toBeInTheDocument();
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Comparing 2 evaluations')).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: 'Baseline' })).toBeInTheDocument();
   });
 });

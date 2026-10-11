@@ -120,7 +120,7 @@ const sessionsHandler = http.get(SESSIONS_API, ({ params }) => {
 const meta: Meta<typeof EvaluationCompareChart> = {
   title: 'Charts/EvaluationCompareChart',
   component: EvaluationCompareChart,
-  args: { workspace: 'default', evaluations: EVALUATIONS, onClose: () => {} },
+  args: { workspace: 'default', evaluations: EVALUATIONS },
   parameters: { msw: { handlers: [sessionsHandler] } },
   decorators: [
     (Story) => (

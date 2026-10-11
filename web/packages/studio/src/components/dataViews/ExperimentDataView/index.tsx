@@ -22,7 +22,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import type { EvaluationFilter, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
-import { Button, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Button, Modal, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { EVAL_DURATION_METADATA_KEY, evalDurationMs } from '@studio/api/evaluation/utils';
 import { ChangesetBadge } from '@studio/components/ChangesetBadge';
 import { EvaluationCompareChart } from '@studio/components/charts/EvaluationCompareChart';
@@ -52,15 +52,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
 import { ChartColumn, Columns3, FolderMinus, FolderPlus, Pin, Repeat2 } from 'lucide-react';
-import {
-  type ComponentProps,
-  type FC,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 export type { EvaluationRow };
 
@@ -196,14 +188,6 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   const [rerunSource, setRerunSource] = useState<EvaluationRow | null>(null);
 
   const [comparedEvaluations, setComparedEvaluations] = useState<EvaluationRow[] | null>(null);
-  const compareChartRef = useRef<HTMLDivElement>(null);
-
-  // The chart renders above the other charts, often far above the bulk-action bar that opens it.
-  useEffect(() => {
-    if (comparedEvaluations) {
-      compareChartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [comparedEvaluations]);
 
   // Seed the sort from default_sort so its column header reflects the order on load. Memoized so the
   // reference is stable across renders (until default_sort changes).
@@ -628,15 +612,6 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
 
   return (
     <>
-      {comparedEvaluations && (
-        <div ref={compareChartRef} className="mb-4">
-          <EvaluationCompareChart
-            workspace={workspace}
-            evaluations={comparedEvaluations}
-            onClose={() => setComparedEvaluations(null)}
-          />
-        </div>
-      )}
       {trendVisible && (
         <div className="mb-4">
           {/* Key by group id for the same reason as the Pareto chart: re-seed the selected metric
@@ -759,6 +734,18 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
           evaluations={addToGroupState.evaluations}
         />
       )}
+      <Modal
+        open={comparedEvaluations !== null}
+        onOpenChange={(open) => {
+          if (!open) setComparedEvaluations(null);
+        }}
+        slotHeading={`Comparing ${comparedEvaluations?.length ?? 0} evaluations`}
+        className="w-[95vw] max-w-[1600px]"
+      >
+        {comparedEvaluations && (
+          <EvaluationCompareChart workspace={workspace} evaluations={comparedEvaluations} />
+        )}
+      </Modal>
       {rerunSource && (
         <SubmitEvaluationModal
           open
