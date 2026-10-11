@@ -240,7 +240,7 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
 
   return (
     <div className="flex flex-col gap-3 rounded border border-base bg-surface p-4">
-      <Text kind="title/xs">Compare Evaluations</Text>
+      <Text kind="title/xs">Scorecard</Text>
       {renderBody()}
     </div>
   );

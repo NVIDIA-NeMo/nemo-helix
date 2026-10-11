@@ -165,7 +165,7 @@ export const ExperimentDetailRoute: FC = () => {
                       onClick={() => setCompareVisible(!compareVisible)}
                     >
                       <Table2 width={12} height={12} className="text-brand" />
-                      {compareVisible ? 'Hide comparison' : 'Compare'}
+                      {compareVisible ? 'Hide scorecard' : 'Scorecard'}
                     </Button>
                   </>
                 )}
