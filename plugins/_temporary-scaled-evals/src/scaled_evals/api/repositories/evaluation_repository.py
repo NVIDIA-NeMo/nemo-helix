@@ -1346,7 +1346,7 @@ class EvaluationRepository:
             cur.execute(
                 """
                 WITH candidate AS (
-                    SELECT e.id
+                    SELECT e.id, e.current_execution, e.dispatch_job_name, e.dispatch_job_uid
                     FROM evaluations e
                     WHERE e.deleted_at IS NULL
                       AND e.status IN ('provisioning', 'running')
@@ -1376,6 +1376,14 @@ class EvaluationRepository:
                     updated_at = NOW()
                 FROM candidate
                 WHERE e.id = candidate.id
+                  AND e.status IN ('provisioning', 'running')
+                  AND e.current_execution = candidate.current_execution
+                  AND e.dispatch_job_name = candidate.dispatch_job_name
+                  AND e.dispatch_job_uid IS NOT DISTINCT FROM candidate.dispatch_job_uid
+                  AND (
+                      e.dispatch_claimed_at IS NULL
+                      OR e.dispatch_claimed_at < NOW() - (%s * INTERVAL '1 second')
+                  )
                   AND (
                       e.dispatch_reconcile_claimed_at IS NULL
                       OR e.dispatch_reconcile_claimed_at < NOW() - (%s * INTERVAL '1 second')
@@ -1383,7 +1391,7 @@ class EvaluationRepository:
                 RETURNING e.id, e.status, e.current_execution, e.dispatch_job_name,
                           e.dispatch_job_uid
                 """,
-                (stale_seconds, claim_timeout, worker_id, claim_timeout),
+                (stale_seconds, claim_timeout, worker_id, stale_seconds, claim_timeout),
             )
             return cur.fetchone()
 

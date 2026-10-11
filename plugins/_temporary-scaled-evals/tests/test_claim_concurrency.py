@@ -27,11 +27,14 @@ except ImportError as exc:
 TEST_DSN_ENV = "SCALED_EVALS_TEST_DATABASE_URL"
 
 
-def _loses_to_an_uncommitted_claim(dsn: str, claim: Callable[[Any], Any]) -> Any:
+def _loses_to_an_uncommitted_claim(
+    dsn: str, claim: Callable[[Any], Any], rival: Callable[[Any], Any] | None = None
+) -> Any:
     """Claim on one connection while a second claimant waits on the same row.
 
     The second claimant selects the candidate before the first commits, blocks on
     the row lock, then must re-check and come back empty once the first commits.
+    ``rival`` replaces the first claim with another write to the same row.
     """
     with (
         psycopg.connect(dsn, row_factory=dict_row) as first,
@@ -39,7 +42,7 @@ def _loses_to_an_uncommitted_claim(dsn: str, claim: Callable[[Any], Any]) -> Any
         ThreadPoolExecutor(1) as pool,
     ):
         with first.transaction():
-            won = claim(first)
+            won = (rival or claim)(first)
             assert won is not None
             losing = pool.submit(claim, second)
             time.sleep(0.5)
@@ -94,6 +97,23 @@ def test_claims_have_exactly_one_winner_without_row_locks_or_admission() -> None
             ),
         )
         assert (leased["id"], leased["dispatch_job_name"]) == ("e1", "job-1")
+
+        # A Job resubmitted after the reconciler picked its row is no longer stale.
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "UPDATE evaluations SET dispatch_claimed_at = NULL, dispatch_reconcile_claimed_at = NULL"
+                " WHERE id = 'e1'"
+            )
+        _loses_to_an_uncommitted_claim(
+            dsn,
+            lambda conn: EvaluationRepository(conn).claim_stale_dispatch_job(
+                stale_seconds=60, claim_timeout=60, worker_id="w"
+            ),
+            rival=lambda conn: conn.execute(
+                "UPDATE evaluations SET dispatch_job_name = 'job-2', dispatch_claimed_at = NOW()"
+                " WHERE id = 'e1' RETURNING id"
+            ).fetchone(),
+        )
 
         build = _loses_to_an_uncommitted_claim(
             dsn,

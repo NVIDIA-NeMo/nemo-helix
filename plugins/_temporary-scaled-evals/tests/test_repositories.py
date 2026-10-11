@@ -410,7 +410,7 @@ def test_evaluation_reconciler_claim_is_leased_without_row_locks() -> None:
     assert "SKIP LOCKED" not in sql
     assert "dispatch_reconcile_claimed_at" in sql
     assert "evaluation_execution_cleanups" in sql
-    assert params == (45.5, 90, "worker-1", 90)
+    assert params == (45.5, 90, "worker-1", 45.5, 90)
 
 
 def test_execution_cleanup_claim_is_bounded_and_skip_locked() -> None:
