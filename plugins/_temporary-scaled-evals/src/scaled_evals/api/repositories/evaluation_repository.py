@@ -88,21 +88,66 @@ _CLAIMABLE_SQL = """
 
 # Concurrent claimants may pick the same candidate. The UPDATE re-checks the
 # claim predicates against the committed row, so exactly one wins and the rest
-# get no row. There is no admission here; capacity is left to platform core.
+# get no row.
 # ponytail: a losing claimant returns None and ends its drain pass early, so
 # replicas contend rather than cooperate. Upgrade path: return several
 # candidates and try each until one update lands.
+# ponytail: admission counts active slots without a lock, so claimants running
+# at the same time can each admit one queued evaluation past a cap. The single
+# controller claims serially, so it holds exactly. Upgrade path: a platform
+# core quota on sandboxes, then delete these caps.
 _CLAIM_SQL = f"""
-    WITH candidate AS (
+    WITH active_usage AS MATERIALIZED (
+        SELECT COALESCE(SUM(parallelism), 0)::BIGINT AS cluster_slots
+        FROM evaluations
+        WHERE deleted_at IS NULL
+          AND status IN ('provisioning', 'running')
+    ),
+    candidate AS (
         SELECT e.id, e.status
         FROM evaluations e
+        CROSS JOIN active_usage usage
+        LEFT JOIN benchmark_runs br
+          ON br.id = e.benchmark_run_id
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(SUM(owned.parallelism), 0)::BIGINT AS owner_slots
+            FROM evaluations owned
+            WHERE owned.deleted_at IS NULL
+              AND owned.status IN ('provisioning', 'running')
+              AND owned.owner_id IS NOT DISTINCT FROM e.owner_id
+        ) owner_usage ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*)::BIGINT AS active_members
+            FROM evaluations member
+            WHERE member.deleted_at IS NULL
+              AND member.status IN ('provisioning', 'running')
+              AND member.benchmark_run_id = e.benchmark_run_id
+        ) benchmark_usage ON e.benchmark_run_id IS NOT NULL
         WHERE {_CLAIMABLE_SQL}
+          AND (
+              e.status <> 'queued'
+              OR (
+                  e.parallelism <= %s
+                  AND usage.cluster_slots + e.parallelism <= %s
+                  AND owner_usage.owner_slots + e.parallelism <= %s
+                  AND (
+                      e.benchmark_run_id IS NULL
+                      OR br.max_concurrent_members IS NULL
+                      OR benchmark_usage.active_members < br.max_concurrent_members
+                  )
+              )
+          )
         ORDER BY
             CASE e.status
                 WHEN 'running' THEN 0
                 WHEN 'provisioning' THEN 1
-                ELSE 2
+                WHEN 'queued' THEN 2
+                ELSE 3
             END,
+            -- Once recovery work is exhausted, admit the owner currently
+            -- consuming the fewest sandbox slots. This prevents one older
+            -- benchmark from monopolizing a smaller dispatch-worker pool.
+            CASE WHEN e.status = 'queued' THEN owner_usage.owner_slots ELSE 0 END,
             e.created_at
         LIMIT 1
     )
@@ -1192,9 +1237,26 @@ class EvaluationRepository:
             )
             return cur.rowcount != 0
 
-    def claim_next(self, *, claim_timeout: float, worker_id: str) -> dict | None:
+    def claim_next(
+        self,
+        *,
+        claim_timeout: float,
+        worker_id: str,
+        cluster_slot_limit: int = 500,
+        per_user_slot_limit: int = 50,
+    ) -> dict | None:
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(_CLAIM_SQL, (claim_timeout, worker_id, claim_timeout))
+            cur.execute(
+                _CLAIM_SQL,
+                (
+                    claim_timeout,
+                    per_user_slot_limit,
+                    cluster_slot_limit,
+                    per_user_slot_limit,
+                    worker_id,
+                    claim_timeout,
+                ),
+            )
             row = cur.fetchone()
             if row is not None and row.get("previous_status") == "queued" and row.get("status") == "provisioning":
                 self.insert_status_event(

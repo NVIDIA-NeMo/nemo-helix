@@ -485,6 +485,8 @@ class Dispatcher:
             row = EvaluationRepository(conn).claim_next(
                 claim_timeout=self.claim_timeout,
                 worker_id=self.worker_id,
+                cluster_slot_limit=settings.control_plane_cluster_run_limit,
+                per_user_slot_limit=settings.control_plane_per_user_run_limit,
             )
             return None if row is None else row["id"]
 

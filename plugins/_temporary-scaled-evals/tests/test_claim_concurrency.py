@@ -53,7 +53,7 @@ def _loses_to_an_uncommitted_claim(
 
 
 @pytest.mark.skipif(not os.environ.get(TEST_DSN_ENV), reason=f"{TEST_DSN_ENV} not set")
-def test_claims_have_exactly_one_winner_without_row_locks_or_admission() -> None:
+def test_claims_have_exactly_one_winner_without_row_locks() -> None:
     admin_dsn = os.environ[TEST_DSN_ENV]
     scratch = f"se_claim_test_{uuid.uuid4().hex[:12]}"
     parsed = urlsplit(admin_dsn)
@@ -73,10 +73,9 @@ def test_claims_have_exactly_one_winner_without_row_locks_or_admission() -> None
                 "INSERT INTO task_revisions (task_id, revision, tarball_object_key, status, build_backend)"
                 " VALUES ('t1', 1, 'k', 'building', 'prebuilt')"
             )
-            # Far above the old 50-slot per-user and 500-slot cluster caps.
             conn.execute(
                 "INSERT INTO evaluations (id, name, task_id, task_revision, status, parallelism)"
-                " VALUES ('e1', 'e1', 't1', 1, 'queued', 1000)"
+                " VALUES ('e1', 'e1', 't1', 1, 'queued', 1)"
             )
 
         won = _loses_to_an_uncommitted_claim(
@@ -120,6 +119,20 @@ def test_claims_have_exactly_one_winner_without_row_locks_or_admission() -> None
             lambda conn: TaskBuildRepository(conn).claim_next(worker_id="w", claim_timeout=60, max_attempts=3),
         )
         assert (build.task_id, build.revision) == ("t1", 1)
+
+        # e1 holds one of the owner's slots, so a 50-slot evaluation waits for a 51-slot cap.
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            conn.execute(
+                "INSERT INTO evaluations (id, name, task_id, task_revision, status, parallelism)"
+                " VALUES ('e2', 'e2', 't1', 1, 'queued', 50)"
+            )
+            repo = EvaluationRepository(conn)
+            assert repo.claim_next(claim_timeout=60, worker_id="w", per_user_slot_limit=50) is None
+            assert (
+                repo.claim_next(claim_timeout=60, worker_id="w", cluster_slot_limit=50, per_user_slot_limit=51) is None
+            )
+            admitted = repo.claim_next(claim_timeout=60, worker_id="w", cluster_slot_limit=51, per_user_slot_limit=51)
+            assert admitted is not None and admitted["id"] == "e2"
     finally:
         with psycopg.connect(admin_dsn, autocommit=True) as conn:
             conn.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(scratch)))
