@@ -175,7 +175,7 @@ describe('ExperimentDetailRoute', () => {
     const firstRow = await screen.findByRole('row', { name: /first/ });
     await user.click(within(firstRow).getByRole('checkbox'));
     await user.click(within(screen.getByRole('row', { name: /second/ })).getByRole('checkbox'));
-    await user.click(screen.getAllByRole('button', { name: 'Compare' }).at(-1)!);
+    await user.click(screen.getByRole('button', { name: 'Compare selected' }));
 
     expect(await screen.findByText(/Comparing 2 evaluations/)).toBeInTheDocument();
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());

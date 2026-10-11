@@ -684,7 +684,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
               onClick={() => setComparedEvaluations(selectedRows)}
             >
               <ChartColumn />
-              Compare
+              Compare selected
             </Button>
             <Button
               kind="tertiary"
