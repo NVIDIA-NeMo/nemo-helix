@@ -7,6 +7,7 @@ import {
 } from '@nemo/common/src/components/charts/ChartTooltip';
 import { GRID_PROPS, TICK_STYLE } from '@nemo/common/src/components/charts/frame';
 import { AXIS_COLOR } from '@nemo/common/src/components/charts/tokens';
+import { Text } from '@nvidia/foundations-react-core';
 import type {
   ComparedEvaluation,
   MetricValuesRow,
@@ -24,7 +25,7 @@ import {
   YAxis,
 } from 'recharts';
 
-const CHART_HEIGHT = 280;
+const PANEL_HEIGHT = 220;
 
 interface ScoresChartProps {
   evaluations: readonly ComparedEvaluation[];
@@ -53,38 +54,49 @@ const ScoresTooltip: FC<
   );
 };
 
-export const ScoresChart: FC<ScoresChartProps> = ({ evaluations, rows }) => (
-  <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-    <BarChart data={[...rows]} margin={{ top: 8, right: 16, bottom: 0, left: 0 }} barGap={2}>
-      <CartesianGrid {...GRID_PROPS} />
-      <XAxis
-        dataKey={(row: MetricValuesRow) => row.metric.label}
-        tick={TICK_STYLE}
-        tickLine={false}
-        stroke={AXIS_COLOR}
-        interval={0}
-      />
-      <YAxis
-        tick={TICK_STYLE}
-        tickLine={false}
-        stroke={AXIS_COLOR}
-        tickFormatter={formatAxisTick}
-      />
-      <Tooltip
-        cursor={{ fill: 'var(--background-color-accent-gray-subtle)' }}
-        content={<ScoresTooltip evaluations={evaluations} />}
-      />
-      {evaluations.map(({ row: evaluation, color }) => (
-        <Bar
-          key={evaluation.id}
-          dataKey={(row: MetricValuesRow) => row.values[evaluation.id]}
-          name={evaluation.name}
-          fill={color}
-          radius={[4, 4, 0, 0]}
-          maxBarSize={32}
-          isAnimationActive={false}
+interface ScorePanelProps {
+  evaluations: readonly ComparedEvaluation[];
+  row: MetricValuesRow;
+}
+
+const ScorePanel: FC<ScorePanelProps> = ({ evaluations, row }) => (
+  <div className="flex flex-col gap-1">
+    <Text kind="label/semibold/sm">{row.metric.label}</Text>
+    <ResponsiveContainer width="100%" height={PANEL_HEIGHT}>
+      <BarChart data={[row]} margin={{ top: 8, right: 16, bottom: 0, left: 0 }} barGap={4}>
+        <CartesianGrid {...GRID_PROPS} />
+        <XAxis dataKey={() => row.metric.label} hide />
+        <YAxis
+          tick={TICK_STYLE}
+          tickLine={false}
+          stroke={AXIS_COLOR}
+          tickFormatter={formatAxisTick}
         />
-      ))}
-    </BarChart>
-  </ResponsiveContainer>
+        <Tooltip
+          cursor={{ fill: 'var(--background-color-accent-gray-subtle)' }}
+          content={<ScoresTooltip evaluations={evaluations} />}
+        />
+        {evaluations.map(({ row: evaluation, color }) => (
+          <Bar
+            key={evaluation.id}
+            dataKey={(metricRow: MetricValuesRow) => metricRow.values[evaluation.id]}
+            name={evaluation.name}
+            fill={color}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={48}
+            isAnimationActive={false}
+          />
+        ))}
+      </BarChart>
+    </ResponsiveContainer>
+  </div>
+);
+
+/** One panel per evaluator, each on its own scale, so a 0–1 score isn't flattened next to a 0–100 one. */
+export const ScoresChart: FC<ScoresChartProps> = ({ evaluations, rows }) => (
+  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+    {rows.map((row) => (
+      <ScorePanel key={row.metric.id} evaluations={evaluations} row={row} />
+    ))}
+  </div>
 );
