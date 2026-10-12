@@ -12,6 +12,7 @@ import {
   Card,
   Divider,
   Flex,
+  Grid,
   Stack,
   Stepper,
   Text,
@@ -97,19 +98,14 @@ export const SwitchyardOptimizationForm: FC<SwitchyardOptimizationFormProps> = (
       routingStrategies.includes(option.id) && errors[option.threshold.field] !== undefined
   );
 
-  const blockingReason = !agentName
-    ? 'No agent selected.'
-    : models.length < 2
-      ? 'Add at least two models to route between.'
-      : routingStrategies.length === 0
-        ? 'Pick at least one routing strategy.'
-        : errors.name
-          ? 'Fix the name before running.'
-          : thresholdError
-            ? 'Fix the thresholds before running.'
-            : !onSubmit
-              ? 'Running a study from here is not available yet.'
-              : undefined;
+  const blockingReason = [
+    { blocked: !agentName, reason: 'No agent selected.' },
+    { blocked: models.length < 2, reason: 'Add at least two models to route between.' },
+    { blocked: routingStrategies.length === 0, reason: 'Pick at least one routing strategy.' },
+    { blocked: !!errors.name, reason: 'Fix the name before running.' },
+    { blocked: !!thresholdError, reason: 'Fix the thresholds before running.' },
+    { blocked: !onSubmit, reason: 'Running a study from here is not available yet.' },
+  ].find((check) => check.blocked)?.reason;
 
   const [submitError, setSubmitError] = useState<string | undefined>();
 
@@ -141,7 +137,7 @@ export const SwitchyardOptimizationForm: FC<SwitchyardOptimizationFormProps> = (
           </Text>
         </Stack>
 
-        <div className="grid grid-cols-1 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <Grid className="grid-cols-1 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_380px]">
           <Stack gap="density-2xl">
             <ControlledTextInput
               useControllerProps={{ control, name: 'name' }}
@@ -184,8 +180,8 @@ export const SwitchyardOptimizationForm: FC<SwitchyardOptimizationFormProps> = (
 
           <Card className="h-fit min-w-0 self-start">
             <Stack gap="density-md" className="w-full min-w-0">
-              <Text kind="label/bold/xs" color="secondary">
-                THIS RUN WILL BUILD
+              <Text className="capitalize" kind="label/bold/xs" color="secondary">
+                this run will build
               </Text>
               <Flex gap="density-xl" wrap="wrap">
                 <Stack gap="density-xxs">
@@ -259,13 +255,13 @@ export const SwitchyardOptimizationForm: FC<SwitchyardOptimizationFormProps> = (
                 className="w-full"
                 loading={isSubmitting}
                 disabled={!!blockingReason || isSubmitting}
-                onClick={() => void submit()}
+                onClick={submit}
               >
                 Run optimization
               </LoadingButton>
             </Stack>
           </Card>
-        </div>
+        </Grid>
       </Stack>
     </FormProvider>
   );
