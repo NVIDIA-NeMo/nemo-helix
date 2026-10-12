@@ -20,6 +20,10 @@ from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_evaluation_secret_environment, resolve_executor
 from pydantic import BaseModel
 
+# The task posts no updates, so the staleness timeout bounds its whole runtime.
+# The run budget alone would kill the task while it builds evidence and the archive.
+FINALIZE_HEADROOM_SECONDS = 900
+
 
 def _dispatcher_cls() -> type[Any]:
     from scaled_evals.dispatch.worker import Dispatcher
@@ -68,7 +72,9 @@ class EvaluationExecutionJob(NemoJob):
                     # Without this the platform cannot reap a hung dispatcher:
                     # the step stays active forever and the reconciler keeps
                     # releasing its claim.
-                    lifecycle=StepLifecycle(staleness_timeout_seconds=canonical.deadline_seconds),
+                    lifecycle=StepLifecycle(
+                        staleness_timeout_seconds=canonical.deadline_seconds + FINALIZE_HEADROOM_SECONDS
+                    ),
                 )
             ]
         )

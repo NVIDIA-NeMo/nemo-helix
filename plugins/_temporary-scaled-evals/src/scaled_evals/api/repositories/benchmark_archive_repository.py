@@ -132,6 +132,22 @@ class BenchmarkArchiveRepository:
             )
             return cur.fetchone()
 
+    def skip_attempt(self, run_id: str, *, generation: str, attempts: int) -> None:
+        """Count an attempt whose builder ended before claiming it, failing the third."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE benchmark_run_archives SET
+                    status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE status END,
+                    error = CASE WHEN attempts + 1 >= 3 THEN 'archive build job ended before claiming'
+                                 ELSE error END,
+                    attempts = attempts + 1
+                WHERE benchmark_run_id = %s AND generation = %s AND attempts = %s
+                  AND status IN ('queued', 'building')
+                """,
+                (run_id, generation, attempts),
+            )
+
     def claim_cleanup(self, *, interval_seconds: float) -> str | None:
         """Schedule another bounded sweep, including failed or soft-deleted runs.
 

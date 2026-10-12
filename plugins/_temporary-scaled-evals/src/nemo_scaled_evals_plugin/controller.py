@@ -55,6 +55,13 @@ _PRELAUNCH_JOB_STATUSES = {
 # Outlasts the slowest teardown (OpenSandbox's cleanup timeout plus a minute, or
 # kubectl's 60 s waits) so another controller does not re-claim a live one.
 CLEANUP_CLAIM_TIMEOUT_SECONDS = 600.0
+# The evaluation Job builds its own evidence and archive as soon as it records a
+# terminal status. The backstop leaves unclaimed rows alone this long so it does
+# not take that work from a live Job.
+FINALIZE_GRACE_SECONDS = 60.0
+# Evidence builds do not renew their lease, so the backstop treats a Job's claim
+# as live for this long. Archive builds hold a row lock and are never taken over.
+FINALIZE_CLAIM_TIMEOUT_SECONDS = 600.0
 
 
 class ScaledEvalsJobsController(NemoController):
@@ -71,8 +78,12 @@ class ScaledEvalsJobsController(NemoController):
         self._projection: EvaluationProjectionWriter | None = None
         self._projection_watermark: datetime | None = None
         self._projection_resumed = False
-        self._cleanup: asyncio.Task[None] | None = None
-        self._dispatcher = Dispatcher(connect=pooled_connection, worker_id=self._worker_id)
+        self._background: dict[str, asyncio.Task[None]] = {}
+        self._dispatcher = Dispatcher(
+            connect=pooled_connection,
+            worker_id=self._worker_id,
+            claim_timeout=FINALIZE_CLAIM_TIMEOUT_SECONDS,
+        )
 
     @property
     def jobs(self) -> AsyncJobsClient:
@@ -145,11 +156,11 @@ class ScaledEvalsJobsController(NemoController):
                 ("submit_evaluation", self._drain(self._submit_one_evaluation)),
                 ("reconcile_evaluation", self._drain(self._reconcile_one_evaluation)),
                 ("cancel_evaluations", self._cancel_evaluation_jobs),
-                ("cleanup_executions", self._start_cleanup),
-                ("build_evidence", self._drain(self._build_one_evidence)),
-                ("build_archives", self._drain(self._build_one_archive)),
                 ("submit_benchmark_archives", self._submit_benchmark_archives),
-                ("cleanup_benchmark_archives", self._drain(self._cleanup_one_benchmark_archive)),
+                self._in_background("cleanup_executions", self._cleanup_one_execution),
+                self._in_background("build_evidence", self._build_one_evidence),
+                self._in_background("build_archives", self._build_one_archive),
+                self._in_background("cleanup_benchmark_archives", self._cleanup_one_benchmark_archive),
             ]
         if self._projection is not None:
             phases.append(("project_evaluations", self._project_evaluations))
@@ -273,16 +284,25 @@ class ScaledEvalsJobsController(NemoController):
         await asyncio.to_thread(self._fail_evaluation_job, row, detail)
         return True
 
-    async def _start_cleanup(self) -> None:
-        """Drain orphaned executions in the background, one drain at a time.
+    def _in_background(
+        self, name: str, step: Callable[[], Awaitable[bool]]
+    ) -> tuple[str, Callable[[], Awaitable[None]]]:
+        """Return a phase that drains ``step`` in the background, one drain at a time.
 
-        A teardown can wait minutes on kubectl or OpenSandbox. Inside the pass it
-        would delay submissions and the heartbeat, and a heartbeat older than
-        ``build_worker_stale_seconds`` fails API readiness.
+        Teardowns can wait minutes on kubectl or OpenSandbox, and archive builds
+        on object storage. Inside the pass they would delay submissions and the
+        heartbeat, and a heartbeat older than ``build_worker_stale_seconds``
+        fails API readiness.
         """
-        if self._cleanup is None or self._cleanup.done():
-            self._cleanup = asyncio.create_task(self._drain(self._cleanup_one_execution)())
-            self._cleanup.add_done_callback(_log_cleanup_failure)
+
+        async def start() -> None:
+            task = self._background.get(name)
+            if task is None or task.done():
+                task = asyncio.create_task(self._drain(step)(), name=f"scaled-evals-{name}")
+                task.add_done_callback(_log_background_failure)
+                self._background[name] = task
+
+        return name, start
 
     async def _cleanup_one_execution(self) -> bool:
         """Tear down one orphaned execution runtime; return False only when none remain."""
@@ -300,18 +320,19 @@ class ScaledEvalsJobsController(NemoController):
         return True
 
     # ponytail: evidence and archives are built by the evaluation Job itself.
-    # These phases are the backstop for Jobs that died first, and they build in
-    # the controller process, so a large archive delays the rest of the pass.
-    # Upgrade path: submit a finalize Job per backlog row, like benchmark archives.
+    # These phases are the backstop for rows no Job finalizes (Jobs that died,
+    # pre-launch cancels, controller-failed runs, archive rebuild requests). They
+    # build in a controller thread, so a backlog competes with the controller's
+    # CPU and connection pool. Upgrade path: a finalize Job per backlog row.
     async def _build_one_evidence(self) -> bool:
-        evaluation_id = await asyncio.to_thread(self._dispatcher.claim_next_evidence)
+        evaluation_id = await asyncio.to_thread(self._dispatcher.claim_next_evidence, min_age=FINALIZE_GRACE_SECONDS)
         if evaluation_id is None:
             return False
         await asyncio.to_thread(self._dispatcher.build_evidence, evaluation_id)
         return True
 
     async def _build_one_archive(self) -> bool:
-        evaluation_id = await asyncio.to_thread(self._dispatcher.claim_next_archive)
+        evaluation_id = await asyncio.to_thread(self._dispatcher.claim_next_archive, min_age=FINALIZE_GRACE_SECONDS)
         if evaluation_id is None:
             return False
         await asyncio.to_thread(self._dispatcher.build_archive, evaluation_id)
@@ -322,18 +343,36 @@ class ScaledEvalsJobsController(NemoController):
         for row in await asyncio.to_thread(self._list_claimable_benchmark_archives):
             run_id = str(row["benchmark_run_id"])
             name = benchmark_archive_job_name(run_id, str(row["generation"]), int(row["attempts"]) + 1)
-            with suppress(ConflictError):
+            try:
                 await self.submitter.create_job(
                     name,
                     BenchmarkArchiveBuildJob,
                     BenchmarkArchiveBuildSpec(benchmark_run_id=run_id),
                 )
+            except ConflictError:
+                try:
+                    response = await self.jobs.get_job_status(workspace=settings.platform_jobs_workspace, name=name)
+                except NotFoundError:
+                    continue  # deleted since the conflict; the next pass creates it
+                if response.data().status not in _ACTIVE_JOB_STATUSES:
+                    # The Job for this attempt ended without claiming it, so the
+                    # same name would conflict on every pass. Counting it moves
+                    # the next pass to a new name and fails the archive at three.
+                    await asyncio.to_thread(self._skip_benchmark_archive_attempt, row)
 
     def _list_claimable_benchmark_archives(self) -> list[dict[str, Any]]:
         with pooled_connection() as conn:
             return BenchmarkArchiveRepository(conn).list_claimable(
-                claim_timeout=self._dispatcher.claim_timeout,
+                claim_timeout=Dispatcher.claim_timeout,
                 limit=settings.platform_jobs_phase_batch_size,
+            )
+
+    def _skip_benchmark_archive_attempt(self, row: dict[str, Any]) -> None:
+        with pooled_connection() as conn:
+            BenchmarkArchiveRepository(conn).skip_attempt(
+                str(row["benchmark_run_id"]),
+                generation=str(row["generation"]),
+                attempts=int(row["attempts"]),
             )
 
     async def _cleanup_one_benchmark_archive(self) -> bool:
@@ -470,6 +509,6 @@ class ScaledEvalsJobsController(NemoController):
             OperationsRepository(conn).heartbeat_service("platform_jobs_controller", self._worker_id)
 
 
-def _log_cleanup_failure(task: asyncio.Task[None]) -> None:
+def _log_background_failure(task: asyncio.Task[None]) -> None:
     if not task.cancelled() and task.exception() is not None:
-        LOG.error("scaled-evals Platform Jobs phase cleanup_executions failed", exc_info=task.exception())
+        LOG.error("scaled-evals Platform Jobs background phase %s failed", task.get_name(), exc_info=task.exception())

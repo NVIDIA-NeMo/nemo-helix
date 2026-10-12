@@ -267,8 +267,11 @@ _ARCHIVE_CLAIM_SQL = """
           AND archive_status = 'building'
           AND (evidence_status IN ('ready', 'missing') OR execution_snapshot IS NULL)
           AND (
-              archive_claimed_at IS NULL
-              OR archive_claimed_at < NOW() - (%s * INTERVAL '1 second')
+              archive_claimed_at < NOW() - (%s * INTERVAL '1 second')
+              OR (
+                  archive_claimed_at IS NULL
+                  AND COALESCE(archive_requested_at, updated_at) <= NOW() - (%s * INTERVAL '1 second')
+              )
           )
           AND (%s::text IS NULL OR id = %s)
         ORDER BY COALESCE(archive_requested_at, updated_at), id
@@ -285,6 +288,12 @@ _ARCHIVE_CLAIM_SQL = """
     RETURNING e.id
 """
 
+# A running Job finalizes a cancelled evaluation only after its teardown, so the
+# backstop's grace window restarts when the teardown outcome is recorded.
+_EVIDENCE_GRACE_RESTART = """
+    evidence_requested_at = CASE WHEN evidence_status = 'building' THEN NOW() ELSE evidence_requested_at END,
+"""
+
 _EVIDENCE_CLAIM_SQL = """
     WITH candidate AS (
         SELECT id
@@ -294,8 +303,11 @@ _EVIDENCE_CLAIM_SQL = """
           AND evidence_status = 'building'
           AND evidence_build_attempts < 5
           AND (
-              evidence_claimed_at IS NULL
-              OR evidence_claimed_at < NOW() - (%s * INTERVAL '1 second')
+              evidence_claimed_at < NOW() - (%s * INTERVAL '1 second')
+              OR (
+                  evidence_claimed_at IS NULL
+                  AND COALESCE(evidence_requested_at, updated_at) <= NOW() - (%s * INTERVAL '1 second')
+              )
           )
           AND (%s::text IS NULL OR id = %s)
         ORDER BY COALESCE(evidence_requested_at, updated_at), id
@@ -1034,6 +1046,7 @@ class EvaluationRepository:
                     cancel_teardown_status = 'failed',
                     cancel_teardown_error = %s,
                     cancel_teardown_updated_at = NOW(),
+                    {_EVIDENCE_GRACE_RESTART}
                     updated_at = NOW()
                 WHERE id = %s AND deleted_at IS NULL AND status = 'cancelled'
                 RETURNING {EVALUATION_COLUMNS}
@@ -1053,6 +1066,7 @@ class EvaluationRepository:
                 SET cancel_teardown_status = 'succeeded',
                     cancel_teardown_error = NULL,
                     cancel_teardown_updated_at = NOW(),
+                    {_EVIDENCE_GRACE_RESTART}
                     updated_at = NOW()
                 WHERE id = %s AND deleted_at IS NULL AND status = 'cancelled'
                   AND cancel_teardown_status = 'pending'
@@ -1277,17 +1291,29 @@ class EvaluationRepository:
             return row
 
     def claim_next_archive(
-        self, *, claim_timeout: float, worker_id: str, evaluation_id: str | None = None
+        self,
+        *,
+        claim_timeout: float,
+        worker_id: str,
+        evaluation_id: str | None = None,
+        min_age: float = 0.0,
     ) -> dict | None:
+        """Claim an archive build; unclaimed rows must have waited ``min_age`` seconds."""
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(_ARCHIVE_CLAIM_SQL, (claim_timeout, evaluation_id, evaluation_id, worker_id))
+            cur.execute(_ARCHIVE_CLAIM_SQL, (claim_timeout, min_age, evaluation_id, evaluation_id, worker_id))
             return cur.fetchone()
 
     def claim_next_evidence(
-        self, *, claim_timeout: float, worker_id: str, evaluation_id: str | None = None
+        self,
+        *,
+        claim_timeout: float,
+        worker_id: str,
+        evaluation_id: str | None = None,
+        min_age: float = 0.0,
     ) -> dict | None:
+        """Claim an evidence build; unclaimed rows must have waited ``min_age`` seconds."""
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(_EVIDENCE_CLAIM_SQL, (claim_timeout, evaluation_id, evaluation_id, worker_id))
+            cur.execute(_EVIDENCE_CLAIM_SQL, (claim_timeout, min_age, evaluation_id, evaluation_id, worker_id))
             return cur.fetchone()
 
     def mark_evidence_ready(

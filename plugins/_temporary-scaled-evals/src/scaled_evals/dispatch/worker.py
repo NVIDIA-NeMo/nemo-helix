@@ -564,23 +564,25 @@ class Dispatcher:
         """Teardown one orphaned runtime before its logical evaluation retries."""
         teardown_orphaned_execution(cleanup, worker_id=self.worker_id, connect=self.connect, resolve=self.resolve)
 
-    def claim_next_archive(self, evaluation_id: str | None = None) -> str | None:
+    def claim_next_archive(self, evaluation_id: str | None = None, *, min_age: float = 0.0) -> str | None:
         """Claim one terminal evaluation that requested an archive rebuild."""
         with self.connect() as conn:
             row = EvaluationRepository(conn).claim_next_archive(
                 claim_timeout=self.claim_timeout,
                 worker_id=self.worker_id,
                 evaluation_id=evaluation_id,
+                min_age=min_age,
             )
             return None if row is None else row["id"]
 
-    def claim_next_evidence(self, evaluation_id: str | None = None) -> str | None:
+    def claim_next_evidence(self, evaluation_id: str | None = None, *, min_age: float = 0.0) -> str | None:
         """Claim one terminal evaluation needing provenance/SBOM generation."""
         with self.connect() as conn:
             row = EvaluationRepository(conn).claim_next_evidence(
                 claim_timeout=self.claim_timeout,
                 worker_id=self.worker_id,
                 evaluation_id=evaluation_id,
+                min_age=min_age,
             )
             return None if row is None else row["id"]
 

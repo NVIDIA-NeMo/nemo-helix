@@ -115,12 +115,40 @@ def test_archive_upgrade_replay_and_queue(tmp_path: Path, monkeypatch: pytest.Mo
             with pytest.raises(Conflict, match="members_changed"):
                 repo.finish(claim, object_key="changed", size_bytes=1)
             assert _archive(repo)["object_key"] is None
-            conn.execute("UPDATE evaluations SET evidence_status = 'building', archive_status = 'building'")
+            # A Job that ends before claiming counts as an attempt; a stale read
+            # is a no-op, and the third attempt fails the archive.
+            for attempts in (0, 1, 2):
+                repo.skip_attempt("bmr_1", generation=rebuilt["generation"], attempts=attempts)
+            assert (_archive(repo)["attempts"], _archive(repo)["status"]) == (3, "failed")
+            conn.execute(
+                "UPDATE evaluations SET evidence_status = 'building', archive_status = 'building', "
+                "evidence_requested_at = NOW(), archive_requested_at = NOW()"
+            )
             evaluations = EvaluationRepository(conn)
             for claim_next in (evaluations.claim_next_evidence, evaluations.claim_next_archive):
+                # The backstop leaves a freshly terminal row, then a live claim, to its Job.
+                assert claim_next(claim_timeout=600, worker_id="c", min_age=60) is None
                 assert claim_next(claim_timeout=30, worker_id="w", evaluation_id="ev_other") is None
                 claimed = claim_next(claim_timeout=30, worker_id="w", evaluation_id="ev_1")
                 assert claimed is not None and claimed["id"] == "ev_1"
+                assert claim_next(claim_timeout=600, worker_id="c") is None
+            # A claim older than the backstop's lease is taken over.
+            conn.execute(
+                "UPDATE evaluations SET evidence_claimed_at = NOW() - INTERVAL '601 seconds', "
+                "archive_claimed_at = NOW() - INTERVAL '601 seconds'"
+            )
+            for claim_next in (evaluations.claim_next_evidence, evaluations.claim_next_archive):
+                assert claim_next(claim_timeout=600, worker_id="c", min_age=60) is not None
+            # An unclaimed row is the backstop's once the grace has passed, and a
+            # cancel teardown restarts the grace.
+            conn.execute(
+                "UPDATE evaluations SET status = 'cancelled', cancel_teardown_status = 'pending', "
+                "evidence_claimed_at = NULL, evidence_requested_at = NOW() - INTERVAL '120 seconds'"
+            )
+            assert evaluations.record_cancel_teardown_succeeded("ev_1") is not None
+            assert evaluations.claim_next_evidence(claim_timeout=600, worker_id="c", min_age=60) is None
+            conn.execute("UPDATE evaluations SET evidence_requested_at = NOW() - INTERVAL '120 seconds'")
+            assert evaluations.claim_next_evidence(claim_timeout=600, worker_id="c", min_age=60) is not None
     finally:
         with psycopg.connect(admin_dsn, autocommit=True) as admin:
             admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(scratch)))
