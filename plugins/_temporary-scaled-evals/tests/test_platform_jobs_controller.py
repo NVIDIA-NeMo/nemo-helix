@@ -7,6 +7,7 @@ import asyncio
 import threading
 import time
 from contextlib import nullcontext
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -23,6 +24,8 @@ import nemo_scaled_evals_plugin.controller as controller_module
 from nemo_scaled_evals_plugin.controller import ScaledEvalsJobsController
 from scaled_evals.api.repositories.build_repository import TaskBuildJob
 from scaled_evals.api.settings import settings
+
+_CREATED = datetime(2026, 9, 29, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
@@ -46,7 +49,10 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
     record_evaluation = MagicMock()
     monkeypatch.setattr(controller, "_claim_build", lambda: build)
     monkeypatch.setattr(controller, "_bind_build", bind_build)
+    controller._entities = MagicMock()
     submitter = controller.submitter
+    write_inputs = MagicMock()
+    monkeypatch.setattr(submitter, "_write_inputs", write_inputs)
     monkeypatch.setattr(
         submitter,
         "_claim",
@@ -80,6 +86,9 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
     assert evaluation_request.spec["evaluation_id"] == "eval_1"
     assert evaluation_request.spec["execution_number"] == 3
     assert "credentials" not in evaluation_request.spec
+    # The launch inputs are stored before the Job that reads them exists.
+    write_inputs.assert_called_once_with("eval_1", 3, evaluation_request.name)
+    assert evaluation_request.spec["inputs_workspace"] == settings.entity_store_private_workspace
     record_evaluation.assert_called_once_with(
         "eval_1",
         3,
@@ -445,3 +454,56 @@ async def test_controller_owns_evidence_and_archive_queues(monkeypatch: pytest.M
     await phases["cleanup_benchmark_archives"]()
     await asyncio.gather(*controller._background.values())
     dispatcher.cleanup_benchmark_archives.assert_called_once_with("run_1")
+
+
+def test_submitter_stores_immutable_launch_inputs_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nemo_scaled_evals_plugin.submitter as submitter_module
+    from nemo_helix_plugin.entities.base import EntityConflictError
+
+    row = {"id": "eval_1", "name": "e", "status": "provisioning", "current_execution": 3, "created_at": _CREATED}
+    repo = MagicMock()
+    repo.load_for_dispatch.return_value = row
+    monkeypatch.setattr(submitter_module, "pooled_connection", lambda: nullcontext(MagicMock()))
+    monkeypatch.setattr(submitter_module, "EvaluationRepository", lambda _conn: repo)
+    monkeypatch.setattr(submitter_module, "private_workspace", lambda: "private")
+    entities = MagicMock()
+    submitter = submitter_module.EvaluationSubmitter(AsyncMock(), "w", entities)
+
+    submitter._write_inputs("eval_1", 3, "job-e3")
+    entity = entities.create.call_args.args[0]
+    assert (entity.name, entity.workspace, entity.evaluation_id, entity.execution_number) == (
+        "job-e3",
+        "private",
+        "eval_1",
+        3,
+    )
+    # State columns are dropped, and what remains is JSON-safe.
+    assert entity.inputs == {"id": "eval_1", "name": "e", "created_at": _CREATED.isoformat()}
+
+    # A resubmission finds the entity an earlier attempt wrote.
+    entities.create.side_effect = EntityConflictError("exists")
+    submitter._write_inputs("eval_1", 3, "job-e3")
+
+
+def test_private_workspace_is_created_by_the_service_or_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nemo_scaled_evals_plugin.submitter as submitter_module
+
+    workspaces = MagicMock()
+    monkeypatch.setattr(submitter_module, "get_nemo_client", lambda **_: object())
+    monkeypatch.setattr(submitter_module.WorkspacesClient, "from_client", lambda _client: workspaces)
+    submitter_module.private_workspace.cache_clear()
+    assert submitter_module.private_workspace() == settings.entity_store_private_workspace
+    assert workspaces.create_workspace.call_args.kwargs["body"].name == settings.entity_store_private_workspace
+
+    # An existing workspace is reused only when this service created it.
+    workspaces.create_workspace.side_effect = ConflictError(
+        httpx.Response(409, request=httpx.Request("POST", "http://entities"))
+    )
+    workspaces.get_workspace.return_value.data.return_value.created_by = "service:scaled-evals"
+    submitter_module.private_workspace.cache_clear()
+    assert submitter_module.private_workspace() == settings.entity_store_private_workspace
+    workspaces.get_workspace.return_value.data.return_value.created_by = "mallory@example.com"
+    submitter_module.private_workspace.cache_clear()
+    with pytest.raises(RuntimeError, match="mallory"):
+        submitter_module.private_workspace()
+    submitter_module.private_workspace.cache_clear()

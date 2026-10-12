@@ -3,9 +3,9 @@
 
 """Entity Store projections of scaled-evals metadata.
 
-Postgres stays authoritative during this phase. These entities are a derived
+Postgres stays authoritative during this phase. `ScaledEvaluation` is a derived
 read model with exactly one writer (the controller's projection phase), which is
-what makes them safe on a store that offers per-entity optimistic locking but no
+what makes it safe on a store that offers per-entity optimistic locking but no
 multi-entity transaction and no atomic dequeue.
 """
 
@@ -67,6 +67,22 @@ class ScaledEvaluation(NemoEntity, entity_type="scaled_evals_evaluation"):
     row_updated_at: datetime
     search_blob: str = ""
     detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScaledEvaluationExecution(NemoEntity, entity_type="scaled_evals_execution"):
+    """The immutable launch inputs of one evaluation execution.
+
+    Named after the execution's Platform Job and written once, before that Job
+    is created, so the Job launches from here rather than from Postgres. Unlike
+    `ScaledEvaluation`, this carries prompt content and the private execution
+    snapshot, because launching needs them, so it lives in a workspace only the
+    scaled-evals service can read. Credentials appear only as role to
+    credential-id references; the payloads stay encrypted in Postgres.
+    """
+
+    evaluation_id: str
+    execution_number: int
+    inputs: dict[str, Any] = Field(default_factory=dict)
 
 
 def searchable_blob(row: dict[str, Any]) -> str:

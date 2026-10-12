@@ -565,8 +565,8 @@ def test_evaluation_execution_writes_are_fenced() -> None:
     )
     status_sql, status_params = _executed_sql_and_params(cur)
     assert "current_execution = %s::integer" in status_sql
-    # The trailing param is the monotonicity guard's status.
-    assert status_params[-3:-1] == (2, 2)
+    # The two trailing params are the monotonicity and cancel guards' status.
+    assert status_params[-4:-2] == (2, 2)
 
     result = EvaluationResultWrite(
         result={"reward": 1},

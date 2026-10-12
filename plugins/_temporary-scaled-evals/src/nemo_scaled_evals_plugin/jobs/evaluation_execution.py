@@ -16,8 +16,11 @@ from nemo_helix_plugin.jobs.api_factory import (
     ResourcesSpec,
     StepLifecycle,
 )
+from nemo_scaled_evals_plugin.entities import ScaledEvaluationExecution
+from nemo_scaled_evals_plugin.jobs.naming import evaluation_execution_job_name
 from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_evaluation_secret_environment, resolve_executor
+from nemo_scaled_evals_plugin.projection import platform_entities
 from pydantic import BaseModel
 
 # The task posts no updates, so the staleness timeout bounds its whole runtime.
@@ -83,7 +86,18 @@ class EvaluationExecutionJob(NemoJob):
         """Execute the specified execution, then publish its evidence and archive."""
         spec = EvaluationExecutionSpec.model_validate(config)
         dispatcher = _dispatcher_cls()()
-        dispatcher.run(spec.evaluation_id, expected_execution_number=spec.execution_number)
+        inputs = None
+        if spec.inputs_workspace:
+            inputs = (
+                platform_entities()
+                .get(
+                    ScaledEvaluationExecution,
+                    evaluation_execution_job_name(spec.evaluation_id, spec.execution_number),
+                    workspace=spec.inputs_workspace,
+                )
+                .inputs
+            )
+        dispatcher.run(spec.evaluation_id, expected_execution_number=spec.execution_number, inputs=inputs)
         # A no-op when the execution was retried rather than terminalized.
         dispatcher.finalize(spec.evaluation_id)
         return {
