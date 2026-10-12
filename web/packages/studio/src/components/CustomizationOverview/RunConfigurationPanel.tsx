@@ -54,7 +54,11 @@ export const RunConfigurationPanel: FC<Props> = ({
           orientation="vertical"
           label="Output Model"
           value={
-            <OutputModelValue workspace={workspace} modelName={customization.spec?.output?.name} />
+            <OutputModelValue
+              workspace={workspace}
+              modelName={customization.spec?.output?.name}
+              jobStatus={customization.status}
+            />
           }
         />
         <KVPair

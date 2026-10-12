@@ -167,14 +167,18 @@ export const usePendingCustomizations = (
   // A run dropping out of the in-flight set is the moment its model entity appears. The
   // model lists were fetched before it existed, so refresh them rather than leaving the
   // user to reload the page.
-  const previousJobNames = useRef<string[] | null>(null);
+  // Keyed by workspace: the names belong to one workspace's jobs, and comparing a new
+  // workspace's first result against the previous one's would read every job that did not
+  // follow as finished.
+  const previousJobNames = useRef<{ workspace: string; jobNames: string[] } | null>(null);
   useEffect(() => {
     if (!isEnabled || !data) return;
+    const currentWorkspace = workspace ?? '';
     const jobNames = pending.map((p) => p.jobName);
     const previous = previousJobNames.current;
-    previousJobNames.current = jobNames;
-    if (!previous) return;
-    const finished = previous.filter((name) => !jobNames.includes(name));
+    previousJobNames.current = { workspace: currentWorkspace, jobNames };
+    if (!previous || previous.workspace !== currentWorkspace) return;
+    const finished = previous.jobNames.filter((name) => !jobNames.includes(name));
     if (finished.length === 0) return;
     // Both key families: the paged list behind the Fine-tuning table and the infinite
     // one behind every model dropdown.
