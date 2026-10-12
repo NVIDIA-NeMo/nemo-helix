@@ -35,7 +35,7 @@ Batch and sequence-length fields differ by backend. Use the fully qualified path
 
 **DPO job fails before the first training step with `KeyError: 'checkpoint'`:**
 
-This is a known issue in v0.7.0 and v0.7.1. The DPO training pod exits shortly after it starts, and its logs end with `KeyError: 'checkpoint'` raised from NeMo-RL's `build_checkpoint_config`. The generated DPO configuration omits the `policy.dtensor_cfg.checkpoint` section that the pinned NeMo-RL version requires. There is no workaround in the 0.7 release line; upgrade to v0.8.0 to run DPO. GRPO jobs are not affected.
+This is a known issue in v0.7.0 and v0.7.1. The DPO training pod exits shortly after it starts, and its logs end with `KeyError: 'checkpoint'` raised from NeMo-RL's `build_checkpoint_config`. The generated DPO configuration omits the `policy.dtensor_cfg.checkpoint` section that the pinned NeMo-RL version requires. There is no workaround in the 0.7 release line. DPO jobs run on v0.6.0. GRPO jobs are not affected.
 
 **Training loss not decreasing:**
 
