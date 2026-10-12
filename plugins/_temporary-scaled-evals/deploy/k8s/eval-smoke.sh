@@ -100,6 +100,17 @@ build_pack() {
   tar -czf "$WORK/pack.tar.gz" -C "$WORK/pack" .
 }
 
+# upload_pack <revision.json>
+#
+# The revision names a Files fileset path rather than a presigned URL, so the
+# pack goes to the Files service over the same port-forward.
+upload_pack() {
+  local files="http://127.0.0.1:$PORT/apis/files/v2/workspaces"
+  curl -sf -X PUT --upload-file "$WORK/pack.tar.gz" -H 'Content-Type: application/gzip' \
+    "$files/$(json "$1" upload.workspace)/filesets/$(json "$1" upload.fileset)/-/$(json "$1" upload.path)" \
+    -o /dev/null
+}
+
 # build_task <label> <sleep_seconds>  ->  sets TASK_ID and REVISION
 build_task() {
   local label="$1" sleep_seconds="$2"
@@ -115,12 +126,18 @@ build_task() {
 
   curl -sf -X POST "$BASE/v1/tasks/$TASK_ID/revisions" -o "$WORK/rev.json" || fail "revision create"
   REVISION="$(json "$WORK/rev.json" "revision")"
-  curl -sf -X PUT --upload-file "$WORK/pack.tar.gz" \
-    -H 'Content-Type: application/gzip' "$(json "$WORK/rev.json" "upload.url")" \
-    -o /dev/null || fail "pack upload"
-  curl -sf -X POST "$BASE/v1/tasks/$TASK_ID/finalize" -o /dev/null || fail "finalize"
+  upload_pack "$WORK/rev.json" || fail "pack upload"
+  # REUSE_HELLO_WORLD / REUSE_SLOW_WORLD=<image_ref>@<digest> finalize against an
+  # already-built image, for deployments whose finalize cannot build (Cloud Build
+  # cannot read packs stored in the Files service).
+  local reuse_var="REUSE_$(printf '%s' "$label" | tr 'a-z-' 'A-Z_')" body='{}'
+  if [ -n "${!reuse_var:-}" ]; then
+    body="{\"image_ref\":\"${!reuse_var%@*}\",\"image_digest\":\"${!reuse_var##*@}\"}"
+  fi
+  curl -sf -X POST "$BASE/v1/tasks/$TASK_ID/finalize" -H 'content-type: application/json' \
+    -d "$body" -o /dev/null || fail "finalize"
 
-  step "waiting for Cloud Build"
+  step "waiting for the task image"
   local status
   for i in $(seq 1 120); do
     curl -sf "$BASE/v1/tasks/$TASK_ID" -o "$WORK/task_now.json" || fail "task get"
@@ -152,9 +169,7 @@ clone_task() {
     -d "{\"name\":\"$NAME-$label\",\"description\":\"fan-out member $label\"}" \
     -o "$out" || fail "clone $label: task create"
   tid="$(json "$out" id)"
-  curl -sf -X PUT --upload-file "$WORK/pack.tar.gz" \
-    -H 'Content-Type: application/gzip' "$(json "$out" upload.url)" \
-    -o /dev/null || fail "clone $label: pack upload"
+  upload_pack "$out" || fail "clone $label: pack upload"
   curl -sf -X POST "$BASE/v1/tasks/$tid/finalize" -H 'content-type: application/json' \
     -d "{\"image_ref\":\"$IMAGE_REF\",\"image_digest\":\"$IMAGE_DIGEST\"}" \
     -o /dev/null \
