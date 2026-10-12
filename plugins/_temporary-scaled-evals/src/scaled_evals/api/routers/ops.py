@@ -111,7 +111,7 @@ def _schema_probe() -> None:
 def _platform_jobs_controller_probe() -> None:
     with pooled_connection(timeout=3) as conn:
         if not OperationsRepository(conn).has_fresh_service_heartbeat(
-            "platform_jobs_controller", stale_seconds=settings.build_worker_stale_seconds
+            "platform_jobs_controller", stale_seconds=settings.platform_jobs_controller_stale_seconds
         ):
             raise RuntimeError("no fresh Platform Jobs controller heartbeat")
 

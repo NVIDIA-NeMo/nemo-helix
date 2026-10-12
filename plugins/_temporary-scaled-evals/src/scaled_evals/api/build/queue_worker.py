@@ -109,9 +109,7 @@ class TaskBuildWorker:
         while not stop.wait(self.heartbeat_interval):
             try:
                 with self.connect() as conn:
-                    repo = TaskBuildRepository(conn)
-                    repo.heartbeat_worker(self.worker_id)
-                    alive = repo.heartbeat(
+                    alive = TaskBuildRepository(conn).heartbeat(
                         job.task_id,
                         job.revision,
                         worker_id=self.worker_id,

@@ -3,5 +3,5 @@
 
 # The repo-root .gitignore excludes `build` to drop Python build artifacts. That
 # bare pattern also matches this vendored source package, which silently kept the
-# whole build-worker (`scaled-evals-build-worker`) out of git.
+# whole task-image build package out of git.
 !src/scaled_evals/api/build/

@@ -147,7 +147,7 @@ _CLAIM_SQL = f"""
             END,
             -- Once recovery work is exhausted, admit the owner currently
             -- consuming the fewest sandbox slots. This prevents one older
-            -- benchmark from monopolizing a smaller dispatch-worker pool.
+            -- benchmark from monopolizing the cluster's sandbox slots.
             CASE WHEN e.status = 'queued' THEN owner_usage.owner_slots ELSE 0 END,
             e.created_at
         LIMIT 1

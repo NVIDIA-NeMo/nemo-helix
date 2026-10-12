@@ -282,7 +282,7 @@ class ScaledEvalsJobsController(NemoController):
 
         Teardowns can wait minutes on kubectl or OpenSandbox, and archive builds
         on object storage. Inside the pass they would delay submissions and the
-        heartbeat, and a heartbeat older than ``build_worker_stale_seconds``
+        heartbeat, and a heartbeat older than ``platform_jobs_controller_stale_seconds``
         fails API readiness.
         """
 

@@ -175,6 +175,21 @@ def snapshot_agent_timeout_floor(row: Mapping[str, Any]) -> int | None:
     return None if floor is None else int(floor)
 
 
+def evaluation_run_budget_seconds(row: Mapping[str, Any], *, floor: float) -> float:
+    """Return how long one execution may run: every sequential trial wave gets the sandbox lifecycle budget."""
+    lifecycle = _profile_lifecycle_timeout_seconds(row)
+    if lifecycle is None:
+        # The row may carry profile ids rather than profile config, so fall back
+        # to the sandbox budget a benchmark variant guarantees the agent.
+        agent_floor = snapshot_agent_timeout_floor(row)
+        if agent_floor is None:
+            return floor
+        lifecycle = float(agent_floor)
+    evaluation = snapshot_evaluation(row)
+    waves = math.ceil(max(1, int(evaluation.get("n_attempts") or 1)) / max(1, int(evaluation.get("parallelism") or 1)))
+    return max(floor, waves * (lifecycle + _LIFECYCLE_TIMEOUT_GRACE_SECONDS))
+
+
 def assert_lifecycle_covers_agent_floor(row: Mapping[str, Any], floor_sec: int) -> None:
     """Fail the launch when the sandbox hard stop would truncate the agent floor.
 
@@ -1253,11 +1268,10 @@ class Dispatcher:
             )
 
     def _terminal_max_polls(self, row: Mapping[str, Any]) -> int:
-        lifecycle_timeout = _profile_lifecycle_timeout_seconds(row)
-        if lifecycle_timeout is None or self.poll_interval <= 0:
+        if self.poll_interval <= 0:
             return self.max_polls
-        lifecycle_polls = math.ceil((lifecycle_timeout + _LIFECYCLE_TIMEOUT_GRACE_SECONDS) / self.poll_interval)
-        return max(self.max_polls, lifecycle_polls)
+        budget = evaluation_run_budget_seconds(row, floor=self.max_polls * self.poll_interval)
+        return math.ceil(budget / self.poll_interval)
 
     def _heartbeat_and_load_runtime_status(
         self,

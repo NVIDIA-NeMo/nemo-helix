@@ -346,6 +346,19 @@ queue and metadata source of truth during this migration.
 There is no separate worker process. The controller also runs execution cleanup,
 the evidence and archive backstops, and benchmark archive cleanup.
 
+Each evaluation Job may run for every sequential trial wave
+(`ceil(n_attempts / parallelism)`) times the profile's sandbox
+`lifecycle_timeout` plus a grace, and never less than
+`DISPATCH_RUN_POLL_INTERVAL_SECONDS` x `DISPATCH_RUN_MAX_POLLS`.
+
+**Known limitation: hosted Gym.** `gym_sandbox_opensandbox` evaluations have no
+working path on Kubernetes yet (AALGO-906). The evaluation Job always runs in
+the plugin's app image with a 1 CPU / 1 Gi limit; it does not switch to the
+snapshot-pinned Gym runner image, set `GYM_RUNNER_MODE=process`, or mount
+`/dev/shm`. With the default `GYM_RUNNER_MODE=docker` the run fails, because
+the Job pod has no Docker daemon. Gym evaluations are still accepted, so leave
+`GYM_SANDBOX_OPENSANDBOX_ENABLED` off on hosted deployments until AALGO-906 lands.
+
 ## Licensing
 
 Every `.py`, `.sql`, `.sh`, `.yaml`, `.yml`, and `.toml` file carries the

@@ -19,7 +19,9 @@ from scaled_evals.api.db import get_conn
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.dispatch.sandbox_k8s import apply_agent_timeout_floor
 from scaled_evals.dispatch.worker import (
+    Dispatcher,
     assert_lifecycle_covers_agent_floor,
+    evaluation_run_budget_seconds,
     snapshot_agent_timeout_floor,
 )
 from scaled_evals.models.execution_snapshot import EXECUTION_SNAPSHOT_SCHEMA_VERSION
@@ -215,6 +217,16 @@ def test_snapshotted_floor_drives_validation_and_job_deadline() -> None:
             ),
             7200,
         )
+
+    # The run budget sizes both the Job deadline and the dispatcher's poll cap.
+    # Without profile config, the frozen floor keeps the Job alive past the agent budget.
+    assert evaluation_run_budget_seconds(_snapshot_row(7200), floor=3600) == 7500  # floor + 300 sandbox grace
+    assert evaluation_run_budget_seconds(_snapshot_row(None), floor=3600) == 3600
+    # Every sequential trial wave gets the full sandbox lifecycle.
+    waves = _snapshot_row(None, framework_config={"environment": {"kwargs": {"lifecycle_timeout": 3600}}})
+    waves["execution_snapshot"]["evaluation"].update(n_attempts=10, parallelism=4)
+    assert evaluation_run_budget_seconds(waves, floor=3600) == 3 * 3900
+    assert Dispatcher(poll_interval=10, max_polls=360)._terminal_max_polls(waves) == 1170
 
 
 def test_benchmark_variant_snapshot_freezes_lineage_and_policy() -> None:

@@ -24,18 +24,6 @@ class TaskBuildRepository:
     def __init__(self, conn: psycopg.Connection) -> None:
         self.conn = conn
 
-    def heartbeat_worker(self, worker_id: str) -> None:
-        with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO service_heartbeats (service, instance_id, heartbeat_at)
-                VALUES ('build_worker', %s, NOW())
-                ON CONFLICT (service, instance_id) DO UPDATE
-                SET heartbeat_at = EXCLUDED.heartbeat_at
-                """,
-                (worker_id,),
-            )
-
     def record_success(
         self,
         task_id: str,

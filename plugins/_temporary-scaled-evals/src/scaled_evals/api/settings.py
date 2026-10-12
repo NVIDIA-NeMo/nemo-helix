@@ -6,7 +6,7 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from cryptography.fernet import Fernet
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Development default when SCALED_EVALS_DATABASE_URL is unset. Matches upstream.
@@ -131,7 +131,11 @@ class Settings(BaseSettings):
     cloud_build_timeout_seconds: float = 2100.0
     cloud_build_poll_interval_seconds: float = 5.0
     # Staleness bound for the Platform Jobs controller heartbeat in readyz.
-    build_worker_stale_seconds: float = 60.0
+    # Hosted charts still set the old BUILD_WORKER_STALE_SECONDS name.
+    platform_jobs_controller_stale_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("PLATFORM_JOBS_CONTROLLER_STALE_SECONDS", "BUILD_WORKER_STALE_SECONDS"),
+    )
     # Target platform for finalize image builds. Pinned to the runtime cluster's
     # arch (hosted nodes are amd64) so an arm64 build host (Apple Silicon under
     # Colima) does not produce images that `exec format error` on amd64 nodes.
