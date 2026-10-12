@@ -315,6 +315,10 @@ def test_cleanup_kubectl_flags_fall_back_when_recorded_path_is_absent(
     # would report "not found" as a successful cleanup and orphan the sandbox.
     with pytest.raises(RuntimeError, match="refusing to clean up"):
         sandbox_k8s._kubectl_target_flags("/tmp/eval_1/user-kube/config", "user")
+    with pytest.raises(RuntimeError, match="refusing to clean up"):
+        sandbox_k8s._kubectl_target_flags("/tmp/eval_1/user-kube/config", "user", "https://api.other:6443")
+    # A user token on this cluster reaches the same sandbox through the controller's account.
+    assert sandbox_k8s._kubectl_target_flags("/tmp/gone", "user", "https://kubernetes.default.svc") == []
     monkeypatch.setattr(sandbox_k8s.shutil, "which", lambda name: "/usr/bin/kubectl" if name == "kubectl" else None)
     handle = LaunchHandle(
         backend="sandbox_k8s",

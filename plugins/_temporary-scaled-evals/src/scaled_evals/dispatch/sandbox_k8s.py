@@ -1586,7 +1586,7 @@ def make_sandbox_k8s_docker_terminator() -> Callable[[LaunchHandle], None]:
     return terminate
 
 
-def _kubectl_target_flags(recorded_path: object, context: object) -> list[str]:
+def _kubectl_target_flags(recorded_path: object, context: object, api_server: object = None) -> list[str]:
     """Return the ``--kubeconfig`` and ``--context`` flags for a cleanup.
 
     Both are captured when the sandbox launches. Under Platform Jobs that
@@ -1597,21 +1597,21 @@ def _kubectl_target_flags(recorded_path: object, context: object) -> list[str]:
     evaluation wedges. With neither flag, kubectl resolves through the cleanup
     process's own ``KUBECONFIG`` or its in-cluster service account.
 
-    That fallback is only the same target for the Job's service-account
-    context. Any other context, such as a user-token kubeconfig, can name
-    another API server or identity; cleanup there treats "not found" as done
-    and would orphan the sandbox, so it raises instead.
+    That fallback reaches the same cluster only for the Job's service-account
+    context, or for a user-token kubeconfig whose recorded ``api_server`` is the
+    in-cluster API. Any other context can name another API server; cleanup there
+    treats "not found" as done and would orphan the sandbox, so it raises instead.
 
     Raises:
-        RuntimeError: The recorded kubeconfig is missing and its context is not
-            the in-cluster service account.
+        RuntimeError: The recorded kubeconfig is missing and its target is not
+            known to be this cluster.
     """
     if recorded_path and Path(str(recorded_path)).exists():
         flags = ["--kubeconfig", str(recorded_path)]
         if context:
             flags.extend(["--context", str(context)])
         return flags
-    if not context or context == _IN_CLUSTER_CONTEXT:
+    if not context or context == _IN_CLUSTER_CONTEXT or api_server == _IN_CLUSTER_API:
         return []
     raise RuntimeError(
         f"kubeconfig for kubectl context {context!r} is not available to this process; "
@@ -1650,7 +1650,7 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
         raise RuntimeError("sandbox cleanup requires kubectl or oc")
 
     base = [kubectl]
-    base.extend(_kubectl_target_flags(kubeconfig_path, context))
+    base.extend(_kubectl_target_flags(kubeconfig_path, context, cleanup_metadata.get("api_server")))
     if cleanup_metadata.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", namespace])
@@ -1828,7 +1828,9 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
         return None
     base = [kubectl]
     try:
-        base.extend(_kubectl_target_flags(cleanup.get("kubeconfig_path"), cleanup.get("context")))
+        base.extend(
+            _kubectl_target_flags(cleanup.get("kubeconfig_path"), cleanup.get("context"), cleanup.get("api_server"))
+        )
     except RuntimeError:
         return None
     if cleanup.get("verify_ssl") is False:
@@ -2631,6 +2633,8 @@ def make_sandbox_k8s_submitter(
         rendered_path = work / f"{spec.evaluation_id}.yaml"
         rendered_path.write_text(rendered)
         cleanup_metadata = _sandbox_cleanup_metadata(rendered, spec.evaluation_id)
+        if user_kubeconfig is not None:
+            cleanup_metadata["api_server"] = env.get("SANDBOX_API_SERVER", _IN_CLUSTER_API)
         run_work_dir = work / spec.evaluation_id
         run_work_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_work_dir / "harbor.log"
