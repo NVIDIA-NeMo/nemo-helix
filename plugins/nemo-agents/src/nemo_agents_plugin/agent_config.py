@@ -35,6 +35,13 @@ class ModelConfig(BaseModel):
     top_p: float | None = Field(default=None, strict=True, ge=0, le=1)
     max_tokens: int | None = Field(default=None, strict=True, gt=0, le=(1 << 64) - 1)
     settings: dict[str, Any] = Field(default_factory=dict)
+    # Adapter-owned per-model catalog metadata (e.g. api, context_window,
+    # cost). Forwarded verbatim to the Fabric model's extensions so an adapter
+    # can register a gateway-served model the harness doesn't ship natively.
+    # Keys that name a declared model field (e.g. max_tokens) are rejected by
+    # the translator -- set those as top-level fields. Orthogonal to settings,
+    # which carries adapter target-config knobs.
+    extensions: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("max_tokens", mode="before")
     @classmethod
