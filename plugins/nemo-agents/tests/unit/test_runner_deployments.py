@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from importlib.util import find_spec
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -932,6 +934,40 @@ def test_entity_client_builds_typed_entities_client() -> None:
     mock_adapter.assert_called_once_with(client)
     mock_entity_client.assert_called_once_with(typed_client)
     assert result is entity_client
+
+
+@pytest.mark.asyncio
+async def test_registry_initialization_is_shared_across_concurrent_log_requests() -> None:
+    backend = _backend()
+    registry = MagicMock()
+    backend._build_registry = MagicMock(return_value=registry)  # type: ignore[method-assign]
+
+    first, second = await asyncio.gather(backend._registry(), backend._registry())
+
+    assert first is registry
+    assert second is registry
+    backend._build_registry.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.LogCaptureFixture) -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    entities.get = AsyncMock(
+        side_effect=[
+            Deployment(name="dep", workspace="default", deployment_config="dep"),
+            DeploymentConfig(name="dep", workspace="default", labels={"nemo.agents/deployment": "dep"}),
+        ]
+    )
+    backend._entities = entities
+    registry = MagicMock()
+    registry.resolve.side_effect = KeyError("missing")
+    backend._executor_registry = registry
+
+    with pytest.raises(RuntimeError, match="Failed to resolve deployment log backend"), caplog.at_level(logging.ERROR):
+        await backend.get_logs(workspace="default", name="dep")
+
+    assert "Failed to resolve deployment log backend" in caplog.text
 
 
 @pytest.mark.asyncio

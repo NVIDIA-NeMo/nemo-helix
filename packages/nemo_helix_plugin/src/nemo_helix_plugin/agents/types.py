@@ -450,7 +450,7 @@ class DeploymentLogsResponse(BaseModel):
 
     data: list[LogLine]
     total_lines: int = Field(description="Number of lines actually returned.")
-    next_offset: int = Field(description="Byte offset just past the returned tail.")
+    next_offset: int | str = Field(description="Resume cursor just past the returned tail.")
 
 
 class AgentJobRequest(BaseModel):
