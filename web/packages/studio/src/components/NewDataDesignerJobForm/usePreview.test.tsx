@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DataDesignerConfig } from '@nemo/sdk/generated/data-designer/schema';
+import type { PreviewStreamHandlers } from '@studio/components/NewDataDesignerJobForm/previewApi';
 import { usePreview } from '@studio/components/NewDataDesignerJobForm/usePreview';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
@@ -46,8 +47,7 @@ describe('usePreview', () => {
 
   it('streams normally when the config builds', async () => {
     streamPreviewMock.mockImplementation(async (...args: unknown[]) => {
-      const onLine = args.find((a) => typeof a === 'function') as ((l: string) => void) | undefined;
-      onLine?.('a log line');
+      (args[4] as PreviewStreamHandlers).onLog('a log line');
     });
     const { result } = renderHook(() =>
       usePreview({ workspace: 'ws', accessToken: 'token', getCurrentConfig: () => CONFIG })
@@ -60,6 +60,61 @@ describe('usePreview', () => {
     expect(streamPreviewMock).toHaveBeenCalled();
     expect(result.current.previewLogs).toContain('a log line');
     expect(result.current.isPreviewing).toBe(false);
+    expect(result.current.hasPreviewRun).toBe(true);
+    expect(result.current.previewRecords).toBeUndefined();
+  });
+
+  it('collects streamed records alongside the logs, with the config column order', async () => {
+    const records = [{ question: 'Q1', scheduler: 'alice' }];
+    streamPreviewMock.mockImplementation(async (...args: unknown[]) => {
+      const handlers = args[4] as PreviewStreamHandlers;
+      handlers.onLog('Preview generation complete');
+      handlers.onRecords(records);
+    });
+    const config = {
+      columns: [{ name: 'scheduler' }, { name: 'question' }],
+    } as unknown as DataDesignerConfig;
+    const { result } = renderHook(() =>
+      usePreview({ workspace: 'ws', accessToken: 'token', getCurrentConfig: () => config })
+    );
+
+    await act(async () => {
+      await result.current.runPreview();
+    });
+
+    expect(result.current.previewRecords).toEqual(records);
+    expect(result.current.previewColumnOrder).toEqual(['scheduler', 'question']);
+    expect(result.current.previewLogs).toContain('Preview generation complete');
+    expect(result.current.previewError).toBeUndefined();
+  });
+
+  it('surfaces an error frame as the preview error', async () => {
+    streamPreviewMock.mockImplementation(async (...args: unknown[]) => {
+      (args[4] as PreviewStreamHandlers).onError('model unavailable');
+    });
+    const { result } = renderHook(() =>
+      usePreview({ workspace: 'ws', accessToken: 'token', getCurrentConfig: () => CONFIG })
+    );
+
+    await act(async () => {
+      await result.current.runPreview();
+    });
+
+    expect(result.current.previewError).toBe('model unavailable');
+  });
+
+  it('surfaces a failed request as the preview error and log line', async () => {
+    streamPreviewMock.mockRejectedValue(new Error('Preview failed: 500'));
+    const { result } = renderHook(() =>
+      usePreview({ workspace: 'ws', accessToken: 'token', getCurrentConfig: () => CONFIG })
+    );
+
+    await act(async () => {
+      await result.current.runPreview();
+    });
+
+    expect(result.current.previewError).toBe('Preview failed: 500');
+    expect(result.current.previewLogs).toContain('Preview failed: 500');
   });
 
   describe('stopPreview', () => {
