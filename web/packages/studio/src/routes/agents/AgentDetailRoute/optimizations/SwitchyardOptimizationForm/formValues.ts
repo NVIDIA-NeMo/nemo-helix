@@ -64,21 +64,36 @@ const thresholdSchema = z.coerce
   .min(0, 'Must be between 0 and 1.')
   .max(1, 'Must be between 0 and 1.');
 
-export const switchyardFormSchema = z.object({
-  name: nameSchema,
-  models: z
-    .array(z.string().min(1))
-    .min(2, 'Add at least two models to route between.')
-    .refine((models) => new Set(models).size === models.length, 'Each model can be added once.'),
-  routingStrategies: z
-    .array(z.enum(['random_routing', 'stage_router', 'llm_classifier']))
-    .min(1, 'Pick at least one routing strategy.'),
-  strong_probability: thresholdSchema,
-  confidence_threshold: thresholdSchema,
-  base_threshold: thresholdSchema,
-  /** Empty means each pair's capable model judges, which is the plugin's own default. */
-  judgeModel: z.string(),
-});
+const lenientThresholdSchema = z.coerce.number().catch(Number.NaN);
+
+export const switchyardFormSchema = z
+  .object({
+    name: nameSchema,
+    models: z
+      .array(z.string().min(1))
+      .min(2, 'Add at least two models to route between.')
+      .refine((models) => new Set(models).size === models.length, 'Each model can be added once.'),
+    routingStrategies: z
+      .array(z.enum(['random_routing', 'stage_router', 'llm_classifier']))
+      .min(1, 'Pick at least one routing strategy.'),
+    strong_probability: lenientThresholdSchema,
+    confidence_threshold: lenientThresholdSchema,
+    base_threshold: lenientThresholdSchema,
+    /** Empty means each pair's capable model judges, which is the plugin's own default. */
+    judgeModel: z.string(),
+  })
+  .superRefine((values, ctx) => {
+    for (const strategy of ROUTING_STRATEGIES) {
+      if (!values.routingStrategies.includes(strategy.id)) continue;
+      const { field } = strategy.threshold;
+      const result = thresholdSchema.safeParse(values[field]);
+      if (!result.success) {
+        for (const issue of result.error.issues) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: issue.message, path: [field] });
+        }
+      }
+    }
+  });
 
 export type SwitchyardFormValues = {
   name: string;
