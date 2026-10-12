@@ -187,7 +187,10 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   // this leaderboard is where you notice a run worth varying.
   const [rerunSource, setRerunSource] = useState<EvaluationRow | null>(null);
 
-  const [comparedEvaluations, setComparedEvaluations] = useState<EvaluationRow[] | null>(null);
+  const [comparison, setComparison] = useState<{
+    evaluations: EvaluationRow[];
+    clearSelection: () => void;
+  } | null>(null);
 
   // Seed the sort from default_sort so its column header reflects the order on load. Memoized so the
   // reference is stable across renders (until default_sort changes).
@@ -656,7 +659,12 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                 selectedRows.length > MAX_COMPARED_EVALUATIONS
               }
               title={`Select ${MIN_COMPARED_EVALUATIONS} to ${MAX_COMPARED_EVALUATIONS} evaluations to compare`}
-              onClick={() => setComparedEvaluations(selectedRows)}
+              onClick={() =>
+                setComparison({
+                  evaluations: selectedRows,
+                  clearSelection: () => table.resetRowSelection(),
+                })
+              }
             >
               <ChartColumn />
               Compare selected
@@ -735,15 +743,17 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
         />
       )}
       <Modal
-        open={comparedEvaluations !== null}
+        open={comparison !== null}
         onOpenChange={(open) => {
-          if (!open) setComparedEvaluations(null);
+          if (open) return;
+          comparison?.clearSelection();
+          setComparison(null);
         }}
-        slotHeading={`Comparing ${comparedEvaluations?.length ?? 0} evaluations`}
+        slotHeading={`Comparing ${comparison?.evaluations.length ?? 0} evaluations`}
         className="w-[95vw] max-w-[1600px]"
       >
-        {comparedEvaluations && (
-          <EvaluationCompareChart workspace={workspace} evaluations={comparedEvaluations} />
+        {comparison && (
+          <EvaluationCompareChart workspace={workspace} evaluations={comparison.evaluations} />
         )}
       </Modal>
       {rerunSource && (

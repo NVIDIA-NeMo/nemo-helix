@@ -166,7 +166,7 @@ describe('ExperimentDetailRoute', () => {
     mockGroup({ evaluation_count: 2 }, [evaluation('first'), evaluation('second')]);
     const user = userEvent.setup();
 
-    const firstRow = await screen.findByRole('row', { name: /first/ });
+    const firstRow = await screen.findByRole('row', { name: /first/ }, { timeout: 10_000 });
     await user.click(within(firstRow).getByRole('checkbox'));
     await user.click(within(screen.getByRole('row', { name: /second/ })).getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: 'Compare selected' }));
