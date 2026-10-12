@@ -20,51 +20,44 @@ interface DashboardPanelProps {
 
 const isExternalHref = (href: string): boolean => /^([a-z][a-z0-9+.-]*:|\/\/)/i.test(href);
 
+// TEMPORARY: softens the secondary button border to 20% opacity. Remove once
+// the global KUI button styles are updated to match.
+const SECONDARY_ACTION_CLASS = 'w-full justify-start border-current/20';
+
 export const DashboardPanel: FC<DashboardPanelProps> = ({ icon, title, description, actions }) => {
   return (
-    <Panel
-      slotIcon={icon}
-      slotHeading={title}
-      className="h-full"
-      slotFooter={
-        actions.length > 0 && (
-          <Stack gap="density-xxs" className="w-full">
-            {actions.map((action) =>
-              isExternalHref(action.href) ? (
-                <Button
-                  key={`${action.label}::${action.href}`}
-                  kind="tertiary"
-                  color="neutral"
-                  size="small"
-                  asChild
-                >
+    <Panel slotIcon={icon} slotHeading={title} density="compact" className="h-full">
+      <Stack gap="density-lg">
+        <Text className="text-secondary" kind="body/regular/md">
+          {description}
+        </Text>
+        {actions.length > 0 && (
+          <Stack gap="density-sm" className="w-full">
+            {actions.map((action, index) => (
+              <Button
+                key={`${action.label}::${action.href}`}
+                kind={index === 0 ? 'primary' : 'secondary'}
+                color={index === 0 ? 'brand' : 'neutral'}
+                size="medium"
+                className={index === 0 ? 'w-full' : SECONDARY_ACTION_CLASS}
+                asChild
+              >
+                {isExternalHref(action.href) ? (
                   <a href={action.href} target="_blank" rel="noopener noreferrer">
                     {action.icon}
                     {action.label}
                   </a>
-                </Button>
-              ) : (
-                <Button
-                  key={`${action.label}::${action.href}`}
-                  kind="tertiary"
-                  color="neutral"
-                  size="small"
-                  asChild
-                >
+                ) : (
                   <Link to={action.href}>
                     {action.icon}
                     {action.label}
                   </Link>
-                </Button>
-              )
-            )}
+                )}
+              </Button>
+            ))}
           </Stack>
-        )
-      }
-    >
-      <Text className="text-secondary" kind="body/regular/md">
-        {description}
-      </Text>
+        )}
+      </Stack>
     </Panel>
   );
 };
