@@ -543,17 +543,16 @@ class AgentDeploymentController(NemoController):
         task.add_done_callback(self._runtime_cleanup_tasks.discard)
 
     async def _start_deployment(self, dep: AgentDeployment) -> None:
-        """pending -> starting: allocate port (subprocess) and spawn via the mode backend."""
+        """pending -> starting: spawn via the mode backend."""
         await self._reconcile_deployment_sessions_after_restart(dep)
         t0 = time.perf_counter()
         backend = self._backend_for(dep)
-        port = backend.allocate_port()
         try:
             info = await backend.create_deployment(
                 workspace=dep.workspace,
                 name=dep.name,
                 config=dep.config,
-                port=port,
+                port=0,
                 agent=dep.agent,
                 image=dep.image or None,
                 deployment_mode=dep.deployment_mode,
