@@ -203,7 +203,7 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
         record = {
             "sandbox_id": sandbox_id,
             "session_id": self.session_id,
-            "role": _sandbox_role(self.session_id),
+            "role": _sandbox_role(self.session_id, self.trial_paths.trial_dir.name),
             "network_mode": self._network_policy.network_mode.value,
             "policy_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
             "policy": payload,
@@ -312,16 +312,15 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
         return {**sdk, "SandboxManager": SandboxManager, "SandboxFilter": SandboxFilter}
 
 
-def _sandbox_role(session_id: str) -> str:
+def _sandbox_role(session_id: str, trial_name: str) -> str:
     """Return ``agent`` or ``verifier`` for a sandbox, from the session ID Harbor gave it.
 
-    Harbor 0.20 doesn't pass the role to the environment. It names the agent's session
-    ``<trial>__env`` and a separate verifier's ``<trial>__verifier__<key>``, shortened to end in a
-    hash when too long.
+    Harbor 0.20 doesn't pass the role to the environment. It names the agent's session exactly
+    ``<trial>__env``, and a separate verifier's ``<trial>__verifier__<key>``, shortened to end in a
+    hash when too long. The trial name can itself contain ``__verifier__``, so only an exact match
+    identifies the agent.
     """
-    if session_id.endswith("__env") and "__verifier__" not in session_id:
-        return "agent"
-    return "verifier"
+    return "agent" if session_id == f"{trial_name}__env" else "verifier"
 
 
 def _sandbox_id(sandbox: Any) -> str | None:
