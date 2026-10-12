@@ -382,9 +382,6 @@ async def _run_producer_workers(
                     "Online sample generation failed, marking row as NaN-eligible",
                     extra={"item_index": idx, "error": str(e)},
                 )
-                # TODO: Consider short-circuiting metric workers for ignored
-                # sample-generation failures instead of forwarding the
-                # inference_error placeholder sample to each metric.
                 sample = {"output_text": None, "response": {}, "inference_error": str(e)}
             finally:
                 index_queue.task_done()
@@ -431,12 +428,15 @@ async def _metric_worker(
         requests_log: list[dict] = []
         requests_log_var.set(requests_log)
         try:
-            metric_result = _normalize_metric_result(
-                await pipeline.metric.compute_scores(
-                    build_metric_input(dict(event.item), dict(event.sample), event.row_index)
-                ),
-                pipeline.output_spec,
-            )
+            if "inference_error" in event.sample:
+                metric_result = nan_metric_result(pipeline.output_spec)
+            else:
+                metric_result = _normalize_metric_result(
+                    await pipeline.metric.compute_scores(
+                        build_metric_input(dict(event.item), dict(event.sample), event.row_index)
+                    ),
+                    pipeline.output_spec,
+                )
         except Exception as e:
             if not tolerate_failure:
                 raise EvaluationError(

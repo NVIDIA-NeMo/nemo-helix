@@ -178,15 +178,28 @@ class TestRowEvalOutcome:
 
         outcome = row_eval_outcome(_row_result(rows))
 
-        assert outcome == RunOutcome(unit="rows", total=2, errored=2, scored=0)
+        assert outcome == RunOutcome(unit="rows", total=2, errored=2, scored=0, first_error="boom")
         assert outcome.failed
+
+    def test_an_inference_error_without_a_metric_error_is_errored(self) -> None:
+        rows = [_row(value=float("nan"), inference_error="Retry attempts exhausted: 6 out of 6")] * 3
+
+        outcome = row_eval_outcome(_row_result(rows))
+
+        assert outcome == RunOutcome(
+            unit="rows", total=3, errored=3, scored=0, first_error="Retry attempts exhausted: 6 out of 6"
+        )
+        assert outcome.message == (
+            "No usable scores across 3 rows (3 reported errors). First error: Retry attempts exhausted: 6 out of 6. "
+            "See the job logs for the underlying request or metric failures."
+        )
 
     def test_a_row_with_a_finite_value_is_scored(self) -> None:
         rows = [_row(value=float("nan"), metric_error="boom"), _row(value=0.0)]
 
         outcome = row_eval_outcome(_row_result(rows))
 
-        assert outcome == RunOutcome(unit="rows", total=2, errored=1, scored=1)
+        assert outcome == RunOutcome(unit="rows", total=2, errored=1, scored=1, first_error="m: boom")
         assert not outcome.failed
 
     def test_non_numeric_outputs_count_as_scored(self) -> None:
