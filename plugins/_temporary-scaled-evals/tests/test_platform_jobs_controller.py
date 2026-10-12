@@ -88,7 +88,7 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
     assert "credentials" not in evaluation_request.spec
     # The launch inputs are stored before the Job that reads them exists.
     write_inputs.assert_called_once_with("eval_1", 3, evaluation_request.name)
-    assert evaluation_request.spec["inputs_workspace"] == settings.entity_store_workspace
+    assert evaluation_request.spec["inputs_workspace"] == settings.entity_store_private_workspace
     record_evaluation.assert_called_once_with(
         "eval_1",
         3,
@@ -465,15 +465,45 @@ def test_submitter_stores_immutable_launch_inputs_once(monkeypatch: pytest.Monke
     repo.load_for_dispatch.return_value = row
     monkeypatch.setattr(submitter_module, "pooled_connection", lambda: nullcontext(MagicMock()))
     monkeypatch.setattr(submitter_module, "EvaluationRepository", lambda _conn: repo)
+    monkeypatch.setattr(submitter_module, "private_workspace", lambda: "private")
     entities = MagicMock()
     submitter = submitter_module.EvaluationSubmitter(AsyncMock(), "w", entities)
 
     submitter._write_inputs("eval_1", 3, "job-e3")
     entity = entities.create.call_args.args[0]
-    assert (entity.name, entity.evaluation_id, entity.execution_number) == ("job-e3", "eval_1", 3)
+    assert (entity.name, entity.workspace, entity.evaluation_id, entity.execution_number) == (
+        "job-e3",
+        "private",
+        "eval_1",
+        3,
+    )
     # State columns are dropped, and what remains is JSON-safe.
     assert entity.inputs == {"id": "eval_1", "name": "e", "created_at": _CREATED.isoformat()}
 
     # A resubmission finds the entity an earlier attempt wrote.
     entities.create.side_effect = EntityConflictError("exists")
     submitter._write_inputs("eval_1", 3, "job-e3")
+
+
+def test_private_workspace_is_created_by_the_service_or_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nemo_scaled_evals_plugin.submitter as submitter_module
+
+    workspaces = MagicMock()
+    monkeypatch.setattr(submitter_module, "get_nemo_client", lambda **_: object())
+    monkeypatch.setattr(submitter_module.WorkspacesClient, "from_client", lambda _client: workspaces)
+    submitter_module.private_workspace.cache_clear()
+    assert submitter_module.private_workspace() == settings.entity_store_private_workspace
+    assert workspaces.create_workspace.call_args.kwargs["body"].name == settings.entity_store_private_workspace
+
+    # An existing workspace is reused only when this service created it.
+    workspaces.create_workspace.side_effect = ConflictError(
+        httpx.Response(409, request=httpx.Request("POST", "http://entities"))
+    )
+    workspaces.get_workspace.return_value.data.return_value.created_by = "service:scaled-evals"
+    submitter_module.private_workspace.cache_clear()
+    assert submitter_module.private_workspace() == settings.entity_store_private_workspace
+    workspaces.get_workspace.return_value.data.return_value.created_by = "mallory@example.com"
+    submitter_module.private_workspace.cache_clear()
+    with pytest.raises(RuntimeError, match="mallory"):
+        submitter_module.private_workspace()
+    submitter_module.private_workspace.cache_clear()

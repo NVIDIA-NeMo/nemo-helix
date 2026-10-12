@@ -231,6 +231,12 @@ class Settings(BaseSettings):
         default="default",
         validation_alias="SCALED_EVALS_ENTITY_STORE_WORKSPACE",
     )
+    # Holds execution inputs (prompts, private snapshots). The service creates it,
+    # so with auth on no user can read it without an explicit role binding.
+    entity_store_private_workspace: str = Field(
+        default="scaled-evals-internal",
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE",
+    )
     entity_store_projection_batch_size: int = Field(
         default=100,
         ge=1,

@@ -3,10 +3,8 @@
 
 """Project evaluation rows into Entity Store and read them back.
 
-The controller writes every changed row, and each evaluation Job writes its own
-row as it changes status. Each write is a single-entity compare-and-swap that
-never goes backwards in `row_updated_at`, so no cross-entity transaction is
-needed to stay consistent. The reader reproduces the
+The writer is driven by the controller and is the only producer, so a row never
+needs a cross-entity transaction to stay consistent. The reader reproduces the
 SQL predicates in `EvaluationRepository.list`/`get` closely enough that the
 existing response schemas are rebuilt byte-for-byte from the projection.
 """
@@ -97,7 +95,7 @@ def entity_to_row(entity: ScaledEvaluation) -> dict[str, Any]:
 
 
 class EvaluationProjectionWriter:
-    """Upsert evaluation rows into Entity Store, never replacing a newer row."""
+    """Upsert evaluation rows into Entity Store, newest change first."""
 
     def __init__(self, client: SyncEntityClient, *, workspace: str) -> None:
         self._client = client
@@ -127,11 +125,6 @@ class EvaluationProjectionWriter:
             existing = self._client.get(ScaledEvaluation, entity.name, workspace=self._workspace)
         except EntityNotFoundError:
             self._client.create(entity)
-            return
-        # The controller and the evaluation Job both project. Never let a row
-        # read earlier overwrite a newer one: the controller's watermark has
-        # already moved past it, so nothing would repair the regression.
-        if existing.row_updated_at > entity.row_updated_at:
             return
         # Copy the fresh projection onto the stored object rather than updating
         # the new one: `id` and `db_version` are read-only views over private

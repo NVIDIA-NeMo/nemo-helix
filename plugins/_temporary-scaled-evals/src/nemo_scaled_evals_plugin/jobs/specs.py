@@ -34,8 +34,6 @@ class EvaluationExecutionSpec(BaseModel):
     # named after the Job. None for Jobs submitted before inputs were written
     # there; those still load the run from Postgres.
     inputs_workspace: str | None = None
-    # Project status and result changes into Entity Store as the Job writes them.
-    project_evaluation: bool = False
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

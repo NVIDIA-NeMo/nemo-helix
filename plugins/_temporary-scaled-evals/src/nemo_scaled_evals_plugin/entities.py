@@ -4,10 +4,9 @@
 """Entity Store projections of scaled-evals metadata.
 
 Postgres stays authoritative during this phase. `ScaledEvaluation` is a derived
-read model: the controller's projection pass and the evaluation's own Job both
-write it, each write a per-entity compare-and-swap that never moves a row back
-in time. That is safe on a store that offers per-entity optimistic locking but
-no multi-entity transaction and no atomic dequeue.
+read model with exactly one writer (the controller's projection phase), which is
+what makes it safe on a store that offers per-entity optimistic locking but no
+multi-entity transaction and no atomic dequeue.
 """
 
 from __future__ import annotations
@@ -76,7 +75,8 @@ class ScaledEvaluationExecution(NemoEntity, entity_type="scaled_evals_execution"
     Named after the execution's Platform Job and written once, before that Job
     is created, so the Job launches from here rather than from Postgres. Unlike
     `ScaledEvaluation`, this carries prompt content and the private execution
-    snapshot, because launching needs them. Credentials appear only as role to
+    snapshot, because launching needs them, so it lives in a workspace only the
+    scaled-evals service can read. Credentials appear only as role to
     credential-id references; the payloads stay encrypted in Postgres.
     """
 

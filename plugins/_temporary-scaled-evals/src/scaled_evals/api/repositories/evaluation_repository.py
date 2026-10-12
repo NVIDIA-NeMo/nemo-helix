@@ -1881,22 +1881,6 @@ class EvaluationRepository:
             )
             return cur.fetchone()
 
-    def load_for_projection(self, evaluation_id: str) -> dict | None:
-        """Return one row shaped like `list_changed_since`, including soft-deleted rows."""
-        with self.conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT {EVALUATION_DETAIL_COLUMNS}, e.deleted_at
-                FROM evaluations e
-                LEFT JOIN task_revisions r
-                  ON r.task_id = e.task_id
-                 AND r.revision = e.task_revision
-                WHERE e.id = %s
-                """,
-                (evaluation_id,),
-            )
-            return cur.fetchone()
-
     def schedule_retry(
         self,
         evaluation_id: str,
@@ -2116,6 +2100,8 @@ class EvaluationRepository:
                       status NOT IN ('succeeded', 'failed', 'cancelled')
                       OR %s IN ('succeeded', 'failed', 'cancelled')
                   )
+                  -- A run finishing after its cancel must not replace it.
+                  AND (status <> 'cancelled' OR %s = 'cancelled')
                 """,
                 (
                     status,
@@ -2142,6 +2128,7 @@ class EvaluationRepository:
                     expected_dispatch_owner,
                     expected_execution_number,
                     expected_execution_number,
+                    status,
                     status,
                 ),
             )
@@ -2207,6 +2194,7 @@ class EvaluationRepository:
                 WHERE id = %s
                   AND (%s::text IS NULL OR dispatch_claimed_by = %s::text)
                   AND (%s::integer IS NULL OR current_execution = %s::integer)
+                  AND status <> 'cancelled'
                 """,
                 (
                     terminal_status,

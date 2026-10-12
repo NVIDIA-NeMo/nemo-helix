@@ -416,8 +416,6 @@ class Dispatcher:
     max_polls: int = field(default_factory=lambda: settings.dispatch_run_max_polls)
     claim_timeout: float = 30.0
     worker_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{time.time_ns()}")
-    # Called with the fresh projection row after each status or result write.
-    on_change: Callable[[dict[str, Any]], None] | None = None
 
     def cleanup_benchmark_archives(self, run_id: str, *, object_keys: list[str] | None = None) -> None:
         """Best-effort immediate cleanup; durable periodic sweeps retry failures."""
@@ -500,7 +498,6 @@ class Dispatcher:
             self.build_evidence(evaluation_id)
         if self.claim_next_archive(evaluation_id) is not None:
             self.build_archive(evaluation_id)
-        self._changed(evaluation_id)
 
     def build_evidence(self, evaluation_id: str) -> None:
         """Generate terminal evidence and upload it before the archive is built."""
@@ -607,19 +604,12 @@ class Dispatcher:
             inputs: the execution's immutable launch inputs; ``None`` loads them from Postgres.
 
         """
-        self._run_claimed(evaluation_id, expected_execution_number=expected_execution_number, inputs=inputs)
-        self._changed(evaluation_id)
-
-    def _changed(self, evaluation_id: str) -> None:
-        if self.on_change is None:
-            return
         try:
-            with self.connect() as conn:
-                row = EvaluationRepository(conn).load_for_projection(evaluation_id)
-            if row is not None:
-                self.on_change(row)
-        except Exception:  # noqa: BLE001 — the controller's projection pass catches up
-            LOG.warning("projecting %s from the job failed", evaluation_id, exc_info=True)
+            self._run_claimed(evaluation_id, expected_execution_number=expected_execution_number, inputs=inputs)
+        except DispatchClaimLost:
+            # The row was cancelled or retried under the run; its new owner
+            # finishes it, so this execution has nothing left to record.
+            LOG.info("evaluation %s changed under its run; leaving it", evaluation_id)
 
     def _run_claimed(
         self,
@@ -630,8 +620,7 @@ class Dispatcher:
     ) -> None:
         """Load, launch, poll to terminal, persist result, optionally upload ATIF.
 
-        One
-        evaluation id in; terminal ``evaluations.status`` out. Never raises for
+        One evaluation id in; terminal ``evaluations.status`` out. Never raises for
         launch/poll/backend failures — those become ``status='failed'`` with
         ``status_detail``.
 
@@ -1803,7 +1792,6 @@ class Dispatcher:
         )
         if not updated:
             raise DispatchClaimLost(evaluation_id)
-        self._changed(evaluation_id)
 
     def _persist_result(
         self,
@@ -1842,7 +1830,6 @@ class Dispatcher:
         )
         if not updated:
             raise DispatchClaimLost(evaluation_id)
-        self._changed(evaluation_id)
 
 
 def get_dispatcher() -> Dispatcher:

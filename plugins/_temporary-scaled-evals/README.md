@@ -346,6 +346,15 @@ queue and metadata source of truth during this migration.
 There is no separate worker process. The controller also runs execution cleanup,
 the evidence and archive backstops, and benchmark archive cleanup.
 
+Before creating an evaluation Job, the submitter writes that execution's
+immutable launch inputs to a `scaled_evals_execution` entity, and the Job
+launches from it. The Job reads only the changing run state from Postgres and
+writes status and results there. Because the inputs include prompt content and
+the private execution snapshot, they are stored in
+`SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE` (default `scaled-evals-internal`).
+The service creates that workspace itself, so only the service has a role in
+it, and it refuses to use a workspace of that name that someone else created.
+
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox
 `lifecycle_timeout` plus a grace, and never less than

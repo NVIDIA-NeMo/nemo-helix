@@ -15,10 +15,12 @@ from typing import Any
 
 import anyio.from_thread
 from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.client_provider import get_async_nemo_client
+from nemo_helix_plugin.client_provider import get_async_nemo_client, get_nemo_client
 from nemo_helix_plugin.entities.base import EntityConflictError, SyncEntityClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nemo_scaled_evals_plugin.entities import ScaledEvaluationExecution
 from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
@@ -39,6 +41,26 @@ SERVICE_NAME = "scaled-evals"
 IMMEDIATE_SUBMIT_TIMEOUT_SECONDS = 10.0
 # The event loop holds tasks weakly; keep in-flight submissions alive until they finish.
 _pending: set[concurrent.futures.Future[None]] = set()
+
+
+@functools.cache
+def private_workspace() -> str:
+    """Return the workspace only this service can read, creating it on first use.
+
+    Raises:
+        RuntimeError: if someone else created a workspace with that name first.
+
+    """
+    name = settings.entity_store_private_workspace
+    client = WorkspacesClient.from_client(get_nemo_client(as_service=SERVICE_NAME, internal=True))
+    try:
+        client.create_workspace(body=CreateWorkspaceRequest(name=name))
+    except ConflictError:
+        # Its creator is its Admin; a user who claimed the name first could read every input.
+        owner = client.get_workspace(name=name).data().created_by
+        if owner != f"service:{SERVICE_NAME}":
+            raise RuntimeError(f"workspace {name!r} belongs to {owner!r}, not the {SERVICE_NAME} service") from None
+    return name
 
 
 class EvaluationSubmitter:
@@ -83,8 +105,7 @@ class EvaluationSubmitter:
                     )
                 ),
             ),
-            inputs_workspace=settings.entity_store_workspace if self.entities is not None else None,
-            project_evaluation=self.entities is not None and settings.entity_store_projection_enabled,
+            inputs_workspace=settings.entity_store_private_workspace if self.entities is not None else None,
         )
         try:
             if self.entities is not None:
@@ -154,7 +175,7 @@ class EvaluationSubmitter:
             self.entities.create(
                 ScaledEvaluationExecution(
                     name=name,
-                    workspace=settings.entity_store_workspace,
+                    workspace=private_workspace(),
                     evaluation_id=evaluation_id,
                     execution_number=execution_number,
                     inputs=jsonable(inputs),

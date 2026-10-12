@@ -20,7 +20,7 @@ from nemo_scaled_evals_plugin.entities import ScaledEvaluationExecution
 from nemo_scaled_evals_plugin.jobs.naming import evaluation_execution_job_name
 from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_evaluation_secret_environment, resolve_executor
-from nemo_scaled_evals_plugin.projection import EvaluationProjectionWriter, platform_entities
+from nemo_scaled_evals_plugin.projection import platform_entities
 from pydantic import BaseModel
 
 # The task posts no updates, so the staleness timeout bounds its whole runtime.
@@ -88,14 +88,15 @@ class EvaluationExecutionJob(NemoJob):
         dispatcher = _dispatcher_cls()()
         inputs = None
         if spec.inputs_workspace:
-            entities = platform_entities()
-            inputs = entities.get(
-                ScaledEvaluationExecution,
-                evaluation_execution_job_name(spec.evaluation_id, spec.execution_number),
-                workspace=spec.inputs_workspace,
-            ).inputs
-            if spec.project_evaluation:
-                dispatcher.on_change = EvaluationProjectionWriter(entities, workspace=spec.inputs_workspace).project
+            inputs = (
+                platform_entities()
+                .get(
+                    ScaledEvaluationExecution,
+                    evaluation_execution_job_name(spec.evaluation_id, spec.execution_number),
+                    workspace=spec.inputs_workspace,
+                )
+                .inputs
+            )
         dispatcher.run(spec.evaluation_id, expected_execution_number=spec.execution_number, inputs=inputs)
         # A no-op when the execution was retried rather than terminalized.
         dispatcher.finalize(spec.evaluation_id)
