@@ -155,15 +155,17 @@ export const DeployRouteModal: FC<DeployRouteModalProps> = ({
     }
   };
 
-  const loadError = !sourceRef
-    ? 'This run has no source agent, so its routes cannot be deployed.'
-    : route && !configPath
-      ? 'This run did not save an agent config for this virtual model.'
-      : agentError
-        ? getErrorMessage(agentError as Error, `Could not load agent "${sourceRef.name}"`)
-        : configError
-          ? getErrorMessage(configError, 'Could not load the routed agent config')
-          : undefined;
+  const getLoadError = (): string | undefined => {
+    if (!sourceRef) return 'This run has no source agent, so its routes cannot be deployed.';
+    if (route && !configPath)
+      return 'This run did not save an agent config for this virtual model.';
+    if (agentError) {
+      return getErrorMessage(agentError as Error, `Could not load agent "${sourceRef.name}"`);
+    }
+    if (configError) return getErrorMessage(configError, 'Could not load the routed agent config');
+    return undefined;
+  };
+  const loadError = getLoadError();
   const errorText =
     loadError ?? (createError ? getErrorMessage(createError, 'Failed to create agent') : undefined);
 
