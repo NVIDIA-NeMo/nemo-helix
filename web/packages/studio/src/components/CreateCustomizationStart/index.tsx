@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { Banner, Stack } from '@nvidia/foundations-react-core';
+import { Banner, Flex, Spinner, Stack } from '@nvidia/foundations-react-core';
 import {
   START_OPTIONS,
   TEMPLATE_GROUP_TITLE,
@@ -27,16 +27,38 @@ import {
 } from '@studio/constants/customizationTemplates';
 import { getFilesetRoute } from '@studio/routes/utils';
 import { toCustomizationBackend } from '@studio/util/customizationBackend';
-import { templateToFormFields } from '@studio/util/forms/customization';
+import {
+  templateToFormFields,
+  type CustomizationFormFields,
+} from '@studio/util/forms/customization';
 import { Box, Bookmark } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type FC } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import { Link } from 'react-router';
+
+// Inlines the customizer skill's references (~75 KB), so it loads only once AI is picked.
+const DescribeWithAiPanel = lazy(() =>
+  import('@studio/components/CreateCustomizationStart/DescribeWithAiPanel').then((module) => ({
+    default: module.DescribeWithAiPanel,
+  }))
+);
+
+const panelFallback = (
+  <Flex align="center" justify="center" className="h-64">
+    <Spinner size="medium" aria-label="Loading..." />
+  </Flex>
+);
 
 /** Namespaces saved-template ids so they cannot collide with a curated recipe's id. */
 const SAVED_PREFIX = 'saved:';
 
 const savedTemplateKey = (template: { name?: string; id: string }) =>
   `${SAVED_PREFIX}${template.name ?? template.id}`;
+
+/** Why Continue is unavailable, shown next to the disabled button. */
+const BLOCKED_HINT: Partial<Record<StartOptionId, string>> = {
+  template: 'Pick a recipe to continue.',
+  ai: 'Draft settings that pass the checks to continue.',
+};
 
 /** Templates are the middle rung, and the likeliest way in, so the page opens on them. */
 const DEFAULT_OPTION: StartOptionId = 'template';
@@ -47,6 +69,8 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
 }) => {
   const [selectedId, setSelectedId] = useState<StartOptionId>(DEFAULT_OPTION);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  // Set only once a generated draft validates, so Continue can never load a broken config.
+  const [draftValues, setDraftValues] = useState<CustomizationFormFields | null>(null);
 
   const toast = useToast();
   const {
@@ -124,6 +148,10 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       onContinue({ optionId: 'scratch' });
       return;
     }
+    if (selectedId === 'ai') {
+      if (draftValues) onContinue({ optionId: 'ai', initialValues: draftValues });
+      return;
+    }
     // Names a model and dataset the workspace already has, so nothing to provision.
     if (selectedSaved) {
       const initialValues = templateToFormFields(selectedSaved);
@@ -173,23 +201,28 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   return (
     <StartPage
       heading="Fine-tune a Model"
-      headingDescription="Train a model on your own data. Pick a ready-made recipe, or set everything up yourself."
+      headingDescription="Train a model on your own data. Describe what you need and let AI draft the settings, pick a ready-made recipe, or set everything up yourself."
       options={START_OPTIONS}
       value={selectedId}
       onChange={(id) => {
         setSelectedId(id as StartOptionId);
         setSelectedTemplateId(null);
         clearConflict();
+        setDraftValues(null);
       }}
       // Provisioning registers models and uploads a dataset, which takes long enough that
       // the cards would stay clickable behind the disabled Continue. Moving the selection
       // then would leave a finished setup pointing at something else.
       disabled={isSettingUp}
-      canContinue={!isSettingUp && (selectedId === 'scratch' || selectedTemplateId !== null)}
+      canContinue={
+        !isSettingUp &&
+        (selectedId === 'scratch' ||
+          (selectedId === 'ai' ? draftValues !== null : selectedTemplateId !== null))
+      }
       continueLabel={isSettingUp ? statusLabel : 'Continue'}
       continueLoading={isSettingUp}
       onContinue={() => void handleContinue()}
-      blockedHint={selectedId === 'template' ? 'Pick a recipe to continue.' : undefined}
+      blockedHint={BLOCKED_HINT[selectedId]}
       slotFooterStart={
         selectedSaved ? (
           <DeleteSavedTemplate
@@ -203,7 +236,11 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
         ) : null
       }
       slotDetail={
-        selectedId === 'template' ? (
+        selectedId === 'ai' ? (
+          <Suspense fallback={panelFallback}>
+            <DescribeWithAiPanel workspace={workspace} onDraft={setDraftValues} />
+          </Suspense>
+        ) : selectedId === 'template' ? (
           <Stack gap="density-2xl" className="w-full">
             <TemplateGroups
               groups={templateGroups}

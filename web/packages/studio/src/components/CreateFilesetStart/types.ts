@@ -87,6 +87,8 @@ export interface GeneratedConfigPanelProps {
   /** Pretty-printed JSON shown in the snippet. */
   config: string;
   onClose: () => void;
+  /** Replaces the default note about what the builder substitutes. */
+  description?: string;
 }
 
 /** What the user confirmed via the Continue footer, carrying that option's payload. */

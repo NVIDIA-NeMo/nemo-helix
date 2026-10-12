@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { build as rolldownBuild, type Plugin as RolldownPlugin } from 'rolldown';
 import license, { type Dependency, type Person } from 'rollup-plugin-license';
 import { visualizer } from 'rollup-plugin-visualizer';
-import { loadEnv, type Plugin } from 'vite';
+import { loadEnv, searchForWorkspaceRoot, type Plugin } from 'vite';
 import mkcert from 'vite-plugin-mkcert';
 import svgr from 'vite-plugin-svgr';
 // vite does not know about vitest -- vitest config extends vite config
@@ -83,6 +83,11 @@ const virtualShimPlugin = (shims: Record<string, string>): RolldownPlugin => ({
 });
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
+
+const CUSTOMIZER_SKILL_DIR = path.resolve(
+  configDir,
+  '../../../plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer'
+);
 
 // The raw rolldown vendor build doesn't read tsconfig paths, so map by hand.
 const WORKSPACE_ALIASES: Record<string, string> = {
@@ -576,6 +581,11 @@ export default defineConfig(({ mode }) => {
     server: {
       host: devServerHost,
       port: 5173,
+      fs: {
+        // The customizer's "Describe with AI" prompt embeds the backend team's skill
+        // references, which live outside the web workspace.
+        allow: [searchForWorkspaceRoot(configDir), CUSTOMIZER_SKILL_DIR],
+      },
       ...(shouldProxyHelix
         ? {
             proxy: {

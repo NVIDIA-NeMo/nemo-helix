@@ -46,6 +46,9 @@ outputs:
   web-studio:
     description: "'true' if any web files changed"
     value: ${{ steps.filter.outputs.web-studio }}
+  customizer-skill-references:
+    description: "'true' if the customizer skill references Studio inlines at build time changed"
+    value: ${{ steps.filter.outputs.customizer-skill-references }}
   github-scripts:
     description: "'true' if GitHub JavaScript scripts or their validation changes"
     value: ${{ steps.filter.outputs.github-scripts }}
@@ -211,6 +214,11 @@ runs:
             - 'web/**'
             - '.nvmrc'
             - 'tools/nodejs/**'
+            # Studio inlines these at build time (see web/packages/studio/tsconfig.json).
+            - 'plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/**'
+          # Lives outside web/, so pnpm's changed-package filter never selects Studio for it.
+          customizer-skill-references:
+            - 'plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/**'
           github-scripts:
             - '.github/scripts/**/*.cjs'
             - '.github/eslint.config.mjs'
