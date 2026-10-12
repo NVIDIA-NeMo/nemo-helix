@@ -97,10 +97,10 @@ def test_cli_submit_accepts_job_json_file(monkeypatch: pytest.MonkeyPatch) -> No
     result = runner.invoke(
         automodel_cli,
         [
-            "submit",
-            str(FIXTURES / "minimal_sft_lora.json"),
             "--workspace",
             "acme-corp",
+            "--job-json",
+            str(FIXTURES / "minimal_sft_lora.json"),
         ],
         obj=_platform("https://nhx.test"),
     )
@@ -151,10 +151,10 @@ def test_cli_submit_prints_studio_link_when_available(monkeypatch: pytest.Monkey
     result = runner.invoke(
         automodel_cli,
         [
-            "submit",
-            str(FIXTURES / "minimal_sft_lora.json"),
             "--workspace",
             "acme-corp",
+            "--job-json",
+            str(FIXTURES / "minimal_sft_lora.json"),
         ],
         obj=_platform("https://nhx.test"),
     )
@@ -201,10 +201,10 @@ def test_cli_submit_omits_studio_link_when_unavailable(monkeypatch: pytest.Monke
     result = runner.invoke(
         automodel_cli,
         [
-            "submit",
-            str(FIXTURES / "minimal_sft_lora.json"),
             "--workspace",
             "acme-corp",
+            "--job-json",
+            str(FIXTURES / "minimal_sft_lora.json"),
         ],
         obj=_platform("https://nhx.test"),
     )
@@ -219,11 +219,11 @@ def test_cli_help_lists_submit_and_explain_only() -> None:
     runner = CliRunner()
     result = runner.invoke(automodel_cli, ["--help"])
     assert result.exit_code == 0
-    assert "submit" in result.stdout
+    assert "Usage:" in result.stdout
     assert "explain" in result.stdout
     # Match on the registered verbs, not the rendered text: the help prose
     # legitimately contains words like "runs".
-    assert {cmd.name for cmd in automodel_cli.registered_commands} == {"submit", "explain"}
+    assert {cmd.name for cmd in automodel_cli.registered_commands} == {"explain"}
 
 
 def test_cli_expose_input_and_output_schemas() -> None:

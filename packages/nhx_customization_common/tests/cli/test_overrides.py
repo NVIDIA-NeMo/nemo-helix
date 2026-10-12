@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the shared customization submit override.
+"""Tests for the shared customization CLI override.
 
-Focus: the hand-written ``submit`` verb installed by
-``apply_job_cli_overrides`` must resolve ``--workspace`` the same way the
-auto-generated verbs do — explicit flag > ``$NHX_WORKSPACE`` > the active
-CLI context's configured workspace > ``"default"``.
+Focus: the hand-written flat command installed by ``apply_job_cli_overrides``
+must resolve ``--workspace`` the same way the auto-generated verbs do — explicit
+flag > ``$NHX_WORKSPACE`` > the active CLI context's configured workspace >
+``"default"``.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class _ContextState:
 
 def _build_app(calls: list[dict[str, object]]) -> typer.Typer:
     """Generated-shaped app (stub ``run``/``submit``) with the overrides applied."""
-    app = typer.Typer(no_args_is_help=True)
+    app = typer.Typer(no_args_is_help=False)
 
     @app.command("run")
     def generated_run() -> None:  # pragma: no cover - should be dropped
@@ -76,7 +76,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file)])
+        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "my-team-ws"
@@ -86,7 +86,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file), "--workspace", "acme-corp"])
+        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file), "--workspace", "acme-corp"])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "acme-corp"
@@ -97,7 +97,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file), "-w", "default"])
+        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file), "-w", "default"])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "default"
@@ -107,7 +107,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), None)
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file)])
+        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "env-ws"
@@ -117,7 +117,19 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), None)
 
-        result = CliRunner().invoke(parent, ["plugin", "submit", str(job_file)])
+        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "default"
+
+    def test_missing_job_json_shows_clear_error_and_help(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NHX_WORKSPACE", raising=False)
+        calls: list[dict[str, object]] = []
+        parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
+
+        result = CliRunner().invoke(parent, ["plugin"])
+
+        assert result.exit_code == 1, result.output
+        assert "Error: --job-json is required." in result.output
+        assert "Usage:" in result.output
+        assert calls == []

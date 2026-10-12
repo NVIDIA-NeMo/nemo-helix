@@ -61,7 +61,7 @@ class _SummaryContributor(_FakeContributor):
             runs_on="a widget press.",
             job_json="widget, press.",
             use_when="you need a widget.",
-            command="nemo customization stub submit JOB.json",
+            command="nemo customization stub --job-json JOB.json",
         )
 
 
@@ -77,7 +77,7 @@ def test_root_help_aggregates_contributor_summaries(monkeypatch: pytest.MonkeyPa
     help_text = _root_help({"stub": _SummaryContributor()}, monkeypatch)
     assert "stub" in help_text
     assert "Trains: Widgets." in help_text
-    assert "Submit: nemo customization stub submit JOB.json" in help_text
+    assert "Command: nemo customization stub --job-json JOB.json" in help_text
 
 
 def test_root_help_lists_contributors_in_name_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -183,7 +183,7 @@ def test_upload_resolves_workspace_like_submit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Uploads land in the same workspace ``submit`` would use, not a literal 'default'."""
+    """Uploads land in the same workspace ``--job-json`` would use, not a literal 'default'."""
     if env is None:
         monkeypatch.delenv("NHX_WORKSPACE", raising=False)
     else:
@@ -220,7 +220,7 @@ def test_group_flags_before_a_subcommand_are_rejected(flag_args: list[str], monk
 
     assert result.exit_code == 2
     assert "must come after the subcommand" in _flat(result.output)
-    assert "nemo customization fake submit [OPTIONS] JOB_JSON" in _flat(result.output)
+    assert "nemo customization fake --job-json JOB_JSON [OPTIONS]" in _flat(result.output)
     assert "fake\n" not in result.output  # the subcommand never ran
 
 
