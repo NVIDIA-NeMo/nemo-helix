@@ -279,7 +279,6 @@ def test_writer_upserts_with_compare_and_swap_and_resumes_from_the_watermark() -
 async def test_controller_projects_changed_rows_and_advances_the_watermark(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import nemo_scaled_evals_plugin.controller as controller_module
     from nemo_scaled_evals_plugin.controller import ScaledEvalsJobsController
 
     client = FakeEntityClient()
@@ -306,11 +305,6 @@ async def test_controller_projects_changed_rows_and_advances_the_watermark(
     assert seen == [None, second["updated_at"]]
 
     # The phase is registered only when projection is enabled.
-    monkeypatch.setattr(
-        controller_module,
-        "settings",
-        type("S", (), {"platform_build_jobs_enabled": False, "platform_evaluation_jobs_enabled": False})(),
-    )
-    assert [name for name, _ in controller._phases()] == ["project_evaluations"]
+    assert "project_evaluations" in dict(controller._phases())
     controller._projection = None
-    assert controller._phases() == []
+    assert "project_evaluations" not in dict(controller._phases())

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
+import math
 import socket
 from typing import Any
 
@@ -25,7 +26,7 @@ from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.settings import settings
-from scaled_evals.dispatch.worker import _retry_delay_seconds
+from scaled_evals.dispatch.worker import _retry_delay_seconds, evaluation_run_budget_seconds
 
 LOG = logging.getLogger(__name__)
 
@@ -69,7 +70,12 @@ class EvaluationSubmitter:
             runtime=str(current["runtime"]),
             deadline_seconds=max(
                 1,
-                int(settings.dispatch_run_poll_interval_seconds * settings.dispatch_run_max_polls),
+                math.ceil(
+                    evaluation_run_budget_seconds(
+                        current,
+                        floor=settings.dispatch_run_poll_interval_seconds * settings.dispatch_run_max_polls,
+                    )
+                ),
             ),
         )
         try:
@@ -123,7 +129,7 @@ class EvaluationSubmitter:
 
     def _load(self, evaluation_id: str) -> dict[str, Any] | None:
         with pooled_connection() as conn:
-            return EvaluationRepository(conn).load_status_runtime(evaluation_id)
+            return EvaluationRepository(conn).load_for_dispatch(evaluation_id)
 
     def _record(self, evaluation_id: str, execution_number: int, name: str, uid: str) -> None:
         with pooled_connection() as conn:
@@ -157,8 +163,6 @@ def submit_evaluation_now(evaluation_id: str) -> None:
         evaluation_id: the evaluation whose row was just committed.
 
     """
-    if not settings.platform_evaluation_jobs_enabled:
-        return
     try:
         # Runs on the server's event loop, which owns the client's async HTTP transport.
         loop = anyio.from_thread.run_sync(asyncio.get_running_loop)

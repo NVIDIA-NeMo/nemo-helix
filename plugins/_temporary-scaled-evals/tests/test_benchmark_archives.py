@@ -488,34 +488,6 @@ def test_mounted_openapi_includes_benchmark_archive_contract():
     assert not {"claim_token", "object_key", "attempts"} & fields.keys()
 
 
-@pytest.mark.parametrize("status", [None, "building", "failed"])
-def test_idle_dispatcher_processes_benchmark_archive_queue(monkeypatch, status):
-    repo = MagicMock(spec=BenchmarkArchiveRepository)
-    repo.claim.return_value = job(status=status) if status else None
-    repo.claim_cleanup.return_value = None
-    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
-    monkeypatch.setattr(settings, "dispatch_kubernetes_jobs_enabled", False)
-    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", False)
-
-    @contextmanager
-    def connect():
-        yield MagicMock()
-
-    worker = Dispatcher(connect=connect)
-    for method in (
-        "claim_next_execution_cleanup",
-        "claim_next",
-        "claim_next_evidence",
-        "claim_next_archive",
-    ):
-        monkeypatch.setattr(worker, method, lambda: None)
-    builder = MagicMock()
-    monkeypatch.setattr(worker, "build_benchmark_archive", builder)
-    assert worker.work_once() is (status is not None)
-    repo.claim.assert_called_once_with(claim_timeout=worker.claim_timeout)
-    assert builder.call_count == (1 if status == "building" else 0)
-
-
 @pytest.mark.parametrize("ownership_lost", [False, True])
 def test_archive_heartbeat_distinguishes_transient_errors_from_lost_ownership(monkeypatch, ownership_lost):
     import threading

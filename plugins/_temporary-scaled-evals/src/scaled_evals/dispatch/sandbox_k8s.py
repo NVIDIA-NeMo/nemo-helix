@@ -1505,7 +1505,7 @@ def _resolve_host_path(path: str) -> Path:
     """Resolve a path to an absolute HOST path for docker bind mounts.
 
     Relative paths are anchored to SCALED_EVALS_HOST_DIR (the host checkout root)
-    so they work correctly when resolved from inside the dispatch-worker container.
+    so they work correctly when resolved from inside a container.
     """
     return resolve_host_path(path, host_root=settings.scaled_evals_host_dir)
 
