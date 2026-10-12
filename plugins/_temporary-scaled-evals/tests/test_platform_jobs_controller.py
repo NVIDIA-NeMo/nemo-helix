@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import anyio.to_thread
 import httpx
 import pytest
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 pytest.importorskip("scaled_evals")
@@ -220,20 +220,35 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
     monkeypatch.setattr(controller, "_submit_one_evaluation", _phase("_submit_one_evaluation"))
     monkeypatch.setattr(controller, "_reconcile_one_evaluation", _phase("_reconcile_one_evaluation"))
     monkeypatch.setattr(controller, "_cancel_evaluation_jobs", _phase("_cancel_evaluation_jobs"))
+    for name in (
+        "_cleanup_one_execution",
+        "_build_one_evidence",
+        "_build_one_archive",
+        "_submit_benchmark_archives",
+        "_cleanup_one_benchmark_archive",
+    ):
+        monkeypatch.setattr(controller, name, _phase(name))
     heartbeats: list[int] = []
     monkeypatch.setattr(controller, "_heartbeat", lambda: heartbeats.append(1))
 
     await controller.reconcile()
+    await asyncio.gather(*controller._background.values())
 
     # A failing phase must not abort the pass, skip the heartbeat, or report the
     # controller unhealthy: readiness gates the API, so either would take the
-    # control plane offline over one bad row.
+    # control plane offline over one bad row. Cleanup and finalize backstops run
+    # in the background.
     assert calls == [
         "_submit_one_build",
         "_reconcile_builds",
         "_submit_one_evaluation",
         "_reconcile_one_evaluation",
         "_cancel_evaluation_jobs",
+        "_submit_benchmark_archives",
+        "_cleanup_one_execution",
+        "_build_one_evidence",
+        "_build_one_archive",
+        "_cleanup_one_benchmark_archive",
     ]
     assert heartbeats == [1]
     assert controller.is_healthy
@@ -243,6 +258,7 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
 
     monkeypatch.setattr(controller, "_heartbeat", _unreachable_database)
     await controller.reconcile()
+    await asyncio.gather(*controller._background.values())
 
     assert not controller.is_healthy
 
@@ -366,10 +382,10 @@ async def test_controller_tears_down_orphaned_executions_off_the_pass(monkeypatc
 
     phase = dict(controller._phases())["cleanup_executions"]
     await asyncio.wait_for(phase(), 1)  # a teardown in progress does not hold the pass open
-    running = controller._cleanup
-    assert running is not None and not running.done()
+    running = controller._background["cleanup_executions"]
+    assert not running.done()
     await phase()
-    assert controller._cleanup is running  # one drain at a time
+    assert controller._background["cleanup_executions"] is running  # one drain at a time
     release.set()
     await asyncio.wait_for(running, 5)
     assert claim_kwargs[0]["claim_timeout"] == controller_module.CLEANUP_CLAIM_TIMEOUT_SECONDS
@@ -378,3 +394,63 @@ async def test_controller_tears_down_orphaned_executions_off_the_pass(monkeypatc
         worker_id=controller._worker_id,
         connect=controller_module.pooled_connection,
     )
+
+
+@pytest.mark.asyncio
+async def test_controller_owns_evidence_and_archive_queues(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", True)
+    monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
+    controller = ScaledEvalsJobsController()
+    jobs = AsyncMock()
+    controller._jobs = cast(Any, jobs)
+    phases = dict(controller._phases())
+    for name in ("build_evidence", "build_archives", "submit_benchmark_archives", "cleanup_benchmark_archives"):
+        assert name in phases
+
+    dispatcher = MagicMock()
+    dispatcher.claim_next_evidence.side_effect = ["eval_1", None]
+    dispatcher.claim_next_archive.side_effect = [None]
+    controller._dispatcher = dispatcher
+    await phases["build_evidence"]()
+    await phases["build_archives"]()
+    await asyncio.gather(*controller._background.values())
+    dispatcher.build_evidence.assert_called_once_with("eval_1")
+    dispatcher.build_archive.assert_not_called()
+    # The backstop leaves freshly terminal rows to the evaluation Job.
+    assert dispatcher.claim_next_evidence.call_args.kwargs == {"min_age": controller_module.FINALIZE_GRACE_SECONDS}
+    assert dispatcher.claim_next_archive.call_args.kwargs == {"min_age": controller_module.FINALIZE_GRACE_SECONDS}
+
+    monkeypatch.setattr(
+        controller,
+        "_list_claimable_benchmark_archives",
+        lambda: [
+            {"benchmark_run_id": "run_1", "generation": "aaaaaaaa-1", "attempts": 0},
+            {"benchmark_run_id": "run_2", "generation": "bbbbbbbb-2", "attempts": 2},
+            {"benchmark_run_id": "run_3", "generation": "cccccccc-3", "attempts": 1},
+        ],
+    )
+    conflict = ConflictError(httpx.Response(409, request=httpx.Request("POST", "http://jobs")))
+    create_job = AsyncMock(side_effect=[None, conflict, conflict])
+    monkeypatch.setattr(controller.submitter, "create_job", create_job)
+    jobs.get_job_status.side_effect = [
+        SimpleNamespace(data=lambda: SimpleNamespace(status=HelixJobStatus.ERROR)),
+        SimpleNamespace(data=lambda: SimpleNamespace(status=HelixJobStatus.ACTIVE)),
+    ]
+    skip = MagicMock()
+    monkeypatch.setattr(controller, "_skip_benchmark_archive_attempt", skip)
+    await phases["submit_benchmark_archives"]()
+    assert [call.args[0] for call in create_job.call_args_list] == [
+        "scaled-evals-benchmark-archive-run_1-aaaaaaaa-a1",
+        "scaled-evals-benchmark-archive-run_2-bbbbbbbb-a3",
+        "scaled-evals-benchmark-archive-run_3-cccccccc-a2",
+    ]
+    assert create_job.call_args.args[2].benchmark_run_id == "run_3"
+    # Only the attempt whose Job ended without claiming is counted.
+    skip.assert_called_once_with({"benchmark_run_id": "run_2", "generation": "bbbbbbbb-2", "attempts": 2})
+
+    repo = MagicMock()
+    repo.claim_cleanup.side_effect = ["run_1", None]
+    monkeypatch.setattr(controller_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    await phases["cleanup_benchmark_archives"]()
+    await asyncio.gather(*controller._background.values())
+    dispatcher.cleanup_benchmark_archives.assert_called_once_with("run_1")

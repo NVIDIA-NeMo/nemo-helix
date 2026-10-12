@@ -146,12 +146,12 @@ def test_idle_dispatcher_reconciles_crashed_upload(monkeypatch):
     monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
     monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveRepository", lambda conn: repo)
     monkeypatch.setattr(settings, "dispatch_kubernetes_jobs_enabled", False)
+    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", False)
     monkeypatch.setattr(artifacts, "list_objects", lambda prefix: [{"key": KEY}, {"key": OTHER}])
     deleted = MagicMock()
     monkeypatch.setattr(artifacts, "delete_object", deleted)
     worker = Dispatcher(connect=connect)
     for method in (
-        # Drained first now that Platform Jobs is the default execution path.
         "claim_next_execution_cleanup",
         "claim_next",
         "claim_next_evidence",
