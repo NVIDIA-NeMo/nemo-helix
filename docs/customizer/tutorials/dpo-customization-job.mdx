@@ -13,6 +13,8 @@ This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](h
 
 **Time to complete:** approximately 45-60 minutes. Job duration increases with model and dataset size.
 
+> **Known issue in v0.7.0 and v0.7.1:** DPO jobs fail shortly after the training pod starts with `KeyError: 'checkpoint'`, because the generated DPO configuration omits the `policy.dtensor_cfg.checkpoint` section that the pinned NeMo-RL version requires. There is no workaround in the 0.7 release line. DPO jobs run on v0.6.0.
+
 ## Prerequisites
 
 Before starting this tutorial, ensure you have:
