@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import List
+from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -28,6 +28,29 @@ from nhx.core.models.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_CREATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES = {
+    "deployment_config": {
+        "summary": "Create a NIM deployment config",
+        "value": {
+            "name": "nim-config-v1",
+            "engine": "nim",
+            "model_spec": {},
+            "executor_config": {"gpu": 1},
+        },
+    }
+}
+
+_UPDATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES = {
+    "deployment_config": {
+        "summary": "Update a NIM deployment config",
+        "value": {
+            "engine": "nim",
+            "model_spec": {},
+            "executor_config": {"gpu": 1},
+        },
+    }
+}
 
 
 @router.get(
@@ -89,7 +112,10 @@ async def list_deployment_configs(
 )
 async def create_deployment_config(
     workspace: str,
-    config_input: CreateModelDeploymentConfigRequest,
+    config_input: Annotated[
+        CreateModelDeploymentConfigRequest,
+        Body(openapi_examples=_CREATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES),
+    ],
     service: ModelDeploymentConfigService = Depends(get_model_deployment_config_service),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> ModelDeploymentConfig:
@@ -243,7 +269,10 @@ async def get_deployment_config_version(
 async def update_deployment_config(
     workspace: str,
     name: str,
-    config_input: UpdateModelDeploymentConfigRequest,
+    config_input: Annotated[
+        UpdateModelDeploymentConfigRequest,
+        Body(openapi_examples=_UPDATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES),
+    ],
     service: ModelDeploymentConfigService = Depends(get_model_deployment_config_service),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> ModelDeploymentConfig:

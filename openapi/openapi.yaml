@@ -1185,6 +1185,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EntityCreateInput'
+            examples:
+              entity:
+                summary: Create an entity with required data
+                value:
+                  name: my-config
+                  data:
+                    target_id: llama-2-7b
+                    training_options:
+                      learning_rate: 0.01
       responses:
         '201':
           description: Successful Response
@@ -1429,6 +1438,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EntityUpdate'
+            examples:
+              entity:
+                summary: Update an entity with required data
+                value:
+                  data:
+                    target_id: llama-2-7b
+                    training_options:
+                      learning_rate: 0.02
       responses:
         '200':
           description: Successful Response
@@ -2251,6 +2268,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt"
+
+          response = requests.head(url)
+
+          response.raise_for_status()
+
+          print(response.status_code)
+
+          print(response.headers)'
+      - lang: JavaScript
+        source: "const response = await fetch(\n  \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          ,\n  { method: \"HEAD\" },\n);\n\nif (!response.ok) {\n  throw new Error(`HTTP\
+          \ ${response.status}`);\n}\nconsole.log(response.status);\nconsole.log(Object.fromEntries(response.headers));"
+      - lang: Go
+        source: "package main\n\nimport (\n  \"fmt\"\n  \"net/http\"\n)\n\nfunc main()\
+          \ {\n  req, err := http.NewRequest(\"HEAD\", \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          , nil)\n  if err != nil {\n    panic(err)\n  }\n  res, err := http.DefaultClient.Do(req)\n\
+          \  if err != nil {\n    panic(err)\n  }\n  defer res.Body.Close()\n\n  fmt.Println(res.Status)\n\
+          \  fmt.Println(res.Header)\n}"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          )\nresponse = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme ==\
+          \ \"https\") do |http|\n  http.request(Net::HTTP::Head.new(uri))\nend\n\n\
+          puts response.code\nputs response.to_hash"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt");
+
+          curl_setopt($ch, CURLOPT_NOBODY, true);
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status;'
     get:
       tags:
       - Files
@@ -5610,6 +5673,21 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateHelixJobRequest'
+            examples:
+              job:
+                summary: Create a CPU container job
+                value:
+                  name: hello-world
+                  spec: {}
+                  source: api-reference
+                  platform_spec:
+                    steps:
+                    - name: run
+                      executor:
+                        provider: cpu
+                        container:
+                          image: python:3.11
+                      config: {}
       responses:
         '201':
           description: Successful Response
@@ -6789,6 +6867,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateModelDeploymentConfigRequest'
+            examples:
+              deployment_config:
+                summary: Create a NIM deployment config
+                value:
+                  name: nim-config-v1
+                  engine: nim
+                  model_spec: {}
+                  executor_config:
+                    gpu: 1
       responses:
         '201':
           description: Create a new model deployment configuration
@@ -6945,6 +7032,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateModelDeploymentConfigRequest'
+            examples:
+              deployment_config:
+                summary: Update a NIM deployment config
+                value:
+                  engine: nim
+                  model_spec: {}
+                  executor_config:
+                    gpu: 1
       responses:
         '201':
           description: Update a model deployment configuration (creates new version)
@@ -8481,6 +8576,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/HelixSecretUpdateRequest'
+            examples:
+              secret:
+                summary: Update secret metadata and value
+                value:
+                  description: Updated secret description
+                  value: new-secret-value
       responses:
         '200':
           description: Successful Response
