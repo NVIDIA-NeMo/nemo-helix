@@ -92,7 +92,7 @@ nemo agents create --agent agent.yaml --workspace <workspace>
   - trigger: "/helix-<name>"
     description: "<what it does>"
     workspace: <workspace>          # must match where you created the agent
-    agent: <your-agent>             # the entity name from step 3
+    agent: <your-agent>             # the entity name from step 2
     image: <published task image>   # nemo agents package output (NGC ref)
     allowed_repos: [ "<owner>/<repo>" ]
 ```

@@ -17,13 +17,14 @@ permissions:
 jobs:
   dispatch:
     name: Dispatch Helix agent
-    # Gate on: a PR comment (not an issue), a `/helix-` trigger token, AND a commenter
-    # with write access — issue_comment runs in the base repo with its secrets, so an
-    # author_association check is what stops an arbitrary user from firing the agent.
+    # Gate on: a PR comment (not an issue), a `/helix-` trigger token, AND an org
+    # OWNER/MEMBER commenter — issue_comment runs in the base repo with its secrets, so
+    # this stops an arbitrary external user from firing the agent. (COLLABORATOR dropped:
+    # it doesn't imply write access. A live repo-permission check is a tracked follow-up.)
     if: >-
       github.event.issue.pull_request != null &&
       startsWith(github.event.comment.body, '/helix-') &&
-      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+      contains(fromJSON('["OWNER", "MEMBER"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
       - name: Check out workflow revision
