@@ -17,6 +17,17 @@ export interface ModelSelection {
   entity?: ModelEntity;
 }
 
+/**
+ * Why a model cannot be picked right now. Returned per row so the dropdown can show the
+ * model as present-but-unavailable, rather than the caller filtering it out -- a model
+ * missing from the list is indistinguishable from one that was never trained.
+ */
+export interface ModelAvailability {
+  disabled: boolean;
+  /** Shown beneath the model name. Keep it to a few words; the row is one line tall. */
+  reason?: string;
+}
+
 export interface ModelSelectV2Props {
   /** Currently selected model (and optional adapter) */
   value: ModelSelection | null;
@@ -46,6 +57,13 @@ export interface ModelSelectV2Props {
   doneLoadingMessage?: string;
   /** Copy shown when no models match. */
   emptyMessage?: string;
+  /**
+   * Per-model availability. Return a disabled result to render the model as a greyed,
+   * unselectable row carrying {@link ModelAvailability.reason}; return nothing (or a
+   * non-disabled result) to leave the row selectable. Omit the prop entirely and every
+   * row is selectable, as before.
+   */
+  getAvailability?: (model: ModelEntity) => ModelAvailability | undefined;
   /** Whether the first page of models is still loading */
   loading?: boolean;
   /** Whether the component is disabled */

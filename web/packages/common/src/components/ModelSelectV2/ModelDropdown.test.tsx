@@ -124,6 +124,32 @@ describe('ModelDropdown', () => {
     });
   });
 
+  describe('availability', () => {
+    it('lists an unavailable model with its reason instead of dropping it', async () => {
+      renderOpen({
+        getAvailability: (model) =>
+          model.name === 'llama-3.1-8b'
+            ? { disabled: true, reason: 'Fine-tuning active — not ready to evaluate' }
+            : undefined,
+      });
+
+      // The selectable row keeps its submenu trigger; the unavailable one does not.
+      await waitFor(() => expect(listedModels()).toEqual(['nemotron-8b']));
+
+      const unavailable = screen.getByTestId('model-dropdown-item-unavailable');
+      expect(unavailable).toHaveTextContent('llama-3.1-8b');
+      expect(unavailable).toHaveTextContent('Fine-tuning active — not ready to evaluate');
+      expect(unavailable).toBeDisabled();
+    });
+
+    it('leaves every row selectable when no availability is supplied', async () => {
+      renderOpen();
+
+      await waitFor(() => expect(listedModels()).toHaveLength(2));
+      expect(screen.queryByTestId('model-dropdown-item-unavailable')).not.toBeInTheDocument();
+    });
+  });
+
   describe('paging', () => {
     it('asks for the next page while more remain', async () => {
       const onLoadMore = vi.fn();

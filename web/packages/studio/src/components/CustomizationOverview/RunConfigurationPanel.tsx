@@ -5,6 +5,7 @@ import { KVPair } from '@nemo/common/src/components/KVPair';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { Button, Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { GrpoRunConfigPairs } from '@studio/components/CustomizationOverview/GrpoRunConfigPairs';
+import { OutputModelValue } from '@studio/components/CustomizationOverview/OutputModelValue';
 import type { CustomizationTrainingTelemetry } from '@studio/types/customization';
 import { isGrpoJob, type CustomizationJob } from '@studio/util/customizationBackend';
 import { getBaseModel } from '@studio/util/customizations';
@@ -15,12 +16,14 @@ interface Props {
   customization: CustomizationJob;
   telemetry: CustomizationTrainingTelemetry;
   onViewConfiguration: () => void;
+  workspace: string;
 }
 
 export const RunConfigurationPanel: FC<Props> = ({
   customization,
   telemetry,
   onViewConfiguration,
+  workspace,
 }) => (
   <Panel
     elevation="high"
@@ -50,7 +53,9 @@ export const RunConfigurationPanel: FC<Props> = ({
         <KVPair
           orientation="vertical"
           label="Output Model"
-          value={customization.spec?.output?.name ?? '-'}
+          value={
+            <OutputModelValue workspace={workspace} modelName={customization.spec?.output?.name} />
+          }
         />
         <KVPair
           orientation="vertical"

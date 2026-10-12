@@ -3,7 +3,10 @@
 
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import { ModelDropdownItem } from '@nemo/common/src/components/ModelSelectV2/ModelDropdownItem';
-import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
+import type {
+  ModelAvailability,
+  ModelSelection,
+} from '@nemo/common/src/components/ModelSelectV2/types';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
@@ -39,6 +42,8 @@ export interface ModelDropdownListProps {
   /** Footer copy once every page has loaded. Omit to render nothing. */
   doneLoadingMessage?: string;
   emptyMessage?: string;
+  /** Per-model availability. A disabled result renders the row greyed and unselectable. */
+  getAvailability?: (model: ModelEntity) => ModelAvailability | undefined;
 }
 
 /**
@@ -58,6 +63,7 @@ export const ModelDropdownList: FC<ModelDropdownListProps> = ({
   isLoadingMore = false,
   doneLoadingMessage,
   emptyMessage = 'No models found',
+  getAvailability,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -131,14 +137,21 @@ export const ModelDropdownList: FC<ModelDropdownListProps> = ({
         </Flex>
       </DropdownHeading>
     ) : (
-      <ModelDropdownItem
-        model={row.model}
-        modelUrn={row.urn}
-        isSelected={value?.model === row.urn}
-        selectedAdapter={value?.model === row.urn ? value.adapter : undefined}
-        onSelect={onSelect}
-        hideAdapters={hideAdapters}
-      />
+      (() => {
+        const availability = getAvailability?.(row.model);
+        return (
+          <ModelDropdownItem
+            model={row.model}
+            modelUrn={row.urn}
+            isSelected={value?.model === row.urn}
+            selectedAdapter={value?.model === row.urn ? value.adapter : undefined}
+            onSelect={onSelect}
+            hideAdapters={hideAdapters}
+            disabled={availability?.disabled}
+            disabledReason={availability?.reason}
+          />
+        );
+      })()
     );
 
   if (rows.length === 0) {

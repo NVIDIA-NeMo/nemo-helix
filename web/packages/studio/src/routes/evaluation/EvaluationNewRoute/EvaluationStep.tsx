@@ -19,10 +19,16 @@ export const EvaluationStep: FC = () => {
 
   return (
     <Stack gap="density-2xl" className="w-full min-w-0">
+      {/*
+        `showUnavailable` so a model that is not ready yet is still listed, disabled and
+        with the reason. Omitting it is what left a user who had just fine-tuned a model
+        searching an empty list with no way to tell whether the run was still going.
+      */}
       <JudgeModelSelect<EvaluationFormValues>
         formFieldName="model"
         slotLabel="Model to Evaluate"
         placeholder="Select a model"
+        showUnavailable
       />
 
       <Card className="min-w-0 p-density-lg">

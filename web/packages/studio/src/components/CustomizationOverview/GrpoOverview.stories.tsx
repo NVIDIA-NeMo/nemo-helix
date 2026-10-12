@@ -48,6 +48,7 @@ const overview = (details: CustomizationStatusDetailsWithMetrics) => (
       customization={grpoCustomizationJob}
       telemetry={telemetry}
       onViewConfiguration={() => {}}
+      workspace="default"
     />
   </Stack>
 );
@@ -103,6 +104,7 @@ export const Failed: Story = {
           customization={failedGrpoCustomizationJob}
           telemetry={{ step: 300, maxSteps: 500 }}
           onViewConfiguration={() => {}}
+          workspace="default"
         />
       </Stack>
     );

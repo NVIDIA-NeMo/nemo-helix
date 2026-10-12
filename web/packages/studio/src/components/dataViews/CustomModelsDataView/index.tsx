@@ -35,6 +35,7 @@ import {
   FINETUNING_TYPE_FILTER_OPTIONS,
   HAS_ADAPTERS,
 } from '@studio/components/dataViews/CustomModelsDataView/constants';
+import { CustomizationStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/CustomizationStatusBadge';
 import { getDeployAction } from '@studio/components/dataViews/CustomModelsDataView/deployAction';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { KindTag } from '@studio/components/dataViews/CustomModelsDataView/KindTag';
@@ -42,7 +43,16 @@ import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import type { ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
 import { useModelDeploymentStatuses } from '@studio/hooks/useModelDeploymentStatuses';
-import { getIntakeTracesRoute, getNewCustomizationJobRoute } from '@studio/routes/utils';
+import {
+  toPendingModelEntity,
+  usePendingCustomizations,
+  type PendingCustomization,
+} from '@studio/hooks/usePendingCustomizations';
+import {
+  getIntakeTracesRoute,
+  getNewCustomizationJobRoute,
+  getWorkspaceCustomizationJobDetailsRoute,
+} from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
@@ -113,6 +123,33 @@ export interface CustomModelsDataViewProps {
 type ModelTableRow = ModelEntity & {
   subRows?: ModelTableRow[];
   _parentModel?: ModelEntity;
+  /**
+   * Set on placeholder rows standing in for a fine-tuning run that has not registered
+   * its model yet. Such a row has no entity behind it: it cannot be opened in the model
+   * panel, deployed, or deleted, and its only action is the job that will produce it.
+   */
+  _pendingJob?: PendingCustomization;
+};
+
+/**
+ * A run in flight, shaped as a table row.
+ *
+ * The model entity is created only once training finishes, so without this the list is
+ * empty for the whole duration of a run -- which reads as "nothing was ever submitted"
+ * rather than "it is still training".
+ */
+const toPendingRow = (pending: PendingCustomization): ModelTableRow => ({
+  ...toPendingModelEntity(pending),
+  _pendingJob: pending,
+});
+
+/** Placeholder rows match the search box on the job's name as well as the model's. */
+const pendingMatchesSearch = (pending: PendingCustomization, search: string): boolean => {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return true;
+  return [pending.outputModelName, pending.jobName].some((candidate) =>
+    candidate.toLowerCase().includes(needle)
+  );
 };
 
 export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
@@ -190,6 +227,36 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
         : undefined,
     }));
   }, [modelsResponse?.data]);
+
+  const { pending } = usePendingCustomizations(workspace);
+
+  /**
+   * Placeholder rows are a first-page concern only. They are client-side additions the
+   * API knows nothing about, so paging past the first page would show them again on top
+   * of a later slice of real models. Column filters other than the name search are also
+   * skipped: a run in flight has no deployment status and no reliably-recorded finetuning
+   * type to filter on, so it is better left out than wrongly matched.
+   */
+  const pendingRows = useMemo<ModelTableRow[]>(() => {
+    if (dataViewState.pagination.state.pageIndex !== 0) return [];
+    if (dataViewState.debouncedColumnFilters.length > 0) return [];
+    const existingNames = new Set((modelsResponse?.data ?? []).map((model) => model.name));
+    const search = dataViewState.debouncedSearchBar ?? '';
+    return pending
+      .filter((p) => !existingNames.has(p.outputModelName) && pendingMatchesSearch(p, search))
+      .map(toPendingRow);
+  }, [
+    dataViewState.debouncedColumnFilters.length,
+    dataViewState.debouncedSearchBar,
+    dataViewState.pagination.state.pageIndex,
+    modelsResponse?.data,
+    pending,
+  ]);
+
+  const rows = useMemo<ModelTableRow[]>(
+    () => [...pendingRows, ...tableData],
+    [pendingRows, tableData]
+  );
 
   const adapterMap = useMemo(() => {
     const map = new Map<string, Map<string, Adapter>>();
@@ -309,12 +376,15 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           // there is nothing for the API to sort or filter on.
           enableSorting: false,
           size: 150,
-          cell: ({ row }) => (
-            <DeploymentStatusBadge
-              state={deploymentStatuses.get(row.original.id)}
-              isAdapter={Boolean(row.original._parentModel)}
-            />
-          ),
+          cell: ({ row }) =>
+            row.original._pendingJob ? (
+              <CustomizationStatusBadge status={row.original._pendingJob.status} />
+            ) : (
+              <DeploymentStatusBadge
+                state={deploymentStatuses.get(row.original.id)}
+                isAdapter={Boolean(row.original._parentModel)}
+              />
+            ),
         }),
         accessor('created_at', {
           id: 'created_at',
@@ -341,6 +411,20 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
           rowActions: (row: ModelTableRow): DropdownEntry[] => {
+            // Nothing exists to act on yet, so the run that will create it is the one link.
+            const pendingJob = row._pendingJob;
+            if (pendingJob) {
+              return [
+                {
+                  children: 'View fine-tuning job',
+                  onSelect: () =>
+                    navigate(
+                      getWorkspaceCustomizationJobDetailsRoute(workspace, pendingJob.jobName)
+                    ),
+                },
+              ];
+            }
+
             const isAdapter = Boolean(row._parentModel);
             const parentModel = row._parentModel;
             // Adapter rows deploy their parent: an adapter is loaded by whatever serves
@@ -427,7 +511,9 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           </Tooltip>
         )}
         onRowClick={(row: ModelTableRow) => {
-          if (row._parentModel) {
+          if (row._pendingJob) {
+            navigate(getWorkspaceCustomizationJobDetailsRoute(workspace, row._pendingJob.jobName));
+          } else if (row._parentModel) {
             const adapter = adapterMap.get(row._parentModel.id)?.get(row.name);
             onRowClick?.(row._parentModel, 'model-details', adapter);
           } else {
@@ -439,8 +525,11 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
             placeholder: 'Search Custom Models...',
           },
           DataViewRoot: {
-            data: tableData,
-            totalCount: modelsResponse?.pagination?.total_results,
+            data: rows,
+            totalCount:
+              modelsResponse?.pagination?.total_results === undefined
+                ? undefined
+                : modelsResponse.pagination.total_results + pendingRows.length,
             requestStatus: isError ? 'error' : isLoading ? 'loading' : undefined,
             reactTableOptions: {
               getRowCanExpand: (row: { original: ModelTableRow }) =>

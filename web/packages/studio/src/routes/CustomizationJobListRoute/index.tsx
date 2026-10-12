@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
+import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsDataView';
@@ -12,8 +13,8 @@ import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobFo
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationResultsRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { type FC, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { type FC, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 
 export const CustomizationJobListRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -29,6 +30,29 @@ export const CustomizationJobListRoute: FC = () => {
   });
 
   const { jobName: customizationJobName } = useCustomizationJobForModel(workspace, selectedModel);
+
+  // `?model=` opens a model's panel directly, so anything outside this page -- a finished
+  // job linking to the model it produced, most of all -- can point at one.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedModel = searchParams.get('model');
+  const { data: linkedModel } = useModelsGetModel(workspace, requestedModel ?? '', undefined, {
+    query: { enabled: Boolean(requestedModel) && !selectedModel, retry: false },
+  });
+
+  useEffect(() => {
+    if (!linkedModel) return;
+    setSelectedModel(linkedModel);
+    setSelectedTab('model-details');
+    // Consumed, so reopening the panel after the user closes it takes another click
+    // rather than happening on every render.
+    setSearchParams(
+      (params) => {
+        params.delete('model');
+        return params;
+      },
+      { replace: true }
+    );
+  }, [linkedModel, setSearchParams]);
 
   return (
     <AccessibleTitle title={`Fine-tuning for ${workspace}`}>

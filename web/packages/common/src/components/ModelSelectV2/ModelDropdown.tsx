@@ -62,6 +62,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
   hideAdapters = false,
   fullWidth = false,
   dropdownSide = 'bottom',
+  getAvailability,
   open,
   onOpenChange,
 }) => {
@@ -205,6 +206,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
               isLoadingMore={isLoadingMore}
               doneLoadingMessage={doneLoadingMessage}
               emptyMessage={emptyMessage}
+              getAvailability={getAvailability}
             />
           </>
         )}

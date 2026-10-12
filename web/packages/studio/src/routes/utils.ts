@@ -135,8 +135,16 @@ const getModelRouteParamsFromEntityRef = (model: NamedEntityRef): ModelRoutePara
   return { modelNamespace: workspace, modelName: name };
 };
 
-export const getCustomizationJobListRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.customizationJobList, { workspace });
+/**
+ * The Fine-tuning page, optionally with a model's detail panel already open.
+ *
+ * A model entity has no route of its own -- it is shown in a side panel over this list --
+ * so `model` is how anything outside the page links to one, e.g. a finished job linking
+ * to the model it produced.
+ */
+export const getCustomizationJobListRoute = (workspace: string, options?: { model?: string }) => {
+  const path = generatePath(ROUTES.workspace.customizationJobList, { workspace });
+  return options?.model ? `${path}?model=${encodeURIComponent(options.model)}` : path;
 };
 
 export const getWorkspacePathParamsFromName = (workspace: string): WorkspacePathParams => {
@@ -208,9 +216,10 @@ export const getWorkspaceCustomizationJobDetailsRoute = (
   });
 };
 
-export const getWorkspaceCustomizationJobListRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.customizationJobList, { workspace });
-};
+export const getWorkspaceCustomizationJobListRoute = (
+  workspace: string,
+  options?: { model?: string }
+) => getCustomizationJobListRoute(workspace, options);
 
 export const getWorkspaceEvaluationRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.evaluation, { workspace });

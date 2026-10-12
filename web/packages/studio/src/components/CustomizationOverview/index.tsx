@@ -122,6 +122,7 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
         customization={customization}
         telemetry={telemetry}
         onViewConfiguration={() => setOpenConfigSidePanel(true)}
+        workspace={workspace}
       />
 
       <CustomizationConfigSidePanel

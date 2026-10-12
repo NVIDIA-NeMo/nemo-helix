@@ -12,6 +12,7 @@ import {
   DropdownSubContent,
   DropdownSubTrigger,
   Flex,
+  Stack,
   Text,
 } from '@nvidia/foundations-react-core';
 import { Check } from 'lucide-react';
@@ -27,6 +28,13 @@ interface ModelDropdownItemProps {
   selectedAdapter?: string;
   onSelect: (selection: ModelSelection) => void;
   hideAdapters?: boolean;
+  /** Render the model as present but unselectable. */
+  disabled?: boolean;
+  /**
+   * Why it cannot be selected, shown beneath the name. Passed as a string rather than an
+   * availability object so the row keeps its shallow memo.
+   */
+  disabledReason?: string;
 }
 
 const formatDate = (dateString: string | undefined): string => {
@@ -115,6 +123,29 @@ const sortAdaptersByNewest = (adapters: Adapter[]): Adapter[] =>
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
+/**
+ * A model the user can see but not pick, with the reason in place of the submenu.
+ *
+ * Showing it at all is the point: a model omitted from the list is indistinguishable
+ * from one that does not exist, which leaves someone waiting on a fine-tuning run with
+ * nothing to tell them whether it is still training or never started.
+ */
+const UnavailableModelItem: FC<{ name: string | undefined; reason?: string }> = ({
+  name,
+  reason,
+}) => (
+  <DropdownItem disabled data-testid="model-dropdown-item-unavailable">
+    <Stack gap="0" className="min-w-0 w-full text-left">
+      <ModelName name={name} />
+      {reason && (
+        <Text kind="body/regular/sm" className="text-secondary truncate">
+          {reason}
+        </Text>
+      )}
+    </Stack>
+  </DropdownItem>
+);
+
 const ModelDropdownItemImpl: FC<ModelDropdownItemProps> = ({
   model,
   modelUrn,
@@ -122,9 +153,15 @@ const ModelDropdownItemImpl: FC<ModelDropdownItemProps> = ({
   selectedAdapter,
   onSelect,
   hideAdapters = false,
+  disabled = false,
+  disabledReason,
 }) => {
   const [hasOpened, handleOpenChange] = useOpenedOnce();
   const hasAdapters = !hideAdapters && model.adapters && model.adapters.length > 0;
+
+  if (disabled) {
+    return <UnavailableModelItem name={model.name} reason={disabledReason} />;
+  }
 
   if (!hasAdapters) {
     return (
