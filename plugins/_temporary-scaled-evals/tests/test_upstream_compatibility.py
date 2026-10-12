@@ -7,62 +7,16 @@ from __future__ import annotations
 
 import json
 import runpy
-import tomllib
 from pathlib import Path
 
 import pytest
 
 try:
-    from scaled_evals.cli.main import _default_switchyard_dockerfile_path
-    from scaled_evals.dispatch.switchyard import SwitchyardProfileConfig, _routing_profiles_text
     from scaled_evals.harbor_runners import resolve_harbor_runner, supported_harbor_versions
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-
-
-def test_switchyard_defaults_to_native_rust_server_and_parses_toml(tmp_path: Path) -> None:
-    dockerfile = tmp_path / "benchmark" / "switchyard-rust-server.Dockerfile"
-    dockerfile.parent.mkdir()
-    dockerfile.write_text("FROM rust:1.96.1-bookworm\n")
-
-    assert (
-        _default_switchyard_dockerfile_path(tmp_path, context_path=".", requested=None)
-        == "benchmark/switchyard-rust-server.Dockerfile"
-    )
-
-    rendered = _routing_profiles_text(
-        SwitchyardProfileConfig(
-            routing_config_toml="""
-# preserved
-[llm_clients.primary]
-format = "openai_chat_completions"
-extra_headers = { x-inference-priority = "interactive", X-Existing = "retained" }
-
-[llm_clients.fallback]
-format = "anthropic_messages"
-
-[tool.ruff]
-[tool.ruff.lint.a]
-[tool.ruff.lint]
-[[tool.poetry.source]]
-[tool.ruff.lint.b]
-"""
-        )
-    )
-    config = tomllib.loads(rendered)
-    assert "# preserved" in rendered
-    assert config["llm_clients"]["primary"]["extra_headers"] == {
-        "X-Existing": "retained",
-        "X-Inference-Priority": "batch",
-    }
-    assert config["llm_clients"]["fallback"]["extra_headers"] == {"X-Inference-Priority": "batch"}
-    assert config["tool"]["ruff"]["lint"]["a"] == {}
-    assert config["tool"]["ruff"]["lint"]["b"] == {}
-
-    with pytest.raises(ValueError, match="routing config formats are mutually exclusive"):
-        SwitchyardProfileConfig(routing_config_toml="schema_version = 1", routing_profiles={"routes": {}})
 
 
 def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:

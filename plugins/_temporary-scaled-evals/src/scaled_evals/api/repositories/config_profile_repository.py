@@ -102,46 +102,6 @@ class ConfigProfileRepository:
             )
             return cur.fetchone()
 
-    def find_switchyard_publish(
-        self,
-        *,
-        source_project: str,
-        source_ref: str,
-        context_path: str,
-        context_hash: str,
-        builder_source_commit: str | None = None,
-        owner_id: str | None = None,
-    ) -> dict | None:
-        owner_filter = "" if owner_id is None else " AND owner_id = %s"
-        owner_params: list[Any] = [] if owner_id is None else [owner_id]
-        with self.conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT {CONFIG_PROFILE_COLUMNS}
-                FROM config_profiles
-                WHERE deleted_at IS NULL
-                  AND type = 'switchyard'
-                  AND config->>'source_project' = %s
-                  AND config->>'source_ref' = %s
-                  AND COALESCE(config->>'context_path', '.') = %s
-                  AND config->>'context_hash' = %s
-                  AND COALESCE(config->>'builder_source_commit', '') = %s
-                  AND COALESCE(config->>'image', '') <> ''
-                  AND COALESCE(config->>'image_digest', '') <> ''{owner_filter}
-                ORDER BY created_at DESC, id DESC
-                LIMIT 1
-                """,
-                (
-                    source_project,
-                    source_ref,
-                    context_path,
-                    context_hash,
-                    builder_source_commit or "",
-                    *owner_params,
-                ),
-            )
-            return cur.fetchone()
-
     def update(
         self,
         profile_id: str,
@@ -211,12 +171,11 @@ class ConfigProfileRepository:
                   AND (
                       framework_profile_id = %s
                       OR harbor_profile_id = %s
-                      OR switchyard_profile_id = %s
                       OR intake_profile_id = %s
                   )
                 LIMIT 1
                 """,
-                (profile_id, profile_id, profile_id, profile_id),
+                (profile_id, profile_id, profile_id),
             )
             return cur.fetchone() is not None
 

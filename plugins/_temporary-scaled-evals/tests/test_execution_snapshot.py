@@ -124,3 +124,16 @@ def test_dispatch_rejects_rotated_credential_before_decryption(monkeypatch) -> N
                 }
             },
         )
+
+
+def test_dispatch_rejects_two_credentials_for_one_provider(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        "scaled_evals.dispatch.credentials.CredentialRepository.load_for_dispatch",
+        lambda *_args, **_kwargs: [
+            {"id": cred_id, "provider": "openai", "payload_kind": "key", "encrypted_payload": b"not-decrypted"}
+            for cred_id in ("cred_1", "cred_2")
+        ],
+    )
+
+    with pytest.raises(ValueError, match="multiple openai credentials are not supported"):
+        materialize_credential_env(object(), {"policy": "cred_1", "judge": "cred_2"})

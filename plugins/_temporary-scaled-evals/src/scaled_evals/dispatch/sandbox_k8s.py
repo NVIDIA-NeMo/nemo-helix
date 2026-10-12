@@ -844,12 +844,7 @@ def _bind_network_policy(
     network_policy: str,
     network_policy_config: Mapping[str, Any],
 ) -> str:
-    """Make the evaluation's direct-egress policy authoritative.
-
-    Switchyard may add a separate, evaluation-scoped grant to its own proxy.
-    Kubernetes combines matching policies additively, so this function owns
-    only direct sandbox egress and never infers a Switchyard book mode.
-    """
+    """Make the evaluation's direct-egress policy authoritative."""
     config = yaml.safe_load(config_text) or {}
     if not isinstance(config, dict):
         raise ValueError("rendered Harbor config must be an object")
@@ -1591,19 +1586,37 @@ def make_sandbox_k8s_docker_terminator() -> Callable[[LaunchHandle], None]:
     return terminate
 
 
-def _kubeconfig_flag(recorded_path: object) -> list[str]:
-    """Return the ``--kubeconfig`` flag for a cleanup, or nothing if it cannot apply.
+def _kubectl_target_flags(recorded_path: object, context: object, api_server: object = None) -> list[str]:
+    """Return the ``--kubeconfig`` and ``--context`` flags for a cleanup.
 
-    The recorded path is captured when the sandbox launches. Under Platform Jobs
-    that happens inside a Job pod whose ``$HOME`` differs from the dispatch
-    worker that later drains the cleanup, so the path can name a file that only
-    ever existed on another pod's filesystem. Passing it anyway fails every
-    kubectl call and wedges the evaluation. Falling back to no flag lets kubectl
-    resolve through the cleanup process's own ``KUBECONFIG``.
+    Both are captured when the sandbox launches. Under Platform Jobs that
+    happens inside a Job pod, and the controller that later cleans up runs in
+    another pod, so the path can name a file that only ever existed on the
+    Job pod's filesystem. The context is defined by that file, so it is dropped
+    with it; otherwise kubectl fails every call on an unknown context and the
+    evaluation wedges. With neither flag, kubectl resolves through the cleanup
+    process's own ``KUBECONFIG`` or its in-cluster service account.
+
+    That fallback reaches the same cluster only for the Job's service-account
+    context, or for a user-token kubeconfig whose recorded ``api_server`` is the
+    in-cluster API. Any other context can name another API server; cleanup there
+    treats "not found" as done and would orphan the sandbox, so it raises instead.
+
+    Raises:
+        RuntimeError: The recorded kubeconfig is missing and its target is not
+            known to be this cluster.
     """
     if recorded_path and Path(str(recorded_path)).exists():
-        return ["--kubeconfig", str(recorded_path)]
-    return []
+        flags = ["--kubeconfig", str(recorded_path)]
+        if context:
+            flags.extend(["--context", str(context)])
+        return flags
+    if not context or context == _IN_CLUSTER_CONTEXT or api_server == _IN_CLUSTER_API:
+        return []
+    raise RuntimeError(
+        f"kubeconfig for kubectl context {context!r} is not available to this process; "
+        "refusing to clean up through its own cluster credentials"
+    )
 
 
 def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
@@ -1637,9 +1650,7 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
         raise RuntimeError("sandbox cleanup requires kubectl or oc")
 
     base = [kubectl]
-    base.extend(_kubeconfig_flag(kubeconfig_path))
-    if context:
-        base.extend(["--context", str(context)])
+    base.extend(_kubectl_target_flags(kubeconfig_path, context, cleanup_metadata.get("api_server")))
     if cleanup_metadata.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", namespace])
@@ -1678,8 +1689,8 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     # Claim mode returns warm-pool capacity through the claim controller. Do not
     # directly delete its adopted Sandbox/Pod. Direct CRD mode owns both the pod
     # and the optional NetworkPolicy, including old-UID orphans left by a failed
-    # controller reconciliation. The evaluation label is shared with Switchyard,
-    # so it must never be used for dependent deletion. Discover the Sandbox CR
+    # controller reconciliation. The evaluation label may select resources other
+    # than the sandbox, so it must never be used for dependent deletion. Discover the Sandbox CR
     # names first, then use sandbox-k8s's ownership label on Pods and policies.
     dependent_selector = f"sandbox-k8s/sandbox in ({','.join(sandbox_names)})"
     if not template_name:
@@ -1816,9 +1827,12 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
     if kubectl is None:
         return None
     base = [kubectl]
-    base.extend(_kubeconfig_flag(cleanup.get("kubeconfig_path")))
-    if cleanup.get("context"):
-        base.extend(["--context", str(cleanup["context"])])
+    try:
+        base.extend(
+            _kubectl_target_flags(cleanup.get("kubeconfig_path"), cleanup.get("context"), cleanup.get("api_server"))
+        )
+    except RuntimeError:
+        return None
     if cleanup.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", str(cleanup.get("namespace") or "default")])
@@ -2384,6 +2398,8 @@ def make_sandbox_k8s_docker_status_reader(
 _IN_CLUSTER_API = "https://kubernetes.default.svc"
 _IN_CLUSTER_CA = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 _USER_CONTEXT = "user"
+# The context the evaluation Job's kubeconfig gives its own service account.
+_IN_CLUSTER_CONTEXT = "incluster"
 _NAMESPACE_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -2617,6 +2633,8 @@ def make_sandbox_k8s_submitter(
         rendered_path = work / f"{spec.evaluation_id}.yaml"
         rendered_path.write_text(rendered)
         cleanup_metadata = _sandbox_cleanup_metadata(rendered, spec.evaluation_id)
+        if user_kubeconfig is not None:
+            cleanup_metadata["api_server"] = env.get("SANDBOX_API_SERVER", _IN_CLUSTER_API)
         run_work_dir = work / spec.evaluation_id
         run_work_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_work_dir / "harbor.log"
