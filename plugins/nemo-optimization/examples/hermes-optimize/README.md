@@ -150,7 +150,7 @@ nemo agents optimize prepare-fileset \
   --workspace default
 
 nemo agents optimize run-strategy \
-  --strategy legacy \
+  --strategy optuna \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -230,7 +230,7 @@ nemo agents optimize prepare-fileset \
   --workspace default
 
 nemo agents optimize run-strategy \
-  --strategy legacy \
+  --strategy optuna \
   --optimize-config-fileset default/hermes-optimize-chatonly-via-agent \
   --optimize-config optimize-chatonly-via-agent.yaml \
   --agent hermes-optimize-chatonly \
@@ -295,7 +295,7 @@ to the fileset root:
 
 ```bash
 nemo agents optimize run-strategy \
-  --strategy legacy \
+  --strategy optuna \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -419,7 +419,7 @@ nemo agents optimize prepare-fileset \
   --workspace default
 
 nemo agents optimize run-strategy \
-  --strategy legacy \
+  --strategy optuna \
   --optimize-config-fileset default/hermes-optimize-mcp \
   --optimize-config optimize-mcp.yaml \
   --workspace default

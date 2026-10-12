@@ -193,7 +193,7 @@ export const buildQuickstartSampleSteps = ({
             cli: {
               title: 'Optimize',
               description: 'Run your own optimization or view the sample study.',
-              // `run-strategy` with `legacy` is what Studio's Optimize submits, so a CLI study
+              // `run-strategy` with `optuna` is what Studio's Optimize submits, so a CLI study
               // lands on the same Optimizations tab. The sample ships no optimize bundle, so
               // staging one stays a placeholder; `run-strategy` reads it from the fileset.
               commands: [
@@ -207,7 +207,7 @@ export const buildQuickstartSampleSteps = ({
                 ),
                 continued(
                   'nemo agents optimize run-strategy',
-                  '--strategy legacy',
+                  '--strategy optuna',
                   `--agent ${agentName}`,
                   `--optimize-config-fileset ${shellQuote(`${workspace}/${optimizeFilesetName}`)}`,
                   "--optimize-config 'optimize.yaml'",

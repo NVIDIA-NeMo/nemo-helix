@@ -33,10 +33,10 @@ export type LaunchOptimizeStudyParams = BundleSource & {
  * The optimization strategy Studio submits a staged bundle to.
  *
  * `run-strategy` is strategy-agnostic, but the bundle Studio stages here — an optimize YAML plus
- * the assets it references — is the input the `legacy` strategy takes, so the choice is fixed
+ * the assets it references — is the input the `optuna` strategy takes, so the choice is fixed
  * rather than offered as a picker.
  */
-export const STUDIO_OPTIMIZE_STRATEGY = 'legacy';
+export const STUDIO_OPTIMIZE_STRATEGY = 'optuna';
 
 // Marks a bundle fileset that Studio created for exactly one study, so deleting the study may delete it.
 const STUDIO_BUNDLE_FIELD = 'studio_bundle_fileset';

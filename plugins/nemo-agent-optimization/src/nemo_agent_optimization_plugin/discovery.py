@@ -8,7 +8,7 @@ variable::
 
     class OptimizeJob(NemoJob):
         nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
-            name="legacy",
+            name="optuna",
             description="Numeric hyperparameter search over a Fabric agent workflow.",
         )
 

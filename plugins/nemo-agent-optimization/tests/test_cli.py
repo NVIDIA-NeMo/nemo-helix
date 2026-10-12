@@ -35,7 +35,7 @@ def _register_badly(group: typer.Typer) -> None:
     raise RuntimeError("this contribution is broken")
 
 
-_LISTING = {"data": [{"name": "legacy", "description": "Numeric HPO."}]}
+_LISTING = {"data": [{"name": "optuna", "description": "Numeric HPO."}]}
 
 
 def install(monkeypatch: pytest.MonkeyPatch, contributions: dict[str, Any] | None = None) -> None:
@@ -134,7 +134,7 @@ def _remote(monkeypatch: pytest.MonkeyPatch, strategies: list[dict[str, str]] | 
 
 
 _STRATEGIES = [
-    {"name": "legacy", "description": "Numeric HPO."},
+    {"name": "optuna", "description": "Numeric HPO."},
     {"name": "acme", "description": "Prompt rewriting."},
 ]
 
@@ -170,7 +170,7 @@ def test_piped_list_strategies_is_json(monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies"])
 
     assert result.exit_code == 0, result.output
-    assert [s["name"] for s in json.loads(result.stdout)] == ["legacy", "acme"]
+    assert [s["name"] for s in json.loads(result.stdout)] == ["optuna", "acme"]
 
 
 def test_list_strategies_code_prints_the_client_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -259,7 +259,7 @@ def test_under_nemo_the_listing_uses_the_cli_shared_client(monkeypatch: pytest.M
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies", "-f", "json"], obj=_State())
 
     assert result.exit_code == 0, result.output
-    assert [s["name"] for s in json.loads(result.stdout)] == ["legacy"]
+    assert [s["name"] for s in json.loads(result.stdout)] == ["optuna"]
     assert requested == [cli_module.AgentOptimizationClient]
     assert "Targeting http://shared-platform" in result.stderr
 

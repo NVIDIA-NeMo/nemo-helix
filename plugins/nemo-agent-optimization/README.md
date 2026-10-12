@@ -10,7 +10,7 @@ doesn't have any optimization options without this plugin installed.
 ```
 nemo agents optimize run-strategy     # submit a run (--strategy picks the implementation)
 nemo agents optimize list-strategies  # what the platform has installed
-nemo agents optimize prepare-fileset  # contributed by the `legacy` strategy
+nemo agents optimize prepare-fileset  # contributed by the `optuna` strategy
 ```
 
 `RunStrategyJob` resolves `--strategy` to an installed strategy job and
@@ -34,7 +34,7 @@ class variable:
 ```python
 class OptimizeJob(NemoJob):
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
-        name="legacy",
+        name="optuna",
         description="Hyperparameter and GA prompt optimization.",
     )
 ```
@@ -63,7 +63,7 @@ To add a strategy:
 3. Optionally contribute companion verbs to the shared `optimize` group by
    declaring a plain `def register(group: typer.Typer) -> None` under
    `nemo.cli.agents.optimize`. The group is shared, so prefix your strategy name
-   onto anything that is not plainly generic. (The `legacy` strategy holds the
+   onto anything that is not plainly generic. (The `optuna` strategy holds the
    generic `prepare-fileset`.)
 
    ```toml
@@ -98,7 +98,7 @@ Targeting http://localhost:8080
 ┏━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Name   ┃ Description                                ┃
 ┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ legacy │ Hyperparameter and GA prompt optimization. │
+│ optuna │ Hyperparameter and GA prompt optimization. │
 └────────┴────────────────────────────────────────────┘
 ```
 

@@ -914,7 +914,7 @@ components:
           type: string
           minLength: 1
           title: Strategy
-          description: Installed optimization strategy to run, e.g. 'legacy'. List
+          description: Installed optimization strategy to run, e.g. 'optuna'. List
             what this platform has with `nemo agents optimize list-strategies`.
         optimize_config:
           title: Optimize Config
@@ -966,7 +966,7 @@ components:
           type: string
           minLength: 1
           title: Strategy
-          description: Installed optimization strategy to run, e.g. 'legacy'. List
+          description: Installed optimization strategy to run, e.g. 'optuna'. List
             what this platform has with `nemo agents optimize list-strategies`.
         optimize_config:
           title: Optimize Config

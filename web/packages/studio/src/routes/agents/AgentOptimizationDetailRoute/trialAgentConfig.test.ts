@@ -76,7 +76,7 @@ describe('studyConfigLocation', () => {
   it('resolves a bare fileset name against the study workspace', () => {
     expect(
       studyConfigLocation(
-        { strategy: 'legacy', optimize_config: 'optimize.yaml', optimize_config_fileset: 'bundle' },
+        { strategy: 'optuna', optimize_config: 'optimize.yaml', optimize_config_fileset: 'bundle' },
         'ws'
       )
     ).toEqual({ workspace: 'ws', fileset: 'bundle', path: 'optimize.yaml' });
@@ -86,7 +86,7 @@ describe('studyConfigLocation', () => {
     expect(
       studyConfigLocation(
         {
-          strategy: 'legacy',
+          strategy: 'optuna',
           optimize_config: 'optimize.yaml',
           optimize_config_fileset: 'other/bundle',
         },
@@ -96,10 +96,10 @@ describe('studyConfigLocation', () => {
   });
 
   it('is undefined without a fileset or config path', () => {
-    expect(studyConfigLocation({ strategy: 'legacy', optimize_config: 'o.yaml' }, 'ws')).toBe(
+    expect(studyConfigLocation({ strategy: 'optuna', optimize_config: 'o.yaml' }, 'ws')).toBe(
       undefined
     );
-    expect(studyConfigLocation({ strategy: 'legacy', optimize_config_fileset: 'b' }, 'ws')).toBe(
+    expect(studyConfigLocation({ strategy: 'optuna', optimize_config_fileset: 'b' }, 'ws')).toBe(
       undefined
     );
   });
