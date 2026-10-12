@@ -54,7 +54,7 @@ const JudgeModelField: FC<SectionProps> = ({ workspace, disabled }) => {
           aria-label="Judge model"
         />
         {value && (
-          <Button kind="tertiary" disabled={disabled} onClick={() => onChange('')}>
+          <Button type="button" kind="tertiary" disabled={disabled} onClick={() => onChange('')}>
             Clear
           </Button>
         )}

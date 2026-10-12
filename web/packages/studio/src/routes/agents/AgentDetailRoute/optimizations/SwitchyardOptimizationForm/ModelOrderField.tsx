@@ -66,6 +66,7 @@ export const ModelOrderField: FC<ModelOrderFieldProps> = ({ workspace, disabled 
                 </Flex>
                 <Flex align="center" gap="density-xxs" className="shrink-0">
                   <Button
+                    type="button"
                     kind="tertiary"
                     size="small"
                     disabled={disabled || index === 0}
@@ -75,6 +76,7 @@ export const ModelOrderField: FC<ModelOrderFieldProps> = ({ workspace, disabled 
                     <ArrowUp size={16} />
                   </Button>
                   <Button
+                    type="button"
                     kind="tertiary"
                     size="small"
                     disabled={disabled || index === value.length - 1}
@@ -85,6 +87,7 @@ export const ModelOrderField: FC<ModelOrderFieldProps> = ({ workspace, disabled 
                   </Button>
                   <Divider orientation="vertical" className="mx-1 h-5" />
                   <Button
+                    type="button"
                     kind="tertiary"
                     size="small"
                     disabled={disabled}

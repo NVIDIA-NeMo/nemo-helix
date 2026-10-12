@@ -172,6 +172,27 @@ describe('SwitchyardOptimizationForm', () => {
     expect(spec).not.toHaveProperty('judge_model');
   });
 
+  it('runs on Enter in the name field, but not when reordering models', async () => {
+    const submitted: unknown[] = [];
+    server.use(
+      http.post(JOBS_URL, async ({ request }) => {
+        submitted.push(await request.json());
+        return HttpResponse.json({ name: 'routing-1' });
+      })
+    );
+    const user = userEvent.setup();
+    renderForm();
+
+    await addModel(user, 'default/big');
+    await addModel(user, 'default/small');
+    await user.click(screen.getByRole('button', { name: 'Move default/small up' }));
+    expect(submitted).toHaveLength(0);
+
+    await user.type(screen.getByRole('textbox', { name: 'Name' }), '{Enter}');
+
+    await waitFor(() => expect(submitted).toHaveLength(1));
+  });
+
   it('shows the server’s rejection beside the run button', async () => {
     server.use(
       http.post(JOBS_URL, () =>

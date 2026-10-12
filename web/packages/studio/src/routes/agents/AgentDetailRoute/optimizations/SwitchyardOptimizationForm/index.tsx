@@ -137,131 +137,133 @@ export const SwitchyardOptimizationForm: FC<SwitchyardOptimizationFormProps> = (
           </Text>
         </Stack>
 
-        <Grid className="grid-cols-1 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <Stack gap="density-2xl">
-            <ControlledTextInput
-              useControllerProps={{ control, name: 'name' }}
-              label="Name"
-              disabled={isSubmitting}
-              formFieldProps={{
-                slotHelp: !errors.name && preview && (
-                  <>
-                    Your optimization will be created as{' '}
-                    <span className="text-primary">{preview}</span>
-                  </>
-                ),
-              }}
-            />
-
-            <Stepper
-              layout="vertical"
-              aria-label="Routing optimization setup"
-              activeStep={models.length < 2 ? 0 : routingStrategies.length === 0 ? 1 : 2}
-              items={[
-                {
-                  slotHeading: 'Which models can it use?',
-                  slotDescription:
-                    'Most capable first. Every model is paired with each model below it, and each pair routes between its two models',
-                  slotSuccessIndicator: 1,
-                  slotContent: <ModelOrderField workspace={workspace} disabled={isSubmitting} />,
-                },
-                {
-                  slotHeading: 'How should each pair route?',
-                  slotDescription:
-                    'Pick one or more strategies to compare. The defaults are a sensible start',
-                  slotSuccessIndicator: 2,
-                  slotContent: (
-                    <RoutingStrategiesSection workspace={workspace} disabled={isSubmitting} />
+        <form onSubmit={submit} noValidate>
+          <Grid className="grid-cols-1 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_380px]">
+            <Stack gap="density-2xl">
+              <ControlledTextInput
+                useControllerProps={{ control, name: 'name' }}
+                label="Name"
+                disabled={isSubmitting}
+                formFieldProps={{
+                  slotHelp: !errors.name && preview && (
+                    <>
+                      Your optimization will be created as{' '}
+                      <span className="text-primary">{preview}</span>
+                    </>
                   ),
-                },
-              ]}
-            />
-          </Stack>
+                }}
+              />
 
-          <Card className="h-fit min-w-0 self-start">
-            <Stack gap="density-md" className="w-full min-w-0">
-              <Text className="capitalize" kind="label/bold/xs" color="secondary">
-                this run will build
-              </Text>
-              <Flex gap="density-xl" wrap="wrap">
-                <Stack gap="density-xxs">
-                  <Text kind="body/bold/lg">{virtualModels || '—'}</Text>
-                  <Text kind="body/regular/xs" color="secondary">
-                    routed models
-                  </Text>
-                </Stack>
-                <Stack gap="density-xxs">
-                  <Text kind="body/bold/lg">{pairs.length || '—'}</Text>
-                  <Text kind="body/regular/xs" color="secondary">
-                    model pairs
-                  </Text>
-                </Stack>
-              </Flex>
-
-              {pairs.length > 0 && (
-                <ol
-                  aria-label="Model pairs"
-                  className="divide-base bg-surface-raised border-base min-w-0 divide-y overflow-hidden rounded-lg border"
-                >
-                  {pairs.map(({ capable, efficient }) => (
-                    <li key={`${capable}|${efficient}`} className="px-3 py-2">
-                      <Stack gap="density-xxs" className="min-w-0">
-                        {[
-                          { model: capable, role: 'capable' },
-                          { model: efficient, role: 'efficient' },
-                        ].map(({ model, role }) => (
-                          <Flex key={role} align="center" gap="density-sm" className="min-w-0">
-                            <Text
-                              kind="body/regular/xs"
-                              className="min-w-0 flex-1 truncate"
-                              title={model}
-                            >
-                              {withoutWorkspace(model, workspace)}
-                            </Text>
-                            <Text kind="body/regular/xs" color="secondary" className="shrink-0">
-                              {role}
-                            </Text>
-                          </Flex>
-                        ))}
-                      </Stack>
-                    </li>
-                  ))}
-                </ol>
-              )}
-
-              <Text kind="body/regular/xs" color="secondary">
-                {plural(pairs.length, 'pair')} × {plural(routingStrategies.length, 'strategy')}.
-                Each routed model splits traffic between one pair, the first as its capable model.
-                Each gets a copy of the agent config pointed at it — the stored agent is never
-                modified.
-              </Text>
-
-              <Divider />
-
-              {blockingReason && (
-                <Banner kind="inline" status="warning">
-                  {blockingReason}
-                </Banner>
-              )}
-
-              {submitError && (
-                <Banner kind="inline" status="error">
-                  {submitError}
-                </Banner>
-              )}
-
-              <LoadingButton
-                color="brand"
-                className="w-full"
-                loading={isSubmitting}
-                disabled={!!blockingReason || isSubmitting}
-                onClick={submit}
-              >
-                Run optimization
-              </LoadingButton>
+              <Stepper
+                layout="vertical"
+                aria-label="Routing optimization setup"
+                activeStep={models.length < 2 ? 0 : routingStrategies.length === 0 ? 1 : 2}
+                items={[
+                  {
+                    slotHeading: 'Which models can it use?',
+                    slotDescription:
+                      'Most capable first. Every model is paired with each model below it, and each pair routes between its two models',
+                    slotSuccessIndicator: 1,
+                    slotContent: <ModelOrderField workspace={workspace} disabled={isSubmitting} />,
+                  },
+                  {
+                    slotHeading: 'How should each pair route?',
+                    slotDescription:
+                      'Pick one or more strategies to compare. The defaults are a sensible start',
+                    slotSuccessIndicator: 2,
+                    slotContent: (
+                      <RoutingStrategiesSection workspace={workspace} disabled={isSubmitting} />
+                    ),
+                  },
+                ]}
+              />
             </Stack>
-          </Card>
-        </Grid>
+
+            <Card className="h-fit min-w-0 self-start">
+              <Stack gap="density-md" className="w-full min-w-0">
+                <Text className="capitalize" kind="label/bold/xs" color="secondary">
+                  this run will build
+                </Text>
+                <Flex gap="density-xl" wrap="wrap">
+                  <Stack gap="density-xxs">
+                    <Text kind="body/bold/lg">{virtualModels || '—'}</Text>
+                    <Text kind="body/regular/xs" color="secondary">
+                      routed models
+                    </Text>
+                  </Stack>
+                  <Stack gap="density-xxs">
+                    <Text kind="body/bold/lg">{pairs.length || '—'}</Text>
+                    <Text kind="body/regular/xs" color="secondary">
+                      model pairs
+                    </Text>
+                  </Stack>
+                </Flex>
+
+                {pairs.length > 0 && (
+                  <ol
+                    aria-label="Model pairs"
+                    className="divide-base bg-surface-raised border-base min-w-0 divide-y overflow-hidden rounded-lg border"
+                  >
+                    {pairs.map(({ capable, efficient }) => (
+                      <li key={`${capable}|${efficient}`} className="px-3 py-2">
+                        <Stack gap="density-xxs" className="min-w-0">
+                          {[
+                            { model: capable, role: 'capable' },
+                            { model: efficient, role: 'efficient' },
+                          ].map(({ model, role }) => (
+                            <Flex key={role} align="center" gap="density-sm" className="min-w-0">
+                              <Text
+                                kind="body/regular/xs"
+                                className="min-w-0 flex-1 truncate"
+                                title={model}
+                              >
+                                {withoutWorkspace(model, workspace)}
+                              </Text>
+                              <Text kind="body/regular/xs" color="secondary" className="shrink-0">
+                                {role}
+                              </Text>
+                            </Flex>
+                          ))}
+                        </Stack>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
+                <Text kind="body/regular/xs" color="secondary">
+                  {plural(pairs.length, 'pair')} × {plural(routingStrategies.length, 'strategy')}.
+                  Each routed model splits traffic between one pair, the first as its capable model.
+                  Each gets a copy of the agent config pointed at it — the stored agent is never
+                  modified.
+                </Text>
+
+                <Divider />
+
+                {blockingReason && (
+                  <Banner kind="inline" status="warning">
+                    {blockingReason}
+                  </Banner>
+                )}
+
+                {submitError && (
+                  <Banner kind="inline" status="error">
+                    {submitError}
+                  </Banner>
+                )}
+
+                <LoadingButton
+                  type="submit"
+                  color="brand"
+                  className="w-full"
+                  loading={isSubmitting}
+                  disabled={!!blockingReason || isSubmitting}
+                >
+                  Run optimization
+                </LoadingButton>
+              </Stack>
+            </Card>
+          </Grid>
+        </form>
       </Stack>
     </FormProvider>
   );
