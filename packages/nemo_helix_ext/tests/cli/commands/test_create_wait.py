@@ -329,6 +329,35 @@ def test_jobs_create_wait_uses_quiet_waiter_and_outputs_created_job() -> None:
     render_events.assert_not_called()
 
 
+def test_jobs_create_wait_falls_back_to_client_workspace_accessor() -> None:
+    # Neither the created job nor the request carries a workspace, so --wait must
+    # resolve it from the client via require_workspace(). A stub of the removed
+    # _get_workspace_path_param helper would regress here (AttributeError).
+    created_job = _CreatedJob(workspace="")
+    client = _platform_client(workspace="client-default-ws")
+    jobs_client = MagicMock()
+    jobs_client.create_job.return_value = _Response(created_job)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.handle_code_generation", return_value=False),
+        _patch_jobs_client(jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+        patch("nemo_helix_ext.cli.commands.jobs.wait_for_platform_job", return_value=True) as wait_for_job,
+    ):
+        create_jobs(
+            _ctx(client),
+            name="input-job",
+            workspace=None,
+            platform_spec=PLATFORM_SPEC_JSON,
+            source="test-source",
+            spec="{}",
+            wait=True,
+            watch=False,
+        )
+
+    assert wait_for_job.call_args.kwargs["workspace"] == "client-default-ws"
+
+
 def test_jobs_create_stamps_telemetry_custom_fields() -> None:
     client = _platform_client()
     jobs_client = MagicMock()

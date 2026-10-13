@@ -99,7 +99,7 @@ def test_jobs_tail_command_raises_when_no_workspace() -> None:
     with (
         patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
         patch("nemo_helix_ext.cli.commands.jobs.render_job_logs"),
-        pytest.raises(typer.Exit),
+        pytest.raises(typer.Exit) as exc_info,
     ):
         tail_platform_job(
             _ctx(client),
@@ -111,4 +111,7 @@ def test_jobs_tail_command_raises_when_no_workspace() -> None:
             task_id=None,
         )
 
+    # Exit code 2 is the clean missing-workspace path; the original AttributeError
+    # regression would exit 1, so this pins the intended behavior.
+    assert exc_info.value.exit_code == 2
     jobs_client.list_job_logs.assert_not_called()
