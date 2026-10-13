@@ -36,6 +36,7 @@ only depends on pydantic and must stay importable on Python 3.10 (the server ima
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -96,11 +97,41 @@ class VolumeMount(_Strict):
     read_only: bool = False
 
 
+# Multipliers for the suffixes ``Quantity`` allows.
+_QUANTITY_SUFFIXES = {
+    "": Decimal(1),
+    "m": Decimal("0.001"),
+    "k": Decimal(10) ** 3,
+    "M": Decimal(10) ** 6,
+    "G": Decimal(10) ** 9,
+    "T": Decimal(10) ** 12,
+    "Ki": Decimal(2) ** 10,
+    "Mi": Decimal(2) ** 20,
+    "Gi": Decimal(2) ** 30,
+    "Ti": Decimal(2) ** 40,
+}
+
+
+def _quantity_value(quantity: str) -> Decimal:
+    """The numeric value of a ``Quantity`` string, so ``500m`` and ``1Gi`` can be compared."""
+    number = quantity.rstrip("mkKMGTi")
+    return Decimal(number) * _QUANTITY_SUFFIXES[quantity[len(number) :]]
+
+
 class Resources(_Strict):
     """Kubernetes resource limits and requests for one service (Compose ``deploy.resources``)."""
 
     limits: dict[Literal["cpu", "memory", "ephemeral-storage"], Quantity] | None = None
     requests: dict[Literal["cpu", "memory", "ephemeral-storage"], Quantity] | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> Resources:
+        """Reject a request above its limit, which Kubernetes refuses when it creates the container."""
+        for resource, request in (self.requests or {}).items():
+            limit = (self.limits or {}).get(resource)
+            if limit is not None and _quantity_value(request) > _quantity_value(limit):
+                raise ValueError(f"{resource} request {request!r} exceeds its limit {limit!r}")
+        return self
 
 
 class Service(_Strict):
@@ -176,6 +207,13 @@ class ComposeServices(_Strict):
         for owner, mount in mounts:
             if mount.name not in self.volumes:
                 raise ValueError(f"{owner}: volume {mount.name!r} is not declared in volumes")
+
+        # Kubernetes requires a container's mount paths to be unique; separate containers may share one.
+        seen: set[tuple[str, str]] = set()
+        for owner, mount in mounts:
+            if (owner, mount.mount_path) in seen:
+                raise ValueError(f"{owner}: mount_path {mount.mount_path!r} is used by more than one volume mount")
+            seen.add((owner, mount.mount_path))
         return self
 
     def names(self) -> list[str]:
@@ -183,7 +221,13 @@ class ComposeServices(_Strict):
         return [s.name for s in self.services]
 
     def sandbox_entrypoint(self) -> list[str] | None:
-        """The sandbox container's entrypoint: ``main``'s own entrypoint, kept alive; None to keep the default."""
+        """The sandbox container's entrypoint: ``main``'s own entrypoint, kept alive; None to keep the default.
+
+        OpenSandbox replaces the container's entrypoint with its own process, which would skip the
+        image's ``ENTRYPOINT``, so it is restored here. ``sh -c "sleep infinity"`` follows it as its
+        arguments, as Compose passes ``command`` to an image's ``ENTRYPOINT``. An entrypoint that exits
+        on its own therefore ends the container, as it would under Compose, rather than being masked.
+        """
         if self.main.entrypoint is None:
             return None
         return [*self.main.entrypoint, "sh", "-c", "sleep infinity"]

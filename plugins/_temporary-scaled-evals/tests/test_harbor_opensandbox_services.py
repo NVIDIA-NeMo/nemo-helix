@@ -67,6 +67,54 @@ def test_rejects_specs_the_pod_cant_run(raw: dict[str, Any], message: str) -> No
         parse_compose_services(raw)
 
 
+def _mounts(*names: str, path: str = "/data") -> list[dict[str, str]]:
+    return [{"name": n, "mount_path": path} for n in names]
+
+
+def test_rejects_duplicate_mount_paths_within_a_container() -> None:
+    service = {"name": "db", "image": "docker.io/x:1", "volume_mounts": _mounts("a", "b")}
+    with pytest.raises(ValidationError, match="db: mount_path '/data' is used by more than one"):
+        parse_compose_services(_spec(service, volumes=["a", "b"]))
+    with pytest.raises(ValidationError, match="main: mount_path '/data' is used by more than one"):
+        parse_compose_services(_spec(volumes=["a", "b"], main={"volume_mounts": _mounts("a", "b")}))
+
+
+def test_allows_the_same_mount_path_in_different_containers() -> None:
+    parse_compose_services(
+        _spec(
+            {"name": "db", "image": "docker.io/x:1", "volume_mounts": _mounts("a")},
+            {"name": "web", "image": "docker.io/y:1", "volume_mounts": _mounts("a")},
+            volumes=["a"],
+            main={"volume_mounts": _mounts("a")},
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("limits", "requests", "valid"),
+    [
+        ({"cpu": "1"}, {"cpu": "2"}, False),
+        ({"cpu": "1"}, {"cpu": "1500m"}, False),
+        ({"memory": "1Gi"}, {"memory": "2000Mi"}, False),
+        ({"memory": "1G"}, {"memory": "1Gi"}, False),
+        ({"cpu": "1"}, {"cpu": "1000m"}, True),
+        ({"memory": "1Gi"}, {"memory": "512Mi"}, True),
+        ({"cpu": "1"}, {"memory": "64Gi"}, True),
+        (None, {"cpu": "2"}, True),
+        ({"cpu": "1"}, None, True),
+    ],
+)
+def test_resource_requests_may_not_exceed_limits(
+    limits: dict[str, str] | None, requests: dict[str, str] | None, valid: bool
+) -> None:
+    raw = _spec({"name": "db", "image": "docker.io/x:1", "resources": {"limits": limits, "requests": requests}})
+    if valid:
+        parse_compose_services(raw)
+    else:
+        with pytest.raises(ValidationError, match="exceeds its limit"):
+            parse_compose_services(raw)
+
+
 def test_rejects_a_non_mapping() -> None:
     with pytest.raises(ValueError, match="must be a mapping"):
         parse_compose_services(["db"])
