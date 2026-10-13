@@ -905,13 +905,7 @@ class JobDispatcher:
 
         step_statuses = []
         for step in steps_response.data:
-            # Get tasks for step
-            tasks_response = await self.store.list(
-                HelixJobTask,
-                workspace=workspace,
-                filter_obj={"step_id": step.id},
-                page_size=1000,
-            )
+            tasks = await self.list_tasks(step.id, workspace)
 
             task_statuses = [
                 HelixJobTaskStatusResponse(
@@ -924,7 +918,7 @@ class JobDispatcher:
                     created_at=task.created_at,
                     updated_at=task.updated_at,
                 )
-                for task in tasks_response.data
+                for task in tasks
             ]
 
             step_statuses.append(
@@ -1004,13 +998,16 @@ class JobDispatcher:
         error_details: Optional[Dict[str, Any]] = None,
     ) -> tuple[HelixJobStep, HelixJobAttempt]:
         """Update a job from a step while holding the per-job mutation lock."""
-        step_to_save = step
+        step_to_save = await self.store.get_by_id(HelixJobStep, step.id)
         saved_step: HelixJobStep | None = None
         for attempt in range(2):
             if not step_to_save.status.can_transition_to(status):
                 raise StateTransitionConflictError(
                     f"Invalid status transition from {step_to_save.status} to {status} for step {step_to_save.id}"
                 )
+
+            if status == HelixJobStatus.CANCELLED:
+                await self._cancel_step_tasks(step_to_save)
 
             if self._step_update_would_be_noop(step_to_save, status, status_details, error_details):
                 saved_step = step_to_save
@@ -1216,17 +1213,14 @@ class JobDispatcher:
         # Check if the job has any created steps, and if so, check if all of them are in created state.
         # If so, cancel the job immediately without going through the normal cancellation process.
         if job_entity.current_attempt_id:
-            response = await self.store.list(
+            steps = await self._list_all_entities(
                 HelixJobStep,
                 filter_obj={"attempt_id": job_entity.current_attempt_id},
                 workspace=workspace,
             )
-            steps = response.data
             if steps and all(s.status == HelixJobStatus.CREATED for s in steps):
-                _, attempt = await self.update_job_status_from_step(
-                    steps[0],
-                    HelixJobStatus.CANCELLED,
-                )
+                for step in steps:
+                    _, attempt = await self.update_job_status_from_step(step, HelixJobStatus.CANCELLED)
                 operations_counter.add(1, attributes={"operation": "cancel_job"})
                 return create_platform_job_response(job_entity, attempt)
 
@@ -1240,6 +1234,15 @@ class JobDispatcher:
             attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
             if attempt is None:
                 raise Exception(f"Job Attempt with Job ID {job_entity.id} does not exist.")
+            if attempt.status == HelixJobStatus.CANCELLED:
+                steps = await self._list_all_entities(
+                    HelixJobStep,
+                    filter_obj={"attempt_id": attempt.id},
+                    workspace=workspace,
+                )
+                for step in steps:
+                    if step.status == HelixJobStatus.CANCELLED:
+                        await self.update_job_status_from_step(step, HelixJobStatus.CANCELLED)
 
         operations_counter.add(1, attributes={"operation": "cancel_job"})
         return create_platform_job_response(job_entity, attempt)
@@ -1365,13 +1368,34 @@ class JobDispatcher:
 
     async def list_tasks(self, step_id: str, workspace: str) -> list[HelixJobTask]:
         """List all platform job tasks for a specific step."""
-        response = await self.store.list(
+        return await self._list_all_entities(
             HelixJobTask,
             workspace=workspace,
             filter_obj={"step_id": step_id},
-            page_size=1000,
         )
-        return list(response.data)
+
+    async def _cancel_step_tasks(self, step: HelixJobStep) -> None:
+        """Finalize child tasks before publishing cancellation of their step."""
+        for task in await self.list_tasks(step.id, step.workspace):
+            for retry in range(2):
+                if task.status.is_terminal():
+                    break
+                cancelled_task = task.model_copy(
+                    update={
+                        "status": HelixJobStatus.CANCELLED,
+                        "status_details": {
+                            **task.status_details,
+                            "message": "Task cancelled as part of job cancellation",
+                        },
+                    }
+                )
+                try:
+                    await self.store.update(cancelled_task)
+                    break
+                except EntityConflictError:
+                    if retry:
+                        raise
+                    task = await self.store.get_by_id(HelixJobTask, task.id)
 
     async def create_or_update_task(
         self, job_name: str, task_name: str, workspace: str, task_update: HelixJobTaskUpdate, step: HelixJobStep
@@ -1385,9 +1409,20 @@ class JobDispatcher:
     ) -> HelixJobTask:
         """Create or update a task while holding the per-job mutation lock."""
         await self.store.get(HelixJob, job_name, workspace=workspace)
-        await self.store.get_by_id(HelixJobStep, step.id)
+        step = await self.store.get_by_id(HelixJobStep, step.id)
 
         task = await self.get_task(step.id, task_name, workspace=workspace)
+
+        if step.status == HelixJobStatus.CANCELLED:
+            if task is not None:
+                await self._cancel_step_tasks(step)
+                return await self.store.get_by_id(HelixJobTask, task.id)
+            task_update = HelixJobTaskUpdate(
+                status=HelixJobStatus.CANCELLED,
+                status_details={"message": "Task cancelled as part of job cancellation"},
+            )
+        elif step.status == HelixJobStatus.CANCELLING and task_update.status == HelixJobStatus.ERROR:
+            task_update = task_update.model_copy(update={"status": HelixJobStatus.CANCELLING})
 
         if not task:
             task = await self.store.create(
@@ -1454,6 +1489,13 @@ class JobDispatcher:
                     "status": task.status,
                 },
             )
+
+        current_step = await self.store.get_by_id(HelixJobStep, step.id)
+        if current_step.status == HelixJobStatus.CANCELLED:
+            if not task.status.is_terminal():
+                await self._cancel_step_tasks(current_step)
+                task = await self.store.get_by_id(HelixJobTask, task.id)
+            return task
 
         # Propagate task status_details to parent job for progress tracking.
         # Training callbacks report progress (percentage_done, epoch, step, loss) at the task level,

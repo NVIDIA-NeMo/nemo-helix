@@ -9,6 +9,48 @@ from nhx.core.jobs.app.test_helpers import TestConstants
 
 
 @pytest.mark.asyncio
+async def test_cancelled_job_has_no_active_public_child_tasks(test_client: AsyncClient):
+    request = CreateHelixJobRequest(
+        name="cancel-with-public-task",
+        source="test-source",
+        spec={},
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="training", executor=TestConstants.TEST_EXECUTOR, config={})]
+        ),
+    )
+    base = f"/apis/jobs/v2/workspaces/default/jobs/{request.name}"
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=request.model_dump())
+    assert response.status_code == 201
+    response = await test_client.patch(f"{base}/steps/training/status", json={"status": "active"})
+    assert response.status_code == 200
+    response = await test_client.put(f"{base}/steps/training/tasks/pod-task", json={"status": "active"})
+    assert response.status_code == 200
+
+    response = await test_client.post(f"{base}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelling"
+    response = await test_client.get(f"{base}/steps/training/tasks/pod-task")
+    assert response.json()["status"] == "active"
+    response = await test_client.patch(f"{base}/steps/training/status", json={"status": "cancelled"})
+    assert response.status_code == 200
+
+    for task_name in ["pod-task", "late-task"]:
+        response = await test_client.put(
+            f"{base}/steps/training/tasks/{task_name}", json={"status": "active", "status_details": {"step": 100}}
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+
+    response = await test_client.get(f"{base}/status")
+    assert response.status_code == 200
+    status = response.json()
+    assert status["status"] == "cancelled"
+    assert status["steps"][0]["status"] == "cancelled"
+    assert len(status["steps"][0]["tasks"]) == 2
+    assert all(task["status"] == "cancelled" for task in status["steps"][0]["tasks"])
+
+
+@pytest.mark.asyncio
 async def test_job_cancel_functionality(test_client: AsyncClient):
     """Test cancelling a job that is currently active."""
     req = CreateHelixJobRequest(

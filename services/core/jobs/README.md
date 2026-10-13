@@ -5,6 +5,26 @@
 
 A microservice for providing a generic job runner for NeMo Helix.
 
+## Cancellation lifecycle
+
+Execution controllers report a step as `cancelled` only after execution teardown
+finishes. The Jobs service then cancels every nonterminal public child task,
+across all task-list pages, before persisting the cancelled step and attempt.
+Completed, errored, and already-cancelled tasks retain their terminal state.
+If child cleanup fails, the step remains reconcilable and cleanup is retried.
+This applies to Kubernetes, Volcano, Docker, and subprocess execution alike.
+
+Task writes use the stored parent step rather than the caller's cached step.
+Late reports cannot create or reactivate a nonterminal task under a cancelled
+step. Error reports received while the step is cancelling remain nonterminal
+until teardown completes; errors recorded before cancellation remain terminal.
+Pause/resume behavior is unchanged.
+
+Repeating the existing cancel request on an already-cancelled job repairs
+nonterminal child tasks in its current attempt. This repair is idempotent and
+does not modify earlier attempts or unrelated workspaces. It does not scan or
+mutate existing jobs automatically.
+
 - [Integrating a functional microservice with Jobs](#integrating-a-functional-microservice-with-jobs)
 - [Local Development](#local-development)
 
