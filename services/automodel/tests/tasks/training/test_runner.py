@@ -210,3 +210,63 @@ def test_postprocessing_reports_the_work_it_is_doing(
     runner._postprocess_phase(None, TrainingMetrics(), MagicMock())
 
     assert sent == [phase, "process"]
+
+
+def test_a_paused_run_skips_publication_and_completion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Training wrote the pause marker, so nothing is selected, published, or reported completed."""
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+    backend = MagicMock()
+
+    def train(library: LibraryConfig) -> TrainingMetrics:
+        (tmp_path / "PAUSED").write_text("5\n")
+        return TrainingMetrics()
+
+    runner = _ScriptedRunner(tmp_path, duration=5.0, compile_config=MagicMock, train=train, backend=backend)
+    synced: list[str] = []
+    completed: list[str] = []
+    monkeypatch.setattr(runner._dist_ctx, "sync_point", synced.append)
+    monkeypatch.setattr(runner._progress, "report_completed", lambda *args, **kwargs: completed.append("completed"))
+
+    result = runner.run()
+
+    assert result.paused and not result.success
+    assert synced == []
+    assert completed == []
+    backend.find_checkpoints.assert_not_called()
+    backend.process_checkpoints.assert_not_called()
+
+
+def test_the_coordinator_clears_an_earlier_pause_marker_before_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Otherwise a run that finishes after a resume would read the old marker and exit as paused."""
+    (tmp_path / "PAUSED").write_text("5\n")
+    backend = MagicMock()
+    backend.compile_config.return_value = {}
+    runner = _ScriptedRunner(tmp_path, duration=None, compile_config=MagicMock, backend=backend)
+    signals: list[str] = []
+    monkeypatch.setattr(runner._dist_ctx, "signal", signals.append)
+
+    # The real compile phase, which _ScriptedRunner replaces.
+    TrainingRunner._compile_config_phase(runner)
+
+    assert not (tmp_path / "PAUSED").exists()
+    assert signals == ["config_ready"]
+
+
+def test_a_paused_run_exits_with_the_pause_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.automodel.tasks.training import __main__ as entrypoint
+    from nhx.automodel.tasks.training.schemas import TrainingResult
+
+    class _Runner:
+        def __enter__(self) -> "_Runner":
+            return self
+
+        def __exit__(self, *exc: object) -> None: ...
+
+        def run(self) -> TrainingResult:
+            return TrainingResult(success=False, paused=True)
+
+    monkeypatch.setattr(entrypoint, "TrainingRunner", _Runner)
+
+    assert entrypoint.run() == 75

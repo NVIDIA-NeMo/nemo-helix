@@ -20,13 +20,15 @@ nemo jobs list --workspace default --filter.source customization --filter.status
 
 ## Pause a Job
 
-Pausing stops a job without losing its progress. A job can be paused while its current step supports pausing, which depends on the training backend. Otherwise, for example while the model is still downloading, or when the backend's training step does not support pausing, the request returns `409` and names the step.
+Pausing stops a job without losing its progress. A job can be paused while its current step supports pausing, which depends on the training backend. Otherwise, for example while the model is still downloading, or when the backend's training step does not support pausing, the request returns `409` and names the step. Training on the `automodel` backend supports pausing.
 
 ```bash
 nemo jobs pause automodel-a1b2c3d4e5f6 --workspace default
 ```
 
 The training step finishes the step it is on, saves a checkpoint, and exits, which frees its GPUs. The job's status moves from `pausing` to `paused`. Its storage, including the checkpoint, is kept so that the job can resume later.
+
+If training doesn't save its checkpoint and exit within 30 minutes, the pause fails and the job ends in `error`. You can then rerun it from its newest checkpoint. Operators can change this limit with the `automodel.training_pause_deadline_seconds` platform setting.
 
 If training finishes before it acts on the pause, the job completes as usual.
 

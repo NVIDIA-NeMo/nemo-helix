@@ -16,6 +16,8 @@ The DistributedContext handles role detection and coordination:
 import logging
 import sys
 
+from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
+
 from .runner import TrainingRunner
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,9 @@ def run() -> int:
     try:
         with TrainingRunner() as runner:
             result = runner.run()
+            if result.paused:
+                # Tells the Jobs service the pause checkpoint is written.
+                return PAUSE_EXIT_CODE
             return 0 if result.success else 1
     except Exception as e:
         logger.exception(f"Training task failed: {e}")
