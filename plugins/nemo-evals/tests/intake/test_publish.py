@@ -302,6 +302,30 @@ async def test_an_agent_row_trial_publishes_its_runtime_as_the_trajectory_window
     assert invocation["end_timestamp"] - invocation["start_timestamp"] == 37.25
 
 
+async def test_a_row_whose_generation_failed_publishes_an_errored_trajectory() -> None:
+    row = RowScore(
+        row_index=0,
+        item={"prompt": "2+2?"},
+        sample={"output_text": None, "response": {}, "inference_error": "Row 0 failed inference: timed out"},
+        metrics={},
+        requests=[],
+        runtime_sec=4.0,
+    )
+    result = row_result_to_agent_eval_result(
+        EvaluationResult(row_scores=[row], aggregate_scores=AggregatedMetricResult(scores=[])),
+        run_id="job-1",
+        started_at=STARTED_AT,
+    )
+    client = _FakeClient()
+
+    await publish_to_intake(result, client=client, experiment_id="exp-1")
+
+    assert client.atif_calls[0]["extra"]["error"] == {
+        "type": "InferenceError",
+        "message": "Row 0 failed inference: timed out",
+    }
+
+
 async def test_publish_revalidates_model_copy_corrupted_measurements_before_network_calls() -> None:
     trial = _trial("t-1").model_copy(update={"measurements": TrialMeasurements(prompt_tokens=8, completion_tokens=2)})
     result = _result([trial], [])

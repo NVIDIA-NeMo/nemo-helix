@@ -13,7 +13,7 @@ import pytest
 from nemo_evals.intake.mapping import score_to_evaluator_results
 from nemo_evals.intake.row_adapter import RowIdentityError, row_result_to_agent_eval_result
 from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus
-from nhx_evals_sdk.agent_eval.trials import AgentEvalTrialStatus
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrialStatus, TrialError
 from nhx_evals_sdk.metrics.protocol import MetricOutput
 from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nhx_evals_sdk.values.protocol import MetricDiagnostic
@@ -189,6 +189,7 @@ def test_inference_failure_becomes_a_failed_trial() -> None:
     result = _adapt([_row(sample={"output_text": None, "response": {}, "inference_error": "boom"})])
     assert result.trials[0].status == AgentEvalTrialStatus.FAILED
     assert result.trials[0].output is None
+    assert result.trials[0].error == TrialError(type="InferenceError", message="boom")
 
 
 def test_empty_sample_becomes_a_failed_trial() -> None:
@@ -197,6 +198,8 @@ def test_empty_sample_becomes_a_failed_trial() -> None:
     result = _adapt([_row(sample={})])
     assert result.trials[0].status == AgentEvalTrialStatus.FAILED
     assert result.trials[0].output is None
+    assert result.trials[0].error is not None
+    assert result.trials[0].error.type == "EmptyOutput"
 
 
 @pytest.mark.parametrize("response", [False, 0, [], {}])
@@ -207,6 +210,7 @@ def test_falsy_response_is_still_an_output(response: object) -> None:
     assert result.trials[0].status == AgentEvalTrialStatus.COMPLETED
     assert result.trials[0].output is not None
     assert result.trials[0].output.response == response
+    assert result.trials[0].error is None
 
 
 def test_metric_error_becomes_a_failed_score_reporting_why() -> None:

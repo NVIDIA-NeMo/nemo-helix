@@ -30,7 +30,13 @@ from nhx_evals_sdk.agent_eval.scores import (
     AgentEvalScoreStatus,
     AgentEvalTaskScore,
 )
-from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialMeasurements
+from nhx_evals_sdk.agent_eval.trials import (
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    AgentOutput,
+    TrialError,
+    TrialMeasurements,
+)
 from nhx_evals_sdk.agent_eval.usage_keys import (
     CACHE_CREATION_INPUT_TOKENS_KEY,
     CACHE_READ_INPUT_TOKENS_KEY,
@@ -95,6 +101,14 @@ def _output(row: RowScore) -> AgentOutput | None:
     if output_text is None and response is None:
         return None
     return AgentOutput(output_text=output_text, response=response)
+
+
+def _generation_error(row: RowScore) -> TrialError:
+    """Why the row has no output; Intake marks a trajectory failed only when it carries an error."""
+    inference_error = row.sample.get(_INFERENCE_ERROR)
+    if inference_error:
+        return TrialError(type="InferenceError", message=str(inference_error))
+    return TrialError(type="EmptyOutput", message="Generation produced no output.")
 
 
 def _token_measurements(row: RowScore) -> TrialMeasurements:
@@ -259,6 +273,7 @@ def row_result_to_agent_eval_result(
                 task_id=task_id,
                 status=AgentEvalTrialStatus.COMPLETED if output is not None else AgentEvalTrialStatus.FAILED,
                 output=output,
+                error=_generation_error(row) if output is None else None,
                 measurements=_token_measurements(row).with_runtime(row.runtime_sec),
             )
         )
