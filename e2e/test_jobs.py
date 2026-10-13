@@ -598,6 +598,8 @@ def _cooperative_pause_step(name: str, image: Callable[[str], str]) -> HelixJobS
     return HelixJobStep(
         name=name,
         lifecycle=StepLifecycle(pause_deadline_seconds=180),
+        # The step only gets job storage, and the path variable, when it asks for it.
+        environment=[EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)],
         executor=CPUExecutionProviderSpec(
             provider="cpu",
             container=ContainerSpec(

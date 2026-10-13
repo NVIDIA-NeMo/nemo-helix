@@ -96,7 +96,7 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
 )
 from nhx.core.jobs.app.ctx import JobContext
-from nhx.core.jobs.app.lifecycle import describe_paused_exit, image_digest_updates, pause_deadline_exceeded
+from nhx.core.jobs.app.lifecycle import describe_paused_exit, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import (
     ComputeResources,
     CPUExecutionProvider,
@@ -515,9 +515,6 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
                 )
             except DockerException:
                 logger.exception("Failed to clean up task storage volume", extra={"volume_name": volume_name})
-
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
-        self.cleanup_job_persistent_storage(workspace, job)
 
     def cleanup_job_persistent_storage(self, workspace: str, job: str) -> None:
         """Remove persistent job storage from the shared volume after successful job completion."""
@@ -1930,11 +1927,6 @@ chmod -R 777 {job_vol}/{storage_subpath}
             return JobUpdate(
                 status=HelixJobStatus.PAUSED, status_details={"message": "Container not found, job paused"}
             )
-        if container.status == "running":
-            return JobUpdate(
-                status=HelixJobStatus.PAUSING,
-                status_details={"message": "Job is being paused", **self._image_digest_updates(step, container)},
-            )
         if container.status not in ("exited", "dead"):
             return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
         raw_exit_code = (container.attrs or {}).get("State", {}).get("ExitCode")
@@ -1942,24 +1934,13 @@ chmod -R 777 {job_vol}/{storage_subpath}
         status, message, error_details = describe_paused_exit(
             exit_code, paused_message=f"Job paused successfully with exit code {exit_code}"
         )
-        digest_details = self._image_digest_updates(step, container)
-        status_details: dict = {"message": message, **digest_details}
+        status_details: dict = {"message": message}
         if status != HelixJobStatus.PAUSED:
             status_details["exit_code"] = exit_code
         return JobUpdate(status=status, status_details=status_details, error_details=error_details or None)
 
-    def _image_digest_updates(self, step: HelixJobStepWithContext, container: Container) -> dict:
-        image = getattr(container, "image", None)
-        observed = getattr(image, "id", None) if image is not None else None
-        if not observed:
-            observed = (container.attrs or {}).get("Image")
-        if observed is not None:
-            observed = str(observed)
-        return image_digest_updates(step.status_details, observed)
-
     def create_step_update(self, step: HelixJobStepWithContext, container: Container) -> JobUpdate:
         status, status_details, error_stack = self.map_docker_container_status_to_platform_status(step, container)
-        status_details.update(self._image_digest_updates(step, container))
         task_id = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
         error_details = {}
         if status == HelixJobStatus.ERROR:
@@ -2214,6 +2195,9 @@ chmod -R 777 {job_vol}/{storage_subpath}
         workspace = self.get_label_from_container(container, JOB_WORKSPACE_ID_LABEL)
         job = self.get_label_from_container(container, JOB_ID_LABEL)
         task = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
+        attrs: dict[str, Any] = container.attrs or {}
+        state = attrs.get("State", {})
+        exit_code = state.get("ExitCode", 0) if isinstance(state, dict) else 0
         delegation_name = self._workload_delegation_name_from_container(container)
 
         self._try_revoke_workload_delegation(
@@ -2238,7 +2222,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
             uses_persistent_storage = (
                 self.get_label_from_container(container, JOB_USES_PERSISTENT_STORAGE_LABEL) == "true"
             )
-            if uses_persistent_storage:
+            if uses_persistent_storage and exit_code == 0:
                 step_name = self.get_label_from_container(container, JOB_STEP_NAME_LABEL)
                 if self.check_job_persistent_storage_cleanup_allowed(job=job, step_name=step_name, workspace=workspace):
                     logger.debug(
@@ -2320,7 +2304,7 @@ class GPUDockerJobBackend(DockerJobBackend[GPUExecutionProvider]):
         # Release GPU on any terminal state. Do not wait for cleanup_steps - that method
         # is called on the base class and has no visibility into the GPU pool!
         # Note: job_update.status may be a string or enum depending on code path
-        # Paused is not terminal, but the container is already gone. Leaving the
+        # Paused is not terminal, but the container has exited. Leaving the
         # allocation in place would reserve those GPUs again when the step resumes.
         release_states = {s.value for s in HelixJobStatus.terminals()} | {HelixJobStatus.PAUSED.value}
         status_value = job_update.status.value if isinstance(job_update.status, HelixJobStatus) else job_update.status

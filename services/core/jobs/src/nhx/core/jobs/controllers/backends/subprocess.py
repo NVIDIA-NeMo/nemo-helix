@@ -326,6 +326,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 error_details={"message": message},
             )
 
+        # The TTLs bound running and scheduling time. A pausing step is bounded by its pause
+        # deadline, and a cancelling step was just terminated above, so neither is timed out here.
+        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING):
+            return self._create_step_update(step, metadata)
         ttl_seconds = (
             self._execution_profile_config.ttl_seconds_active
             if step.status == HelixJobStatus.ACTIVE
@@ -349,10 +353,6 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             )
 
         return self._create_step_update(step, metadata)
-
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
-        job_dir = self._root_dir / workspace / job
-        shutil.rmtree(job_dir, ignore_errors=True)
 
     def cleanup_steps(self) -> None:
         for key, metadata in self._process_registry.items():

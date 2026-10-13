@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared pause, resume, and storage-retention decisions for the jobs service."""
+"""Shared pause, resume, and rerun decisions for the jobs service."""
 
 from __future__ import annotations
 
@@ -9,14 +9,10 @@ import datetime
 from collections.abc import Mapping
 from typing import Any, Protocol
 
+from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.constants import (
-    IMAGE_DIGEST,
-    IMAGE_DIGEST_AT_SAVE,
-    IMAGE_DIGEST_COMPARISON_SKIPPED,
-    IMAGE_DIGEST_WARNING,
     NON_RESUMABLE_REASON,
-    PAUSE_EXIT_CODE,
     PAUSE_REQUESTED_AT,
     POD_PHASES,
     RERUN_EXCLUDED_STATUS_DETAILS,
@@ -140,70 +136,36 @@ def with_lifecycle_timestamps(
     status_details: Mapping[str, Any] | None,
     now: datetime.datetime | None = None,
 ) -> dict[str, Any] | None:
-    """Stamp resume and stop clocks, and snapshot the image digest at save time.
+    """Stamp the pause, resume and stop clocks.
 
-    ``stopped_at`` and ``resumed_at`` are overwritten on each new occurrence.
-    A same-status write does not move them.
+    ``pause_requested_at``, ``resumed_at`` and ``stopped_at`` are overwritten on each
+    new occurrence. A same-status write does not move them, so a repeated pause
+    request does not extend the pause deadline.
     """
     details = dict(status_details or {})
     if step.status == status:
         return details or None
     stamp = _resolve_now(now).isoformat()
-    if status in (HelixJobStatus.PAUSED, HelixJobStatus.ERROR):
+    if status == HelixJobStatus.PAUSING:
+        details[PAUSE_REQUESTED_AT] = stamp
+    elif status in (HelixJobStatus.PAUSED, HelixJobStatus.ERROR):
         details[STOPPED_AT] = stamp
-        existing = step.status_details or {}
-        digest = details.get(IMAGE_DIGEST)
-        if not isinstance(digest, str) or not digest:
-            digest = existing.get(IMAGE_DIGEST)
-        if isinstance(digest, str) and digest:
-            details[IMAGE_DIGEST_AT_SAVE] = digest
     elif status == HelixJobStatus.RESUMING:
         details[RESUMED_AT] = stamp
     return details or None
 
 
-def image_digest_updates(existing: dict[str, Any] | None, observed: str | None) -> dict[str, Any]:
-    """Record the live image digest, and compare it once a saved digest exists.
+def attempt_can_transition(current: HelixJobStatus, new: HelixJobStatus) -> bool:
+    """Return whether an attempt may move from ``current`` to ``new``.
 
-    The saved digest is ``image_digest_at_save``, copied when the step enters
-    ``paused`` or ``error``. Until that exists, the live digest is overwritten
-    as pods start. The comparison runs on the first reconcile that sees the
-    new pod.
+    Attempts follow the step state machine, plus ``pausing -> active``: when the
+    step being paused finishes instead, the pipeline moves on and the job is
+    running again. Steps never take that edge, so a stale ``active`` report from
+    the reconciler cannot undo a pause.
     """
-    current = existing or {}
-    saved = current.get(IMAGE_DIGEST_AT_SAVE)
-    has_saved = isinstance(saved, str) and bool(saved)
-    if not has_saved:
-        if observed and current.get(IMAGE_DIGEST) != observed:
-            return {IMAGE_DIGEST: observed}
-        return {}
-
-    updates: dict[str, Any] = {}
-    if observed and current.get(IMAGE_DIGEST) != observed:
-        updates[IMAGE_DIGEST] = observed
-    if IMAGE_DIGEST_WARNING in current or IMAGE_DIGEST_COMPARISON_SKIPPED in current:
-        return updates
-    if not observed:
-        updates[IMAGE_DIGEST_COMPARISON_SKIPPED] = "Image digest comparison skipped because the new digest is missing."
-        return updates
-    if observed != saved:
-        updates[IMAGE_DIGEST_WARNING] = (
-            "The training image changed since this state was saved "
-            f"(was {saved}, now {observed}). Training may behave differently or fail to resume."
-        )
-    return updates
-
-
-def storage_window_expired(
-    stopped_at: datetime.datetime | None, ttl_seconds: int, now: datetime.datetime | None = None
-) -> bool:
-    """Return whether ``stopped_at`` is older than ``ttl_seconds``. A non-positive TTL is already expired."""
-    if ttl_seconds <= 0:
+    if current == HelixJobStatus.PAUSING and new == HelixJobStatus.ACTIVE:
         return True
-    anchor = ensure_aware(stopped_at)
-    if anchor is None:
-        return True
-    return anchor + datetime.timedelta(seconds=ttl_seconds) < _resolve_now(now)
+    return current.can_transition_to(new)
 
 
 def active_ttl_anchor(step: TimedStep) -> datetime.datetime | None:
@@ -221,33 +183,19 @@ def active_ttl_anchor(step: TimedStep) -> datetime.datetime | None:
     return max(created_at, resumed_at)
 
 
-def effective_pause_ttl_seconds(requested: int | None, *, default_seconds: int, maximum_seconds: int) -> int:
-    """Return the pause window a job actually gets.
-
-    An unset request uses the platform default. Both are capped by the platform
-    maximum, so lowering that maximum shortens windows that were saved earlier.
-    """
-    chosen = default_seconds if requested is None else requested
-    return min(chosen, maximum_seconds)
-
-
 def rerun_status_details(previous: dict[str, Any] | None) -> dict[str, Any]:
     """Copy progress scalars and the metrics series onto a new attempt.
 
     ``resumable``, pod details, and ``storage_reclaimed_at`` stay behind. A
     non-resumable failure is reported as ``rerun_warning`` without copying the flag.
-    ``image_digest_at_save`` is carried so the new attempt can compare images.
     """
     source = previous or {}
     copied: dict[str, Any] = {}
     metrics = source.get("metrics")
     if isinstance(metrics, dict):
         copied["metrics"] = metrics
-    saved = source.get(IMAGE_DIGEST_AT_SAVE)
-    if isinstance(saved, str) and saved:
-        copied[IMAGE_DIGEST_AT_SAVE] = saved
     for key, value in source.items():
-        if key in RERUN_EXCLUDED_STATUS_DETAILS or key in ("metrics", IMAGE_DIGEST_AT_SAVE):
+        if key in RERUN_EXCLUDED_STATUS_DETAILS or key == "metrics":
             continue
         if isinstance(value, bool):
             continue

@@ -669,3 +669,43 @@ def test_sync_pausing_exit_75_is_paused(mock_nemo_client, tmp_path, mock_platfor
     update = backend.sync(step)
 
     assert update.status == HelixJobStatus.PAUSED
+
+
+def test_sync_pausing_step_older_than_the_ttl_is_not_timed_out(
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
+):
+    """A long training step is bounded by its pause deadline while pausing, not by the TTLs."""
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"])
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
+    _schedule_without_otel_export(backend, step)
+    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    metadata = backend._process_registry.get(key)
+    assert metadata is not None
+    ttl_seconds = backend._execution_profile_config.ttl_seconds_active
+    step.created_at = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds + 300)
+    _mark_pausing(step)
+    try:
+        update = backend.sync(step)
+        assert update.status == HelixJobStatus.PAUSING
+        assert metadata.process.poll() is None
+    finally:
+        metadata.process.kill()
+        metadata.process.wait(timeout=5)
+
+
+def test_sync_cancelling_step_older_than_the_ttl_is_cancelled(
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
+):
+    """Cancel terminates the process, so an old step ends cancelled rather than timed out."""
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"])
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
+    _schedule_without_otel_export(backend, step)
+    ttl_seconds = backend._execution_profile_config.ttl_seconds_active
+    step.created_at = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds + 300)
+    step.status = HelixJobStatus.CANCELLING
+
+    update = backend.sync(step)
+
+    assert update.status == HelixJobStatus.CANCELLED
