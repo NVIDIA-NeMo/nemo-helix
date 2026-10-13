@@ -31,8 +31,8 @@ import os
 import random
 import shutil
 import tempfile
-import time
 from pathlib import Path
+from time import sleep
 from urllib.parse import quote
 
 import httpx
@@ -196,7 +196,7 @@ def _download_resumable(
                     raise SystemExit(f"Gave up on {url} after {failures} failed attempts at byte {offset}") from exc
                 delay = min(60, 2**failures)
                 logger.warning("%s dropped at byte %d (%s); retrying in %ds", local_path.name, offset, exc, delay)
-                time.sleep(delay)
+                sleep(delay)
     if local_path.stat().st_size != size:
         raise SystemExit(f"{local_path} is {local_path.stat().st_size} bytes; expected {size}")
 

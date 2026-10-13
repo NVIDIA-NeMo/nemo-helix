@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
+from asyncio import to_thread
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, TypeGuard, overload
@@ -94,7 +94,7 @@ class _SyncBackendAdapter:
         postprocess_hooks: tuple[inference.PostprocessResponse, ...] | None = None,
     ) -> BenchmarkEvaluationResult:
         """Evaluate multiple metrics by running the sync backend in a worker thread."""
-        return await asyncio.to_thread(
+        return await to_thread(
             self._backend.evaluate_dataset,
             metrics=metrics,
             dataset=dataset,

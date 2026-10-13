@@ -60,7 +60,7 @@ def _ranged_server(*, drop_first_chunk_after: int | None = None, honor_range: bo
 
 @pytest.fixture
 def no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mine_embedding_data.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(mine_embedding_data, "sleep", lambda _seconds: None)
 
 
 def test_download_resumable_keeps_ranges_inside_the_file(tmp_path: Path) -> None:

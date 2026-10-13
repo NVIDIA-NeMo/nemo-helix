@@ -125,7 +125,7 @@ async def test_embedding_client_retries_http_503(monkeypatch: pytest.MonkeyPatch
     async def fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_embeddings.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_embeddings.async_sleep", fake_sleep)
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -193,7 +193,7 @@ async def test_embedding_client_includes_http_error_body(monkeypatch: pytest.Mon
     async def fake_sleep(delay: float) -> None:
         del delay
 
-    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_embeddings.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_embeddings.async_sleep", fake_sleep)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, request=request, text='{"detail":"queue full"}')
@@ -211,7 +211,7 @@ async def test_embedding_client_retries_non_finite_response(monkeypatch: pytest.
     async def fake_sleep(delay: float) -> None:
         del delay
 
-    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_embeddings.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_embeddings.async_sleep", fake_sleep)
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:

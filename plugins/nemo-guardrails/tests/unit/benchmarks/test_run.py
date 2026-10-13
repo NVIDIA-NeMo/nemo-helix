@@ -54,7 +54,7 @@ def test_smoke_test_retries_until_virtual_model_route_is_ready(monkeypatch) -> N
             return httpx.Response(404, request=request, json={"error": "not ready"})
         return httpx.Response(200, request=request, json={"choices": [{"message": {"content": "ok"}}]})
 
-    monkeypatch.setattr("nemo_guardrails_plugin.benchmarks.run.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("nemo_guardrails_plugin.benchmarks.run.sleep", lambda _seconds: None)
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
         client = NemoClient(base_url="http://platform.test", http_client=http_client)
 

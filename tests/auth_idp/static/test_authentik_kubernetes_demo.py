@@ -708,8 +708,8 @@ def test_authentik_kubernetes_port_forward_times_out_without_readiness(monkeypat
     monotonic_values = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
     monkeypatch.setattr(live_test.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
-    monkeypatch.setattr(live_test.time, "monotonic", lambda: next(monotonic_values))
-    monkeypatch.setattr(live_test.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(live_test, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(live_test, "pause", lambda seconds: None)
     requested_urls = []
 
     def fake_get(url: str, **_kwargs: object):
@@ -785,8 +785,8 @@ def test_authentik_kubernetes_port_forward_waits_after_kill(monkeypatch: pytest.
     monotonic_values = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(live_test, "_free_port", lambda: 19001)
     monkeypatch.setattr(live_test.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
-    monkeypatch.setattr(live_test.time, "monotonic", lambda: next(monotonic_values))
-    monkeypatch.setattr(live_test.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(live_test, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(live_test, "pause", lambda seconds: None)
     monkeypatch.setattr(
         live_test.httpx,
         "get",

@@ -433,7 +433,7 @@ class TestEvaluator:
             return cast(Callable[..., object], func)(*args, **kwargs)
 
         to_thread = mocker.patch(
-            "nhx_evals_sdk.execution.evaluator.asyncio.to_thread",
+            "nhx_evals_sdk.execution.evaluator.to_thread",
             new=mocker.AsyncMock(side_effect=run_in_thread),
         )
 
@@ -459,7 +459,7 @@ class TestEvaluator:
             return cast(Callable[..., object], func)(*args, **kwargs)
 
         to_thread = mocker.patch(
-            "nhx_evals_sdk.execution.evaluator.asyncio.to_thread",
+            "nhx_evals_sdk.execution.evaluator.to_thread",
             new=mocker.AsyncMock(side_effect=run_in_thread),
         )
 

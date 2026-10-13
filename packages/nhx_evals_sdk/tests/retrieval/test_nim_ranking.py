@@ -267,7 +267,7 @@ async def test_ranking_client_retries_http_503(monkeypatch: pytest.MonkeyPatch) 
     async def fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_ranking.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_ranking.async_sleep", fake_sleep)
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -299,7 +299,7 @@ async def test_ranking_client_retries_non_finite_logits(monkeypatch: pytest.Monk
     async def fake_sleep(delay: float) -> None:
         del delay
 
-    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_ranking.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("nhx_evals_sdk.retrieval.nim_ranking.async_sleep", fake_sleep)
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
