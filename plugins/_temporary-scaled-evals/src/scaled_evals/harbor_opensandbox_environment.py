@@ -5,8 +5,8 @@
 
 This is a ``BaseEnvironment`` written directly on the OpenSandbox SDK (through
 ``scaled_evals.harbor_opensandbox_driver``), not a subclass of Harbor's own OpenSandbox
-environment, so it depends on Harbor's public environment API rather than one release's private
-OpenSandbox hooks. What it adds over a plain sandbox:
+environment. It uses only the parts of Harbor's environment API that every supported runner
+shares, so the same class runs on Harbor 0.13.2 and 0.20.0. What it adds over a plain sandbox:
 
 * Egress comes from a trusted allowlist the runner renders into Harbor's environment kwargs, never
   from ``task.toml``. ``no-network`` tasks get deny-all, ``public`` tasks get the trusted allowlist
@@ -133,12 +133,13 @@ PROVISIONING_STATUS_BUDGET_SEC = 30
 def sandbox_role(session_id: str, trial_name: str) -> str:
     """Return ``agent`` or ``verifier`` for a sandbox, from the session ID Harbor gave it.
 
-    Harbor 0.20 doesn't pass the role to the environment. It names the agent's session exactly
-    ``<trial>__env``, and a separate verifier's ``<trial>__verifier__<key>``, shortened to end in a
-    hash when too long. The trial name can itself contain ``__verifier__``, so only an exact match
-    identifies the agent.
+    Harbor doesn't pass the role to the environment, and names the agent's session differently by
+    release: exactly the trial name on 0.13.2, exactly ``<trial>__env`` on 0.20. A separate
+    verifier's session is ``<trial>__verifier__<key>`` on both, shortened to end in a hash when too
+    long. The trial name can itself contain ``__verifier__``, so only an exact match identifies the
+    agent.
     """
-    return "agent" if session_id == f"{trial_name}__env" else "verifier"
+    return "agent" if session_id in (trial_name, f"{trial_name}__env") else "verifier"
 
 
 def _local_write_mode(path: Path) -> int:
@@ -246,20 +247,26 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
     @property
     @override
     def capabilities(self) -> EnvironmentCapabilities:
-        """Advertise every allowlist form ``egress_policy`` can enforce, so Harbor accepts those tasks."""
-        return EnvironmentCapabilities(
-            gpus=True,
-            disable_internet=True,
-            mounted=False,
-            docker_compose=self._services is not None,
-            network_allowlist=True,
-            network_allowlist_hostnames=True,
-            network_allowlist_wildcard_hostnames=True,
-            network_allowlist_ipv4_addresses=True,
-            network_allowlist_ipv6_addresses=True,
-            network_allowlist_ipv4_cidrs=True,
-            network_allowlist_ipv6_cidrs=True,
-        )
+        """Advertise every allowlist form ``egress_policy`` can enforce, so Harbor accepts those tasks.
+
+        Harbor 0.13 has no per-entry-type allowlist fields (its task model admits hostnames and
+        ``*.`` wildcards only), so fields the installed Harbor doesn't define are left out.
+        """
+        wanted = {
+            "gpus": True,
+            "disable_internet": True,
+            "mounted": False,
+            "docker_compose": self._services is not None,
+            "network_allowlist": True,
+            "network_allowlist_hostnames": True,
+            "network_allowlist_wildcard_hostnames": True,
+            "network_allowlist_ipv4_addresses": True,
+            "network_allowlist_ipv6_addresses": True,
+            "network_allowlist_ipv4_cidrs": True,
+            "network_allowlist_ipv6_cidrs": True,
+        }
+        fields = EnvironmentCapabilities.model_fields
+        return EnvironmentCapabilities(**{name: value for name, value in wanted.items() if name in fields})
 
     @classmethod
     @override
