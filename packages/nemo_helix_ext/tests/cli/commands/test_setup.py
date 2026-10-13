@@ -2913,7 +2913,7 @@ class TestUsableModelPairSelection:
 
         _probe_post(client).side_effect = post
 
-        with patch(f"{SETUP_MOD}.time.monotonic", side_effect=lambda: clock["now"]):
+        with patch(f"{SETUP_MOD}.monotonic", side_effect=lambda: clock["now"]):
             assert _select_usable_model_pair(client, "default", [large, small]) == ModelPair(
                 default=small,
                 fast=small,
@@ -2928,7 +2928,7 @@ class TestUsableModelPairSelection:
         client = _client_answering({entity_id: _probe_timeout() for entity_id in entity_ids})
         clock = iter([0.0, 0.0, 0.0, 91.0])
 
-        with patch(f"{SETUP_MOD}.time.monotonic", side_effect=lambda: next(clock)):
+        with patch(f"{SETUP_MOD}.monotonic", side_effect=lambda: next(clock)):
             assert _select_usable_model_pair(client, "default", entity_ids) is None
 
         assert _probe_post(client).call_count == 1
@@ -3810,7 +3810,7 @@ class TestWaitForHelixSpinner:
         mock_console, _ = spinner_console
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0.5, 1, 1]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0.5, 1, 1]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[False, True]),
         ):
             result = _wait_for_platform("http://localhost:8080")
@@ -3823,7 +3823,7 @@ class TestWaitForHelixSpinner:
         _, mock_status = spinner_console
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 2, 4, 4, 6, 6]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 2, 4, 4, 6, 6]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[False, False, True]),
         ):
             _wait_for_platform("http://localhost:8080")
@@ -3835,7 +3835,7 @@ class TestWaitForHelixSpinner:
         """Spinner exits cleanly and function returns False on timeout."""
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 200, 200]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 200, 200]),
             patch(f"{self._MOD}._check_platform_reachable", return_value=False),
         ):
             result = _wait_for_platform("http://localhost:8080", timeout=120)
@@ -3846,7 +3846,7 @@ class TestWaitForHelixSpinner:
         """Health check should use a short HTTP timeout (<=1.5s) for fast cycles."""
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0.5, 1]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0.5, 1]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[True]) as mock_reachable,
         ):
             _wait_for_platform("http://localhost:8080")
@@ -3862,7 +3862,7 @@ class TestWaitForHelixSpinner:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 5, 10, 10]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 5, 10, 10]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[False, True]),
         ):
             result = _wait_for_platform("http://localhost:8080", log_path=log)
@@ -3876,7 +3876,7 @@ class TestWaitForHelixSpinner:
         _, mock_status = spinner_console
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 2, 4, 4]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 2, 4, 4]),
             patch(f"{self._MOD}._check_platform_reachable", side_effect=[False, True]),
         ):
             result = _wait_for_platform("http://localhost:8080", log_path=None)
@@ -3891,7 +3891,7 @@ class TestWaitForHelixSpinner:
         dead.poll.return_value = 3
         with (
             patch(f"{self._MOD}._pause") as pause,
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 1, 2]),
             patch(f"{self._MOD}._check_platform_reachable") as reachable,
         ):
             result = _wait_for_platform("http://localhost:8080", timeout=120, proc=dead)
@@ -3954,7 +3954,7 @@ class TestWaitForModelsSpinner:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 100]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 1, 2, 100]),
         ):
             _wait_for_models(client, "nvidia-build", "default", round_seconds=5, max_rounds=1)
 
@@ -3974,7 +3974,7 @@ class TestWaitForModelsSpinner:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 1, 2, 3]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 1, 2, 3]),
         ):
             result = _wait_for_models(client, "nvidia-build", "default", round_seconds=30, max_rounds=1)
 
@@ -3995,7 +3995,7 @@ class TestWaitForModelsSpinner:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 1, 2, 3]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 1, 2, 3]),
         ):
             result = _wait_for_models(client, "nvidia-build", "default", round_seconds=30, max_rounds=1)
 
@@ -4022,7 +4022,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             result = _wait_for_models(
                 client,
@@ -4052,7 +4052,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             result = _wait_for_models(
                 client,
@@ -4077,7 +4077,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             result = _wait_for_models(client, "lost-provider", "default", round_seconds=30, max_rounds=2)
 
@@ -4095,7 +4095,7 @@ class TestWaitForModelsEarlyExit:
         # monotonic calls: start, deadline, while-check, elapsed, while-check, elapsed, while-check(exit)
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 1, 2, 2, 100]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 1, 1, 2, 2, 100]),
         ):
             result = _wait_for_models(client, "new-provider", "default", round_seconds=5, max_rounds=1)
 
@@ -4115,7 +4115,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             result = _wait_for_models(client, "good-provider", "default", round_seconds=30, max_rounds=1)
 
@@ -4133,7 +4133,7 @@ class TestWaitForModelsEarlyExit:
 
         with (
             patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 0, 0]),
+            patch(f"{self._MOD}.monotonic", side_effect=[0, 0, 0, 0]),
         ):
             _wait_for_models(client, "bad-provider", "default", round_seconds=30, max_rounds=1)
 

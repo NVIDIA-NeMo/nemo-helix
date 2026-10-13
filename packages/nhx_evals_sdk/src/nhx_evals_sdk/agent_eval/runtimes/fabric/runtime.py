@@ -47,11 +47,12 @@ import math
 import os
 import shutil
 import tempfile
-import time
 import tomllib
+from asyncio import wait_for
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from time import sleep
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -464,7 +465,7 @@ class FabricAgentRuntime:
                     workspace_dir=workspace_dir,
                 )
 
-            result = await asyncio.wait_for(
+            result = await wait_for(
                 # ``Fabric.run`` folds the per-invocation input + request id into a ``RunRequest``.
                 client.run(
                     task_config,
@@ -889,7 +890,7 @@ _CODEX_HOME_REMOVAL_DELAYS_S = (0.0, 0.5, 1.0, 2.0)
 
 def _remove_codex_home(home: Path) -> None:
     for delay in _CODEX_HOME_REMOVAL_DELAYS_S:
-        time.sleep(delay)
+        sleep(delay)
         shutil.rmtree(home, ignore_errors=True)
         if not home.exists():
             return

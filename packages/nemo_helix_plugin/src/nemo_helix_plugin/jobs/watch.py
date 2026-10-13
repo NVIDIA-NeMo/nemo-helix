@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from asyncio import sleep as async_sleep
 from collections.abc import AsyncIterator, Iterable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
@@ -418,7 +418,7 @@ def _sleep(poll_interval: float, deadline: _WatchDeadline) -> None:
 async def _async_sleep(poll_interval: float, deadline: _WatchDeadline) -> None:
     sleep_for = deadline.sleep_seconds(poll_interval)
     if sleep_for > 0:
-        await asyncio.sleep(sleep_for)
+        await async_sleep(sleep_for)
 
 
 def _status_event(status_response: HelixJobStatusResponse, job_name: str) -> JobStatusEvent:
