@@ -3,10 +3,12 @@
 
 """The OpenSandbox SDK calls ``NemoOpenSandboxEnvironment`` makes, with no Harbor imports.
 
-Adapted from ``sandboxed_gym.backends._opensandbox_driver`` (create, exec, file I/O, kill by
-metadata) and from Harbor 0.20's ``OpenSandboxEnvironment`` (create retries, a readiness wait that
-fails fast, directory transfer). Keeping Harbor out of this module is what lets the environment
-run on every Harbor runner, and leaves it ready to move into a shared package.
+Covers what one Harbor trial needs from OpenSandbox: create a sandbox (retrying transient errors,
+failing fast when it can't become ready, and killing any sandbox a failed or retried create left
+behind), run commands, move files in and out, and kill sandboxes by their metadata labels. The
+create path follows Harbor 0.20's own OpenSandbox environment. Keeping Harbor out of this module
+is what lets the environment run on more than one Harbor release, and leaves it ready to move into
+a shared package.
 
 The SDK is only installed in the Harbor runner venvs, so it is imported lazily by ``load_sdk``.
 Tests replace that mapping with mocks.
@@ -80,7 +82,7 @@ def join_output(messages: Sequence[Any]) -> str:
     """Rejoin a command's output messages into one stream.
 
     execd sends one message per output line with its line ending stripped, and a blank line as
-    ``"\n"``; joining with ``""`` would run every line together. Whether the output ended in a
+    ``"\\n"``; joining with ``""`` would run every line together. Whether the output ended in a
     newline can't be recovered, so the result has none at the end.
     """
     return "\n".join(message.text.rstrip("\n") for message in messages)
@@ -152,6 +154,7 @@ class OpenSandboxDriver:
         logger: logging.Logger | None = None,
         retry_wait: Callable[[int], float] | None = None,
     ) -> None:
+        """Hold the connection settings; nothing talks to the server until a method is called."""
         self._connection = connection
         self._sdk = dict(sdk) if sdk is not None else None
         self._logger = logger or LOGGER
@@ -172,6 +175,7 @@ class OpenSandboxDriver:
             "protocol": self._connection.protocol,
             "use_server_proxy": self._connection.use_server_proxy,
         }
+        # Only override the SDK's own request timeout when one was configured.
         if self._connection.request_timeout_sec is not None:
             kwargs["request_timeout"] = timedelta(seconds=self._connection.request_timeout_sec)
         return self.sdk["ConnectionConfig"](**kwargs)
@@ -180,8 +184,8 @@ class OpenSandboxDriver:
         """Create a sandbox, wait until it is ready, and leave no other sandbox behind.
 
         Every attempt carries one create-attempt label, so a sandbox the server created but whose
-        response was lost is still found and killed: all of them when the create fails, all but
-        the returned one when it succeeds. Only transient SDK errors are retried.
+        response was lost is still found and killed: all of them when the create fails or is
+        cancelled, all but the returned one when it succeeds. Only transient SDK errors are retried.
 
         Args:
             request: What to create.
@@ -192,26 +196,34 @@ class OpenSandboxDriver:
             TimeoutError: The sandbox did not become ready within ``request.ready_timeout_sec``.
         """
         attempt_id = uuid4().hex
-        metadata = {**request.metadata, CREATE_ATTEMPT_METADATA_KEY: attempt_id}
+        attempt_label = {CREATE_ATTEMPT_METADATA_KEY: attempt_id}
+        metadata = {**request.metadata, **attempt_label}
         attempt = 1
-        while True:
-            try:
-                sandbox = await self._create_once(request, metadata, failure_check)
-                break
-            except BaseException as exc:
-                if attempt >= CREATE_ATTEMPTS or not is_transient_sdk_error(exc):
-                    await self.kill_matching({CREATE_ATTEMPT_METADATA_KEY: attempt_id})
-                    raise
-                self._logger.warning(
-                    "OpenSandbox create attempt %d of %d failed with %s; retrying",
-                    attempt,
-                    CREATE_ATTEMPTS,
-                    type(exc).__name__,
-                )
-            await asyncio.sleep(self._retry_wait(attempt))
-            attempt += 1
+        # The outer handler covers the retry backoff as well as the create calls, so a cancellation
+        # while waiting to retry still kills what earlier attempts left behind.
+        try:
+            while True:
+                try:
+                    sandbox = await self._create_once(request, metadata, failure_check)
+                    break
+                except Exception as exc:
+                    if attempt >= CREATE_ATTEMPTS or not is_transient_sdk_error(exc):
+                        raise
+                    self._logger.warning(
+                        "OpenSandbox create attempt %d of %d failed with %s; retrying",
+                        attempt,
+                        CREATE_ATTEMPTS,
+                        type(exc).__name__,
+                    )
+                await asyncio.sleep(self._retry_wait(attempt))
+                attempt += 1
+        except BaseException:
+            # Shielded, so a second cancellation can't cut the cleanup short.
+            await asyncio.shield(self.kill_matching(attempt_label))
+            raise
 
-        await self.kill_matching({CREATE_ATTEMPT_METADATA_KEY: attempt_id}, keep=sandbox_id(sandbox))
+        # Success: kill only the sandboxes earlier attempts orphaned, keeping the one returned.
+        await self.kill_matching(attempt_label, keep=sandbox_id(sandbox))
         return sandbox
 
     async def _create_once(
@@ -219,6 +231,7 @@ class OpenSandboxDriver:
     ) -> Any:
         """One create call, then the readiness wait; the sandbox is killed if it never becomes ready."""
         sdk = self.sdk
+        # The request carries the policy as plain data; the SDK takes its own model.
         network_policy = (
             sdk["NetworkPolicy"].model_validate(dict(request.network_policy))
             if request.network_policy is not None
@@ -242,6 +255,7 @@ class OpenSandboxDriver:
         try:
             await self._wait_until_ready(sandbox, request, failure_check)
         except BaseException:
+            # We hold the handle here, so kill this sandbox directly rather than by label.
             await self.safe_kill(sandbox)
             raise
         return sandbox
@@ -251,6 +265,8 @@ class OpenSandboxDriver:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + request.ready_timeout_sec
         while True:
+            # A sandbox that can no longer become ready fails the create now, with the reason,
+            # instead of at the deadline.
             failure = await self._terminal_failure(sandbox)
             if failure is None and failure_check is not None:
                 failure = await failure_check(sandbox)
@@ -294,6 +310,7 @@ class OpenSandboxDriver:
                 "Failed to kill OpenSandbox sandbox %s; it may linger until its server-side timeout.",
                 sandbox_id(sandbox),
             )
+        # Release the client side even when the kill failed.
         try:
             await sandbox.close()
         except Exception:
@@ -303,43 +320,62 @@ class OpenSandboxDriver:
         """Best-effort kill of every sandbox whose metadata includes ``metadata``, except ``keep``.
 
         Returns the IDs it killed. Failures are logged, not raised.
+
+        Raises:
+            ValueError: ``metadata`` is empty; it would match every sandbox on the server.
         """
         if not metadata:
             raise ValueError("killing sandboxes by metadata requires at least one label")
-        sdk = self.sdk
         try:
-            manager = await sdk["SandboxManager"].create(connection_config=self.connection_config())
+            manager = await self.sdk["SandboxManager"].create(connection_config=self.connection_config())
         except Exception:
             self._logger.warning("Could not list OpenSandbox sandboxes matching %s", dict(metadata), exc_info=True)
             return []
-        killed: list[str] = []
         try:
-            matches: list[str] = []
-            page = 1
-            while True:
-                result = await manager.list_sandbox_infos(sdk["SandboxFilter"](metadata=dict(metadata), page=page))
-                matches.extend(info.id for info in result.sandbox_infos if info.id != keep)
-                if not result.pagination.has_next_page:
-                    break
-                page += 1
-            for match in matches:
-                try:
-                    await manager.kill_sandbox(match)
-                except Exception:
-                    # One sandbox the server already dropped must not spare the rest.
-                    self._logger.warning("Could not kill OpenSandbox sandbox %s", match, exc_info=True)
-                    continue
-                killed.append(match)
-            if killed:
-                self._logger.warning("Killed OpenSandbox sandboxes matching %s: %s", dict(metadata), ", ".join(killed))
-        except Exception:
-            self._logger.warning("Could not list OpenSandbox sandboxes matching %s", dict(metadata), exc_info=True)
-        finally:
             try:
-                await manager.close()
+                matches = await self._list_matching(manager, metadata, keep=keep)
             except Exception:
-                pass
+                self._logger.warning("Could not list OpenSandbox sandboxes matching %s", dict(metadata), exc_info=True)
+                return []
+            killed = await self._kill_each(manager, matches)
+        finally:
+            await self._close_quietly(manager)
+        if killed:
+            self._logger.warning("Killed OpenSandbox sandboxes matching %s: %s", dict(metadata), ", ".join(killed))
         return killed
+
+    async def _list_matching(self, manager: Any, metadata: Mapping[str, str], *, keep: str | None) -> list[str]:
+        """IDs of every sandbox whose metadata includes ``metadata``, across all pages, except ``keep``."""
+        sandbox_filter = self.sdk["SandboxFilter"]
+        matches: list[str] = []
+        page = 1
+        while True:
+            result = await manager.list_sandbox_infos(sandbox_filter(metadata=dict(metadata), page=page))
+            matches.extend(info.id for info in result.sandbox_infos if info.id != keep)
+            if not result.pagination.has_next_page:
+                return matches
+            page += 1
+
+    async def _kill_each(self, manager: Any, sandbox_ids: Sequence[str]) -> list[str]:
+        """Kill each sandbox in turn and return the ones killed; a failed kill is logged and skipped."""
+        killed: list[str] = []
+        for match in sandbox_ids:
+            try:
+                await manager.kill_sandbox(match)
+            except Exception:
+                # One sandbox the server already dropped must not spare the rest.
+                self._logger.warning("Could not kill OpenSandbox sandbox %s", match, exc_info=True)
+                continue
+            killed.append(match)
+        return killed
+
+    @staticmethod
+    async def _close_quietly(manager: Any) -> None:
+        """Close a ``SandboxManager``, ignoring errors: the caller's outcome matters more than the close."""
+        try:
+            await manager.close()
+        except Exception:
+            pass
 
     async def run(
         self,
@@ -360,6 +396,7 @@ class OpenSandboxDriver:
             "timeout": timedelta(seconds=timeout_sec) if timeout_sec is not None else None,
             "envs": dict(env) if env else None,
         }
+        # Leave uid out entirely rather than send None, so the SDK uses the image's default user.
         if uid is not None:
             opts["uid"] = uid
         execution = await sandbox.commands.run(command, opts=self.sdk["RunCommandOpts"](**opts))
@@ -394,12 +431,14 @@ class OpenSandboxDriver:
 
         The type is the SDK's ``entry_type`` lower-cased, or ``""`` when the SDK left it unset.
         """
+        # One recursive search rather than a listing per directory.
         matches = await sandbox.files.search(self.sdk["SearchEntry"](path=root, pattern="**"))
         base = PurePosixPath(root)
         return [
             (
                 PurePosixPath(entry.path).relative_to(base),
                 entry.path,
+                # The SDK reports types like "EntryType.FILE"; callers match on the lower-cased suffix.
                 str(getattr(entry, "entry_type", "") or "").lower(),
             )
             for entry in matches
