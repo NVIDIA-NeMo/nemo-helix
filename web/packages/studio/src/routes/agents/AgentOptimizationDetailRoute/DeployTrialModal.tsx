@@ -18,7 +18,6 @@ import {
   applyTrialToAgentConfig,
   buildTrialAgentName,
   fetchStudyConfig,
-  isDeployedParam,
   studyConfigLocation,
   withAgentName,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/trialAgentConfig';
@@ -139,9 +138,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
     }
   }, [trial, sourceAgent, studyConfig]);
   const appliedConfig = applied?.ok ? applied : undefined;
-  const deployedParams =
-    trial?.params.filter((param) => isDeployedParam(studyConfig?.searchSpace.get(param.name))) ??
-    [];
+  const deployedParams = appliedConfig?.deployedParams ?? [];
 
   // The study read the agent's config when it ran, so a later edit was never evaluated.
   const agentChangedSinceStudy =

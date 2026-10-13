@@ -183,6 +183,27 @@ models:
     });
   });
 
+  it('leaves out the judge model the study only scored with', async () => {
+    const user = userEvent.setup();
+    const captured = mockHelix({
+      optimizeYaml: `${OPTIMIZE_YAML}
+models:
+  judge: {provider: nvidia, model: judge-model}
+eval:
+  evaluators:
+    accuracy: {_type: tunable_rag_evaluator, llm_name: judge}
+`,
+    });
+    renderModal();
+
+    const { dialog, deploy } = await deployButton();
+    expect(within(dialog).queryByText(/Also adds/)).not.toBeInTheDocument();
+    await user.click(deploy);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(captured.agent.config?.models).not.toHaveProperty('judge');
+  });
+
   it('warns when the study ran the agent model with different settings', async () => {
     const user = userEvent.setup();
     const captured = mockHelix({

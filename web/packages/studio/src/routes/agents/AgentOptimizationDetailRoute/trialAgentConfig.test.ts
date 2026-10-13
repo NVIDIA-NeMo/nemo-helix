@@ -34,10 +34,12 @@ const specAgent = (harnessModel?: Record<string, unknown>) => ({
 
 const study = (
   searchSpace: Record<string, SearchSpaceEntry>,
-  overlayModels: Record<string, Record<string, unknown>> = {}
+  overlayModels: Record<string, Record<string, unknown>> = {},
+  evaluatorModels: string[] = []
 ): StudyConfig => ({
   searchSpace: new Map(Object.entries(searchSpace)),
   overlayModels: new Map(Object.entries(overlayModels)),
+  evaluatorModels: new Set(evaluatorModels),
 });
 
 describe('parseStudyConfig', () => {
@@ -67,8 +69,25 @@ describe('parseStudyConfig', () => {
     ).toEqual(new Map([['judge', { model: 'x' }]]));
   });
 
+  it('collects the models the evaluators score with', () => {
+    expect(
+      parseStudyConfig({
+        eval: {
+          evaluators: {
+            accuracy: { _type: 'tunable_rag_evaluator', llm_name: 'judge' },
+            exact: { _type: 'exact_match' },
+          },
+        },
+      }).evaluatorModels
+    ).toEqual(new Set(['judge']));
+  });
+
   it('returns an empty study config when the optimizer section is missing', () => {
-    expect(parseStudyConfig({})).toEqual({ searchSpace: new Map(), overlayModels: new Map() });
+    expect(parseStudyConfig({})).toEqual({
+      searchSpace: new Map(),
+      overlayModels: new Map(),
+      evaluatorModels: new Set(),
+    });
   });
 });
 
@@ -268,6 +287,39 @@ describe('applyTrialToAgentConfig', () => {
       default: { temperature: 0.2 },
       judge: { provider: 'nvidia', model: 'judge-model', temperature: 0 },
     });
+  });
+
+  it('leaves out a judge model only the evaluators use, along with its params', () => {
+    const {
+      config: next,
+      addedModels,
+      deployedParams,
+    } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ temperature: '0.2', judge_temperature: '0' }),
+      study(
+        {
+          temperature: { path: 'models.default.temperature' },
+          judge_temperature: { path: 'models.judge.temperature', values: [0, 0.5] },
+        },
+        { judge: { provider: 'nvidia', model: 'judge-model' } },
+        ['judge']
+      )
+    );
+
+    expect(addedModels).toEqual([]);
+    expect(next.models).not.toHaveProperty('judge');
+    expect(deployedParams.map((param) => param.name)).toEqual(['temperature']);
+  });
+
+  it('keeps tuning an evaluator model the agent also defines', () => {
+    const { config: next } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ fast_temperature: '0.1' }),
+      study({ fast_temperature: { path: 'models.fast.temperature' } }, {}, ['fast'])
+    );
+
+    expect(next.models).toMatchObject({ fast: { model: 'llama-mini', temperature: 0.1 } });
   });
 
   it('rejects a model neither the agent nor the optimize config defines', () => {
