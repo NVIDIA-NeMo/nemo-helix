@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ChartLegend } from '@nemo/common/src/components/charts/ChartLegend';
-import { Text } from '@nvidia/foundations-react-core';
+import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { HeadToHeadChart } from '@studio/components/charts/EvaluationCompareChart/HeadToHeadChart';
 import { ImprovementChart } from '@studio/components/charts/EvaluationCompareChart/ImprovementChart';
 import { ScoresChart } from '@studio/components/charts/EvaluationCompareChart/ScoresChart';
@@ -32,15 +32,15 @@ const Section: FC<{ title: string; description: string; children: ReactNode }> =
   description,
   children,
 }) => (
-  <section className="flex flex-col gap-2">
-    <div className="flex flex-col gap-0.5">
+  <Stack gap="density-md">
+    <Stack gap="density-xxs">
       <Text kind="label/bold/md">{title}</Text>
       <Text kind="body/regular/xs" color="subtle">
         {description}
       </Text>
-    </div>
+    </Stack>
     {children}
-  </section>
+  </Stack>
 );
 
 const Placeholder: FC<{ children: ReactNode }> = ({ children }) => (
@@ -109,10 +109,10 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
     if (sessions.isError) return <Placeholder>Could not load test case results.</Placeholder>;
     if (sessions.isLoading) {
       return (
-        <div aria-busy className="flex items-center gap-2">
+        <Flex aria-busy align="center" gap="density-md">
           <Loader2 width={16} height={16} className="animate-spin text-brand" />
           <Placeholder>Loading test case results…</Placeholder>
-        </div>
+        </Flex>
       );
     }
     if (!hasPairedTestCases) {
@@ -122,8 +122,8 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <Stack gap="density-xl">
+      <Flex wrap="wrap" align="center" justify="between" gap="density-lg">
         <MetricSelect
           label="Baseline"
           value={baseline.row.id}
@@ -132,7 +132,7 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
           triggerClassName="w-56"
         />
         <ChartLegend items={legendItems} interactive={false} justify="end" />
-      </div>
+      </Flex>
       <Section title="Scores" description="Mean score per evaluator.">
         {scoreRows.length > 0 ? (
           <ScoresChart evaluations={compared} rows={scoreRows} />
@@ -170,6 +170,6 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
         )}
         {renderHeadToHead()}
       </Section>
-    </div>
+    </Stack>
   );
 };

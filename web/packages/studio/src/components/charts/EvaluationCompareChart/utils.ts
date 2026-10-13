@@ -156,6 +156,11 @@ export function symmetricAxisBound(values: readonly number[]): number {
   return step * magnitude;
 }
 
+export const CATEGORY_AXIS_WIDTH = 140;
+
+export const truncateCategoryLabel = (label: string): string =>
+  label.length > 20 ? `${label.slice(0, 19)}…` : label;
+
 export const formatImprovement = (value: number): string =>
   `${value > 0 ? '+' : ''}${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
 

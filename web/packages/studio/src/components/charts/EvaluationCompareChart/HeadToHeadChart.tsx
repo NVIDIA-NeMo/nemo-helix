@@ -9,7 +9,11 @@ import {
 import { TICK_STYLE } from '@nemo/common/src/components/charts/frame';
 import { AXIS_COLOR } from '@nemo/common/src/components/charts/tokens';
 import { Stack } from '@nvidia/foundations-react-core';
-import type { HeadToHead } from '@studio/components/charts/EvaluationCompareChart/utils';
+import {
+  CATEGORY_AXIS_WIDTH,
+  type HeadToHead,
+  truncateCategoryLabel,
+} from '@studio/components/charts/EvaluationCompareChart/utils';
 import type { FC } from 'react';
 import {
   Bar,
@@ -22,13 +26,18 @@ import {
 } from 'recharts';
 
 const ROW_HEIGHT = 36;
-const CATEGORY_WIDTH = 140;
+
+interface OutcomeSeries {
+  readonly key: keyof HeadToHead;
+  readonly label: string;
+  readonly color: string;
+}
 
 const OUTCOMES = [
   { key: 'better', label: 'Better', color: 'var(--text-color-feedback-success)' },
   { key: 'same', label: 'Same', color: 'var(--text-color-accent-gray)' },
   { key: 'worse', label: 'Worse', color: 'var(--text-color-feedback-danger)' },
-] as const satisfies readonly { key: keyof HeadToHead; label: string; color: string }[];
+] as const satisfies readonly OutcomeSeries[];
 
 const LEGEND_ITEMS = OUTCOMES.map(({ key, label, color }) => ({ id: key, label, color }));
 
@@ -56,8 +65,6 @@ const HeadToHeadTooltip: FC<TooltipProps<number, string>> = ({ active, payload }
   );
 };
 
-const truncate = (label: string): string => (label.length > 20 ? `${label.slice(0, 19)}…` : label);
-
 export const HeadToHeadChart: FC<{ rows: readonly HeadToHeadRow[] }> = ({ rows }) => (
   <Stack gap="density-sm">
     <ChartLegend items={LEGEND_ITEMS} interactive={false} justify="end" />
@@ -79,11 +86,11 @@ export const HeadToHeadChart: FC<{ rows: readonly HeadToHeadRow[] }> = ({ rows }
         <YAxis
           type="category"
           dataKey="name"
-          width={CATEGORY_WIDTH}
+          width={CATEGORY_AXIS_WIDTH}
           tick={TICK_STYLE}
           tickLine={false}
           stroke={AXIS_COLOR}
-          tickFormatter={truncate}
+          tickFormatter={truncateCategoryLabel}
           interval={0}
         />
         <Tooltip

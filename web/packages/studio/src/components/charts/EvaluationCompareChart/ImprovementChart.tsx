@@ -8,11 +8,13 @@ import {
 import { AXIS_LABEL_STYLE, GRID_PROPS, TICK_STYLE } from '@nemo/common/src/components/charts/frame';
 import { AXIS_COLOR, REFERENCE_LINE_COLOR } from '@nemo/common/src/components/charts/tokens';
 import {
+  CATEGORY_AXIS_WIDTH,
   type ComparedEvaluation,
   describeImprovement,
   formatImprovement,
   type ImprovementRow,
   symmetricAxisBound,
+  truncateCategoryLabel,
 } from '@studio/components/charts/EvaluationCompareChart/utils';
 import type { FC } from 'react';
 import {
@@ -30,7 +32,6 @@ import {
 const BAR_SIZE = 12;
 const ROW_PADDING = 20;
 const AXIS_HEIGHT = 48;
-const CATEGORY_WIDTH = 140;
 
 interface ImprovementChartProps {
   baseline: ComparedEvaluation;
@@ -71,8 +72,6 @@ const ImprovementTooltip: FC<
   );
 };
 
-const truncate = (label: string): string => (label.length > 20 ? `${label.slice(0, 19)}…` : label);
-
 export const ImprovementChart: FC<ImprovementChartProps> = ({ baseline, candidates, rows }) => {
   const height = rows.length * (candidates.length * (BAR_SIZE + 2) + ROW_PADDING) + AXIS_HEIGHT;
   const bound = symmetricAxisBound(
@@ -108,11 +107,11 @@ export const ImprovementChart: FC<ImprovementChartProps> = ({ baseline, candidat
         <YAxis
           type="category"
           dataKey={(row: ImprovementRow) => row.metric.label}
-          width={CATEGORY_WIDTH}
+          width={CATEGORY_AXIS_WIDTH}
           tick={TICK_STYLE}
           tickLine={false}
           stroke={AXIS_COLOR}
-          tickFormatter={truncate}
+          tickFormatter={truncateCategoryLabel}
           interval={0}
         />
         <ReferenceLine x={0} stroke={REFERENCE_LINE_COLOR} />

@@ -7,7 +7,7 @@ import {
 } from '@nemo/common/src/components/charts/ChartTooltip';
 import { GRID_PROPS, TICK_STYLE } from '@nemo/common/src/components/charts/frame';
 import { AXIS_COLOR } from '@nemo/common/src/components/charts/tokens';
-import { Text } from '@nvidia/foundations-react-core';
+import { Grid, Stack, Text } from '@nvidia/foundations-react-core';
 import type {
   ComparedEvaluation,
   MetricValuesRow,
@@ -60,7 +60,7 @@ interface ScorePanelProps {
 }
 
 const ScorePanel: FC<ScorePanelProps> = ({ evaluations, row }) => (
-  <div className="flex flex-col gap-1">
+  <Stack gap="density-xs">
     <Text kind="label/semibold/sm">{row.metric.label}</Text>
     <ResponsiveContainer width="100%" height={PANEL_HEIGHT}>
       <BarChart data={[row]} margin={{ top: 8, right: 16, bottom: 0, left: 0 }} barGap={4}>
@@ -89,14 +89,14 @@ const ScorePanel: FC<ScorePanelProps> = ({ evaluations, row }) => (
         ))}
       </BarChart>
     </ResponsiveContainer>
-  </div>
+  </Stack>
 );
 
 /** One panel per evaluator, each on its own scale, so a 0–1 score isn't flattened next to a 0–100 one. */
 export const ScoresChart: FC<ScoresChartProps> = ({ evaluations, rows }) => (
-  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+  <Grid cols={{ base: 1, md: 2, xl: 3 }} gap="density-xl">
     {rows.map((row) => (
       <ScorePanel key={row.metric.id} evaluations={evaluations} row={row} />
     ))}
-  </div>
+  </Grid>
 );
