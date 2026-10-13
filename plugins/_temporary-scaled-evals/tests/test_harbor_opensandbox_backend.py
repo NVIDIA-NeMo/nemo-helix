@@ -289,6 +289,7 @@ def test_trusted_hosts_put_model_endpoint_first_without_duplicates() -> None:
 
 
 def test_sandbox_lifetime_default_matches_the_environment() -> None:
+    """The deployment setting and the environment's own default agree on the sandbox lifetime."""
     environment = pytest.importorskip("scaled_evals.harbor_opensandbox_environment")
     environment_default = (
         inspect.signature(environment.NemoOpenSandboxEnvironment.__init__).parameters["sandbox_timeout_sec"].default

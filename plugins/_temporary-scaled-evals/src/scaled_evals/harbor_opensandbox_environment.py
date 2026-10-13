@@ -89,6 +89,7 @@ __all__ = [
     "NemoOpenSandboxEnvironment",
 ]
 
+# Logger for messages that have no environment instance to log through, such as ``preflight``.
 LOGGER = logging.getLogger(__name__)
 
 # Harbor environment type this class reports; the value Harbor 0.20's own OpenSandbox environment uses.
@@ -97,10 +98,17 @@ ENVIRONMENT_TYPE = "opensandbox"
 MANAGED_BY_METADATA_KEY = "nemo-managed-by"
 # Value of MANAGED_BY_METADATA_KEY on every sandbox this environment creates.
 MANAGED_BY_METADATA_VALUE = "scaled-evals"
-# Defaults for the operator template's tuning kwargs, as Harbor 0.20's OpenSandbox environment set them.
+# Constructor defaults, the same values Harbor 0.20's own OpenSandbox environment used. They apply
+# only when Harbor's environment kwargs leave a setting out; see the class docstring.
+# How long the server keeps a sandbox before deleting it. 24 hours (86,400 seconds).
 DEFAULT_SANDBOX_TIMEOUT_SEC = 60 * 60 * 24
+# How long a new sandbox may take to become healthy. 24 hours (86,400 seconds); in practice Harbor's
+# own start timeout ends the wait sooner: the task's build_timeout_sec (600 seconds by default) times
+# the job's environment_build_timeout_multiplier.
 DEFAULT_READY_TIMEOUT_SEC = 60 * 60 * 24
+# How often the readiness wait polls a new sandbox. 2 seconds.
 DEFAULT_HEALTH_CHECK_POLL_INTERVAL_SEC = 2.0
+# How long the one-time ``id -u`` probe of the image's user may take. 30 seconds.
 _IMAGE_UID_PROBE_TIMEOUT_SEC = 30
 # How long start() waits for main's readiness check and the services, when main has no timeout_sec.
 COMPOSE_READY_TIMEOUT_SEC = 300
@@ -188,6 +196,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         compose_services: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
+        """Store this environment's settings, then let ``BaseEnvironment`` validate the task against them."""
         # BaseEnvironment.__init__ runs the definition, capability and network policy validators,
         # which read these, so they are set first.
         has_compose_file = any((environment_dir / name).is_file() for name in COMPOSE_FILENAMES)

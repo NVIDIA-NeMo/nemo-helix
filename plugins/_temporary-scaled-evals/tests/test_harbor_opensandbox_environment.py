@@ -36,7 +36,9 @@ from scaled_evals.harbor_opensandbox_environment import (
     sandbox_role,
 )
 
+# The runner's trusted egress allowlist: an IP, a wildcard hostname and an IPv6 CIDR, one of each form.
 TRUSTED = ["10.96.0.20", "*.nvidia.com", "2001:db8::/48"]
+# Trial name, which Harbor also uses for the trial directory and the sandbox session IDs.
 TRIAL = "hello-world__abc"
 
 
@@ -124,6 +126,7 @@ def test_driver_does_not_need_harbor() -> None:
 
 
 async def test_no_network_is_deny_all(tmp_path: Path, server: Server) -> None:
+    """A ``no-network`` task gets a deny-all policy with no exceptions."""
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
 
     await environment._create_sandbox()
@@ -132,6 +135,7 @@ async def test_no_network_is_deny_all(tmp_path: Path, server: Server) -> None:
 
 
 async def test_public_gets_the_trusted_allowlist_not_unrestricted_access(tmp_path: Path, server: Server) -> None:
+    """A ``public`` task gets the trusted allowlist plus the resolver, never unrestricted egress."""
     environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
 
     await environment._create_sandbox()
@@ -146,6 +150,7 @@ async def test_public_gets_the_trusted_allowlist_not_unrestricted_access(tmp_pat
 
 
 async def test_records_the_verified_policy_for_the_supervisor(tmp_path: Path, server: Server) -> None:
+    """The verified policy, its hash, the session and the role are recorded in the trial directory."""
     environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
 
     sandbox = await environment._create_sandbox()
@@ -161,6 +166,7 @@ async def test_records_the_verified_policy_for_the_supervisor(tmp_path: Path, se
 
 
 async def test_agent_and_separate_verifier_each_keep_their_record(tmp_path: Path, server: Server) -> None:
+    """An agent and a separate verifier in one trial each keep their own egress record."""
     agent = _environment(tmp_path, server, NetworkMode.PUBLIC)
     verifier = _environment(tmp_path, server, NetworkMode.NO_NETWORK, session_id=f"{TRIAL}__verifier__task")
 
@@ -190,10 +196,12 @@ async def test_agent_and_separate_verifier_each_keep_their_record(tmp_path: Path
     ],
 )
 def test_sandbox_role_from_harbor_session_id(trial_name: str, session_id: str, role: str) -> None:
+    """Only the agent's exact session ID counts as the agent; every other session is a verifier."""
     assert sandbox_role(session_id, trial_name) == role
 
 
 async def test_agent_is_recorded_as_agent_when_the_trial_name_contains_verifier(tmp_path: Path, server: Server) -> None:
+    """A trial name containing ``__verifier__`` doesn't make the agent look like a verifier."""
     trial = "task__verifier__x__Ab12Cd3"
     environment = _environment(tmp_path, server, NetworkMode.PUBLIC, trial_name=trial)
 
@@ -214,6 +222,7 @@ def test_harbor_session_naming_still_matches_sandbox_role() -> None:
 
 
 async def test_allowlist_task_narrows_the_trusted_allowlist(tmp_path: Path, server: Server) -> None:
+    """An ``allowlist`` task gets only the hosts it asked for, plus the resolver."""
     environment = _environment(tmp_path, server, NetworkMode.ALLOWLIST, ["*.NVIDIA.com"])
 
     await environment._create_sandbox()
@@ -223,6 +232,7 @@ async def test_allowlist_task_narrows_the_trusted_allowlist(tmp_path: Path, serv
 
 
 def test_allowlist_task_cannot_extend_the_trusted_allowlist(tmp_path: Path, server: Server) -> None:
+    """A task asking for a host outside the trusted allowlist is rejected before any sandbox exists."""
     with pytest.raises(ValueError, match=r"\['pypi.org'\].*does not include"):
         _environment(tmp_path, server, NetworkMode.ALLOWLIST, ["*.nvidia.com", "pypi.org"])
 
@@ -230,6 +240,7 @@ def test_allowlist_task_cannot_extend_the_trusted_allowlist(tmp_path: Path, serv
 
 
 def test_advertises_static_allowlist_support(tmp_path: Path, server: Server) -> None:
+    """Harbor sees allowlist support for every entry form, but no dynamic policy changes."""
     capabilities = _environment(tmp_path, server, NetworkMode.PUBLIC).capabilities
 
     assert capabilities.network_allowlist
@@ -242,10 +253,12 @@ def test_advertises_static_allowlist_support(tmp_path: Path, server: Server) -> 
 
 
 def test_reports_the_opensandbox_type(tmp_path: Path, server: Server) -> None:
+    """The environment reports Harbor's ``opensandbox`` type."""
     assert _environment(tmp_path, server, NetworkMode.PUBLIC).type() == "opensandbox"
 
 
 async def test_labels_every_create(tmp_path: Path, server: Server) -> None:
+    """Every create carries the caller's labels, the session, the managed-by label and an attempt ID."""
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
 
     await environment._create_sandbox()
@@ -259,6 +272,7 @@ async def test_labels_every_create(tmp_path: Path, server: Server) -> None:
 
 
 async def test_sends_task_resources_env_and_gpu_types(tmp_path: Path, server: Server) -> None:
+    """Task CPU, memory, GPU, GPU types, env and the sandbox lifetime reach the create call."""
     environment = _environment(
         tmp_path,
         server,
@@ -278,6 +292,7 @@ async def test_sends_task_resources_env_and_gpu_types(tmp_path: Path, server: Se
 
 
 async def test_kills_the_sandbox_when_the_applied_default_is_wrong(tmp_path: Path, server: Server) -> None:
+    """A sandbox whose applied default action differs from the requested one is killed."""
     server.applied_default = "allow"
     environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
 
@@ -288,6 +303,7 @@ async def test_kills_the_sandbox_when_the_applied_default_is_wrong(tmp_path: Pat
 
 
 async def test_kills_the_sandbox_when_the_policy_cannot_be_read_back(tmp_path: Path, server: Server) -> None:
+    """A sandbox that can't report its applied policy is killed rather than trusted."""
     server.readback = False
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
 
@@ -300,6 +316,7 @@ async def test_kills_the_sandbox_when_the_policy_cannot_be_read_back(tmp_path: P
 async def test_strict_verification_rejects_a_dropped_rule(
     tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Strict verification kills a sandbox that applied fewer rules than requested."""
     environment = _environment(tmp_path, server, NetworkMode.PUBLIC, egress_verification="strict")
     sdk = environment._driver.sdk
     create = sdk["Sandbox"].create
@@ -319,6 +336,7 @@ async def test_strict_verification_rejects_a_dropped_rule(
 
 
 def test_rejects_compose_tasks_and_missing_images(tmp_path: Path, server: Server) -> None:
+    """Compose tasks and tasks without a prebuilt image are rejected at construction."""
     (tmp_path / "environment").mkdir()
     (tmp_path / "environment" / "docker-compose.yaml").write_text("services: {}\n")
     with pytest.raises(ValueError, match="docker-compose"):
@@ -337,6 +355,7 @@ def test_rejects_compose_tasks_and_missing_images(tmp_path: Path, server: Server
 
 
 async def test_start_prepares_logs_and_uploads_the_environment(tmp_path: Path, server: Server) -> None:
+    """``start`` creates the log and work directories, opens them up as root, and uploads the environment directory with its file modes."""
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, task={"workdir": "/app"})
     script = tmp_path / "environment" / "setup.sh"
     script.write_text("echo hi\n")
@@ -354,6 +373,7 @@ async def test_start_prepares_logs_and_uploads_the_environment(tmp_path: Path, s
 
 
 async def test_stop_deletes_and_closes(tmp_path: Path, server: Server) -> None:
+    """``stop(delete=True)`` kills the sandbox and releases the client."""
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
     await environment.start(force_build=False)
     sandbox = _sandbox(environment)
@@ -366,6 +386,7 @@ async def test_stop_deletes_and_closes(tmp_path: Path, server: Server) -> None:
 
 
 async def test_file_transfers_round_trip(tmp_path: Path, server: Server) -> None:
+    """Files and directories upload and download intact, and an unreadable entry is skipped."""
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
     await environment.start(force_build=False)
     source = tmp_path / "upload"
@@ -388,6 +409,7 @@ async def test_file_transfers_round_trip(tmp_path: Path, server: Server) -> None
 
 
 async def test_download_dir_asks_the_sandbox_for_untyped_entries(tmp_path: Path, server: Server) -> None:
+    """Entries the search returns without a type are checked with ``test -d`` and ``test -f``."""
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
     await environment.start(force_build=False)
     files = _sandbox(environment).files
@@ -403,6 +425,7 @@ async def test_download_dir_asks_the_sandbox_for_untyped_entries(tmp_path: Path,
 
 
 async def test_exec_falls_back_to_the_task_workdir_and_merges_env(tmp_path: Path, server: Server) -> None:
+    """``exec`` defaults to the task's workdir, merges env, and returns stderr and the exit code."""
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, task={"workdir": "/app"})
     await environment.start(force_build=False)
     commands = _sandbox(environment).commands
@@ -427,6 +450,7 @@ async def _started(tmp_path: Path, server: Server, image_uid: int | None) -> Nem
 
 
 async def test_root_commands_run_as_the_image_user_on_a_non_root_image(tmp_path: Path, server: Server) -> None:
+    """On a non-root image, root commands run as the image's user, and the image is probed only once."""
     environment = await _started(tmp_path, server, image_uid=10001)
     commands = _sandbox(environment).commands
 
@@ -439,6 +463,7 @@ async def test_root_commands_run_as_the_image_user_on_a_non_root_image(tmp_path:
 
 
 async def test_a_root_default_user_is_mapped_too(tmp_path: Path, server: Server) -> None:
+    """A default user of ``root`` is mapped the same way as an explicit one."""
     environment = await _started(tmp_path, server, image_uid=10001)
     environment.default_user = "root"
 
@@ -448,6 +473,7 @@ async def test_a_root_default_user_is_mapped_too(tmp_path: Path, server: Server)
 
 
 async def test_root_images_keep_uid_0(tmp_path: Path, server: Server) -> None:
+    """On a root image, root commands keep uid 0."""
     environment = await _started(tmp_path, server, image_uid=0)
 
     await environment.exec("apt-get install -y curl", user="root")
@@ -456,6 +482,7 @@ async def test_root_images_keep_uid_0(tmp_path: Path, server: Server) -> None:
 
 
 async def test_non_root_requests_do_not_probe(tmp_path: Path, server: Server) -> None:
+    """Commands that don't ask for root never trigger the image probe."""
     environment = await _started(tmp_path, server, image_uid=10001)
     commands = _sandbox(environment).commands
 
@@ -468,6 +495,7 @@ async def test_non_root_requests_do_not_probe(tmp_path: Path, server: Server) ->
 
 
 async def test_a_failed_probe_keeps_uid_0(tmp_path: Path, server: Server) -> None:
+    """When the image probe fails, root commands keep uid 0, and the probe isn't retried."""
     environment = await _started(tmp_path, server, image_uid=None)
     commands = _sandbox(environment).commands
 
