@@ -71,6 +71,13 @@ one. Pick up the change deliberately:
 nemo agent-hardener refresh --manifest-id <name>
 ```
 
+In Studio, use **Refresh Target**. A run logs a warning when the agent is newer
+than its manifest.
+
+**The agent cannot reach a service on the host.**
+Declare it when you create the manifest with `--backend NAME:PORT[,PORT]`. The
+sandbox reaches it through `host.docker.internal`, not `localhost`.
+
 **A run fails in seconds with `model_unavailable`.**
 Every model group you set explicitly — `--attack-model`, `--analysis-model` and
 `--safety-model`, together with their `--*-base-url` and `--*-key-secret` — is

@@ -307,8 +307,9 @@ change an existing manifest. Take those changes deliberately:
 uv run nemo agent-hardener refresh --manifest-id react-agent
 ```
 
-Your egress, secrets, models, defenders and cached benign suite are all preserved; only the target
-itself is rebuilt. You don't need this after `apply-mitigation` — applying a hardened workflow
+Your egress, backends, secrets, models, defenders and cached benign suite are all preserved; only the
+target itself is rebuilt. Runs log a warning when the agent is newer than its manifest; in Studio use
+**Refresh Target** (or `POST /manifests/{name}/refresh`). You don't need this after `apply-mitigation` — applying a hardened workflow
 refreshes the manifest for you, so `run → harden → apply → run again` measures the change you just
 made.
 
@@ -321,6 +322,12 @@ uv run nemo agent-hardener init --agent react-agent --egress en.wikipedia.org
 
 A bare host opens **443 only**; write `host:80` for plain HTTP. Hosts can't be auto-discovered for a
 config-only agent, since its tool code lives in an installed package rather than in your project.
+
+If the agent calls a service on the host (say a remote MCP server), declare it with
+`--backend NAME:PORT[,PORT]` (repeatable). The sandbox reaches it via `host.docker.internal`. The
+Inference Gateway backend is added automatically and its name is reserved; your backends survive
+`refresh`. Gateway-routed model URLs in the hardener's copy of the agent also use
+`host.docker.internal` rather than `localhost`.
 
 If the agent reads non-secret environment variables — a host-backend URL, a feature flag — set them
 at init too:
@@ -383,7 +390,7 @@ should list `agent-hardener` with a `bundleUrl`) and that the bundle is served
 **`Missing required secrets: <NAME>`.** The agent config references `${<NAME>}` and nothing provides
 it. Agent Hardener derives required secrets from the agent's *stored* config, so this means the variable
 was unset when the agent was registered. Export it and re-run `nemo agents create`, or supply it via
-`--env-file`.
+`--env-file`. Its values are merged into the victim's `.env` and win over the operator environment.
 
 **The victim never becomes healthy, and its log shows a pydantic `union_tag_invalid` for a
 `_type`.** The agent references a component the scaffolded victim can't resolve — it installs only

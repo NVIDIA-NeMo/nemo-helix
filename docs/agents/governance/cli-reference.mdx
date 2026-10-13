@@ -82,6 +82,7 @@ Resolves a target once and saves it as a manifest. Pass either `--agent` or
 | `--egress <host[:port]>` | Allow-list an outbound host. Repeatable. A bare host opens 443 only |
 | `--secrets <name>` | Override the derived secret names. Repeatable |
 | `--env <KEY=VALUE>` | Non-secret environment variable. Repeatable, splits on the first `=` |
+| `--backend <NAME:PORT[,PORT]>` | Host service the sandboxed agent calls, such as a remote MCP server running on the host. Repeatable. Reached through `host.docker.internal` |
 | `--port <n>` | Victim port |
 | `--dockerfile <path>` | Project-relative Dockerfile to build the victim from |
 | `--start-command <cmd>` | Absolute command that serves the agent inside the sandbox. Required when the Dockerfile's `ENTRYPOINT`/`CMD` is a shell form |
@@ -100,6 +101,10 @@ virtualenv plus `/usr/local/bin/python*` and `/usr/bin/python*`. Set it for a
 *resolved* executable, so globs that match no process grant nothing and the
 agent's outbound calls are refused mid-run.
 
+`--backend` opens the sandbox-to-host route for the named ports. The Inference
+Gateway backend is added automatically and its name, `nemo-inference-gateway`, is
+reserved. Backends you declare are kept when you `refresh` the manifest.
+
 `--env` values are stored in plaintext on the manifest. `--secrets` stores only
 the names and resolves values from the platform Secrets store at run time, so
 use it for credentials.
@@ -114,8 +119,9 @@ reads this local file, so edits do take effect there.
 nemo agent-hardener refresh --manifest-id <name>
 ```
 
-Re-resolves the manifest against the agent as it is now. Egress, secrets, models,
-defenders and the cached benign suite are preserved.
+Re-resolves the manifest against the agent as it is now. Egress, backends, secrets,
+models, defenders and the cached benign suite are preserved. A run logs a warning
+when the agent is newer than its manifest.
 
 ### `manifest show`
 
@@ -164,7 +170,7 @@ the first `run`.
 | `--manifest-id <name>` | Saved manifest. Required |
 | `--yes` | Accept the interview's suggested answers |
 | `--no-interactive` | Skip the interview and generate from rules alone |
-| `--env-file <path>` | Dotenv supplying the agent's secrets |
+| `--env-file <path>` | Dotenv supplying the agent's secrets. Its values are merged into the agent's `.env` and win over the operator environment |
 | `--workspace <name>` | Workspace of the manifest |
 
 ### `run`
@@ -194,8 +200,10 @@ looked up by manifest id; with `--config` you must pass `--benign-suite` yoursel
 | `--analysis-base-url <url>` | Custom OpenAI-compatible endpoint for the analysis model |
 | `--analysis-key-secret <name>` | Secrets-store name holding the analysis endpoint's API key |
 | `--safety-model <name>` | Model the generated guardrail uses to screen traffic. Unset reuses the agent's own model |
-| `--env-file <path>` | Dotenv supplying the agent's secrets |
+| `--env-file <path>` | Dotenv supplying the agent's secrets. Its values are merged into the agent's `.env` and win over the operator environment |
 | `--workspace <name>` | Workspace for the run |
+
+A failed run keeps its hitlog, so you can replay it with `--replay-hitlog`.
 
 Override flags apply to one launch and never edit the saved manifest, so a run can
 deviate from the frozen baseline without breaking comparability.
@@ -253,7 +261,7 @@ the benign suite against it. Applies nothing.
 | `--replay-hitlog <fileset-ref>` | Recorded attacks to replay. Required |
 | `--keep <id>` | Keep this defense. Repeatable |
 | `--exclude <id>` | Drop this defense. Repeatable |
-| `--env-file <path>` | Dotenv supplying the agent's secrets |
+| `--env-file <path>` | Dotenv supplying the agent's secrets. Its values are merged into the agent's `.env` and win over the operator environment |
 | `--workspace <name>` | Workspace for the run |
 
 ### `status`
