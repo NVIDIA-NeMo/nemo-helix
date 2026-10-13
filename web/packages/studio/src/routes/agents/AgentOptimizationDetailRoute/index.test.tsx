@@ -8,7 +8,7 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentOptimizationDetailRoute } from '@studio/routes/agents/AgentOptimizationDetailRoute';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
-import { renderRoute, screen, within } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import { http, HttpResponse } from 'msw';
 
 const workspace = workspace1.workspace;
@@ -143,7 +143,11 @@ describe('AgentOptimizationDetailRoute', () => {
       );
 
       expect(await screen.findByText('results/switchyard/agent-routed.yaml')).toBeInTheDocument();
-      expect(await screen.findByText(/Created routed virtual model/)).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.getByTestId('nv-code-snippet-code')).toHaveTextContent(
+          'Created routed virtual model'
+        )
+      );
       expect(screen.getAllByText('Logs')).toHaveLength(1);
       expect(screen.getByText('Artifacts')).toBeInTheDocument();
     }
