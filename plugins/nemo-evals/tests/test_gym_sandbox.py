@@ -621,6 +621,34 @@ def test_an_unreadable_staged_manifest_leaves_the_host_online(tmp_path: Path, ma
     assert payload["environment_offline"] is False
 
 
+def test_a_job_cannot_switch_uv_back_online_under_a_derived_offline_run(tmp_path: Path) -> None:
+    """The host keeps a pre-set UV_OFFLINE, so a job-authored value would quietly undo the
+    deployment's decision; refusing it keeps hardening out of submitter hands."""
+    persistent = stage_manifest(tmp_path, WHEELS_V1_MANIFEST)
+
+    with pytest.raises(SandboxUnavailableError, match="UV_OFFLINE"):
+        serve_config(
+            target(environment=FilesetRef(root="default/custom-gym"), env_vars={"UV_OFFLINE": "0"}),
+            capable_plan(sandbox_egress_allow=()),
+            job_id="job-9",
+            persistent_storage_path=persistent,
+        )
+
+
+def test_a_job_may_set_uv_offline_when_the_deployment_does_not_derive_it(tmp_path: Path) -> None:
+    persistent = stage_manifest(tmp_path, WHEELS_V1_MANIFEST)
+
+    payload = serve_config(
+        target(environment=FilesetRef(root="default/custom-gym"), env_vars={"UV_OFFLINE": "1"}),
+        capable_plan(sandbox_egress_allow=("huggingface.co:443",)),
+        job_id="job-9",
+        persistent_storage_path=persistent,
+    )
+
+    assert payload["environment_offline"] is False
+    assert payload["host_env"]["UV_OFFLINE"] == "1"
+
+
 def test_the_derived_offline_flag_reaches_the_built_spec(tmp_path: Path) -> None:
     from sandboxed_gym.runtime.gym_host_runtime import ENVIRONMENT_OFFLINE_ENV_KEY
 

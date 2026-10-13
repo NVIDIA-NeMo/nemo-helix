@@ -45,6 +45,7 @@ from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from pydantic import BaseModel, ConfigDict, Field
 from sandboxed_gym.host.models import DEFAULT_HOST_TTL_S
+from sandboxed_gym.runtime.gym_host_runtime import UV_OFFLINE_ENV_KEY
 
 #: Env-var names that look like a credential. Used to refuse a sandboxed run that would hand one to
 #: user-supplied environment code through `env_vars`; `env_secrets` is the supported route.
@@ -424,12 +425,20 @@ def serve_config(
     else:
         chunk_deadline_s = target.collection_timeout_s + _HOST_DEADLINE_GRACE_S
 
+    offline = fileset_environment and environment_offline(plan, staged_environment_format(persistent_storage_path))
+    env = host_env(target, workspace=workspace)
+    if offline and UV_OFFLINE_ENV_KEY in env:
+        # The host keeps a pre-set UV_OFFLINE, so a job-authored value would override the deployment's decision.
+        raise SandboxUnavailableError(
+            f"`env_vars` sets {UV_OFFLINE_ENV_KEY}, but the deployment runs this wheels-v1 environment offline "
+            "and owns that setting; remove it from the target"
+        )
+
     return {
         "job_id": job_id,
         "host_provider": plan.host_provider,
         "environment_path": "/job/environment" if fileset_environment else None,
-        "environment_offline": fileset_environment
-        and environment_offline(plan, staged_environment_format(persistent_storage_path)),
+        "environment_offline": offline,
         # GRPO leaves this off: its documented wheels-v1 contract vendors Gym's own closure.
         "reuse_image_gym_install": True,
         "sandbox": {
@@ -458,7 +467,7 @@ def serve_config(
         # orchestrator, so it is deliberately absent here.
         "policy_base_urls": plan.policy_base_urls,
         "gym_global_config": gym_global_config(target),
-        "host_env": host_env(target, workspace=workspace),
+        "host_env": env,
     }
 
 
