@@ -16,6 +16,12 @@ const FABRIC_DEFAULT_MODEL_KEY = 'default';
 // start with. Agent runtimes bind the same placeholder themselves, so a deploy leaves it out.
 const GATEWAY_CREDENTIAL_PATH = 'environment.env.NEMO_AGENTS_IGW_API_KEY';
 
+// The wizard also points the study's model at the gateway (gatewayAgentModel), replacing its
+// base_url and api_key_env and dropping a legacy settings.base_url. That changes how the study
+// reached the model, not what it ran, so a deploy neither keeps nor reports it.
+const GATEWAY_PATH_MARKER = '/apis/inference-gateway/';
+const GATEWAY_ROUTING_FIELDS = new Set(['base_url', 'api_key_env']);
+
 // Keys a plain object resolves through its prototype, so writing one would reach Object.prototype.
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -210,13 +216,27 @@ const agentModelSegments = (
   return isPlainObject(getAt(config, ['models', modelKey])) ? ['models', modelKey] : undefined;
 };
 
+const isGatewayRouted = (model: Record<string, unknown>): boolean =>
+  typeof model.base_url === 'string' && model.base_url.includes(GATEWAY_PATH_MARKER);
+
+const withoutLegacyBaseUrl = (model: Record<string, unknown>): Record<string, unknown> => {
+  if (!isPlainObject(model.settings) || !Object.hasOwn(model.settings, 'base_url')) return model;
+  const settings = { ...model.settings };
+  delete settings.base_url;
+  return { ...model, settings };
+};
+
 const findModelDifference = (
   modelKey: string,
   studyModel: Record<string, unknown>,
-  agentModel: Record<string, unknown>
+  deployedModel: Record<string, unknown>
 ): ModelDifference | undefined => {
+  const routed = isGatewayRouted(studyModel);
+  const agentModel = routed ? withoutLegacyBaseUrl(deployedModel) : deployedModel;
   const fields = [...new Set([...Object.keys(studyModel), ...Object.keys(agentModel)])].filter(
-    (field) => !isSameValue(studyModel[field], agentModel[field])
+    (field) =>
+      !(routed && GATEWAY_ROUTING_FIELDS.has(field)) &&
+      !isSameValue(studyModel[field], agentModel[field])
   );
   if (fields.length === 0) return undefined;
   return fields.includes('model')

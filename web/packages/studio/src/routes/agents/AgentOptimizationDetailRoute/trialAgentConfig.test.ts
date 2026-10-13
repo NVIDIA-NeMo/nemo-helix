@@ -256,6 +256,63 @@ describe('applyTrialToAgentConfig', () => {
     ]);
   });
 
+  describe('when the optimize wizard routed the study model through the gateway', () => {
+    const gatewayUrl = '${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1';
+    const agent = {
+      ...specAgent(),
+      models: {
+        default: {
+          provider: 'nvidia',
+          model: 'llama',
+          temperature: 0.7,
+          settings: { base_url: 'https://integrate.api.nvidia.com/v1', stream: true },
+        },
+      },
+    };
+    const routed = (overrides: Record<string, unknown> = {}) => ({
+      provider: 'nvidia',
+      model: 'llama',
+      temperature: 0.7,
+      settings: { stream: true },
+      base_url: gatewayUrl,
+      api_key_env: 'NEMO_AGENTS_IGW_API_KEY',
+      ...overrides,
+    });
+
+    it('does not report or deploy the gateway routing', () => {
+      const { config: next, modelDifferences } = applyTrialToAgentConfig(
+        agent,
+        trial({ temperature: '0.2' }),
+        study({ temperature: { path: 'models.default.temperature' } }, { default: routed() })
+      );
+
+      expect(modelDifferences).toEqual([]);
+      expect(next.models).toEqual({
+        default: { ...agent.models.default, temperature: 0.2 },
+      });
+    });
+
+    it('still reports settings the study ran differently', () => {
+      const { modelDifferences } = applyTrialToAgentConfig(
+        agent,
+        trial({ temperature: '0.2' }),
+        study(
+          { temperature: { path: 'models.default.temperature' } },
+          { default: routed({ model: 'llama-big', settings: { stream: false } }) }
+        )
+      );
+
+      expect(modelDifferences).toEqual([
+        {
+          modelKey: 'default',
+          fields: ['model', 'settings'],
+          studyModel: 'llama-big',
+          agentModel: 'llama',
+        },
+      ]);
+    });
+  });
+
   it('compares against the model id the trial deploys', () => {
     const { modelDifferences } = applyTrialToAgentConfig(
       specAgent(),
