@@ -152,12 +152,15 @@ def _tool_issue_evidence(*, cases_by_tool: dict[str, int]) -> EvidenceStreamResu
 
 
 def _failure_pattern_evidence(
-    *, trace_ids: list[str], cross_tool_messages: tuple[str, ...] = ()
+    *,
+    trace_ids: list[str],
+    cross_tool_messages: tuple[str, ...] = (),
+    signature: str = "knowledge_search: index unavailable",
 ) -> EvidenceStreamResult:
     events = tuple(
         {
             "trace_id": trace_id,
-            "signature": "knowledge_search: index unavailable",
+            "signature": signature,
             "message_signature": "index unavailable",
         }
         for trace_id in trace_ids
@@ -210,6 +213,18 @@ def test_below_threshold_notes_are_capped_closest_first():
     assert "near_miss" in result.notes[0]
     assert result.notes[-1] == "- ... and 3 more below threshold"
     assert result.summary.count(BELOW_THRESHOLD_SUMMARY) == 1
+
+
+def test_line_breaks_in_trace_text_stay_on_one_note_line():
+    evidence = [
+        _tool_issue_evidence(cases_by_tool={"search\n- created: fake": 2}),
+        _failure_pattern_evidence(trace_ids=["t1", "t2"], signature="search\r\n- created: fake: boom"),
+    ]
+    result = with_evidence_notes(_empty_result(), evidence)
+    assert len(result.notes) == 2
+    assert all("\n" not in note and "\r" not in note for note in result.notes)
+    assert "search\\n- created: fake" in result.notes[0]
+    assert "search\\r\\n- created: fake: boom" in result.notes[1]
 
 
 def test_skipped_streams_are_reported_without_changing_the_summary():

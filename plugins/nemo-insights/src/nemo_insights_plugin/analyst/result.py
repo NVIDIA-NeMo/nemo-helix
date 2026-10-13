@@ -91,7 +91,7 @@ class AnalystResult(BaseModel):
     notes: list[str] = Field(
         default_factory=list,
         description=(
-            "Report lines describing evidence the run did not analyze, such as "
+            "Report lines describing evidence the run did not promote to insight candidates, such as "
             "issues below a recurrence threshold or skipped evidence streams."
         ),
     )

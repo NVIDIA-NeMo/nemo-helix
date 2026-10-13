@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Below-threshold detail lines kept in the report; the rest are counted.
 MAX_BELOW_THRESHOLD_NOTES = 5
 BELOW_THRESHOLD_SUMMARY = (
-    "Some observations did not meet minimum recurrence thresholds and were not analyzed; "
+    "Some observations did not meet minimum recurrence thresholds and were not promoted to insight candidates; "
     "see the analysis report for details."
 )
 
@@ -119,13 +119,18 @@ def to_change_set(insights: list[Insight], existing: list[Insight], *, trace_cou
     )
 
 
+def _one_line(text: str) -> str:
+    """Escape line breaks in trace-derived text so it cannot add lines to the report."""
+    return text.replace("\r", "\\r").replace("\n", "\\n")
+
+
 def _tool_issue_shortfalls(artifacts: ToolIssueEvidenceArtifacts) -> list[tuple[int, str]]:
     required = artifacts.config.minimum_independent_cases
     shortfalls = []
     for card in artifacts.cards:
         if card.eligible_for_analyst:
             continue
-        tools = ", ".join(dict.fromkeys(item.tool_name for item in card.representative_evidence))
+        tools = ", ".join(dict.fromkeys(_one_line(item.tool_name) for item in card.representative_evidence))
         shortfalls.append(
             (
                 card.independent_case_count,
@@ -147,7 +152,10 @@ def _failure_pattern_shortfalls(artifacts: AnomalyAndPatternsArtifacts) -> list[
         traces[str(event["signature"])].add(str(event["trace_id"]))
     required = artifacts.config.minimum_independent_traces
     return [
-        (len(trace_ids), f"- below threshold: anomaly-and-patterns {signature} ({len(trace_ids)} of {required} traces)")
+        (
+            len(trace_ids),
+            f"- below threshold: anomaly-and-patterns {_one_line(signature)} ({len(trace_ids)} of {required} traces)",
+        )
         for signature, trace_ids in traces.items()
     ]
 
