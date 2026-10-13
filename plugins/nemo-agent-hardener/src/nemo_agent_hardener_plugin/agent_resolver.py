@@ -60,6 +60,9 @@ IMAGE_AGENT_CONFIG = f"/workspace/{AGENT_CONFIG_FILENAME}"
 
 #: Route-only backend naming the host-side Inference Gateway; reserved so a user backend cannot shadow it.
 GATEWAY_BACKEND_NAME = "nemo-inference-gateway"
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
+#: How a container reaches the host's loopback.
+SANDBOX_HOST_ALIAS = "host.docker.internal"
 _BACKEND_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 #: Processes allowed to egress. Scoped to the image's venv rather than left open, because the
@@ -120,6 +123,15 @@ def parse_backends(specs: list[str] | None) -> list[dict[str, Any]]:
             raise ValueError(f"invalid backend {spec!r}: {GATEWAY_BACKEND_NAME!r} is reserved for the gateway")
         backends.append({"name": name, "ports": [int(p) for p in ports]})
     return backends
+
+
+def sandbox_reachable(url: str) -> str:
+    """Rewrite a loopback URL to the host alias a sandboxed victim can reach; other hosts are unchanged."""
+    parts = urlsplit(url)
+    if parts.hostname not in _LOOPBACK_HOSTS:
+        return url
+    netloc = SANDBOX_HOST_ALIAS + (f":{parts.port}" if parts.port else "")
+    return parts._replace(netloc=netloc).geturl()
 
 
 def inject_gateway_url(config: dict[str, Any], workspace: str, base_url: str) -> dict[str, Any]:
@@ -313,7 +325,7 @@ def gateway_backend(base_url: str) -> dict[str, Any] | None:
     egress route. Remote gateways are reachable directly (via egress discovery), so skip them.
     """
     parts = urlsplit(base_url)
-    if parts.hostname not in ("localhost", "127.0.0.1"):
+    if parts.hostname not in _LOOPBACK_HOSTS:
         return None
     port = parts.port or (443 if parts.scheme == "https" else 80)
     return {"name": GATEWAY_BACKEND_NAME, "ports": [port]}
@@ -611,7 +623,8 @@ def resolve_agent_to_manifest(
             "stored config. Re-run with --project-dir pointing at the directory holding them."
         )
 
-    injected = inject_gateway_url(agent_config, workspace, base_url)
+    # The frozen agent.yaml runs inside the sandbox, where the host's `localhost` is not the host.
+    injected = inject_gateway_url(agent_config, workspace, sandbox_reachable(base_url))
 
     if project_dir is not None:
         project_path = Path(project_dir)

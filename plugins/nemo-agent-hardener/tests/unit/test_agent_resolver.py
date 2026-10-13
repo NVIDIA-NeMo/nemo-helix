@@ -31,6 +31,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     parse_backends,
     require_guardable_harness,
     resolve_agent_to_manifest,
+    sandbox_reachable,
     shipped_dockerfile,
 )
 from nemo_helix_plugin.client.client import NemoClient
@@ -447,6 +448,33 @@ def test_parse_backends_rejects_malformed_specs(spec: str):
 def test_parse_backends_rejects_the_gateway_backend_name():
     with pytest.raises(ValueError, match="nemo-inference-gateway"):
         parse_backends(["nemo-inference-gateway:9000"])
+
+
+# --------------------------------------------------------------------------- sandbox_reachable
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://localhost:8080", "http://host.docker.internal:8080"),
+        ("http://127.0.0.1:9000/apis/x", "http://host.docker.internal:9000/apis/x"),
+        ("https://localhost/", "https://host.docker.internal/"),
+        ("https://gateway.example.com:8443/a", "https://gateway.example.com:8443/a"),
+        ("http://my-host:8080", "http://my-host:8080"),
+    ],
+)
+def test_sandbox_reachable_rewrites_only_loopback_hosts(url: str, expected: str):
+    assert sandbox_reachable(url) == expected
+
+
+def test_resolve_injects_a_sandbox_reachable_gateway_url(tmp_path):
+    client = _client(_agent(), deployments=[{"agent": "calc", "status": "running", "port": 9123}])
+    resolved = resolve_agent_to_manifest(
+        "calc", client=client, base_url="http://localhost:8080", default_workspace="default", manifest_dir=tmp_path
+    )
+    written = yaml.safe_load(resolved.agent_config_path.read_text(encoding="utf-8"))
+    base_url = written["models"]["default"]["base_url"]
+    assert base_url.startswith("http://host.docker.internal:8080/apis/inference-gateway/")
+    # The egress route still names the host-side port.
+    assert resolved.manifest["backends"] == [{"name": "nemo-inference-gateway", "ports": [8080]}]
 
 
 def test_resolve_appends_user_backends_after_the_gateway(tmp_path):
