@@ -197,7 +197,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   optimizerInsights: {
     heading: 'No insights yet',
     subheading: 'Run an optimizer analysis on an agent to surface insights here.',
-    cliCommand: 'nemo insights analysis-runs create --agent <agent-name>',
+    cliCommand: 'nemo insights analysis-runs create --agent <agent-name> --workspace <workspace>',
     skillPrompt: 'Help me run my first analysis of my agent with the nemo-analyst skill',
   },
   insightExperiments: {
