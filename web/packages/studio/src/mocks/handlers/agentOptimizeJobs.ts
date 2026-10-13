@@ -120,7 +120,7 @@ const applyFilter = (jobs: RunStrategyJob[], filter: FilterQuery): RunStrategyJo
 /** What a platform with the Switchyard plugin installed reports, beside the built-in strategy. */
 export const mockOptimizationStrategies: OptimizationStrategyList = {
   data: [
-    { name: 'legacy', description: 'Run an optimize config against the agent.' },
+    { name: 'optuna', description: 'Run an optimize config against the agent.' },
     {
       name: 'switchyard',
       description:

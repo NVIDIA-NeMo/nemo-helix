@@ -8,12 +8,12 @@ const routing = (installed: readonly string[] | undefined) =>
 
 describe('strategyOptions', () => {
   it('enables routing when the platform has the switchyard strategy', () => {
-    expect(routing(['legacy', 'switchyard'])).toMatchObject({ enabled: true });
-    expect(routing(['legacy', 'switchyard'])?.tag).toBeUndefined();
+    expect(routing(['optuna', 'switchyard'])).toMatchObject({ enabled: true });
+    expect(routing(['optuna', 'switchyard'])?.tag).toBeUndefined();
   });
 
   it('disables routing and says why when switchyard is not installed', () => {
-    expect(routing(['legacy'])).toMatchObject({
+    expect(routing(['optuna'])).toMatchObject({
       enabled: false,
       tag: { label: 'Not installed' },
     });

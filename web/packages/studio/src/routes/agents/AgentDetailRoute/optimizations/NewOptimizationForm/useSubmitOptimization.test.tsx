@@ -59,7 +59,7 @@ const SubmitForm = ({ evaluation = EVALUATION }: { evaluation?: AgentEvaluationR
 };
 
 describe('optimization form submission', () => {
-  it('renders the original rubric into a legacy optimize bundle without requiring a new judge', async () => {
+  it('renders the original rubric into a optuna optimize bundle without requiring a new judge', async () => {
     const uploaded = new Map<string, string>();
     const submitted: unknown[] = [];
     server.use(

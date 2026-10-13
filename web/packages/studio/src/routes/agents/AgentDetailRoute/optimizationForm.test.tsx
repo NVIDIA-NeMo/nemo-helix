@@ -106,7 +106,7 @@ describe('AgentDetailRoute optimization form', () => {
   });
 
   it('disables model routing when switchyard is not installed', async () => {
-    server.use(http.get(STRATEGIES_URL, () => HttpResponse.json({ data: [{ name: 'legacy' }] })));
+    server.use(http.get(STRATEGIES_URL, () => HttpResponse.json({ data: [{ name: 'optuna' }] })));
     renderDetail('?tab=optimizations&view=strategy');
 
     expect(await screen.findByText('Not installed')).toBeInTheDocument();
