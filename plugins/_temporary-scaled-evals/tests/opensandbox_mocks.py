@@ -23,6 +23,7 @@ class Server:
     """What the mock server holds and how it misbehaves; tests set the knobs, then inspect the state."""
 
     def __init__(self) -> None:
+        """A server with no sandboxes that behaves normally until a test turns a knob."""
         self.sandboxes: dict[str, dict[str, str]] = {}
         self.killed: list[str] = []
         self.creates: list[dict[str, Any]] = []
@@ -62,6 +63,7 @@ class Files:
     """``sandbox.files`` over an in-memory tree of ``path -> bytes``; directories map to ``None``."""
 
     def __init__(self) -> None:
+        """An empty file tree."""
         self.tree: dict[str, bytes | None] = {}
         self.modes: dict[str, int] = {}
         # Paths whose read fails, like a dangling symlink.
@@ -123,6 +125,7 @@ class Commands:
     """
 
     def __init__(self, server: Server, files: Files) -> None:
+        """Commands for one sandbox, answering file checks from that sandbox's ``files``."""
         self._server = server
         self._files = files
         self.runs: list[tuple[str, dict[str, Any]]] = []
@@ -160,6 +163,7 @@ class Sandbox:
     """A live sandbox handle, as ``Sandbox.create`` returns it."""
 
     def __init__(self, server: Server, sandbox_id: str, policy: dict[str, Any] | None) -> None:
+        """A sandbox the server created with ``policy``; ``None`` means no egress policy was sent."""
         self._server = server
         self.id = sandbox_id
         self._policy = policy or {"defaultAction": "allow", "egress": []}
@@ -202,6 +206,7 @@ class Manager:
     """``SandboxManager``: paginated listing by metadata, and kill by ID."""
 
     def __init__(self, server: Server) -> None:
+        """A manager over ``server``'s sandboxes."""
         self._server = server
 
     async def list_sandbox_infos(self, selector: SimpleNamespace) -> SimpleNamespace:
