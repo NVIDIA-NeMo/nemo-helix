@@ -140,18 +140,18 @@ def guardrails_tutorial_assets() -> Generator[None, None, None]:
         os.environ.pop("GUARDRAILS_TUTORIAL_ASSETS", None)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def nhx_base_url(request: pytest.FixtureRequest, cluster_url: str | None) -> Iterator[str]:
     """Derive the NHX base URL and set it as an environment variable.
 
     Notebooks read NHX_BASE_URL from the environment at runtime,
-    so we set it here for the duration of the test session.
+    so we set it here for the duration of the test module.
     """
     if cluster_url:
         url = cluster_url
     else:
-        sdk = request.getfixturevalue("sdk")
-        url = str(sdk.base_url)
+        client = request.getfixturevalue("client")
+        url = str(client.base_url)
 
     old = os.environ.get("NHX_BASE_URL")
     os.environ["NHX_BASE_URL"] = url
