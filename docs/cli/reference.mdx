@@ -4128,7 +4128,6 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `list-execution-profiles`: Get all currently configured execution profiles.
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
-* `rerun`: Rerun a failed platform job from surviving storage.
 * `control`: Change mutable job behavior, such as how long a pause...
 * `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
@@ -4408,32 +4407,6 @@ Resume a paused platform job by name or ID.
 
 ```shell
 nemo jobs resume [OPTIONS] NAME
-```
-
-**Arguments:**
-
-* `<NAME>`: Job name or ID (both are accepted).
-
-**Options:**
-
-* `--workspace`
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
-
-#### nemo jobs rerun
-
-Rerun a failed platform job from surviving storage.
-
-**Usage:**
-
-```shell
-nemo jobs rerun [OPTIONS] NAME
 ```
 
 **Arguments:**

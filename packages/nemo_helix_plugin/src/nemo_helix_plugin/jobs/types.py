@@ -225,16 +225,17 @@ class JobControl(BaseModel):
     """Mutable job behavior, stored on the job and kept off the execution spec.
 
     The attempt spec stays the immutable snapshot of what a run executes. Rerun
-    copies the job spec into the next attempt and keeps using this object.
+    copies the job spec into the next attempt and keeps using this object. In a
+    control update, an omitted or null value keeps the job's current value.
     """
 
     pause_ttl_seconds: Optional[int] = Field(
         default=None,
         ge=0,
         description="How long this job keeps storage after it pauses, measured from stopped_at. "
-        "When unset, the platform paused-storage TTL applies. Send null to clear a value and go back "
-        "to that default. Cannot exceed the platform maximum. 0 reclaims on the next retention pass. "
-        "Changing this value does not move the start time.",
+        "When the job has no value, the platform paused-storage TTL applies. Cannot exceed the platform "
+        "maximum. 0 reclaims on the next retention pass. In a control update, an omitted or null value "
+        "keeps the current value. Changing this value does not move the start time.",
         json_schema_extra={"nullable": True},
     )
 

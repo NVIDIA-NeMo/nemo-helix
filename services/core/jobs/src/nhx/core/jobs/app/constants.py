@@ -36,34 +36,3 @@ JOB_NUM_NODES_ANNOTATION = "nhx.nvidia.com/num-nodes"
 PAUSE_REQUESTED_AT = "pause_requested_at"
 RESUMED_AT = "resumed_at"
 STOPPED_AT = "stopped_at"
-STORAGE_RECLAIMED_AT = "storage_reclaimed_at"
-RERUN_WARNING = "rerun_warning"
-RESUMABLE = "resumable"
-NON_RESUMABLE_REASON = "non_resumable_reason"
-
-# Progress copied onto a rerun. Pod status, pause clocks, and storage flags stay on the failed attempt.
-RERUN_EXCLUDED_STATUS_DETAILS = frozenset(
-    {
-        RESUMABLE,
-        NON_RESUMABLE_REASON,
-        STORAGE_RECLAIMED_AT,
-        PAUSE_REQUESTED_AT,
-        RESUMED_AT,
-        STOPPED_AT,
-        RERUN_WARNING,
-        "events",
-        "containers",
-        "conditions",
-        "exit_code",
-        "message",
-        "pid",
-        "pgid",
-        "subprocess_work_dir",
-        "subprocess_persistent_storage_path",
-        "name",
-        "restart_count",
-        "ready",
-        "error",
-    }
-)
-POD_PHASES = frozenset({"Pending", "Running", "Succeeded", "Failed", "Unknown"})

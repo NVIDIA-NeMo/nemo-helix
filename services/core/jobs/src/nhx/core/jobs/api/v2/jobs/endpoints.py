@@ -517,9 +517,7 @@ async def resume_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
-        status.HTTP_409_CONFLICT: {
-            "description": "Storage has been reclaimed, or the job status changed during the request"
-        },
+        status.HTTP_409_CONFLICT: {"description": "The job changed during the request"},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "The pause window exceeds the platform maximum"},
     },
 )

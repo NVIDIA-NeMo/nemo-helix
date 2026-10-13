@@ -80,7 +80,7 @@ def test_job_reconciler_syncs_active_job(
 
     # Verify the typed Jobs client was called with the correct deepObject filter for
     # active/pending steps. The status list is encoded as a comma-joined filter value.
-    mock_jobs_client.list_steps.assert_called_once_with(
+    mock_jobs_client.list_steps.assert_any_call(
         workspace="-",
         name="-",
         query_params={

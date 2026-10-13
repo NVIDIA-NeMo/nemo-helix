@@ -23,7 +23,6 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
-from nhx.core.jobs.app.lifecycle import describe_paused_exit, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import (
     ComputeResources,
     ContainerSpec,
@@ -38,13 +37,11 @@ from nhx.core.jobs.controllers.backends.base import (
     require_staleness_timeout_seconds,
     staleness_error_message,
 )
-from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     BaseKubernetesExecutionProfileConfig,
     aggregate_pod_statuses_for_job_step,
     build_event_field_selector,
     build_metadata,
-    classify_task_containers,
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
@@ -53,7 +50,6 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     get_namespace_from_environment,
     image_pull_backoff_failure,
     list_pod_status,
-    list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
     update_all_tasks,
@@ -200,31 +196,22 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
 
         job_name = name_for_step(step)
 
-        # A paused step normally has no Kubernetes Job: the Job is deleted when the step
-        # reaches paused, so resume creates a new one.
+        # If the job is being resumed, first try unsuspending the job.
+        # If it cannot be found, it means either the job was paused before being scheduled on the k8s cluster,
+        # or the job was deleted out of band. In either case, we create a new job.
         if step.status == HelixJobStatus.RESUMING:
             k8s_job: V1Job | None = self.get_job_by_name(job_name)
-            if k8s_job is not None and k8s_job.spec is not None and k8s_job.spec.suspend:
-                # Jobs paused before cooperative pause left a suspended Job object.
+            if k8s_job is not None:
                 self.resume_job(k8s_job)
                 return JobUpdate(
                     status=HelixJobStatus.PENDING,
                     status_details={"message": "Job resumed with Kubernetes Job backend"},
                 )
-            if k8s_job is not None:
-                # A finished Job cannot run again. The new Job has the same name, so creating it
-                # before the old one is gone fails with 409. Delete it and retry on a later tick.
-                if k8s_job.metadata is None or k8s_job.metadata.deletion_timestamp is None:
-                    logger.info(
-                        "Removing finished Kubernetes job before scheduling the step again",
-                        extra={"job_name": job_name, "namespace": self.namespace},
-                    )
-                    self.terminate_job(k8s_job)
-                raise SchedulingDeferred(f"Waiting for the previous Kubernetes Job '{job_name}' to be deleted")
-            logger.info(
-                "Kubernetes job not found for step, creating a new Kubernetes job",
-                extra={"job_name": job_name, "namespace": self.namespace},
-            )
+            else:
+                logger.warning(
+                    "Kubernetes job not found for step, creating a new Kubernetes job",
+                    extra={"job_name": job_name, "namespace": self.namespace},
+                )
 
         # Create a configmap storing the job's step config
         configmap_name = create_configmap(
@@ -332,7 +319,15 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         elif step.status == HelixJobStatus.CANCELLING:
             return self.sync_terminate_job(step, k8s_job)
         elif step.status == HelixJobStatus.PAUSING:
-            return self.sync_pausing(step, k8s_job)
+            # If the job doesn't exist, we can't suspend it, so we will
+            # move it immediately to cancelled. When it is resumed, a new job will be created.
+            # This can happen if a job is created and then immediately paused before it is scheduled on the k8s cluster.
+            if k8s_job is None:
+                return JobUpdate(
+                    status=HelixJobStatus.PAUSED,
+                    status_details={"message": "Job is paused"},
+                )
+            return self.sync_suspend_job(step, k8s_job)
         else:
             raise ValueError(f"Unhandled job step status: {step.status}")
 
@@ -501,33 +496,6 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         else:
             self.terminate_job(job)
             return self.create_step_update(step, job)
-
-    def sync_pausing(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
-        """Leave a pausing workload running until it exits or the pause deadline passes.
-
-        Exit 75 is a pause. Exit 0 means training finished. Any other exit is an error.
-        """
-        if pause_deadline_exceeded(step):
-            if job is not None:
-                self.terminate_job(job)
-            message = "Pause deadline exceeded"
-            return JobUpdate(
-                status=HelixJobStatus.ERROR,
-                status_details={"message": message},
-                error_details={"message": message},
-            )
-        if job is None:
-            return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
-
-        pods = _pods_for_job(self._core_v1, job, step)
-        running, exit_code = classify_task_containers(pods)
-        if running:
-            return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
-        if exit_code is None:
-            exit_code = _job_object_pause_exit_code(job)
-        if exit_code is None:
-            return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
-        return _pause_exit_update(self, job, exit_code)
 
     def sync_suspend_job(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:
@@ -863,37 +831,3 @@ def map_kubernetes_job_status_to_step_status(
             },
         )
     return mapped_status, details
-
-
-def _pods_for_job(core_v1: client.CoreV1Api, job: V1Job, step: HelixJobStepWithContext) -> list:
-    namespace = job.metadata.namespace if job.metadata is not None else None
-    if namespace is None:
-        return []
-    return list_pods_by_labels(core_v1, namespace, common_labels_for_step(step))
-
-
-def _positive_count(value: object) -> bool:
-    return isinstance(value, int) and value > 0
-
-
-def _job_object_pause_exit_code(job: V1Job) -> int | None:
-    """Fall back to the Job object when no task container exit code is readable."""
-    status: V1JobStatus | None = job.status
-    if status is None:
-        return None
-    if status.completion_time is not None or _positive_count(status.succeeded):
-        return 0
-    if _positive_count(status.failed):
-        return 1
-    return None
-
-
-def _pause_exit_update(backend: KubernetesJobBackend, job: V1Job, exit_code: int) -> JobUpdate:
-    status, message, error_details = describe_paused_exit(exit_code)
-    if status == HelixJobStatus.PAUSED:
-        backend.terminate_job(job)
-    return JobUpdate(
-        status=status,
-        status_details={"message": message},
-        error_details=error_details or None,
-    )
