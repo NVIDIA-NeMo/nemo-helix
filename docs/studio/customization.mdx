@@ -22,8 +22,11 @@ Select **Customize a Model** from the fine-tuned models list to open **Fine-tune
 
 | Option | What it does |
 | ------ | ------------ |
-| Start from a template | Provisions a ready-made NVIDIA recipe — registering its base model and loading its dataset into the workspace — then opens the form filled in. See [Start from a Template](#start-from-a-template). |
+| Describe with AI | You pick a base model and a training dataset and describe your goal; a model drafts the training settings, then the form opens filled in. See [Describe with AI](#describe-with-ai). |
+| Start from a template | Opens the form filled in from a recipe. NVIDIA recipes first register their base model and load their dataset into the workspace. See [Start from a Template](#start-from-a-template). |
 | Build from scratch | Opens the form with default values, for you to choose your own base model and dataset. |
+
+Whichever you pick, the form is where the job is created: nothing is submitted until you select **Start Fine-Tuning**.
 
 To start from a model or job you already have, use one of these instead. Both open the form directly, with your choice applied:
 
@@ -50,6 +53,37 @@ Select **Start Fine-Tuning** to create the job. Studio confirms with a toast and
 
 Model eligibility for fine-tuning depends on the selected base model; **Customize this Model** is disabled for models that have no fileset to fine-tune from.
 
+### Describe with AI
+
+Describe with AI drafts a complete job config from your goal, so you can start from settings that suit your model and data instead of from defaults. It asks for:
+
+| Field | What to enter |
+| ----- | ------------- |
+| Base model | The model to fine-tune. Only fine-tunable models are listed. |
+| Training dataset | A dataset fileset in the workspace. Studio reads its files to detect the format — chat, prompt and completion, preference pairs, or NeMo Gym — and to estimate how many rows it has. A dataset with no training files, files that can't be read, or a format Customizer doesn't accept is reported here, and can't be drafted from. |
+| Reward environment | Shown only for NeMo Gym datasets. Optional: choose **None** to pick it later in the form. |
+| What's the goal of this fine-tune? | Your goal in plain language, such as teaching a new task, changing tone, or distilling a larger model. Mention constraints that matter, like a single GPU, low serving cost, or a quick test run. |
+| Drafting model | The model that writes the draft. It must support tool calling. It is not the model being fine-tuned. |
+
+Select **Draft settings**, or press ⌘/Ctrl + Enter in the goal field. The drafting model receives your inputs, the dataset's format and size, and Customizer's own guidance on choosing backends and hyperparameters, and returns a full job config: training backend, training method, hyperparameters, and compute. A status next to the button shows what is running.
+
+Every draft is checked against the same job schema and form rules the form applies when you submit. When a draft fails, Studio sends the errors back to the drafting model and retries automatically, up to two times. If it still fails, the remaining errors are listed: adjust your goal and select **Draft again**.
+
+A draft that passes the checks shows:
+
+- **Training setup**: the base model and the main settings the draft chose, with a count of any other values it set.
+- **Why these settings**: the model's reasoning for its choices, and a **Before you submit** list of anything you still need to provide.
+- **View config**: the full request the form will submit for this draft, defaults included.
+- **Edit**: returns to the inputs so you can change them and draft again.
+
+Select **Continue** to open the form filled in with the draft. Every value can still be changed there.
+
+<Note>
+
+The drafting model never picks a teacher model or a reward environment for you. If your goal needs one that you haven't provided, such as a teacher for distillation, the draft leaves it for you to select in the form, and **Training setup** shows it as **Pick in the form**.
+
+</Note>
+
 ### Start from a Template
 
 A template is a complete recipe: a base model, a dataset, and a tuned set of training parameters that are known to work together. Choosing one lets you run a fine-tuning job without first sourcing a model or preparing data.
@@ -64,14 +98,16 @@ Studio ships these templates, all LoRA fine-tunes of Nemotron models on a text-t
 
 Lightning is the smallest and the quickest way to see the whole flow end to end. Ultra needs a multi-node allocation.
 
-Select a template, then select **Continue**. Before the form opens, Studio prepares the workspace:
+Pick a template. Before the form opens, Studio prepares the workspace:
 
 1. Registers the template's base model — a fileset backed by the Hugging Face repository, and a model entity pointing at it.
 2. Downloads the template's Hugging Face dataset, converts each row to the shape the training backend expects, and uploads it as a dataset fileset with both a training and a validation split.
 
-The button reports progress while this runs, and the form opens pre-filled once it finishes.
+Studio shows its progress while this runs, and the form opens pre-filled once it finishes.
 
 A template fills the form in — it does not submit anything. Review the settings, change whatever you want, and select **Start Fine-Tuning** when you're ready.
+
+Templates you save from a job also appear, under **Saved templates**. To save one, open a job's actions menu (**⋯**) and select **Save as template**. A saved template points at a model and dataset that are already in the workspace, so it opens the form straight away, with nothing to provision.
 
 <Note>
 
@@ -107,7 +143,7 @@ The Overview tab's training progress panel differs by training method:
 
 Below the training panel, **Run Configuration** summarizes the customization ID, output model, base model, and other run metadata, with a **View Job Configuration** action that opens the full job spec.
 
-From the detail page header, select **Evaluate** to start an evaluation against the resulting model once the job is launchable, or open the actions menu (**⋯**) for **Clone** and, while the job is active or pending, **Cancel Job**.
+From the detail page header, select **Evaluate** to start an evaluation against the resulting model once the job is launchable, or open the actions menu (**⋯**) for **Clone**, **Save as template**, and, while the job is active or pending, **Cancel Job**.
 
 ## Related Topics
 
