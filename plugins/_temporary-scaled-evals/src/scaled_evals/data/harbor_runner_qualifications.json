@@ -90,6 +90,7 @@
       "selectable": true,
       "qualification": "supported",
       "patches": ["claude-code-initial-turns", "terminus2-tmux-env-fallback"],
+      "packages": ["opensandbox"],
       "git_tag": "v0.13.2",
       "git_tag_object_sha": "8146f0bdc96fdace618fee74989708f395aff3f0",
       "git_commit_sha": "96eaf6b2316b8a5a64ef78defe4df5ce0c51216a",

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 try:
+    from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSIONS
     from scaled_evals.harbor_runners import resolve_harbor_runner, supported_harbor_versions
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
@@ -69,9 +70,19 @@ def test_harbor_runner_requirements_match_the_catalog() -> None:
             for line in (requirements_dir / f"{version}.txt").read_text().splitlines()
             if line and not line.startswith("#")
         ]
+        # Packages pinned beside Harbor: each Harbor extra's package, then plain additions.
+        packages = catalog["releases"][version].get("packages", [])
         harbor = f"harbor[{','.join(extras)}]" if extras else "harbor"
         assert lines[0] == f"{harbor}=={version}"
-        assert [line.split("==", 1)[0] for line in lines[1:]] == extras
+        assert [line.split("==", 1)[0] for line in lines[1:]] == [*extras, *packages]
+
+
+def test_harbor_opensandbox_runners_carry_the_sdk() -> None:
+    """Every runner harbor_opensandbox accepts gets the SDK, so the Dockerfile installs its environment there."""
+    for version in HARBOR_OPENSANDBOX_HARBOR_VERSIONS:
+        assert version in supported_harbor_versions()
+        lines = (PLUGIN_ROOT / "harbor-runners" / f"{version}.txt").read_text().splitlines()
+        assert "opensandbox==0.1.16" in lines, version
 
 
 def test_generic_harbor_020_patches_cover_langgraph_and_pi(tmp_path: Path) -> None:

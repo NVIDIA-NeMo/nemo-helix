@@ -3,7 +3,8 @@
 
 """NemoOpenSandboxEnvironment against a mock OpenSandbox SDK.
 
-Written to Harbor's public environment API, not to private hooks of any one release.
+Written to the Harbor environment API that Harbor 0.13.2 and 0.20.0 share, so the same tests run
+against either runner's Harbor.
 """
 
 from __future__ import annotations
@@ -62,14 +63,14 @@ def _environment(
     """An environment for a hello-world task on the mock server, with the trusted allowlist above.
 
     ``task`` adds fields to the task's ``[environment]``; ``kwargs`` go to the environment. The
-    session ID defaults to the agent's as Harbor 0.20 names it: ``<trial>__env``.
+    session ID defaults to the agent's under Harbor 0.13.2 naming: the bare trial name.
     """
     environment_dir = tmp_path / "environment"
     environment_dir.mkdir(exist_ok=True)
     environment = NemoOpenSandboxEnvironment(
         environment_dir=environment_dir,
         environment_name="hello-world",
-        session_id=session_id or f"{trial_name}__env",
+        session_id=session_id or trial_name,
         trial_paths=TrialPaths(trial_dir=tmp_path / trial_name),
         task_env_config=EnvironmentConfig(docker_image="registry.example/hello:1", **(task or {})),
         network_policy=NetworkPolicy(network_mode=mode, allowed_hosts=allowed_hosts or []),
@@ -158,16 +159,19 @@ async def test_records_the_verified_policy_for_the_supervisor(tmp_path: Path, se
     record = json.loads((tmp_path / TRIAL / applied_egress_filename(sandbox.id)).read_text())
     canonical = json.dumps(record["policy"], sort_keys=True, separators=(",", ":"))
     assert record["sandbox_id"] == sandbox.id
-    assert record["session_id"] == f"{TRIAL}__env"
+    assert record["session_id"] == TRIAL
     assert record["role"] == "agent"
     assert record["network_mode"] == "public"
     assert record["policy"] == _policy_sent(server)
     assert record["policy_sha256"] == hashlib.sha256(canonical.encode()).hexdigest()
 
 
-async def test_agent_and_separate_verifier_each_keep_their_record(tmp_path: Path, server: Server) -> None:
-    """An agent and a separate verifier in one trial each keep their own egress record."""
-    agent = _environment(tmp_path, server, NetworkMode.PUBLIC)
+@pytest.mark.parametrize("agent_session", [TRIAL, f"{TRIAL}__env"], ids=["harbor-0.13", "harbor-0.20"])
+async def test_agent_and_separate_verifier_each_keep_their_record(
+    tmp_path: Path, server: Server, agent_session: str
+) -> None:
+    """An agent and a separate verifier in one trial each keep their own egress record, under either release's naming."""
+    agent = _environment(tmp_path, server, NetworkMode.PUBLIC, session_id=agent_session)
     verifier = _environment(tmp_path, server, NetworkMode.NO_NETWORK, session_id=f"{TRIAL}__verifier__task")
 
     agent_sandbox = await agent._create_sandbox()
@@ -186,11 +190,14 @@ async def test_agent_and_separate_verifier_each_keep_their_record(tmp_path: Path
 @pytest.mark.parametrize(
     ("trial_name", "session_id", "role"),
     [
+        # Harbor 0.13.2 names the agent's session after the trial; 0.20 adds __env.
+        ("trial-1", "trial-1", "agent"),
         ("trial-1", "trial-1__env", "agent"),
         ("trial-1", "trial-1__verifier__task", "verifier"),
         ("trial-1", "trial-1__verifier__env", "verifier"),
         ("trial-1-with-a-long-name", "trial-1-with-a-long-name__verifier__step-o__1a2b3c4d", "verifier"),
         # A trial name may itself contain __verifier__; only an exact match is the agent.
+        ("a__verifier__b__xyz", "a__verifier__b__xyz", "agent"),
         ("a__verifier__b__xyz", "a__verifier__b__xyz__env", "agent"),
         ("a__verifier__b__xyz", "a__verifier__b__xyz__verifier__env", "verifier"),
     ],
@@ -217,8 +224,10 @@ def test_harbor_session_naming_still_matches_sandbox_role() -> None:
 
     from harbor.trial.trial import Trial
 
+    source = inspect.getsource(Trial)
     assert "}__verifier__{" in inspect.getsource(Trial._separate_verifier_session_id)
-    assert 'session_id=f"{self.config.trial_name}__env"' in inspect.getsource(Trial)
+    # The agent's session: the bare trial name (0.13.2) or the trial name plus __env (0.20).
+    assert "session_id=self.config.trial_name," in source or 'session_id=f"{self.config.trial_name}__env"' in source
 
 
 async def test_allowlist_task_narrows_the_trusted_allowlist(tmp_path: Path, server: Server) -> None:
@@ -265,7 +274,7 @@ async def test_labels_every_create(tmp_path: Path, server: Server) -> None:
 
     metadata = server.creates[-1]["metadata"]
     assert metadata["nemo-scaled-evals-run"] == "run-1"
-    assert metadata["session_id"] == f"{TRIAL}__env"
+    assert metadata["session_id"] == TRIAL
     assert metadata[MANAGED_BY_METADATA_KEY] == MANAGED_BY_METADATA_VALUE
     assert len(metadata[CREATE_ATTEMPT_METADATA_KEY]) == 32
     assert environment._metadata == {"nemo-scaled-evals-run": "run-1"}
