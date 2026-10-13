@@ -28,6 +28,13 @@ from typing import Any
 
 from nemo_evals.config import EvaluatorConfig
 from nemo_evals.jobs.agent_spec import GymRunnerTarget, RegisteredAgentSource
+from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
+from nemo_evals.jobs.gym_environment_package import (
+    ENVIRONMENT_MANIFEST_FILENAME,
+    EnvironmentFormat,
+    GymEnvironmentPackageError,
+    parse_environment_manifest,
+)
 from nemo_evals.jobs.secret_env import GYM_SANDBOX_PLAN_ENVVAR, JobEnvSecretSource
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
@@ -38,6 +45,7 @@ from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from pydantic import BaseModel, ConfigDict, Field
 from sandboxed_gym.host.models import DEFAULT_HOST_TTL_S
+from sandboxed_gym.runtime.gym_host_runtime import UV_OFFLINE_ENV_KEY
 
 #: Env-var names that look like a credential. Used to refuse a sandboxed run that would hand one to
 #: user-supplied environment code through `env_vars`; `env_secrets` is the supported route.
@@ -312,6 +320,35 @@ def _egress_rules(plan: SandboxPlan) -> list[dict[str, Any]]:
     return rules
 
 
+def staged_environment_format(persistent_storage_path: Path | None) -> EnvironmentFormat | None:
+    """The format of the package the stage step left on this job's storage, or ``None``.
+
+    ``None`` covers no storage path, no staged tree and an unreadable manifest alike: the host
+    revalidates the package itself and reports a bad one with a better error than this could.
+    """
+    if persistent_storage_path is None:
+        return None
+    manifest_path = persistent_storage_path / ENVIRONMENT_STORAGE_DIR / ENVIRONMENT_MANIFEST_FILENAME
+    try:
+        raw_manifest = manifest_path.read_bytes()
+    except OSError:
+        return None
+    try:
+        return parse_environment_manifest(raw_manifest).format
+    except GymEnvironmentPackageError:
+        return None
+
+
+def environment_offline(plan: SandboxPlan, environment_format: EnvironmentFormat | None) -> bool:
+    """Derived, never submitted: ``wheels-v1`` promises no index, an empty allowlist promises no other fetch.
+
+    The Docker provider records the allowlist without enforcing it, so emptiness means nothing there.
+    """
+    if plan.host_provider == "docker":
+        return False
+    return environment_format == EnvironmentFormat.WHEELS_V1 and not plan.egress_allow
+
+
 def host_env(target: GymRunnerTarget, *, workspace: str) -> dict[str, str]:
     """The target's own environment variables, for the Gym host container.
 
@@ -388,10 +425,20 @@ def serve_config(
     else:
         chunk_deadline_s = target.collection_timeout_s + _HOST_DEADLINE_GRACE_S
 
+    offline = fileset_environment and environment_offline(plan, staged_environment_format(persistent_storage_path))
+    env = host_env(target, workspace=workspace)
+    if offline and UV_OFFLINE_ENV_KEY in env:
+        # The host keeps a pre-set UV_OFFLINE, so a job-authored value would override the deployment's decision.
+        raise SandboxUnavailableError(
+            f"`env_vars` sets {UV_OFFLINE_ENV_KEY}, but the deployment runs this wheels-v1 environment offline "
+            "and owns that setting; remove it from the target"
+        )
+
     return {
         "job_id": job_id,
         "host_provider": plan.host_provider,
         "environment_path": "/job/environment" if fileset_environment else None,
+        "environment_offline": offline,
         # GRPO leaves this off: its documented wheels-v1 contract vendors Gym's own closure.
         "reuse_image_gym_install": True,
         "sandbox": {
@@ -420,7 +467,7 @@ def serve_config(
         # orchestrator, so it is deliberately absent here.
         "policy_base_urls": plan.policy_base_urls,
         "gym_global_config": gym_global_config(target),
-        "host_env": host_env(target, workspace=workspace),
+        "host_env": env,
     }
 
 
@@ -508,6 +555,7 @@ class SessionBackedGymRunner:
             "rollout_timeout_s": serve.sandbox.rollout_timeout_s,
             "startup_timeout_s": serve.sandbox.bootstrap_timeout_s,
             "collection_timeout_s": self._target.collection_timeout_s,
+            "environment_offline": serve.environment_offline,
         }
         orchestrator = SandboxedGymOrchestrator()
         # `start` provisions a host and blocks on its readiness probe, so it runs off the event loop.
