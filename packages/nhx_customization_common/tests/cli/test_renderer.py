@@ -120,7 +120,7 @@ def _ctx(base_url: str | None, workspace: str = "default") -> RendererContext:
     return RendererContext(
         console=Console(force_terminal=False, no_color=True, width=200),
         cli_kwargs={"workspace": workspace},
-        verb="submit",
+        verb="--job-json",
         is_local=False,
         base_url=base_url,
     )
@@ -207,7 +207,7 @@ def test_renderer_defaults_workspace_when_missing(
     ctx = RendererContext(
         console=Console(force_terminal=False, no_color=True, width=200),
         cli_kwargs={},  # no workspace
-        verb="submit",
+        verb="--job-json",
         is_local=False,
         base_url="https://nhx.test",
     )

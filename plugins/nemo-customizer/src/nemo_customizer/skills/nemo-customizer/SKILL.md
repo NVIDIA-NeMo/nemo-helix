@@ -5,7 +5,7 @@
 name: nemo-customizer
 description: >-
   Fine-tune models on NeMo Helix with `automodel`, `unsloth`, or `rl` (all
-  `submit`-only): HF dataset conversion, filesets, model entities, and job JSON
+  Jobs-service backends using `--job-json`): HF dataset conversion, filesets, model entities, and job JSON
   (hyperparameters, batch, schedule, optimizer) + job polling. `automodel`/`unsloth`
   run SFT/LoRA as Docker GPU jobs; `rl` runs DPO (preference) or GRPO (NeMo Gym
   environment + reward) on a Ray cluster (Kubernetes). Covers building and converting
@@ -68,15 +68,15 @@ metadata:
 
 # NeMo Customizer
 
-End-to-end **SFT + LoRA** (automodel/unsloth), **DPO**, and **GRPO** (rl) on NeMo Helix. Three backend plugins ship in this repo — all are **`submit`-only** and expose no local `run` verb:
+End-to-end **SFT + LoRA** (automodel/unsloth), **DPO**, and **GRPO** (rl) on NeMo Helix. Three backend plugins ship in this repo — all submit through `nemo customization <plugin> --job-json ...` and expose no local `run` verb:
 
-| Backend | Verb | Trains | Where it runs | Pick when |
-|---------|------|--------|---------------|-----------|
-| **`automodel`** (default) | `submit` | SFT / LoRA | **Kubernetes GPU pods or the platform's Docker GPU executor** — whichever the platform provides. Multi-node (`num_nodes > 1`) needs Kubernetes | General SFT/LoRA; multi-GPU (data/tensor parallel); distillation; full-weight SFT |
-| **`unsloth`** | `submit` | SFT / LoRA | Same as automodel — either runtime, 4 steps (download → train → upload → model-entity). Single-GPU inside the container | User asks for Unsloth, or wants Unsloth's 4-bit LoRA path / optimizer defaults on a single GPU |
-| **`rl`** | `submit` | **DPO** (preference) or **GRPO** (Gym env) | **Kubernetes only** — provisions a **Ray** cluster, no Docker fallback; 4 steps (download → train → upload → model-entity) | Preference DPO (full-weight), or GRPO with an environment FileSet (`native-v1` / `wheels-v1` / `adapter-wheels-v1`) + Gym rollout rows; GRPO also supports LoRA |
+| Backend | Invocation | Trains | Where it runs | Pick when |
+|---------|------------|--------|---------------|-----------|
+| **`automodel`** (default) | `automodel --job-json` | SFT / LoRA | **Kubernetes GPU pods or the platform's Docker GPU executor** — whichever the platform provides. Multi-node (`num_nodes > 1`) needs Kubernetes | General SFT/LoRA; multi-GPU (data/tensor parallel); distillation; full-weight SFT |
+| **`unsloth`** | `unsloth --job-json` | SFT / LoRA | Same as automodel — either runtime, 4 steps (download → train → upload → model-entity). Single-GPU inside the container | User asks for Unsloth, or wants Unsloth's 4-bit LoRA path / optimizer defaults on a single GPU |
+| **`rl`** | `rl --job-json` | **DPO** (preference) or **GRPO** (Gym env) | **Kubernetes only** — provisions a **Ray** cluster, no Docker fallback; 4 steps (download → train → upload → model-entity) | Preference DPO (full-weight), or GRPO with an environment FileSet (`native-v1` / `wheels-v1` / `adapter-wheels-v1`) + Gym rollout rows; GRPO also supports LoRA |
 
-`nemo-customizer` is the router (`nemo customization …`); training backends are separate plugins (`nemo-automodel`, `nemo-unsloth`, `nemo-rl`). `submit` posts to the platform API; the platform runs training in container steps — **not** in the CLI shell. Heavy ML deps live in container images only.
+`nemo-customizer` is the router (`nemo customization …`); training backends are separate plugins (`nemo-automodel`, `nemo-unsloth`, `nemo-rl`). The backend command posts to the platform API; the platform runs training in container steps — **not** in the CLI shell. Heavy ML deps live in container images only.
 
 **Runtime split:** `automodel`/`unsloth` run on **either** `platform.runtime` — Kubernetes GPU pods or the local Docker GPU executor (`require_container_runtime`), whichever the platform offers. Their one exception is **multi-node** (`parallelism.num_nodes > 1`), which compiles to a `gpu_distributed` executor only Volcano/Kubernetes can place. `rl` is Kubernetes-only in every case (`require_distributed_runtime`) — it provisions a Ray cluster and has no Docker fallback. So a docker-runtime platform runs SFT/LoRA fine and cannot run DPO or GRPO at all.
 
@@ -140,7 +140,7 @@ Full create/update commands, fileset `token_secret`, license acceptance, and dow
 
 **`rl` runtime gate:** `rl --job-json` fails fast unless the platform runs `platform.runtime: kubernetes` (`require_distributed_runtime`). rl job steps execute as **Kubernetes pods via the `kubernetes_job` execution backend** — the **`docker` job backend cannot run rl**. Before submitting rl, confirm with `nemo jobs list-execution-profiles -f json` that the `cpu`/`gpu` profiles report `backend: kubernetes_job` (or `volcano_job`). If they report `backend: docker`/`subprocess`, the platform is **not** configured for rl: stop and tell the user DPO and GRPO need a Kubernetes-runtime platform — do **not** start/reuse a docker-runtime platform, and do **not** fall back to automodel/unsloth (those are SFT/LoRA, neither DPO nor GRPO). To stand up or configure one, see `references/rl-kubernetes-runtime.md`.
 
-For **`automodel`/`unsloth`**, training never runs inside the `nemo` CLI process. After `submit`, the platform launches GPU container steps — as Kubernetes pods, or on the Docker daemon attached to that platform host when the platform is Docker-backed. On a Docker-backed platform that daemon is often the same machine as `http://127.0.0.1:8080`, but always query the platform for its executors — not the agent's shell GPU or a separate `docker info` on another box. **`rl` does not use the Docker executor** — its steps run on the Kubernetes cluster the platform is configured against.
+For **`automodel`/`unsloth`**, training never runs inside the `nemo` CLI process. After submission, the platform launches GPU container steps — as Kubernetes pods, or on the Docker daemon attached to that platform host when the platform is Docker-backed. On a Docker-backed platform that daemon is often the same machine as `http://127.0.0.1:8080`, but always query the platform for its executors — not the agent's shell GPU or a separate `docker info` on another box. **`rl` does not use the Docker executor** — its steps run on the Kubernetes cluster the platform is configured against.
 
 ## Gotchas
 
@@ -392,7 +392,7 @@ bash plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/
 
 Read `<job-id>` from the `"name"` field in submit stdout (JSON). **Do not use `2>&1`** before `json.load` — warnings on stderr break parsing; see Gotchas. Optional interval override: append seconds (e.g. `… 30`). Or poll manually: `nemo jobs get-status unsloth-<job-id>` every 30–60s. If submit fails on an unknown profile, re-list execution profiles and pass `--profile <name>` on submit (default is `gpu`).
 
-Use `submit` for Unsloth jobs; the contributor CLI exposes no local `run` verb.
+Use `nemo customization unsloth --job-json <job.json>` for Unsloth jobs; the contributor CLI exposes no local `run` verb.
 
 ## Fast path — rl (GRPO)
 

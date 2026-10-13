@@ -37,7 +37,6 @@ class RunStrategyJob(NemoJob):
     description: ClassVar[str] = "Optimize a platform agent with an installed optimization strategy."
     container: ClassVar[str] = "cpu-tasks"
     job_collection_path: ClassVar[str | None] = None
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = RunStrategySpec
     input_spec_schema: ClassVar[type[BaseModel]] = RunStrategySubmitSpec
 
