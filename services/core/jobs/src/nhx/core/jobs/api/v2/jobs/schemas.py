@@ -120,3 +120,4 @@ class HelixJobStepsListFilter(Filter):
     job: Optional[str] = Field(None, description="The ID of the job to filter steps by.")
     status: Optional[List[HelixJobStatus]] = Field(None, description="The list of statuses to filter steps by.")
     source: Optional[str] = Field(None, description="The source of the job steps.")
+    task_cleanup_pending: bool | None = Field(None, description="Whether terminal child-task cleanup is unfinished.")
