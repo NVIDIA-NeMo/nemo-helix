@@ -4,7 +4,7 @@ description: Evaluate models, datasets, and agents with the NeMo Helix Evals plu
 license: Apache-2.0
 metadata:
   owner: nemo-helix
-  author: nemo-helix
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
   maturity: active
   tags: [evaluation, metrics, agent-eval, nemo-helix]
 allowed-tools: Bash, Read
