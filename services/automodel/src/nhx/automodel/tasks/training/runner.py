@@ -16,7 +16,7 @@ from pathlib import Path
 from types import TracebackType
 
 import yaml
-from nhx.automodel.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
+from nhx.automodel.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME, PAUSE_SENTINEL_FILE_NAME
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.service.path_utils import remap_job_storage_path
 
@@ -91,6 +91,16 @@ class TrainingRunner:
         try:
             library_config = self._compile_config_phase()
             metrics = self._training_phase(library_config)
+            if self._pause_sentinel_path().exists():
+                # Every pod stops here and exits 75; there is nothing to synchronize or publish.
+                logger.info("Training stopped for a pause after saving its checkpoint; skipping publication")
+                result = TrainingResult(
+                    success=False,
+                    paused=True,
+                    gpu_info=gpu_info,
+                    training_duration_seconds=self._progress.training_duration_seconds,
+                )
+                return result
             self._dist_ctx.sync_point(BARRIER_TRAINING_COMPLETE)
             result = self._postprocess_phase(gpu_info, metrics, library_config)
 
@@ -149,10 +159,16 @@ class TrainingRunner:
     def _get_library_config_path(self) -> Path:
         return self._workspace_path / AUTOMODEL_CONFIG_FILENAME
 
+    def _pause_sentinel_path(self) -> Path:
+        return self._workspace_path / PAUSE_SENTINEL_FILE_NAME
+
     def _compile_config_phase(self) -> LibraryConfig:
         config_path = self._get_library_config_path()
 
         if self._dist_ctx.is_coordinator:
+            # Clear the previous run's pause marker before any pod starts training, so only a pause
+            # in this run can be mistaken for one.
+            self._pause_sentinel_path().unlink(missing_ok=True)
             self._progress.report_running("compiling_config")
             config_dict = self._backend.compile_config(self._config, self._workspace_path)
             config_path.parent.mkdir(parents=True, exist_ok=True)

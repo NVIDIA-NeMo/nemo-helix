@@ -35,6 +35,14 @@ class AutomodelConfig(create_service_config_class("automodel")):  # type: ignore
         default=3600,
         description="Terminate training if no task progress within this many seconds (0 disables).",
     )
+    training_pause_deadline_seconds: int = Field(
+        default=1800,
+        ge=0,
+        description=(
+            "How long a paused training step may take to finish its current step, save a checkpoint, "
+            "and exit. Past this, the step is stopped and fails. 0 means training cannot be paused."
+        ),
+    )
 
     default_training_execution_profile: str = Field(
         default="gpu",
