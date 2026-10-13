@@ -5,14 +5,18 @@
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections import defaultdict
+from collections.abc import Callable, Sequence
 from contextlib import AsyncExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
 from insight_agent.config import EvidenceStreamsConfig
+from insight_agent.evidence_streams.anomaly_and_patterns.stream import AnomalyAndPatternsArtifacts
 from insight_agent.evidence_streams.builtins import registered_builtin_streams
+from insight_agent.evidence_streams.evidence_streams import EvidenceStreamResult
+from insight_agent.evidence_streams.tool_issues.stream import ToolIssueEvidenceArtifacts
 from insight_agent.insight import Insight
 from insight_agent.insights_generation.insight_compilation import InsightCompilation
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients
@@ -25,6 +29,13 @@ from pydantic import BaseModel, ValidationError
 from trace_ingest.models import TraceSnapshot
 
 logger = logging.getLogger(__name__)
+
+# Below-threshold detail lines kept in the report; the rest are counted.
+MAX_BELOW_THRESHOLD_NOTES = 5
+BELOW_THRESHOLD_SUMMARY = (
+    "Some observations did not meet minimum recurrence thresholds and were not promoted to insight candidates; "
+    "see the analysis report for details."
+)
 
 
 class BorrowedModelClient(UnifiedLLM):
@@ -108,6 +119,67 @@ def to_change_set(insights: list[Insight], existing: list[Insight], *, trace_cou
     )
 
 
+def _one_line(text: str) -> str:
+    """Escape line breaks in trace-derived text so it cannot add lines to the report."""
+    return text.replace("\r", "\\r").replace("\n", "\\n")
+
+
+def _tool_issue_shortfalls(artifacts: ToolIssueEvidenceArtifacts) -> list[tuple[int, str]]:
+    required = artifacts.config.minimum_independent_cases
+    shortfalls = []
+    for card in artifacts.cards:
+        if card.eligible_for_analyst:
+            continue
+        tools = ", ".join(dict.fromkeys(_one_line(item.tool_name) for item in card.representative_evidence))
+        shortfalls.append(
+            (
+                card.independent_case_count,
+                f"- below threshold: tool-issues {tools} {card.issue_type} "
+                f"({card.independent_case_count} of {required} independent cases)",
+            )
+        )
+    return shortfalls
+
+
+def _failure_pattern_shortfalls(artifacts: AnomalyAndPatternsArtifacts) -> list[tuple[int, str]]:
+    analysis = artifacts.result
+    grouped = {group.signature for group in analysis.failure_groups}
+    cross_tool = {group.message_signature for group in analysis.cross_tool_failure_groups}
+    traces: dict[str, set[str]] = defaultdict(set)
+    for event in analysis.failure_events:
+        if event["signature"] in grouped or event.get("message_signature") in cross_tool:
+            continue
+        traces[str(event["signature"])].add(str(event["trace_id"]))
+    required = artifacts.config.minimum_independent_traces
+    return [
+        (
+            len(trace_ids),
+            f"- below threshold: anomaly-and-patterns {_one_line(signature)} ({len(trace_ids)} of {required} traces)",
+        )
+        for signature, trace_ids in traces.items()
+    ]
+
+
+def with_evidence_notes(result: AnalystResult, evidence: Sequence[EvidenceStreamResult]) -> AnalystResult:
+    """Report evidence that was held below a recurrence threshold or never analyzed."""
+    shortfalls: list[tuple[int, str]] = []
+    skipped: list[str] = []
+    for item in evidence:
+        if isinstance(item.artifacts, ToolIssueEvidenceArtifacts):
+            shortfalls.extend(_tool_issue_shortfalls(item.artifacts))
+        elif isinstance(item.artifacts, AnomalyAndPatternsArtifacts):
+            shortfalls.extend(_failure_pattern_shortfalls(item.artifacts))
+        if item.skip_reason is not None:
+            skipped.append(f"- skipped: {item.stream_name} ({item.skip_reason})")
+    # Closest to the threshold first, so a capped list keeps the likeliest issues.
+    shortfalls.sort(key=lambda shortfall: -shortfall[0])
+    notes = [line for _, line in shortfalls[:MAX_BELOW_THRESHOLD_NOTES]]
+    if len(shortfalls) > MAX_BELOW_THRESHOLD_NOTES:
+        notes.append(f"- ... and {len(shortfalls) - MAX_BELOW_THRESHOLD_NOTES} more below threshold")
+    summary = f"{result.summary} {BELOW_THRESHOLD_SUMMARY}" if shortfalls else result.summary
+    return result.model_copy(update={"summary": summary, "notes": [*result.notes, *notes, *skipped]})
+
+
 async def analyze_snapshot(
     snapshot: TraceSnapshot,
     *,
@@ -136,7 +208,7 @@ async def analyze_snapshot(
             tasks = [group.create_task(registry.analyze(name, snapshot)) for name in registry.names]
         evidence = [task.result() for task in tasks]
         if not any(item.problems for item in evidence):
-            return to_change_set(existing, existing, trace_count=len(snapshot))
+            return with_evidence_notes(to_change_set(existing, existing, trace_count=len(snapshot)), evidence)
         compiler = InsightCompilation(llm=model_clients.default)
         async with AsyncExitStack() as stack:
             if relay_scope_name is not None:
@@ -147,4 +219,4 @@ async def analyze_snapshot(
                 for event in ("LLMComplete", "PythonOutput"):
                     stack.callback(compiler.event_manager.on(event, event_handler))
             insights = await compiler.compile_insights(evidence, snapshot, existing)
-        return to_change_set(insights, existing, trace_count=len(snapshot))
+        return with_evidence_notes(to_change_set(insights, existing, trace_count=len(snapshot)), evidence)

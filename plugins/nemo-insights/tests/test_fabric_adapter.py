@@ -141,6 +141,7 @@ async def test_fabric_adapter_returns_unpersisted_analyst_result(monkeypatch) ->
             "summary": "No high-impact failures found.",
             "new_insights": [],
             "updated_insights": [],
+            "notes": [],
         },
     }
     assert seen["agent"] == "research-agent"

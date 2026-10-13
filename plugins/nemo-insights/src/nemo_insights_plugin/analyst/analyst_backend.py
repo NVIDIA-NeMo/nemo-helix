@@ -502,6 +502,7 @@ class RemoteAnalystBackend(AnalystBackend):
 
         if not lines:
             lines.append("- no insights created or updated")
+        lines.extend(result.notes)
 
         lines.extend(self._mirror(workspace=workspace, stored=stored))
         return f"{result.summary}\n\n" + "\n".join(lines)
@@ -639,6 +640,7 @@ class LocalAnalystBackend(AnalystBackend):
 
         if not lines:
             lines.append("- no insights created or updated")
+        lines.extend(result.notes)
 
         self.store.write_records(records)
         return f"{result.summary}\n\nWrote analyst result to {self.path}\n" + "\n".join(lines)
