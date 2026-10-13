@@ -6,10 +6,9 @@ title: "OpenShell"
 description: "Connect NeMo Helix to an independently installed OpenShell gateway for agent deployments."
 ---
 
-OpenShell is a peer deployment mode of Docker and Kubernetes. The platform talks
-to an OpenShell gateway; the gateway selects its compute driver. Use
-`nemo agents deploy --mode openshell` even when the gateway runs on Kubernetes.
-Keep `k8s_executor` pointed at a Kubernetes backend.
+NeMo Helix connects to an OpenShell gateway to deploy sandboxed agents. Agent
+deployments use `--mode openshell` with either gateway compute driver, Docker or
+Kubernetes. The gateway manages sandbox creation and policy enforcement.
 
 The NeMo Helix chart does not install OpenShell. Install a compatible gateway
 and its prerequisites using the [OpenShell Kubernetes guide](https://github.com/NVIDIA/OpenShell/blob/main/docs/kubernetes/setup.mdx).
@@ -70,8 +69,7 @@ Change `gateway_endpoint` to your gateway's reachable Service address.
 
 The generated sandbox policy permits platform access for the configured
 executables and denies other network destinations. The OpenShell deployment
-mode derives the agent's inference URL from `platform_egress`; do not use the
-old `k8s_internal_base_url` workaround for this mode. If tools need external
+mode derives the agent's inference URL from `platform_egress`. If tools need external
 services, provide an explicit policy through `default_policy_path`, mounted into
 the platform controller. The mandatory platform egress rule is retained.
 
@@ -81,7 +79,8 @@ existing executors when adding OpenShell. The overlay preserves the default
 Kubernetes executor for other workloads and does not add a Jobs executor.
 </Note>
 
-Render before applying, using the same release name and namespace as your installation:
+The following command renders the overlay with your installation's release name
+and namespace:
 
 ```sh
 helm template "$HELM_RELEASE" k8s/helm --namespace "$NAMESPACE" \
@@ -89,9 +88,8 @@ helm template "$HELM_RELEASE" k8s/helm --namespace "$NAMESPACE" \
   --values k8s/helm/examples/openshell/values.yaml > rendered.yaml
 ```
 
-Inspect the rendered platform ConfigMap for `openshell_executor`, the gateway
-endpoint, and the fully qualified platform egress host. Then apply the overlay
-alongside your existing values using the upgrade procedure in
+The rendered platform ConfigMap contains the executor selection, gateway endpoint,
+and platform egress host. Apply the overlay alongside your existing values using
 [Install](/documentation/kubernetes-deployment/setup/helm/install).
 
 For a TLS gateway, use an `https` endpoint and configure these executor fields:
@@ -108,18 +106,15 @@ certificate Secret with the chart's volume settings on the controller and any
 API process that needs the gateway connection. TLS configuration does not remove
 the authentication limitation described above.
 
-## Verify
+## Deploy an agent
 
-Check that the platform controller starts without skipping the OpenShell executor
-or reporting gateway connection errors. Then follow
-[Sandboxed Deployments](/documentation/agents/sandboxed-deployments) to package,
-deploy, and invoke a Fabric agent through the Agents gateway.
+[Sandboxed Deployments](/documentation/agents/sandboxed-deployments) covers agent
+registration, deployment, invocation, and examples of the default network policy.
 
-Verify both a permitted platform request and a denied external request from the
-same sandbox. An agent's textual claim that it is isolated is not a policy test.
 The default Landlock compatibility setting is `best_effort`: on unsupported
-kernels it does not provide filesystem confinement. Set
-`landlock_compatibility: hard_requirement` when deployment must fail without it.
+kernels it does not provide filesystem confinement. With
+`landlock_compatibility: hard_requirement`, deployment fails if the required
+Landlock support is unavailable.
 
 ## Troubleshooting
 

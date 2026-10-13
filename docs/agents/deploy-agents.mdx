@@ -48,10 +48,9 @@ agent through the deployments plugin.
 | `k8s` | A Kubernetes Deployment + Service | Yes | A container image and a configured `k8s` executor |
 | `openshell` | A policy-governed OpenShell sandbox | Yes | An image packaged for OpenShell, a reachable gateway, and an `openshell` executor |
 
-OpenShell is a peer mode: use `--mode openshell` regardless of the gateway's
-compute driver. Configure `agents.deployments.openshell_executor` rather than
-redirecting `k8s_executor`. See [Sandboxed Deployments](/documentation/agents/sandboxed-deployments)
-for packaging, deployment, and policy verification.
+`--mode openshell` uses `agents.deployments.openshell_executor` with either
+gateway compute driver. See [Sandboxed Deployments](/documentation/agents/sandboxed-deployments)
+for deployment and network policy examples.
 
 <Note>
 

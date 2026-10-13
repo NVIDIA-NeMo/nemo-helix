@@ -10,19 +10,20 @@ Deploy a registered Fabric agent with `--mode openshell` to run it under the
 OpenShell executor's policy. This mode is independent of the gateway's Docker or
 Kubernetes compute driver. Requests still go through the platform's Agents gateway.
 
-## Before you start
+## Prerequisites
 
-- Connect the CLI to your platform using its saved context.
-- Configure an OpenShell deployment executor using the
+- A CLI context connected to your platform.
+- An OpenShell deployment executor configured as described in the
   [OpenShell operator guide](/documentation/kubernetes-deployment/setup/helm/openshell).
-- Prepare a working Fabric `agent.yaml`, with a model available through the
+- A Fabric `agent.yaml` with a model available through the
   platform's Inference Gateway. See [Agents](/documentation/agents).
-- Have an agent image built with the OpenShell runtime profile, compatible with
+- An agent image built with the OpenShell runtime profile, compatible with
   your platform version and compute-node architecture, and already accessible to
   the gateway's compute nodes. See [Deploy Agents](/documentation/agents/deploy-agents)
   for packaging guidance.
 
-Use the same workspace for registration, deployment, invocation, and cleanup:
+The examples below register and deploy an agent in `WORKSPACE`. `IMAGE_TAG` is
+the reference to the prepared image:
 
 ```sh
 export WORKSPACE=default
@@ -30,9 +31,6 @@ export AGENT_NAME=sandbox-hello
 export AGENT_CONFIG="agents/$AGENT_NAME/agent.yaml"
 export IMAGE_TAG="<accessible-agent-image>"
 ```
-
-Set `IMAGE_TAG` to the prepared image reference. Confirm the model works before
-diagnosing sandbox connectivity. Keep secrets out of the agent config.
 
 ## Register and deploy
 
@@ -45,10 +43,8 @@ nemo agents deploy --agent "$AGENT_NAME" \
   --image "$IMAGE_TAG" --workspace "$WORKSPACE" --timeout 600
 ```
 
-The operator's `agents.deployments.openshell_executor` selects the OpenShell
-backend. Do not point `k8s_executor` at OpenShell or use `--mode k8s` for this
-deployment. Wait for the deployment to reach `running`; a created sandbox alone
-does not prove the agent is ready.
+`agents.deployments.openshell_executor` selects the backend for `--mode openshell`.
+The deployment reaches `running` when the agent service is ready.
 
 ## Invoke and verify policy
 
@@ -57,20 +53,25 @@ nemo agents invoke --agent-deployment "$AGENT_NAME-sandbox" \
   --workspace "$WORKSPACE" --input "Reply with a short greeting."
 ```
 
-Confirm the response contains usable model output. If invocation fails after
-the deployment becomes ready, inspect the agent log and the platform's route to
-the gateway. Readiness alone does not prove model access or end-to-end proxying.
+The invocation returns the agent's response through the platform's Agents gateway.
+A deployment can be ready while invocation fails because of model access or
+platform-to-gateway routing; see the operator guide's
+[troubleshooting section](/documentation/kubernetes-deployment/setup/helm/openshell#troubleshooting).
 
-With the OpenShell CLI connected to the same gateway and gateway workspace,
-select the sandbox belonging to this deployment. Check both deployment-name and
-deployment-workspace labels; do not pick another workload by name prefix.
+### Network policy
+
+The default policy allows sandbox access to the platform and denies other network
+destinations. OpenShell associates each sandbox with deployment-name and
+deployment-workspace labels. With the OpenShell CLI connected to the deployment's
+gateway and gateway workspace, those labels identify the sandbox:
 
 ```sh
-openshell sandbox list
+openshell sandbox list --selector \
+  "nemo.nvidia.com/deployment-name=$AGENT_NAME-sandbox,nemo.nvidia.com/deployment-workspace=$WORKSPACE"
 ```
 
-Set `SANDBOX_NAME` to that sandbox and `PLATFORM_API_URL` to the HTTP endpoint
-configured by the operator's `platform_egress`. Then run:
+In the following examples, `SANDBOX_NAME` is the name from that listing and
+`PLATFORM_API_URL` is the endpoint configured by `platform_egress`:
 
 ```sh
 openshell sandbox exec --name "$SANDBOX_NAME" -- \
@@ -79,11 +80,10 @@ openshell sandbox exec --name "$SANDBOX_NAME" -- \
   curl --fail --show-error --max-time 10 https://example.com
 ```
 
-For the default generated policy, the platform health request should succeed
-and the external request should be denied. Confirm a policy denial in the
-gateway output/logs; a timeout or DNS failure alone does not prove enforcement.
-If a custom policy allows external hosts, choose a destination outside its allowlist.
-Invoke the agent again to confirm model access still works.
+With the default policy, the health request succeeds and the external request is
+denied. The gateway's audit logs record policy denials; connection failures alone
+can also result from DNS or network problems. Custom policies may allow additional
+destinations, including the external host in this example.
 
 ## Clean up
 
@@ -92,5 +92,5 @@ nemo agents undeploy "$AGENT_NAME-sandbox" --workspace "$WORKSPACE" --yes
 nemo agents delete "$AGENT_NAME" --workspace "$WORKSPACE" --yes
 ```
 
-Verify the sandbox is gone from the gateway. The agent image is retained. See the operator guide for gateway authentication, image-pull,
-working-directory, and policy troubleshooting.
+Undeploying removes the deployment and its sandbox. Deleting the agent removes
+the registration. The agent image is retained.
