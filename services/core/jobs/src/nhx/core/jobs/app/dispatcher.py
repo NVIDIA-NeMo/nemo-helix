@@ -38,12 +38,8 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     get_model_id,
     job_artifact_base_path,
 )
-from nhx.core.jobs.app.constants import (
-    IMAGE_DIGEST_AT_SAVE,
-    PAUSE_REQUESTED_AT,
-    STORAGE_RECLAIMED_AT,
-)
-from nhx.core.jobs.app.lifecycle import rerun_status_details, with_lifecycle_timestamps
+from nhx.core.jobs.app.constants import STORAGE_RECLAIMED_AT
+from nhx.core.jobs.app.lifecycle import attempt_can_transition, rerun_status_details, with_lifecycle_timestamps
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
@@ -705,8 +701,6 @@ class JobDispatcher:
         # Store original spec name in config for reference
         step_config = dict(first_step.config) if first_step.config else {}
         step_config[STEP_SPEC_NAME_CONFIG_KEY] = first_step.name
-        saved_digest = (attempt.status_details or {}).get(IMAGE_DIGEST_AT_SAVE)
-        initial_details = {IMAGE_DIGEST_AT_SAVE: saved_digest} if isinstance(saved_digest, str) and saved_digest else {}
         await self.store.create(
             HelixJobStep(
                 name=first_step.name,  # Simple name, unique per attempt via parent-scoped uniqueness
@@ -714,7 +708,6 @@ class JobDispatcher:
                 attempt_id=attempt.id,
                 config=step_config,
                 status=HelixJobStatus.CREATED,
-                status_details=initial_details,
             )
         )
 
@@ -1055,13 +1048,16 @@ class JobDispatcher:
         """Update a job from a step while holding the per-job mutation lock."""
         step_to_save = step
         saved_step: HelixJobStep | None = None
+        requested_details = status_details
         for attempt in range(2):
             if not step_to_save.status.can_transition_to(status):
                 raise StateTransitionConflictError(
                     f"Invalid status transition from {step_to_save.status} to {status} for step {step_to_save.id}"
                 )
 
-            status_details = with_lifecycle_timestamps(step_to_save, status, status_details)
+            # Stamp against the step as it is now, so a retry after a refetch does not carry
+            # a clock stamped for a transition that another writer already made.
+            status_details = with_lifecycle_timestamps(step_to_save, status, requested_details)
             if self._step_update_would_be_noop(step_to_save, status, status_details, error_details):
                 saved_step = step_to_save
                 break
@@ -1166,6 +1162,10 @@ class JobDispatcher:
                             "workspace": attempt.workspace,
                         },
                     )
+                # The step being paused finished before it saw the pause. The pause no
+                # longer applies and the pipeline moves on, so the job is running again.
+                if attempt.status == HelixJobStatus.PAUSING:
+                    new_attempt_status = HelixJobStatus.ACTIVE
             else:
                 new_attempt_status = HelixJobStatus.COMPLETED
                 logger.info(
@@ -1185,23 +1185,8 @@ class JobDispatcher:
         # Update attempt if status changed, respecting state machine transitions to prevent
         # backward transitions from concurrent reconciler/scheduler updates
         if new_attempt_status != attempt.status:
-            if not attempt.status.can_transition_to(new_attempt_status):
-                logger.debug(
-                    f"Skipping attempt {attempt.id} status update from '{attempt.status}' "
-                    f"to '{new_attempt_status}': transition not valid (concurrent update "
-                    f"advanced the attempt past the desired state)"
-                )
-            else:
-                attempt.status = new_attempt_status
-                if attempt.status == HelixJobStatus.ERROR:
-                    attempt.error_details = saved_step.error_details
-                if attempt.status in (HelixJobStatus.PAUSED, HelixJobStatus.ERROR):
-                    saved_digest = (saved_step.status_details or {}).get(IMAGE_DIGEST_AT_SAVE)
-                    if isinstance(saved_digest, str) and saved_digest:
-                        attempt.status_details = self._update_status_details_object(
-                            attempt.status_details, {IMAGE_DIGEST_AT_SAVE: saved_digest}
-                        )
-                attempt = await self.store.update(attempt)
+            attempt, changed = await self._save_attempt_status(attempt, new_attempt_status, saved_step)
+            if changed:
                 if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
                     try:
                         job = await self.store.get_by_id(HelixJob, attempt.job)
@@ -1231,6 +1216,42 @@ class JobDispatcher:
 
         operations_counter.add(1, attributes={"operation": "update_job_status_from_step"})
         return saved_step, attempt
+
+    async def _save_attempt_status(
+        self,
+        attempt: HelixJobAttempt,
+        status: HelixJobStatus,
+        step: HelixJobStep,
+    ) -> tuple[HelixJobAttempt, bool]:
+        """Move the attempt to ``status`` after ``step`` changed. Return the attempt and whether it moved.
+
+        Tasks write progress into the attempt without the job lock, so the save can
+        lose a version race. Like the step update, refetch and retry once while the
+        transition is still valid, so the attempt does not fall behind its step.
+        """
+        for try_number in range(2):
+            if attempt.status == status:
+                return attempt, False
+            if not attempt_can_transition(attempt.status, status):
+                logger.debug(
+                    f"Skipping attempt {attempt.id} status update from '{attempt.status}' "
+                    f"to '{status}': transition not valid (concurrent update "
+                    f"advanced the attempt past the desired state)"
+                )
+                return attempt, False
+            attempt.status = status
+            if status == HelixJobStatus.ERROR:
+                attempt.error_details = step.error_details
+            try:
+                return await self.store.update(attempt), True
+            except EntityConflictError as e:
+                if try_number > 0:
+                    raise
+                try:
+                    attempt = await self.store.get_by_id(HelixJobAttempt, attempt.id)
+                except EntityNotFoundError:
+                    raise e from e
+        raise RuntimeError("_save_attempt_status did not save or skip the attempt")
 
     async def update_job_status_details(
         self, job_name: str, workspace: str, status_details: Dict[str, Any]
@@ -1415,13 +1436,8 @@ class JobDispatcher:
                 f"Cannot pause job '{job_entity.name}': the running step '{step_spec_name}' does not support pause."
             )
 
-        _, updated_attempt = await self.update_job_status_from_step(
-            active_or_pending_step,
-            HelixJobStatus.PAUSING,
-            status_details={
-                PAUSE_REQUESTED_AT: datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            },
-        )
+        # The lifecycle stamp writes pause_requested_at, which starts the pause deadline.
+        _, updated_attempt = await self.update_job_status_from_step(active_or_pending_step, HelixJobStatus.PAUSING)
         operations_counter.add(1, attributes={"operation": "pause_job"})
         return create_platform_job_response(job_entity, updated_attempt)
 

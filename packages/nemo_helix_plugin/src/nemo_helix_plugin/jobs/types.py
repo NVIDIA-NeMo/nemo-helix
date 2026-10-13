@@ -192,8 +192,10 @@ class JobControl(BaseModel):
         default=None,
         ge=0,
         description="How long this job keeps storage after it pauses, measured from stopped_at. "
-        "When unset, the platform paused-storage TTL applies. Cannot exceed the platform maximum. "
-        "0 reclaims on the next retention pass. Changing this value does not move the start time.",
+        "When unset, the platform paused-storage TTL applies. Send null to clear a value and go back "
+        "to that default. Cannot exceed the platform maximum. 0 reclaims on the next retention pass. "
+        "Changing this value does not move the start time.",
+        json_schema_extra={"nullable": True},
     )
 
 

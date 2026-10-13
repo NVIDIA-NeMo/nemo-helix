@@ -1713,7 +1713,7 @@ def test_volcano_pausing_exit_75_deletes_job(volcano_job, test_step_pausing):
     step = _cooperative_pausing_step(test_step_pausing)
     job = {"status": {"state": {"phase": "Failed"}}, "metadata": {"name": "vj"}}
     terminated = SimpleNamespace(exit_code=75)
-    container = SimpleNamespace(image_id=None, state=SimpleNamespace(terminated=terminated))
+    container = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=terminated))
     pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Failed"))
 
     with (

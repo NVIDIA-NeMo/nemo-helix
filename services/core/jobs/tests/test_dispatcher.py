@@ -18,6 +18,7 @@ from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
 from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
 from nhx.common.api.parsed_filter import ParsedFilter
+from nhx.common.auth import AuthContext
 from nhx.common.entities import (
     ALL_WORKSPACES,
     DEFAULT_WORKSPACE,
@@ -31,7 +32,6 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobResponse,
     HelixJobTaskUpdate,
 )
-from nhx.core.jobs.app.constants import IMAGE_DIGEST_AT_SAVE
 from nhx.core.jobs.app.dispatcher import (
     JobDeletionConflictError,
     JobDispatcher,
@@ -1344,27 +1344,6 @@ async def test_pause_targets_a_live_step_before_an_idempotent_return(
 
 
 @pytest.mark.asyncio
-async def test_error_copies_saved_image_digest_onto_the_attempt(
-    mock_dispatcher: JobDispatcher,
-    mock_store: EntityClient,
-    sample_platform_job_request: CreateHelixJobRequest,
-):
-    """Rerun reads the saved digest from the attempt, so the step snapshot has to land there."""
-    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
-    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
-    assert step is not None
-    await mock_dispatcher.update_job_status_from_step(
-        step,
-        HelixJobStatus.ERROR,
-        status_details={"image_digest": "sha256:saved"},
-    )
-
-    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
-    assert attempt is not None
-    assert attempt.status_details[IMAGE_DIGEST_AT_SAVE] == "sha256:saved"
-
-
-@pytest.mark.asyncio
 async def test_get_job_status_returns_steps_in_spec_order(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
@@ -2427,3 +2406,124 @@ async def test_list_jobs_filter_name_operator_and_project_like(
     assert "excluded-job" not in returned_names
     assert "no-project-job" not in returned_names
     assert len(returned_names) == 1
+
+
+def _two_step_request(request: CreateHelixJobRequest, name: str) -> CreateHelixJobRequest:
+    spec = request.platform_spec.model_copy(deep=True)
+    spec.steps[0].lifecycle = StepLifecycle(pause_deadline_seconds=60)
+    spec.steps.append(HelixJobStepSpec(name="upload", executor=spec.steps[0].executor, config={}))
+    return request.model_copy(update={"name": name, "platform_spec": spec})
+
+
+@pytest.mark.asyncio
+async def test_pausing_step_that_completes_lets_the_job_finish(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """Training finished before it saw the pause: the job runs again, then completes."""
+    job = await mock_dispatcher.create_job(
+        _two_step_request(sample_platform_job_request, "pause-lost-race"), DEFAULT_WORKSPACE
+    )
+    training = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert training is not None
+    training, _ = await mock_dispatcher.update_job_status_from_step(training, HelixJobStatus.ACTIVE)
+    await mock_dispatcher.pause_job(job.name, DEFAULT_WORKSPACE)
+    training = await mock_store.get_by_id(HelixJobStep, training.id)
+    assert training.status == HelixJobStatus.PAUSING
+
+    _, attempt = await mock_dispatcher.update_job_status_from_step(training, HelixJobStatus.COMPLETED)
+
+    assert attempt.status == HelixJobStatus.ACTIVE
+    upload = await mock_dispatcher.get_current_job_step_by_name(job.name, "upload", DEFAULT_WORKSPACE)
+    assert upload is not None
+    with pytest.raises(JobOperationConflictError, match="does not support pause"):
+        await mock_dispatcher.pause_job(job.name, DEFAULT_WORKSPACE)
+    resumed = await mock_dispatcher.resume_job(job.name, DEFAULT_WORKSPACE)
+    assert resumed is not None and resumed.status == HelixJobStatus.ACTIVE
+
+    upload, _ = await mock_dispatcher.update_job_status_from_step(upload, HelixJobStatus.ACTIVE)
+    _, attempt = await mock_dispatcher.update_job_status_from_step(upload, HelixJobStatus.COMPLETED)
+    assert attempt.status == HelixJobStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_repeated_pause_keeps_the_first_request_time(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A second pause request must not push the pause deadline back."""
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    step, _ = await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.ACTIVE)
+    await mock_dispatcher.pause_job(job.name, DEFAULT_WORKSPACE)
+    first = (await mock_store.get_by_id(HelixJobStep, step.id)).status_details["pause_requested_at"]
+
+    # A second request that read the step while it was still active.
+    await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.PAUSING)
+
+    again = await mock_store.get_by_id(HelixJobStep, step.id)
+    assert again.status == HelixJobStatus.PAUSING
+    assert again.status_details["pause_requested_at"] == first
+
+
+@pytest.mark.asyncio
+async def test_attempt_update_retries_after_a_concurrent_write(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A progress write to the attempt between read and save must not leave the attempt behind its step."""
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    original_update = mock_store.update
+    conflicts: list[str] = []
+
+    async def update_with_one_attempt_conflict(entity):
+        if isinstance(entity, HelixJobAttempt) and not conflicts:
+            conflicts.append(entity.id)
+            # Another writer saves progress first, so this save loses the version race.
+            fresh = await mock_store.get_by_id(HelixJobAttempt, entity.id)
+            fresh.status_details = {**fresh.status_details, "percentage_done": 40}
+            await original_update(fresh)
+            raise EntityConflictError("version conflict")
+        return await original_update(entity)
+
+    with patch.object(mock_store, "update", side_effect=update_with_one_attempt_conflict):
+        _, attempt = await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.ACTIVE)
+
+    assert conflicts
+    assert attempt.status == HelixJobStatus.ACTIVE
+    stored = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert stored.status == HelixJobStatus.ACTIVE
+    assert stored.status_details["percentage_done"] == 40
+
+
+@pytest.mark.asyncio
+async def test_rerun_saves_the_callers_auth_context(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A regular user reads the job with auth_context stripped. Rerun must not save it back as empty."""
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.ERROR, error_details={"message": "boom"})
+    caller = AuthContext(principal_id="user@example.com", principal_email="user@example.com")
+    original_update = mock_store.update
+    saved_auth: list[AuthContext | None] = []
+
+    async def record_job_auth(entity):
+        if isinstance(entity, HelixJob):
+            saved_auth.append(entity.auth_context)
+        return await original_update(entity)
+
+    with patch.object(mock_store, "update", side_effect=record_job_auth):
+        rerun = await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE, auth_context=caller)
+
+    assert rerun is not None
+    assert saved_auth == [caller]

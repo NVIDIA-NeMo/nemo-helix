@@ -543,8 +543,7 @@ def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_jo
     container_mock = MagicMock()
     container_mock.id = "16-character-uid"
     container_mock.status = "exited"
-    container_mock.image.id = "sha256:paused"
-    container_mock.attrs = {"State": {"ExitCode": 75}, "Image": "sha256:paused"}
+    container_mock.attrs = {"State": {"ExitCode": 75}}
     task_id = uuid.uuid4().hex
     container_mock.labels = owned_container_labels(
         {
@@ -575,15 +574,13 @@ def test_docker_job_sync_pausing_leaves_running_container(docker_job, docker_cli
     test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
     container_mock = MagicMock()
     container_mock.status = "running"
-    container_mock.image.id = "sha256:running"
-    container_mock.attrs = {"State": {"ExitCode": 0}, "Image": "sha256:running"}
+    container_mock.attrs = {"State": {"ExitCode": 0}}
     docker_client_mock.containers.get.side_effect = None
     docker_client_mock.containers.get.return_value = container_mock
 
     update = docker_job.sync(test_job_step)
 
     assert update.status == HelixJobStatus.PAUSING
-    assert update.status_details["image_digest"] == "sha256:running"
     container_mock.stop.assert_not_called()
     container_mock.kill.assert_not_called()
 

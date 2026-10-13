@@ -6,6 +6,8 @@
 import logging
 import math
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
@@ -100,6 +102,38 @@ platform_config = get_platform_config()
 _JOB_STATUS_VALUES = ", ".join(job_status.value for job_status in HelixJobStatus)
 MAX_LOG_QUERY_LINES = 10_000
 DEFAULT_LOG_QUERY_LIMIT = 100
+
+
+@contextmanager
+def job_operation_errors(operation: str, name: str, workspace: str) -> Iterator[None]:
+    """Turn dispatcher conflicts from a job operation into 409 responses.
+
+    A concurrent writer, such as the reconciler or a second request, can move the
+    step or attempt between the read and the write. The caller gets 409 and can
+    refresh, never 500. A job deleted mid-request is reported as not found.
+    """
+    try:
+        yield
+    except JobOperationConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
+    except (StateTransitionConflictError, EntityConflictError) as exc:
+        logger.info(
+            "Cannot %s job '%s' in workspace '%s': its status changed during the request",
+            operation,
+            sanitize_for_log(name),
+            sanitize_for_log(workspace),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot {operation} job '{name}': its status changed during the request. "
+            "Refresh the job status and try again.",
+        ) from exc
+    except JobStatusUpdateSkippedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{name}' not found in workspace '{workspace}'.",
+        ) from exc
 
 
 def _format_validation_location(loc: Any, *, prefix: str | None = None) -> str:
@@ -400,6 +434,7 @@ async def get_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
+        status.HTTP_409_CONFLICT: {"description": "The job status changed during the request"},
     },
 )
 async def cancel_job(
@@ -409,19 +444,8 @@ async def cancel_job(
 ) -> HelixJobResponse:
     """Cancel a platform job."""
     with scoped_app_ctx(JobContext(id=name)):
-        try:
+        with job_operation_errors("cancel", name, workspace):
             job = await dispatcher.cancel_job(name, workspace)
-        except StateTransitionConflictError as exc:
-            logger.info(
-                "Cannot cancel job '%s' in workspace '%s'",
-                sanitize_for_log(name),
-                sanitize_for_log(workspace),
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(f"Cannot cancel job '{name}' from its current state. Refresh the job status and try again."),
-            ) from exc
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -435,7 +459,9 @@ async def cancel_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
-        status.HTTP_409_CONFLICT: {"description": "The running step cannot be paused"},
+        status.HTTP_409_CONFLICT: {
+            "description": "The running step cannot be paused, or the job status changed during the request"
+        },
     },
 )
 async def pause_job(
@@ -445,10 +471,8 @@ async def pause_job(
 ) -> HelixJobResponse:
     """Pause a platform job."""
     with scoped_app_ctx(JobContext(id=name)):
-        try:
+        with job_operation_errors("pause", name, workspace):
             job = await dispatcher.pause_job(name, workspace)
-        except JobOperationConflictError as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -462,7 +486,9 @@ async def pause_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
-        status.HTTP_409_CONFLICT: {"description": "The job cannot be resumed"},
+        status.HTTP_409_CONFLICT: {
+            "description": "The job cannot be resumed, or its status changed during the request"
+        },
     },
 )
 async def resume_job(
@@ -472,10 +498,8 @@ async def resume_job(
 ) -> HelixJobResponse:
     """Resume a paused platform job."""
     with scoped_app_ctx(JobContext(id=name)):
-        try:
+        with job_operation_errors("resume", name, workspace):
             job = await dispatcher.resume_job(name, workspace)
-        except JobOperationConflictError as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -489,7 +513,9 @@ async def resume_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
-        status.HTTP_409_CONFLICT: {"description": "Storage has been reclaimed"},
+        status.HTTP_409_CONFLICT: {
+            "description": "Storage has been reclaimed, or the job status changed during the request"
+        },
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "The pause window exceeds the platform maximum"},
     },
 )
@@ -503,16 +529,15 @@ async def update_job_control(
     """Change mutable job behavior, such as how long a pause keeps storage."""
     with scoped_app_ctx(JobContext(id=name)):
         try:
-            job = await dispatcher.update_job_control(
-                name,
-                workspace,
-                request,
-                auth_context=AuthContext.from_principal(auth_client.principal),
-            )
+            with job_operation_errors("update control for", name, workspace):
+                job = await dispatcher.update_job_control(
+                    name,
+                    workspace,
+                    request,
+                    auth_context=AuthContext.from_principal(auth_client.principal),
+                )
         except PauseTTLLimitError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.detail) from exc
-        except JobOperationConflictError as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

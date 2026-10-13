@@ -52,6 +52,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_VOLUME_PATH,
     JobUpdate,
 )
+from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes import (
     CPUKubernetesJobBackend,
     GPUKubernetesJobBackend,
@@ -75,6 +76,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     build_metadata,
     build_pod_security_context,
     build_tolerations,
+    classify_task_containers,
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
@@ -1126,15 +1128,28 @@ def test_schedule_from_resuming_existing_job(kubernetes_job, cpu_execution_provi
 
 
 def test_schedule_from_resuming_finished_job_is_replaced(kubernetes_job, cpu_execution_provider, test_step_resuming):
-    """A finished Job left by a cooperative pause is deleted before a new one is created."""
+    """A finished Job is deleted, and the new same-name Job is created only once the old one is gone."""
     existing = MagicMock()
     existing.spec.suspend = False
+    existing.metadata.deletion_timestamp = None
     kubernetes_job._batch_v1.read_namespaced_job.return_value = existing
 
     with patch.object(kubernetes_job, "terminate_job") as terminate:
+        with pytest.raises(SchedulingDeferred):
+            kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
+        terminate.assert_called_once_with(existing)
+
+        # Foreground deletion is still running. Do not delete again, and do not create yet.
+        existing.metadata.deletion_timestamp = datetime.datetime.now(datetime.timezone.utc)
+        with pytest.raises(SchedulingDeferred):
+            kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
+        terminate.assert_called_once_with(existing)
+        kubernetes_job._batch_v1.create_namespaced_job.assert_not_called()
+
+        # The old Job is gone, so the new one is created.
+        kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=404)
         kubernetes_job.schedule(cpu_execution_provider, test_step_resuming)
 
-    terminate.assert_called_once_with(existing)
     kubernetes_job._batch_v1.create_namespaced_job.assert_called_once()
 
 
@@ -1550,7 +1565,7 @@ def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, tes
 def _terminated_task_pod(exit_code: int):
     terminated = SimpleNamespace(exit_code=exit_code)
     state = SimpleNamespace(terminated=terminated)
-    container = SimpleNamespace(image_id="sha256:training", state=state)
+    container = SimpleNamespace(name="nemo-job-task", state=state)
     return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Succeeded"))
 
 
@@ -3274,3 +3289,12 @@ def test_image_pull_ttl_can_be_disabled(kubernetes_job, test_step_pending):
 
     assert update.status == HelixJobStatus.PENDING
     terminate.assert_not_called()
+
+
+def test_classify_task_containers_reads_only_the_task_container():
+    """A sidecar that keeps running after the task exits must not hold the pause open."""
+    task = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=SimpleNamespace(exit_code=75)))
+    sidecar = SimpleNamespace(name="istio-proxy", state=SimpleNamespace(terminated=None))
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task], phase="Running"))
+
+    assert classify_task_containers([pod]) == (False, 75)

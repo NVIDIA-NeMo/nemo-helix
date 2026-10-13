@@ -109,6 +109,8 @@ def test_api_factory_routes():
         ("post", "/jobs/{name}/cancel"),
         ("post", "/jobs/{name}/pause"),
         ("post", "/jobs/{name}/resume"),
+        ("post", "/jobs/{name}/rerun"),
+        ("patch", "/jobs/{name}/control"),
         ("get", "/jobs/{name}/logs"),
         ("get", "/jobs/{name}/results"),
         ("get", "/jobs/{job}/results/{name}"),

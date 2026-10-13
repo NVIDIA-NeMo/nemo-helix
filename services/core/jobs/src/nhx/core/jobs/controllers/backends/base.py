@@ -358,10 +358,6 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
     @abstractmethod
     def shutdown(self): ...
 
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
-        """Delete a job's persistent storage. Backends with durable storage override this."""
-        return None
-
     def __str__(self) -> str:
         return self.BACKEND_NAME
 
@@ -437,8 +433,7 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             raise RuntimeError(f"Failed to fetch job '{workspace}/{job}' to check storage cleanup eligibility") from e
 
         job_status = getattr(job_response.status, "value", job_response.status)
-        # Failed jobs keep storage until the retention pass. Completed and cancelled jobs reclaim here.
-        if job_status not in ("cancelled", "completed"):
+        if job_status not in ("cancelled", "error", "completed"):
             return False
 
         try:

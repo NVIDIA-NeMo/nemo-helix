@@ -14,6 +14,7 @@ from kubernetes.client.models import V1Pod
 from kubernetes.client.rest import ApiException
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nemo_helix_plugin.jobs.constants import job_storage_subpath as build_job_storage_subpath
 from nemo_helix_plugin.jobs.execution_profiles import (
     BaseKubernetesExecutionProfileConfig as PluginBaseKubernetesExecutionProfileConfig,
@@ -76,7 +77,6 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
     NEMO_JOB_TASK_CONTAINER_NAME,
-    PAUSE_EXIT_CODE,
 )
 from nhx.core.jobs.app.providers import ComputeResources, ContainerSpec
 from nhx.core.jobs.controllers.backends.base import (
@@ -495,6 +495,9 @@ def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
     stopped for a pause and no other container failed, ``0`` when every task
     container exited 0, and the first other code otherwise. It is ``None`` when
     no task container has terminated.
+
+    Only the task container is read, by name. Injected sidecars can keep running
+    after the task exits, and their exit codes say nothing about the pause.
     """
     if not pods:
         return False, None
@@ -504,7 +507,9 @@ def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
     for pod in pods:
         statuses: list[client.V1ContainerStatus] = []
         if pod.status is not None and pod.status.container_statuses:
-            statuses = list(pod.status.container_statuses)
+            statuses = [
+                status for status in pod.status.container_statuses if status.name == NEMO_JOB_TASK_CONTAINER_NAME
+            ]
         if not statuses:
             phase = pod.status.phase if pod.status is not None else None
             if phase in ("Succeeded", "Failed"):
@@ -527,16 +532,6 @@ def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
     if saw_pause:
         return False, PAUSE_EXIT_CODE
     return False, 0
-
-
-def first_task_image_id(pods: list[V1Pod]) -> str | None:
-    """Return the first task container image id. Init containers are ignored."""
-    for pod in pods:
-        statuses = pod.status.container_statuses if pod.status is not None else None
-        for container in statuses or []:
-            if container.image_id:
-                return container.image_id
-    return None
 
 
 def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, str], str]:
@@ -575,10 +570,7 @@ def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tup
                         "name": container_status.name,
                         "ready": container_status.ready,
                         "restart_count": container_status.restart_count,
-                        "image_id": container_status.image_id,
                     }
-                    if container_status.image_id and "image_digest" not in pod_info:
-                        pod_info["image_digest"] = container_status.image_id
                     if container_status.state and container_status.state.terminated:
                         container_info["terminated"] = {
                             "exit_code": container_status.state.terminated.exit_code,

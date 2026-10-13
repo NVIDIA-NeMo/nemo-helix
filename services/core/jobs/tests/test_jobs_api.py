@@ -19,7 +19,7 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.types import HelixJobTaskUpdate
 from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
-from nhx.common.entities.client import EntityValidationError
+from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.endpoints import (
     _format_create_job_conflict,
@@ -37,6 +37,7 @@ from nhx.core.jobs.app.dispatcher import (
     JobDispatcher,
     JobOutputLocationError,
     JobSecretValidationError,
+    JobStatusUpdateSkippedError,
     StateTransitionConflictError,
 )
 from nhx.core.jobs.app.providers import ContainerSpec, GPUExecutionProvider, SubprocessExecutionProvider
@@ -1436,9 +1437,33 @@ async def test_cancel_job_conflict_sanitizes_log_fields(
             )
 
     assert response.status_code == 409
-    message = next(record.getMessage() for record in caplog.records if "Cannot cancel job" in record.msg)
+    message = next(record.getMessage() for record in caplog.records if "Cannot cancel job" in record.getMessage())
     assert "\r" not in message
     assert "\n" not in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["cancel", "pause", "resume", "rerun"])
+@pytest.mark.parametrize(
+    "error,expected_status",
+    [
+        (StateTransitionConflictError("invalid transition"), 409),
+        (EntityConflictError("version conflict"), 409),
+        (JobStatusUpdateSkippedError("job deleted"), 404),
+    ],
+)
+async def test_job_operation_races_are_not_server_errors(
+    test_client: AsyncClient,
+    mock_dispatcher: JobDispatcher,
+    operation: str,
+    error: Exception,
+    expected_status: int,
+):
+    """A concurrent writer moving the job mid-request gives 409, and a deleted job gives 404, never 500."""
+    with patch.object(mock_dispatcher, f"{operation}_job", new=AsyncMock(side_effect=error)):
+        response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/raced-job/{operation}")
+
+    assert response.status_code == expected_status, response.text
 
 
 @pytest.mark.asyncio

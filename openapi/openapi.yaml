@@ -5772,6 +5772,7 @@ paths:
       tags:
       - Jobs
       summary: Rerun Job
+      description: Rerun a failed job from its surviving storage as a new attempt.
       operationId: rerun_job_apis_jobs_v2_workspaces__workspace__jobs__job__rerun_post
       parameters:
       - name: job
@@ -5796,7 +5797,7 @@ paths:
         '404':
           description: Job not Found
         '409':
-          description: The job cannot be rerun
+          description: The job cannot be rerun, or its status changed during the request
         '422':
           description: Validation Error
           content:
@@ -6259,12 +6260,54 @@ paths:
                 $ref: '#/components/schemas/HelixJobResponse'
         '404':
           description: Job not Found
+        '409':
+          description: The job status changed during the request
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control:
+    patch:
+      tags:
+      - Jobs
+      summary: Update Job Control
+      description: Change mutable job behavior, such as how long a pause keeps storage.
+      operationId: update_job_control_apis_jobs_v2_workspaces__workspace__jobs__name__control_patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobControl'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: Storage has been reclaimed, or the job status changed during
+            the request
+        '422':
+          description: The pause window exceeds the platform maximum
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/logs:
     get:
       tags:
@@ -6383,50 +6426,8 @@ paths:
         '404':
           description: Job not Found
         '409':
-          description: The running step cannot be paused
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control:
-    patch:
-      tags:
-      - Jobs
-      summary: Update Job Control
-      description: Change mutable job behavior, such as how long a pause keeps storage.
-      operationId: update_job_control_apis_jobs_v2_workspaces__workspace__jobs__name__control_patch
-      parameters:
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/JobControl'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HelixJobResponse'
-        '404':
-          description: Job not Found
-        '409':
-          description: Storage has been reclaimed
+          description: The running step cannot be paused, or the job status changed
+            during the request
         '422':
           description: Validation Error
           content:
@@ -6509,7 +6510,8 @@ paths:
         '404':
           description: Job not Found
         '409':
-          description: The job cannot be resumed
+          description: The job cannot be resumed, or its status changed during the
+            request
         '422':
           description: Validation Error
           content:
@@ -14699,7 +14701,8 @@ components:
         platform_spec:
           $ref: '#/components/schemas/HelixJobSpec'
         control:
-          $ref: '#/components/schemas/JobControl'
+          allOf:
+          - $ref: '#/components/schemas/JobControl'
           description: Mutable job behavior. This is not part of the execution spec.
         fileset:
           type: string
@@ -15850,6 +15853,27 @@ components:
       type: object
       title: JailbreakDetectionConfig
       description: Configuration data for jailbreak detection.
+    JobControl:
+      properties:
+        pause_ttl_seconds:
+          title: Pause Ttl Seconds
+          description: How long this job keeps storage after it pauses, measured from
+            stopped_at. When unset, the platform paused-storage TTL applies. Send
+            null to clear a value and go back to that default. Cannot exceed the platform
+            maximum. 0 reclaims on the next retention pass. Changing this value does
+            not move the start time.
+          nullable: true
+          type: integer
+          minimum: 0.0
+      type: object
+      title: JobControl
+      description: 'Mutable job behavior, stored on the job and kept off the execution
+        spec.
+
+
+        The attempt spec stays the immutable snapshot of what a run executes. Rerun
+
+        copies the job spec into the next attempt and keeps using this object.'
     JobExecutionProfileConfig:
       properties:
         ttl_seconds_before_active:
@@ -18543,20 +18567,6 @@ components:
       type: object
       title: PatronusRailConfig
       description: Configuration data for the Patronus Evaluate API
-    JobControl:
-      properties:
-        pause_ttl_seconds:
-          type: integer
-          minimum: 0.0
-          title: Pause Ttl Seconds
-          description: How long this job keeps storage after it pauses, measured from
-            stopped_at. When unset, the platform paused-storage TTL applies. Cannot
-            exceed the platform maximum. 0 reclaims on the next retention pass. Changing
-            this value does not move the start time.
-      type: object
-      title: JobControl
-      description: Mutable job behavior, stored on the job and kept off the execution
-        spec.
     PolygrafDetection:
       properties:
         server_endpoint:
