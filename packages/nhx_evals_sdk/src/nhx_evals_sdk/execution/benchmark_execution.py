@@ -63,6 +63,7 @@ from nhx_evals_sdk.metrics.protocol import (
 )
 from nhx_evals_sdk.resilience.api import use_resilience_session
 from nhx_evals_sdk.resilience.errors import first_failure_cause, iter_leaf_causes
+from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime
 from nhx_evals_sdk.values import (
     Agent,
     AgentBase,
@@ -328,47 +329,48 @@ async def _run_producer_workers(
             requests_log: list[dict] = []
             requests_log_var.set(requests_log)
             try:
-                if isinstance(target, Retrieval):
-                    sample = build_retrieval_sample(item, target.rankings)
-                elif is_online:
-                    assert target is not None
-                    if prompt_template is None:
-                        raise ValueError("prompt_template is required for online benchmark evaluation")
-                    if isinstance(target, AgentBase):
-                        agent_target = cast(Agent, target)
-                        sample = await generate_online_sample_agent(
-                            agent=agent_target,
-                            row=item,
-                            index=idx,
-                            prompt_template=prompt_template,
-                            params=online_params,
-                            preprocess_hooks=preprocess_hooks,
-                            postprocess_hooks=postprocess_hooks,
-                            agent_inference_fn=cast(AgentInferenceFn | None, inference_fn),
-                            client=cast(httpx.AsyncClient | None, client),
-                            default_headers=default_headers,
-                        )
+                with measure_target_runtime() as target_runtime:
+                    if isinstance(target, Retrieval):
+                        sample = build_retrieval_sample(item, target.rankings)
+                    elif is_online:
+                        assert target is not None
+                        if prompt_template is None:
+                            raise ValueError("prompt_template is required for online benchmark evaluation")
+                        if isinstance(target, AgentBase):
+                            agent_target = cast(Agent, target)
+                            sample = await generate_online_sample_agent(
+                                agent=agent_target,
+                                row=item,
+                                index=idx,
+                                prompt_template=prompt_template,
+                                params=online_params,
+                                preprocess_hooks=preprocess_hooks,
+                                postprocess_hooks=postprocess_hooks,
+                                agent_inference_fn=cast(AgentInferenceFn | None, inference_fn),
+                                client=cast(httpx.AsyncClient | None, client),
+                                default_headers=default_headers,
+                            )
+                        else:
+                            model_inference_fn = (
+                                cast(InferenceFn, inference_fn) if inference_fn is not None else make_inference_request
+                            )
+                            sample = await generate_online_sample(
+                                target=target,
+                                row=item,
+                                index=idx,
+                                prompt_template=prompt_template,
+                                params=online_model_params,
+                                preprocess_hooks=preprocess_hooks,
+                                postprocess_hooks=postprocess_hooks,
+                                inference_fn=model_inference_fn,
+                                client=cast(AsyncOpenAI | None, client),
+                                default_headers=default_headers,
+                            )
                     else:
-                        model_inference_fn = (
-                            cast(InferenceFn, inference_fn) if inference_fn is not None else make_inference_request
-                        )
-                        sample = await generate_online_sample(
-                            target=target,
-                            row=item,
-                            index=idx,
-                            prompt_template=prompt_template,
-                            params=online_model_params,
-                            preprocess_hooks=preprocess_hooks,
-                            postprocess_hooks=postprocess_hooks,
-                            inference_fn=model_inference_fn,
-                            client=cast(AsyncOpenAI | None, client),
-                            default_headers=default_headers,
-                        )
-                else:
-                    sample = build_offline_sample(item)
-                    # TODO: Consider matching ComputeMetricPipeline by applying
-                    # offline postprocess hooks after reconciling service
-                    # progress tracking so sample hooks do not double count.
+                        sample = build_offline_sample(item)
+                        # TODO: Consider matching ComputeMetricPipeline by applying
+                        # offline postprocess hooks after reconciling service
+                        # progress tracking so sample hooks do not double count.
             except Exception as e:
                 if not tolerate_failure:
                     raise EvaluationError(
@@ -389,6 +391,7 @@ async def _run_producer_workers(
 
             row_scores[idx].sample = dict(sample)
             row_scores[idx].requests.extend(requests_log)
+            row_scores[idx].runtime_sec = target_runtime.seconds
 
             event = _SampleEvent(
                 row_index=idx,
@@ -677,6 +680,7 @@ async def evaluate_benchmark(
                     *row_generation_requests[row_idx],
                     *row_metric_requests[row_idx].get(pipeline.metric_ref, []),
                 ],
+                runtime_sec=row.runtime_sec,
                 metric_errors=_metric_errors_for_ref(row.metric_errors, pipeline.metric_ref),
                 metric_diagnostics=_metric_diagnostics_for_ref(row.metric_diagnostics, pipeline.metric_ref),
             )

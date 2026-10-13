@@ -133,6 +133,7 @@ def namespace_result(
             sample=row_score.sample,
             metrics={metric_key: _extract_metric_outputs(row_score, metric_key)},
             requests=row_score.requests,
+            runtime_sec=row_score.runtime_sec,
             metric_errors={metric_key: error} if (error := _extract_metric_error(row_score, metric_key)) else None,
             metric_diagnostics=(
                 {metric_key: diagnostics}
@@ -210,6 +211,7 @@ def collapse_results(
                 sample=first_row.sample,
                 metrics=metrics,
                 requests=requests,
+                runtime_sec=first_row.runtime_sec,
                 metric_errors=metric_errors or None,
                 metric_diagnostics=metric_diagnostics or None,
             )

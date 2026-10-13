@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -214,6 +214,18 @@ def _trial_totals(trial: AgentEvalTrial, measurements: TrialMeasurements) -> dic
     return totals
 
 
+def _steps_carry_timing(steps: Sequence[AtifStepParam], *, started_at: datetime) -> bool:
+    """Whether any step recorded its own time, beyond the run start stamped onto untimed steps."""
+    unrecorded_timestamps = (started_at, started_at.isoformat())
+    for step in steps:
+        extra = step.get("extra")
+        if isinstance(extra, Mapping) and extra.get("invocation") is not None:
+            return True
+        if step.get("timestamp") not in unrecorded_timestamps:
+            return True
+    return False
+
+
 def trial_to_atif_ingest(
     trial: AgentEvalTrial,
     *,
@@ -251,17 +263,21 @@ def trial_to_atif_ingest(
         "message": output_text or "",
         "timestamp": started_at,
     }
-    if ended_at is not None:
-        # Give the single-step trajectory a real duration so the root span's latency (end - start) is
-        # the trial's runtime instead of 0. Intake reads the window start/end from this NAT invocation
-        # block (epoch-second timestamps); ``started_at`` stays the start, so re-ingest is still idempotent.
-        step["extra"] = {
-            "invocation": {
-                "start_timestamp": started_at.timestamp(),
-                "end_timestamp": ended_at.timestamp(),
-            }
-        }
     step_payload: list[AtifStepParam] = list(steps) if steps else [step]
+    if ended_at is not None and not _steps_carry_timing(step_payload, started_at=started_at):
+        # Intake rolls the root span's latency up from step invocation windows (epoch seconds), so an
+        # untimed trajectory needs the trial's runtime on its final step or its latency reads as 0.
+        final_step = step_payload[-1]
+        step_payload[-1] = {
+            **final_step,
+            "extra": {
+                **(final_step.get("extra") or {}),
+                "invocation": {
+                    "start_timestamp": started_at.timestamp(),
+                    "end_timestamp": ended_at.timestamp(),
+                },
+            },
+        }
 
     body: AtifCreateParams = {
         "schema_version": ATIF_SCHEMA_VERSION,

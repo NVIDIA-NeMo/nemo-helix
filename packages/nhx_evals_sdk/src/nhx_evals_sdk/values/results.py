@@ -530,6 +530,11 @@ class RowScore(BaseModel):
     sample: dict[str, Any] = Field(description="Sample output payload for the evaluated row.")
     metrics: dict[str, list[MetricOutput]] = Field(description="Metric-level row outputs by metric key.")
     requests: list[dict[str, Any]] = Field(description="Request details captured during evaluation.")
+    runtime_sec: float | None = Field(
+        default=None,
+        ge=0,
+        description="Seconds the target spent generating this row's sample; unset for offline rows.",
+    )
     metric_errors: dict[str, str] | None = Field(
         default=None,
         description="Full row-level error text keyed by metric for summary rendering.",

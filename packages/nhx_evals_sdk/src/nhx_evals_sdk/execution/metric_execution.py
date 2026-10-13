@@ -33,7 +33,7 @@ from nhx_evals_sdk.execution.pipeline import (
     GeneratedSampleScoringPipeline,
     PipelineRuntime,
 )
-from nhx_evals_sdk.execution.samples import SAMPLE_RUNTIME_SEC_KEY, build_offline_sample, build_retrieval_sample
+from nhx_evals_sdk.execution.samples import build_offline_sample, build_retrieval_sample
 from nhx_evals_sdk.execution.scoring import (
     empty_evaluation_result,
     finalize_evaluation_result,
@@ -49,7 +49,7 @@ from nhx_evals_sdk.metrics.protocol import (
 )
 from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resilience.api import run_indexed_tasks, use_resilience_session
-from nhx_evals_sdk.resilience.attempt_timing import time_successful_attempt
+from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime, timed_target_call
 from nhx_evals_sdk.resilience.errors import get_evaluation_error
 from nhx_evals_sdk.session import begin_evaluation_session
 from nhx_evals_sdk.structured_output import (
@@ -405,7 +405,7 @@ async def generate_online_sample(
     # runtime (both expose only ``__call__``), so ``isinstance`` can't
     # discriminate them. ``target`` is the real discriminator and the
     # overloads statically pin the pairing — ``cast`` just records that.
-    with time_successful_attempt() as attempt:
+    with timed_target_call():
         if isinstance(target, Model):
             model_fn = cast(inference.InferenceFn, inference_fn)
             response = await model_fn(
@@ -457,8 +457,6 @@ async def generate_online_sample(
         sample["invocation_metadata"] = invocation.metadata
         if invocation.evidence is not None:
             sample["evidence"] = invocation.evidence
-    if attempt.seconds is not None:
-        sample[SAMPLE_RUNTIME_SEC_KEY] = attempt.seconds
     return sample
 
 
@@ -714,6 +712,7 @@ class ComputeMetricPipeline:
         row: dict[str, object],
         error: Exception,
         generation_requests: list[dict[str, object]],
+        runtime_sec: float | None = None,
     ) -> tuple[int, MetricResult | None, RowScore]:
         """Convert inference failures into NaN rows when the job allows ignoring them."""
         # Prefer row-derived root causes when we can identify them. Generic
@@ -754,6 +753,7 @@ class ComputeMetricPipeline:
                 sample=sample,
                 metrics={self.metric_key: nan_result.outputs},
                 requests=generation_requests,
+                runtime_sec=runtime_sec,
                 metric_errors={self.metric_key: error_message},
             ),
         )
@@ -764,6 +764,7 @@ class ComputeMetricPipeline:
         row: dict[str, object],
         sample: dict[str, object],
         generation_requests: list[dict[str, object]],
+        runtime_sec: float | None = None,
     ) -> tuple[int, MetricResult | None, RowScore]:
         """Score one online row using the generated sample payload."""
         return await score_row(
@@ -775,6 +776,7 @@ class ComputeMetricPipeline:
             fail_fast=fail_fast_from_params(self.params),
             generation_requests=generation_requests,
             logger=log,
+            runtime_sec=runtime_sec,
         )
 
 
@@ -789,11 +791,14 @@ async def _generate_pipeline_item(index: int, runtime: PipelineRuntime) -> None:
     generation_requests: list[dict[str, Any]] = []
     inference.requests_log_var.set(generation_requests)
 
-    try:
-        sample = await runtime.pipeline.generate_sample(index, row)
-    except Exception as error:
-        runtime.results[index] = runtime.pipeline.handle_generation_error(index, row, error, generation_requests)
-        return
+    with measure_target_runtime() as target_runtime:
+        try:
+            sample = await runtime.pipeline.generate_sample(index, row)
+        except Exception as error:
+            runtime.results[index] = runtime.pipeline.handle_generation_error(
+                index, row, error, generation_requests, target_runtime.seconds
+            )
+            return
 
     await runtime.sample_queue.put(
         GeneratedSampleEvent(
@@ -801,6 +806,7 @@ async def _generate_pipeline_item(index: int, runtime: PipelineRuntime) -> None:
             item=MappingProxyType(row),
             sample=MappingProxyType(sample),
             requests_log=generation_requests,
+            runtime_sec=target_runtime.seconds,
         )
     )
 
@@ -823,6 +829,7 @@ async def _score_pipeline_samples(runtime: PipelineRuntime) -> None:
                 dict(event.item),
                 dict(event.sample),
                 event.requests_log,
+                event.runtime_sec,
             )
         finally:
             runtime.sample_queue.task_done()

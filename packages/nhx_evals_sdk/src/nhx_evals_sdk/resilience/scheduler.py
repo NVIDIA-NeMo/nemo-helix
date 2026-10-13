@@ -13,7 +13,6 @@ from typing import Deque, ParamSpec, TypeVar
 
 import anyio
 from nhx_evals_sdk.logging_utils import escape_log_value
-from nhx_evals_sdk.resilience.attempt_timing import record_successful_attempt
 from nhx_evals_sdk.resilience.classifier import classify_exception
 from nhx_evals_sdk.resilience.config import ResilienceConfig
 from nhx_evals_sdk.resilience.policy import (
@@ -23,6 +22,7 @@ from nhx_evals_sdk.resilience.policy import (
     pressure,
     retry_wait_seconds,
 )
+from nhx_evals_sdk.resilience.target_runtime import record_attempt
 from nhx_evals_sdk.resilience.types import (
     ClassifierResult,
     Clock,
@@ -216,18 +216,17 @@ class ResilienceScheduler:
 
         endpoint_acquired = False
         global_acquired = False
-        dispatched = False
-        started = self.now()
+        dispatched_at: float | None = None
+        succeeded = False
         try:
             await controller.limiter.acquire()
             endpoint_acquired = True
             await self._global_limiter.acquire()
             global_acquired = True
             await self._on_dispatch(controller.state, attempt=attempt)
-            dispatched = True
             dispatched_at = self.now()
             result = await operation(*args, **kwargs)
-            record_successful_attempt(max(0.0, self.now() - dispatched_at))
+            succeeded = True
             return result
         except asyncio.CancelledError as exc:
             async with controller.lock, self._lock:
@@ -240,7 +239,10 @@ class ResilienceScheduler:
                 cause=exc,
             ) from exc
         finally:
-            elapsed = max(0.0, self.now() - started)
+            dispatched = dispatched_at is not None
+            elapsed = max(0.0, self.now() - dispatched_at) if dispatched_at is not None else 0.0
+            if dispatched:
+                record_attempt(elapsed, succeeded=succeeded)
             await self._on_complete(controller.state, dispatched=dispatched, elapsed_seconds=elapsed)
             if global_acquired:
                 self._global_limiter.release()

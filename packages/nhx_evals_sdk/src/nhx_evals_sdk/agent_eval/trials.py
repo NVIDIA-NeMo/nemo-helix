@@ -170,6 +170,9 @@ class TrialMeasurements(BaseModel):
             raise ValueError("total_tokens must equal prompt_tokens + completion_tokens")
         return self
 
+    def with_runtime(self, runtime_sec: float | None) -> Self:
+        return self.model_validate({**self.model_dump(), "runtime_sec": runtime_sec})
+
 
 class AgentEvalTrial(BaseModel):
     """Durable trial artifact: output, evidence, status, error, measurements, and metadata."""

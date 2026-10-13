@@ -37,15 +37,16 @@ from nhx_evals_sdk.execution.metric_execution import (
     run_sync,
 )
 from nhx_evals_sdk.execution.pipeline import PipelineRuntime
-from nhx_evals_sdk.execution.samples import SAMPLE_RUNTIME_SEC_KEY, build_metric_input
+from nhx_evals_sdk.execution.samples import build_metric_input
 from nhx_evals_sdk.execution.scoring import empty_evaluation_result, finalize_evaluation_result
 from nhx_evals_sdk.execution.values import EvaluationError, EvaluationPhase
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.hooks import HooksBase
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric as RuntimeLLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nhx_evals_sdk.metrics.template_rendering import build_template_context
 from nhx_evals_sdk.metrics.utils import metric_type_name
+from nhx_evals_sdk.resilience.api import use_resilience_session
+from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime
 from nhx_evals_sdk.resolvers import LocalSecretResolver, _candidate_env_names
 from nhx_evals_sdk.structured_output import StructuredOutputMode
 from nhx_evals_sdk.values.agents import Agent, GenericAgent
@@ -856,32 +857,45 @@ class TestGenerateOnlineSample:
         hook.postprocess.assert_called_once_with(raw_response, id="0")
 
     @pytest.mark.asyncio
-    async def test_records_how_long_the_agent_took_to_answer(self):
+    async def test_measures_agent_runtime_through_the_resilience_scheduler(self):
         async def slow_agent(request: httpx.Request) -> httpx.Response:
             await asyncio.sleep(0.05)
             return httpx.Response(200, json={"output": "done"})
 
-        async with httpx.AsyncClient(transport=httpx.MockTransport(slow_agent)) as client:
-            sample = await generate_online_sample(
-                target=_make_agent(),
+        async with (
+            use_resilience_session(),
+            httpx.AsyncClient(transport=httpx.MockTransport(slow_agent)) as client,
+        ):
+            with measure_target_runtime() as runtime:
+                sample = await generate_online_sample(
+                    target=_make_agent(),
+                    row={"prompt": "hello"},
+                    index=0,
+                    prompt_template={"messages": [{"role": "user", "content": "{{item.prompt}}"}]},
+                    inference_fn=invoke_agent,
+                    client=client,
+                )
+
+        assert sample["output_text"] == "done"
+        assert runtime.seconds is not None and runtime.seconds >= 0.05
+        assert "runtime_sec" not in sample
+
+    @pytest.mark.asyncio
+    async def test_custom_inference_fn_runtime_falls_back_to_the_call_duration(self):
+        async def custom_inference(model: Model, request: dict, max_retries: int | None, **kwargs) -> dict:
+            await asyncio.sleep(0.05)
+            return {"choices": [{"message": {"content": "done"}}]}
+
+        with measure_target_runtime() as runtime:
+            await generate_online_sample(
+                target=_make_model(),
                 row={"prompt": "hello"},
                 index=0,
                 prompt_template={"messages": [{"role": "user", "content": "{{item.prompt}}"}]},
-                inference_fn=invoke_agent,
-                client=client,
+                inference_fn=custom_inference,
             )
 
-        assert sample["output_text"] == "done"
-        assert sample[SAMPLE_RUNTIME_SEC_KEY] > 0
-
-    def test_recorded_runtime_does_not_shadow_a_dataset_column_in_metric_templates(self):
-        row = {"prompt": "hello", SAMPLE_RUNTIME_SEC_KEY: 120}
-        metric_input = build_metric_input(row, {"output_text": "done", SAMPLE_RUNTIME_SEC_KEY: 3.2}, 0)
-
-        context = build_template_context(row, metric_input.candidate)
-
-        assert context[SAMPLE_RUNTIME_SEC_KEY] == 120
-        assert SAMPLE_RUNTIME_SEC_KEY not in context["sample"]
+        assert runtime.seconds is not None and runtime.seconds >= 0.05
 
 
 class TestGenerateOnlineSampleAgent:
@@ -1768,6 +1782,44 @@ class TestEvaluateMetricOnline:
         assert result.aggregate_scores.scores[0].count == 0
         assert result.aggregate_scores.scores[0].nan_count == 1
         metric.compute_scores.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rows_record_generation_runtime_whether_inference_succeeds_or_fails(self, mocker: MockerFixture):
+        async def _fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs) -> dict:
+            await asyncio.sleep(0.02)
+            if "fail" in json.dumps(request):
+                raise RuntimeError("gen bad")
+            return {"choices": [{"message": {"content": "world"}}]}
+
+        mocker.patch(
+            "nhx_evals_sdk.execution.metric_execution.inference.make_inference_request",
+            new_callable=AsyncMock,
+            side_effect=_fake_inference,
+        )
+
+        result = await evaluate_metric(
+            _make_test_metric(),
+            rows=[{"prompt": "hello"}, {"prompt": "fail"}],
+            target=_make_model(),
+            params=RunConfigOnlineModel(parallelism=1, ignore_request_failure=True),
+        )
+
+        succeeded, failed = result.row_scores
+        assert failed.metric_errors
+        for row_score in (succeeded, failed):
+            assert row_score.runtime_sec is not None and row_score.runtime_sec >= 0.02
+            assert "runtime_sec" not in row_score.sample
+        assert all("sample.runtime_sec" not in record for record in result.to_records())
+
+    @pytest.mark.asyncio
+    async def test_offline_rows_have_no_generation_runtime(self, mocker: MockerFixture):
+        result = await evaluate_metric(
+            _make_test_metric(),
+            rows=[{"prompt": "hello", "output_text": "world"}],
+            params=RunConfig(),
+        )
+
+        assert result.row_scores[0].runtime_sec is None
 
     @pytest.mark.asyncio
     async def test_metric_failure_raises_evaluation_error_with_strict_mode(self, mocker: MockerFixture):

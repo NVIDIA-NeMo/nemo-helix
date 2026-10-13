@@ -196,6 +196,51 @@ def test_trial_to_atif_ingest_adds_invocation_window_when_ended_at_given() -> No
     }
 
 
+def test_trial_to_atif_ingest_puts_the_runtime_window_on_the_last_untimed_recorded_step() -> None:
+    ended = STARTED_AT + timedelta(seconds=12.5)
+    steps = [
+        {"step_id": 1, "source": "user", "message": "q", "timestamp": STARTED_AT.isoformat()},
+        {"step_id": 2, "source": "agent", "message": "a", "timestamp": STARTED_AT.isoformat(), "extra": {"k": "v"}},
+    ]
+
+    body = trial_to_atif_ingest(
+        _trial(),
+        run_id="run-1",
+        evaluation_name="exp-1",
+        agent_name="a",
+        started_at=STARTED_AT,
+        ended_at=ended,
+        steps=steps,
+    )
+
+    first, last = body["steps"]
+    assert first == steps[0]
+    assert last["extra"] == {
+        "k": "v",
+        "invocation": {"start_timestamp": STARTED_AT.timestamp(), "end_timestamp": ended.timestamp()},
+    }
+    assert "invocation" not in steps[1]["extra"]
+
+
+def test_trial_to_atif_ingest_leaves_recorded_step_timing_alone() -> None:
+    steps = [
+        {"step_id": 1, "source": "user", "message": "q", "timestamp": STARTED_AT.isoformat()},
+        {"step_id": 2, "source": "agent", "message": "a", "timestamp": "2026-01-02T03:04:14+00:00"},
+    ]
+
+    body = trial_to_atif_ingest(
+        _trial(),
+        run_id="run-1",
+        evaluation_name="exp-1",
+        agent_name="a",
+        started_at=STARTED_AT,
+        ended_at=STARTED_AT + timedelta(seconds=12.5),
+        steps=steps,
+    )
+
+    assert body["steps"] == steps
+
+
 def test_trial_to_atif_ingest_omits_invocation_window_without_ended_at() -> None:
     body = trial_to_atif_ingest(
         _trial(), run_id="run-1", evaluation_name="exp-1", agent_name="a", started_at=STARTED_AT

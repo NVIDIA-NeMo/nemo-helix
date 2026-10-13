@@ -282,9 +282,10 @@ async def test_an_agent_row_trial_publishes_its_runtime_as_the_trajectory_window
     row = RowScore(
         row_index=0,
         item={"prompt": "2+2?"},
-        sample={"output_text": "4", "response": {"choices": []}, "runtime_sec": 37.25},
+        sample={"output_text": "4", "response": {"choices": []}},
         metrics={},
         requests=[],
+        runtime_sec=37.25,
     )
     result = row_result_to_agent_eval_result(
         EvaluationResult(row_scores=[row], aggregate_scores=AggregatedMetricResult(scores=[])),
@@ -500,6 +501,40 @@ async def test_a_rejected_trajectory_falls_back_instead_of_failing_the_trial(tmp
     # The rich attempt is refused, the single-step retry lands, and the trial still publishes.
     assert [len(call["steps"]) for call in calls] == [2, 1]
     assert report.trial_count == 1
+
+
+async def test_a_trial_with_an_untimed_recorded_trajectory_publishes_its_runtime(tmp_path: Path) -> None:
+    trace = tmp_path / "trajectory.json"
+    trace.write_text(
+        json.dumps(
+            {
+                "schema_version": "ATIF-v1.7",
+                "session_id": "s",
+                "agent": {"name": "codex", "version": "1.0"},
+                "steps": [
+                    {"step_id": 1, "source": "user", "message": "q"},
+                    {"step_id": 2, "source": "agent", "message": "a"},
+                ],
+            }
+        )
+    )
+    trial = AgentEvalTrial(
+        id="t-1",
+        task_id="task-1",
+        status=AgentEvalTrialStatus.COMPLETED,
+        output=AgentOutput(output_text="a"),
+        evidence=CandidateEvidence(
+            descriptors={"trace": EvidenceDescriptor(kind="trace", format="atif", ref=str(trace))}
+        ),
+        measurements=TrialMeasurements(runtime_sec=12.5),
+    )
+    client = _FakeClient()
+
+    await publish_to_intake(_result([trial], []), client=client, experiment_id="exp-1")
+
+    *_, last_step = client.atif_calls[0]["steps"]
+    invocation = last_step["extra"]["invocation"]
+    assert invocation["end_timestamp"] - invocation["start_timestamp"] == 12.5
 
 
 # --- OTLP publish path ------------------------------------------------------
