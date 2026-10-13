@@ -359,6 +359,12 @@ async def test_the_host_is_created_from_the_deployment_config_and_the_targets_se
     global_config = json.loads(spec.bootstrap_env[GYM_GLOBAL_CONFIG_ENV_KEY])
     assert "resources_servers/mcqa/configs/mcqa.yaml" in global_config["config_paths"]
 
+    # Evaluator's wheels-v1 contract reaches the host too: package servers run on the image's Gym
+    # install, so a wheelhouse of extras is enough under an egress policy with no package index.
+    from sandboxed_gym.runtime.gym_host_runtime import REUSE_IMAGE_GYM_INSTALL_ENV_KEY
+
+    assert spec.bootstrap_env[REUSE_IMAGE_GYM_INSTALL_ENV_KEY] == "true"
+
 
 async def test_the_host_is_destroyed_when_the_run_finishes(stub_provider: _StubHostProvider, tmp_path: Path) -> None:
     runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-3")

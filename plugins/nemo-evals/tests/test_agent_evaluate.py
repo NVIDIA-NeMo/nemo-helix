@@ -1680,6 +1680,7 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
         data=[
             SimpleNamespace(path="nemo-environment.yaml"),
             SimpleNamespace(path="resources_servers/custom/configs/custom.yaml"),
+            SimpleNamespace(path="resources_servers/custom/requirements.txt"),
             SimpleNamespace(path="wheels/custom_dependency-1.0-py3-none-any.whl"),
         ]
     )
@@ -1723,6 +1724,7 @@ async def test_resolve_gym_environment_accepts_native_v1(mocker: MockerFixture) 
         data=[
             SimpleNamespace(path="nemo-environment.yaml"),
             SimpleNamespace(path="resources_servers/custom/configs/custom.yaml"),
+            SimpleNamespace(path="resources_servers/custom/requirements.txt"),
         ]
     )
     manifest = mocker.Mock()
