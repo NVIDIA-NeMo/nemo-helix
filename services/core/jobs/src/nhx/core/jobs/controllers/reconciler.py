@@ -17,6 +17,7 @@ from nemo_helix_plugin.jobs.types import (
 from nhx.common.controller import Controller, HeartbeatMixin
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import scoped_app_ctx, start_span_with_ctx
+from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
 from nhx.core.jobs.controllers.backends import extract_provider_profile
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
@@ -97,6 +98,11 @@ class JobReconciler(HeartbeatMixin, Controller):
             ):
                 try:
                     provider, profile = extract_provider_profile(step)
+                    if step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+                        self._update_step_status_with_timing(
+                            step=step, provider=provider, profile=profile, status=step.status
+                        )
+                        continue
                     backend = self._backend_registry.get_backend(provider=provider, profile=profile)
                     self._step_reconciliation_total.add(1)
                     with scoped_app_ctx(
@@ -193,7 +199,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         error_details: dict | None = None,
     ):
         started_at = time.monotonic()
-        update_fields: dict = {"status": status}
+        update_fields: dict = {"status": status, "expected_step_id": step.id}
         if status_details is not None:
             update_fields["status_details"] = status_details
         if error_details is not None:
@@ -257,4 +263,18 @@ class JobReconciler(HeartbeatMixin, Controller):
             query_params=query,
         ).items():
             steps.append(step)
+        cleanup_query = cast(
+            ListStepsQueryParams,
+            {
+                "filter[status]": "cancelled,error",
+                "filter[" + JOB_TASK_CLEANUP_PENDING_KEY + "]": "true",
+                "sort": "updated_at",
+            },
+        )
+        try:
+            for step in self._jobs.list_steps(name="-", workspace="-", query_params=cleanup_query).items():
+                steps.append(step)
+        except NemoClientError:
+            logger.exception("Could not fetch terminal steps pending task cleanup")
+            self._step_reconciliation_errors.add(1, attributes={"error_type": "task_cleanup_fetch"})
         return steps
