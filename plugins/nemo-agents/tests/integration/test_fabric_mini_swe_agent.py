@@ -16,6 +16,36 @@ from nemo_agents_plugin.fabric.session_registry import FabricSessionRegistry
 from pytest_httpserver import HTTPServer
 from werkzeug.wrappers import Request, Response
 
+_MODEL_RESPONSE = {
+    "id": "completion-test",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "gpt-4o-mini",
+    "choices": [
+        {
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-test",
+                        "type": "function",
+                        "function": {
+                            "name": "bash",
+                            "arguments": json.dumps(
+                                {"command": "printf 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\\nhello\\n'"}
+                            ),
+                        },
+                    }
+                ],
+            },
+        }
+    ],
+    "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+}
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -46,40 +76,7 @@ def mini_swe_agent_config(httpserver: HTTPServer, tmp_path: Path, monkeypatch: p
         assert payload["model"] == "gpt-4o-mini"
         assert not payload.get("stream")
         assert any(tool["function"]["name"] == "bash" for tool in payload["tools"])
-        return Response(
-            json.dumps(
-                {
-                    "id": "completion-test",
-                    "object": "chat.completion",
-                    "created": 0,
-                    "model": "gpt-4o-mini",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "finish_reason": "tool_calls",
-                            "message": {
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [
-                                    {
-                                        "id": "call-test",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "bash",
-                                            "arguments": json.dumps(
-                                                {"command": "printf 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\\nhello\\n'"}
-                                            ),
-                                        },
-                                    }
-                                ],
-                            },
-                        }
-                    ],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
-                }
-            ),
-            mimetype="application/json",
-        )
+        return Response(json.dumps(_MODEL_RESPONSE), mimetype="application/json")
 
     httpserver.expect_request(
         "/v1/chat/completions", method="POST", headers={"Authorization": "Bearer test-key"}
