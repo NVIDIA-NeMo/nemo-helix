@@ -14,7 +14,7 @@ import numpy as np
 import optuna
 from optuna.study import Study, StudyDirection
 
-_SUPPORTED_MODES = frozenset({"harmonic", "sum", "chebyshev"})
+_SUPPORTED_MODES = frozenset({"harmonic", "weighted_sum", "sum", "chebyshev"})
 
 
 def pick_trial(
@@ -45,7 +45,7 @@ def pick_trial(
         utility = 1.0 - norm
         hmean = norm.shape[1] / (1.0 / (utility + eps)).sum(axis=1)
         best_idx = int(hmean.argmax())
-    elif normalized_mode == "sum":
+    elif normalized_mode in {"weighted_sum", "sum"}:
         w = np.ones(norm.shape[1]) if weights is None else np.asarray(weights, float)
         if w.size != norm.shape[1]:
             raise ValueError("`weights` length must equal number of objectives.")

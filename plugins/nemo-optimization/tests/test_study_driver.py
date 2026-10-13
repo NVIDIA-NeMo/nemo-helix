@@ -153,8 +153,10 @@ def test_run_numeric_study_grid_exhaustive(tmp_path: Path) -> None:
     assert len(result.study.trials) == 6
 
 
-def test_run_numeric_study_multi_objective(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode", ["harmonic", "weighted_sum", "chebyshev"])
+def test_run_numeric_study_multi_objective(tmp_path: Path, mode: str) -> None:
     payload = _payload()
+    payload["optimizer"]["multi_objective_combination_mode"] = mode
     payload["optimizer"]["eval_metrics"] = {
         "coverage": {"direction": "maximize", "weight": 0.5},
         "latency": {"direction": "minimize", "weight": 0.5},
@@ -209,6 +211,7 @@ def test_run_numeric_study_all_trials_failed(tmp_path: Path) -> None:
     with pytest.raises(StudyDriverError, match="no completed trials") as exc_info:
         run_numeric_study(payload, tmp_path, AlwaysFailEvaluator(), seed=0)
     assert exc_info.value.trial_count == 2
+    assert "simulated trial failure" in str(exc_info.value)
 
 
 def test_sanitize_config_for_artifact_redacts_secrets() -> None:
