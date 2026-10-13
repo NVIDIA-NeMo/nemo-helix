@@ -15163,6 +15163,11 @@ components:
         job:
           type: string
           title: Job
+        job_id:
+          title: Job Id
+          description: ID of the platform job. Unlike the job name, it is never reused
+            by a later job.
+          type: string
         attempt_id:
           type: string
           title: Attempt Id

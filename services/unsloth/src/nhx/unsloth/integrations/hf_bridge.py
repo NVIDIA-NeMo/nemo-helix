@@ -13,6 +13,7 @@ from nhx.customization_common.integrations import (
     IntegrationRuntimeContext,
     build_mlflow_config,
     build_wandb_config,
+    find_mlflow_run_id,
 )
 from nhx.customization_common.service.context import NHXJobContext
 
@@ -81,6 +82,9 @@ def apply_integrations_to_sft_config(
             env["WANDB_BASE_URL"] = base_url
         if wandb_dir := wandb_config.get("dir"):
             env["WANDB_DIR"] = wandb_dir
+        if run_id := wandb_config.get("id"):
+            env["WANDB_RUN_ID"] = run_id
+            env["WANDB_RESUME"] = wandb_config.get("resume", "allow")
 
     if mlflow_config:
         report_to.append("mlflow")
@@ -89,6 +93,8 @@ def apply_integrations_to_sft_config(
             env["MLFLOW_EXPERIMENT_NAME"] = experiment_name
         if tags := mlflow_config.get("tags"):
             env["MLFLOW_TAGS"] = json.dumps(tags)
+        if run_id := find_mlflow_run_id(mlflow_config):
+            env["MLFLOW_RUN_ID"] = run_id
 
     if wandb_config and wandb_config.get("name"):
         sft_kwargs["run_name"] = wandb_config["name"]

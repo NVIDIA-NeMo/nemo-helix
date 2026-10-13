@@ -529,6 +529,36 @@ def test_training_start_does_not_reset_the_stored_progress() -> None:
 # --------------------------------------------------------------------------- #
 
 
+def test_rewind_drops_seeded_points_past_the_restored_step() -> None:
+    """A rerun restores an earlier checkpoint. Points past it never happened in this run."""
+    prior = {
+        "train_loss": [{"step": s, "epoch": 1, "value": 1.0 / s} for s in (1, 2, 3, 4)],
+        "val_loss": [{"step": 2, "epoch": 1, "value": 0.9}, {"step": 4, "epoch": 1, "value": 0.8}],
+    }
+    reporter = _RecordingReporter(prior)
+    callback = _make_callback(reporter)
+
+    callback.rewind_to(2)
+    callback.report_train_step(step=3, epoch=1, metrics={"loss": 0.1})
+
+    metrics = reporter.reports[-1]["metrics"]
+    assert [point["step"] for point in metrics["train_loss"]] == [1, 2, 3]
+    assert metrics["train_loss"][-1]["value"] == 0.1
+    assert [point["step"] for point in metrics["val_loss"]] == [2]
+
+
+def test_rewind_to_the_last_step_keeps_every_point() -> None:
+    """A resume after a pause restores exactly where training stopped."""
+    prior = {"train_loss": [{"step": 1, "epoch": 1, "value": 0.5}, {"step": 2, "epoch": 1, "value": 0.4}]}
+    reporter = _RecordingReporter(prior)
+    callback = _make_callback(reporter)
+
+    callback.rewind_to(2)
+    callback.report_train_step(step=3, epoch=1, metrics={"loss": 0.3})
+
+    assert [point["step"] for point in reporter.reports[-1]["metrics"]["train_loss"]] == [1, 2, 3]
+
+
 def test_a_failed_seed_read_withholds_the_series() -> None:
     """The accumulator is known incomplete, and the merge replaces a sent key whole.
 

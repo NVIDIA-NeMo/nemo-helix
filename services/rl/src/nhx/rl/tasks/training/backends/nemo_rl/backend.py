@@ -43,6 +43,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.checkpoints import (
 )
 from nhx.rl.tasks.training.chat_templates import apply_chat_template_to_checkpoint
 from nhx.rl.tasks.training.errors.parser import parse_error_from_output
+from nhx.rl.tasks.training.integrations import find_logger_mlflow_run_id
 from nhx.rl.tasks.training.protocol import LibraryConfig, TrainingBackend
 
 from .dpo_config import compile_dpo_config
@@ -148,6 +149,9 @@ class NemoRLBackend(TrainingBackend):
             mlflow_config = customizer_config.integrations.mlflow
             if mlflow_config.tracking_uri:
                 env_overrides["MLFLOW_URI"] = mlflow_config.tracking_uri
+        # Continue this job's MLflow run after a resume or rerun, instead of starting another.
+        if mlflow_run_id := find_logger_mlflow_run_id(library_config.config_dict.get("logger") or {}):
+            env_overrides["MLFLOW_RUN_ID"] = mlflow_run_id
 
         # Build driver arguments
         driver_path = self._get_driver_path(customizer_config)

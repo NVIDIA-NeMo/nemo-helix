@@ -93,7 +93,7 @@ def test_api_factory_routes():
         service_name="foo",
         job_type="Foo",
         job_input=FooJobConfig,
-        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME],
+        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
         platform_job_config_compiler=foo_job_config_compiler,
     )
 
@@ -364,7 +364,7 @@ def _job_routes_app():
         job_type="TestJob",
         job_input=FooJobConfig,
         platform_job_config_compiler=foo_job_config_compiler,
-        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME],
+        route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
     )
     app = FastAPI()
     register_sdk_exception_handlers(app)
@@ -1920,6 +1920,25 @@ class TestSDKExceptionHandling:
         mock_jobs.pause_job = AsyncMock(side_effect=_client_error(ClientConflictError, 409, error_detail))
 
         response = client.post("/v2/workspaces/default/test/jobs/my-job/pause")
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == error_detail
+
+    @pytest.mark.parametrize(
+        "operation,error_detail",
+        [
+            ("resume", "Cannot resume job 'my-job': this job failed rather than paused, use rerun."),
+            ("rerun", "Cannot rerun job 'my-job': this job is paused, use resume."),
+        ],
+    )
+    def test_resume_and_rerun_return_the_jobs_api_reason(self, mock_service_with_job_routes, operation, error_detail):
+        app, mock_jobs = mock_service_with_job_routes
+        client = TestClient(app, raise_server_exceptions=False)
+        setattr(
+            mock_jobs, f"{operation}_job", AsyncMock(side_effect=_client_error(ClientConflictError, 409, error_detail))
+        )
+
+        response = client.post(f"/v2/workspaces/default/test/jobs/my-job/{operation}")
 
         assert response.status_code == 409
         assert response.json()["detail"] == error_detail

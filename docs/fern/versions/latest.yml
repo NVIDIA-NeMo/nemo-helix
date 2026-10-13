@@ -167,6 +167,9 @@ navigation:
               - page: Cancel a Job
                 path: ../../customizer/manage-customization-jobs/cancel-job.mdx
                 slug: cancel-job
+              - page: Pause, Resume, and Rerun a Job
+                path: ../../customizer/manage-customization-jobs/pause-resume-rerun.mdx
+                slug: pause-resume-rerun
               - page: Training Configuration
                 path: ../../customizer/manage-customization-jobs/hyperparameters.mdx
                 slug: training-configuration
