@@ -228,6 +228,8 @@ _PROBE_CONFIGS: dict[str, ProbeConfig] = {
 # OpenAI-compatible root (``GET {base}/models``).
 _CUSTOM_PROVIDER_PROBE = ProbeConfig("GET", "models")
 _NVIDIA_BUILD_HOSTNAME = "integrate.api.nvidia.com"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_HTTPS_REQUIRED_MESSAGE = "API key validation requires an HTTPS provider URL."
 
 
 class KeyValidationStatus(StrEnum):
@@ -1036,6 +1038,19 @@ def _get_all_model_choices(
 def _display_model_name(model_entity_id: str) -> str:
     """Strip workspace prefix from a model entity ID for display."""
     return model_entity_id.split("/", 1)[-1] if "/" in model_entity_id else model_entity_id
+
+
+def _refuses_credential_probe(host_url: str) -> bool:
+    """Return whether a bearer token must not be sent to ``host_url``.
+
+    Remote ``http://`` URLs would carry the key in cleartext. Loopback HTTP stays
+    allowed so a local OpenAI-compatible server can still be checked.
+    """
+    parsed = urlparse(host_url)
+    if parsed.scheme == "https":
+        return False
+    hostname = (parsed.hostname or "").lower()
+    return not (parsed.scheme == "http" and hostname in _LOOPBACK_HOSTS)
 
 
 def _nvidia_build_catalog_root(host_url: str) -> str | None:
@@ -2190,7 +2205,8 @@ def _validate_api_key(
     """Probe the provider with the API key to detect auth failures early.
 
     Makes a lightweight request to an auth-required endpoint.
-    Returns ``REJECTED`` only on a definitive 401/403 credential rejection.
+    Returns ``REJECTED`` on a definitive 401/403 credential rejection, and when the
+    URL is not HTTPS (loopback HTTP is still probed).
     Names outside the catalog use an OpenAI-compatible ``GET {base}/models`` probe.
     A host on ``integrate.api.nvidia.com`` still uses the Build chat follow-up,
     because that catalog listing does not check the key.
@@ -2201,6 +2217,9 @@ def _validate_api_key(
     if not api_key:
         return KeyValidationResult(status=KeyValidationStatus.VALID)
 
+    if _refuses_credential_probe(host_url):
+        return KeyValidationResult(status=KeyValidationStatus.REJECTED, message=_HTTPS_REQUIRED_MESSAGE)
+
     # Build's model list is unauthenticated even when the user typed a custom
     # name and a base URL that already ends in /v1.
     build_root = _nvidia_build_catalog_root(host_url)
@@ -2210,6 +2229,9 @@ def _validate_api_key(
     else:
         probe = _PROBE_CONFIGS.get(provider_name, _CUSTOM_PROVIDER_PROBE)
         probe_host = host_url
+
+    if _refuses_credential_probe(probe_host):
+        return KeyValidationResult(status=KeyValidationStatus.REJECTED, message=_HTTPS_REQUIRED_MESSAGE)
 
     headers: dict[str, str] = {}
     if auth_header_format:

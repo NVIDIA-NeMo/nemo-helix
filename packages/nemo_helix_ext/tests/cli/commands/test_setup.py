@@ -3508,6 +3508,26 @@ class TestValidateApiKey:
         assert result.status is KeyValidationStatus.REJECTED
         assert "rejected the credentials" in result.message.lower()
 
+    def test_cleartext_remote_url_is_rejected_before_the_probe(self):
+        with patch(f"{self._MOD}.httpx.request") as mock_req:
+            result = _validate_api_key("nv-inference", "http://example.com/v1", "test-key")
+        assert result.status is KeyValidationStatus.REJECTED
+        assert "HTTPS" in result.message
+        mock_req.assert_not_called()
+
+    def test_cleartext_nvidia_build_url_is_rejected_before_the_probe(self):
+        with patch(f"{self._MOD}.httpx.request") as mock_req:
+            result = _validate_api_key("my-build", "http://integrate.api.nvidia.com/v1", "bad-key")
+        assert result.status is KeyValidationStatus.REJECTED
+        mock_req.assert_not_called()
+
+    def test_loopback_http_url_is_still_probed(self):
+        mock_resp = _http_response(200, {"data": [{"id": "local-model"}]})
+        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+            result = _validate_api_key("local-vllm", "http://127.0.0.1:8000/v1", "test-key")
+        assert result.status is KeyValidationStatus.VALID
+        assert mock_req.call_args.args[1] == "http://127.0.0.1:8000/v1/models"
+
     def test_custom_provider_rejects_unauthorized_key(self):
         mock_resp = _http_response(401, {"message": "Invalid proxy server token"})
         with patch(f"{self._MOD}.httpx.request", return_value=mock_resp):
