@@ -356,7 +356,7 @@ const SeededIntakeSpansTable: FC<
       }),
     ].filter(Boolean) as DataView.TanstackTable.ColumnDef<SpanTableRow>[];
 
-  if (error) {
+  if (error && !spansResponse) {
     return <ErrorMessage message={getErrorMessage(error)} />;
   }
 

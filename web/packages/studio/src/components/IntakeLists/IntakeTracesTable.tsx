@@ -98,7 +98,7 @@ const SeededIntakeTracesTable: FC<
     }
   );
 
-  if (error) {
+  if (error && !tracesResponse) {
     return <ErrorMessage message={getErrorMessage(error)} />;
   }
 

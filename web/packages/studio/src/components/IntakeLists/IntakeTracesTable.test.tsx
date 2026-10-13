@@ -283,5 +283,31 @@ describe('IntakeTracesTable', () => {
 
       releasePoll();
     });
+
+    it('keeps the current rows visible when a poll fails', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let requestCount = 0;
+      server.use(
+        http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () => {
+          requestCount += 1;
+          if (requestCount > 1) {
+            return HttpResponse.json({ detail: 'Service unavailable' }, { status: 503 });
+          }
+          return HttpResponse.json(mockTracesPage);
+        })
+      );
+
+      renderRoute(<IntakeTracesTable workspace="default" />, {
+        history: '/workspaces/default/intake/traces',
+      });
+      expect(await screen.findByText('Answer customer policy question')).toBeInTheDocument();
+
+      await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_LONG));
+      await waitFor(() => expect(requestCount).toBeGreaterThan(1));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      expect(screen.getByText('Answer customer policy question')).toBeInTheDocument();
+      expect(screen.queryByText(/Service unavailable/)).not.toBeInTheDocument();
+    });
   });
 });
