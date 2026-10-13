@@ -44,7 +44,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/config"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/config"
 )
 
 // mockExternalProcessor is a mock implementation of the ExternalProcessorServer.

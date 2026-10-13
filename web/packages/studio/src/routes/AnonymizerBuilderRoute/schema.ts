@@ -24,6 +24,7 @@ import {
   DEFAULT_MODEL_TOP_P,
   DEFAULT_PREVIEW_ROWS,
   MAX_PREVIEW_ROWS,
+  ENTITY_MODE_AUTO,
   ENTITY_MODE_CUSTOM,
   HASH_ALGORITHM_DEFAULT,
   HASH_ALGORITHM_VALUES,
@@ -105,7 +106,7 @@ export const anonymizerFormSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['entityLabels'],
-        message: 'Select at least one entity label, or include the default entities',
+        message: 'Select at least one entity label, or include the available entities',
       });
     }
   });
@@ -120,7 +121,7 @@ export const getAnonymizerFormDefaults = (): AnonymizerFormData => ({
   previewRows: DEFAULT_PREVIEW_ROWS,
   textColumn: '',
   dataSummary: '',
-  entityMode: ENTITY_MODE_CUSTOM,
+  entityMode: ENTITY_MODE_AUTO,
   includeDefaultEntities: true,
   entityLabels: [],
   redactTemplate: REDACT_DEFAULT_TEMPLATE,

@@ -8,10 +8,10 @@ build-backend = "hatchling.build"
 [project]
 name = "nemo-studio-assistant"
 version = "0.1.0"
-description = "NeMo Studio Assistant — a Fabric Deep Agents assistant for NeMo Platform tasks."
+description = "NeMo Studio Assistant — a Fabric Deep Agents assistant for NeMo Helix tasks."
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "nemo-platform",
+    "nemo-helix",
     "fastmcp>=3.2.0",
     "httpx",
 ]

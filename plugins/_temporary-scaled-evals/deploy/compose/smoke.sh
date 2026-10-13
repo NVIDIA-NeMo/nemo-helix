@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # End-to-end check for the compose stack: create a task, upload a task pack,
-# finalize it, and confirm the build worker built the image and pushed it to the
+# finalize it, and confirm the build Job built the image and pushed it to the
 # registry. Fails loudly on the first broken step.
 #
 #   docker compose up -d && ./smoke.sh
@@ -41,7 +41,7 @@ for i in $(seq 1 60); do
   sleep 5
 done
 python3 -m json.tool "$WORK/readyz.json"
-for check in postgres schema object_store buildkit registry build_worker; do
+for check in postgres schema object_store buildkit registry platform_jobs_controller; do
   [ "$(json "$WORK/readyz.json" "checks.$check")" = ok ] || fail "readyz check '$check' is not ok"
 done
 
@@ -80,7 +80,7 @@ step "POST /v1/tasks/$TASK_ID/finalize"
 curl -sf -X POST "$BASE/v1/tasks/$TASK_ID/finalize" -o "$WORK/finalize.json" || fail "finalize"
 python3 -m json.tool "$WORK/finalize.json"
 
-step "waiting for the build worker"
+step "waiting for the build Job"
 STATUS=""
 for i in $(seq 1 90); do
   curl -sf "$BASE/v1/tasks/$TASK_ID" -o "$WORK/task_now.json" || fail "task get"

@@ -9,7 +9,7 @@ import pytest
 from aiohttp import ClientSession
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from nmp.core.inference_gateway.api.dependencies import global_http_client
+from nhx.core.inference_gateway.api.dependencies import global_http_client
 
 
 @pytest.mark.asyncio

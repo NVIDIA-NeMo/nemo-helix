@@ -17,6 +17,7 @@ from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.gym.daytona import GymDaytonaBackend
 from scaled_evals.dispatch.gym.sandbox_daytona import GymSandboxDaytonaBackend
 from scaled_evals.dispatch.gym.sandbox_opensandbox import GymSandboxOpenSandboxBackend
+from scaled_evals.dispatch.harbor_opensandbox import HarborOpenSandboxBackend
 from scaled_evals.dispatch.registry import (
     RuntimeBackendRegistry,
     build_runtime_backend_registry,
@@ -70,6 +71,7 @@ def _spec() -> LaunchSpec:
         (GymDaytonaBackend, "gym_daytona"),
         (GymSandboxDaytonaBackend, "gym_sandbox_daytona"),
         (GymSandboxOpenSandboxBackend, "gym_sandbox_opensandbox"),
+        (HarborOpenSandboxBackend, "harbor_opensandbox"),
     ],
 )
 def test_builtin_backend_adapter_preserves_unwired_operation_errors(backend_type: type[Any], backend_name: str) -> None:
@@ -122,14 +124,15 @@ def test_default_registry_contains_supported_runtimes() -> None:
         "gym_daytona",
         "gym_sandbox_daytona",
         "gym_sandbox_opensandbox",
+        "harbor_opensandbox",
         "sandbox_k8s",
     )
 
 
-def test_empty_extra_plugin_list_still_registers_sandbox_k8s() -> None:
+def test_empty_extra_plugin_list_still_registers_builtin_harbor_runtimes() -> None:
     registry = build_runtime_backend_registry(plugin_specs=())
 
-    assert registry.names() == ("sandbox_k8s",)
+    assert registry.names() == ("harbor_opensandbox", "sandbox_k8s")
 
 
 def test_sandbox_k8s_plugin_registers_sandbox_runtime_directly() -> None:
@@ -148,6 +151,7 @@ def test_gym_plugin_registers_gym_runtimes_after_builtin_sandbox() -> None:
         "gym_daytona",
         "gym_sandbox_daytona",
         "gym_sandbox_opensandbox",
+        "harbor_opensandbox",
         "sandbox_k8s",
     )
 
@@ -155,7 +159,7 @@ def test_gym_plugin_registers_gym_runtimes_after_builtin_sandbox() -> None:
 def test_explicit_sandbox_plugin_is_ignored_because_it_is_builtin() -> None:
     registry = build_runtime_backend_registry(plugin_specs=("scaled_evals.dispatch.sandbox_k8s",))
 
-    assert registry.names() == ("sandbox_k8s",)
+    assert registry.names() == ("harbor_opensandbox", "sandbox_k8s")
 
 
 def test_default_extra_plugin_set_registers_sandbox_and_gym_runtimes() -> None:
@@ -167,6 +171,7 @@ def test_default_extra_plugin_set_registers_sandbox_and_gym_runtimes() -> None:
         "gym_daytona",
         "gym_sandbox_daytona",
         "gym_sandbox_opensandbox",
+        "harbor_opensandbox",
         "sandbox_k8s",
     )
 

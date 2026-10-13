@@ -41,6 +41,22 @@ def test_from_pyproject_returns_none_when_no_nemo_services(tmp_path):
     assert PluginConfig.from_pyproject(pyproject) is None
 
 
+def test_from_pyproject_returns_none_for_virtual_workspace_member(tmp_path):
+    pyproject = _write_pyproject(
+        tmp_path / "virtual-plugin",
+        """
+        [project.entry-points."nemo.services"]
+        virtual-svc = "virtual_plugin.service:VirtualService"
+
+        [tool.uv]
+        package = false
+
+        [tool.nemo.openapi]
+        """,
+    )
+    assert PluginConfig.from_pyproject(pyproject) is None
+
+
 def test_from_pyproject_empty_table_uses_defaults(tmp_path):
     pyproject = _write_pyproject(
         tmp_path / "data-designer",

@@ -87,6 +87,7 @@ export function makeDatasetsTableColumns({
               { value: StorageConfigType.ngc, label: 'NGC' },
               { value: StorageConfigType.huggingface, label: 'Hugging Face' },
               { value: StorageConfigType.s3, label: 'S3' },
+              { value: StorageConfigType.github, label: 'GitHub' },
             ],
           },
         },

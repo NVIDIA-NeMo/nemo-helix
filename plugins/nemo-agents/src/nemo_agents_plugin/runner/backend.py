@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, DeploymentStatus, Endpoint
 from nemo_agents_plugin.spec_revision import SpecRevision
-from nemo_platform_plugin.auth import AuthContext
+from nemo_helix_plugin.auth import AuthContext
 
 
 @dataclass(frozen=True)
@@ -107,6 +107,10 @@ class RunnerBackend(ABC):
         use_image_entrypoint: bool = False,
     ) -> DeploymentInfo:
         """Start the agent process; returns status="starting".
+
+        ``port=0`` delegates allocation to the backend. The returned info
+        contains the actual port. Fabric subprocesses always reserve their
+        own socket; an explicit port applies only to NAT subprocesses.
 
         ``created_by`` is the principal id that created the deployment. When
         platform auth is enabled, container-mode backends delegate inference calls

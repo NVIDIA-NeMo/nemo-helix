@@ -7,7 +7,7 @@ import { StudioNavItem } from '@studio/components/Layouts/NavigationDrawer/compo
 import { SUB_LIST_CLASS } from '@studio/components/Layouts/NavigationDrawer/styles';
 import type { NavItem as NavItemData } from '@studio/components/Layouts/NavigationDrawer/types';
 import { resolveActive } from '@studio/components/Layouts/NavigationDrawer/utils';
-import { ChevronDown, ChevronLeft } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { FC } from 'react';
 import { NavLink } from 'react-router';
 
@@ -31,7 +31,7 @@ export const ExpandableNavItem: FC<ExpandableNavItemProps> = ({
   const { href, subItems = [] } = item;
   const isOpen = accordionOpen ?? item.defaultOpen !== false;
   const subListId = `${item.id}-submenu`;
-  const chevron = isOpen ? <ChevronDown /> : <ChevronLeft />;
+  const chevron = isOpen ? <ChevronDown /> : <ChevronRight />;
   // The sub-list only exists while open; a closed chevron must not point at an id that isn't there.
   const disclosure = { 'aria-expanded': isOpen, ...(isOpen && { 'aria-controls': subListId }) };
   const labelText = typeof item.slotLabel === 'string' ? item.slotLabel : undefined;

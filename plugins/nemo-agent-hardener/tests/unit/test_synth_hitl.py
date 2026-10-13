@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
 from nemo_agent_hardener_plugin.jobs import hitl
 from nemo_agent_hardener_plugin.jobs.synth_client import SynthClient
+from nemo_helix_plugin.client.client import NemoClient
 
 
 def test_synth_client_maps_endpoints() -> None:
@@ -98,15 +98,12 @@ def test_status_details_channel_publishes_and_matches_round() -> None:
 
     # The channel wraps the SDK via ``client_from_platform`` into a typed JobsClient;
     # model that with a real JobsClient over a mocked transport.
-    http_client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://platform:8080")
-    platform = SimpleNamespace(
-        base_url="http://platform:8080",
+    http_client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://127.0.0.1:8080")
+    platform = NemoClient(
+        base_url="http://127.0.0.1:8080",
         workspace="default",
-        _custom_headers={"Authorization": "Bearer x"},
-        _client=http_client,
-        timeout=None,
-        max_retries=2,
-        _prepare_url=lambda url: url,
+        default_headers={"Authorization": "Bearer x"},
+        http_client=http_client,
     )
 
     channel = hitl.StatusDetailsChannel(platform, name="job1", workspace="default", poll_interval=0.0)

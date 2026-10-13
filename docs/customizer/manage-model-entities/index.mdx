@@ -59,56 +59,55 @@ Complete example of setting up a model for customization:
 
 <Tip>
 
-**Hugging Face Token**: If downloading from a gated Hugging Face repository (like Llama models), you will need to create a secret containing your Hugging Face API token first. Refer to [Manage Secrets](/documentation/get-started/core-concepts/manage-secrets) for instructions.
+**Hugging Face Token**: If downloading from a gated Hugging Face repository, you will need to create a secret containing your Hugging Face API token first. Refer to [Manage Secrets](/documentation/get-started/core-concepts/manage-secrets) for instructions.
 
 </Tip>
 ```python
-import os
 import time
-from nemo_platform import NeMoPlatform
-from nemo_platform._exceptions import ConflictError
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Step 1: Create FileSet from Hugging Face
 try:
-    fileset = client.files.filesets.create(
-        workspace="default",
-        name="qwen3-1.7b",
-        description="Qwen3 1.7B base model from Hugging Face",
-        storage=HuggingfaceStorageConfigParam(
-            type="huggingface",
-            repo_id="Qwen/Qwen3-1.7B",
-            repo_type="model",
+    fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name="nemotron-3-5-lightning-30b-a3b",
+            description="Nemotron 3.5 Lightning 30B A3B base model from Hugging Face",
+            storage=HuggingfaceStorageConfig(
+                repo_id="nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+                repo_type="model",
+            ),
         ),
-    )
+    ).data()
     print(f"Created FileSet: {fileset.name}")
 except ConflictError:
     print("FileSet already exists, retrieving...")
-    fileset = client.files.filesets.retrieve(workspace="default", name="qwen3-1.7b")
+    fileset = client.files.get_fileset(name="nemotron-3-5-lightning-30b-a3b").data()
 
 # Step 2: Create Model Entity
 try:
-    model = client.models.create(
-        workspace="default",
-        name="qwen3-1.7b",
-        fileset="default/qwen3-1.7b",  # Reference to the FileSet
-        description="Qwen3 1.7B base model for customization",
-    )
+    model = client.models.create_model(
+        body=CreateModelEntityRequest(
+            name="nemotron-3-5-lightning-30b-a3b",
+            fileset="default/nemotron-3-5-lightning-30b-a3b",  # Reference to the FileSet
+            description="Nemotron 3.5 Lightning 30B A3B base model for customization",
+        ),
+    ).data()
     print(f"Created Model Entity: {model.name}")
 except ConflictError:
     print("Model Entity already exists, retrieving...")
-    model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+    model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 # Step 3: Wait for ModelSpec to be auto-populated
 print("Waiting for model spec to be populated...")
 while not model.spec:
     time.sleep(5)
-    model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+    model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 print(f"Model ready!")
 print(f" Architecture: {model.spec.family}")
@@ -116,6 +115,8 @@ print(f" Parameters: {model.spec.base_num_parameters:,}")
 print(f" Layers: {model.spec.num_layers}")
 ```
 
-After the Model Entity is ready (has a `spec`), you can use it in customization jobs with `model: "default/qwen3-1.7b"`.
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
+After the Model Entity is ready (has a `spec`), you can use it in customization jobs with `model: "default/nemotron-3-5-lightning-30b-a3b"`.
 
 ---

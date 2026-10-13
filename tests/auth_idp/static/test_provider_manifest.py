@@ -7,7 +7,7 @@ import pytest
 import yaml
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import validator_for
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 
 from tests.auth_idp.providers import load_provider_config, load_provider_configs
 
@@ -34,13 +34,13 @@ def test_all_provider_manifests_share_the_same_contract(monkeypatch):
         (
             "e2e_setup_password_grant",
             None,
-            {"password_env_var": "AUTHENTIK_SETUP_PASSWORD"},
+            {"password": "duplicate-source"},
         ),
         (
             "interactive_user_password_grant",
             {
                 "grant_type": "password",
-                "client_id": "nemo-platform",
+                "client_id": "nemo-helix",
                 "username": "nemo-user",
                 "password": "shared-secret",
                 "scope": "openid email groups",
@@ -62,6 +62,21 @@ def test_provider_manifest_rejects_multiple_grant_credential_sources(grant_name,
         validator.validate(manifest)
 
 
+def test_provider_manifest_allows_generic_grant_with_password_and_client_secret():
+    schema = _load_provider_manifest_schema()
+    validator = validator_for(schema)(schema)
+    manifest = yaml.safe_load(Path("contrib/auth/zitadel/manifest.yaml").read_text())
+    manifest["token_acquisition"]["e2e_setup_grant"].update(
+        {
+            "grant_type": "password",
+            "username": "nemo-setup",
+            "password_env_var": "ZITADEL_E2E_SETUP_PASSWORD",
+        }
+    )
+
+    validator.validate(manifest)
+
+
 def test_authentik_manifest_declares_real_token_acquisition_contract():
     manifest = yaml.safe_load(Path("contrib/auth/authentik/manifest.yaml").read_text())
     token_acquisition = manifest["token_acquisition"]
@@ -71,15 +86,17 @@ def test_authentik_manifest_declares_real_token_acquisition_contract():
     workload_contract = manifest["workload_contract"]
 
     assert interactive_user_identity["username"] == "nemo-user"
-    assert interactive_user_identity["password"] == "nemo-user-password-dev"
+    assert interactive_user_identity["password_env_var"] == "AUTHENTIK_INTERACTIVE_USER_PASSWORD"
     assert interactive_user_identity["expected_email"] == "nemo-user@example.com"
     assert token_acquisition["token_endpoint"]
     setup_grant = token_acquisition["e2e_setup_password_grant"]
     assert setup_grant["grant_type"] == "password"
-    assert setup_grant["client_id"] == "nemo-platform"
+    assert setup_grant["client_id"] == "nemo-helix"
     assert setup_grant["username"] == "nemo-setup"
-    assert setup_grant["password"] == "nemo-setup-token-secret-dev"
-    assert "password_env_var" not in setup_grant
+    assert setup_grant["password_env_var"] == "AUTHENTIK_SETUP_PASSWORD"
+    assert setup_grant["client_secret_env_var"] == "AUTHENTIK_SETUP_CLIENT_SECRET"
+    assert "password" not in setup_grant
+    assert "client_secret" not in setup_grant
     assert "interactive_user_password_grant" not in token_acquisition
     workload_provider_grant = token_acquisition["workload_provider_password_grant"]
     assert workload_provider_grant["grant_type"] == "password"
@@ -89,11 +106,11 @@ def test_authentik_manifest_declares_real_token_acquisition_contract():
     assert workload_identity["principal_id"]
     assert not workload_identity["principal_id"].startswith(principal_contract["internal_service_prefix_reserved"])
     assert workload_identity["expected_groups"] == ["nemo-workloads"]
-    assert workload_contract["audience"] == "nemo-platform"
+    assert workload_contract["audience"] == "nemo-helix"
     assert workload_contract["groups_format"] == "comma_string"
     assert workload_contract["token_env_vars"] == [WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR]
-    assert workload_contract["forwarded_headers"]["principal_id"] == "X-NMP-Principal-Id"
-    assert workload_contract["forwarded_headers"]["principal_groups"] == "X-NMP-Principal-Groups"
+    assert workload_contract["forwarded_headers"]["principal_id"] == "X-NHX-Principal-Id"
+    assert workload_contract["forwarded_headers"]["principal_groups"] == "X-NHX-Principal-Groups"
 
 
 def test_authentik_manifest_declares_provider_test_runtimes():
@@ -103,6 +120,16 @@ def test_authentik_manifest_declares_provider_test_runtimes():
 
     assert "authentik-compose" in runtime_ids
     assert "authentik-kubernetes" in runtime_ids
+
+
+def test_zitadel_manifest_declares_kubernetes_test_runtime():
+    manifest = yaml.safe_load(Path("contrib/auth/zitadel/manifest.yaml").read_text())
+
+    assert manifest["compose_file"] is None
+    assert {runtime["id"] for runtime in manifest["test_runtimes"]} == {"zitadel-kubernetes"}
+    token_acquisition = manifest["token_acquisition"]
+    assert token_acquisition["e2e_setup_grant"]["grant_type"] == "client_credentials"
+    assert token_acquisition["workload_provider_grant"]["grant_type"] == "client_credentials"
 
 
 def test_authentik_manifest_compose_and_kubernetes_runtime_capabilities_stay_in_parity():
@@ -152,6 +179,9 @@ def test_authentik_manifest_declares_extended_startup_timeouts_for_real_oidc():
 
 
 def test_authentik_provider_config_loads_token_acquisition_fields(monkeypatch):
+    monkeypatch.setenv("AUTHENTIK_INTERACTIVE_USER_PASSWORD", "interactive-secret")
+    monkeypatch.setenv("AUTHENTIK_SETUP_PASSWORD", "setup-password")
+    monkeypatch.setenv("AUTHENTIK_SETUP_CLIENT_SECRET", "setup-client-secret")
     monkeypatch.setenv("AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD", "shared-secret")
     provider = next(config for config in load_provider_configs() if config.name == "authentik")
 
@@ -161,14 +191,16 @@ def test_authentik_provider_config_loads_token_acquisition_fields(monkeypatch):
     assert provider.discovery_url == "https://127.0.0.1:18080/application/o/nemo/.well-known/openid-configuration"
     assert provider.token_endpoint == "https://127.0.0.1:18080/application/o/token/"
     assert provider.interactive_user_username == "nemo-user"
-    assert provider.interactive_user_password == "nemo-user-password-dev"
+    assert provider.interactive_user_password == "interactive-secret"
     assert provider.interactive_user_expected_email == "nemo-user@example.com"
     assert provider.e2e_setup_password_grant is not None
     assert provider.e2e_setup_password_grant["grant_type"] == "password"
-    assert provider.e2e_setup_password_grant["password"] == "nemo-setup-token-secret-dev"
+    assert provider.e2e_setup_password_grant["password"] == "setup-password"
+    assert provider.e2e_setup_password_grant["client_secret"] == "setup-client-secret"
     assert provider.interactive_user_password_grant is None
+    assert provider.workload_provider_password_grant is not None
     assert provider.workload_provider_password_grant["grant_type"] == "password"
-    assert provider.workload_audience == "nemo-platform"
+    assert provider.workload_audience == "nemo-helix"
     assert provider.workload_principal_claim == "sub"
     assert provider.workload_groups_claim == "groups"
     assert provider.workload_groups_format == "comma_string"
@@ -181,6 +213,8 @@ def test_authentik_provider_config_loads_token_acquisition_fields(monkeypatch):
 
 
 def test_authentik_provider_config_resolves_workload_provider_password_grant_env_var(monkeypatch):
+    monkeypatch.setenv("AUTHENTIK_SETUP_PASSWORD", "setup-password")
+    monkeypatch.setenv("AUTHENTIK_SETUP_CLIENT_SECRET", "setup-client-secret")
     monkeypatch.setenv("AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD", "shared-secret")
 
     provider = load_provider_config(Path("contrib/auth/authentik/manifest.yaml"))
@@ -189,5 +223,33 @@ def test_authentik_provider_config_resolves_workload_provider_password_grant_env
     assert provider.workload_provider_password_grant["password"] == "shared-secret"
     assert "password_env_var" not in provider.workload_provider_password_grant
     assert provider.e2e_setup_password_grant is not None
-    assert provider.e2e_setup_password_grant["password"] == "nemo-setup-token-secret-dev"
+    assert provider.e2e_setup_password_grant["password"] == "setup-password"
+    assert provider.e2e_setup_password_grant["client_secret"] == "setup-client-secret"
     assert "password_env_var" not in provider.e2e_setup_password_grant
+
+
+def test_zitadel_provider_config_loads_generic_client_credentials_grants(monkeypatch):
+    monkeypatch.setenv("ZITADEL_E2E_SETUP_CLIENT_SECRET", "setup-secret")
+    monkeypatch.setenv("ZITADEL_WORKLOAD_CLIENT_SECRET", "workload-secret")
+
+    provider = load_provider_config(Path("contrib/auth/zitadel/manifest.yaml"))
+
+    assert provider.compose_file is None
+    assert provider.nemo_config == Path("contrib/auth/zitadel/helm/values.yaml")
+    assert provider.token_endpoint == "https://127.0.0.1:18084/oauth/v2/token"
+    assert provider.e2e_setup_password_grant == {
+        "grant_type": "client_credentials",
+        "client_id": "__ZITADEL_SETUP_CLIENT_ID__",
+        "client_secret": "setup-secret",
+        "client_auth_method": "client_secret_basic",
+        "expected_subject": "nemo-setup",
+        "scope": "openid profile email groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud",
+    }
+    assert provider.workload_provider_password_grant == {
+        "grant_type": "client_credentials",
+        "client_id": "__ZITADEL_WORKLOAD_CLIENT_ID__",
+        "client_secret": "workload-secret",
+        "client_auth_method": "client_secret_basic",
+        "expected_subject": "svc-nemo",
+        "scope": "openid profile email groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud",
+    }

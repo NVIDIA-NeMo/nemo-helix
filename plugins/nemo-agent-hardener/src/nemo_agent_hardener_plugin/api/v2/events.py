@@ -23,19 +23,19 @@ from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_RUN_TYPE
 from nemo_agent_hardener_plugin.filesets import download_fileset
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.entities.client import EntitiesClient
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
 
-def _get_sdk() -> Any:
-    from nemo_platform_plugin.sdk_provider import get_platform_sdk
+def _get_client() -> NemoClient:
+    from nemo_helix_plugin.client_provider import get_nemo_client
 
-    return get_platform_sdk(as_service="agent-hardener", internal=True)
+    return get_nemo_client(as_service="agent-hardener", internal=True)
 
 
 def _events_path(workspace: str, run_name: str) -> Path:
@@ -152,11 +152,11 @@ async def get_events(workspace: str, name: str, after: int = 0) -> EventsRespons
 def _fileset_fallback(workspace: str, name: str, stream: Any, after: int) -> list[tuple[int, dict[str, Any]]]:
     """Blocking: fetch the run's ``events_fileset`` and re-read history. Must run off the event loop."""
     try:
-        sdk = _get_sdk()
-        # get_entity_by_name returns a generic Entity — its domain fields live under `.data`
+        client = _get_client()
+        # get_entity_by_name returns a generic Entity; its domain fields live under `.data`
         # (same access pattern as sdk.py::_run_to_dict), not as top-level attributes.
         run = (
-            client_from_platform(sdk, EntitiesClient)
+            EntitiesClient.from_client(client)
             .get_entity_by_name(
                 name=name,
                 entity_type=AGENT_HARDENER_RUN_TYPE,
@@ -166,7 +166,7 @@ def _fileset_fallback(workspace: str, name: str, stream: Any, after: int) -> lis
         )
         fileset_ref = (getattr(run, "data", None) or {}).get("events_fileset")
         if fileset_ref:
-            download_fileset(sdk, fileset_ref, stream._path.parent)
+            download_fileset(client, fileset_ref, stream._path.parent)
             return stream.history(after_id=after)
     except Exception:
         logger.warning("Fileset fallback failed for run %r events; returning empty", name, exc_info=True)

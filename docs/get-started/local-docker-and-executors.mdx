@@ -1,0 +1,96 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Local Docker and Executors"
+description: "When the NeMo Helix control plane needs Docker locally versus when jobs and agents use subprocess"
+---
+<a id="local-docker-and-executors"></a>
+
+Docker is required for the control plane's **default local setup** (`nemo setup --start-services` or default `nemo services run`). Many day-to-day jobs and agent deploys still run as **subprocess** on the host. This page explains which path applies when.
+
+For install steps, see [Setup](/documentation/get-started/setup). For job executor YAML, see [Manage Jobs](/documentation/kubernetes-deployment/setup/jobs).
+
+## Short answer
+
+| Question | Answer |
+| -------- | ------ |
+| Do I need Docker to start the default local control plane? | **Yes.** Startup preflight fails closed when the resolved run starts the **deployments** service or controller with a Docker-backed `default_executor` (the bundled local config uses `local-docker`). |
+| Do all local jobs need Docker? | **No.** Default local config registers `subprocess/default`, so many CPU plugin jobs run on the host. Some job profiles (auditor, GPU/customizer, some data-designer paths) still use Docker. |
+| Do agent deploys need Docker? | **Not by default.** `nemo agents deploy` defaults to `--mode subprocess` (Agents plugin path). `--mode docker` / `k8s` go through the deployments plugin and need a container executor. |
+| Do model deployments on the control plane need Docker? | **Yes** for the default local Docker executor. Model deployments use the deployments plugin, which has no subprocess backend. |
+
+Subprocess agent deploy does **not** mean the control plane can start without Docker. If the deployments controller is in the run (default full local), preflight still requires the Docker daemon.
+
+## When you need Docker
+
+| Workload | Local default | Docker daemon needed? |
+| -------- | ------------- | --------------------- |
+| Starting the control plane (`nemo setup --start-services`, default `nemo services run`) | Deployments `default_executor: local-docker` | **Yes** (preflight) |
+| Jobs with `cpu`/`default` (many evaluator, data-designer, anonymizer steps) | Translated to `subprocess/default` | No |
+| Jobs on Docker-backed profiles (auditor, GPU/customizer, some data-designer) | Docker job backends | **Yes** |
+| `nemo agents deploy` (default) | `--mode subprocess` | No for the agent process |
+| `nemo agents deploy --mode docker` / `k8s` | Deployments plugin | **Yes** (or cluster) |
+| Model deployments on the control plane | Deployments plugin → `local-docker` | **Yes** |
+| Intake with managed ClickHouse (`NHX_INTAKE_CLICKHOUSE_URL` unset) | Local ClickHouse container | **Yes** when intake is selected |
+| Remote / Kubernetes deployment, CLI-only against a remote base URL | Operator or remote cluster | No on the laptop |
+
+Inspect what the running control plane registered:
+
+```bash
+nemo jobs list-execution-profiles -f json
+```
+
+## Why preflight requires Docker
+
+The CLI does **not** treat Docker as a global dependency. It fails closed only when the resolved configuration would start the **deployments** service or controller and `deployments.default_executor` resolves to a **docker** backend.
+
+Typical message:
+
+```text
+Docker is required for this default local setup (deployments default_executor
+uses the docker backend) but the Docker daemon is not available.
+Install and start Docker, or use a kubernetes / non-docker config
+(and omit the deployments service if you do not need it), then retry.
+```
+
+That path exists because the deployments plugin backends are docker, Kubernetes, and OpenShell — there is no subprocess deployments backend. Model deployments go through that plugin. The Agents plugin's default subprocess mode is a separate code path.
+
+## Jobs: subprocess vs Docker
+
+Bundled local config registers a `subprocess` executor at profile `default`. Many CPU container steps submitted as `cpu`/`default` are translated to that host subprocess backend so local development does not require the jobs Docker image for every plugin job.
+
+Docker (or Kubernetes) job backends remain in use for:
+
+- Auditor jobs (dedicated Docker profile)
+- GPU / customizer job profiles
+- Workloads that opt into a Docker-backed execution profile
+
+Configure profiles under `jobs.executors` and related knobs such as `jobs.enable_subprocess_executor` in the [Config Reference](/documentation/kubernetes-deployment/config-reference). See [Manage Jobs](/documentation/kubernetes-deployment/setup/jobs) for backend YAML.
+
+## Agents vs model deployments
+
+| Path | How it runs locally | Notes |
+| ---- | ------------------- | ----- |
+| Agents (`nemo agents deploy`) | Default `--mode subprocess` on the host | Optional `--mode docker` / `k8s` via deployments plugin |
+| Model deployments | Deployments plugin only | Default executor `local-docker`; no subprocess backend |
+
+See [Deploy Agents](/documentation/agents/deploy-agents) and [Deploy Models](/documentation/models-and-inference/deploy-models).
+
+## Escape hatches
+
+If you cannot or do not want Docker on the laptop:
+
+1. **Start Docker** for the default full local path (simplest).
+2. **Omit or reconfigure deployments** — pass a custom `--config` that sets a non-docker `deployments.default_executor`, or omit the deployments service/controller from the run so preflight does not apply.
+3. **External ClickHouse** — set `NHX_INTAKE_CLICKHOUSE_URL` before start so Intake does not provision a local container.
+4. **Remote control plane** — point the CLI at a remote `NHX_BASE_URL`; the laptop does not need Docker for API-only use.
+5. **Kubernetes** — cluster install paths use cluster executors; see [Kubernetes Deployment](/documentation/kubernetes-deployment/setup).
+
+## Related
+
+- [Setup](/documentation/get-started/setup) — install and prerequisites
+- [Manage Jobs](/documentation/kubernetes-deployment/setup/jobs) — execution backends
+- [Deploy Agents](/documentation/agents/deploy-agents) — subprocess vs docker/k8s modes
+- [Deploy Models](/documentation/models-and-inference/deploy-models) — model deployment via the deployments plugin
+- [Config Reference](/documentation/kubernetes-deployment/config-reference) — `jobs` executor knobs

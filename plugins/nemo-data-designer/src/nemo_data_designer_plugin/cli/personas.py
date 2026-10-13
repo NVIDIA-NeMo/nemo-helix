@@ -17,11 +17,11 @@ from data_designer_nemo.nemotron_personas import (
     get_resource_name_for_locale,
     sync_nemotron_personas_fileset,
 )
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.client.errors import ConflictError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from pydantic import SecretStr
 
 _SUPPORTED_LOCALE_NAMES = sorted(SUPPORTED_LOCALES)
@@ -93,7 +93,7 @@ def make_fileset_command(
             secrets = SecretsClient.from_client(client)
             secrets.create_secret(
                 workspace=secret_workspace,
-                body=PlatformSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
+                body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
             )
         except ConflictError as exc:
             print_error(

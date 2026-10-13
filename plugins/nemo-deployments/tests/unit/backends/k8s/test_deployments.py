@@ -45,9 +45,9 @@ from nemo_deployments_plugin.entities import (
     EnvVar,
     SecretRef,
 )
-from nemo_platform_plugin.auth.workload_delegations import KUBERNETES_POD_UID_REFERENCE_NAME, WorkloadDelegationScope
-from nemo_platform_plugin.auth.workload_identity import build_kubernetes_pod_uid_workload_delegation
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.auth.workload_delegations import KUBERNETES_POD_UID_REFERENCE_NAME, WorkloadDelegationScope
+from nemo_helix_plugin.auth.workload_identity import build_kubernetes_pod_uid_workload_delegation
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 
 @pytest.fixture
@@ -490,7 +490,7 @@ async def test_read_deployment_status_revokes_stale_pod_uid_workload_delegation(
             workload_instance_id=deployment_key("default", "task"),
             workload_claim_id="logical-task",
         ),
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_generation="old-pod",
         namespace="dep-ns",
         service_account_name="dep-sa",
@@ -552,7 +552,7 @@ async def test_read_deployment_status_refreshes_active_pod_uid_before_expiry(
             workload_instance_id=deployment_key("default", "task"),
             workload_claim_id="logical-task",
         ),
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_generation="pod-uid-1",
         namespace="dep-ns",
         service_account_name="dep-sa",
@@ -622,7 +622,7 @@ async def test_read_deployment_status_revokes_stale_pod_uid_when_pod_list_is_con
             workload_instance_id=deployment_key("default", "task"),
             workload_claim_id="logical-task",
         ),
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_generation="old-pod",
         namespace="dep-ns",
         service_account_name="dep-sa",
@@ -675,7 +675,7 @@ async def test_read_deployment_status_keeps_delegation_when_pod_list_fails(
             workload_instance_id=deployment_key("default", "task"),
             workload_claim_id="logical-task",
         ),
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_generation="old-pod",
         namespace="dep-ns",
         service_account_name="dep-sa",

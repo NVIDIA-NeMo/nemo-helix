@@ -12,7 +12,7 @@ passes — getting past the PDP is exactly what the row proves).
 
 Identity keys map to tokens minted by the session issuer (see conftest):
 
-- ``admin``      sub=usr-admin,  email matching auth.admin_email -> PlatformAdmin@system (seeded)
+- ``admin``      sub=usr-admin,  email matching auth.admin_email -> HelixAdmin@system (seeded)
 - ``alice``      sub=usr-alice,  email alice@harness.test  -> Editor@<wsA> (provisioned)
 - ``victor``     sub=usr-victor, email victor@harness.test -> Viewer@<wsA> (provisioned)
 - ``sam``        sub=usr-sam,    email sam@harness.test    -> Viewer@system (provisioned)
@@ -34,11 +34,11 @@ from typing import Literal
 NOT_403 = "not-403"
 
 # Paths under test (placeholders substituted at runtime).
-TARGETS = "/apis/auditor/v2/workspaces/{wsA}/targets"
-TARGETS_B = "/apis/auditor/v2/workspaces/{wsB}/targets"
+TARGETS = "/apis/garak/v2/workspaces/{wsA}/targets"
+TARGETS_B = "/apis/garak/v2/workspaces/{wsB}/targets"
 WORKSPACES = "/apis/entities/v2/workspaces"
-EVAL_HELLO = "/apis/evaluator/v1/hello/world"
-EVAL_HEALTHZ = "/apis/evaluator/v1/healthz"
+EVAL_HELLO = "/apis/evals/v1/hello/world"
+EVAL_HEALTHZ = "/apis/evals/v1/healthz"
 GATEWAY = "/apis/agents/v2/workspaces/{wsA}/agents/ghost-agent/-/health"
 SERVICE_ONLY = "/apis/harness-fixture/probe/service-only"
 FIXTURE_OPEN = "/apis/harness-fixture/probe/open"
@@ -46,7 +46,7 @@ UNRULED_OK = "/apis/harness-unruled/ruled"
 UNRULED_BAD = "/apis/harness-unruled/unruled"
 BROKEN_SUB = "/apis/harness-broken/anything"
 BROKEN_BARE = "/apis/harness-broken"
-UNKNOWN_PATH = "/apis/auditor/v2/path-that-matches-no-rule"
+UNKNOWN_PATH = "/apis/garak/v2/path-that-matches-no-rule"
 IAM_BINDINGS = "/apis/auth/v2/iam/role-bindings"
 PDP_ALLOW = "/apis/auth/v2/authz/allow"
 
@@ -292,7 +292,7 @@ MATRIX: list[Case] = [
     Case(
         "E4",
         "caller-kind",
-        "PlatformAdmin allowed on service-only route (admin global bypass holds)",
+        "HelixAdmin allowed on service-only route (admin global bypass holds)",
         "GET",
         SERVICE_ONLY,
         "admin",
@@ -346,7 +346,7 @@ MATRIX: list[Case] = [
         "provisioner",
         {401},
         body={"input": {}},
-        notes="middleware consults only X-NMP-Principal-Id on /apis/auth/v2/authz/*",
+        notes="middleware consults only X-NHX-Principal-Id on /apis/auth/v2/authz/*",
     ),
     # ------------------------------------------------------------------ #
     # F. plugin fence & deny_route containment.                           #
@@ -369,7 +369,7 @@ MATRIX: list[Case] = [
         "service",
         {403},
     ),
-    Case("F3", "fence", "Unenumerable plugin: PlatformAdmin denied", "GET", BROKEN_SUB, "admin", {403}),
+    Case("F3", "fence", "Unenumerable plugin: HelixAdmin denied", "GET", BROKEN_SUB, "admin", {403}),
     Case(
         "F4",
         "fence",
@@ -401,7 +401,7 @@ MATRIX: list[Case] = [
     Case(
         "F8",
         "fence",
-        "Unruled route denied for PlatformAdmin (overrides bypass)",
+        "Unruled route denied for HelixAdmin (overrides bypass)",
         "GET",
         UNRULED_BAD,
         "admin",
@@ -423,7 +423,7 @@ MATRIX: list[Case] = [
     Case(
         "G2",
         "knobs",
-        "Quarantine: PlatformAdmin denied on quarantined namespace",
+        "Quarantine: HelixAdmin denied on quarantined namespace",
         "GET",
         UNRULED_OK,
         "admin",

@@ -17,7 +17,7 @@ from typing import Any, Literal, Self
 
 import yaml
 from nemo_agents_plugin.entities import AGENT_CONFIG_FILENAME
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
 class AgentConfigLoadError(ValueError):
@@ -32,7 +32,24 @@ class ModelConfig(BaseModel):
     api_key_env: str | None = None
     base_url: str | None = None
     temperature: float | None = None
+    top_p: float | None = Field(default=None, strict=True, ge=0, le=1)
+    max_tokens: int | None = Field(default=None, strict=True, gt=0, le=(1 << 64) - 1)
     settings: dict[str, Any] = Field(default_factory=dict)
+    # Adapter-owned per-model catalog metadata (e.g. api, context_window,
+    # cost). Forwarded verbatim to the Fabric model's extensions so an adapter
+    # can register a gateway-served model the harness doesn't ship natively.
+    # Keys that name a declared model field (e.g. max_tokens) are rejected by
+    # the translator -- set those as top-level fields. Orthogonal to settings,
+    # which carries adapter target-config knobs.
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def _normalize_integral_max_tokens(cls, value: Any) -> Any:
+        # Match Fabric's handling of whole-number JSON/YAML floats.
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
 
 
 class HarnessConfig(BaseModel):
@@ -40,6 +57,13 @@ class HarnessConfig(BaseModel):
 
     kind: str
     model: ModelConfig | None = None
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: str = Field(min_length=1, pattern=r"\S")
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -63,6 +87,7 @@ class EnvironmentConfig(BaseModel):
 class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    artifacts: str | None = None
     timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     max_turns: int | None = Field(default=None, gt=0, le=(1 << 32) - 1)
 
@@ -136,8 +161,9 @@ class AgentConfig(BaseModel):
     config_format: Literal["nemo-agents-spec-v1"]
     name: str
     description: str = ""
-    default_harness: str
-    harnesses: dict[str, HarnessConfig]
+    default_harness: str | None = None
+    harnesses: dict[str, HarnessConfig] = Field(default_factory=dict)
+    workflow: WorkflowConfig | None = None
     models: dict[str, ModelConfig] = Field(default_factory=dict)
     prompts: dict[str, str] = Field(default_factory=dict)
     instructions: InstructionsConfig | None = None
@@ -149,7 +175,13 @@ class AgentConfig(BaseModel):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
     @model_validator(mode="after")
-    def _validate_default_harness(self) -> Self:
+    def _validate_execution_selection(self) -> Self:
+        if self.workflow is not None:
+            if self.default_harness is not None or self.harnesses:
+                raise ValueError("workflow and harness selection are mutually exclusive")
+            return self
+        if self.default_harness is None:
+            raise ValueError("Configure workflow or default_harness with harnesses")
         if self.default_harness not in self.harnesses:
             available = ", ".join(sorted(self.harnesses))
             raise ValueError(f"default_harness must reference one of harnesses: {available}")

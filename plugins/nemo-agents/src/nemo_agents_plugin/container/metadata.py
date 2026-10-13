@@ -18,7 +18,7 @@ from pathlib import Path
 import yaml
 from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT
 
-NEMO_PLATFORM_AGENT_FRAMEWORK = "nemo_platform_agent"
+NEMO_HELIX_AGENT_FRAMEWORK = "nemo_helix_agent"
 
 
 def extract_agent_metadata(
@@ -38,7 +38,7 @@ def extract_agent_metadata(
     * **agent_version**: *agent_version* arg → ``pyproject [project].version`` → ``YY.MM.DD``
     * **agent_author**: *agent_author* arg → ``git config user.name`` (run in the
       project's git repo) → ``"unknown"``
-    * **agent_framework**: ``"nemo_platform_agent"`` for Platform-owned agent
+    * **agent_framework**: ``"nemo_helix_agent"`` for Platform-owned agent
       specs, ``"nemo_agent_toolkit"`` when config has a ``workflow`` key
     * **agent_id**: truncated SHA-256 of config + pyproject + build-env inputs,
       so changing ``--nat-version`` (etc.) yields a distinct identifier.
@@ -194,7 +194,7 @@ def _resolve_timestamp(cwd: Path | None = None) -> str:
 
 def _detect_framework(config_data: dict) -> str:
     if config_data.get("config_format") == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-        return NEMO_PLATFORM_AGENT_FRAMEWORK
+        return NEMO_HELIX_AGENT_FRAMEWORK
     if "workflow" in config_data:
         return "nemo_agent_toolkit"
     return "unknown"

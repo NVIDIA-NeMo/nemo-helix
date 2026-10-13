@@ -30,6 +30,12 @@ describe('CUSTOMIZATION_TEMPLATES', () => {
       expect(fields.automodel.dataset.validation).toBe(DATASET_REF);
     });
 
+    it('pins the cookbook seed so a rerun reproduces the first run', () => {
+      // Every cookbook sets rng.seed: 1111. Left unset, two runs of the same recipe
+      // diverge and a user comparing them has no way to tell why.
+      expect(fields.automodel.schedule?.seed).toBe(1111);
+    });
+
     it('registers every model it references', () => {
       const registered = template.models.map((m) => `${WORKSPACE}/${m.name}`);
       expect(registered).toContain(fields.automodel.model);
@@ -226,6 +232,121 @@ describe('template dataset converters', () => {
       ['SQL', { schema: 's', question: 'q' }],
     ])('drops rows missing %s', (_field, row) => {
       expect(birdDataset.convertRow(row)).toBeNull();
+    });
+  });
+});
+
+describe('template dataset sources', () => {
+  /**
+   * Two filesets per template: the read-only external one pointing at HuggingFace, and the
+   * local one holding the converted JSONL. A name collision between them would make the
+   * converted upload target the read-only fileset, which rejects writes.
+   */
+  it('never names a source fileset after a converted one', () => {
+    const convertedNames = new Set(CUSTOMIZATION_TEMPLATES.map((t) => t.dataset.name));
+    for (const { dataset } of CUSTOMIZATION_TEMPLATES) {
+      expect(dataset.sourceFilesetName).not.toBe(dataset.name);
+      expect(convertedNames.has(dataset.sourceFilesetName)).toBe(false);
+    }
+  });
+
+  /** Sharing the name lets the second template's create collapse into a no-op 409. */
+  it('reuses one source fileset per HuggingFace repo', () => {
+    const byRepo = new Map<string, Set<string>>();
+    for (const { dataset } of CUSTOMIZATION_TEMPLATES) {
+      const names = byRepo.get(dataset.hfRepoId) ?? new Set<string>();
+      names.add(dataset.sourceFilesetName);
+      byRepo.set(dataset.hfRepoId, names);
+    }
+    for (const names of byRepo.values()) {
+      expect(names.size).toBe(1);
+    }
+  });
+
+  it.each([
+    ['the current BIRD-SQL shard', 'data/train-00000-of-00001-fe8894d41b7815be.parquet', true],
+    ['a re-sharded train split', 'data/train-00002-of-00004-abc123.parquet', true],
+    ['an unsuffixed shard', 'train-00000-of-00001.parquet', true],
+    ['the validation split', 'data/validation-00000-of-00001-abc.parquet', false],
+    ['a non-Parquet file', 'data/train-00000-of-00001-abc.json', false],
+    ['the readme', 'README.md', false],
+    ['a differently-prefixed split', 'data/pretrain-00000-of-00001-abc.parquet', false],
+  ])('matches %s: %s', (_label, path, expected) => {
+    for (const { dataset } of CUSTOMIZATION_TEMPLATES) {
+      expect(dataset.filePattern.test(path)).toBe(expected);
+    }
+  });
+
+  describe('cookbook hyperparameters carried over', () => {
+    const byId = (id: string) => {
+      const template = CUSTOMIZATION_TEMPLATES.find((t) => t.id === id)!;
+      return template.buildFormSpec(WORKSPACE, DATASET_REF).automodel;
+    };
+
+    // The HF export records only the single physical MTP layer, so without these the
+    // recipe trains at depth 1 where the cookbook intends one layer reused twice.
+    it.each([['lora-nemotron-35-lightning-text2sql'], ['lora-nemotron-3-ultra-text2sql']])(
+      '%s sets the cookbook MTP overrides',
+      (id) => {
+        expect(byId(id).training.mtp).toEqual({
+          num_nextn_predict_layers: 2,
+          use_repeated_layer: true,
+          loss_scaling_factor: 0.1,
+        });
+      }
+    );
+
+    it('leaves MTP alone for Super, whose cookbook declares none', () => {
+      expect(byId('lora-nemotron-3-super-text2sql').training.mtp).toBeUndefined();
+    });
+
+    // Super's cookbook notes it "avoids OOM on 80GB"; Ultra sets it for the same reason.
+    it.each([['lora-nemotron-3-super-text2sql'], ['lora-nemotron-3-ultra-text2sql']])(
+      '%s recomputes activations',
+      (id) => {
+        expect(byId(id).training.activation_checkpointing).toBe(true);
+      }
+    );
+
+    it('leaves activation checkpointing off for Lightning, whose cookbook omits it', () => {
+      expect(byId('lora-nemotron-35-lightning-text2sql').training.activation_checkpointing).toBe(
+        false
+      );
+    });
+
+    it('pins Ultra to the cookbook pack size rather than deriving it', () => {
+      // Pack size used to follow max_seq_length, which forced a choice between the
+      // cookbook's 2048 pack and truncating the SQL target. These are separate now.
+      const automodel = byId('lora-nemotron-3-ultra-text2sql');
+      expect(automodel.batch?.sequence_packing).toBe(true);
+      expect(automodel.batch?.packed_sequence_size).toBe(2048);
+      expect(automodel.training.max_seq_length).toBe(4096);
+    });
+
+    it('carries them through to the submitted job spec, not just the form', () => {
+      // formToAutomodelCreate rebuilds the spec, so a field the form holds can still be
+      // dropped on submit. Ultra is the recipe that sets all four.
+      const template = CUSTOMIZATION_TEMPLATES.find(
+        (t) => t.id === 'lora-nemotron-3-ultra-text2sql'
+      )!;
+      const { spec } = formToAutomodelCreate(template.buildFormSpec(WORKSPACE, DATASET_REF));
+
+      expect(spec.training.activation_checkpointing).toBe(true);
+      expect(spec.training.mtp).toEqual({
+        num_nextn_predict_layers: 2,
+        use_repeated_layer: true,
+        loss_scaling_factor: 0.1,
+      });
+      expect(spec.batch?.packed_sequence_size).toBe(2048);
+      expect(spec.schedule?.seed).toBe(1111);
+    });
+
+    it('sends no backend block — deepep would fail on a node without the library', () => {
+      for (const template of CUSTOMIZATION_TEMPLATES) {
+        expect(template.buildFormSpec(WORKSPACE, DATASET_REF).automodel.training.backend).toBe(
+          undefined
+        );
+      }
     });
   });
 });

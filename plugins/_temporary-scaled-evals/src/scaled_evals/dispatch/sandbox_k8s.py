@@ -795,7 +795,12 @@ def _task_image_ref_for_sandbox(spec: LaunchSpec) -> str:
     the recorded digest remains mandatory provenance and dispatch verifies
     mutable tags before launch.
     """
-    image_ref = spec.image_ref.strip()
+    return _image_ref_for_sandbox(spec.image_ref, spec.image_digest)
+
+
+def _image_ref_for_sandbox(image_ref: str, image_digest: str | None) -> str:
+    """``_task_image_ref_for_sandbox`` for any recorded image, such as a separate verifier image."""
+    image_ref = image_ref.strip()
     if settings.sandbox_k8s_task_image_reference_mode == "tag":
         last_slash = image_ref.rfind("/")
         last_colon = image_ref.rfind(":")
@@ -805,7 +810,7 @@ def _task_image_ref_for_sandbox(spec: LaunchSpec) -> str:
                 "digest-only and tag-plus-digest references are not admitted"
             )
         return image_ref
-    digest = (spec.image_digest or "").strip()
+    digest = (image_digest or "").strip()
     if re.fullmatch(r"[^\s]+@sha256:[0-9a-fA-F]{64}", digest):
         return digest
     if re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
@@ -839,12 +844,7 @@ def _bind_network_policy(
     network_policy: str,
     network_policy_config: Mapping[str, Any],
 ) -> str:
-    """Make the evaluation's direct-egress policy authoritative.
-
-    Switchyard may add a separate, evaluation-scoped grant to its own proxy.
-    Kubernetes combines matching policies additively, so this function owns
-    only direct sandbox egress and never infers a Switchyard book mode.
-    """
+    """Make the evaluation's direct-egress policy authoritative."""
     config = yaml.safe_load(config_text) or {}
     if not isinstance(config, dict):
         raise ValueError("rendered Harbor config must be an object")
@@ -1176,9 +1176,8 @@ def _stage_task_tree(tarball_object_key: str, dest: Path) -> Path | None:
     failures are also fatal: falling back after a partial local stage can launch
     Harbor against the wrong or incomplete task.
     """
-    from botocore.exceptions import BotoCoreError, ClientError
-
-    from scaled_evals.api import s3
+    from scaled_evals.api import artifacts
+    from scaled_evals.api._files_backend import MissingObjectError
 
     try:
         with tempfile.TemporaryDirectory(prefix="se-task-") as tmp:
@@ -1187,12 +1186,18 @@ def _stage_task_tree(tarball_object_key: str, dest: Path) -> Path | None:
             extracted = tmp_path / "extracted"
             extracted.mkdir()
             try:
-                s3.download_object(tarball_object_key, str(tarball_path))
-            except (BotoCoreError, ClientError) as exc:
+                artifacts.download_object(tarball_object_key, str(tarball_path))
+            except MissingObjectError as exc:
                 raise RuntimeError(
                     f"could not fetch task pack object {tarball_object_key!r} from "
-                    f"the object store: {exc}. The revision's artifact may be missing "
-                    f"(re-upload + finalize the task) or the store unreachable."
+                    f"storage: {exc}. The revision's artifact is missing "
+                    f"(re-upload + finalize the task)."
+                ) from exc
+            except Exception as exc:  # noqa: BLE001 - any Files transport error (5xx/connection) is a fetch failure, not a 'no task tree' signal
+                raise RuntimeError(
+                    f"could not fetch task pack object {tarball_object_key!r} from "
+                    f"storage: {exc}. The object store may be unreachable; retry, or "
+                    f"re-upload + finalize the task."
                 ) from exc
             _extract_pack(tarball_path, extracted)
             task_src = _find_task_tree(extracted)
@@ -1231,7 +1236,7 @@ def _inject_extra_skills(task_tree: Path, object_keys: list[str]) -> list[dict[s
     <name> is derived from the key. Best-effort: failures are logged and skipped
     so a bad key doesn't abort the whole launch.
     """
-    from scaled_evals.api import s3
+    from scaled_evals.api import artifacts
 
     # Harbor sets environment_dir = task_tree/environment/ (it appends /environment
     # to the task path). Candidate 0 in _upload_environment_skills is
@@ -1252,7 +1257,7 @@ def _inject_extra_skills(task_tree: Path, object_keys: list[str]) -> list[dict[s
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / filename
         try:
-            s3.download_object(key, str(dest))
+            artifacts.download_object(key, str(dest))
         except Exception as exc:  # noqa: BLE001
             LOG.warning("could not inject extra skill %s: %s", key, exc)
             materials.append({"object_key": key, "status": "download_failed"})
@@ -1275,11 +1280,12 @@ def _save_extra_skill_materials_artifact(
     evaluation_id: str,
     *,
     harbor_dir: Path | None = None,
+    jobs_dir: str | None = None,
 ) -> None:
     if not materials:
         return
     root = harbor_dir or Path(settings.harbor_dir).expanduser()
-    artifact_dir = root / settings.sandbox_k8s_jobs_dir / evaluation_id
+    artifact_dir = root / (jobs_dir or settings.sandbox_k8s_jobs_dir) / evaluation_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     path = artifact_dir / "scaled-evals-extra-skill-materials.json"
     path.write_text(json.dumps({"materials": materials}, indent=2, sort_keys=True) + "\n")
@@ -1374,13 +1380,15 @@ def apply_agent_timeout_floor(task_tree: Path | None, floor_sec: int) -> dict[st
     return {"original": original, "effective": effective}
 
 
-def _save_instruction_artifact(task_tree: Path, evaluation_id: str, *, harbor_dir: Path | None = None) -> None:
+def _save_instruction_artifact(
+    task_tree: Path, evaluation_id: str, *, harbor_dir: Path | None = None, jobs_dir: str | None = None
+) -> None:
     """Copy the final instruction.md (post-patch) into the job artifact directory."""
     instr = task_tree / "instruction.md"
     if not instr.exists():
         return
     root = harbor_dir or Path(settings.harbor_dir).expanduser()
-    artifact_dir = root / settings.sandbox_k8s_jobs_dir / evaluation_id
+    artifact_dir = root / (jobs_dir or settings.sandbox_k8s_jobs_dir) / evaluation_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(instr, artifact_dir / "instruction.md")
 
@@ -1393,7 +1401,7 @@ def _harbor_run_argv(harbor_dir: Path) -> tuple[str, ...]:
     return HARBOR_RUN
 
 
-def _spawn_detached(argv: list[str], cwd: Path, log_path: Path) -> None:
+def _spawn_detached(argv: list[str], cwd: Path, log_path: Path, *, env: Mapping[str, str] | None = None) -> None:
     """Fire-and-forget ``harbor run``, detached, logging to ``log_path``."""
     pid_path = log_path.with_suffix(f"{log_path.suffix}.pid")
     exit_path = log_path.with_suffix(f"{log_path.suffix}.exit.json")
@@ -1413,6 +1421,7 @@ def _spawn_detached(argv: list[str], cwd: Path, log_path: Path) -> None:
             ],
             cwd=cwd,
             log=log,
+            env=env,
         )
     start_ticks = _process_start_ticks(proc.pid)
     pid_path.write_text(json.dumps({"pid": proc.pid, "start_ticks": start_ticks, "token": token}))
@@ -1496,7 +1505,7 @@ def _resolve_host_path(path: str) -> Path:
     """Resolve a path to an absolute HOST path for docker bind mounts.
 
     Relative paths are anchored to SCALED_EVALS_HOST_DIR (the host checkout root)
-    so they work correctly when resolved from inside the dispatch-worker container.
+    so they work correctly when resolved from inside a container.
     """
     return resolve_host_path(path, host_root=settings.scaled_evals_host_dir)
 
@@ -1577,6 +1586,39 @@ def make_sandbox_k8s_docker_terminator() -> Callable[[LaunchHandle], None]:
     return terminate
 
 
+def _kubectl_target_flags(recorded_path: object, context: object, api_server: object = None) -> list[str]:
+    """Return the ``--kubeconfig`` and ``--context`` flags for a cleanup.
+
+    Both are captured when the sandbox launches. Under Platform Jobs that
+    happens inside a Job pod, and the controller that later cleans up runs in
+    another pod, so the path can name a file that only ever existed on the
+    Job pod's filesystem. The context is defined by that file, so it is dropped
+    with it; otherwise kubectl fails every call on an unknown context and the
+    evaluation wedges. With neither flag, kubectl resolves through the cleanup
+    process's own ``KUBECONFIG`` or its in-cluster service account.
+
+    That fallback reaches the same cluster only for the Job's service-account
+    context, or for a user-token kubeconfig whose recorded ``api_server`` is the
+    in-cluster API. Any other context can name another API server; cleanup there
+    treats "not found" as done and would orphan the sandbox, so it raises instead.
+
+    Raises:
+        RuntimeError: The recorded kubeconfig is missing and its target is not
+            known to be this cluster.
+    """
+    if recorded_path and Path(str(recorded_path)).exists():
+        flags = ["--kubeconfig", str(recorded_path)]
+        if context:
+            flags.extend(["--context", str(context)])
+        return flags
+    if not context or context == _IN_CLUSTER_CONTEXT or api_server == _IN_CLUSTER_API:
+        return []
+    raise RuntimeError(
+        f"kubeconfig for kubectl context {context!r} is not available to this process; "
+        "refusing to clean up through its own cluster credentials"
+    )
+
+
 def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     """Delete and verify per-evaluation Sandbox resources.
 
@@ -1608,10 +1650,7 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
         raise RuntimeError("sandbox cleanup requires kubectl or oc")
 
     base = [kubectl]
-    if kubeconfig_path:
-        base.extend(["--kubeconfig", str(kubeconfig_path)])
-    if context:
-        base.extend(["--context", str(context)])
+    base.extend(_kubectl_target_flags(kubeconfig_path, context, cleanup_metadata.get("api_server")))
     if cleanup_metadata.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", namespace])
@@ -1650,8 +1689,8 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     # Claim mode returns warm-pool capacity through the claim controller. Do not
     # directly delete its adopted Sandbox/Pod. Direct CRD mode owns both the pod
     # and the optional NetworkPolicy, including old-UID orphans left by a failed
-    # controller reconciliation. The evaluation label is shared with Switchyard,
-    # so it must never be used for dependent deletion. Discover the Sandbox CR
+    # controller reconciliation. The evaluation label may select resources other
+    # than the sandbox, so it must never be used for dependent deletion. Discover the Sandbox CR
     # names first, then use sandbox-k8s's ownership label on Pods and policies.
     dependent_selector = f"sandbox-k8s/sandbox in ({','.join(sandbox_names)})"
     if not template_name:
@@ -1788,10 +1827,12 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
     if kubectl is None:
         return None
     base = [kubectl]
-    if cleanup.get("kubeconfig_path"):
-        base.extend(["--kubeconfig", str(cleanup["kubeconfig_path"])])
-    if cleanup.get("context"):
-        base.extend(["--context", str(cleanup["context"])])
+    try:
+        base.extend(
+            _kubectl_target_flags(cleanup.get("kubeconfig_path"), cleanup.get("context"), cleanup.get("api_server"))
+        )
+    except RuntimeError:
+        return None
     if cleanup.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", str(cleanup.get("namespace") or "default")])
@@ -2357,6 +2398,8 @@ def make_sandbox_k8s_docker_status_reader(
 _IN_CLUSTER_API = "https://kubernetes.default.svc"
 _IN_CLUSTER_CA = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 _USER_CONTEXT = "user"
+# The context the evaluation Job's kubeconfig gives its own service account.
+_IN_CLUSTER_CONTEXT = "incluster"
 _NAMESPACE_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -2590,6 +2633,8 @@ def make_sandbox_k8s_submitter(
         rendered_path = work / f"{spec.evaluation_id}.yaml"
         rendered_path.write_text(rendered)
         cleanup_metadata = _sandbox_cleanup_metadata(rendered, spec.evaluation_id)
+        if user_kubeconfig is not None:
+            cleanup_metadata["api_server"] = env.get("SANDBOX_API_SERVER", _IN_CLUSTER_API)
         run_work_dir = work / spec.evaluation_id
         run_work_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_work_dir / "harbor.log"

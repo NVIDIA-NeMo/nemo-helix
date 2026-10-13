@@ -263,6 +263,24 @@ def test_a_200_carrying_an_error_is_a_sandbox_failure() -> None:
     assert not excinfo.value.retryable
 
 
+@pytest.mark.parametrize("status", [200, 503])
+def test_a_host_reported_error_carries_the_hosts_output(status: int) -> None:
+    """The output tail is what says why the host failed; the code alone does not."""
+    session = _session()
+    envelope = {"error": {"code": "bootstrap_failed", "message": "not ready", "host_output_tail": ["No module"]}}
+
+    if status == 200:
+        with pytest.raises(RolloutTransportError) as excinfo:
+            session._decode_results(json.dumps(envelope).encode())
+        error = excinfo.value
+    else:
+        error = session._transport_error(json.dumps(envelope), status, [{}], 0.0)
+
+    assert error.origin == "sandbox"
+    assert "bootstrap_failed" in str(error)
+    assert "--- gym host output (1 lines) ---\nNo module" in str(error)
+
+
 def test_heartbeat_whitespace_does_not_break_decoding() -> None:
     """The host pads the body while it works; that padding reaches this decoder verbatim."""
     session = _session()

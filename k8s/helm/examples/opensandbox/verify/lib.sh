@@ -4,7 +4,7 @@
 
 # Shared helpers for OpenSandbox runtime verification.
 # Sourced by shared-kernel.sh / kata-qemu.sh — do not run directly.
-# Set OPEN_SANDBOX_WORKLOAD_NS (or NMP_NAMESPACE) to the platform job namespace.
+# Set OPEN_SANDBOX_WORKLOAD_NS (or NHX_NAMESPACE) to the platform job namespace.
 
 set -euo pipefail
 
@@ -87,7 +87,7 @@ require_profile() {
     shared-kernel)
       SERVER_DEPLOY="opensandbox-server"
       SERVER_SVC="opensandbox-server"
-      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NMP_NAMESPACE:-}}"
+      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NHX_NAMESPACE:-}}"
       API_SECRET="opensandbox-server-api-key"
       EXPECT_RUNTIME_CLASS=""          # cluster default OCI runtime
       EXPECT_KATA_NODE="false"
@@ -95,7 +95,7 @@ require_profile() {
     kata-qemu)
       SERVER_DEPLOY="opensandbox-server-kata"
       SERVER_SVC="opensandbox-server-kata"
-      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NMP_NAMESPACE:-}}"
+      WORKLOAD_NS="${OPEN_SANDBOX_WORKLOAD_NS:-${NHX_NAMESPACE:-}}"
       API_SECRET="opensandbox-server-kata-api-key"
       EXPECT_RUNTIME_CLASS="kata-qemu"
       EXPECT_KATA_NODE="true"
@@ -104,7 +104,7 @@ require_profile() {
       die "unknown profile '${profile}' (expected shared-kernel|kata-qemu)"
       ;;
   esac
-  [[ -n "${WORKLOAD_NS}" ]] || die "set OPEN_SANDBOX_WORKLOAD_NS or NMP_NAMESPACE to the platform job namespace"
+  [[ -n "${WORKLOAD_NS}" ]] || die "set OPEN_SANDBOX_WORKLOAD_NS or NHX_NAMESPACE to the platform job namespace"
 }
 
 preflight_control_plane() {
@@ -252,7 +252,7 @@ print(json.dumps({
   "metadata": {
     "purpose": "runtime-verify",
     "profile": "${PROFILE}",
-    "nmp-verify-request": "${request_id}",
+    "nhx-verify-request": "${request_id}",
   },
 }))
 PY
@@ -471,6 +471,36 @@ echo OSB_VERIFY_OK
   fi
 }
 
+HARBOR_MOUNT_PATHS=(/logs /solution /installed-agent)
+
+# The template's Harbor emptyDirs must reach the sandbox container and be
+# world-writable, or task images with a non-root USER fail at sandbox start.
+# Templates without any of them (e.g. Gym-only installs) only get a warning.
+assert_harbor_mounts() {
+  local pod="$1"
+  local mounts path probe
+  local missing=()
+  mounts="$(kubectl get pod -n "${WORKLOAD_NS}" "${pod}" \
+    -o jsonpath='{range .spec.containers[?(@.name=="sandbox")].volumeMounts[*]}{.mountPath}{"\n"}{end}')"
+  for path in "${HARBOR_MOUNT_PATHS[@]}"; do
+    grep -qx "${path}" <<<"${mounts}" || missing+=("${path}")
+  done
+  if [[ ${#missing[@]} -eq ${#HARBOR_MOUNT_PATHS[@]} ]]; then
+    warn "no Harbor mounts (${HARBOR_MOUNT_PATHS[*]}); scaled-evals harbor_opensandbox tasks with a non-root USER will fail"
+    return
+  fi
+  [[ ${#missing[@]} -eq 0 ]] \
+    || die "sandbox container is missing Harbor volumeMounts: ${missing[*]}; check the BatchSandbox template and restart the server"
+  probe="$(kubectl exec -n "${WORKLOAD_NS}" "${pod}" -c sandbox -- /bin/sh -c '
+for p in "$@"; do printf "%s=%s\n" "$p" "$(stat -c %a "$p")"; done
+' sh "${HARBOR_MOUNT_PATHS[@]}" 2>&1)" || die "kubectl exec (mount probe) failed: ${probe}"
+  for path in "${HARBOR_MOUNT_PATHS[@]}"; do
+    grep -qx "${path}=777" <<<"${probe}" \
+      || die "${path} is not world-writable in the sandbox container: ${probe}"
+  done
+  ok "Harbor mounts present and world-writable (${HARBOR_MOUNT_PATHS[*]})"
+}
+
 assert_batchsandbox() {
   kubectl get batchsandbox -n "${WORKLOAD_NS}" "${SANDBOX_ID}" >/dev/null \
     || die "BatchSandbox/${SANDBOX_ID} missing in ${WORKLOAD_NS}"
@@ -493,5 +523,6 @@ run_profile_verification() {
   assert_runtime_class "${pod}"
   assert_node_placement "${pod}"
   assert_kernel_isolation "${pod}"
+  assert_harbor_mounts "${pod}"
   info "PASS profile=${PROFILE}"
 }

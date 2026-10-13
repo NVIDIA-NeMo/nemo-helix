@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { GuardrailConfig } from '@nemo/sdk/generated/platform/schema';
+import { DEFAULT_BUILD_MODEL_NAME } from '@studio/constants/constants';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { server } from '@studio/mocks/node';
@@ -32,7 +33,8 @@ const MODEL_GROUPS = [
   {
     workspace: WORKSPACE,
     models: [
-      { name: 'nemotron-3.5-lightning-30b-a3b', workspace: WORKSPACE, model_providers: ['p'] },
+      { name: 'adept-fuyu-8b', workspace: WORKSPACE, model_providers: ['p'] },
+      { name: DEFAULT_BUILD_MODEL_NAME, workspace: WORKSPACE, model_providers: ['p'] },
     ],
   },
 ];
@@ -106,7 +108,7 @@ describe('CreateGuardrailModal', () => {
               type: 'main',
               engine: 'nim',
               mode: 'chat',
-              model: `${WORKSPACE}/nemotron-3.5-lightning-30b-a3b`,
+              model: `${WORKSPACE}/${DEFAULT_BUILD_MODEL_NAME}`,
             },
           ],
         },

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nmp.automodel.entities.validators import validate_fileset_uri
+from nhx.automodel.entities.validators import validate_fileset_uri
 
 
 def test_validate_fileset_workspace_name() -> None:

@@ -3,7 +3,7 @@
 
 """Unit tests for run-record helpers (manifest fact extraction + entity flattening).
 
-These import plugin modules that depend on nemo-platform packages, so they run under the
+These import plugin modules that depend on nemo-helix packages, so they run under the
 workspace test environment (``make test-package PACKAGE=nemo_agent_hardener_plugin``).
 """
 
@@ -14,7 +14,7 @@ from datetime import datetime
 import yaml
 from nemo_agent_hardener_plugin.jobs.run import _manifest_facts, _run_data
 from nemo_agent_hardener_plugin.sdk import _run_to_dict
-from nemo_platform_plugin.entities.types import Entity
+from nemo_helix_plugin.entities.types import Entity
 
 
 def test_manifest_facts_reads_agent_name_and_port(tmp_path):

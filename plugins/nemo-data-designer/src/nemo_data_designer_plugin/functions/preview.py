@@ -16,7 +16,8 @@ from anyio.lowlevel import current_token
 from data_designer.config.utils.io_helpers import serialize_data
 from data_designer.errors import DataDesignerError
 from data_designer.interface.data_designer import DataDesigner
-from data_designer_nemo.context import create_execution_context, create_validation_context
+from data_designer_nemo.context.execution import create_execution_context
+from data_designer_nemo.context.validation import create_validation_context
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError, raise_if_errors
 from data_designer_nemo.fileset_file_seed_reader import workspace_cvar
 from data_designer_nemo.runnable import resolve_runnable_config
@@ -31,10 +32,10 @@ from nemo_data_designer_plugin.functions._types import (
     PreviewSpec,
     ProcessorOutputFrame,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.function import NemoFunction
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.frames import Done, Error
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.function import NemoFunction
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.frames import Done, Error
 from pydantic import BaseModel
 
 
@@ -52,8 +53,8 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
         spec: PreviewSpec,
         *,
         ctx: FunctionContext,
-        sdk: NeMoPlatform,
-        async_sdk: AsyncNeMoPlatform,
+        sdk: NemoClient,
+        async_sdk: AsyncNemoClient,
     ) -> AsyncIterator[BaseModel]:
         # Fail fast on request shape (``num_records``) before doing any config-validation work.
         num_records = _validate_and_get_num_records(spec.num_records)

@@ -1,0 +1,101 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: Upgrading from NeMo Evaluator
+description: Migrate deployment overrides and integrations to NeMo Helix Evals.
+---
+
+The Evaluator plugin is now **NeMo Helix Evals**. Update existing deployments before
+starting the new version. The repository rename tool updates source files; it does
+not migrate deployment configuration, databases, or serialized job artifacts.
+
+## Before upgrading
+
+- **Drain evaluation jobs.** Finish queued and running row, agent, and retrieval
+  evaluations before upgrading. Existing compiled job specifications and cloudpickle
+  metric bundles can reference removed `nemo_evaluator` or `nemo_evaluator_sdk`
+  modules. Reading job history does not make those artifacts executable. Rebuild
+  compiled specifications and recreate or re-upload metric bundles from source.
+- **Rename configuration overrides.** Move every `evaluator:` block to `evals:`,
+  preserving all values, including `sandboxed_gym_default` and image overrides.
+  For Helm, check `platformConfig.evaluator`, custom
+  `baseHelixConfig` YAML, and any additional configuration files or environment
+  overrides. Replace `NEMO_EVALUATOR_*` with `NEMO_EVALS_*` and `NHX_EVALUATOR_*`
+  with `NHX_EVALS_*` where those settings are used. Update service allowlists from
+  `evaluator` to `evals`, even when it appears in the middle of a list.
+
+<Warning>
+The old configuration namespace is not an alias. Leaving
+`evaluator: {sandboxed_gym_default: true}` unchanged loses that override, allowing
+the new service to use its default execution mode. Explicitly retain the sandbox
+setting under `evals:` and verify it before accepting untrusted evaluation jobs.
+</Warning>
+
+## Update all feature flags
+
+<Warning>
+**Feature-flag overrides must be renamed, keeping their existing values.** Old names
+are no longer read. An old override disabling evaluations can therefore fall back
+to the new default, which enables evaluations. Update deployed platform and Helm
+configuration, environment files, and any custom Studio build or runtime markers.
+Restart Studio or rebuild custom assets as appropriate, then verify the intended
+evaluation routes are enabled or disabled.
+</Warning>
+
+| Previous setting | New setting |
+| --- | --- |
+| `studio.feature_flags.evaluator_enabled` | `studio.feature_flags.evals_enabled` |
+| `studio.feature_flags.evaluator_benchmarks_enabled` | `studio.feature_flags.evals_benchmarks_enabled` |
+| `VITE_FF_EVALUATOR_ENABLED` | `VITE_FF_EVALS_ENABLED` |
+| `VITE_FF_EVALUATOR_BENCHMARKS_ENABLED` | `VITE_FF_EVALS_BENCHMARKS_ENABLED` |
+| `STUDIO_UI_VITE_FF_EVALUATOR_ENABLED` | `STUDIO_UI_VITE_FF_EVALS_ENABLED` |
+| `STUDIO_UI_VITE_FF_EVALUATOR_BENCHMARKS_ENABLED` | `STUDIO_UI_VITE_FF_EVALS_BENCHMARKS_ENABLED` |
+
+For example, these platform configuration overrides keep sandboxing enabled and
+the evaluation UI disabled:
+
+```yaml
+evals:
+  sandboxed_gym_default: true
+studio:
+  feature_flags:
+    evals_enabled: false
+    evals_benchmarks_enabled: false
+```
+
+For Helm, put these structured settings under `platformConfig` in your values file.
+
+## Update integrations
+
+| Surface | Previous name | New name |
+| --- | --- | --- |
+| CLI group | `nemo evaluator` | `nemo evals` |
+| Typed client property | `client.evaluator` | `client.evals` |
+| Plugin distribution / module | `nemo-evaluator-plugin` / `nemo_evaluator` | `nemo-evals-plugin` / `nemo_evals` |
+| SDK distribution / module | `nemo-evaluator-sdk` / `nemo_evaluator_sdk` | `nhx-evals-sdk` / `nhx_evals_sdk` |
+| API prefix | `/apis/evaluator/` | `/apis/evals/` |
+| Service identity | `service:evaluator` | `service:evals` |
+| Row job source | `nemo-evaluator` | `nemo-evals` |
+| Agent job source | `nemo-evaluator.agent-evaluate` | `nemo-evals.agent-evaluate` |
+| Retrieval job source | `nemo-evaluator.retrieve-eval` | `nemo-evals.retrieve-eval` |
+
+Update external gateway routes, SIEM and audit rules, service-identity matching,
+job-source filters, scripts, and integrations that match the previous values.
+
+**Permissions and stored entity kinds are unchanged.** Keep `evaluator.*` roles and
+scopes, task-kind discriminators, and entity types. Python classes and types such
+as `Evaluator`, `EvaluatorPluginService`, and `EvaluatorPerms` also retain their
+names for this change.
+
+## Existing job history
+
+Completed jobs remain stored in the core Jobs service. This rename does not migrate
+their source fields. Studio evaluation job lists and Evals job list routes filter
+by the new sources, so older jobs do not appear there. Access historical records
+through the core Jobs service; retrieval through a typed plugin resource also
+depends on the stored specification matching its schema.
+
+This is a visibility limitation, separate from the requirement to drain jobs and
+rebuild artifacts. After upgrading, submit a small new evaluation and verify its
+new source, results, configuration, and intended Studio feature gates.

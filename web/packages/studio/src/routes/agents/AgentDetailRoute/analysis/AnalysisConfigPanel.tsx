@@ -15,12 +15,20 @@ import {
   Button,
   Flex,
   FormField,
+  Grid,
   Stack,
   Switch,
   Text,
 } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import { queryClient } from '@studio/api/queryClient';
+import { useLatestAnalysisRun } from '@studio/api/useLatestAnalysisRun';
+import {
+  type TriggerInsightsRunVariables,
+  useTriggerInsightsRun,
+} from '@studio/api/useTriggerInsightsRun';
+import { LatestAnalysisRun } from '@studio/routes/agents/AgentDetailRoute/analysis/LatestAnalysisRun';
+import { RunAnalysisModal } from '@studio/routes/agents/AgentDetailRoute/analysis/RunAnalysisModal';
 import { saveAnalysisConfig } from '@studio/routes/agents/AgentDetailRoute/analysis/saveAnalysisConfig';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { type FC, useEffect, useState } from 'react';
@@ -41,6 +49,9 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
   const [enabled, setEnabled] = useState(false);
   const [defaultModel, setDefaultModel] = useState('');
   const [fastModel, setFastModel] = useState('');
+  const [runModalOpen, setRunModalOpen] = useState(false);
+  const triggerRun = useTriggerInsightsRun(workspace);
+  const { latestRun, isActive: runActive, blocksNewRun } = useLatestAnalysisRun(workspace, agent);
 
   const {
     data: config,
@@ -95,6 +106,20 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
     }
   };
 
+  const handleRun = (variables: TriggerInsightsRunVariables) => {
+    triggerRun.mutate(variables, {
+      onSuccess: ({ status, jobName, message }) => {
+        if (status === 'started') {
+          toast.success(`Queued analysis run "${jobName}".`);
+          setRunModalOpen(false);
+        } else {
+          toast.error(message ?? 'Failed to start the analysis run.');
+        }
+      },
+      onError: (runError) => toast.error(runError.message),
+    });
+  };
+
   if (!agent) return null;
 
   return (
@@ -123,29 +148,52 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
             </LoadingButton>
           </Flex>
         ) : (
-          <Button
-            kind="secondary"
-            size="small"
-            onClick={() => setEditing(true)}
-            disabled={isLoading}
-          >
-            Edit
-          </Button>
+          <Flex gap="density-sm">
+            <LoadingButton
+              kind="secondary"
+              color="neutral"
+              size="small"
+              height={28}
+              onClick={() => setRunModalOpen(true)}
+              loading={triggerRun.isPending}
+              disabled={!config || blocksNewRun}
+            >
+              Run analysis now
+            </LoadingButton>
+            <Button
+              kind="secondary"
+              size="small"
+              onClick={() => setEditing(true)}
+              disabled={isLoading}
+            >
+              Edit
+            </Button>
+          </Flex>
         )
       }
     >
+      {runModalOpen && config ? (
+        <RunAnalysisModal
+          workspace={workspace}
+          agent={agent}
+          config={config}
+          running={triggerRun.isPending}
+          onClose={() => setRunModalOpen(false)}
+          onRun={handleRun}
+        />
+      ) : null}
       {isLoading ? (
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Loading analysis config...
         </Text>
       ) : isError && !notFound ? (
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Could not load the analysis config for this agent.
         </Text>
       ) : editing ? (
         <Stack gap="density-md">
           {notFound && (
-            <Text kind="body/regular/xs" color="secondary">
+            <Text className="text-secondary" kind="body/regular/xs">
               Analysis has never been enabled for this agent. Saving creates the config.
             </Text>
           )}
@@ -156,53 +204,55 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
             onCheckedChange={setEnabled}
             slotLabel="Run periodic analysis"
           />
-          <FormField
-            slotLabel="Default model"
-            slotHelp="Used for quality-critical analysis work."
-            slotError={
-              defaultModel && !isQualifiedModelRef(defaultModel)
-                ? `Stored value "${defaultModel}" is not workspace-qualified. Pick a model to replace it.`
-                : undefined
-            }
-          >
-            <WorkspaceModelSelect
-              workspace={workspace}
-              value={defaultModel ? { model: defaultModel } : null}
-              onValueChange={({ model }) => setDefaultModel(model)}
-              placeholder="Select a default model"
-              hideAdapters
-              fullWidth
-              aria-label="Default model"
-            />
-          </FormField>
-          <FormField
-            slotLabel="Fast model"
-            slotHelp="Used for latency-sensitive analysis work."
-            slotError={
-              fastModel && !isQualifiedModelRef(fastModel)
-                ? `Stored value "${fastModel}" is not workspace-qualified. Pick a model to replace it.`
-                : undefined
-            }
-          >
-            <WorkspaceModelSelect
-              workspace={workspace}
-              value={fastModel ? { model: fastModel } : null}
-              onValueChange={({ model }) => setFastModel(model)}
-              placeholder="Select a fast model"
-              hideAdapters
-              fullWidth
-              aria-label="Fast model"
-            />
-          </FormField>
+          <Grid cols={{ base: 1, md: 2 }} gap="4">
+            <FormField
+              slotLabel="Default model"
+              slotHelp="Used for quality-critical analysis work."
+              status={defaultModel && !isQualifiedModelRef(defaultModel) ? 'error' : undefined}
+              slotError={`Stored value "${defaultModel}" is not workspace-qualified. Pick a model to replace it.`}
+            >
+              <WorkspaceModelSelect
+                workspace={workspace}
+                value={defaultModel ? { model: defaultModel } : null}
+                onValueChange={({ model }) => setDefaultModel(model)}
+                placeholder="Select a default model"
+                hideAdapters
+                fullWidth
+                aria-label="Default model"
+              />
+            </FormField>
+            <FormField
+              slotLabel="Fast model"
+              slotHelp="Used for latency-sensitive analysis work."
+              status={fastModel && !isQualifiedModelRef(fastModel) ? 'error' : undefined}
+              slotError={`Stored value "${fastModel}" is not workspace-qualified. Pick a model to replace it.`}
+            >
+              <WorkspaceModelSelect
+                workspace={workspace}
+                value={fastModel ? { model: fastModel } : null}
+                onValueChange={({ model }) => setFastModel(model)}
+                placeholder="Select a fast model"
+                hideAdapters
+                fullWidth
+                aria-label="Fast model"
+              />
+            </FormField>
+          </Grid>
         </Stack>
       ) : notFound ? (
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Analysis is not enabled for this agent. Choose Edit to enable it, or run{' '}
           <code>nemo insights analysis enable --agent {agent}</code>.
         </Text>
       ) : (
-        <Stack gap="2">
+        <Grid cols={{ base: 1, md: 2 }} gap="4">
+          {latestRun ? (
+            <div className="md:col-span-2">
+              <LatestAnalysisRun workspace={workspace} run={latestRun} isActive={runActive} />
+            </div>
+          ) : null}
           <KVPair
+            orientation="vertical"
             label="Periodic analysis"
             value={
               <Badge kind="solid" color={config?.enabled ? 'green' : 'gray'}>
@@ -210,12 +260,14 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
               </Badge>
             }
           />
-          <KVPair label="Default model" value={config?.default_model} />
-          <KVPair label="Fast model" value={config?.fast_model} />
-          {config?.updated_at && (
-            <KVPair label="Updated" value={<RelativeTime datetime={config.updated_at} />} />
-          )}
-        </Stack>
+          <KVPair
+            orientation="vertical"
+            label="Updated"
+            value={config?.updated_at && <RelativeTime datetime={config.updated_at} />}
+          />
+          <KVPair orientation="vertical" label="Default model" value={config?.default_model} />
+          <KVPair orientation="vertical" label="Fast model" value={config?.fast_model} />
+        </Grid>
       )}
     </DetailPanel>
   );

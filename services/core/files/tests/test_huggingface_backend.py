@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, Mock, call, patch
 import aiohttp
 import httpx
 import pytest
-from nmp.common.api.common import SecretRef
-from nmp.common.config import Configuration
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.app.backends.factory import storage_impl_factory
-from nmp.core.files.app.backends.huggingface import (
+from nhx.common.api.common import SecretRef
+from nhx.common.config import Configuration
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.app.backends.factory import storage_impl_factory
+from nhx.core.files.app.backends.huggingface import (
     HuggingfaceAccessError,
     HuggingfaceBackendError,
     HuggingfaceConfigError,
@@ -22,7 +22,7 @@ from nmp.core.files.app.backends.huggingface import (
     _retry_after_seconds,
     raise_for_hf_status,
 )
-from nmp.core.files.config import FilesConfig, files_config
+from nhx.core.files.config import FilesConfig, files_config
 
 
 def _clear_files_config_cache() -> None:
@@ -110,7 +110,7 @@ def hf_secrets_empty() -> dict[str, str]:
 @pytest.fixture
 def mock_hf_api():
     """Mock Huggingface Hub API."""
-    with patch("nmp.core.files.app.backends.huggingface.HfApi") as mock_api_cls:
+    with patch("nhx.core.files.app.backends.huggingface.HfApi") as mock_api_cls:
         mock_api = Mock()
         mock_api_cls.return_value = mock_api
         yield mock_api
@@ -134,7 +134,7 @@ def test_a_fileset_created_from_a_sha_tracks_nothing(hf_secrets_empty):
 
 def test_get_download_url(hf_config, hf_secrets_empty):
     """Test download URL generation."""
-    with patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url:
+    with patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url:
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/main/file.txt"
 
         impl = HuggingfaceStorageImpl(hf_config, hf_secrets_empty)
@@ -198,7 +198,7 @@ async def test_list_files_network_error_retries_then_succeeds(hf_config, mock_hf
 
     impl = HuggingfaceStorageImpl(hf_config, hf_secrets_empty)
 
-    with patch("nmp.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch("nhx.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep:
         files = await impl.list_files()
 
     assert files[0].path == "file1.txt"
@@ -283,7 +283,7 @@ async def test_list_files_file_path_fallback_to_get_file(hf_config, mock_hf_api,
 
     # Mock get_file to succeed (the path is a valid file)
     with patch.object(impl, "get_file") as mock_get_file:
-        from nmp.core.files.app.backends.base import FileInfo
+        from nhx.core.files.app.backends.base import FileInfo
 
         mock_get_file.return_value = FileInfo(path="subdir/file.jsonl", size=1234)
 
@@ -298,7 +298,7 @@ async def test_list_files_file_path_fallback_to_get_file(hf_config, mock_hf_api,
 async def test_list_files_path_not_found_returns_empty(hf_config, mock_hf_api, mock_httpx_response, hf_secrets_empty):
     """Test list_files returns empty list when path doesn't exist as file or directory."""
     from huggingface_hub.utils import EntryNotFoundError
-    from nmp.core.files.exceptions import NotFoundError
+    from nhx.core.files.exceptions import NotFoundError
 
     # list_repo_tree fails (not a directory)
     mock_hf_api.list_repo_tree.side_effect = EntryNotFoundError("Entry not found")
@@ -334,8 +334,8 @@ async def test_list_files_entry_not_found_no_path_returns_empty(
 async def test_download_success(hf_config, hf_secrets_empty):
     """Test successful file download."""
     with (
-        patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
-        patch("nmp.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
+        patch("nhx.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
     ):
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/main/test.txt"
 
@@ -359,8 +359,8 @@ async def test_download_success(hf_config, hf_secrets_empty):
 async def test_download_with_token(hf_config_with_token, hf_secrets):
     """Test download includes authorization header when token provided."""
     with (
-        patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
-        patch("nmp.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
+        patch("nhx.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
     ):
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/v1.0/test.txt"
 
@@ -386,8 +386,8 @@ async def test_download_with_byte_range(hf_config, hf_secrets_empty):
     byte_range = ByteRange(start=0, end=100)
 
     with (
-        patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
-        patch("nmp.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
+        patch("nhx.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
     ):
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/main/test.txt"
 
@@ -412,8 +412,8 @@ async def test_download_with_byte_range(hf_config, hf_secrets_empty):
 async def test_download_file_not_found(hf_config, hf_secrets_empty):
     """Test download when file is not found (404)."""
     with (
-        patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
-        patch("nmp.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
+        patch("nhx.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
     ):
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/main/missing.txt"
 
@@ -441,8 +441,8 @@ async def test_download_file_not_found(hf_config, hf_secrets_empty):
 async def test_download_unauthorized(hf_config, hf_secrets_empty):
     """Test download when unauthorized (401)."""
     with (
-        patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
-        patch("nmp.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
+        patch("nhx.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
     ):
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/main/private.txt"
 
@@ -470,8 +470,8 @@ async def test_download_unauthorized(hf_config, hf_secrets_empty):
 async def test_download_network_error(hf_config, hf_secrets_empty):
     """Test download with network error."""
     with (
-        patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
-        patch("nmp.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
+        patch("nhx.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
     ):
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/main/test.txt"
 
@@ -485,7 +485,7 @@ async def test_download_network_error(hf_config, hf_secrets_empty):
         download_iter = await impl.download("test.txt", None)
 
         with (
-            patch("nmp.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("nhx.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep,
             pytest.raises(HuggingfaceUnavailableError) as exc_info,
         ):
             async for _ in download_iter:
@@ -500,9 +500,9 @@ async def test_download_network_error(hf_config, hf_secrets_empty):
 async def test_download_retries_reuse_http_session(hf_config, hf_secrets_empty):
     """Retry attempts reuse the backend's pooled HTTP session."""
     with (
-        patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
-        patch("nmp.core.files.app.backends.huggingface.get_http_session") as mock_get_session,
-        patch("nmp.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
+        patch("nhx.core.files.app.backends.huggingface.get_http_session") as mock_get_session,
+        patch("nhx.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
     ):
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/main/test.txt"
         session = Mock()
@@ -518,7 +518,7 @@ async def test_download_retries_reuse_http_session(hf_config, hf_secrets_empty):
         download_iter = await impl.download("test.txt", None)
 
         with (
-            patch("nmp.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock),
+            patch("nhx.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock),
             pytest.raises(HuggingfaceUnavailableError),
         ):
             async for _ in download_iter:
@@ -531,8 +531,8 @@ async def test_download_retries_reuse_http_session(hf_config, hf_secrets_empty):
 async def test_download_does_not_retry_after_yielding_chunk(hf_config, hf_secrets_empty):
     """A streaming failure after yielding bytes is propagated without replaying content."""
     with (
-        patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
-        patch("nmp.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.huggingface.hf_hub_url") as mock_url,
+        patch("nhx.core.files.app.backends.huggingface.download_url_streaming") as mock_stream,
     ):
         mock_url.return_value = "https://huggingface.co/test-org/test-repo/resolve/main/test.txt"
 
@@ -547,7 +547,7 @@ async def test_download_does_not_retry_after_yielding_chunk(hf_config, hf_secret
 
         chunks = []
         with (
-            patch("nmp.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("nhx.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep,
             pytest.raises(HuggingfaceUnavailableError) as exc_info,
         ):
             async for chunk in download_iter:
@@ -571,7 +571,7 @@ async def test_validate_storage_success(hf_config, mock_hf_api, hf_secrets_empty
     impl = HuggingfaceStorageImpl(hf_config, hf_secrets_empty)
 
     # Mock file metadata check
-    with patch("nmp.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
+    with patch("nhx.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
         mock_metadata.return_value = Mock(size=1234)
         await impl.validate_storage()
 
@@ -695,7 +695,7 @@ async def test_get_file_gated_repo_error(hf_config, mock_httpx_response, hf_secr
     mock_httpx_response.headers = {"X-Error-Code": "GatedRepo"}
     mock_httpx_response.url = "https://huggingface.co/test-org/test-repo/test.txt"
 
-    with patch("nmp.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
+    with patch("nhx.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
         mock_metadata.side_effect = GatedRepoError("Gated repo", response=mock_httpx_response)
 
         impl = HuggingfaceStorageImpl(hf_config, hf_secrets_empty)
@@ -710,13 +710,13 @@ async def test_get_file_rate_limit_error(hf_config, hf_secrets_empty):
     """Test get_file when rate limited by HuggingFace."""
     mock_error = _hf_http_error(429, "Rate limited", headers={"Retry-After": "0"})
 
-    with patch("nmp.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
+    with patch("nhx.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
         mock_metadata.side_effect = mock_error
 
         impl = HuggingfaceStorageImpl(hf_config, hf_secrets_empty)
 
         with (
-            patch("nmp.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("nhx.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep,
             pytest.raises(HuggingfaceUnavailableError) as exc_info,
         ):
             await impl.get_file("test.txt")
@@ -729,21 +729,21 @@ async def test_get_file_rate_limit_error(hf_config, hf_secrets_empty):
 
 async def test_get_file_rate_limit_uses_retry_env_override(hf_config, hf_secrets_empty, monkeypatch):
     """HF retry attempts and exponential delays can be increased by environment."""
-    monkeypatch.setenv("NMP_FILES_HF_RETRY_ATTEMPTS", "3")
-    monkeypatch.setenv("NMP_FILES_HF_RETRY_INITIAL_DELAY_SECONDS", "2")
-    monkeypatch.setenv("NMP_FILES_HF_RETRY_MAX_DELAY_SECONDS", "3")
+    monkeypatch.setenv("NHX_FILES_HF_RETRY_ATTEMPTS", "3")
+    monkeypatch.setenv("NHX_FILES_HF_RETRY_INITIAL_DELAY_SECONDS", "2")
+    monkeypatch.setenv("NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS", "3")
     _clear_files_config_cache()
 
     try:
         mock_error = _hf_http_error(429, "Rate limited")
 
-        with patch("nmp.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
+        with patch("nhx.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
             mock_metadata.side_effect = mock_error
 
             impl = HuggingfaceStorageImpl(hf_config, hf_secrets_empty)
 
             with (
-                patch("nmp.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep,
+                patch("nhx.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep,
                 pytest.raises(HuggingfaceUnavailableError),
             ):
                 await impl.get_file("test.txt")
@@ -776,19 +776,19 @@ def test_retry_after_seconds_prefers_retry_after_header():
 
 async def test_get_file_rate_limit_uses_hf_ratelimit_delay(hf_config, hf_secrets_empty, monkeypatch):
     """429 retries use HF's RateLimit reset when Retry-After is absent."""
-    monkeypatch.setenv("NMP_FILES_HF_RETRY_ATTEMPTS", "2")
-    monkeypatch.setenv("NMP_FILES_HF_RETRY_MAX_DELAY_SECONDS", "10")
+    monkeypatch.setenv("NHX_FILES_HF_RETRY_ATTEMPTS", "2")
+    monkeypatch.setenv("NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS", "10")
     _clear_files_config_cache()
 
     try:
         mock_error = _hf_http_error(429, "Rate limited", headers={"RateLimit": '"resolvers";r=0;t=7'})
 
-        with patch("nmp.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
+        with patch("nhx.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
             mock_metadata.side_effect = [mock_error, Mock(size=1234)]
 
             impl = HuggingfaceStorageImpl(hf_config, hf_secrets_empty)
 
-            with patch("nmp.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch("nhx.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep:
                 file_info = await impl.get_file("test.txt")
 
         assert file_info.path == "test.txt"
@@ -833,7 +833,7 @@ async def test_validate_storage_checks_file_metadata_for_gated_repos(hf_config, 
     impl = HuggingfaceStorageImpl(hf_config, hf_secrets_empty)
 
     # But file metadata check fails with gated error
-    with patch("nmp.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
+    with patch("nhx.core.files.app.backends.huggingface.get_hf_file_metadata") as mock_metadata:
         mock_response = Mock()
         mock_response.status_code = 403
         mock_response.headers = {"X-Error-Code": "GatedRepo"}
@@ -956,7 +956,7 @@ async def test_resolve_config_retries_rate_limit_then_succeeds(mock_hf_api, hf_s
         hf_secrets_empty,
     )
 
-    with patch("nmp.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch("nhx.core.files.app.backends.huggingface.sleep", new_callable=AsyncMock) as mock_sleep:
         resolved_config = await impl.resolve_config()
 
     assert resolved_config.original_revision == "main"

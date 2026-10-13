@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@nvidia/foundations-react-core':
-        specifier: 1.7.0
-        version: 1.7.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.13.0
+        version: 1.13.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/react-query':
         specifier: ^5.69.0
         version: 5.101.4(react@19.2.8)
@@ -45,8 +45,8 @@ packages:
   '@date-fns/tz@1.5.0':
     resolution: {integrity: sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg==}
 
-  '@nvidia/foundations-react-core@1.7.0':
-    resolution: {integrity: sha512-F72H2veujWqh9AzBLlnsHKl2zfiBtm7xE/befrLESRHuysDddQrSiyCzIZovcX0eTvae+8GrgiCp0FE4xgTEdQ==}
+  '@nvidia/foundations-react-core@1.13.0':
+    resolution: {integrity: sha512-Hj97eqvnGrAJVi8as5VMwLXh4dET1ccgeANEyWAndlnQHXNGba5wZmdUT3rv7S6OAKydHynpeoQlbsKDj3gnjg==}
     hasBin: true
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -882,7 +882,7 @@ snapshots:
 
   '@date-fns/tz@1.5.0': {}
 
-  '@nvidia/foundations-react-core@1.7.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@nvidia/foundations-react-core@1.13.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@date-fns/tz': 1.5.0
       '@radix-ui/react-label': 2.1.8(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

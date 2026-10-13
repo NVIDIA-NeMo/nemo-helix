@@ -3,7 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   useSafeSynthesizerDownloadJobResultSummary as useDownloadJobResultSummaryV1beta1GenerateJobsJobIdResultsSummaryDownloadGet,
   useSafeSynthesizerGetJobSuspense as useGetJobV1beta1GenerateJobsJobIdGetSuspense,
@@ -69,7 +69,7 @@ export const GenerateJobDetailsRoute: FC | null = SAFE_SYNTHESIZER_ENABLED
 
       // Extract error message from logs when job status is error
       const errorMessage = useMemo(() => {
-        if (job.status !== PlatformJobStatus.error || !logs || logs.length === 0) {
+        if (job.status !== HelixJobStatus.error || !logs || logs.length === 0) {
           return undefined;
         }
 

@@ -3,7 +3,7 @@
 
 """The victim's business tools, served over MCP.
 
-An MCP server rather than Python passed to a framework, because that is the only way a NeMo Platform
+An MCP server rather than Python passed to a framework, because that is the only way a NeMo Helix
 agent gets tools of its own: Fabric constructs the agent and ``FABRIC_OWNED_AGENT_KEYS`` rejects a
 ``tools`` key in the config. The tool *code* is never uploaded — it runs in this process, inside the
 image, and the agent calls it.

@@ -356,17 +356,17 @@ describe('WorkspaceBaseModelsRoute customizable filter gating', () => {
     suppressConsoleError('was not wrapped in act');
   });
 
-  it('hides the Customizable checkbox when customizer is disabled', () => {
+  it('hides the Fine-tunable checkbox when customizer is disabled', () => {
     render(
       <TestWrapper initialEntry="/workspaces/ws1/base-models">
         <WorkspaceBaseModelsRoute />
       </TestWrapper>
     );
 
-    expect(screen.queryByRole('checkbox', { name: 'Customizable' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Fine-tunable' })).not.toBeInTheDocument();
   });
 
-  it('shows the Customizable checkbox when customizer is enabled', async () => {
+  it('shows the Fine-tunable checkbox when customizer is enabled', async () => {
     mockEnvironment.customizerEnabled = true;
 
     render(
@@ -375,7 +375,7 @@ describe('WorkspaceBaseModelsRoute customizable filter gating', () => {
       </TestWrapper>
     );
 
-    expect(await screen.findByRole('checkbox', { name: 'Customizable' })).toBeInTheDocument();
+    expect(await screen.findByRole('checkbox', { name: 'Fine-tunable' })).toBeInTheDocument();
   });
 });
 

@@ -32,12 +32,6 @@ from scaled_evals.dispatch import (
     RuntimeStatus,
     summarize_harbor_result,
 )
-from scaled_evals.dispatch.switchyard import (
-    SwitchyardProfileConfig,
-    SwitchyardRender,
-    render_switchyard,
-    write_switchyard_artifacts,
-)
 from scaled_evals.dispatch.worker import (
     Dispatcher,
 )
@@ -79,7 +73,6 @@ def _eval_row(**overrides) -> dict:
         "task_revision": 2,
         "framework_profile_id": None,
         "harbor_profile_id": None,
-        "switchyard_profile_id": None,
         "intake_profile_id": None,
         "credentials": {},
         "runtime": "sandbox_k8s",
@@ -198,9 +191,9 @@ def _stub_dispatch_archive_build(monkeypatch) -> None:  # noqa: ANN001
             "source_bytes": 42,
         }
 
-    monkeypatch.setattr("scaled_evals.dispatch.worker.s3.build_evaluation_archive", fake_build)
+    monkeypatch.setattr("scaled_evals.dispatch.worker.artifacts.build_evaluation_archive", fake_build)
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.build_evaluation_archive_from_directory",
+        "scaled_evals.dispatch.worker.artifacts.build_evaluation_archive_from_directory",
         lambda evaluation_id, _root: fake_build(evaluation_id),
     )
 
@@ -209,11 +202,11 @@ def _stub_dispatch_archive_build(monkeypatch) -> None:  # noqa: ANN001
 def _disable_dispatch_artifact_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep dispatcher unit tests independent from local object-store state."""
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.sync_directory_to_prefix",
+        "scaled_evals.dispatch.worker.artifacts.sync_directory_to_prefix",
         lambda _root, _prefix: 0,
     )
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.replace_directory_at_prefix",
+        "scaled_evals.dispatch.worker.artifacts.replace_directory_at_prefix",
         lambda _root, _prefix: 0,
     )
 
@@ -338,7 +331,7 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
     checked: list[str] = []
     monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.object_exists",
+        "scaled_evals.api.routers.evaluations.artifacts.object_exists",
         lambda key: checked.append(key) or True,
     )
     conn = _conn_with_fetchone(
@@ -364,8 +357,8 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
 def test_create_409_when_ready_revision_pack_missing_local_rustfs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "object_store_backend", "s3")
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.object_exists", lambda _key: False)
+    monkeypatch.setattr(settings, "object_store_backend", "artifacts")
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
     conn = _conn_with_fetchone(
         {
             "status": "ready",
@@ -450,7 +443,7 @@ def test_create_422_on_malformed_profile_id() -> None:
     assert response.json()["detail"]["error"]["code"] == "invalid_reference"
 
 
-def test_create_records_default_deny_without_switchyard() -> None:
+def test_create_records_default_deny() -> None:
     conn = _conn(
         fetchone=[
             {"status": "ready"},
@@ -474,8 +467,8 @@ def test_create_records_default_deny_without_switchyard() -> None:
     assert response.json()["network_policy"] == "default_deny"
     execute_calls = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
     insert_call = next(call for call in execute_calls if "INSERT INTO evaluations" in call.args[0])
-    assert insert_call.args[1][24] == "default_deny"
-    assert insert_call.args[1][25].obj == {}
+    assert insert_call.args[1][23] == "default_deny"
+    assert insert_call.args[1][24].obj == {}
 
 
 def test_create_resolves_harbor_version_before_queueing() -> None:
@@ -513,7 +506,7 @@ def test_create_resolves_harbor_version_before_queueing() -> None:
         "0.13.2",
         "scaled-evals-api:dev",
         None,
-        "nemo-platform-plugin-overlay-v1",
+        "nemo-helix-plugin-overlay-v1",
         "0.1.13",
     )
     runner_metadata = insert_call.args[1][10].obj
@@ -742,10 +735,10 @@ def test_create_422_when_profile_missing() -> None:
 
 
 def test_create_422_when_profile_wrong_type() -> None:
-    # harbor_profile_id points at a switchyard-typed profile.
+    # harbor_profile_id points at an intake-typed profile.
     conn = _conn(
         fetchone=[{"status": "ready"}],
-        fetchall=[[{"id": "cfg_sw", "type": "switchyard"}]],
+        fetchall=[[{"id": "cfg_sw", "type": "intake"}]],
     )
     _override_conn(conn)
 
@@ -925,7 +918,7 @@ def test_get_telemetry_returns_attempt_aware_usage_and_raw_handoff_links() -> No
         "output_tokens": 30,
         "cached_tokens": 10,
         "cache_creation_tokens": 5,
-        "usage_source": "switchyard-session-stats",
+        "usage_source": "atif",
         "turn_count": 4,
         "tool_call_count": 2,
         "cost_usd": 0.25,
@@ -988,7 +981,7 @@ def test_get_telemetry_returns_attempt_aware_usage_and_raw_handoff_links() -> No
         "output_tokens": 30,
         "cached_tokens": 10,
         "cache_creation_tokens": 5,
-        "source": "switchyard-session-stats",
+        "source": "atif",
     }
     assert body["executions"][0]["interactions"] == {"turns": 4, "tool_calls": 2}
     assert body["executions"][0]["cost"] == {
@@ -1029,7 +1022,6 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
                 status="failed",
                 framework_profile_id="cfg_h",
                 harbor_profile_id="cfg_h",
-                switchyard_profile_id="cfg_s",
                 intake_profile_id="cfg_i",
                 credentials={"openai": "cred_openai"},
                 n_attempts=3,
@@ -1057,7 +1049,6 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
         "framework_version": None,
         "framework_profile_id": "cfg_h",
         "harbor_profile_id": "cfg_h",
-        "switchyard_profile_id": "cfg_s",
         "intake_profile_id": "cfg_i",
         "credentials": {"openai": "cred_openai"},
         "agent_bundle_id": None,
@@ -1546,16 +1537,16 @@ def test_events_stream_emits_terminal_event_after_status_flip(monkeypatch) -> No
     assert [(event["event"], event["data"].get("status")) for event in events] == [("status", "succeeded")]
 
 
-def test_events_stream_does_not_stop_on_switchyard_lifecycle_event(monkeypatch) -> None:  # noqa: ANN001
+def test_events_stream_does_not_stop_on_lifecycle_event(monkeypatch) -> None:  # noqa: ANN001
     async def no_sleep(_seconds: float) -> None:
         return None
 
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.asyncio.sleep", no_sleep)
-    switchyard = {
+    lifecycle = {
         "id": 1,
-        "type": "switchyard",
+        "type": "lifecycle",
         "status": "succeeded",
-        "detail": "switchyard draining until later",
+        "detail": "runtime draining until later",
         "created_at": NOW,
     }
     succeeded = {
@@ -1565,7 +1556,7 @@ def test_events_stream_does_not_stop_on_switchyard_lifecycle_event(monkeypatch) 
         "detail": "1/1 trials completed",
         "created_at": NOW + timedelta(microseconds=1),
     }
-    conn = _conn(fetchone=[{"id": "ev_test123"}], fetchall=[[switchyard], [succeeded]])
+    conn = _conn(fetchone=[{"id": "ev_test123"}], fetchall=[[lifecycle], [succeeded]])
     _override_conn(conn)
 
     response = client.get("/v1/evaluations/ev_test123/events/stream")
@@ -1573,7 +1564,7 @@ def test_events_stream_does_not_stop_on_switchyard_lifecycle_event(monkeypatch) 
     assert response.status_code == 200
     events = _sse_events(response.text)
     assert [(event["event"], event["data"].get("status")) for event in events] == [
-        ("switchyard", "succeeded"),
+        ("lifecycle", "succeeded"),
         ("status", "succeeded"),
     ]
 
@@ -1666,7 +1657,7 @@ def test_list_artifacts_reads_s3_and_supports_prefix(monkeypatch) -> None:  # no
             }
         ]
 
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.list_objects", fake_list_objects)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.list_objects", fake_list_objects)
 
     response = client.get("/v1/evaluations/ev_test123/artifacts", params={"prefix": "trial/"})
 
@@ -1690,7 +1681,7 @@ def test_list_artifacts_reads_s3_and_supports_prefix(monkeypatch) -> None:  # no
 def test_list_artifacts_404_when_evaluation_unknown(monkeypatch) -> None:  # noqa: ANN001
     _override_conn(_conn_with_fetchone(None))
     list_objects = MagicMock(return_value=[])
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.list_objects", list_objects)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.list_objects", list_objects)
 
     response = client.get("/v1/evaluations/ev_missing/artifacts")
 
@@ -1700,11 +1691,26 @@ def test_list_artifacts_404_when_evaluation_unknown(monkeypatch) -> None:  # noq
 
 
 def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
-    _override_conn(_conn_with_fetchone({"id": "ev_test123"}))
-    monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.stream_object",
-        lambda key: iter([b"artifact content"]),
-    )
+    conn = _conn_with_fetchone({"id": "ev_test123"})
+    _override_conn(conn)
+    checkout_active = False
+
+    @contextmanager
+    def stream_db() -> Iterator[Database]:
+        nonlocal checkout_active
+        checkout_active = True
+        try:
+            yield Database(conn)
+        finally:
+            checkout_active = False
+
+    def stream_object(_key: str) -> Iterator[bytes]:
+        assert not checkout_active, "artifact download retained its database checkout"
+        yield b"artifact content"
+
+    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.stream_object", stream_object)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: True)
 
     response = client.get(
         "/v1/evaluations/ev_test123/artifacts/trial/result.json",
@@ -1715,10 +1721,28 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
     assert response.headers["content-disposition"] == 'attachment; filename="result.json"'
 
 
+def test_get_artifact_missing_object_returns_404(monkeypatch) -> None:  # noqa: ANN001
+    conn = _conn_with_fetchone({"id": "ev_test123"})
+    _override_conn(conn)
+
+    @contextmanager
+    def stream_db() -> Iterator[Database]:
+        yield Database(conn)
+
+    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    # The object does not exist in the backing Files store; the route must map that
+    # to a clean 404 up front rather than a 200 with a stream that fails mid-iteration.
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
+
+    response = client.get("/v1/evaluations/ev_test123/artifacts/trial/result.json")
+
+    assert response.status_code == 404
+
+
 def test_get_archive_missing(monkeypatch) -> None:  # noqa: ANN001
     _override_conn(_conn_with_fetchone(_archive_row()))
     presign = MagicMock(return_value="http://signed.example/archive")
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.presign_get", presign)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.presign_get", presign)
 
     response = client.get("/v1/evaluations/ev_test123/archive")
 
@@ -1745,7 +1769,7 @@ def test_get_archive_building() -> None:
     assert response.json()["download"] is None
 
 
-def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN001
+def test_get_archive_ready_streams_download(monkeypatch) -> None:  # noqa: ANN001
     built_at = datetime(2026, 6, 15, 12, tzinfo=UTC)
     _override_conn(
         _conn_with_fetchone(
@@ -1757,10 +1781,6 @@ def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN0
             )
         )
     )
-    monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.presign_get",
-        lambda key: f"http://signed.example/{key}",
-    )
 
     response = client.get("/v1/evaluations/ev_test123/archive")
 
@@ -1769,33 +1789,11 @@ def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN0
     assert body["status"] == "ready"
     assert body["size_bytes"] == 2048
     assert body["built_at"] == "2026-06-15T12:00:00Z"
+    # Downloads always stream through the API now (presigned direct-to-storage URLs are gone).
     assert body["download"] == {
-        "method": "GET",
-        "url": "http://signed.example/evaluations/ev_test123/results.tar.gz",
-    }
-
-
-def test_get_archive_ready_uses_api_download_when_backend_cannot_presign(monkeypatch) -> None:  # noqa: ANN001
-    _override_conn(
-        _conn_with_fetchone(
-            _archive_row(
-                archive_status="ready",
-                archive_object_key="evaluations/ev_test123/results.tar.gz",
-            )
-        )
-    )
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.can_presign_get", lambda: False)
-    presign = MagicMock()
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.presign_get", presign)
-
-    response = client.get("/v1/evaluations/ev_test123/archive")
-
-    assert response.status_code == 200
-    assert response.json()["download"] == {
         "method": "GET",
         "url": "/evaluations/ev_test123/archive/download",
     }
-    assert presign.call_count == 0
 
 
 def test_get_archive_404_when_evaluation_unknown() -> None:
@@ -1838,16 +1836,12 @@ def test_post_archive_ready_without_force_returns_existing_download(monkeypatch)
         )
     )
     _override_conn(conn)
-    monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.presign_get",
-        lambda _key: "http://signed.example/archive",
-    )
 
     response = client.post("/v1/evaluations/ev_test123/archive", json={})
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
-    assert response.json()["download"]["url"] == "http://signed.example/archive"
+    assert response.json()["download"]["url"] == "/evaluations/ev_test123/archive/download"
     assert len(conn.cursor.return_value.__enter__.return_value.execute.call_args_list) == 1
 
 
@@ -1905,26 +1899,6 @@ def test_logs_include_ng_run_for_gym(monkeypatch, tmp_path) -> None:  # noqa: AN
     assert "meta" in lines
     assert "--- ng_run.log ---" in lines
     assert "harbor_agent ready" in lines
-
-
-def test_logs_include_switchyard_capture_files(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "gym_daytona_work_dir", str(tmp_path))
-    work = tmp_path / "ev_test123" / "switchyard"
-    work.mkdir(parents=True)
-    (work / "switchyard.log").write_text("switchyard accepted request\n")
-    (work / "switchyard.previous.log").write_text("switchyard restarted once\n")
-    (work / "status.json").write_text('{"availableReplicas":1}\n')
-    _override_conn(_conn_with_fetchone(_eval_row(status="running", runtime="gym_daytona", backend_handle="ev_test123")))
-
-    response = client.get("/v1/evaluations/ev_test123/logs", params={"tail_lines": 20})
-
-    assert response.status_code == 200
-    lines = response.json()["lines"]
-    assert "--- switchyard.log ---" in lines
-    assert "switchyard accepted request" in lines
-    assert "--- switchyard.previous.log ---" in lines
-    assert "switchyard restarted once" in lines
-    assert "--- status.json ---" in lines
 
 
 def test_log_stream_returns_sse_snapshot() -> None:
@@ -1997,102 +1971,6 @@ class _FakeBackend:
     def summarize(self, result):  # noqa: ANN001, ANN201
         # Mirrors the real backends: reduce the (Harbor-shaped) result envelope.
         return summarize_harbor_result(result)
-
-
-class _FakeSwitchyardProvisioner:
-    def __init__(self) -> None:
-        self.provisions: list[dict] = []
-        self.captures: list[str] = []
-        self.capture_session_ids: list[tuple[str, ...]] = []
-        self.deletes: list[str] = []
-        self.delete_artifact_roots: list[Path | None] = []
-        self.ensure_ready_checks: list[str] = []
-        self.ensure_ready_error: Exception | None = None
-        self.ensure_ready_errors: list[Exception | None] = []
-        self.invoke_persist_lease = False
-        self.provision_error: Exception | None = None
-
-    def provision(
-        self,
-        *,
-        evaluation_id: str,
-        profile_id: str,
-        raw_config,
-        credential_env,
-        artifact_root: Path,
-        benchmark_run_id=None,
-        persist_lease=None,
-    ) -> SwitchyardRender:
-        self.provisions.append(
-            {
-                "evaluation_id": evaluation_id,
-                "profile_id": profile_id,
-                "raw_config": dict(raw_config),
-                "credential_env": dict(credential_env),
-                "benchmark_run_id": benchmark_run_id,
-            }
-        )
-        render = render_switchyard(
-            evaluation_id=evaluation_id,
-            profile_id=profile_id,
-            config=SwitchyardProfileConfig.model_validate(raw_config),
-            credential_env=credential_env,
-            artifact_root=artifact_root,
-            benchmark_run_id=benchmark_run_id,
-            external_allowed_hosts=("switchyard.example.com",),
-        )
-        write_switchyard_artifacts(render, artifact_root)
-        if self.invoke_persist_lease and persist_lease is not None:
-            persist_lease(render.lease)
-        if self.provision_error is not None:
-            raise self.provision_error
-        return render
-
-    def capture(  # noqa: ANN001, ANN201
-        self, lease, artifact_root: Path, *, final=False, session_ids=()
-    ):
-        self.captures.append(lease.name)
-        self.capture_session_ids.append(tuple(session_ids))
-        root = artifact_root / "switchyard"
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "switchyard.log").write_text("switchyard routed request\n")
-        (root / "status.json").write_text('{"ready":true}\n')
-        if final:
-            sessions = {
-                session_id: {
-                    "session_id": session_id,
-                    "total_calls": 1,
-                    "total_prompt_tokens": 1,
-                    "total_cached_tokens": 0,
-                    "total_cache_creation_tokens": 0,
-                    "total_completion_tokens": 1,
-                    "models": {
-                        "nvidia/unknown-test-model": {
-                            "calls": 1,
-                            "prompt_tokens": 1,
-                            "cached_tokens": 0,
-                            "cache_creation_tokens": 0,
-                            "completion_tokens": 1,
-                        }
-                    },
-                }
-                for session_id in session_ids
-            }
-            (root / "routing_stats_final.json").write_text(json.dumps({"requests": 1, "sessions": sessions}) + "\n")
-        return None
-
-    def delete(self, lease, artifact_root: Path | None = None) -> None:  # noqa: ANN001
-        self.deletes.append(lease.name)
-        self.delete_artifact_roots.append(artifact_root)
-
-    def ensure_ready(self, lease) -> None:  # noqa: ANN001
-        self.ensure_ready_checks.append(lease.name)
-        if self.ensure_ready_errors:
-            if error := self.ensure_ready_errors.pop(0):
-                raise error
-            return
-        if self.ensure_ready_error is not None:
-            raise self.ensure_ready_error
 
 
 def _worker_conn(row: dict | None) -> tuple[MagicMock, list]:
@@ -2326,6 +2204,45 @@ def _fake_download(pack: Path):  # noqa: ANN202
     return _dl
 
 
+def test_status_read_failure_tears_down_before_syncing_artifacts(monkeypatch: pytest.MonkeyPatch) -> None:
+    order: list[str] = []
+    backend = _FakeBackend()
+    backend.status_error = RuntimeError("result.json unreadable")
+    original_teardown = backend.teardown
+
+    def teardown(handle: LaunchHandle) -> None:
+        order.append("teardown")
+        original_teardown(handle)
+
+    monkeypatch.setattr(backend, "teardown", teardown)
+    snapshot = {
+        "schema_version": "scaled-evals-execution-inputs-v1",
+        "captured_at": NOW.isoformat(),
+        "evaluation": {"framework": "harbor", "framework_version": None, "runtime": "gym_daytona"},
+        "task": {"slug": "task"},
+        "profiles": {},
+        "credentials": {},
+        "submission_identity": {},
+    }
+    conn, executed = _worker_conn(
+        _eval_row(status="queued", runtime="gym_daytona", execution_snapshot=snapshot, image_ref="")
+    )
+    worker = _dispatcher(backend, conn)
+    for method, step in (
+        ("_write_provenance_warn", "provenance"),
+        ("_sync_artifacts_warn", "sync"),
+        ("_build_archive_warn", "archive"),
+    ):
+        monkeypatch.setattr(worker, method, lambda *args, _step=step, **kwargs: order.append(_step))
+
+    worker.run("ev_test123")
+
+    assert order == ["teardown", "provenance", "sync", "archive"]
+    assert backend.teardown_handles == [LaunchHandle(backend="fake", external_id="hbr-ev-test123")]
+    params = _status_update_params(executed, "failed")
+    assert any("status read failed: result.json unreadable" in str(value) for value in params)
+
+
 # ---------- gym_daytona backend (no Daytona account) ----------------------
 
 
@@ -2336,3 +2253,16 @@ def _fake_download(pack: Path):  # noqa: ANN202
 
 
 # ---------- result summary + status reader (no cluster) -------------------
+
+
+def test_dispatch_fails_retired_switchyard_evaluation_without_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = _FakeBackend()
+    conn, executed = _worker_conn(_eval_row(status="queued", switchyard_profile_id="cfg_sw"))
+    worker = _dispatcher(backend, conn)
+    for method in ("_sync_artifacts_warn", "_build_archive_warn", "_write_provenance_warn"):
+        monkeypatch.setattr(worker, method, lambda *args, **kwargs: None)
+
+    worker.run("ev_test123")
+
+    assert not backend.launched
+    assert "switchyard_unsupported" in _status_update_params(executed, "failed")

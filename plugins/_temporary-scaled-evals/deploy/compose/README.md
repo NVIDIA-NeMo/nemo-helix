@@ -5,8 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Compose stack (Phase 1)
 
-The NeMo Platform API serving the scaled-evals plugin, both scaled-evals
-workers, and the substrate they need — Postgres, RustFS, BuildKit, and a
+The NeMo Helix API serving the scaled-evals plugin and the substrate it needs — Postgres, RustFS, BuildKit, and a
 registry. Enough to take a task from `create` to a built, pushed image.
 
 ```bash
@@ -24,9 +23,7 @@ health verdict rather than reading `docker compose ps`.
 
 | Service | Image | Purpose |
 |---|---|---|
-| `api` | built here | `nemo services run --services scaled-evals` on `:8080` |
-| `build-worker` | same image | claims finalize jobs, drives BuildKit, pushes |
-| `dispatch-worker` | same image | claims evaluations (no runtime enabled in Phase 1) |
+| `api` | built here | `nemo services run --services scaled-evals` on `:8080`; its Jobs controller runs builds and evaluations as subprocess Platform Jobs |
 | `postgres` | `postgres:16` | platform database; scaled-evals lives in its `scaled_evals` schema |
 | `rustfs` | `rustfs/rustfs` | S3-compatible object store on `:9000` |
 | `buildkit` | `moby/buildkit` | builds task Dockerfiles; no published port |
@@ -36,7 +33,7 @@ Everything is published on `127.0.0.1` only.
 
 ## The app image is not the platform's image
 
-`docker/Dockerfile.nmp-api` is the platform's real image. It builds through
+`docker/Dockerfile.nhx-api` is the platform's real image. It builds through
 bake, from base images in internal registries, and installs the
 `functional-services` dependency group — which does not include this ephemeral
 plugin. Building it locally is neither quick nor plugin-aware.
@@ -48,12 +45,12 @@ build about a minute instead of tens of minutes.
 
 Three packages are installed that the plugin does not depend on:
 
-- `nmp-platform-runner` serves the plugin. It is not in the plugin's dependency
+- `nhx-platform-runner` serves the plugin. It is not in the plugin's dependency
   closure because the runner loads plugins, not the reverse.
-- `nemo-platform-ext` implements the `nemo` CLI imported by the SDK wrapper.
+- `nemo-helix-ext` implements the `nemo` CLI imported by the SDK wrapper.
   Release wheels vendor it, but a source-checkout image must install it.
-- `nmp-entities` is needed only because the runner's startup banner imports
-  `nmp.core.entities.config` unconditionally without declaring the dependency.
+- `nhx-entities` is needed only because the runner's startup banner imports
+  `nhx.core.entities.config` unconditionally without declaring the dependency.
   A full `uv sync` hides that; a scoped install does not.
 
 ## Differences from the standalone scaled-evals compose stack
@@ -74,7 +71,7 @@ Colima VM that runs it — refuse, so rootlesskit dies with
 `fork/exec /proc/self/exe: permission denied`. The documented workaround
 installs an AppArmor profile on the host, which a dev stack should not require.
 
-The hosted-cluster, identity-provider, Switchyard, and Gym environment blocks are
+The hosted-cluster, identity-provider, and Gym environment blocks are
 not carried over; none are part of Phase 1.
 
 ## scaled-evals' own database
@@ -96,7 +93,7 @@ database of its own; it is kept because the vendored SQL is unqualified, so the
 schema is what makes the same code safe against a shared database later.
 
 **Upgrading an existing stack:** the database was previously named
-`nemo_platform`, so a volume from before this change has no `scaled_evals`
+`nemo_helix`, so a volume from before this change has no `scaled_evals`
 database and the API will report that it does not exist. `docker compose down -v`
 for a clean start, or `createdb` it by hand.
 
@@ -138,9 +135,9 @@ that same `.env`; the notable knobs:
 
 ## Known gaps
 
-- `dispatch_worker`, `gym_dispatch`, and `sandbox_k8s_dispatch` report
-  `skipped: disabled` in `readyz`. The dispatch worker process runs, but no
-  evaluation runtime is enabled in Phase 1, so evaluations do not execute here.
-- Both workers are silent: upstream `queue_worker.py` has no log statements, so
-  a working build produces no output. Confirm progress through task status or
-  the `service_heartbeats` table rather than `docker compose logs`.
+- `gym_dispatch` and `sandbox_k8s_dispatch` report `skipped: disabled` in
+  `readyz`. No evaluation runtime is enabled in Phase 1, so evaluations do not
+  execute here.
+- Builds are quiet: upstream `queue_worker.py` has no log statements, so a
+  working build produces no output. Confirm progress through task status
+  rather than `docker compose logs`.

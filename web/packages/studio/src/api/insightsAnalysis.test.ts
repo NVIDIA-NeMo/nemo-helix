@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import { insightsCreateAnalyzeJob } from '@nemo/sdk/generated/insights/insights-analysis-jobs';
+import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import {
   agentsFromTrajectories,
   isQualifiedModelRef,
@@ -19,12 +20,19 @@ vi.mock('@nemo/sdk/generated/insights/insights-analysis-configs', async (importO
   insightsGetAnalysisConfig: vi.fn(),
 }));
 
-vi.mock('@nemo/sdk/generated/insights/insights-analysis-jobs', () => ({
-  insightsCreateAnalyzeJob: vi.fn(),
+vi.mock('@nemo/sdk/generated/insights/insights-analysis-runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/insights/insights-analysis-runs')>()),
+  insightsCreateAnalysisRun: vi.fn(),
+}));
+
+vi.mock('@studio/api/agents/agentEthos', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/api/agents/agentEthos')>()),
+  readAgentEthos: vi.fn(),
 }));
 
 const getConfig = vi.mocked(insightsGetAnalysisConfig);
-const createJob = vi.mocked(insightsCreateAnalyzeJob);
+const readEthos = vi.mocked(readAgentEthos);
+const createRun = vi.mocked(insightsCreateAnalysisRun);
 
 const config = (overrides: Record<string, unknown> = {}) => ({
   name: 'email-security-triage',
@@ -76,11 +84,11 @@ describe('agentsFromTrajectories', () => {
 });
 
 describe('triggerInsightsRun', () => {
-  it('creates an analyze job with the config model pair', async () => {
+  it('creates an analysis run with the config model pair', async () => {
     getConfig.mockResolvedValue(config());
-    createJob.mockResolvedValue({
-      name: 'analyze-job-1',
-      spec: { agent: '', default_model: '', fast_model: '' },
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
     });
 
     const result = await triggerInsightsRun('default', 'email-security-triage');
@@ -88,16 +96,34 @@ describe('triggerInsightsRun', () => {
     expect(result).toEqual({
       agent: 'email-security-triage',
       status: 'started',
-      jobName: 'analyze-job-1',
+      jobName: 'analysis-run-1',
     });
-    expect(createJob).toHaveBeenCalledWith('default', {
-      description: expect.stringContaining('email-security-triage'),
-      spec: {
-        agent: 'email-security-triage',
-        default_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
-        fast_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
-      },
+    expect(createRun).toHaveBeenCalledWith('default', {
+      agent: 'email-security-triage',
+      default_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
+      fast_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
     });
+  });
+
+  it('uses a config the caller already holds instead of fetching it', async () => {
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
+    });
+
+    const result = await triggerInsightsRun(
+      'default',
+      'email-security-triage',
+      {},
+      { storedConfig: config({ fast_model: 'default/held-fast' }) }
+    );
+
+    expect(result.status).toBe('started');
+    expect(getConfig).not.toHaveBeenCalled();
+    expect(createRun).toHaveBeenCalledWith(
+      'default',
+      expect.objectContaining({ fast_model: 'default/held-fast' })
+    );
   });
 
   it('reports not-enabled when the agent has no analysis config', async () => {
@@ -107,7 +133,36 @@ describe('triggerInsightsRun', () => {
 
     expect(result.status).toBe('not-enabled');
     expect(result.message).toContain('nemo insights analysis enable --agent recipe-agent');
-    expect(createJob).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+  });
+
+  it('does not report started when the run has no backing job', async () => {
+    getConfig.mockResolvedValue(config());
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1' },
+    });
+
+    const result = await triggerInsightsRun('default', 'email-security-triage');
+
+    expect(result).toMatchObject({ status: 'error' });
+    expect(result.message).toContain('analysis-run-1');
+  });
+
+  it('surfaces an AnalysisRun submission error detail', async () => {
+    getConfig.mockResolvedValue(config());
+    createRun.mockRejectedValue(
+      new AxiosError('Request failed', 'ERR_BAD_RESPONSE', undefined, undefined, {
+        status: 503,
+        statusText: '',
+        data: { detail: { error: 'Could not reach the Jobs service.', run: 'analysis-run-1' } },
+        headers: {},
+        config: { headers: new AxiosHeaders() },
+      })
+    );
+
+    const result = await triggerInsightsRun('default', 'email-security-triage');
+
+    expect(result).toMatchObject({ status: 'error', message: 'Could not reach the Jobs service.' });
   });
 
   it('reports not-enabled when the stored config has no model pair', async () => {
@@ -116,7 +171,7 @@ describe('triggerInsightsRun', () => {
     const result = await triggerInsightsRun('default', 'email-security-triage');
 
     expect(result.status).toBe('not-enabled');
-    expect(createJob).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
   });
 
   it('surfaces a non-404 config failure as an error', async () => {
@@ -127,9 +182,41 @@ describe('triggerInsightsRun', () => {
     expect(result).toMatchObject({ status: 'error', message: 'Failed to get analysis config.' });
   });
 
+  it('sends the agent ethos with the run', async () => {
+    getConfig.mockResolvedValue(config());
+    readEthos.mockResolvedValue('# Ethos');
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
+    });
+
+    const result = await triggerInsightsRun('default', 'email-security-triage');
+
+    expect(result.status).toBe('started');
+    expect(readEthos).toHaveBeenCalledWith('default', 'email-security-triage');
+    expect(createRun).toHaveBeenCalledWith(
+      'default',
+      expect.objectContaining({ ethos: '# Ethos' })
+    );
+  });
+
+  it('runs without ethos when the agent has none', async () => {
+    getConfig.mockResolvedValue(config());
+    readEthos.mockResolvedValue(undefined);
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
+    });
+
+    const result = await triggerInsightsRun('default', 'email-security-triage');
+
+    expect(result.status).toBe('started');
+    expect(createRun.mock.calls[0][1]).not.toHaveProperty('ethos');
+  });
+
   it('surfaces a job creation failure as an error', async () => {
     getConfig.mockResolvedValue(config());
-    createJob.mockRejectedValue(new Error('boom'));
+    createRun.mockRejectedValue(new Error('boom'));
 
     const result = await triggerInsightsRun('default', 'email-security-triage');
 
@@ -153,9 +240,9 @@ describe('isQualifiedModelRef', () => {
 describe('triggerInsightsRun overrides', () => {
   it('replaces the stored pair with the supplied overrides', async () => {
     getConfig.mockResolvedValue(config());
-    createJob.mockResolvedValue({
-      name: 'analyze-job-1',
-      spec: { agent: '', default_model: '', fast_model: '' },
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
     });
 
     await triggerInsightsRun('default', 'email-security-triage', {
@@ -163,22 +250,20 @@ describe('triggerInsightsRun overrides', () => {
       fast_model: 'default/override-fast',
     });
 
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createRun).toHaveBeenCalledWith(
       'default',
       expect.objectContaining({
-        spec: expect.objectContaining({
-          default_model: 'default/override-slow',
-          fast_model: 'default/override-fast',
-        }),
+        default_model: 'default/override-slow',
+        fast_model: 'default/override-fast',
       })
     );
   });
 
   it('keeps the stored value for a blank override half', async () => {
     getConfig.mockResolvedValue(config());
-    createJob.mockResolvedValue({
-      name: 'analyze-job-1',
-      spec: { agent: '', default_model: '', fast_model: '' },
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
     });
 
     await triggerInsightsRun('default', 'email-security-triage', {
@@ -186,22 +271,20 @@ describe('triggerInsightsRun overrides', () => {
       fast_model: 'default/override-fast',
     });
 
-    expect(createJob).toHaveBeenCalledWith(
+    expect(createRun).toHaveBeenCalledWith(
       'default',
       expect.objectContaining({
-        spec: expect.objectContaining({
-          default_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
-          fast_model: 'default/override-fast',
-        }),
+        default_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
+        fast_model: 'default/override-fast',
       })
     );
   });
 
   it('lets an override supply a pair the stored config is missing', async () => {
     getConfig.mockResolvedValue(config({ default_model: '', fast_model: '' }));
-    createJob.mockResolvedValue({
-      name: 'analyze-job-1',
-      spec: { agent: '', default_model: '', fast_model: '' },
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
     });
 
     const result = await triggerInsightsRun('default', 'email-security-triage', {
@@ -221,7 +304,7 @@ describe('triggerInsightsRun overrides', () => {
 
     expect(result.status).toBe('error');
     expect(result.message).toContain('workspace/name format');
-    expect(createJob).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
   });
 
   it('rejects an unqualified ref that came from the stored config', async () => {
@@ -231,23 +314,23 @@ describe('triggerInsightsRun overrides', () => {
 
     expect(result.status).toBe('error');
     expect(result.message).toContain('workspace/name format');
-    expect(createJob).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
   });
 });
 
 describe('triggerInsightsRuns', () => {
   it('applies the overrides to every agent', async () => {
     getConfig.mockImplementation(async (_workspace, agent) => config({ agent }));
-    createJob.mockResolvedValue({
-      name: 'analyze-job-1',
-      spec: { agent: '', default_model: '', fast_model: '' },
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
     });
 
     await triggerInsightsRuns('default', ['a', 'b'], { default_model: 'default/override-slow' });
 
-    expect(createJob).toHaveBeenCalledTimes(2);
-    for (const call of createJob.mock.calls) {
-      expect(call[1].spec.default_model).toBe('default/override-slow');
+    expect(createRun).toHaveBeenCalledTimes(2);
+    for (const call of createRun.mock.calls) {
+      expect(call[1].default_model).toBe('default/override-slow');
     }
   });
 
@@ -256,9 +339,9 @@ describe('triggerInsightsRuns', () => {
       if (agent === 'missing') throw axiosErrorWithStatus(404);
       return config({ agent });
     });
-    createJob.mockResolvedValue({
-      name: 'analyze-job-1',
-      spec: { agent: '', default_model: '', fast_model: '' },
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
     });
 
     const results = await triggerInsightsRuns('default', ['a', 'missing', 'b']);

@@ -6,7 +6,7 @@
 // and oidc-client-ts — and therefore Node builtins — into the vendor bundle
 // every plugin loads. The mutation comes off `host.sdk.platform` instead.
 
-import { usePlatformSdk } from '@agent-hardener/api/platform';
+import { useHelixSdk } from '@agent-hardener/api/platform';
 import { useToast } from '@agent-hardener/host';
 import { CJobCancellableStatuses, FormModal, getErrorMessage } from '@nemo/common';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
@@ -18,7 +18,7 @@ import { FC, MouseEvent, useState } from 'react';
 interface CancelJobButtonProps {
   workspace: string;
   jobName: string;
-  /** `PlatformJobStatus` from the platform SDK, kept loose to avoid a value import. */
+  /** `HelixJobStatus` from the platform SDK, kept loose to avoid a value import. */
   jobStatus?: string;
   compact?: boolean;
 }
@@ -34,7 +34,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const toast = useToast();
   const queryClient = useQueryClient();
-  const { useJobsCancelJob, getJobsGetJobQueryKey, getJobsListJobsQueryKey } = usePlatformSdk();
+  const { useJobsCancelJob, getJobsGetJobQueryKey, getJobsListJobsQueryKey } = useHelixSdk();
 
   const { mutateAsync, isPending } = useJobsCancelJob({
     mutation: {

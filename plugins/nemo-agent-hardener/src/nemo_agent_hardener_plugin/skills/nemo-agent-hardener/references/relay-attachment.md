@@ -21,12 +21,15 @@ for Route B (BYO).
    import nemo_relay
    from nemo_relay.plugin import PluginConfig
 
-   await nemo_relay.plugin.initialize(PluginConfig())
+   async with nemo_relay.plugin.activate(PluginConfig()):
+       ...  # serve requests inside the block (e.g. a FastAPI lifespan)
    ```
 
    The empty `PluginConfig()` means "discover": Relay layers `/etc/nemo-relay/plugins.toml` over
    it — and that uploaded file is how Agent Hardener's guardrails *and* its ATOF telemetry sink reach
-   the victim. Skip this call and every guardrail is inert.
+   the victim. Skip this call and every guardrail is inert. The activation owns the plugin host:
+   keep it open for the process lifetime. A bare `await nemo_relay.plugin.initialize(...)` that
+   discards its result lets the host shut down, and telemetry is then lost at random.
 
 2. **Put Relay in the tool path.** Per framework:
 
@@ -39,9 +42,7 @@ for Route B (BYO).
 
    Install the matching extra in the image: `pip install "nemo-relay[langgraph]"` (or
    `[langchain]`). `create_tool_node` preserves ToolNode's argument injection, parallel
-   execution, error handling, `Command` results and interrupts; on a nemo-relay wheel that
-   predates it (0.8.x from PyPI) the equivalent is
-   `ToolNode(TOOLS, awrap_tool_call=NemoRelayMiddleware().awrap_tool_call)`.
+   execution, error handling, `Command` results and interrupts.
 
 3. *(Attribution, recommended)* pass Relay's callback handler on each invocation so a turn's
    scopes nest under one root:
@@ -64,10 +65,10 @@ Two checks, two moments; each failure names its cause:
 
 | Error text contains | It means | Fix |
 |---|---|---|
-| "wrote no Relay telemetry … the file was never created" | Relay never started | obligation 1: `initialize(PluginConfig())` at startup |
+| "wrote no Relay telemetry … the file was never created" | Relay never started | obligation 1: `plugin.activate(PluginConfig())` at startup, held open |
 | "still empty after 30s; Relay is not attached, or its ATOF sink is disabled" | Relay started but emits nothing | the uploaded `plugins.toml` was not discovered — check `/etc/nemo-relay/` exists and is writable in the image |
 | "emitted no new Relay events in 30s (N older records present)" | this invocation went untraced | the serving path bypasses the instrumented agent object |
 | "Relay recorded no tool call at all" (after round 1) | tool calls bypass Relay — the trap above | obligation 2: `create_tool_node` / middleware in the tool path |
 
 A worked, verified example of all of it: `plugins/nemo-agent-hardener/examples/langgraph-victim/` —
-`agent.py` (tools node wiring) and `server.py` (`initialize()` + per-request scope + callback).
+`agent.py` (tools node wiring) and `server.py` (`activate()` + per-request scope + callback).

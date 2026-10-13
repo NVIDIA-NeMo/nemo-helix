@@ -1,25 +1,41 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { HF_DATASETS_API } from '@studio/api/datasets/huggingFaceRows';
+import { filesetRowsQueryOptions } from '@studio/api/datasets/filesetParquetRows';
 import type { CustomizationTemplateDataset } from '@studio/constants/customizationTemplates';
-import { server } from '@studio/mocks/node';
 import { fetchAndConvertDataset } from '@studio/util/huggingFaceDataset';
 import { QueryClient } from '@tanstack/react-query';
-import { http, HttpResponse } from 'msw';
 
-const rowsHandler = (makeRow: () => Record<string, unknown> = () => ({ text: 'x' })) =>
-  http.get(HF_DATASETS_API, ({ request }) => {
-    const length = Number(new URL(request.url).searchParams.get('length') ?? '0');
-    return HttpResponse.json({ rows: Array.from({ length }, () => ({ row: makeRow() })) });
-  });
+// Reading and decoding rows is covered in filesetParquetRows.test.ts. This suite owns the
+// conversion contract: which rows land in which partition, and when that is refused.
+vi.mock('@studio/api/datasets/filesetParquetRows', () => ({
+  filesetRowsQueryOptions: vi.fn(),
+}));
+
+const rowsOptions = vi.mocked(filesetRowsQueryOptions);
+
+type RowsParams = Parameters<typeof filesetRowsQueryOptions>[0];
+
+/** Serves `rows` (or a failure) in place of a real fileset read. */
+const serveRows = (rows: Record<string, unknown>[] | Error) => {
+  rowsOptions.mockImplementation(
+    (params: RowsParams) =>
+      ({
+        queryKey: ['test-rows', params.filesetName, params.rowCount],
+        queryFn: () => (rows instanceof Error ? Promise.reject(rows) : Promise.resolve(rows)),
+      }) as never
+  );
+};
+
+const repeat = (count: number, row: Record<string, unknown> = { text: 'x' }) =>
+  Array.from({ length: count }, () => ({ ...row }));
 
 const dataset = (
   overrides: Partial<CustomizationTemplateDataset> = {}
 ): CustomizationTemplateDataset => ({
-  hfDataset: 'owner/ds',
-  hfConfig: 'default',
-  hfSplit: 'train',
+  hfRepoId: 'owner/ds',
+  sourceFilesetName: 'owner-ds-hf',
+  filePattern: /train-.*\.parquet$/,
   trainingRowCount: 3,
   validationRowCount: 2,
   name: 'test-dataset',
@@ -31,13 +47,19 @@ describe('fetchAndConvertDataset', () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     queryClient = new QueryClient();
   });
 
   it('splits converted rows into training and validation JSONL blobs', async () => {
-    server.use(rowsHandler(() => ({ text: 'hello' })));
+    serveRows(repeat(5, { text: 'hello' }));
 
-    const { training, validation } = await fetchAndConvertDataset(queryClient, dataset(), () => {});
+    const { training, validation } = await fetchAndConvertDataset(
+      queryClient,
+      'ws',
+      dataset(),
+      () => {}
+    );
 
     const trainingLines = (await training.text()).split('\n');
     const validationLines = (await validation.text()).split('\n');
@@ -46,33 +68,54 @@ describe('fetchAndConvertDataset', () => {
     expect(JSON.parse(trainingLines[0])).toEqual({ text: 'hello' });
   });
 
-  it('reports progress up to the total requested row count', async () => {
-    server.use(rowsHandler());
+  it('reads the source fileset for exactly the rows both partitions need', async () => {
+    serveRows(repeat(5));
+
+    await fetchAndConvertDataset(queryClient, 'ws', dataset(), () => {});
+
+    expect(rowsOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: 'ws',
+        filesetName: 'owner-ds-hf',
+        rowCount: 5,
+      })
+    );
+  });
+
+  it('walks the caller through each phase', async () => {
+    serveRows(repeat(5));
     const onProgress = vi.fn();
 
-    await fetchAndConvertDataset(queryClient, dataset(), onProgress);
+    await fetchAndConvertDataset(queryClient, 'ws', dataset(), onProgress);
 
-    expect(onProgress).toHaveBeenLastCalledWith(5, 5);
+    expect(onProgress.mock.calls.map(([phase]) => phase)).toEqual(['locating', 'converting']);
+  });
+
+  it('forwards download progress from the fileset read', async () => {
+    rowsOptions.mockImplementation(
+      (params: RowsParams) =>
+        ({
+          queryKey: ['test-rows'],
+          queryFn: () => {
+            params.onDownloadProgress?.(512, 1024);
+            return Promise.resolve(repeat(5));
+          },
+        }) as never
+    );
+    const onProgress = vi.fn();
+
+    await fetchAndConvertDataset(queryClient, 'ws', dataset(), onProgress);
+
+    expect(onProgress).toHaveBeenCalledWith('downloading', 512, 1024);
   });
 
   it('does not backfill a dropped training row from the validation partition', async () => {
-    server.use(
-      http.get(HF_DATASETS_API, () =>
-        HttpResponse.json({
-          rows: [
-            { row: { text: 'a' } },
-            { row: { drop: true } },
-            { row: { text: 'c' } },
-            { row: { text: 'd' } },
-            { row: { text: 'e' } },
-          ],
-        })
-      )
-    );
+    serveRows([{ text: 'a' }, { drop: true }, { text: 'c' }, { text: 'd' }, { text: 'e' }]);
 
     await expect(
       fetchAndConvertDataset(
         queryClient,
+        'ws',
         dataset({
           trainingRowCount: 3,
           validationRowCount: 2,
@@ -83,73 +126,21 @@ describe('fetchAndConvertDataset', () => {
     ).rejects.toThrow(/Not enough valid training rows: needed 3, found 2/);
   });
 
-  it('paginates in 100-row pages for large datasets', async () => {
-    let requests = 0;
-    server.use(
-      http.get(HF_DATASETS_API, ({ request }) => {
-        requests += 1;
-        const length = Number(new URL(request.url).searchParams.get('length') ?? '0');
-        return HttpResponse.json({ rows: Array.from({ length }, () => ({ row: { text: 'x' } })) });
-      })
-    );
-
-    await fetchAndConvertDataset(
-      queryClient,
-      dataset({ trainingRowCount: 150, validationRowCount: 50 }),
-      () => {}
-    );
-
-    expect(requests).toBe(2);
-  });
-
-  it('throws when Hugging Face responds with an error', async () => {
-    server.use(
-      http.get(HF_DATASETS_API, () => HttpResponse.json({ error: 'boom' }, { status: 500 }))
-    );
-
-    await expect(fetchAndConvertDataset(queryClient, dataset(), () => {})).rejects.toThrow(
-      /Failed to fetch dataset from Hugging Face/
-    );
-  });
-
-  it.each([
-    ['null', null],
-    ['undefined', undefined],
-    ['a string', 'not-a-row'],
-    ['an array', [1, 2]],
-  ])('throws when a 200 carries %s in place of a row object', async (_label, row) => {
-    server.use(http.get(HF_DATASETS_API, () => HttpResponse.json({ rows: [{ row }] })));
-
-    await expect(fetchAndConvertDataset(queryClient, dataset(), () => {})).rejects.toThrow(
-      /unexpected response shape/
-    );
-  });
-
   it('throws when no rows survive conversion', async () => {
-    server.use(rowsHandler());
+    serveRows(repeat(5));
 
     await expect(
-      fetchAndConvertDataset(queryClient, dataset({ convertRow: () => null }), () => {})
+      fetchAndConvertDataset(queryClient, 'ws', dataset({ convertRow: () => null }), () => {})
     ).rejects.toThrow(/Not enough valid training rows/);
   });
 
   it('throws when valid training rows are short of the configured count', async () => {
-    let served = 0;
-    server.use(
-      http.get(HF_DATASETS_API, ({ request }) => {
-        const length = Number(new URL(request.url).searchParams.get('length') ?? '0');
-        const rows = Array.from({ length }, () => {
-          const valid = served < 2;
-          served += 1;
-          return { row: valid ? { text: 'x' } : { drop: true } };
-        });
-        return HttpResponse.json({ rows });
-      })
-    );
+    serveRows([{ text: 'x' }, { text: 'x' }, { drop: true }]);
 
     await expect(
       fetchAndConvertDataset(
         queryClient,
+        'ws',
         dataset({
           trainingRowCount: 3,
           validationRowCount: 0,
@@ -161,41 +152,35 @@ describe('fetchAndConvertDataset', () => {
   });
 
   it('throws when validation is requested but yields no rows', async () => {
-    let served = 0;
-    server.use(
-      http.get(HF_DATASETS_API, ({ request }) => {
-        const length = Number(new URL(request.url).searchParams.get('length') ?? '0');
-        const rows = Array.from({ length }, () => {
-          const valid = served < 3;
-          served += 1;
-          return { row: valid ? { text: 'x' } : { drop: true } };
-        });
-        return HttpResponse.json({ rows });
-      })
-    );
+    serveRows([{ text: 'x' }, { text: 'x' }, { text: 'x' }, { drop: true }, { drop: true }]);
 
     await expect(
       fetchAndConvertDataset(
         queryClient,
+        'ws',
         dataset({ convertRow: (row) => (row.drop ? null : row) }),
         () => {}
       )
     ).rejects.toThrow(/Not enough valid validation rows/);
   });
 
-  it('retries a transient failure and then succeeds', async () => {
-    let calls = 0;
-    server.use(
-      http.get(HF_DATASETS_API, ({ request }) => {
-        calls += 1;
-        if (calls === 1) return HttpResponse.json({ error: 'temporary' }, { status: 503 });
-        const length = Number(new URL(request.url).searchParams.get('length') ?? '0');
-        return HttpResponse.json({ rows: Array.from({ length }, () => ({ row: { text: 'x' } })) });
-      })
-    );
+  /** Parquet INT64 columns decode as BigInt, which plain JSON.stringify refuses. */
+  it('serializes BigInt row values instead of throwing on them', async () => {
+    serveRows(repeat(5, { id: 9007199254740993n, text: 'x' }));
 
-    const { training } = await fetchAndConvertDataset(queryClient, dataset(), () => {});
-    expect((await training.text()).split('\n')).toHaveLength(3);
-    expect(calls).toBe(2);
+    const { training } = await fetchAndConvertDataset(queryClient, 'ws', dataset(), () => {});
+
+    expect(JSON.parse((await training.text()).split('\n')[0])).toEqual({
+      id: '9007199254740993',
+      text: 'x',
+    });
+  });
+
+  it('surfaces a failure from the fileset read', async () => {
+    serveRows(new Error('No dataset file matched /train-.*/.'));
+
+    await expect(fetchAndConvertDataset(queryClient, 'ws', dataset(), () => {})).rejects.toThrow(
+      /No dataset file matched/
+    );
   });
 });

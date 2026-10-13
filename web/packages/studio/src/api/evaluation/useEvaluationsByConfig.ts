@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEvaluatorListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import type { EvaluatorListEvaluateJobsParams } from '@nemo/sdk/generated/evaluator/schema';
+import { useEvalsListEvaluateJobs } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import type { EvalsListEvaluateJobsParams } from '@nemo/sdk/generated/evals/schema';
 
 /**
  * Custom hook to fetch evaluation jobs filtered by configuration.
@@ -18,13 +18,13 @@ import type { EvaluatorListEvaluateJobsParams } from '@nemo/sdk/generated/evalua
  */
 export const useEvaluationsByConfig = (
   workspace: string,
-  config: Partial<EvaluatorListEvaluateJobsParams>
+  config: Partial<EvalsListEvaluateJobsParams>
 ) => {
-  const params: EvaluatorListEvaluateJobsParams = {
+  const params: EvalsListEvaluateJobsParams = {
     page: config.page,
     page_size: config.page_size,
     sort: 'created_at',
   };
 
-  return useEvaluatorListEvaluateJobs(workspace, params);
+  return useEvalsListEvaluateJobs(workspace, params);
 };

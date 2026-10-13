@@ -3,18 +3,18 @@
 
 from types import SimpleNamespace
 
-import nemo_platform_plugin.jobs.image as platform_image
-import nmp.automodel.images as automodel_images
-import nmp.customization_common.service.images as shared_images
+import nemo_helix_plugin.jobs.image as platform_image
+import nhx.automodel.images as automodel_images
+import nhx.customization_common.service.images as shared_images
 import pytest
-from nmp.automodel.config import AutomodelConfig
-from nmp.automodel.images import (
+from nhx.automodel.config import AutomodelConfig
+from nhx.automodel.images import (
     TRAINING_IMAGE_NAME,
     get_automodel_qualified_image,
     get_tasks_image,
     get_training_image,
 )
-from nmp.customization_common.service.images import CUSTOMIZER_TASKS_IMAGE_NAME
+from nhx.customization_common.service.images import CUSTOMIZER_TASKS_IMAGE_NAME
 
 
 @pytest.fixture
@@ -54,8 +54,8 @@ def test_automodel_full_image_override(monkeypatch, platform_config):
         automodel_images,
         "config",
         AutomodelConfig(
-            tasks_image="my-registry/nemo-platform-dev/nmp-customizer-tasks:dev",
+            tasks_image="my-registry/nemo-helix-dev/nhx-customizer-tasks:dev",
         ),
     )
 
-    assert get_tasks_image() == "my-registry/nemo-platform-dev/nmp-customizer-tasks:dev"
+    assert get_tasks_image() == "my-registry/nemo-helix-dev/nhx-customizer-tasks:dev"

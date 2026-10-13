@@ -5,7 +5,8 @@
 # Verify the shared-kernel OpenSandbox profile (cluster default OCI runtime).
 #
 # Checks: server Ready + Secret, /health, create sandbox, Running,
-# empty runtimeClassName, shared-kernel match (uname -r == node kernel), cleanup.
+# empty runtimeClassName, shared-kernel match (uname -r == node kernel),
+# Harbor mounts, cleanup.
 #
 # Usage:
 #   ./shared-kernel.sh

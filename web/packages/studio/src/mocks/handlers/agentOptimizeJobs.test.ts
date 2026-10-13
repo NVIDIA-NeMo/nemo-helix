@@ -5,7 +5,7 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 
 const listOptimizeJobs = (filter?: unknown, workspace = 'default') => {
   const url = new URL(
-    `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${workspace}/jobs/optimize`,
+    `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/${workspace}/jobs/run-strategy`,
     window.location.origin
   );
   if (filter !== undefined) url.searchParams.set('filter', JSON.stringify(filter));
@@ -59,7 +59,7 @@ describe('mock optimize jobs handler', () => {
 
   it('rejects a filter that is not valid JSON', async () => {
     const url = new URL(
-      `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/default/jobs/optimize`,
+      `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/default/jobs/run-strategy`,
       window.location.origin
     );
     url.searchParams.set('filter', '{not json');

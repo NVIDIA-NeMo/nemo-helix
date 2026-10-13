@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Testing Guide for NeMo Platform
+# Testing Guide for NeMo Helix
 
-This document describes the testing strategy, structure, and best practices for the NeMo Platform repository.
+This document describes the testing strategy, structure, and best practices for the NeMo Helix repository.
 
 ## Table of Contents
 
@@ -121,7 +121,7 @@ def test_create_and_fetch_entity(client, db_session):
 **Characteristics**:
 
 - Start the platform via `nemo services run` (real process, real ports)
-- Hit services with an external HTTP client (the NeMoPlatform SDK)
+- Hit services with an external HTTP client (the typed `NemoClient`)
 - Test startup machinery, port binding, config resolution, and cross-service workflows
 - Slower than integration tests (tens of seconds for startup) but faster than Docker/K8s e2e
 
@@ -135,7 +135,7 @@ make test-e2e
 uv run --frozen pytest e2e -v --run-e2e
 
 # If you already have services running
-NMP_BASE_URL=http://localhost:8080 uv run --frozen pytest e2e -v --run-e2e
+NHX_BASE_URL=http://localhost:8080 uv run --frozen pytest e2e -v --run-e2e
 ```
 
 **Prerequisites**: `make bootstrap` must have been run. The harness spawns `nemo services run`
@@ -310,23 +310,25 @@ def test_file_upload_api(client):
 
 **E2E Test** (focuses on complete user workflow):
 ```python
-def test_data_pipeline(sdk: NeMoPlatform):
+def test_data_pipeline(client: NemoClient):
     """Test complete data pipeline from upload to results."""
     # User uploads training data
-    file = sdk.files.upload(workspace="default", file=training_data)
+    files = FilesClient.from_client(client)
+    files.create_fileset(workspace="default", body=CreateFilesetRequest(name="training-data"))
+    files.upload_file(workspace="default", name="training-data", path="train.jsonl", content=training_data)
 
     # User creates and runs training job
-    job = sdk.jobs.create(
+    job = JobsClient.from_client(client).create_job(
         workspace="default",
-        spec={"input_file": file.id, "model": "gpt"}
-    )
+        body=CreateHelixJobRequest(spec={"input_fileset": "default/training-data", "model": "gpt"}),
+    ).data()
 
     # Wait for job completion
-    wait_for_completion(sdk, job.id)
+    wait_for_completion(client, job.name)
 
     # User retrieves trained model
-    model = sdk.models.retrieve(job.spec.output.name)
-    assert model.status == "ready"
+    model = ModelsClient.from_client(client).get_model(workspace="default", name=job.spec["output"]["name"]).data()
+    assert model.name is not None
     # Tests the complete user journey
 ```
 
@@ -337,19 +339,19 @@ def test_data_pipeline(sdk: NeMoPlatform):
 ### Directory Structure
 
 ```
-nmp/
+nhx/
 ├── pytest.ini                    # Root pytest configuration
 ├── conftest.py                   # Shared fixtures for all tests
 ├── e2e/                          # E2E tests (testcontainers-based)
-│   ├── configs/                  # NeMo Platform configuration files
+│   ├── configs/                  # NeMo Helix configuration files
 │   ├── conftest.py               # E2E fixtures (backend, sdk, workspace)
 │   └── test_*.py                 # E2E test files
 ├── tests/                        # Root-level tests
 │   └── ...
 ├── packages/                     # Library packages
-│   ├── nmp_platform/             # Legacy platform task entrypoint package
+│   ├── nhx_platform/             # Legacy platform task entrypoint package
 │   │   └── tests/
-│   ├── nmp_common/
+│   ├── nhx_common/
 │   │   └── tests/                # Unit tests (primarily)
 │   ├── data_designer/
 │   │   └── tests/
@@ -414,7 +416,7 @@ make test-e2e
 uv run --frozen pytest e2e -v --run-e2e
 
 # E2E against an already-running instance
-NMP_BASE_URL=http://localhost:8080 uv run --frozen pytest e2e -v --run-e2e
+NHX_BASE_URL=http://localhost:8080 uv run --frozen pytest e2e -v --run-e2e
 
 # Regression tests
 make test-regression
@@ -433,8 +435,8 @@ uv run pytest -v -m canary
 
 ```bash
 # Test a specific package
-make test-package PACKAGE=nmp_common
-uv run pytest -v packages/nmp_common/tests/
+make test-package PACKAGE=nhx_common
+uv run pytest -v packages/nhx_common/tests/
 
 # Test a specific service
 make test-service SERVICE=guardrails
@@ -660,8 +662,10 @@ Available markers are defined in `pytest.ini`:
 For tests that make inference calls through the Inference Gateway, use mock provider mode to return controlled responses without real LLM backends:
 
 ```python
-from nmp.testing import ClientContext, add_mock_provider, create_test_client
-from nmp.core.inference_gateway.service import InferenceGatewayService
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nhx.testing import ClientContext, add_mock_provider, create_test_client
+from nhx.core.inference_gateway.service import InferenceGatewayService
 
 @pytest.fixture
 def mock_provider_clients() -> Generator[ClientContext, None, None]:
@@ -670,21 +674,21 @@ def mock_provider_clients() -> Generator[ClientContext, None, None]:
 
 def test_with_mock_llm(mock_provider_clients: ClientContext):
     provider = add_mock_provider(
-        mock_provider_clients.sdk,
+        mock_provider_clients.client,
         workspace="default",
         name="my-llm",
         mock_response_body={"choices": [{"message": {"content": "Hello!"}}]},
     )
-    response = mock_provider_clients.sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=provider.name,
+    response = InferenceGatewayClient.from_client(mock_provider_clients.client).provider_post(
         workspace="default",
-        body={"model": "test", "messages": []},
-    )
+        name=provider.name,
+        trailing_uri="v1/chat/completions",
+        body=JsonBody({"model": "test", "messages": []}),
+    ).data()
     assert response["choices"][0]["message"]["content"] == "Hello!"
 ```
 
-See [Mock Provider README](services/core/inference-gateway/src/nmp/core/inference_gateway/api/mock_provider/README.md) for complete documentation.
+See [Mock Provider README](services/core/inference-gateway/src/nhx/core/inference_gateway/api/mock_provider/README.md) for complete documentation.
 
 ## Troubleshooting
 

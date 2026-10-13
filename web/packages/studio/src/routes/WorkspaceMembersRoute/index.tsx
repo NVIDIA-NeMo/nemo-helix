@@ -7,11 +7,11 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import {
   getEntitiesListWorkspaceMembersQueryKey,
-  useEntitiesListWorkspaceMembers,
   useEntitiesRemoveWorkspaceMember,
 } from '@nemo/sdk/generated/platform/entity-store';
 import type { WorkspaceMember } from '@nemo/sdk/generated/platform/schema';
 import { Button, PageHeader, Stack } from '@nvidia/foundations-react-core';
+import { useWorkspaceMembers } from '@studio/api/entity-store/useWorkspaceMembers';
 import { queryClient } from '@studio/api/queryClient';
 import { MembersDataView } from '@studio/components/dataViews/MembersDataView';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
@@ -33,7 +33,7 @@ export const WorkspaceMembersRoute: FC = () => {
   const [removingMember, setRemovingMember] = useState<WorkspaceMember | null>(null);
 
   const { mutateAsync: removeMember } = useEntitiesRemoveWorkspaceMember();
-  const { data: membersData } = useEntitiesListWorkspaceMembers(workspace);
+  const { data: membersData, isForbidden } = useWorkspaceMembers(workspace);
 
   useBreadcrumbs({
     items: [
@@ -88,9 +88,12 @@ export const WorkspaceMembersRoute: FC = () => {
           }
           slotDescription={MEMBERS_ROUTE_HEADER_DESCRIPTION}
           slotActions={
-            <Button color="brand" onClick={openAdd}>
-              Add Member
-            </Button>
+            // Without read access there is nothing to add members to from here.
+            isForbidden ? undefined : (
+              <Button color="brand" onClick={openAdd}>
+                Add Member
+              </Button>
+            )
           }
         />
 

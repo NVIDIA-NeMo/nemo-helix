@@ -20,8 +20,8 @@ from nemo_agent_hardener_plugin.config import (
     read_env_file,
     write_env_file,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.secrets.client import SecretsClient
 
 
 def resolve_inference_key(config: AgentHardenerConfig) -> tuple[str | None, str]:

@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob, EvaluateAgentSpec
 from nemo_agents_plugin.refs import AgentRef
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.refs import FilesetRef
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.refs import FilesetRef
 
 
 @pytest.mark.asyncio
@@ -42,7 +42,7 @@ async def test_compile_produces_single_cpu_step() -> None:
     assert step["config"]["eval_config"] == "config.yml"
     assert step["config"]["eval_config_fileset"] == "nemo-agent-eval-calc"
 
-    from nemo_platform_plugin.jobs.constants import (
+    from nemo_helix_plugin.jobs.constants import (
         DEFAULT_JOB_STORAGE_PATH,
         EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
         PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
@@ -98,7 +98,7 @@ def test_resolve_eval_config_fileset_downloads_via_sdk(tmp_path: Path, ctx: JobC
     manager.download_from_url.side_effect = _fake_download
 
     with (
-        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager) as manager_cls,
     ):
@@ -120,7 +120,7 @@ def test_resolve_eval_config_fileset_without_sdk_raises(tmp_path: Path, ctx: Job
     with pytest.raises(Exception) as exc:
         with job._resolve_eval_config(spec, ctx=ctx, sdk=None):
             pass
-    assert "sdk" in str(exc.value).lower()
+    assert "platform client" in str(exc.value)
 
 
 def test_resolve_output_fileset_uploads_on_clean_exit(tmp_path: Path, ctx: JobContext) -> None:
@@ -129,7 +129,7 @@ def test_resolve_output_fileset_uploads_on_clean_exit(tmp_path: Path, ctx: JobCo
     manager = MagicMock()
 
     with (
-        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager) as manager_cls,
     ):
@@ -237,7 +237,7 @@ def test_resolve_eval_config_fileset_tempdir_lands_under_ctx_ephemeral(tmp_path:
     manager.download_from_url.side_effect = _fake_download
 
     with (
-        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager),
     ):

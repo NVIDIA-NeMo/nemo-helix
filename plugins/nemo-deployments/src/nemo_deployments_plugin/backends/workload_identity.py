@@ -9,9 +9,9 @@ from typing import overload
 
 from nemo_deployments_plugin.backends.labels import deployment_key
 from nemo_deployments_plugin.entities import DeploymentConfig
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.auth.workload_delegations import WorkloadDelegationLookupScope, WorkloadDelegationScope
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationLookupScope, WorkloadDelegationScope
+from nemo_helix_plugin.auth.workload_identity import (
     WorkloadIdentityConfigError,
     is_workload_identity_token_exchange_enabled,
 )
@@ -37,7 +37,7 @@ def workload_identity_activation_error(
     except WorkloadIdentityConfigError as exc:
         return str(exc)
     if not token_exchange_enabled:
-        return "workload_identity requires auth.oidc.workload_token_exchange_enabled to be enabled"
+        return "workload_identity requires auth.oidc.workload to be configured"
     if auth_context is None:
         return "workload_identity requires deployment auth_context for on-behalf-of delegation"
     return None

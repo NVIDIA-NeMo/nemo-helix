@@ -67,7 +67,7 @@ Use this only when it matches an established pattern for that area of the app.
 
 ## 4. Runtime injection (FastAPI Studio service)
 
-**File:** `services/studio/src/nmp/studio/env_mappings.py`
+**File:** `services/studio/src/nhx/studio/env_mappings.py`
 
 Add an `EnvMapping` in `ENV_MAPPINGS` (keep the feature-flag block grouped):
 

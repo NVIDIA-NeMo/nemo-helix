@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""NeMo Platform Intake integration.
+"""NeMo Helix Intake integration.
 
 Post-run ATIF upload is handled directly by dispatch: each finished job creates
 its run's Experiment (one per benchmark run) and POSTs the trials' ATIF

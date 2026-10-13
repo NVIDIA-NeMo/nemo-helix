@@ -54,7 +54,7 @@ describe('WorkspaceDashboardRoute', () => {
       expect(await screen.findByText('Welcome to NeMo Studio')).toBeInTheDocument();
       expect(
         screen.getByText(
-          'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Platform jobs.'
+          'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Helix jobs.'
         )
       ).toBeInTheDocument();
     });

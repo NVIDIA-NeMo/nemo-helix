@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+harbor[opensandbox]==0.20.0
+# Pinned exactly: NemoOpenSandboxEnvironment is qualified against this SDK release.
+opensandbox==0.1.16

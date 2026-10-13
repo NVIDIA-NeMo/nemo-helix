@@ -3,14 +3,14 @@
 
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { FC } from 'react';
 
 interface StatusLogsContentProps {
   workspace: string;
   jobName: string;
   /** When provided, logs poll while the job runs and stop once it's terminal. */
-  jobStatus?: PlatformJobStatus;
+  jobStatus?: HelixJobStatus;
 }
 
 export const StatusLogsContent: FC<StatusLogsContentProps> = ({

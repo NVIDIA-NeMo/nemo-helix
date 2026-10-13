@@ -17,8 +17,8 @@ from nemo_example_plugin.types.payloads import (
     CreateExampleItemRequest,
     UpdateExampleItemRequest,
 )
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError
 
 BASE = "http://test:8000"
 WS = "default"

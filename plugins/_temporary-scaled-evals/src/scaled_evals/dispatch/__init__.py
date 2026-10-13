@@ -21,9 +21,9 @@ runtime capabilities. :mod:`scaled_evals.dispatch.worker` owns the generic
 dispatch lifecycle.
 
 Trigger model: ``POST /evaluations`` durably inserts ``status='queued'`` and
-returns. The out-of-process ``scaled-evals-dispatch-worker`` process claims
-``queued`` / ``provisioning`` / ``running`` rows with ``FOR UPDATE SKIP LOCKED``
-and calls :class:`Dispatcher` to launch, poll, resume, and write terminal status.
+returns. The API submits a Platform Job for the row (the Jobs controller
+resubmits it if that fails), and the Job calls :class:`Dispatcher` to launch,
+poll, resume, and write terminal status.
 """
 
 from scaled_evals.dispatch.gym import (

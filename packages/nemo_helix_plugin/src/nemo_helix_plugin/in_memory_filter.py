@@ -1,0 +1,218 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""In-memory FilterRepository: evaluate a filter tree against Python objects.
+
+A peer of ``SQLAlchemyFilterRepository`` — same filter tree, same ``apply``
+front door, different executor. Bind an entity and run ``operation.apply(repo)``
+to get a ``bool`` instead of a SQL expression.
+"""
+
+import operator
+from datetime import datetime
+from typing import Any, Callable, Dict, List
+
+from nemo_helix_plugin.filter_ops import ElemMatchCondition, FilterOperator, FilterRepository
+
+# Sentinel distinguishing "field/key is absent" from an explicit None value.
+_MISSING = object()
+
+
+class InMemoryFilterRepository(FilterRepository):
+    """Evaluate a filter tree against one in-memory entity, returning ``bool``.
+
+    Bind an entity (mirrors ``SQLAlchemyFilterRepository`` binding a model), then
+    run ``operation.apply(repo)``. The entity may be a mapping or an object: base
+    fields resolve as attributes/keys, and ``data.<dotted>`` fields walk the
+    nested ``data`` mapping.
+
+    Semantics are plain Python, NOT a byte-for-byte mirror of the SQL backends:
+
+    - Values are compared by native Python type. There is no JSON-to-text
+      coercion, so ``data.score`` (stored int ``5``) does not match the string
+      ``"5"``, and ``$like``/``$in``/``$nin`` see the real value.
+    - Absent fields (missing key/attr) and explicit ``None`` are equivalent and
+      satisfy only ``$eq None`` (standard SQL three-valued NULL logic, which both
+      SQLite and PostgreSQL share).
+    - ``$like`` is a case-insensitive substring test; ``%`` and ``_`` are literal
+      characters, NOT SQL wildcards.
+
+    Where the SQL backends disagree with each other (JSON boolean text is
+    ``"1"/"0"`` on SQLite but ``"true"/"false"`` on PostgreSQL; SQLite casts
+    non-numeric text to ``0.0`` while PostgreSQL errors), this path follows
+    neither. Realistic callers (e.g. job-status filtering in the jobs dispatcher)
+    compare strings, numbers, and datetimes, where native and SQL semantics agree.
+    """
+
+    def __init__(self, entity: Any):
+        self.entity = entity
+
+    def _value(self, field: str) -> Any:
+        """Resolve ``field`` on the bound entity (``_MISSING`` if absent).
+
+        Mirrors ``SQLAlchemyFilterRepository._get_column``: a plain attribute/key,
+        or a ``data.<dotted>`` walk through the nested ``data`` mapping.
+        """
+        if _has_attr(self.entity, field):
+            return _get_attr(self.entity, field, _MISSING)
+        if field.startswith("data."):
+            data = _get_attr(self.entity, "data", _MISSING)
+            return _walk_json_path(data, field.split(".")[1:])
+        raise ValueError(f"Field '{field}' does not exist on {type(self.entity).__name__}")
+
+    def eq(self, field: str, value: Any) -> bool:
+        return _compare(self._value(field), FilterOperator.EQ, value)
+
+    def like(self, field: str, value: str) -> bool:
+        return _compare(self._value(field), FilterOperator.LIKE, value)
+
+    def lt(self, field: str, value: Any) -> bool:
+        return _compare(self._value(field), FilterOperator.LT, value)
+
+    def lte(self, field: str, value: Any) -> bool:
+        return _compare(self._value(field), FilterOperator.LTE, value)
+
+    def gt(self, field: str, value: Any) -> bool:
+        return _compare(self._value(field), FilterOperator.GT, value)
+
+    def gte(self, field: str, value: Any) -> bool:
+        return _compare(self._value(field), FilterOperator.GTE, value)
+
+    def in_op(self, field: str, values: List[Any]) -> bool:
+        return _compare(self._value(field), FilterOperator.IN, values)
+
+    def nin(self, field: str, values: List[Any]) -> bool:
+        return _compare(self._value(field), FilterOperator.NIN, values)
+
+    def starts_with(self, field: str, prefix: str) -> bool:
+        return _compare(self._value(field), FilterOperator.STARTS_WITH, prefix)
+
+    def ends_with(self, field: str, suffix: str) -> bool:
+        return _compare(self._value(field), FilterOperator.ENDS_WITH, suffix)
+
+    def contains(self, field: str, value: Any) -> bool:
+        """Array membership: some scalar element of the list at ``field`` equals ``value`` by JSON type."""
+        return self.elem_match(field, [ElemMatchCondition(None, FilterOperator.EQ, value)])
+
+    def elem_match(self, field: str, conditions: List[ElemMatchCondition]) -> bool:
+        field_value = self._value(field)
+        if not isinstance(field_value, (list, tuple)):
+            return False
+        return any(_element_matches(element, conditions) for element in field_value)
+
+    def has_key(self, field: str, key: str) -> bool:
+        field_value = self._value(field)
+        return isinstance(field_value, dict) and field_value.get(key) is not None
+
+    def and_op(self, operations: List[Any]) -> bool:
+        return all(operations)
+
+    def or_op(self, operations: List[Any]) -> bool:
+        return any(operations)
+
+    def not_op(self, operation: Any) -> bool:
+        return not operation
+
+
+_ORDERED: Dict[FilterOperator, Callable[[Any, Any], bool]] = {
+    FilterOperator.LT: operator.lt,
+    FilterOperator.LTE: operator.le,
+    FilterOperator.GT: operator.gt,
+    FilterOperator.GTE: operator.ge,
+}
+
+
+def _compare(field_value: Any, op: FilterOperator, value: Any) -> bool:
+    """Apply one comparison to an already-resolved value (``_MISSING`` when absent)."""
+    if op == FilterOperator.EQ:
+        # Absent collapses to None, so only `$eq None` matches a missing/null field.
+        return (None if field_value is _MISSING else field_value) == value
+    # Every other comparison is false on absent/None (SQL `NULL <op> x` is NULL); in
+    # particular `$nin` is NOT simply `not $in`.
+    if field_value is _MISSING or field_value is None:
+        return False
+    if op == FilterOperator.LIKE:
+        return str(value).lower() in str(field_value).lower()
+    if op == FilterOperator.STARTS_WITH:
+        return str(field_value).startswith(value)
+    if op == FilterOperator.ENDS_WITH:
+        return str(field_value).endswith(value)
+    if op == FilterOperator.IN:
+        return field_value in value
+    if op == FilterOperator.NIN:
+        return field_value not in value
+    if isinstance(field_value, datetime) and isinstance(value, str):
+        value = datetime.fromisoformat(value).replace(tzinfo=None)
+    try:
+        return _ORDERED[op](field_value, value)
+    except TypeError:
+        # Incomparable operands (e.g. text vs number) — no match.
+        return False
+
+
+def _element_matches(element: Any, conditions: List[ElemMatchCondition]) -> bool:
+    if conditions[0].key is None:
+        if isinstance(element, (dict, list, tuple)):
+            return False
+        return all(_compare_element(element, c.operator, c.value) for c in conditions)
+    if not isinstance(element, dict):
+        return False
+    return all(_compare_element(element.get(c.key, _MISSING), c.operator, c.value) for c in conditions)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _json_equal(element: Any, value: Any) -> bool:
+    """Equality by JSON type: ``true`` is not ``1`` and ``"1"`` is not ``1``, but ``3`` equals ``3.0``."""
+    if element is _MISSING or element is None or value is None:
+        return element in (_MISSING, None) and value is None
+    if isinstance(element, bool) or isinstance(value, bool):
+        return isinstance(element, bool) and isinstance(value, bool) and element == value
+    if _is_number(value):
+        return _is_number(element) and element == value
+    return isinstance(element, str) and element == value
+
+
+def _compare_element(element: Any, op: FilterOperator, value: Any) -> bool:
+    """One comparison against an array element (or one of its fields), by JSON type."""
+    if op == FilterOperator.EQ:
+        return _json_equal(element, value)
+    if element is _MISSING or element is None:
+        return False
+    if op in (FilterOperator.IN, FilterOperator.NIN):
+        found = any(_json_equal(element, v) for v in value if v is not None)
+        return found if op == FilterOperator.IN else not found
+    if _is_number(value):
+        return _is_number(element) and _compare(element, op, value)
+    return isinstance(element, str) and _compare(element, op, value)
+
+
+def _has_attr(entity: Any, field: str) -> bool:
+    """Whether `field` is a key (mapping) or attribute (object) of `entity`."""
+    if isinstance(entity, dict):
+        return field in entity
+    return hasattr(entity, field)
+
+
+def _get_attr(entity: Any, field: str, default: Any) -> Any:
+    """Read `field` as a key (mapping) or attribute (object), else `default`."""
+    if isinstance(entity, dict):
+        return entity.get(field, default)
+    return getattr(entity, field, default)
+
+
+def _walk_json_path(data: Any, path: List[str]) -> Any:
+    """Navigate a dotted `data.<a>.<b>` path through nested mappings.
+
+    Mirrors the SQL JSON subscript walk. A missing key (or descending into a
+    non-mapping) yields ``_MISSING`` so callers apply SQL null semantics.
+    """
+    current = data
+    for key in path:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return _MISSING
+    return current

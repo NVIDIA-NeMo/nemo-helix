@@ -1,0 +1,122 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Fixtures for the ``nemo intake`` / ``nemo experiments`` plugin CLI tests.
+
+The plugin Typer apps are driven directly with a ``CLIContext`` whose client is
+a ``NemoClient`` over ``httpx.MockTransport``, so every test pins the exact
+HTTP method, path, query string, and JSON body a command sends.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Literal
+
+import httpx
+import pytest
+import typer
+from click.testing import Result
+from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_ext.cli.core.help_formatter import NhxGroup
+from nemo_helix_ext.config.config import ConfigParams
+from nemo_helix_plugin.client.client import NemoClient
+from nhx.intake.cli import ExperimentsCLI, IntakeCLI
+from typer.testing import CliRunner
+
+
+@dataclass
+class Recorder:
+    """Records requests and answers each with the next scripted response."""
+
+    responses: list[httpx.Response]
+    requests: list[httpx.Request] = field(default_factory=list)
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if not self.responses:
+            raise AssertionError(f"unexpected request {request.method} {request.url}")
+        return self.responses.pop(0)
+
+    @property
+    def last(self) -> httpx.Request:
+        return self.requests[-1]
+
+
+def _mounted(app: typer.Typer, name: str) -> typer.Typer:
+    """Mount a plugin app under an ``NhxGroup`` root, the way ``nemo`` mounts ``nemo.cli`` groups.
+
+    The host restyles every command it hands out (help, usage errors), so the
+    plugin's own plain ``typer.Typer`` apps are tested as users see them.
+    """
+    root = typer.Typer(cls=NhxGroup, add_completion=False)
+
+    @root.callback()
+    def _root() -> None:
+        pass
+
+    root.add_typer(app, name=name)
+    return root
+
+
+@dataclass
+class CliHarness:
+    """Runs a plugin Typer app against a scripted typed client."""
+
+    app: typer.Typer
+    name: str
+
+    def run(
+        self,
+        args: list[str],
+        responses: list[httpx.Response] | None = None,
+        *,
+        workspace: str | None = "default",
+        input: str | None = None,
+        output_format: Literal["table", "json", "yaml", "markdown", "csv", "raw"] = "json",
+    ) -> tuple[Result, Recorder]:
+        recorder = Recorder(list(responses or []))
+        client = NemoClient(
+            base_url="http://test",
+            workspace=workspace,
+            http_client=httpx.Client(transport=httpx.MockTransport(recorder)),
+        )
+        overrides: ConfigParams = {"base_url": "http://test", "output_format": output_format}
+        state = CLIContext(overrides=overrides, _client=client)
+        result = CliRunner().invoke(_mounted(self.app, self.name), [self.name, *args], obj=state, input=input)
+        return result, recorder
+
+    @staticmethod
+    def page(items: list[dict], page: int, total_pages: int, *, page_size: int = 1) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": items,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "current_page_size": len(items),
+                    "total_pages": total_pages,
+                    "total_results": total_pages * page_size,
+                },
+            },
+        )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    config_file = tmp_path / "config.yaml"
+    config_file.touch()
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(config_file))
+    for var in ("NHX_ACCESS_TOKEN", "NHX_BASE_URL", "NHX_WORKSPACE"):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(scope="session")
+def experiments_cli() -> CliHarness:
+    return CliHarness(ExperimentsCLI().get_cli(), ExperimentsCLI.name)
+
+
+@pytest.fixture(scope="session")
+def intake_cli() -> CliHarness:
+    return CliHarness(IntakeCLI().get_cli(), IntakeCLI.name)

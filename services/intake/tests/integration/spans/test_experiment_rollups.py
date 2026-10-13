@@ -420,3 +420,120 @@ def _atif_body(
 
 def _iso(value: datetime) -> str:
     return value.isoformat().replace("+00:00", "Z")
+
+
+def test_failed_evaluator_results_are_counted_not_inferred(client: TestClient) -> None:
+    """A FAILED result keeps the attempt at 0 in the mean (as a missing row always did) but also
+    surfaces it: the evaluation rollup reports ``failed_count`` and the session lists the evaluator."""
+    evaluation_id = "rollup-failed-rows"
+    group_id = _ensure_group(client)
+    created = client.post(
+        EVALUATIONS,
+        json={
+            "name": evaluation_id,
+            "experiment_group_id": group_id,
+            "dataset_name": "rollup-dataset",
+            "dataset_version": "v1",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    seeds: list[tuple[str, str, float | None]] = [
+        ("run-ok", "case-ok", 1.0),  # scored -> 1.0
+        ("run-judge-down", "case-judge-down", None),  # no reward; the judge records a FAILED row below
+    ]
+    for index, (run_id, test_case_id, score) in enumerate(seeds):
+        response = client.post(
+            ATIF_INGEST,
+            json=_atif_body(
+                started_at=started_at,
+                evaluation_id=evaluation_id,
+                run_id=run_id,
+                test_case_id=test_case_id,
+                score=score,
+                cost_usd=0.10,
+                latency_ms=1000,
+                offset_seconds=index * 10,
+            ),
+        )
+        assert response.status_code == 201, response.text
+
+    failed_session = f"{evaluation_id}-run-judge-down-case-judge-down"
+    posted = client.post(
+        "/apis/intake/v2/workspaces/default/evaluator-results",
+        json={
+            "span_id": "root-span-unknown",
+            "session_id": failed_session,
+            "name": "reward",
+            "data_type": "NUMERIC",
+            "status": "FAILED",
+            "comment": "judge endpoint unreachable",
+        },
+    )
+    assert posted.status_code == 201, posted.text
+
+    evaluation = client.get(f"{EVALUATIONS}/{evaluation_id}").json()
+    reward = evaluation["aggregate_scores"]["reward"]
+    # Same arithmetic as a missing row: mean = avg(1.0, 0) over 2 test cases ...
+    assert reward["count"] == 2
+    assert reward["mean"] == pytest.approx(0.5)
+    # ... but the failure is now a fact of the record, not an inference.
+    assert reward["failed_count"] == 1
+
+    sessions = client.get(f"{EVALUATIONS}/{evaluation_id}/sessions", params={"page_size": 50})
+    assert sessions.status_code == 200, sessions.text
+    by_session = {row["session_id"]: row for row in sessions.json()["data"]}
+    assert by_session[failed_session]["failed_evaluators"] == ["reward"]
+    assert by_session[failed_session]["evaluator_scores"] == {}
+    scored_session = f"{evaluation_id}-run-ok-case-ok"
+    assert by_session[scored_session]["failed_evaluators"] == []
+    assert by_session[scored_session]["evaluator_scores"] == {"reward": 1.0}
+
+
+def test_an_evaluator_that_failed_everywhere_still_appears_in_the_rollup(client: TestClient) -> None:
+    evaluation_id = "rollup-all-failed"
+    group_id = _ensure_group(client)
+    created = client.post(
+        EVALUATIONS,
+        json={
+            "name": evaluation_id,
+            "experiment_group_id": group_id,
+            "dataset_name": "rollup-dataset",
+            "dataset_version": "v1",
+        },
+    )
+    assert created.status_code == 201, created.text
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    response = client.post(
+        ATIF_INGEST,
+        json=_atif_body(
+            started_at=started_at,
+            evaluation_id=evaluation_id,
+            run_id="run-1",
+            test_case_id="case-1",
+            score=None,
+            cost_usd=0.10,
+            latency_ms=1000,
+            offset_seconds=0,
+        ),
+    )
+    assert response.status_code == 201, response.text
+    posted = client.post(
+        "/apis/intake/v2/workspaces/default/evaluator-results",
+        json={
+            "span_id": "root-span-unknown",
+            "session_id": f"{evaluation_id}-run-1-case-1",
+            "name": "judge.accuracy",
+            "data_type": "NUMERIC",
+            "status": "FAILED",
+        },
+    )
+    assert posted.status_code == 201, posted.text
+
+    evaluation = client.get(f"{EVALUATIONS}/{evaluation_id}").json()
+    # Before FAILED rows existed this evaluator would simply be absent from the response.
+    judge = evaluation["aggregate_scores"]["judge.accuracy"]
+    assert judge["count"] == 1
+    assert judge["mean"] == pytest.approx(0.0)
+    assert judge["failed_count"] == 1

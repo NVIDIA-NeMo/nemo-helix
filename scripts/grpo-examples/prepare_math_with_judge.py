@@ -12,7 +12,7 @@ the one thing they omit: an ``agent_ref`` on every row. Gym infers the agent fro
 Both sources are public HuggingFace datasets, so nothing here needs the internal GitLab
 dataset registry.
 
-    uv run --with datasets scripts/grpo-examples/prepare_math_with_judge.py --out-dir /tmp/mwj-dataset
+    uv run --no-project --with datasets scripts/grpo-examples/prepare_math_with_judge.py --out-dir /tmp/mwj-dataset
 
 Then upload the directory as a FileSet with ``purpose=dataset``.
 """

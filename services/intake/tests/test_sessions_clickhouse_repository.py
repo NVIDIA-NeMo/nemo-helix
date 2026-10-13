@@ -6,9 +6,9 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from nmp.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
-from nmp.intake.repository.clickhouse.session import ClickHouseSessionRepository, _session_detail_query
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
+from nhx.intake.repository.clickhouse.session import ClickHouseSessionRepository, _session_detail_query
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 
 
 class _Executor(ClickHouseExecutor):

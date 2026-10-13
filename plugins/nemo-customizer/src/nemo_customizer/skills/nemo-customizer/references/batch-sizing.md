@@ -84,6 +84,63 @@ Pick the path by whether the **base model fits in ~48 GB on one GPU** (LoRA or f
 
 Output type is **model** (full checkpoint), not adapter. Expect much longer runs than LoRA at the same batch. **Inference:** deploy `default/<output.name>` as a new model entity — full SFT does not hot-reload onto the base model's LoRA deployment.
 
+### Retrieval recipes (`bi_encoder` / `cross_encoder`)
+
+The tables above assume one sequence per sample. Retrieval samples cost more:
+`bi_encoder` encodes the query plus `retrieval.train_n_passages` passages (default
+5, so 6 sequences per sample) at `retrieval.query_max_length` /
+`retrieval.passage_max_length` (512 each) rather than `max_seq_length`.
+
+| Recipe | Default `micro` | Default GBS | `learning_rate` | Sequences per sample |
+|--------|----------------:|------------:|----------------:|---------------------:|
+| `bi_encoder` | 8 | 256 | `1e-5` | `1 + train_n_passages` |
+| `cross_encoder` | 8 | 128 | `3e-6` | `train_n_passages` |
+
+These are applied automatically for unset fields — do not copy them into the job
+JSON unless you intend to override.
+
+Measured on a 1B embedding model, LoRA rank 16, `train_n_passages` 5, 512/512
+query/passage, one 48 GB (47.37 GiB usable) GPU:
+
+| `micro` | Peak | Verdict |
+|--------:|-----:|---------|
+| 1 | 4.55 GiB | Wastes the card, and no in-batch negatives |
+| 8 | 28.3 GiB (range 14.8–28.3 over 20 steps) | **Default.** Real headroom for long batches |
+| 12 | 41.5 GiB (~87%) | **Maximum confirmed on 48 GB.** Allocator hits cache-flush retries |
+| 16, 32 | OOM | — |
+
+`micro` 12 pairs with **GBS 384**, not 256: `global_batch_size` must be divisible
+by `micro_batch_size × data_parallel_size`. It runs, but at 87% the caching
+allocator logs `memory allocation failed with OOM` warnings and frees cached
+blocks to continue — survivable, slower, and one long batch away from a hard OOM.
+Use it only when you want the wider in-batch negative pool and accept that risk.
+
+On 80 GB cards, `micro` 24 / GBS 384 is the analogous step up (untested here).
+
+Retrieval activations are ~6× a plain SFT sample at the same sequence length, so
+do **not** carry the LoRA tables above over to these recipes.
+
+Peak is also data-dependent: the collator pads to the longest sequence in the
+batch, so a batch of long passages spikes well above the average step. Leave
+real headroom rather than tuning to the first step that fits, and reach for
+`retrieval.do_gradient_checkpointing: true` (default `false`) before giving up
+`micro` — it trades step time for a large cut in activation memory, which is the
+right trade when `micro` is carrying in-batch-negative quality.
+
+**`micro_batch_size` is a quality knob for `bi_encoder`, not just a speed one.**
+The contrastive loss draws in-batch negatives from the local batch and gathers
+across data-parallel ranks, but **not** across gradient-accumulation steps. A
+`micro_batch_size` of 1 therefore trains against the mined negatives alone with
+no in-batch negatives at all, which is a much weaker signal — raising GBS does not
+compensate. When you hit OOM on a bi-encoder, prefer lowering
+`retrieval.train_n_passages` or the passage length before dropping `micro` below
+about 8. `cross_encoder` has no such coupling.
+
+The gather is across **data-parallel ranks**, so `micro` 8 on two GPUs gives the
+same 16-query negative pool as `micro` 16 on one — without either card paying the
+`micro` 16 activation bill. Scaling GPUs is the cheap way to widen negatives;
+`micro` is the expensive one.
+
 ### `max_seq_length` scaling
 
 Scale **`micro_batch_size`** from the 2048 tables (round down, minimum 1):
@@ -221,6 +278,6 @@ There is no `parallelism` block, no TP / PP / DP, no GBS divisibility math. Mult
 | Symptom | Action |
 |---------|--------|
 | CUDA OOM | Halve `per_device_train_batch_size` (keep effective batch via `gradient_accumulation_steps`); then lower `model.max_seq_length`; then drop `lora.rank` to 8 |
-| Missing `nmp-unsloth-training` image | Build/pull the Unsloth container image — see `references/troubleshooting.md` and `docker/unsloth/README.md` |
+| Missing `nhx-unsloth-training` image | Build/pull the Unsloth container image — see `references/troubleshooting.md` and `docker/unsloth/README.md` |
 | `Unsloth training requires platform.runtime: docker` (platform not using the Docker executor) | Start platform with `platform.runtime: docker` and a GPU execution profile; training runs in containers on that host's Docker daemon |
 | Loss not moving | Raise `learning_rate` one step (e.g. `5e-5` → `1e-4`); confirm `apply_chat_template` matches the data shape; check the LoRA `target_modules` covers the right layers (defaults are Unsloth's 7-module set) |

@@ -30,9 +30,10 @@ import os
 import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import jinja2
+import yaml
 
 # Marker written as the first line of every plugin-generated ``.dockerignore``
 # / ``Dockerfile``.  ``render_dockerignore`` and the CLI no-build path only
@@ -67,6 +68,43 @@ def is_plugin_managed(path: Path) -> bool:
     return first_line[0] in (DOCKERFILE_SENTINEL, DOCKERIGNORE_SENTINEL)
 
 
+def resolve_fabric_harness_install(agent_config: Path, *, python_version: str | None = None) -> tuple[str, bool, bool]:
+    """Return the Platform extra, Hermes isolation flag, and Pi (Node) harness flag."""
+    try:
+        payload = yaml.safe_load(agent_config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return "nemo-agents-plugin", False, False
+    if not isinstance(payload, Mapping):
+        return "nemo-agents-plugin", False, False
+
+    workflow = payload.get("workflow")
+    if isinstance(workflow, Mapping):
+        target_id = workflow.get("target_id")
+        if not isinstance(target_id, str):
+            return "nemo-agents-plugin", False, False
+        platform_extra = _FABRIC_WORKFLOW_INSTALLS.get(target_id, "nemo-agents-plugin")
+        install_hermes = False
+        install_pi = False
+    else:
+        harnesses = payload.get("harnesses")
+        default_harness = payload.get("default_harness")
+        selected = (
+            harnesses.get(default_harness)
+            if isinstance(harnesses, Mapping) and isinstance(default_harness, str)
+            else None
+        )
+        kind = selected.get("kind") if isinstance(selected, Mapping) else None
+        if not isinstance(kind, str):
+            return "nemo-agents-plugin", False, False
+        platform_extra = _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin")
+        install_hermes = kind in _HERMES_HARNESS_KINDS
+        install_pi = kind in _PI_HARNESS_KINDS
+    if python_version is not None and platform_extra == "nemo-agents-plugin-nooa":
+        if re.fullmatch(r"3\.(12|13)(?:\.\d+)?", python_version) is None:
+            raise ValueError(f"NOOA requires Python 3.12 or 3.13; got {python_version!r}. Set --python-version 3.13.")
+    return platform_extra, install_hermes, install_pi
+
+
 # -- Defaults ---------------------------------------------------------------
 
 _DEFAULTS: dict[str, str] = {
@@ -85,7 +123,7 @@ _DEFAULTS: dict[str, str] = {
     # resolves cleanly with ``uv pip install --prerelease=allow
     # 'nvidia-nat[most]==<ver>'`` against public PyPI.  Note: NAT does not
     # define an ``[all]`` extra — ``[most]`` is the comprehensive one
-    # (includes langchain / react-agent / wiki-search).
+    # (includes langchain and wiki-search).
     "nat_version": "1.8.0",
 }
 
@@ -97,7 +135,7 @@ _ENV_MAP: dict[str, str] = {
     "uv_version": "NEMO_AGENTS_UV_VERSION",
 }
 
-#: Local nemo-platform wheel to install instead of resolving the pinned contract
+#: Local nemo-helix wheel to install instead of resolving the pinned contract
 #: version. Set by an operator rather than a caller: it names a path on the build
 #: host, and packaging runs there for the CLI and the platform job alike.
 WHEEL_ENV = "NEMO_AGENTS_WHEEL"
@@ -105,9 +143,54 @@ WHEEL_ENV = "NEMO_AGENTS_WHEEL"
 #: Newest wheel in the checkout's ``dist``, so the value survives every rebuild.
 WHEEL_LATEST = "LATEST"
 
-PINNED_NEMO_RELAY_CLI_VERSION = "0.7.3"
-PINNED_NEMO_RELAY_INSTALLER_COMMIT = "40c5990361afc26ae8b901ff1f49c2b03ddd9ede"
-PINNED_NEMO_RELAY_INSTALLER_SHA256 = "ba2585a32e568643819992fa66b750004328351fce422b979d8c11cfc8bbfadb"
+#: ``WORKDIR`` of every rendered agent image.
+_IMAGE_WORKDIR = "/workspace"
+
+# Unreleased Hermes main with Relay 0.9 (NousResearch/hermes-agent#115343); pin a release once one includes it.
+PINNED_HERMES_COMMIT = "dccb84b92401234db294667ec203d3ac3dc1b87f"
+
+# Pi harness (nvidia.fabric.pi) is a Node/npm adapter: the image installs Node + the
+# npm adapter + Pi SDK peers additively, alongside the Python/Rust Fabric stack.
+# Pi 0.86.x requires Node >= 22.19.0.
+PINNED_NODE_MAJOR = "22"
+PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.4.0"
+# The adapter declares the Pi SDK as OPTIONAL peers, so they are installed explicitly.
+# Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.4.0 requires
+# ^0.86.0) so the explicitly-installed SDK matches what the adapter was built against.
+PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@^0.86.0 @earendil-works/pi-coding-agent@^0.86.0"
+# NeMo Relay 0.9 CLI must be on PATH for Relay-enabled Pi telemetry (ATIF/OTEL/OpenInference).
+PI_RELAY_CLI_SPEC = "nemo-relay-cli-bin>=0.9.0,<0.10.0"
+# The Relay Pi extension is shipped only in the NeMo-Relay source tree (not the
+# nemo-relay-cli-bin wheel or the npm adapter), so the image fetches it from a
+# pinned Relay 0.9 ref. Kept in lockstep with PI_RELAY_CLI_SPEC's 0.9.x range so
+# the gateway CLI and the extension it loads cannot drift.
+PI_RELAY_EXTENSION_REF = "0.9.0"
+PI_RELAY_EXTENSION_REPO = "https://github.com/NVIDIA/NeMo-Relay.git"
+# Path to the Pi extension package WITHIN the Relay source tree.
+_PI_RELAY_EXTENSION_SRC_SUBDIR = "crates/cli/assets/pi-extension"
+# Stable in-image location the extension is copied to; translator.py defaults
+# harness.settings["relay_extension_path"] here for Relay-enabled Pi agents.
+PI_RELAY_EXTENSION_PATH = "/opt/pi-relay-extension"
+# npm global prefix for the adapter; its descriptor is linked into the Fabric
+# share/ tree so the Rust core's `preinstalled` discovery finds it.
+_PI_NPM_PREFIX = "/opt/pi-adapter"
+
+_FABRIC_HARNESS_INSTALLS = {
+    "claude": "nemo-agents-plugin-claude",
+    "nvidia.fabric.claude": "nemo-agents-plugin-claude",
+    "codex": "nemo-agents-plugin-codex",
+    "nvidia.fabric.codex": "nemo-agents-plugin-codex",
+    "deepagents": "nemo-agents-plugin-deepagents",
+    "nooa-bench-agent": "nemo-agents-plugin-nooa",
+    "nvidia.fabric.nooa.bench-agent": "nemo-agents-plugin-nooa",
+    "nvidia.fabric.langchain.deepagents": "nemo-agents-plugin-deepagents",
+}
+_FABRIC_WORKFLOW_INSTALLS = {
+    "nvidia.nooa.coding-agent": "nemo-agents-plugin-nooa",
+    "nvidia.nooa.arc-solver": "nemo-agents-plugin-nooa",
+}
+_HERMES_HARNESS_KINDS = {"hermes", "nvidia.fabric.hermes"}
+_PI_HARNESS_KINDS = {"pi", "nvidia.fabric.pi"}
 
 # -- Jinja2 template --------------------------------------------------------
 
@@ -202,6 +285,13 @@ RUN if getent passwd 1000 >/dev/null; then userdel -rf "$(getent passwd 1000 | c
     if getent group  1000 >/dev/null; then groupdel -f "$(getent group  1000 | cut -d: -f1)" 2>/dev/null || true; fi && \\
     groupadd -g 1000 agent && useradd -u 1000 -g agent -m agent && \\
     chown -R agent:agent /workspace
+{% endif %}
+{% if sandbox_workdir_setup %}
+# The {{ sandbox_runtime }} supervisor requires its workload identity to be able to
+# write the WORKDIR itself; the contents keep their ownership.
+RUN {{ sandbox_workdir_setup }}
+{% endif %}
+{% if not allow_root %}
 USER agent
 {% endif %}
 ENTRYPOINT ["sh", "-c", "exec nat serve --config_file=$NAT_CONFIG_FILE --host 0.0.0.0"]
@@ -227,18 +317,9 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \\
     UV_LINK_MODE=copy
 
 RUN apt-get update && \\
-    apt-get install -y --no-install-recommends g++ gcc ca-certificates curl{% if sandbox_apt_packages %} {{ sandbox_apt_packages }}{% endif %} && \\
+    apt-get install -y --no-install-recommends g++ gcc ca-certificates curl{% if install_hermes or install_pi %} git{% endif %}{% if install_pi %} gnupg{% endif %}{% if sandbox_apt_packages %} {{ sandbox_apt_packages }}{% endif %} && \\
     update-ca-certificates && \\
     rm -rf /var/lib/apt/lists/*
-
-# Claude and Codex Relay integration launches this external CLI. Authenticate
-# the immutable installer before root execution; it separately verifies the
-# pinned release binary before placing it on the global runtime PATH.
-RUN curl -fsSL https://raw.githubusercontent.com/NVIDIA/NeMo-Relay/{{ pinned_nemo_relay_installer_commit }}/install.sh -o /tmp/install-nemo-relay.sh && \\
-    echo "{{ pinned_nemo_relay_installer_sha256 }}  /tmp/install-nemo-relay.sh" | sha256sum -c - && \\
-    NEMO_RELAY_VERSION={{ pinned_nemo_relay_cli_version }} sh /tmp/install-nemo-relay.sh --install-dir /usr/local/bin && \\
-    rm /tmp/install-nemo-relay.sh && \\
-    nemo-relay --version
 
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
@@ -254,17 +335,61 @@ COPY ./ /workspace
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \\
     . /workspace/.venv/bin/activate && \\
-    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-platform[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
-      "nemo-relay=={{ pinned_nemo_relay_cli_version }}" . && \\
+    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[{{ platform_extra }}]"{% else %}"nemo-helix[{{ platform_extra }}]=={{ contract_version }}"{% endif %} . && \\
     chmod -R a+rX /opt/uv /workspace/.venv
 {% else %}
-# The plugin owns the supported Fabric adapter and harness dependency set.
+# Install the release-matched NeMo Agents runtime and selected harness.
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \\
     . /workspace/.venv/bin/activate && \\
-    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-platform[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
-      "nemo-relay=={{ pinned_nemo_relay_cli_version }}" && \\
+    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[{{ platform_extra }}]"{% else %}"nemo-helix[{{ platform_extra }}]=={{ contract_version }}"{% endif %} && \\
     chmod -R a+rX /opt/uv /workspace/.venv
+{% endif %}
+{% if install_hermes %}
+# Hermes Agent cannot share the Platform environment. Install the pinned source
+# and matching Fabric adapter in Python 3.14, then let Fabric launch that adapter
+# through its isolated interpreter.
+RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
+    uv venv --python 3.14 /opt/hermes-venv && \\
+    git init --quiet /opt/hermes-agent && \\
+    git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git && \\
+    git -C /opt/hermes-agent fetch --depth 1 origin {{ pinned_hermes_commit }} && \\
+    git -C /opt/hermes-agent checkout --quiet --detach FETCH_HEAD && \\
+    FABRIC_VERSION="$(/workspace/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("nemo-fabric"))')" && \\
+    uv pip install --no-sources --prerelease=allow --python /opt/hermes-venv/bin/python \\
+      "nemo-fabric[relay]==${FABRIC_VERSION}" \\
+      "nemo-fabric-adapters-hermes==${FABRIC_VERSION}" \\
+      --editable /opt/hermes-agent && \\
+    uv pip check --python /opt/hermes-venv/bin/python && \\
+    chmod -R a+rX /opt/hermes-agent /opt/hermes-venv
+ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python
+{% endif %}
+{% if install_pi %}
+# Pi is a Node adapter (Fabric spawns `node dist/cli.js`), so install Node + the npm
+# adapter + Pi SDK peers additively, and link the descriptor into the Fabric share/
+# tree for `preinstalled` discovery to resolve `nvidia.fabric.pi`.
+RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
+    curl -fsSL https://deb.nodesource.com/setup_{{ pinned_node_major }}.x | bash - && \\
+    apt-get install -y --no-install-recommends nodejs && \\
+    rm -rf /var/lib/apt/lists/* && \\
+    npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} {{ pi_sdk_npm_specs }} && \\
+    . /workspace/.venv/bin/activate && \\
+    uv pip install --no-sources --prerelease=allow "{{ pi_relay_cli_spec }}" && \\
+    git init --quiet /opt/pi-relay-src && \\
+    git -C /opt/pi-relay-src remote add origin {{ pi_relay_extension_repo }} && \\
+    git -C /opt/pi-relay-src fetch --depth 1 origin {{ pi_relay_extension_ref }} && \\
+    git -C /opt/pi-relay-src checkout --quiet --detach FETCH_HEAD && \\
+    test -d "/opt/pi-relay-src/{{ pi_relay_extension_src_subdir }}" && \\
+    cp -r "/opt/pi-relay-src/{{ pi_relay_extension_src_subdir }}" "{{ pi_relay_extension_path }}" && \\
+    rm -rf /opt/pi-relay-src && \\
+    chmod -R a+rX "{{ pi_relay_extension_path }}" && \\
+    PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \\
+    FABRIC_SHARE="$(/workspace/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("data"))')/share/nemo-fabric/adapters/pi" && \\
+    test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" && \\
+    mkdir -p "${FABRIC_SHARE}" && \\
+    ln -sf "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" "${FABRIC_SHARE}/pi.fabric-adapter.json" && \\
+    chmod -R a+rX {{ pi_npm_prefix }} "${FABRIC_SHARE}"
+ENV PATH="{{ pi_npm_prefix }}/bin:$PATH"
 {% endif %}
 
 LABEL org.opencontainers.image.title="{{ agent_name | dockerfile_escape }}" \\
@@ -298,6 +423,13 @@ RUN if getent passwd 1000 >/dev/null; then userdel -rf "$(getent passwd 1000 | c
     if getent group  1000 >/dev/null; then groupdel -f "$(getent group  1000 | cut -d: -f1)" 2>/dev/null || true; fi && \\
     groupadd -g 1000 agent && useradd -u 1000 -g agent -m agent && \\
     chown -R agent:agent /workspace
+{% endif %}
+{% if sandbox_workdir_setup %}
+# The {{ sandbox_runtime }} supervisor requires its workload identity to be able to
+# write the WORKDIR itself; the contents keep their ownership.
+RUN {{ sandbox_workdir_setup }}
+{% endif %}
+{% if not allow_root %}
 USER agent
 {% endif %}
 ENV VIRTUAL_ENV=/workspace/.venv
@@ -344,6 +476,7 @@ class SharedRenderParams:
     sandbox_runtime: str = ""
     sandbox_apt_packages: str = ""
     sandbox_user_setup: str = ""
+    sandbox_workdir_setup: str = ""
     agent_id: str = ""
     agent_name: str = ""
     agent_version: str = ""
@@ -372,6 +505,9 @@ class FabricRenderParams(SharedRenderParams):
     #: Wheel to install instead of the pinned requirement, relative to the build
     #: context. Empty means resolve ``contract_version`` from an index.
     wheel_filename: str = ""
+    platform_extra: str = "nemo-agents-plugin"
+    install_hermes: bool = False
+    install_pi: bool = False
 
 
 # -- Public API -------------------------------------------------------------
@@ -446,9 +582,16 @@ def _jinja_env() -> jinja2.Environment:
     )
     env.filters["dockerfile_escape"] = _dockerfile_escape
     template_globals: dict[str, Any] = env.globals
-    template_globals["pinned_nemo_relay_cli_version"] = PINNED_NEMO_RELAY_CLI_VERSION
-    template_globals["pinned_nemo_relay_installer_commit"] = PINNED_NEMO_RELAY_INSTALLER_COMMIT
-    template_globals["pinned_nemo_relay_installer_sha256"] = PINNED_NEMO_RELAY_INSTALLER_SHA256
+    template_globals["pinned_hermes_commit"] = PINNED_HERMES_COMMIT
+    template_globals["pinned_node_major"] = PINNED_NODE_MAJOR
+    template_globals["pi_adapter_npm_spec"] = PI_ADAPTER_NPM_SPEC
+    template_globals["pi_sdk_npm_specs"] = PI_SDK_NPM_SPECS
+    template_globals["pi_relay_cli_spec"] = PI_RELAY_CLI_SPEC
+    template_globals["pi_relay_extension_repo"] = PI_RELAY_EXTENSION_REPO
+    template_globals["pi_relay_extension_ref"] = PI_RELAY_EXTENSION_REF
+    template_globals["pi_relay_extension_src_subdir"] = _PI_RELAY_EXTENSION_SRC_SUBDIR
+    template_globals["pi_relay_extension_path"] = PI_RELAY_EXTENSION_PATH
+    template_globals["pi_npm_prefix"] = _PI_NPM_PREFIX
     return env
 
 
@@ -489,10 +632,12 @@ def resolve_shared_render_params(
     sandbox_runtime_name = ""
     sandbox_apt_packages = ""
     sandbox_user_setup = ""
+    sandbox_workdir_setup = ""
     if sandbox_runtime:
         from nemo_agents_plugin.container.sandbox import (
             render_apt_packages,
             render_user_setup,
+            render_workdir_setup,
             resolve_sandbox_profile,
         )
 
@@ -500,6 +645,7 @@ def resolve_shared_render_params(
         sandbox_runtime_name = profile.name
         sandbox_apt_packages = render_apt_packages(profile)
         sandbox_user_setup = render_user_setup(profile)
+        sandbox_workdir_setup = render_workdir_setup(profile, _IMAGE_WORKDIR)
 
     if metadata is None:
         metadata = extract_agent_metadata(
@@ -520,6 +666,7 @@ def resolve_shared_render_params(
         sandbox_runtime=sandbox_runtime_name,
         sandbox_apt_packages=sandbox_apt_packages,
         sandbox_user_setup=sandbox_user_setup,
+        sandbox_workdir_setup=sandbox_workdir_setup,
         contract_version=get_contract_version(),
         agent_id=metadata["agent_id"],
         agent_name=metadata["agent_name"],
@@ -672,8 +819,15 @@ def render_fabric_dockerfile(
         shared.contract_version,
         pins_contract_version=template_path is None and not wheel_filename,
     )
+    platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(
+        agent_config, python_version=shared.python_version
+    )
     params = FabricRenderParams(
-        **{f.name: getattr(shared, f.name) for f in fields(shared)}, wheel_filename=wheel_filename
+        **{f.name: getattr(shared, f.name) for f in fields(shared)},
+        wheel_filename=wheel_filename,
+        platform_extra=platform_extra,
+        install_hermes=install_hermes,
+        install_pi=install_pi,
     )
 
     if template_path:
@@ -689,11 +843,11 @@ def render_fabric_dockerfile(
 
 
 def get_contract_version() -> str:
-    """Return the published ``nemo-platform`` package version."""
+    """Return the published ``nemo-helix`` package version."""
     from importlib.metadata import PackageNotFoundError, version
 
     try:
-        return version("nemo-platform")
+        return version("nemo-helix")
     except PackageNotFoundError:
         return UNRESOLVED_CONTRACT_VERSION
 
@@ -706,7 +860,7 @@ def require_installable_contract_version(contract_version: str, *, pins_contract
     """
     if contract_version == UNRESOLVED_CONTRACT_VERSION:
         raise ValueError(
-            "Unable to resolve the installed nemo-platform contract version; "
+            "Unable to resolve the installed nemo-helix contract version; "
             "Fabric packaging requires an installed release version."
         )
 
@@ -726,11 +880,11 @@ def require_installable_contract_version(contract_version: str, *, pins_contract
         return
 
     raise ValueError(
-        f"The installed nemo-platform version '{contract_version}' {' and '.join(reasons)}, so no "
+        f"The installed nemo-helix version '{contract_version}' {' and '.join(reasons)}, so no "
         "package index serves it. Fabric packaging pins this exact version inside the image, so the "
         "build would fail while resolving it. Point NEMO_AGENTS_WHEEL at a locally built wheel "
-        "(`uv build --package nemo-platform --wheel --out-dir dist`) to package from a source "
-        "checkout, install a released nemo-platform, or set "
+        "(`uv build --package nemo-helix --wheel --out-dir dist`) to package from a source "
+        "checkout, install a released nemo-helix, or set "
         "NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION=1 if your index serves this version."
     )
 

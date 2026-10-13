@@ -16,7 +16,7 @@ from urllib.parse import quote, urljoin
 
 import httpx
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.settings import settings
 
 RESULT_NAMESPACE = "scaled_evals"
@@ -86,7 +86,7 @@ def result_with_harbor_viewer_publication(
     viewer = {
         "job_name": publication.job_name,
         "archive": {
-            "file_name": s3.HARBOR_VIEWER_ARCHIVE_FILE_NAME,
+            "file_name": artifacts.HARBOR_VIEWER_ARCHIVE_FILE_NAME,
             "format": "tar.gz",
             "size_bytes": publication.archive_size_bytes,
         },
@@ -122,9 +122,9 @@ def publish_harbor_job_archive(
     with tempfile.NamedTemporaryFile(prefix=f"{job_name}-", suffix=".tar.gz") as archive:
         _write_harbor_job_archive(job_name=job_name, job_dir=root, archive_path=archive.name)
         archive_path = Path(archive.name)
-        archive_size_bytes = s3.upload_file(
+        archive_size_bytes = artifacts.upload_file(
             archive_path,
-            s3.evaluation_harbor_viewer_archive_key(job_name),
+            artifacts.evaluation_harbor_viewer_archive_key(job_name),
             content_type="application/gzip",
         )
         overwrite = str(settings.harbor_viewer_upload_overwrite).lower()
@@ -198,18 +198,18 @@ def _write_harbor_job_archive(*, job_name: str, job_dir: Path, archive_path: str
     exactly like object-store artifacts before leaving the worker.
     """
     with (
-        s3._staged_artifacts(job_dir) as (staged_root, files),  # noqa: SLF001
+        artifacts._staged_artifacts(job_dir) as (staged_root, files),  # noqa: SLF001
         tarfile.open(archive_path, mode="w:gz") as archive,
     ):
         for source in files:
             relative = source.relative_to(staged_root).as_posix()
-            if s3._is_unsafe_artifact_path(relative):  # noqa: SLF001
+            if artifacts._is_unsafe_artifact_path(relative):  # noqa: SLF001
                 raise ValueError(f"unsafe Harbor Viewer artifact path: {relative!r}")
             archive.add(
                 source,
                 arcname=f"{job_name}/{relative}",
                 recursive=False,
-                filter=lambda info, path=source: s3._normalize_archive_info(  # noqa: SLF001
+                filter=lambda info, path=source: artifacts._normalize_archive_info(  # noqa: SLF001
                     info,
                     path.stat().st_mtime,
                 ),

@@ -10,7 +10,7 @@ Tests cover:
 - Configuration merging behavior (Pydantic model instantiation)
 """
 
-from nmp.core.models.parallelism.config import (
+from nhx.core.models.parallelism.config import (
     BalanceConfig,
     ContextParallelismConfig,
     DataParallelismConfig,

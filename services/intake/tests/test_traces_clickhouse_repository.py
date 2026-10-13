@@ -8,10 +8,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from nmp.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseExternalData, ClickHouseQuery
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable
-from nmp.intake.repository.clickhouse.trace import TRACE_COLUMNS, ClickHouseTraceRepository, _order_by
-from nmp.intake.spans.domain import TraceListFilter
+from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseExternalData, ClickHouseQuery
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.repository.clickhouse.trace import TRACE_COLUMNS, ClickHouseTraceRepository, _order_by
+from nhx.intake.spans.domain import TraceListFilter
 
 _TRACE_PAGE_COLUMNS = [*TRACE_COLUMNS, "started_at_us"]
 

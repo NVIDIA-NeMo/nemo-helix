@@ -4,27 +4,37 @@
 """In-sandbox Gym host HTTP runtime (``GET /health``, ``POST /rollouts/run``).
 
 Started inside the OpenSandbox job image via ``RunHelper`` + ``RolloutCollectionHelper``.
-Reads ``NMP_GYM_GLOBAL_CONFIG`` from bootstrap env (same JSON as colocated Gym, minus Ray GCS).
+Reads ``NHX_GYM_GLOBAL_CONFIG`` from bootstrap env (same JSON as colocated Gym, minus Ray GCS).
 
 Imports only the standard library, PyYAML, and ``nemo_gym`` at runtime: the module source
 is injected verbatim into the sandbox image, where ``nemo_rl`` may not be importable.
 """
 
 import asyncio
+import collections
 import concurrent.futures
 import json
 import os
+import re
+import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
 import traceback
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from sandboxed_gym.environment_package import (
+    CUSTOM_AGENT_SUBDIR,
+    CUSTOM_RESOURCES_SERVER_SUBDIR,
     ENVIRONMENT_MANIFEST_FILENAME,
+    SERVER_INSTALL_MARKERS,
+    AdapterWheelsV1Package,
     EnvironmentPackage,
     EnvironmentPackageError,
     WheelsV1Package,
@@ -34,17 +44,21 @@ from sandboxed_gym.environment_package import (
     validate_environment_namespaces,
 )
 
-GYM_GLOBAL_CONFIG_ENV_KEY = "NMP_GYM_GLOBAL_CONFIG"
+GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
 #: Set by the orchestrator when the caller supplied an explicit ``environment_path`` (a FileSet).
-#: ``NMP_ENVIRONMENT_PATH`` is also the host's environment *mount*, so it is ``/job/environment``
+#: ``NHX_ENVIRONMENT_PATH`` is also the host's environment *mount*, so it is ``/job/environment``
 #: for image-bundled Gym too; this flag is how a missing ``nemo-environment.yaml`` becomes a
 #: FileSet error instead of a silent fallback to the image-shipped environment.
-ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY = "NMP_ENVIRONMENT_PACKAGE_REQUIRED"
-ENVIRONMENT_OFFLINE_ENV_KEY = "NMP_ENVIRONMENT_OFFLINE"
+ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY = "NHX_ENVIRONMENT_PACKAGE_REQUIRED"
+ENVIRONMENT_OFFLINE_ENV_KEY = "NHX_ENVIRONMENT_OFFLINE"
+REUSE_IMAGE_GYM_INSTALL_ENV_KEY = "NHX_REUSE_IMAGE_GYM_INSTALL"
+HF_CACHE_DIRNAME = ".huggingface"
 UV_CACHE_DIR_KEY = "uv_cache_dir"
 UV_VENV_DIR_KEY = "uv_venv_dir"
 # Writable /job/work subdirectory where wheels are installed for the running Gym host.
 WHEELS_V1_INSTALL_SUBDIR = "wheels-v1-site-packages"
+#: uv ends a failure with its reason; this many trailing stderr lines carry it into the error message.
+_UV_FAILURE_REASON_LINES = 20
 # Writable /job/work subdirectory Gym writes one `<rollout_id>.capture.jsonl` per rollout into.
 # Under /job/work rather than beside the Gym tree because that is the one path the job image
 # guarantees is writable by uid 1000; /opt is not, which is why gym_host.sh stages Gym to /tmp.
@@ -56,20 +70,28 @@ OBSERVABILITY_ENABLED_KEY = "observability_enabled"
 MODEL_CALL_CAPTURE_DIR_KEY = "model_call_capture_dir"
 #: Key this host attaches a rollout's captured model calls under, on the result it returns.
 #: Namespaced so it cannot collide with a Gym field or an environment's own extras.
-MODEL_CALLS_RESULT_KEY = "_nmp_model_calls"
+MODEL_CALLS_RESULT_KEY = "_nhx_model_calls"
 # uv setting that points Gym's per-server dependency resolver at the staged wheelhouse.
 UV_FIND_LINKS_ENV_KEY = "UV_FIND_LINKS"
+# Gym's config key; the name must match Gym's.
+SKIP_VENV_IF_PRESENT_KEY = "skip_venv_if_present"
+COMPONENT_VENV_DIRNAME = ".venv"
+COMPONENT_VENV_ROOT_SUBDIR = "gym_venvs"
 UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
 NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
+#: Writable copy of the image Gym checkout. ``gym_host.sh`` stages it here before this process starts.
+IMAGE_GYM_SRC_ENV_KEY = "SANDBOXED_GYM_SRC_DIR"
+DEFAULT_IMAGE_GYM_SRC = "/tmp/gym-src/Gym"
 #: Which agent, resources server, and model to run. Gym has no schema for this key, so
 #: the host pops it and rewrites ``config_paths`` before Gym parses the dict.
-ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nmp_environment_component_selection"
+ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
 # Mirrors DEFAULT_GYM_PORT_RANGE_{LOW,HIGH} in nemo_rl.distributed.virtual_cluster.
 DEFAULT_GYM_PORT_RANGE_LOW = 5000
 DEFAULT_GYM_PORT_RANGE_HIGH = 5999
 
 _DEFAULT_HTTP_PORT = 8080
 _READY: bool = False
+_BOOTSTRAP_ERROR: dict[str, Any] | None = None
 _RUN_HELPER: Any = None
 _HEAD_SERVER_CONFIG: Any = None
 _ROLLOUT_HELPER: Any = None
@@ -82,7 +104,7 @@ _EVENT_LOOP_LOCK = threading.Lock()
 _HEARTBEAT_INTERVAL_S = 15.0
 #: With no hop left to time a rollout out, the host has to be what gives up: a wedged batch would
 #: otherwise heartbeat until the sandbox's ttl_s.
-ROLLOUT_DEADLINE_ENV_KEY = "NMP_ROLLOUT_DEADLINE_S"
+ROLLOUT_DEADLINE_ENV_KEY = "NHX_ROLLOUT_DEADLINE_S"
 _DEFAULT_ROLLOUT_DEADLINE_S = 30 * 60.0
 # Bounded so a deeply recursive failure cannot produce an oversized error response.
 _TRACEBACK_FRAMES = 20
@@ -103,8 +125,84 @@ def _env_float(name: str, default: float) -> float:
     return float(raw)
 
 
+#: Env vars whose values are masked before a line is captured. The tail is returned to the caller
+#: and stored in job logs, so anything a component prints about its own environment must not be.
+_SECRET_ENV_NAME_RE = re.compile(r"KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH|PRIVATE", re.IGNORECASE)
+#: Short enough that one runaway line cannot fill the failure response on its own.
+_MAX_CAPTURED_LINE_CHARS = 500
+#: Below this, a value is too short to be a credential and masking it only obscures the output.
+_MIN_MASKED_SECRET_CHARS = 8
+
+
+class _OutputTail:
+    """Keeps the last ``limit`` lines written through it, and passes them on unchanged."""
+
+    def __init__(self, stream: Any, buffer: collections.deque[str], secrets: tuple[str, ...] = ()) -> None:
+        self._stream = stream
+        self._buffer = buffer
+        self._secrets = secrets
+        self._partial = ""
+        # Past the captured width, plus the longest secret: a secret starting inside that width is
+        # held whole, so masking still matches it. Anything beyond would be truncated away anyway.
+        self._retain = _MAX_CAPTURED_LINE_CHARS + max((len(secret) for secret in secrets), default=0)
+
+    def write(self, text: str) -> int:
+        # Captured only once a line terminator arrives. Masking each write on its own would store a
+        # secret straddling two writes as two fragments, neither of which matches it.
+        pending = self._partial + text
+        self._partial = "" if pending.endswith(("\n", "\r")) else pending.rpartition("\n")[2]
+        for line in pending[: len(pending) - len(self._partial)].splitlines():
+            if line.strip():
+                self._buffer.append(self._scrub(line))
+        # A writer under no obligation to emit a newline would otherwise grow this without bound.
+        self._partial = self._partial[: self._retain]
+        return self._stream.write(text)
+
+    def _scrub(self, line: str) -> str:
+        for secret in self._secrets:
+            line = line.replace(secret, "***")
+        return line[:_MAX_CAPTURED_LINE_CHARS]
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+_OUTPUT_TAIL_LINES = 80
+
+#: Bounded well below the rollout deadline: preflight runs on every host start.
+_PREFLIGHT_TIMEOUT_S = 20.0
+
+_OUTPUT_TAIL: collections.deque[str] = collections.deque(maxlen=_OUTPUT_TAIL_LINES)
+
+
+def _captured_output_secrets() -> tuple[str, ...]:
+    """Values masked out of captured output.
+
+    The policy key is read from the config as well as the environment: it is only an ``${oc.env:}``
+    reference on a platform job, and a config that inlines it literally is masked by no env name.
+    """
+    values = {value for name, value in os.environ.items() if _SECRET_ENV_NAME_RE.search(name)}
+    try:
+        values.add(_resolved_policy_route(_load_global_config_dict())[1])
+    except Exception:
+        pass
+    return tuple(value for value in values if len(value) >= _MIN_MASKED_SECRET_CHARS)
+
+
+def _install_output_tail() -> None:
+    secrets = _captured_output_secrets()
+    sys.stdout = _OutputTail(sys.stdout, _OUTPUT_TAIL, secrets)
+    sys.stderr = _OutputTail(sys.stderr, _OUTPUT_TAIL, secrets)
+
+
 def _runtime_error(code: str, message: str) -> dict[str, Any]:
-    return {"error": {"code": code, "message": message}}
+    error: dict[str, Any] = {"code": code, "message": message}
+    if _OUTPUT_TAIL:
+        error["host_output_tail"] = list(_OUTPUT_TAIL)
+    return {"error": error}
 
 
 def _load_global_config_dict() -> dict[str, Any]:
@@ -115,6 +213,105 @@ def _load_global_config_dict() -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise RuntimeError(f"{GYM_GLOBAL_CONFIG_ENV_KEY} must be a JSON object")
     return parsed
+
+
+class PolicyCredentialRejected(RuntimeError):
+    """The policy endpoint rejected the configured credential."""
+
+
+def _resolve_env_interpolation(raw: str) -> str:
+    """Resolve ``${oc.env:VAR}`` and ``${oc.env:VAR,default}``, leaving anything else untouched.
+
+    Not OmegaConf: this module is injected verbatim into the sandbox image and may import only the
+    standard library, PyYAML and ``nemo_gym``.
+    """
+
+    def substitute(match: re.Match[str]) -> str:
+        name, _, default = match.group(1).partition(",")
+        return os.environ.get(name.strip(), default.strip())
+
+    return re.sub(r"\$\{oc\.env:([^}]*)\}", substitute, raw)
+
+
+def _first_str(value: Any) -> str:
+    """Policy fields take a list as well as a scalar; a list of endpoints is probed at its first."""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    return value if isinstance(value, str) else ""
+
+
+def _resolved_policy_route(global_config: dict[str, Any]) -> tuple[str, str, str]:
+    """Return ``(base_url, api_key, model_name)``, or empty strings if any stayed unresolved.
+
+    Gym supports interpolation forms this resolver does not. Those are Gym's to resolve, so a value
+    still holding ``${`` is reported as unresolved rather than probed as a literal.
+    """
+    values = tuple(
+        _resolve_env_interpolation(_first_str(global_config.get(key)))
+        for key in ("policy_base_url", "policy_api_key", "policy_model_name")
+    )
+    if any("${" in value for value in values):
+        return "", "", ""
+    return values
+
+
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    """Surfaces a redirect as its own status instead of following it.
+
+    Following one re-sends the ``Authorization`` header to whatever the endpoint names, and only
+    the sandbox egress policy would stand between that and an arbitrary origin.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_RefuseRedirect)
+
+
+def _preflight_policy_credential(global_config: dict[str, Any]) -> None:
+    """Reject a bad policy credential before Gym's servers are built."""
+    base_url, api_key, model_name = _resolved_policy_route(global_config)
+    if not base_url or not api_key or not model_name:
+        return
+
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions",
+        data=json.dumps(
+            {
+                "model": model_name,
+                "messages": [{"role": "user", "content": "ok"}],
+                "max_tokens": 1,
+                "temperature": 1.0,
+                "top_p": 1.0,
+            }
+        ).encode(),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with _NO_REDIRECT_OPENER.open(request, timeout=_PREFLIGHT_TIMEOUT_S):
+            return
+    except urllib.error.HTTPError as error:
+        # Only 401. It can mean nothing but a credential the endpoint would not accept, whereas a
+        # 403 is equally an egress proxy, a per-path policy, or a quota rule -- and refusing to
+        # start is unrecoverable, where letting a run proceed costs only the diagnosis.
+        if error.code != 401:
+            print(f"gym-host: policy preflight inconclusive (HTTP {error.code}); continuing", flush=True)
+            return
+        source = _policy_key_source(global_config)
+        raise PolicyCredentialRejected(
+            f"the policy endpoint {base_url} rejected the configured credential (HTTP 401) for model "
+            f"{model_name}{source}. Every rollout would fail the same way."
+        ) from error
+    except Exception as error:
+        print(f"gym-host: policy preflight inconclusive ({type(error).__name__}: {error}); continuing", flush=True)
+
+
+def _policy_key_source(global_config: dict[str, Any]) -> str:
+    raw = str(global_config.get("policy_api_key") or "")
+    match = re.search(r"\$\{oc\.env:([A-Za-z_][A-Za-z0-9_]*)", raw)
+    return f", read from ${match.group(1)}" if match else ""
 
 
 def _free_port_in_range(low: int, high: int) -> int:
@@ -183,7 +380,7 @@ def _uv_cache_dir() -> str | None:
     # Prefer the explicit env var. The container image sets it, and it sidesteps
     # `uv cache dir`, which exits non-zero whenever the working directory's
     # pyproject.toml pins a [tool.uv] required-version that disagrees with the uv on
-    # PATH - true in the nemo-platform image, whose WORKDIR is the platform workspace.
+    # PATH - true in the nemo-helix image, whose WORKDIR is the platform workspace.
     configured = os.environ.get("UV_CACHE_DIR")
     if configured:
         return configured
@@ -214,7 +411,7 @@ def _apply_uv_dirs(global_config: dict[str, Any]) -> None:
 def _environment_package_required() -> bool:
     """Whether the mounted environment path must be a valid FileSet package.
 
-    The host always mounts something at ``NMP_ENVIRONMENT_PATH`` (typically ``/job/environment``).
+    The host always mounts something at ``NHX_ENVIRONMENT_PATH`` (typically ``/job/environment``).
     Image-bundled Gym has no ``nemo-environment.yaml`` there. FileSet-backed runs do, and must
     fail closed if it is missing rather than starting against the image. The orchestrator sets
     this only when serve config carried an explicit ``environment_path``.
@@ -226,6 +423,54 @@ def _environment_offline() -> bool:
     return os.environ.get(ENVIRONMENT_OFFLINE_ENV_KEY, "").strip().lower() in {"1", "true", "yes"}
 
 
+def _reuse_image_gym_install() -> bool:
+    return os.environ.get(REUSE_IMAGE_GYM_INSTALL_ENV_KEY, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _apply_huggingface_offline_policy() -> None:
+    """Pin the Hugging Face libraries offline when the job forbids egress.
+
+    Independent of whether a cache was staged: an offline job with no snapshot should
+    fail on a missing file rather than on a blocked network. An online job is left
+    alone, so a caller that set the flags deliberately keeps them.
+    """
+    if not _environment_offline():
+        return
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+
+
+def _install_huggingface_cache_fallback(dataset_path: str, work_path: str) -> None:
+    """Copy a vendored Hugging Face cache off the read-only dataset mount into writable work.
+
+    ``datasets`` writes lock files beside the cache, so the caches cannot point at the
+    mount itself.
+    """
+    if not dataset_path or not work_path:
+        return
+    source = os.path.join(dataset_path, HF_CACHE_DIRNAME)
+    if not os.path.isdir(source):
+        return
+
+    destination = os.path.join(work_path, HF_CACHE_DIRNAME)
+    # lexists, not exists: a dangling symlink is invisible to exists() and would survive to
+    # fail copytree. Work is a writable PVC the environment also gets, so it can hold anything.
+    if os.path.lexists(destination):
+        if os.path.islink(destination) or not os.path.isdir(destination):
+            os.unlink(destination)
+        else:
+            shutil.rmtree(destination)
+    # symlinks=True: the hub cache links snapshots/<rev>/* at blobs/<sha>, and dereferencing
+    # writes every blob twice. The links are relative, so they still land inside the copy.
+    shutil.copytree(source, destination, symlinks=True)
+
+    os.environ["HF_HOME"] = destination
+    # An explicit leaf variable wins over HF_HOME, and nemo_gym claims HF_DATASETS_CACHE
+    # under its own tree at import time when it is unset.
+    os.environ["HF_DATASETS_CACHE"] = os.path.join(destination, "datasets")
+    os.environ["HF_HUB_CACHE"] = os.path.join(destination, "hub")
+
+
 def _load_runtime_environment_package(
     environment_path: str,
     *,
@@ -234,7 +479,7 @@ def _load_runtime_environment_package(
     """Load a mounted package while preserving manifest-free bundled environments."""
     if not environment_path:
         if required:
-            raise RuntimeError("a Gym environment package is required, but NMP_ENVIRONMENT_PATH is empty")
+            raise RuntimeError("a Gym environment package is required, but NHX_ENVIRONMENT_PATH is empty")
         return None
 
     manifest_path = os.path.join(environment_path, ENVIRONMENT_MANIFEST_FILENAME)
@@ -253,15 +498,17 @@ def _load_runtime_environment_package(
 def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_path: str) -> None:
     """Install a wheels-v1 environment's vendored dependencies, with no package-index access.
 
-    Other package formats are a no-op. When the validated package is ``wheels-v1``, every wheel
-    under its wheelhouse is installed into the writable work mount, so nothing is fetched from a
-    package index during this installation.
+    Other package formats are a no-op. When the validated package is ``wheels-v1`` or
+    ``adapter-wheels-v1``, every wheel under its wheelhouse is installed into the writable work
+    mount, so nothing is fetched from a package index during this installation.
 
     The wheels are installed into the writable work directory instead of an existing virtualenv.
     ``PYTHONPATH`` exposes them to Gym's child processes, while ``sys.path`` exposes them to the
     already-running host process.
+
+    A failed install raises ``RuntimeError`` carrying uv's own reason, not the command line.
     """
-    if not isinstance(package, WheelsV1Package):
+    if not isinstance(package, (WheelsV1Package, AdapterWheelsV1Package)):
         return
 
     wheels_dir = str(package.wheelhouse_path)
@@ -271,7 +518,9 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
 
     # --target keeps mutable packages under the writable work mount. --only-binary closes the
     # source-distribution path opened by --find-links, including for transitive dependencies.
-    subprocess.run(
+    # Output is captured because uv writes to the process's own file descriptors, which bypass
+    # the output tail, so a failure would otherwise reach the caller with no reason.
+    result = subprocess.run(
         [
             "uv",
             "pip",
@@ -285,12 +534,25 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
             wheels_dir,
         ]
         + [str(wheel) for wheel in package.wheel_files],
-        check=True,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    # Forwarded through sys.stdout/sys.stderr so the output tail keeps it, with secrets masked.
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        reason = "\n".join(lines[-_UV_FAILURE_REASON_LINES:]) or "uv printed no error output"
+        for secret in _captured_output_secrets():
+            reason = reason.replace(secret, "***")
+        # The command lists every wheel, so it is left out: it would bury the reason.
+        raise RuntimeError(
+            f"uv pip install of {len(package.wheel_files)} wheels from {wheels_dir} "
+            f"failed with exit code {result.returncode}:\n{reason}"
+        )
 
-    # Gym creates a private venv for each agent and resource server from that component's
-    # requirements.txt. Prefer the staged component wheels while retaining package-index fallback
-    # for image-owned Gym and its core dependencies.
+    # For any component Gym still builds a venv for.
     os.environ[UV_FIND_LINKS_ENV_KEY] = wheels_dir
 
     if _environment_offline():
@@ -317,18 +579,140 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
         sys.path.insert(0, wheels_install_dir)
 
 
-def _prepend_environment_search_root(environment_root: str) -> None:
-    """Search the mounted environment package before Gym's built-in paths.
+def _image_gym_search_root() -> str | None:
+    """Gym checkout the host script copied out of the training image, when that copy exists."""
+    root = os.environ.get(IMAGE_GYM_SRC_ENV_KEY, DEFAULT_IMAGE_GYM_SRC)
+    if os.path.isdir(root):
+        return os.path.realpath(root)
+    return None
 
-    Gym looks up config files in ``NEMO_GYM_EXTRA_ROOTS`` first. If the package is
-    not at the front of that list, Gym loads the image's agent or resources server
-    instead, and the job scores the wrong environment. Any extra roots already set
-    stay after the package so they still work as backups.
+
+def _container_gym_venv() -> Path | None:
+    """The virtualenv this host runs in, which carries Gym and Gym's dependency closure.
+
+    The runtime image activates it (``VIRTUAL_ENV``); ``sys.prefix`` is the same place when the
+    host was started with that interpreter directly. It only counts if it looks like a venv Gym
+    can activate: Gym's skip check needs both ``bin/python`` and ``bin/activate``.
     """
-    # Preserve operator-provided roots as fallbacks; changing their relative order could
-    # select a different image-bundled component.
+    candidate = Path(os.environ.get("VIRTUAL_ENV") or sys.prefix)
+    if (candidate / "bin" / "python").exists() and (candidate / "bin" / "activate").exists():
+        return candidate
+    return None
+
+
+def _writable_component_venv_root(configured_root: str, work_path: str, global_config: dict[str, Any]) -> Path:
+    """Return a venv root this host may write under, mirroring the image's baked venvs if needed.
+
+    ``/opt/gym_venvs`` is often read-only for the sandbox's uid. Gym reads one ``uv_venv_dir``
+    for every component, so moving it would hide the image's prebuilt venvs; instead the baked
+    entries are linked into the writable root so ``skip_venv_if_present`` still finds them.
+    """
+    root = Path(configured_root)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        writable = os.access(root, os.W_OK)
+    except OSError:
+        writable = False
+    if writable:
+        return root
+
+    mirrored_root = Path(work_path, COMPONENT_VENV_ROOT_SUBDIR)
+    mirrored_root.mkdir(parents=True, exist_ok=True)
+    if root.is_dir():
+        for kind_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+            for server_dir in sorted(path for path in kind_dir.iterdir() if path.is_dir()):
+                mirrored = mirrored_root / kind_dir.name / server_dir.name
+                if mirrored.exists() or mirrored.is_symlink():
+                    continue
+                mirrored.parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(server_dir, mirrored)
+    global_config[UV_VENV_DIR_KEY] = str(mirrored_root)
+    print(f"gym-host: {root} is read-only; component venvs live under {mirrored_root}", flush=True)
+    return mirrored_root
+
+
+def _link_wheels_v1_component_venvs(
+    package: EnvironmentPackage | None,
+    global_config: dict[str, Any],
+    work_path: str,
+) -> None:
+    """Give each wheels-v1 component the container's Gym install as its venv.
+
+    The wheels-v1 contract: the runtime image provides Gym and everything Gym needs; the
+    wheelhouse provides only what the package's own servers add, and this host has already
+    installed those onto ``PYTHONPATH`` (see `_install_wheels_v1_dependencies`). Left alone, Gym
+    would still build a fresh venv for every package server and install Gym's whole closure
+    into it from a package index, which is slow, duplicates the image, and fails outright
+    under a sandbox that allows no index egress.
+
+    Gym skips that build when ``skip_venv_if_present`` is set and the component's venv path
+    already holds ``bin/python`` and ``bin/activate``. So for every package server directory
+    Gym can discover (one holding an install marker), the venv path is made a symlink to the
+    container's own venv. Gym activates it and runs the entrypoint; the server's extra
+    dependencies come from ``PYTHONPATH``. A venv that already exists at that path, such as an
+    image-baked one for a same-named built-in, is kept.
+
+    Only wheels-v1 opts in: native-v1 declares that its dependencies resolve from an index. The
+    caller opts in too (``NHX_REUSE_IMAGE_GYM_INSTALL``): this host is shared with GRPO, whose
+    documented wheels-v1 contract still vendors the full closure.
+    """
+    if not isinstance(package, WheelsV1Package) or not _reuse_image_gym_install():
+        return
+    if not global_config.get(SKIP_VENV_IF_PRESENT_KEY):
+        print(
+            f"gym-host: {SKIP_VENV_IF_PRESENT_KEY} is off; wheels-v1 servers will build their own venvs",
+            flush=True,
+        )
+        return
+    container_venv = _container_gym_venv()
+    if container_venv is None:
+        print("gym-host: no activatable container venv found; wheels-v1 servers will build their own venvs", flush=True)
+        return
+    server_dirs = [
+        (kind, server_dir)
+        for kind in (CUSTOM_RESOURCES_SERVER_SUBDIR, CUSTOM_AGENT_SUBDIR)
+        if (package.root / kind).is_dir()
+        for server_dir in sorted(path for path in (package.root / kind).iterdir() if path.is_dir())
+        if any((server_dir / marker).is_file() for marker in SERVER_INSTALL_MARKERS)
+    ]
+    if not server_dirs:
+        return
+
+    configured_root = global_config.get(UV_VENV_DIR_KEY) or os.environ.get("NEMO_GYM_VENV_DIR")
+    if not configured_root:
+        # Gym's default is `<server dir>/.venv`, which is inside the read-only environment mount.
+        configured_root = str(Path(work_path, COMPONENT_VENV_ROOT_SUBDIR))
+        global_config[UV_VENV_DIR_KEY] = configured_root
+    venv_root = _writable_component_venv_root(configured_root, work_path, global_config)
+
+    for kind, server_dir in server_dirs:
+        venv_path = venv_root / kind / server_dir.name / COMPONENT_VENV_DIRNAME
+        if venv_path.exists() or venv_path.is_symlink():
+            print(f"gym-host: keeping existing venv for {kind}/{server_dir.name} at {venv_path}", flush=True)
+            continue
+        venv_path.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(container_venv, venv_path)
+        print(
+            f"gym-host: {kind}/{server_dir.name} uses the container's Gym install ({container_venv}); "
+            "its extra dependencies come from the wheelhouse",
+            flush=True,
+        )
+
+
+def _prepend_environment_search_root(environment_root: str) -> None:
+    """Search the mounted package, then the image Gym checkout, then operator roots.
+
+    Gym resolves a server directory from ``NEMO_GYM_EXTRA_ROOTS`` before the install root.
+    The library wheel is first on ``PYTHONPATH``, so that install root has no server trees.
+    Servers the package does not ship, such as ``simple_agent`` and ``vllm_model``, resolve
+    from the image checkout. The package stays first so a server it does ship wins.
+    """
     existing = [root for root in os.environ.get(NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "").split(os.pathsep) if root]
-    roots = [environment_root, *existing]
+    image_root = _image_gym_search_root()
+    roots = [environment_root]
+    if image_root:
+        roots.append(image_root)
+    roots.extend(existing)
     deduplicated = list(dict.fromkeys(roots))
     os.environ[NEMO_GYM_EXTRA_ROOTS_ENV_KEY] = os.pathsep.join(deduplicated)
 
@@ -360,6 +744,9 @@ def _compose_gym_config_with_environment_package(
         # Evaluator selection metadata.
         if selection is not None:
             raise RuntimeError("Gym component selection was supplied without an environment package")
+        return gym_config
+    if selection is None:
+        # Training writes config_paths itself. Eval supplies component selection.
         return gym_config
     if not isinstance(selection, dict):
         raise RuntimeError("A mounted environment package requires Gym component selection metadata")
@@ -428,9 +815,15 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
     global_config = _load_global_config_dict()
     # Apply writable uv locations before Gym creates per-component environments.
     _apply_uv_dirs(global_config)
-    _apply_model_call_capture(global_config, os.environ.get("NMP_WORK_PATH", "/job/work"))
+    _apply_model_call_capture(global_config, os.environ.get("NHX_WORK_PATH", "/job/work"))
+    # Before RunHelper.start() so Gym's child processes inherit the cache paths.
+    _apply_huggingface_offline_policy()
+    _install_huggingface_cache_fallback(
+        os.environ.get("NHX_DATASET_PATH", ""),
+        os.environ.get("NHX_WORK_PATH", "/job/work"),
+    )
     environment_package = _load_runtime_environment_package(
-        os.environ.get("NMP_ENVIRONMENT_PATH", ""),
+        os.environ.get("NHX_ENVIRONMENT_PATH", ""),
         required=_environment_package_required(),
     )
     # Compose config paths before dependency installation or Gym imports can execute
@@ -442,8 +835,16 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
         _prepend_environment_search_root(str(environment_package.root))
     _install_wheels_v1_dependencies(
         environment_package,
-        os.environ.get("NMP_WORK_PATH", "/job/work"),
+        os.environ.get("NHX_WORK_PATH", "/job/work"),
     )
+    # After the wheelhouse is on PYTHONPATH and before Gym builds anything.
+    _link_wheels_v1_component_venvs(
+        environment_package,
+        global_config,
+        os.environ.get("NHX_WORK_PATH", "/job/work"),
+    )
+
+    _preflight_policy_credential(global_config)
 
     # Import after the package is wired in: Gym reads extra search roots at import time.
     from nemo_gym.cli.env import RunHelper
@@ -640,7 +1041,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         # Must match do_POST: a host that passes /health and then 503s every rollout is
         # invisible to wait_ready.
-        if not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
+        if _BOOTSTRAP_ERROR is not None:
+            self._send_json(503, {"status": "failed", **_BOOTSTRAP_ERROR})
+        elif not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
             self._send_json(503, {"status": "starting"})
         else:
             self._send_json(200, {"status": "ready"})
@@ -650,7 +1053,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_empty(404)
             return
         if not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
-            self._send_json(503, _runtime_error("bootstrap_failed", "Gym host not ready"))
+            self._send_json(503, _BOOTSTRAP_ERROR or _runtime_error("bootstrap_failed", "Gym host not ready"))
             return
 
         try:
@@ -694,7 +1097,7 @@ class Handler(BaseHTTPRequestHandler):
             examples,
             _HEAD_SERVER_CONFIG,
             _ROLLOUT_HELPER,
-            capture_dir=model_call_capture_dir(os.environ.get("NMP_WORK_PATH", "/job/work")),
+            capture_dir=model_call_capture_dir(os.environ.get("NHX_WORK_PATH", "/job/work")),
             # Captures share the response with the rollouts they annotate, and a response over
             # the cap is refused whole -- so an unbudgeted capture would turn "traces too big"
             # into "every result lost". Half leaves the records themselves the same room they
@@ -716,7 +1119,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self._announce_close()
         self.end_headers()
-        self._write_chunk(self._await_results(future, started))
+        try:
+            body = self._await_results(future, started)
+        except OSError:
+            raise
+        except BaseException as exc:  # noqa: BLE001
+            # Headers are already sent. An exception here must still become an error body,
+            # or the proxy forwards a 200 with no payload. Stdout is what the job can see.
+            detail = traceback.format_exc(limit=_TRACEBACK_FRAMES)
+            print(f"gym-host: rollouts/run crashed: {detail}", flush=True)
+            body = self._error_body(
+                "internal",
+                f"{type(exc).__name__}: {exc}\n{detail[-_MAX_TRACEBACK_CHARS:]}",
+            )
+        if not body:
+            # A zero-length chunk is the terminator, so an empty body cannot be sent as
+            # one: it would reach the caller as a successful batch of nothing.
+            body = self._error_body("internal", "rollout produced an empty response body")
+        self._write_chunk(body)
+        # Terminator. Only this ends the body.
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
 
@@ -771,11 +1192,19 @@ class Handler(BaseHTTPRequestHandler):
         )
         envelope = {
             "results": results,
-            "job_id": os.environ.get("NMP_JOB_ID", ""),
-            "environment_path": os.environ.get("NMP_ENVIRONMENT_PATH", ""),
-            "work_path": os.environ.get("NMP_WORK_PATH", ""),
+            "job_id": os.environ.get("NHX_JOB_ID", ""),
+            "environment_path": os.environ.get("NHX_ENVIRONMENT_PATH", ""),
+            "work_path": os.environ.get("NHX_WORK_PATH", ""),
         }
-        body = json.dumps(envelope).encode("utf-8")
+        try:
+            body = json.dumps(envelope).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            # A Gym result is an arbitrary object, so encoding it is part of running the
+            # batch and not a detail of the framing: a single value the environment left
+            # unencodable would otherwise take down the whole response.
+            detail = f"rollout results are not JSON-serializable: {exc}"
+            print(f"gym-host: rollouts/run failed: {detail}", flush=True)
+            return self._error_body("internal", detail)
         if len(body) > self.max_response_bytes:
             return self._error_body(
                 "payload_too_large",
@@ -818,22 +1247,49 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
-def main() -> None:
-    global _READY, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
+class _Server(ThreadingHTTPServer):
+    """``ThreadingHTTPServer`` that reports handler failures where they can be read.
 
-    Handler.max_request_bytes = _env_int("NMP_MAX_REQUEST_BYTES", Handler.max_request_bytes)
-    Handler.max_response_bytes = _env_int("NMP_MAX_RESPONSE_BYTES", Handler.max_response_bytes)
+    The base class prints them to stderr, which is not surfaced to the job: a request
+    that died mid-response left no trace anywhere, on either side of the connection.
+    """
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        print(
+            f"gym-host: unhandled error serving {client_address}: {traceback.format_exc()}",
+            flush=True,
+        )
+
+
+def main() -> None:
+    global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
+
+    # Before bootstrap, so this host's own startup output is captured if a rollout later fails.
+    # Gym's component servers are not: they inherit fd 1/2 and write past this wrapper. Gym's
+    # `nemo_gym_log_dir` would capture them, but in nemo-gym 0.5.0 it runs each component under
+    # `set -o pipefail`, which kills any non-editable install whose requirements.txt has nothing
+    # left after Gym filters out its `../..` lines -- a FileSet server then dies printing nothing.
+    _install_output_tail()
+    Handler.max_request_bytes = _env_int("NHX_MAX_REQUEST_BYTES", Handler.max_request_bytes)
+    Handler.max_response_bytes = _env_int("NHX_MAX_RESPONSE_BYTES", Handler.max_response_bytes)
     # Set from the caller's rollout_timeout_s. This, not that timeout, is what actually bounds a
     # batch: the client's is a per-read socket timeout, and the heartbeat keeps resetting it.
     Handler.rollout_deadline_s = _env_float(ROLLOUT_DEADLINE_ENV_KEY, Handler.rollout_deadline_s)
 
     _ensure_event_loop()
-    _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
-    _READY = True
+    try:
+        _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
+    except Exception as exc:
+        # Serve anyway. Exiting takes the sandbox down with its logs, and leaves the caller
+        # polling an address that never answers until its readiness timeout expires.
+        traceback.print_exc()
+        _BOOTSTRAP_ERROR = _runtime_error("bootstrap_failed", f"{type(exc).__name__}: {exc}")
+    else:
+        _READY = True
 
-    port = _env_int("NMP_RUNTIME_HTTP_PORT", _DEFAULT_HTTP_PORT)
+    port = _env_int("NHX_RUNTIME_HTTP_PORT", _DEFAULT_HTTP_PORT)
     # Threaded so chunked rollouts overlap and /health stays answerable mid-batch.
-    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    _Server(("0.0.0.0", port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

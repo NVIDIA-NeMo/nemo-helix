@@ -15,14 +15,20 @@ CLI) rely on:
   so the controller can mark deployments failed without waiting for the
   health-check timeout.
 - The system dir lives under the configured ``workspace_dir`` (default:
-  ``nmp_user_data_dir() / "agents"``), not the plugin source tree.
+  ``nhx_user_data_dir() / "agents"``), not the plugin source tree.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
+import socket
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -34,8 +40,14 @@ from nemo_agents_plugin.config import AgentsConfig, ControllerConfig
 from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
 from nemo_agents_plugin.runner.in_memory import InMemoryRunnerBackend, _resolve_nat_bin
-from nemo_platform_plugin.config import Configuration, nmp_user_data_dir
-from nemo_platform_plugin.files.storage_config import GithubStorageConfig
+from nemo_helix_plugin.config import Configuration, nhx_user_data_dir
+from nemo_helix_plugin.files.storage_config import GithubStorageConfig
+
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
 
 STAGED_SHA = "1" * 40
 
@@ -57,33 +69,43 @@ def _backend(workspace_dir: Path) -> InMemoryRunnerBackend:
     return InMemoryRunnerBackend(cfg)
 
 
+def _without_telemetry(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop the ``telemetry`` the backend wires in on its own.
+
+    Tests about staging and validation care that the *agent's* config reaches
+    the child unchanged. The auto-wired export is the backend's addition and is
+    pinned by the telemetry tests at the bottom of this module.
+    """
+    return {key: value for key, value in config.items() if key != "telemetry"}
+
+
 # ---------------------------------------------------------------------------
-# Default workspace_dir resolves through nmp_user_data_dir()
+# Default workspace_dir resolves through nhx_user_data_dir()
 # ---------------------------------------------------------------------------
 
 
 def test_default_workspace_dir_is_under_user_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The default workspace_dir resolves to ``nmp_user_data_dir() / 'agents'``.
+    """The default workspace_dir resolves to ``nhx_user_data_dir() / 'agents'``.
 
     Earlier versions defaulted to the plugin source root, which leaked
     runtime state into the source tree (and was undocumented).  Artifacts
-    now route through the standard NMP user-data location so they survive
+    now route through the standard NHX user-data location so they survive
     ``/tmp/`` cleanup and live in a well-known place.
     """
-    monkeypatch.setenv("NMP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path))
     Configuration.clear_cache()
     try:
         cfg = AgentsConfig.get()
         # workspace_dir is computed relative to the user-data root.
-        assert cfg.controller.workspace_dir == nmp_user_data_dir() / "agents"
+        assert cfg.controller.workspace_dir == nhx_user_data_dir() / "agents"
         assert cfg.controller.workspace_dir == tmp_path / "agents"
     finally:
         Configuration.clear_cache()
 
 
 def test_workspace_dir_follows_xdg_data_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``XDG_DATA_HOME`` shifts the workspace_dir alongside the rest of NMP state."""
-    monkeypatch.delenv("NMP_DATA_DIR", raising=False)
+    """``XDG_DATA_HOME`` shifts the workspace_dir alongside the rest of NHX state."""
+    monkeypatch.delenv("NHX_DATA_DIR", raising=False)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     Configuration.clear_cache()
     try:
@@ -177,7 +199,8 @@ def test_write_config_creates_system_dir(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_records_log_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize("requested_port", [0, 49200])
+async def test_create_deployment_records_log_path(tmp_path: Path, requested_port: int) -> None:
     """``DeploymentInfo.log_path`` is populated and matches ``log_path_for``."""
     backend = _backend(tmp_path)
 
@@ -193,13 +216,18 @@ async def test_create_deployment_records_log_path(tmp_path: Path) -> None:
     fake = _FakeProc()
 
     def _fake_spawn(self_, name, config_path, log_path, port):  # noqa: ANN001
+        assert port == (requested_port or 49200)
         # Touch the log file so callers can locate it — mirrors real spawn.
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return fake
 
-    with patch.object(InMemoryRunnerBackend, "_spawn", _fake_spawn):
-        info = await backend.create_deployment("ws", "calc-1", {"workflow": {}}, port=49200)
+    with (
+        patch.object(InMemoryRunnerBackend, "_spawn", _fake_spawn),
+        patch.object(backend, "allocate_port", return_value=49200) as allocate,
+    ):
+        info = await backend.create_deployment("ws", "calc-1", {"workflow": {}}, port=requested_port)
+        assert allocate.call_count == (1 if requested_port == 0 else 0)
 
     assert info.log_path == str(backend.log_path_for("ws", "calc-1"))
     assert Path(info.log_path).exists()
@@ -232,7 +260,7 @@ async def test_create_deployment_validates_platform_agent_config(tmp_path: Path)
 
     fake_process = SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
 
-    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port
         assert credential_env == {"NVIDIA_API_KEY": "not-used"}
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,12 +274,15 @@ async def test_create_deployment_validates_platform_agent_config(tmp_path: Path)
         info = await backend.create_deployment("ws", "fabric-dep", config, port=49210)
 
     assert info.status == "starting"
-    assert info.endpoint == "http://127.0.0.1:49210"
-    assert info.port == 49210
+    assert info.endpoint == f"http://127.0.0.1:{info.port}"
+    assert info.port > 0
     assert info.pid == 4242
     assert Path(info.log_path).exists()
-    assert validation_calls == [{"config": config, "base_dir": tmp_path / "system" / "ws" / "fabric-dep-fabric"}]
-    assert yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text()) == config
+    assert validation_calls == [
+        {"config": ANY, "base_dir": tmp_path / "system" / "ws" / "fabric-dep-fabric"},
+    ]
+    assert _without_telemetry(validation_calls[0]["config"]) == config
+    assert _without_telemetry(yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text())) == config
     status = await backend.get_deployment_status("ws", "fabric-dep")
     assert status is info
 
@@ -274,7 +305,7 @@ async def test_delete_deployment_removes_fabric_deployment(tmp_path: Path) -> No
     fake_process = SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
     terminate_calls: list[tuple[str, Any]] = []
 
-    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port, credential_env
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -300,34 +331,11 @@ async def test_delete_deployment_removes_fabric_deployment(tmp_path: Path) -> No
     assert await backend.get_deployment_status("ws", "fabric-dep") is None
 
 
-@pytest.mark.asyncio
-async def test_create_deployment_cleans_fabric_base_dir_on_validation_failure(tmp_path: Path) -> None:
-    backend = _backend(tmp_path)
-    config = {
-        "config_format": "nemo-agents-spec-v1",
-        "name": "fabric-agent",
-        "default_harness": "hermes",
-        "harnesses": {"hermes": {"kind": "hermes"}},
-        "models": {"default": {"provider": "openai", "model": "openai/gpt-5.4"}},
-    }
-    base_dir = tmp_path / "system" / "ws" / "fabric-dep-fabric"
-
-    async def _validate_platform_agent_config(config_: dict[str, Any], *, base_dir: Path) -> Any:
-        del config_
-        (base_dir / "validation.txt").write_text("created during validation")
-        raise ValueError("bad fabric config")
-
-    with patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate_platform_agent_config):
-        with pytest.raises(ValueError, match="bad fabric config"):
-            await backend.create_deployment("ws", "fabric-dep", config, port=0)
-
-    assert not base_dir.exists()
-    assert await backend.get_deployment_status("ws", "fabric-dep") is None
-
-
+@pytest.mark.parametrize("spawn_fails", [False, True], ids=["success", "spawn-failure"])
 def test_spawn_fabric_uses_current_python_and_platform_server(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    spawn_fails: bool,
 ) -> None:
     backend = _backend(tmp_path)
     config_path = tmp_path / "agent.yaml"
@@ -336,16 +344,22 @@ def test_spawn_fabric_uses_current_python_and_platform_server(
     process = SimpleNamespace()
     monkeypatch.setenv("NVIDIA_API_KEY", "real-controller-key")
 
-    with patch("nemo_agents_plugin.runner.in_memory.subprocess.Popen", return_value=process) as popen:
-        spawned = backend._spawn_fabric(
-            "fabric-dep",
-            config_path,
-            log_path,
-            49212,
-            {"NVIDIA_API_KEY": "not-used"},
-        )
+    with patch(
+        "nemo_agents_plugin.runner.in_memory.subprocess.Popen",
+        return_value=process,
+        side_effect=OSError("spawn failed") if spawn_fails else None,
+    ) as popen:
+        with pytest.raises(OSError, match="spawn failed") if spawn_fails else nullcontext():
+            spawned = backend._spawn_fabric(
+                "fabric-dep",
+                config_path,
+                log_path,
+                49212,
+                {"NVIDIA_API_KEY": "not-used"},
+                socket_fd=123,
+            )
+            assert spawned is process
 
-    assert spawned is process
     popen.assert_called_once_with(
         [
             sys.executable,
@@ -357,12 +371,16 @@ def test_spawn_fabric_uses_current_python_and_platform_server(
             "127.0.0.1",
             "--port",
             "49212",
+            "--socket-fd",
+            "123",
         ],
         stdout=ANY,
         stderr=subprocess.STDOUT,
         env=ANY,
+        pass_fds=(123,),
     )
     assert popen.call_args.kwargs["env"]["NVIDIA_API_KEY"] == "not-used"
+    assert popen.call_args.kwargs["stdout"].closed
     assert os.environ["NVIDIA_API_KEY"] == "real-controller-key"
 
 
@@ -514,7 +532,7 @@ def test_resolve_nat_bin_uses_path(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_resolve_nat_bin_uses_sibling_of_sys_executable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When `nat` is not on PATH, look next to `sys.executable`.
 
-    This is the `uv tool install nemo-platform` case: the tool venv contains
+    This is the `uv tool install nemo-helix` case: the tool venv contains
     `nat` (it's co-installed with `nemo` via the `[services]` chain), but the
     venv's `bin/` is not prepended to PATH, so `shutil.which` returns None.
     """
@@ -580,7 +598,7 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
 
     fake_process = SimpleNamespace(pid=4343, returncode=None, poll=lambda: None)
 
-    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port, credential_env
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -589,8 +607,11 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
     with (
         patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
-        patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
-        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=_files_client_at(STAGED_SHA)),
+        patch("nemo_agents_plugin.runner.in_memory.get_async_nemo_client", MagicMock()),
+        patch(
+            "nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client",
+            return_value=_files_client_at(STAGED_SHA),
+        ),
         patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
     ):
         info = await backend.create_deployment("ws", "fabric-dep", config, port=49212, agent="fabric-agent")
@@ -600,7 +621,7 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
     assert info.staged_spec is not None
     assert (info.staged_spec.revision, info.staged_spec.tracked_revision) == (STAGED_SHA, "main")
     assert (base_dir / "mcps" / "calculator.py").exists()
-    assert yaml.safe_load((base_dir / "agent.yaml").read_text()) == config
+    assert _without_telemetry(yaml.safe_load((base_dir / "agent.yaml").read_text())) == config
 
 
 @pytest.mark.asyncio
@@ -621,8 +642,8 @@ async def test_create_deployment_cleans_base_dir_when_staging_fails(tmp_path: Pa
 
     with (
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
-        patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
-        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.get_async_nemo_client", MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client", return_value=MagicMock()),
     ):
         with pytest.raises(FabricArtifactStagingError, match="skills/review"):
             await backend.create_deployment("ws", "fabric-dep", config, port=0, agent="fabric-agent")
@@ -666,7 +687,7 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
 
     fake_process = SimpleNamespace(pid=5150, returncode=None, poll=lambda: None)
 
-    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None):  # noqa: ANN001
+    def _spawn_fabric(self_, name, config_path, log_path, port, credential_env=None, *, socket_fd):  # noqa: ANN001
         del self_, name, config_path, port, credential_env
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -678,10 +699,10 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
         with (
             patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate),
             patch(
-                "nemo_agents_plugin.runner.in_memory.get_async_platform_sdk",
+                "nemo_agents_plugin.runner.in_memory.get_async_nemo_client",
                 return_value=MagicMock(),
             ),
-            patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=files_client),
+            patch("nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client", return_value=files_client),
             patch("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _download_fileset),
             patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
         ):
@@ -693,3 +714,346 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
 
     assert base_dirs[0] == base_dirs[1]
     assert sorted(path.name for path in (base_dirs[1] / "skills").iterdir()) == ["new.md"]
+
+
+# ---------------------------------------------------------------------------
+# Intake ATIF telemetry is auto-wired for Fabric-backed subprocess deployments
+#
+# The child runs on the platform host, so the platform's own base URL reaches
+# it with no container rebase and no auth-proxy sidecar in front.
+# ---------------------------------------------------------------------------
+
+
+_INTAKE_ENDPOINT = "http://platform.test:8080/apis/intake/v2/workspaces/ws/ingest/atif"
+
+
+def _telemetry_agent_config(telemetry: dict[str, Any] | None = None) -> dict[str, Any]:
+    config: dict[str, Any] = {
+        "config_format": "nemo-agents-spec-v1",
+        "name": "fabric-agent",
+        "default_harness": "hermes",
+        "harnesses": {"hermes": {"kind": "hermes"}},
+        "models": {
+            "default": {
+                "provider": "nvidia",
+                "model": "default/test-model",
+                "base_url": "http://platform/apis/inference-gateway/v2/workspaces/ws/openai/-/v1",
+                "api_key_env": "NVIDIA_API_KEY",
+            }
+        },
+    }
+    if telemetry is not None:
+        config["telemetry"] = telemetry
+    return config
+
+
+async def _deploy_and_read_staged_config(
+    backend: InMemoryRunnerBackend,
+    config: dict[str, Any],
+    *,
+    port: int = 49400,
+) -> tuple[DeploymentInfo, dict[str, Any]]:
+    """Deploy *config* with validation and spawn stubbed; return the staged YAML."""
+
+    async def _validate(config_: dict[str, Any], *, base_dir: Path) -> Any:
+        del config_, base_dir
+        return SimpleNamespace(agent_config=SimpleNamespace(name="fabric-agent"))
+
+    def _spawn_fabric(self_, name, config_path, log_path, port_, credential_env=None, *, socket_fd):  # noqa: ANN001
+        del self_, name, config_path, port_, credential_env
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
+
+    with (
+        patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate),
+        patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
+    ):
+        info = await backend.create_deployment("ws", "fabric-dep", config, port=port)
+
+    staged = yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text())
+    return info, staged
+
+
+@pytest.fixture
+def platform_base_url(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Pin the platform URL the wired endpoint must be built from."""
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform.test:8080")
+    return "http://platform.test:8080"
+
+
+@requires_hermes_adapter
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_wires_intake_telemetry_when_config_is_silent(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    assert staged["telemetry"]["enabled"] is True
+    assert staged["telemetry"]["provider"] == "relay"
+    assert staged["telemetry"]["agent_name"] == "fabric-agent"
+    assert staged["telemetry"]["atif"] == {
+        "enabled": True,
+        "storage": [{"type": "http", "endpoint": _INTAKE_ENDPOINT}],
+    }
+
+
+@requires_hermes_adapter
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_omits_header_env(tmp_path: Path) -> None:
+    """No sidecar and no env-named credentials: subprocess exports unauthenticated.
+
+    Pinned so that wiring identity here later is a deliberate change rather than
+    a silent one — it only makes sense together with the rest of subprocess mode
+    under platform auth.
+    """
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    assert "header_env" not in staged["telemetry"]["atif"]["storage"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_honors_telemetry_opt_out(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config({"enabled": False}))
+
+    assert staged["telemetry"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_preserves_declared_atif_storage(tmp_path: Path) -> None:
+    """An explicit destination beats an inferred one."""
+    declared = {
+        "atif": {"storage": [{"type": "http", "endpoint": "https://telemetry.example.com/atif"}]},
+    }
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config(declared))
+
+    assert staged["telemetry"] == declared
+
+
+@requires_hermes_adapter
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_does_not_mutate_the_caller_config(tmp_path: Path) -> None:
+    """The mapping passed in is the live AgentDeployment entity the controller re-saves.
+
+    Wiring it in place would persist an inferred endpoint into the stored
+    deployment, which no later run would know to recompute.
+    """
+    backend = _backend(tmp_path)
+    config = _telemetry_agent_config()
+
+    _, staged = await _deploy_and_read_staged_config(backend, config)
+
+    assert "telemetry" not in config
+    assert "telemetry" in staged
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_starts_when_adapter_cannot_export_atif(tmp_path: Path) -> None:
+    """An adapter with no Relay ATIF output runs untraced rather than failing.
+
+    Patched at the probe rather than expressed as a config, because "this
+    adapter does not advertise ATIF" is a property of the adapter descriptor,
+    not of anything the agent config can say.
+    """
+    backend = _backend(tmp_path)
+    config = _telemetry_agent_config()
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", return_value=False):
+        info, staged = await _deploy_and_read_staged_config(backend, config)
+
+    assert info.status == "starting"
+    assert "telemetry" not in staged
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_skips_adapter_probe_when_telemetry_is_opted_out(tmp_path: Path) -> None:
+    """The opt-out is answered before the probe resolves a Fabric plan.
+
+    Ordering, not behavior: the staged config is the same either way. Pinned
+    because the wasted plan is invisible from the output -- only the call count
+    shows it.
+    """
+    backend = _backend(tmp_path)
+    probe = MagicMock(return_value=True)
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", probe):
+        _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config({"enabled": False}))
+
+    probe.assert_not_called()
+    assert staged["telemetry"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_probes_adapter_when_config_is_silent(tmp_path: Path) -> None:
+    """The counterpart: a config that wants wiring does reach the probe."""
+    backend = _backend(tmp_path)
+    probe = MagicMock(return_value=True)
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", probe):
+        _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    probe.assert_called_once()
+    assert staged["telemetry"]["atif"]["storage"] == [{"type": "http", "endpoint": _INTAKE_ENDPOINT}]
+
+
+def test_spawn_fabric_inherits_socket_after_parent_closes(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+    popen = subprocess.Popen
+
+    def spawn_probe(cmd: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        fd = cmd[cmd.index("--socket-fd") + 1]
+        kwargs["stdin"] = subprocess.PIPE
+        kwargs["stdout"] = subprocess.PIPE
+        return popen(
+            [
+                sys.executable,
+                "-c",
+                "import socket, sys; sys.stdin.read(); "
+                "s = socket.socket(fileno=int(sys.argv[1])); s.listen(); "
+                "print(s.getsockname()[1])",
+                fd,
+            ],
+            **kwargs,
+        )
+
+    proc = None
+    try:
+        with backend.reserve_socket() as reserved:
+            port = reserved.getsockname()[1]
+            with patch("nemo_agents_plugin.runner.in_memory.subprocess.Popen", spawn_probe):
+                proc = backend._spawn_fabric(
+                    "probe",
+                    tmp_path / "agent.yaml",
+                    tmp_path / "agent.log",
+                    port,
+                    socket_fd=reserved.fileno(),
+                )
+        assert reserved.fileno() == -1
+        stdout, _ = proc.communicate(input=b"", timeout=10)
+        assert proc.returncode == 0
+        assert stdout.strip() == str(port).encode()
+        with socket.socket() as replacement:
+            replacement.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            replacement.bind(("127.0.0.1", port))
+            replacement.listen()
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    ["stage", "validation", "spawn", "cancel_stage", "cancel_validation", "cancel_spawn", "cancel_spawn_twice", None],
+)
+async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) -> None:
+    backend = _backend(tmp_path)
+    sockets: list[socket.socket] = []
+    addresses: list[tuple[str, int]] = []
+    reserve = backend.reserve_socket
+    spawn_started = threading.Event()
+    allow_spawn = threading.Event()
+    process = SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
+
+    @contextmanager
+    def track_reservation() -> Iterator[socket.socket]:
+        with reserve() as sock:
+            sockets.append(sock)
+            addresses.append(sock.getsockname())
+            yield sock
+
+    async def stage(*args: Any) -> None:
+        assert sockets[0].fileno() >= 0
+        with socket.socket() as competitor:
+            with pytest.raises(OSError):
+                competitor.bind(sockets[0].getsockname())
+        if failure == "cancel_stage":
+            raise asyncio.CancelledError
+        if failure == "stage":
+            raise ValueError("stage failed")
+
+    async def validate(*args: Any, base_dir: Path) -> None:
+        (base_dir / "validation.txt").write_text("created during validation")
+        if failure == "cancel_validation":
+            raise asyncio.CancelledError
+        if failure == "validation":
+            raise ValueError("validation failed")
+
+    def spawn(*args: Any, socket_fd: int) -> Any:
+        assert socket_fd == sockets[0].fileno()
+        if failure == "spawn":
+            raise OSError("spawn failed")
+        if failure in {"cancel_spawn", "cancel_spawn_twice"}:
+            spawn_started.set()
+            assert allow_spawn.wait(5)
+            os.fstat(socket_fd)
+        return process
+
+    with (
+        patch.object(backend, "reserve_socket", track_reservation),
+        patch.object(backend, "_stage_ethos", stage),
+        patch.object(backend, "_spawn_fabric", spawn),
+        patch.object(backend, "_terminate") as terminate,
+        patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", validate),
+        patch(
+            "nemo_agents_plugin.runner.in_memory.configure_intake_telemetry", side_effect=lambda config, **kw: config
+        ),
+        patch("nemo_agents_plugin.runner.in_memory.platform_gateway_credential_env", return_value={}),
+    ):
+        task = asyncio.create_task(
+            backend.create_deployment(
+                "ws",
+                "dep",
+                {"config_format": "nemo-agents-spec-v1"},
+                port=0,
+            )
+        )
+        if failure in {"cancel_spawn", "cancel_spawn_twice"}:
+            try:
+                assert await asyncio.to_thread(spawn_started.wait, 5)
+                task.cancel()
+                await asyncio.sleep(0)
+                if failure == "cancel_spawn_twice":
+                    task.cancel()
+                    await asyncio.sleep(0)
+                assert sockets[0].fileno() >= 0
+            finally:
+                allow_spawn.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            terminate.assert_called_once_with("dep", process)
+        elif failure in {"cancel_stage", "cancel_validation"}:
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            terminate.assert_not_called()
+        elif failure:
+            with pytest.raises((ValueError, OSError), match=failure):
+                await task
+        else:
+            info = await task
+            assert info.port > 0
+            assert info.endpoint == f"http://127.0.0.1:{info.port}"
+        assert sockets[0].fileno() == -1
+        if failure:
+            with socket.socket() as replacement:
+                replacement.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                replacement.bind(addresses[0])
+                replacement.listen()
+            assert not backend._fabric_base_dir_for("ws", "dep").exists()
+            assert await backend.get_deployment_status("ws", "dep") is None

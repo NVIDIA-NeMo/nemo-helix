@@ -8,12 +8,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar
 
-from nemo_agents_plugin.jobs.execute_extensions import ExecuteAgentAfterInvokeContext
+from nemo_helix_plugin.agents.execute_extensions import ExecuteAgentAfterInvokeContext
+from nemo_helix_plugin.client_provider import get_async_task_nemo_client
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
 from nemo_insights_plugin.analyst.result import AnalystResult
-from nemo_insights_plugin.jobs.analyze import REPORT_FILE_NAME, REPORT_RESULT_NAME
-from nemo_platform_plugin.sdk_provider import get_async_task_sdk
 from pydantic import BaseModel, ConfigDict, Field
+
+REPORT_RESULT_NAME = "analysis-report"
+REPORT_FILE_NAME = "analysis-report.txt"
 
 
 class InsightsAnalysisExtensionConfig(BaseModel):
@@ -79,7 +81,7 @@ async def _persist_result(
     insights_output: str | None,
     local_only: bool,
 ) -> str:
-    client = get_async_task_sdk("insights")
+    client = get_async_task_nemo_client("insights")
     try:
         backend = make_analyst_backend(client=client, insights_output=insights_output, local_only=local_only)
         return await backend.persist_result(workspace=workspace, agent=agent, result=result)

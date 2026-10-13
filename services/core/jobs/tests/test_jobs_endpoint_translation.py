@@ -3,14 +3,14 @@
 
 import pytest
 from fastapi import HTTPException
-from nmp.core.jobs.api.v2.jobs.endpoints import translate_cpu_container_steps_to_subprocess, validate_job_spec
-from nmp.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider, SubprocessExecutionProvider
-from nmp.core.jobs.app.schemas import PlatformJobSpec, PlatformJobStepSpec
-from nmp.core.jobs.controllers.backends.docker import DockerJobExecutionProfile, DockerJobExecutionProfileConfig
+from nhx.core.jobs.api.v2.jobs.endpoints import translate_cpu_container_steps_to_subprocess, validate_job_spec
+from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider, SubprocessExecutionProvider
+from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
+from nhx.core.jobs.controllers.backends.docker import DockerJobExecutionProfile, DockerJobExecutionProfileConfig
 
 
-def _cpu_step(name: str, profile: str = "default") -> PlatformJobStepSpec:
-    return PlatformJobStepSpec(
+def _cpu_step(name: str, profile: str = "default") -> HelixJobStepSpec:
+    return HelixJobStepSpec(
         name=name,
         executor=CPUExecutionProvider(
             provider="cpu",
@@ -21,7 +21,7 @@ def _cpu_step(name: str, profile: str = "default") -> PlatformJobStepSpec:
 
 
 def test_translate_cpu_container_steps_to_subprocess_uses_explicit_compat_profiles() -> None:
-    spec = PlatformJobSpec(steps=[_cpu_step("local-step"), _cpu_step("docker-step", profile="docker")])
+    spec = HelixJobSpec(steps=[_cpu_step("local-step"), _cpu_step("docker-step", profile="docker")])
 
     translated = translate_cpu_container_steps_to_subprocess(spec, {"default"})
 
@@ -32,7 +32,7 @@ def test_translate_cpu_container_steps_to_subprocess_uses_explicit_compat_profil
 
 
 def test_translate_cpu_container_steps_to_subprocess_does_not_use_implicit_defaults() -> None:
-    spec = PlatformJobSpec(steps=[_cpu_step("docker-step")])
+    spec = HelixJobSpec(steps=[_cpu_step("docker-step")])
 
     translated = translate_cpu_container_steps_to_subprocess(spec, set())
 
@@ -40,9 +40,9 @@ def test_translate_cpu_container_steps_to_subprocess_does_not_use_implicit_defau
 
 
 def test_validate_job_spec_matches_provider_and_profile() -> None:
-    spec = PlatformJobSpec(
+    spec = HelixJobSpec(
         steps=[
-            PlatformJobStepSpec(
+            HelixJobStepSpec(
                 name="local-step",
                 executor=SubprocessExecutionProvider(provider="subprocess", profile="default", command=["true"]),
             )

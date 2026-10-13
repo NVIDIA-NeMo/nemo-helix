@@ -40,7 +40,8 @@ export const ProgressReportingFields = ({
         useControllerProps={{ name: field('min_report_interval_seconds'), control }}
         formFieldProps={{
           slotLabel: 'Min Report Interval (s)',
-          slotInfo: 'Floor on how often progress is reported, to keep long runs from flooding.',
+          slotInfo:
+            'Least time between progress reports. Metrics are still recorded at full resolution, so raising this only makes charts update less often while leaving training less time blocked on reporting.',
         }}
         {...specSliderProps(defaults, `${defaultsPrefix}_min_report_interval_seconds`)}
         min={1}
@@ -53,7 +54,7 @@ export const ProgressReportingFields = ({
         formFieldProps={{
           slotLabel: 'Time Series Metrics',
           slotInfo:
-            'Comma separated metric names to record over time. Left unset, the backend picks its own set.',
+            'Metric names to keep history for, matching the job status details and so prefixed by phase. Glob patterns work, so *_loss covers every loss. Unmatched metrics are still reported as a current value, just without history.',
         }}
         placeholder="train_loss, val_loss"
         disabled={disabled}

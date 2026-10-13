@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Entity definitions for the Agent Hardener plugin — stored in the NeMo Platform entity store.
+"""Entity definitions for the Agent Hardener plugin — stored in the NeMo Helix entity store.
 
 A :class:`AgentHardenerRun` records one war-game run (agent targeted, victim port, manifest, outcome); a
 :class:`AgentHardenerManifest` is a named, reusable war-game target scaffolded from a deployed agent or an
@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Literal
 
 from nemo_agent_hardener_plugin.model_config import WarGameModels
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 from pydantic import Field
 
 AGENT_HARDENER_RUN_TYPE = "agent_hardener_run"

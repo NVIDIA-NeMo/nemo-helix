@@ -10,7 +10,7 @@ metadata:
   name: {{ include "nemo-common.clickhouse.fullname" . }}
   labels:
     app.kubernetes.io/component: clickhouse
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   {{- with .Values.clickhouse.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -28,5 +28,5 @@ spec:
       protocol: TCP
   selector:
     app.kubernetes.io/component: clickhouse
-    {{- include "nemo-platform.selectorLabels" . | nindent 4 }}
+    {{- include "nemo-helix.selectorLabels" . | nindent 4 }}
 {{- end }}

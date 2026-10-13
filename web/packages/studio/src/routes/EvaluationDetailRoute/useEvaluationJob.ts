@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import type { EvaluationResponse, PlatformJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import type { EvaluationResponse, HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { fetchEvaluatorJobs } from '@studio/api/evaluation/evaluator-jobs';
 import {
   type EvalJobRow,
@@ -37,7 +37,7 @@ export const useEvaluationJob = (
   const { data: job } = useQuery({
     queryKey: ['evaluation-job', workspace, evaluationName] as const,
     queryFn: async ({ signal }) => {
-      const matches = (candidate: PlatformJobResponse) =>
+      const matches = (candidate: HelixJobResponse) =>
         publishedEvaluationName(candidate) === evaluationName;
       const jobs = await fetchEvaluatorJobs(workspace, signal, (all) => all.some(matches));
       const found = jobs.find(matches);
@@ -47,7 +47,7 @@ export const useEvaluationJob = (
     refetchInterval: (query) => {
       if (published) return false;
       const status = query.state.data?.status;
-      const settled = PlatformJobTerminalStatuses.some((terminal) => terminal === status);
+      const settled = HelixJobTerminalStatuses.some((terminal) => terminal === status);
       return settled ? false : JOB_POLLING_INTERVAL_LONG;
     },
   });

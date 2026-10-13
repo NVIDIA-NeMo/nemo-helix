@@ -11,6 +11,12 @@ const KEYBOARD_TARGET_SELECTOR = '[data-row-click]';
 
 type MakeColumns<T> = ComponentProps<typeof DataView.Root<T>>['makeColumns'];
 
+export type RowClickHandler<DataType> = (
+  row: DataType,
+  index: number,
+  event: React.MouseEvent
+) => void;
+
 function findRowFromEvent(
   target: EventTarget | null
 ): { tr: HTMLTableRowElement; index: number } | null {
@@ -67,7 +73,7 @@ function RowKeyboardTarget({
   dataIndex,
   subIndex,
 }: {
-  onActivate: () => void;
+  onActivate: (event: React.MouseEvent) => void;
   dataIndex: number;
   subIndex?: number;
 }) {
@@ -102,10 +108,10 @@ function RowKeyboardTarget({
  * can be toggled with zero conditional logic.
  */
 export function useRowClick<DataType>(
-  onRowClick: ((row: DataType, index: number) => void) | undefined,
+  onRowClick: RowClickHandler<DataType> | undefined,
   data: DataType[]
 ) {
-  const onClick: React.MouseEventHandler | undefined = useCallback(
+  const activate = useCallback(
     (e: React.MouseEvent) => {
       if (!onRowClick) return;
 
@@ -119,10 +125,20 @@ export function useRowClick<DataType>(
 
       const resolved = resolveRowData(data, row.tr);
       if (resolved) {
-        onRowClick(resolved.item, resolved.index);
+        onRowClick(resolved.item, resolved.index, e);
       }
     },
     [onRowClick, data]
+  );
+
+  const onAuxClick: React.MouseEventHandler = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 1) return;
+      if (isInteractiveElement(e.target)) return;
+      e.preventDefault();
+      activate(e);
+    },
+    [activate]
   );
 
   const wrapColumns = useCallback(
@@ -155,7 +171,7 @@ export function useRowClick<DataType>(
               return (
                 <>
                   <RowKeyboardTarget
-                    onActivate={() => onRowClick(context.row.original, topLevelIndex)}
+                    onActivate={(e) => onRowClick(context.row.original, topLevelIndex, e)}
                     dataIndex={topLevelIndex}
                     subIndex={isSubRow ? context.row.index : undefined}
                   />
@@ -172,7 +188,8 @@ export function useRowClick<DataType>(
 
   return {
     wrapColumns,
-    onClick: onRowClick ? onClick : undefined,
+    onClick: onRowClick ? activate : undefined,
+    onAuxClick: onRowClick ? onAuxClick : undefined,
     className: onRowClick ? '[&_tbody_tr]:cursor-pointer' : '',
   };
 }

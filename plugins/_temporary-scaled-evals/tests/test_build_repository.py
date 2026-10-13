@@ -31,8 +31,8 @@ def test_claim_expires_stale_final_attempt_before_selecting_work() -> None:
     assert "build worker lease expired after final attempt" in expire_sql
     assert "build_attempts >= %s" in expire_sql
     assert expire_params == (3, 90)
-    assert "FOR UPDATE SKIP LOCKED" in claim_sql
-    assert claim_params == (3, 90, "worker-1")
+    assert "SKIP LOCKED" not in claim_sql
+    assert claim_params == (3, 90, "worker-1", 3, 90)
 
 
 @pytest.mark.parametrize(
@@ -67,3 +67,61 @@ def test_retry_or_fail_persists_retry_or_terminal_state(attempt: int, terminal: 
         assert "build_next_attempt_at = NOW()" in sql
         assert "status = 'failed'" not in sql
         assert params == ("builder unavailable", 30, "task_1", 2, "worker-1")
+
+
+def test_complete_persists_verifier_image() -> None:
+    conn = MagicMock()
+    cur = conn.cursor.return_value.__enter__.return_value
+    cur.rowcount = 1
+
+    assert TaskBuildRepository(conn).complete(
+        "task_1",
+        2,
+        worker_id="worker-1",
+        image_ref="registry/task@sha256:a",
+        image_digest="sha256:a",
+        verifier_image_ref="registry/verifier@sha256:b",
+        verifier_image_digest="sha256:b",
+    )
+
+    sql, params = cur.execute.call_args_list[0].args
+    assert "verifier_image_ref = %s, verifier_image_digest = %s" in sql
+    assert params == (
+        "registry/task@sha256:a",
+        "sha256:a",
+        "registry/verifier@sha256:b",
+        "sha256:b",
+        "task_1",
+        2,
+        "worker-1",
+    )
+
+
+def test_platform_job_claim_binding_and_listing() -> None:
+    conn = MagicMock()
+    cur = conn.cursor.return_value.__enter__.return_value
+    cur.rowcount = 1
+    cur.fetchall.return_value = [
+        {
+            "task_id": "task_1",
+            "revision": 2,
+            "build_attempts": 1,
+            "job_name": "scaled-evals-build-abc",
+        }
+    ]
+    repository = TaskBuildRepository(conn)
+
+    assert repository.bind_platform_job(
+        "task_1",
+        2,
+        worker_id="controller-1",
+        job_name="scaled-evals-build-abc",
+    )
+    bind_sql, bind_params = cur.execute.call_args.args
+    assert "SET build_claimed_by = %s" in bind_sql
+    assert bind_params == ("scaled-evals-build-abc", "task_1", 2, "controller-1")
+
+    assert repository.list_platform_jobs(limit=10) == cur.fetchall.return_value
+    list_sql, list_params = cur.execute.call_args.args
+    assert "build_claimed_by LIKE 'scaled-evals-build-%%'" in list_sql
+    assert list_params == (10,)

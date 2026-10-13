@@ -8,7 +8,7 @@ from nemo_customizer.discovery import (
     discover_customization_contributor_classes,
     discover_customization_contributors,
 )
-from nemo_platform_plugin.discovery import (
+from nemo_helix_plugin.discovery import (
     discover_customization_contributors as platform_discover,
 )
 

@@ -30,8 +30,8 @@ Tell the user that the NeMo CLI or the Safe Synthesizer plugin is not installed 
 
 ### Container image cannot be pulled or is the wrong tag
 
-- For released images, verify `NMP_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-platform`, `NMP_IMAGE_TAG=<tag>`, and `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=safe-synthesizer-tasks`.
-- For local Docker executor testing, verify `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE_REF=safe-synthesizer-tasks:local` and that `docker image inspect safe-synthesizer-tasks:local` succeeds.
+- For released images, verify `NHX_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-helix`, `NHX_IMAGE_TAG=<tag>`, and `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=nhx-safe-synthesizer-tasks`.
+- For local Docker executor testing, verify `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE_REF=nhx-safe-synthesizer-tasks:local` and that `docker image inspect nhx-safe-synthesizer-tasks:local` succeeds.
 - For Kubernetes, push the image to a registry the cluster can pull and set `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE_REF` to that full pushed image reference.
 - If the pull fails from `nvcr.io`, confirm NGC credentials or image pull secrets are configured for the Jobs backend.
 

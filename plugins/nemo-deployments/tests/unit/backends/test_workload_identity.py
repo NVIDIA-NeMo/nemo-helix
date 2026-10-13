@@ -10,8 +10,8 @@ from nemo_deployments_plugin.backends.k8s.workload_identity import revoke_worklo
 from nemo_deployments_plugin.backends.labels import deployment_key
 from nemo_deployments_plugin.backends.workload_identity import workload_identity_activation_error
 from nemo_deployments_plugin.entities import Container, DeploymentConfig, WorkloadIdentitySpec
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.auth.workload_delegations import WorkloadDelegationLookupScope
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationLookupScope
 
 
 def _config() -> DeploymentConfig:
@@ -34,7 +34,7 @@ def test_workload_identity_activation_error_when_exchange_disabled() -> None:
     ):
         error = workload_identity_activation_error(config=_config(), auth_context=_auth_context())
 
-    assert error == "workload_identity requires auth.oidc.workload_token_exchange_enabled to be enabled"
+    assert error == "workload_identity requires auth.oidc.workload to be configured"
 
 
 def test_workload_identity_activation_error_when_auth_context_missing() -> None:

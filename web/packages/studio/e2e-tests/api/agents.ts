@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { NMP_BASE_URL } from '@e2e-tests/utils/environment';
+import { NHX_BASE_URL } from '@e2e-tests/utils/environment';
 import { APIRequestContext, APIResponse } from '@playwright/test';
 
 interface AgentDeployment {
@@ -28,7 +28,7 @@ export class AgentsAPI {
   constructor(private request: APIRequestContext) {}
 
   private workspacePath(workspace: string) {
-    return `${NMP_BASE_URL}/apis/agents/v2/workspaces/${encodeURIComponent(workspace)}`;
+    return `${NHX_BASE_URL}/apis/agents/v2/workspaces/${encodeURIComponent(workspace)}`;
   }
 
   async listDeploymentsForAgent(workspace: string, agent: string): Promise<AgentDeployment[]> {
@@ -55,7 +55,7 @@ export class AgentsAPI {
 
   async deleteFileset(workspace: string, name: string) {
     const response = await this.request.delete(
-      `${NMP_BASE_URL}/apis/files/v2/workspaces/${encodeURIComponent(workspace)}/filesets/${encodeURIComponent(name)}`
+      `${NHX_BASE_URL}/apis/files/v2/workspaces/${encodeURIComponent(workspace)}/filesets/${encodeURIComponent(name)}`
     );
     assertDone(response, `delete fileset ${name}`);
   }
@@ -64,7 +64,7 @@ export class AgentsAPI {
    *  so a run's published results need no separate cleanup call. */
   async deleteExperiment(workspace: string, name: string) {
     const response = await this.request.delete(
-      `${NMP_BASE_URL}/apis/intake/v2/workspaces/${encodeURIComponent(workspace)}/experiments/${encodeURIComponent(name)}`
+      `${NHX_BASE_URL}/apis/intake/v2/workspaces/${encodeURIComponent(workspace)}/experiments/${encodeURIComponent(name)}`
     );
     assertDone(response, `delete experiment ${name}`);
   }

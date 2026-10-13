@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+schema_version = "1.3"
+multi_step_reward_strategy = "final"
+
+[task]
+name = "hello/debug-agent-runtime-error"
+authors = [{ name = "NVIDIA" }]
+keywords = ["hello", "debugging", "expected-failure", "multi-step"]
+
+[metadata]
+difficulty = "easy"
+category = "debug"
+
+[agent]
+timeout_sec = 60.0
+
+[verifier]
+timeout_sec = 60.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 512
+
+# This must remain a Harbor multi-step task. Its first agent invocation times
+# out inside the step, while the shared verifier still emits reward=0.0. The
+# resulting result.json has top-level exception_info=null and carries the real
+# failure at step_results[0].exception_info.
+[[steps]]
+name = "attempt-answer"
+min_reward = 1.0
+
+[steps.agent]
+# Keep this far below the time needed to start any installed agent. Harbor
+# converts the asyncio timeout into AgentTimeoutError on this step.
+timeout_sec = 0.01
+
+# Declared to prove this is a genuinely multi-step task. The first step's
+# min_reward gate stops execution before Harbor reaches this step.
+[[steps]]
+name = "should-not-run"

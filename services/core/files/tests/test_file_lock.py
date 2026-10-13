@@ -8,9 +8,9 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
-from nmp.common.entities import EntityConflictError, EntityNotFoundError
-from nmp.core.files.app.file_lock import FileLockManager, _path_to_lock_name
-from nmp.core.files.entities import FileLock
+from nhx.common.entities import EntityConflictError, EntityNotFoundError
+from nhx.core.files.app.file_lock import FileLockManager, _path_to_lock_name
+from nhx.core.files.entities import FileLock
 
 
 @pytest.fixture

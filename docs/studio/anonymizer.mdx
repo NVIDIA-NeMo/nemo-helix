@@ -1,0 +1,99 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "NeMo Studio Anonymizer"
+description: "Detect and protect PII in a dataset from Studio, with a live preview before running a full job."
+---
+
+Use **Datasets > Anonymizer** in the NeMo Studio workspace sidebar to detect and protect PII in a dataset through context-aware replacement or rewriting. The page is enabled by default; an administrator can hide it by setting `studio.feature_flags.anonymizer_enabled: false` in the platform configuration and restarting Studio.
+
+Studio covers the same workflow as the `nemo anonymizer` CLI and the `sdk.anonymizer` accessor. For concepts, configuration shape, and the CLI and SDK paths, see [Anonymize Data](/documentation/anonymize-data).
+
+## Anonymizer Job List
+
+The Anonymizer page lists the anonymizer jobs in the current workspace and polls for status changes.
+
+| Action | Where | Result |
+|--------|-------|--------|
+| Start a new job | **Anonymize Data** | Opens the builder. |
+| View details | Row actions > **View Details** | Opens the job detail page. |
+| Search | Name search bar | Filters the list to jobs whose names match the query. |
+| Filter | **Status**, **Created At**, and **Updated At** filters | Narrows the list by job status or date range. |
+| Cancel a job | Row actions > **Cancel** | Available while the job is in a cancellable state. |
+| Delete jobs | Row actions > **Delete**, or select rows and delete | Removes the selected jobs. |
+
+The table shows each job's name, description, creation time, and status. The **Updated** column is hidden by default and can be enabled from the column controls.
+
+## Build a Job
+
+The builder has a configuration panel on the left with **Source** and **Model Settings** tabs, and a preview panel on the right. **Preview** runs the current configuration over a few records; **Full Run** submits the job and opens its detail page.
+
+### Data Source
+
+| Field | Description |
+|-------|-------------|
+| Source | **Dataset** to pick a file from a workspace fileset, or **URL** for an HTTP(S) address. |
+| Dataset / URL | The `.csv` or `.parquet` file to anonymize. |
+
+### Generation
+
+Choose the anonymization strategy. Each strategy exposes its own parameters.
+
+| Strategy | What it does | Parameters |
+|----------|--------------|------------|
+| Substitute | Replaces detected entities with LLM-generated synthetic values. | None. |
+| Redact | Replaces entities with a label-based marker, removing the original text. | Format template (default `[REDACTED_{label}]`), label normalization. |
+| Annotate | Tags entities with their label but keeps the original text. | Format template (default `<{text}, {label}>`; requires `{text}` and `{label}`). |
+| Hash | Replaces entities with a deterministic digest, so the same text always hashes the same way. | Algorithm (SHA-256, SHA-1, MD5), digest length (6–64), format template (requires `{digest}`). |
+| Rewrite | Rewrites the whole text into a privacy-safe version that reduces explicit and inferable identifiers. | Privacy goal, LLM instructions, risk tolerance, max repair rounds, strict entity protection. |
+
+**Preview Rows** sets how many records a preview run anonymizes (1–10, default 1). It does not affect a full run.
+
+Rewrite-specific parameters:
+
+| Field | Description |
+|-------|-------------|
+| Privacy Goal | **Default**, or **Custom** to state what to **Protect** (identifiers) and what to **Preserve** (utility and meaning). |
+| LLM Instructions | Optional extra instructions for the rewriter. |
+| Risk Tolerance | Minimal, Low (default), Moderate, or High. |
+| Max Repair Rounds | Repair passes run when leakage exceeds the tolerance. `0` disables repair. |
+| Strict Entity Protection | Forces every detected entity to be protected regardless of risk. |
+
+### Columns
+
+**Text Column** names the column holding the text to anonymize. When Studio can read the selected file, this is a dropdown of its columns and a single-column file is selected automatically; otherwise it is a free-text field. **Data Summary** is an optional description of the data that helps the models produce better results.
+
+### Entities
+
+**Auto-detect** covers the default entity labels and lets the augmenter add more labels it finds. **Custom** restricts the output to the labels you select; the picker groups the labels the platform reports by category and accepts a typed-in label of your own. In Custom mode, **Also include all N default entities** adds the defaults to your selection. Custom mode requires at least one label or the defaults.
+
+### Model Settings
+
+The **Model Settings** tab assigns a workspace model to each role the selected strategy uses, with an inference-parameter dropdown per role.
+
+| Strategy | Roles |
+|----------|-------|
+| Redact, Annotate, Hash | Entity Detector, Entity Validator, Entity Augmenter, Latent Detector. |
+| Substitute | The detection roles, plus Replacement Generator. |
+| Rewrite | The detection roles, Replacement Generator, and Domain Classifier, Disposition Analyzer, Meaning Extractor, QA Generator, Rewriter, Repairer, Evaluator. |
+
+**Entity Detector** runs a token-classification NER model rather than a general chat model, so it takes no sampling parameters. The NER families Studio recognizes — GLiNER models and privacy filters — are grouped under **Suggested**, and any other model in the workspace remains selectable under **Other models**.
+
+### Preview
+
+**Preview** streams anonymized records into the preview panel. Page through the returned records, expand **Logs** to follow the run, and use **Stop** to end a preview early. A banner reports records that failed during the run.
+
+## Job Detail
+
+The job detail page polls until the job reaches a terminal state.
+
+| Panel | What it shows |
+|-------|---------------|
+| Job Details | Status, strategy, created and updated times, creator, source, and the error message when the job failed. |
+| Results | Result artifacts, each with a **Download** action. Populated once the job is terminal. |
+| Preview | The first records of the result dataset. Download the result for the full dataset. |
+| Failed Records | Records the job could not anonymize, when there are any. |
+| Logs | Job logs, with a download action. |
+
+Use the actions menu in the page header to cancel a running job or delete the job.

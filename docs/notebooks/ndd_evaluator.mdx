@@ -15,7 +15,7 @@ description: ""
 
 ```text
  ┌───────────────────────────────┐ ┌─────────────────────────────┐
- │ Nemo Data Designer │ │ Nemo Evaluator │
+ │ Nemo Data Designer │ │ NeMo Helix Evals │
  │ +------------------------+ │ │ +-----------------------+ │
  │ | Nurse Triage Note |───┼───────▶│ | LLM predicts ESI | │
  │ +------------------------+ │ │ +-----------------------+ │
@@ -41,45 +41,53 @@ Tip: Run the cells in order. You can re-run preview/generation to explore differ
 
 ## **Step 1**: 🎨 NeMo Data Designer
 
-First, create a client for interacting with NeMo Platform.
+First, create a client for interacting with NeMo Helix.
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
-# Base URL for the platform
-BASE_URL = os.getenv("NMP_BASE_URL", "http://localhost:8080")
-WORKSPACE = "default"
-
-# Initialize NeMoPlatform client (does not trigger any action yet)
-client = NeMoPlatform(base_url=BASE_URL, workspace=WORKSPACE)
+# Initialize the client from your current CLI context (does not trigger any action yet)
+client = NemoClient.from_config()
+WORKSPACE = client.resolve_workspace()
 ```
 
 Create a Secret and Model Provider to use models hosted on `build.nvidia.com`.
-Note: these resources may already exist if you are running NeMo Platform Quickstart.
+Note: these resources may already exist if you are running NeMo Helix Quickstart.
 
 ```python
+from pydantic import SecretStr
+from nemo_helix_plugin.models.types import CreateModelProviderRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
 SECRET_NAME = "nvidia-build-api-key"
 PROVIDER_NAME = "build"
 PROVIDER_API_KEY = os.getenv("NVIDIA_API_KEY")
 
-existing_secrets = client.secrets.list()
-if SECRET_NAME not in [secret.name for secret in existing_secrets.data]:
+existing_secrets = client.secrets.list_secrets().items()
+if SECRET_NAME not in [secret.name for secret in existing_secrets]:
     if PROVIDER_API_KEY is None:
         raise ValueError(
             "Set NVIDIA_API_KEY to a key with access to NVIDIA Build models"
         )
-        client.secrets.create(
-            name=SECRET_NAME, value=PROVIDER_API_KEY, description="NVIDIA Build API key"
+    client.secrets.create_secret(
+        body=HelixSecretCreateRequest(
+            name=SECRET_NAME,
+            value=SecretStr(PROVIDER_API_KEY),
+            description="NVIDIA Build API key",
         )
+    )
 
-existing_providers = client.inference.providers.list()
-if PROVIDER_NAME not in [provider.name for provider in existing_providers.data]:
-    provider = client.inference.providers.create(
-        name=PROVIDER_NAME,
-        host_url="https://integrate.api.nvidia.com",
-        api_key_secret_name=SECRET_NAME,
-        description="External provider for build.nvidia.com",
+existing_providers = client.models.list_providers().items()
+if PROVIDER_NAME not in [provider.name for provider in existing_providers]:
+    client.models.create_provider(
+        body=CreateModelProviderRequest(
+            name=PROVIDER_NAME,
+            host_url="https://integrate.api.nvidia.com",
+            api_key_secret_name=SECRET_NAME,
+            description="External provider for build.nvidia.com",
+        )
     )
 ```
 
@@ -89,10 +97,10 @@ Create a `DataDesignerConfigBuilder` with the models you intend to use.
 import data_designer.config as dd
 
 MODEL_ALIAS_GENERATOR = "content_generator"
-MODEL_ID_GENERATOR = "nvidia/nemotron-3-nano-30b-a3b"
+MODEL_ID_GENERATOR = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 MODEL_ALIAS_JUDGE = "judge"
-MODEL_ID_JUDGE = "openai/gpt-oss-120b"
+MODEL_ID_JUDGE = "nvidia/nemotron-3-super-120b-a12b"
 
 model_configs = [
     dd.ModelConfig(
@@ -313,7 +321,7 @@ config_builder.add_column(
 Tip: Re-run preview to cycle examples; adjust prompts, temperatures, or scenarios to tune realism and difficulty.
 
 ```python
-data_designer = client.data_designer
+data_designer = DataDesignerResource(client)
 preview = data_designer.preview(config_builder)
 ```
 
@@ -364,37 +372,30 @@ from rich import print
 def filter_by_scores(df, min_coherence=3, samples_per_complexity=100):
     indices = []
     for idx, k in enumerate(df['triage_note_quality']):
-        # If k is a string, parse it to dict
-        if isinstance(k, str):
-            try:
-                k_dict = ast.literal_eval(k)
-            except Exception:
-                continue
-            else:
-                k_dict = k
-                try:
-                    coherence_score = int(k_dict['Clinical Coherence']['score'])
-                    if coherence_score >= min_coherence:
-                        indices.append(idx)
-                    except Exception:
-                        continue
-                        filtered_df = df.iloc[indices]
-                        filtered_df = filtered_df[["esi_level_description", "content", "triage_note_quality"]]
-                        filtered_df['esi_level_complexity'] = filtered_df['triage_note_quality'].apply(
-                            lambda k: (ast.literal_eval(k) if isinstance(k, str) else k).get('ESI Level Complexity', {}).get('score')
-                        )
-                        filtered_df.drop(columns=['triage_note_quality'], inplace=True)
-                        percent_filtered = 100 * len(filtered_df) / len(df) if len(df) > 0 else 0
-                        print(f"Filtered {len(filtered_df)} out of {len(df)} records ({percent_filtered:.1f}%)")
-                        # Sample up to N per complexity
-                        sampled_df = (
-                            filtered_df
-                            .groupby('esi_level_complexity', group_keys=False)
-                            .apply(lambda x: x.sample(min(len(x), samples_per_complexity), random_state=42))
-                            .reset_index(drop=True)
-                        )
-                        print(f"Sampled {len(sampled_df)} records total, {samples_per_complexity} (or less) per complexity level.")
-                        return sampled_df
+        try:
+            k_dict = ast.literal_eval(k) if isinstance(k, str) else k
+            coherence_score = int(k_dict['Clinical Coherence']['score'])
+        except Exception:
+            continue
+        if coherence_score >= min_coherence:
+            indices.append(idx)
+    filtered_df = df.iloc[indices]
+    filtered_df = filtered_df[["esi_level_description", "content", "triage_note_quality"]]
+    filtered_df['esi_level_complexity'] = filtered_df['triage_note_quality'].apply(
+        lambda k: (ast.literal_eval(k) if isinstance(k, str) else k).get('ESI Level Complexity', {}).get('score')
+    )
+    filtered_df.drop(columns=['triage_note_quality'], inplace=True)
+    percent_filtered = 100 * len(filtered_df) / len(df) if len(df) > 0 else 0
+    print(f"Filtered {len(filtered_df)} out of {len(df)} records ({percent_filtered:.1f}%)")
+    # Sample up to N per complexity
+    sampled_df = (
+        filtered_df
+        .groupby('esi_level_complexity', group_keys=False)
+        .apply(lambda x: x.sample(min(len(x), samples_per_complexity), random_state=42))
+        .reset_index(drop=True)
+    )
+    print(f"Sampled {len(sampled_df)} records total, {samples_per_complexity} (or less) per complexity level.")
+    return sampled_df
 
 filtered_df = filter_by_scores(dataset, samples_per_complexity=100)
 ```
@@ -435,7 +436,7 @@ def show_example_triage_notes(filtered_df, num_examples=5):
 show_example_triage_notes(filtered_df, num_examples=3)
 ```
 
-## **Step 2**: 📊 Nemo Evaluator
+## **Step 2**: 📊 NeMo Helix Evals
 
 We evaluate the model on filtered triage notes to see if it predicts the correct ESI level.
 
@@ -444,8 +445,9 @@ We evaluate the model on filtered triage notes to see if it predicts the correct
 - **Metric**: String containment check against ground-truth ESI
 
 ```python
-from nemo_platform import ConflictError
-from nemo_platform.filesets import build_fileset_ref
+from nemo_evals.sdk import FilesetRef
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Split the filtered dataframe into different complexity levels
 df_complexities = {
@@ -460,8 +462,10 @@ files_url_dict = {}
 # Create one fileset and store each complexity split as a separate file inside it
 FILESET_NAME = "nurse-triage-notes-eval"
 try:
-    client.files.filesets.create(
-        name=FILESET_NAME, description="Triage evaluator datasets by complexity"
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=FILESET_NAME, description="Triage evaluator datasets by complexity"
+        )
     )
 except ConflictError:
     pass
@@ -475,16 +479,17 @@ for level, df in df_complexities.items():
     )
 
     # Upload the dataset file to the shared fileset
-    result = client.files.upload(
-        fileset=FILESET_NAME,
-        local_path=file_name,
-        remote_path=file_name,
-    )
+    with open(file_name, "rb") as fh:
+        result = client.files.upload_file(
+            name=FILESET_NAME,
+            path=file_name,
+            content=fh.read(),
+        )
 
     print(f"Dataset uploaded: {result}")  # Print result with the uploaded file URL/info
 
     # Construct files_url for this complexity file within the shared fileset
-    files_url = build_fileset_ref(file_name, workspace=WORKSPACE, fileset=FILESET_NAME)
+    files_url = FilesetRef(root=f"{WORKSPACE}/{FILESET_NAME}").with_fragment(file_name)
     files_url_dict[level] = files_url
 ```
 
@@ -531,15 +536,11 @@ For *each* complexity level, the accuracy score for each model is printed, allow
 
 ```python
 
-import time
 import pandas as pd
 from typing import Any
-from nemo_platform.types.evaluation import (
- FilesetRef,
- MetricOnlineJobParam,
- ModelParam,
- StringCheckMetricParam,
-)
+
+from nemo_evals.sdk import Evaluator, FilesetRef
+from nhx_evals_sdk import Model, RunConfigOnlineModel, SecretRef, StringCheckMetric
 
 # This code assumes EVALUATOR_CONFIG is available in the notebook scope
 
@@ -559,83 +560,71 @@ MODEL_SPECS = [
 COMPLEXITIES = ["simple", "moderate", "complex"]
 
 def run_evaluation(
- client: Any,
- evaluator_config: dict[str, Any],
- model_spec: dict[str, str],
- complexity: str,
- files_url_dict: dict[str, FilesetRef],
- secret_key_name: str | None = None,
+    evaluator: Evaluator,
+    evaluator_config: dict[str, Any],
+    model_spec: dict[str, str],
+    complexity: str,
+    files_url_dict: dict[str, FilesetRef],
+    secret_key_name: str | None = None,
 ) -> float:
- """
- Populates the evaluator_config, filling in the files_url and endpoint, then runs evaluation.
- Returns accuracy for the given model+complexity.
- """
- fileset_ref: FilesetRef = files_url_dict[complexity]
- model_kwargs = {
- "url": model_spec["url"],
- "name": model_spec["model_id"],
- }
- if secret_key_name:
- model_kwargs["api_key_secret"] = secret_key_name
+    """
+    Builds the metric and target, then runs evaluation for the given model+complexity.
+    Returns accuracy for the given model+complexity.
+    """
+    fileset_ref: FilesetRef = files_url_dict[complexity]
+    model = Model(
+        url=model_spec["url"],
+        name=model_spec["model_id"],
+        api_key_secret=SecretRef(root=secret_key_name) if secret_key_name else None,
+    )
 
- job_spec = MetricOnlineJobParam(
- metric=StringCheckMetricParam(
- type="string-check",
- operation="contains",
- left_template="{{sample.output_text}}",
- right_template="{{item.esi_level_description}}",
- ),
- dataset=fileset_ref,
- model=ModelParam(**model_kwargs),
- prompt_template=evaluator_config["prompt_template"],
- )
- job = client.evaluation.metric_jobs.create(
- spec=job_spec,
- )
- print(f"Submitted evaluation job for model '{model_spec['name']}' on complexity '{complexity.capitalize()}' (job name: {job.name})")
- max_wait_seconds = 7200
- elapsed = 0
- while True:
- time.sleep(5)
- elapsed += 5
- status = client.evaluation.metric_jobs.retrieve(job.name)
- if status.status in ("completed", "success", "error", "failed", "cancelled"):
- break
- if elapsed >= max_wait_seconds:
- raise TimeoutError(f"Job {job.name} did not complete within {max_wait_seconds}s")
- if status.status in ("error", "failed", "cancelled"):
- raise RuntimeError(
- f"Job {job.name} for model '{model_spec['name']}' on complexity '{complexity}' ended with status: {status.status}"
- )
- print(f" ✔️ Job done for model '{model_spec['name']}' on complexity '{complexity.capitalize()}'")
+    metric = StringCheckMetric(
+        operation="contains",
+        left_template="{{sample.output_text}}",
+        right_template="{{item.esi_level_description}}",
+    )
 
- # Fetch results and extract accuracy
- aggregate_scores = client.evaluation.metric_jobs.results.aggregate_scores.download(
- job=job.name,
- )
- if not aggregate_scores.scores:
- raise ValueError(f"No scores returned for job {job.name}")
- accuracy_value = next(
- (s.mean for s in aggregate_scores.scores if s.name in ("string-check", "accuracy")),
- aggregate_scores.scores[0].mean,
- )
- return accuracy_value
+    job = evaluator.submit(
+        metric=metric,
+        dataset=fileset_ref,
+        config=RunConfigOnlineModel(parallelism=1),
+        target=model,
+        prompt_template=evaluator_config["prompt_template"],
+    )
+    print(f"Submitted evaluation job for model '{model_spec['name']}' on complexity '{complexity.capitalize()}' (job name: {job.name})")
+    job.wait_until_done()
+    result = job.get_result()
+    print(f" ✔️ Job done for model '{model_spec['name']}' on complexity '{complexity.capitalize()}'")
+
+    # Fetch results and extract accuracy
+    aggregate_scores = result.aggregate_scores
+    if not aggregate_scores.scores:
+        raise ValueError(f"No scores returned for job {job.name}")
+    accuracy_value = next(
+        (s.mean for s in aggregate_scores.scores if s.name in ("string-check", "accuracy")),
+        aggregate_scores.scores[0].mean,
+    )
+    if accuracy_value is None:
+        raise ValueError(f"No numeric score returned for job {job.name}")
+    return accuracy_value
+
+evaluator = Evaluator.from_client(client)
 
 results_dict = {model_spec['name']: {} for model_spec in MODEL_SPECS}
 
 print("Starting evaluation jobs (per model, per complexity)...")
 for complexity in COMPLEXITIES:
- for spec in MODEL_SPECS:
- accuracy = run_evaluation(
- client,
- EVALUATOR_CONFIG,
- spec,
- complexity,
- files_url_dict,
- secret_key_name=SECRET_NAME if PROVIDER_API_KEY else None,
- )
- results_dict[spec['name']][complexity.capitalize()] = 100 * accuracy # Store as percentage
- print(f" --> DONE: {spec['name']}, {complexity.capitalize()} (Accuracy: {100*accuracy:.2f}%)\n")
+    for spec in MODEL_SPECS:
+        accuracy = run_evaluation(
+            evaluator,
+            EVALUATOR_CONFIG,
+            spec,
+            complexity,
+            files_url_dict,
+            secret_key_name=SECRET_NAME if PROVIDER_API_KEY else None,
+        )
+        results_dict[spec['name']][complexity.capitalize()] = 100 * accuracy # Store as percentage
+        print(f" --> DONE: {spec['name']}, {complexity.capitalize()} (Accuracy: {100*accuracy:.2f}%)\n")
 
 ```
 

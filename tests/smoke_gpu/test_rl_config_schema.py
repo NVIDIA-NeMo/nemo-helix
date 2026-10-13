@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""nmp-rl-training: does the config we compile actually satisfy NeMo-RL's schemas?
+"""nhx-rl-training: does the config we compile actually satisfy NeMo-RL's schemas?
 
 Built as part of the docker-bake.hcl bake group (smoke-test stage) and run on a CPU
 runner -- no GPU hardware required.
@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.smoke_nmp_rl_training
+pytestmark = pytest.mark.smoke_nhx_rl_training
 
 
 def _write_fixture(root: Path) -> Path:
@@ -75,16 +75,16 @@ def _compile(root: Path, *, lora: bool, moe: bool = False) -> dict:
     exclusion and no expert parallelism, while ``grpo-nanov3-30BA3B-2n8g-fsdp2.yaml``
     uses expert parallelism plus a Transformer-Engine / DeepEP backend block.
     """
-    from nmp.customization_common.service.context import NMPJobContext
-    from nmp.rl.app.jobs.training.schemas import (
+    from nhx.customization_common.service.context import NHXJobContext
+    from nhx.rl.app.jobs.training.schemas import (
         GRPOConfig,
         LoRAConfig,
         ModelConfig,
         TrainingBackend,
         TrainingStepConfig,
     )
-    from nmp.rl.entities.values import FinetuningType, TrainingType
-    from nmp.rl.tasks.training.backends.nemo_rl.grpo_config import compile_grpo_config
+    from nhx.rl.entities.values import FinetuningType, TrainingType
+    from nhx.rl.tasks.training.backends.nemo_rl.grpo_config import compile_grpo_config
 
     moe_backend = {
         "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
@@ -123,7 +123,7 @@ def _compile(root: Path, *, lora: bool, moe: bool = False) -> dict:
             sandbox_environment_path="/job/environment",
             sandbox_dataset_path="/job/dataset",
             sandboxed=True,
-            gym_runtime_image="nvcr.io/nvidia/nmp-rl-training:test",
+            gym_runtime_image="nvcr.io/nvidia/nhx-rl-training:test",
         ),
         training=TrainingStepConfig.TrainingConfig(
             training_type=TrainingType.GRPO,
@@ -142,7 +142,7 @@ def _compile(root: Path, *, lora: bool, moe: bool = False) -> dict:
         output_model="out",
         workspace_path=str(root / "workspace"),
     )
-    ctx = NMPJobContext(
+    ctx = NHXJobContext(
         workspace="default",
         job_id="smoke-job",
         attempt_id="attempt-1",
@@ -160,7 +160,7 @@ def _compile(root: Path, *, lora: bool, moe: bool = False) -> dict:
 @pytest.mark.parametrize("moe", [False, True], ids=["dense", "moe"])
 def test_compiled_grpo_config_satisfies_master_config(tmp_path, monkeypatch, lora, moe):
     """The driver builds MasterConfig from this dict; a missing field is fatal there."""
-    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     from nemo_rl.algorithms.grpo import MasterConfig
 
     MasterConfig(**_compile(tmp_path, lora=lora, moe=moe))
@@ -173,7 +173,7 @@ def test_moe_knobs_land_on_the_keys_nemo_rl_reads(tmp_path, monkeypatch, lora):
     ``nemo_rl/models/automodel/setup.py``, ``automodel_kwargs`` only by the v2 worker, and
     ``hf_config_overrides`` sits on ``policy``, not on ``dtensor_cfg``.
     """
-    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     policy = _compile(tmp_path, lora=lora, moe=True)["policy"]
     dtensor_cfg = policy["dtensor_cfg"]
 
@@ -196,7 +196,7 @@ def test_moe_knobs_land_on_the_keys_nemo_rl_reads(tmp_path, monkeypatch, lora):
 def test_dtensor_cfg_keys_are_known_to_nemo_rl(tmp_path, monkeypatch):
     """DTensorConfig is a TypedDict, so an invented key is accepted and ignored, never
     rejected."""
-    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     from nemo_rl.models.policy import DTensorConfig
 
     known = set(DTensorConfig.__required_keys__) | set(DTensorConfig.__optional_keys__)
@@ -217,7 +217,7 @@ def test_compiled_vllm_cfg_has_required_typeddict_keys(tmp_path, monkeypatch, lo
     choosing from stop_strings and expose_http_server, and hardcoding it would
     override logic that exists for VLMs.
     """
-    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     from nemo_rl.models.generation.vllm.config import VllmSpecificArgs
 
     vllm_cfg = _compile(tmp_path, lora=lora)["policy"]["generation"]["vllm_cfg"]
@@ -232,7 +232,7 @@ def test_lora_selects_the_v2_dtensor_worker(tmp_path, monkeypatch):
     lm_policy.py asserts "LoRA is not supported for DTensorPolicyWorker V1" when it
     sees an enabled lora_cfg without _v2, so the two must be emitted together.
     """
-    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     dtensor_cfg = _compile(tmp_path, lora=True)["policy"]["dtensor_cfg"]
 
     assert dtensor_cfg["lora_cfg"]["enabled"] is True

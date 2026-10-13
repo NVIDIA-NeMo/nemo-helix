@@ -4,7 +4,7 @@
 """Tests for numeric JSON field comparison ordering."""
 
 import pytest
-from nmp.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
+from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from sqlalchemy import JSON, Column, Integer, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Session
 

@@ -22,7 +22,7 @@ from nemo_agents_plugin.fabric.runtime import (
     stream_fabric_agent_once,
     stream_fabric_runtime,
 )
-from nemo_fabric import FabricConfig
+from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig
 
 
 class _FabricMapping:
@@ -408,7 +408,9 @@ class TestRunFabricAgentOnce:
 @pytest.mark.asyncio
 class TestStreamFabricAgentOnce:
     async def test_keeps_ephemeral_runtime_alive_for_stream_context(self) -> None:
-        fabric_config = cast(FabricConfig, object())
+        fabric_config = FabricConfig(
+            metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
+        )
         fake_runtime = _FakeRuntime()
         fake_fabric = _FakeFabric(runtime=fake_runtime)
         request = FabricOneShotRequest(
@@ -449,7 +451,9 @@ class TestStreamFabricAgentOnce:
 
         fake_runtime = _FakeRuntime(stream=_SlowInvokeStream(), enter_delay=0.06)
         request = FabricOneShotRequest(
-            fabric_config=cast(FabricConfig, object()),
+            fabric_config=FabricConfig(
+                metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
+            ),
             base_dir=Path("/tmp/agent"),
             timeout_seconds=0.1,
         )
@@ -466,7 +470,9 @@ class TestStreamFabricAgentOnce:
     async def test_cleans_up_runtime_when_stream_start_fails(self) -> None:
         fake_runtime = _FakeRuntime(invoke_error=fabric_runtime.FabricError("stream unavailable"))
         request = FabricOneShotRequest(
-            fabric_config=cast(FabricConfig, object()),
+            fabric_config=FabricConfig(
+                metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
+            ),
             base_dir=Path("/tmp/agent"),
         )
 
@@ -480,7 +486,9 @@ class TestStreamFabricAgentOnce:
     async def test_wraps_runtime_context_entry_errors_as_start_errors(self) -> None:
         fake_runtime = _FakeRuntime(enter_error=fabric_runtime.FabricError("harness unavailable"))
         request = FabricOneShotRequest(
-            fabric_config=cast(FabricConfig, object()),
+            fabric_config=FabricConfig(
+                metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
+            ),
             base_dir=Path("/tmp/agent"),
         )
 
@@ -494,7 +502,9 @@ class TestStreamFabricAgentOnce:
     async def test_maps_runtime_context_exit_errors_as_cleanup_errors(self) -> None:
         fake_runtime = _FakeRuntime(exit_error=fabric_runtime.FabricError("stop failed"))
         request = FabricOneShotRequest(
-            fabric_config=cast(FabricConfig, object()),
+            fabric_config=FabricConfig(
+                metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
+            ),
             base_dir=Path("/tmp/agent"),
         )
 
@@ -508,7 +518,9 @@ class TestStreamFabricAgentOnce:
         stream = _FakeInvokeStream(result_error=fabric_runtime.FabricError("result failed"))
         fake_runtime = _FakeRuntime(stream=stream)
         request = FabricOneShotRequest(
-            fabric_config=cast(FabricConfig, object()),
+            fabric_config=FabricConfig(
+                metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
+            ),
             base_dir=Path("/tmp/agent"),
         )
 
@@ -526,7 +538,9 @@ class TestStreamFabricAgentOnce:
 
         fake_runtime = _FakeRuntime(stream=_SlowInvokeStream())
         request = FabricOneShotRequest(
-            fabric_config=cast(FabricConfig, object()),
+            fabric_config=FabricConfig(
+                metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
+            ),
             base_dir=Path("/tmp/agent"),
             timeout_seconds=0.01,
         )
@@ -540,7 +554,9 @@ class TestStreamFabricAgentOnce:
     async def test_cleans_up_once_after_cancellation(self) -> None:
         fake_runtime = _FakeRuntime()
         request = FabricOneShotRequest(
-            fabric_config=cast(FabricConfig, object()),
+            fabric_config=FabricConfig(
+                metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
+            ),
             base_dir=Path("/tmp/agent"),
         )
         stream_started = asyncio.Event()
@@ -660,3 +676,26 @@ class TestStreamFabricRuntime:
         await runtime_stream.aclose()
 
         assert fake_stream.close_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("settings", "atof", "message"),
+    [
+        ({}, {}, "relay_streaming: true"),
+        ({"relay_streaming": True, "api_type": "anthropic-messages"}, {}, "openai-responses or openai-completions"),
+        ({"relay_streaming": True}, {}, "shared collector"),
+        ({"relay_streaming": True}, {"enabled": False}, "shared collector"),
+    ],
+)
+def test_remote_streaming_rejects_incomplete_configuration(
+    settings: dict[str, Any], atof: dict[str, Any], message: str
+) -> None:
+    config = FabricConfig.model_validate(
+        {
+            "metadata": {"name": "remote-agent"},
+            "harness": {"adapter_id": "nvidia.fabric.remote-agent", "settings": settings},
+            "relay": {"observability": {"atof": atof}},
+        }
+    )
+    with pytest.raises(FabricRuntimeStartError, match=message):
+        fabric_runtime.fabric_streaming_options(config)

@@ -37,7 +37,7 @@ def test_task_staging_preserves_slug(
     env_file = tmp_path / "sandbox.env"
     env_file.write_text("SANDBOX_NAMESPACE=ns\nTASK_IMAGE=reg/static:old\nVERIFY_SSL=true\n")
     pack = _make_task_pack(tmp_path / "pack.tar.gz")
-    monkeypatch.setattr("scaled_evals.api.s3.download_object", _fake_download(pack))
+    monkeypatch.setattr("scaled_evals.api.artifacts.download_object", _fake_download(pack))
     work = tmp_path / "work"
     submit = (
         make_sandbox_k8s_docker_submitter(

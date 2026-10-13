@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
-import type { PlatformJobResponse, PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { getJobDetailRoute } from '@studio/components/dataViews/JobsDataView/utils';
 import {
   JOB_PROGRESS_JOB_TYPE,
@@ -12,11 +12,11 @@ import { getAgentEvaluationDetailRoute } from '@studio/routes/utils';
 
 interface JobProgressRefetchIntervalArgs {
   readonly jobMissing: boolean;
-  readonly status?: PlatformJobStatus;
+  readonly status?: HelixJobStatus;
 }
 
 interface JobProgressDetailRouteArgs {
-  readonly job?: PlatformJobResponse | null;
+  readonly job?: HelixJobResponse | null;
   readonly jobName: string;
   readonly jobType?: string;
   readonly source?: string;

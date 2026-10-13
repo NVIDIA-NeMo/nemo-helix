@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# CI validates by running: helm template nemo-platform . -f ci/25-controller-extra-volumes-openshell.yaml
+# CI validates by running: helm template nemo-helix . -f ci/25-controller-extra-volumes-openshell.yaml
 # Exercises controller extra volume/mount rendering; also the worked example for an
 # OpenShell gateway installed separately (ghcr.io/nvidia/openshell/helm-chart, mTLS defaults).
 #
@@ -31,12 +31,15 @@ core:
         mountPath: /etc/openshell-tls/client
         readOnly: true
 platformConfig:
+  agents:
+    deployments:
+      openshell_executor: openshell
   deployments:
     executors:
       - name: local-k8s
         backend: k8s
         config:
-          default_namespace: nemo
+          default_namespace: "{{ .Release.Namespace }}"
       - name: openshell
         backend: openshell
         config:
@@ -46,6 +49,6 @@ platformConfig:
             client_cert_path: /etc/openshell-tls/client/tls.crt
             client_key_path: /etc/openshell-tls/client/tls.key
           platform_egress:
-            host: nemo-platform-api.nemo.svc
+            host: '{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc'
             port: 8080
     default_executor: local-k8s

@@ -7,15 +7,15 @@ description: ""
 ---
 <a id="milvus-setup"></a>
 
-NeMo Evaluator uses Milvus for vector database storage for [Retrieval evaluations](/documentation/evaluate-models/metrics) and [RAG evaluations](/documentation/evaluate-models/metrics/rag-metrics).
+NeMo Helix Evals uses Milvus for vector database storage for [Retrieval evaluations](/documentation/evaluate-models/metrics) and [RAG evaluations](/documentation/evaluate-models/metrics/rag-metrics).
 
 ## Configuration
 
-To configure NeMo Evaluator to use Milvus, set the `milvus_url` in the [platform configuration](/documentation/kubernetes-deployment/config-reference):
+To configure NeMo Helix Evals to use Milvus, set the `milvus_url` in the [platform configuration](/documentation/kubernetes-deployment/config-reference):
 
 ```yaml
-evaluator:
+evals:
  milvus_url: "milvus-standalone.default.svc.cluster.local:19530"
 ```
 
-See the [platform configuration reference](/documentation/kubernetes-deployment/config-reference) for the complete NeMo Evaluator configuration reference.
+See the [platform configuration reference](/documentation/kubernetes-deployment/config-reference) for the complete NeMo Helix Evals configuration reference.

@@ -7,6 +7,7 @@ import { Stack } from '@nvidia/foundations-react-core';
 import { GrpoRewardPanel } from '@studio/components/CustomizationOverview/GrpoRewardPanel';
 import { GrpoTrainingHealthPanel } from '@studio/components/CustomizationOverview/GrpoTrainingHealthPanel';
 import { RunConfigurationPanel } from '@studio/components/CustomizationOverview/RunConfigurationPanel';
+import { TrainingHealthPanel } from '@studio/components/CustomizationOverview/TrainingHealthPanel';
 import { TrainingLossPanel } from '@studio/components/CustomizationOverview/TrainingLossPanel';
 import { ErrorMessageWithRetry } from '@studio/components/ErrorMessageWithRetry';
 import { Loading } from '@studio/components/Layouts/Loading';
@@ -93,6 +94,7 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
       {isGrpoJob(customization) ? (
         <>
           <GrpoRewardPanel
+            jobStatus={customization.status}
             reward={buildRewardChartData(metrics)}
             metrics={getGrpoSummaryTiles(metrics, isTerminalStatus)}
             progress={getGrpoProgressTiles(telemetry, runState)}
@@ -100,16 +102,20 @@ export const CustomizationOverview: FC<Props> = ({ customizationJobName, workspa
           <GrpoTrainingHealthPanel statusDetails={metrics} />
         </>
       ) : (
-        <TrainingLossPanel
-          trainLoss={metrics?.metrics?.train_loss}
-          valLoss={metrics?.metrics?.val_loss}
-          maxSteps={maxXAxisValue}
-          metrics={[
-            ...getLossTiles(metrics, isTerminalStatus),
-            ...getTrainingDiagnosticsTiles(telemetry, metrics, runState),
-          ]}
-          progress={getTrainingProgressTiles(telemetry)}
-        />
+        <>
+          <TrainingLossPanel
+            jobStatus={customization.status}
+            trainLoss={metrics?.metrics?.train_loss}
+            valLoss={metrics?.metrics?.val_loss}
+            maxSteps={maxXAxisValue}
+            metrics={[
+              ...getLossTiles(metrics, isTerminalStatus),
+              ...getTrainingDiagnosticsTiles(telemetry, metrics, runState),
+            ]}
+            progress={getTrainingProgressTiles(telemetry)}
+          />
+          <TrainingHealthPanel statusDetails={metrics} />
+        </>
       )}
 
       <RunConfigurationPanel

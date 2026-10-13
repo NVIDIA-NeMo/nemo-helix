@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import httpx
-from nemo_platform_plugin.config import get_platform_config
+from nemo_helix_plugin.config import get_platform_config
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +220,7 @@ def init_models_sync(
 
     if not files_api_url:
         logger.warning(
-            "Files API URL not configured. Set NMP_FILES_URL or pass files_api_url parameter. Skipping model download."
+            "Files API URL not configured. Set NHX_FILES_URL or pass files_api_url parameter. Skipping model download."
         )
         return {}
 

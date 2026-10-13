@@ -6,6 +6,9 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
+import signal
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,8 +16,42 @@ import sandboxed_gym.orchestrator as orchestrator_module
 from sandboxed_gym.broker import EpisodeBrokerServer
 from sandboxed_gym.config import BrokerEndpoint, EpisodeBrokerConfig
 from sandboxed_gym.host.models import GymHostHandle
-from sandboxed_gym.orchestrator import SandboxedGymOrchestrator, SandboxedGymSession
+from sandboxed_gym.orchestrator import (
+    _INSTALLED,
+    _TERMINATION_SHUTDOWNS,
+    TERMINATION_SIGNALS,
+    SandboxedGymOrchestrator,
+    SandboxedGymSession,
+)
 from sandboxed_gym.serve_config import SandboxedGymServeConfig
+
+
+@pytest.fixture(autouse=True)
+def _drop_the_reaper_the_session_arms():
+    """start() arms a process-exit sweep. These tests must not leave it installed."""
+    original = {signum: signal.getsignal(signum) for signum in TERMINATION_SIGNALS}
+    registered: list[Callable[..., object]] = []
+    real_register = atexit.register
+    installed = set(_INSTALLED)
+    prior_shutdowns = list(_TERMINATION_SHUTDOWNS)
+
+    def _tracking_register(func, *args, **kwargs):
+        registered.append(func)
+        return real_register(func, *args, **kwargs)
+
+    atexit.register = _tracking_register  # ty: ignore[invalid-assignment]
+    try:
+        yield
+    finally:
+        atexit.register = real_register
+        for func in registered:
+            atexit.unregister(func)
+        for signum, handler in original.items():
+            signal.signal(signum, handler)
+        _INSTALLED.clear()
+        _INSTALLED.update(installed)
+        _TERMINATION_SHUTDOWNS.clear()
+        _TERMINATION_SHUTDOWNS.extend(prior_shutdowns)
 
 
 def test_advertise_url_preferred_over_host():
@@ -260,3 +297,36 @@ def test_a_broker_that_fails_to_shut_down_does_not_hide_why_startup_failed(monke
     # The loop thread is released before the broker is asked to stop, so a broker that raises
     # cannot strand it.
     assert closed == [True]
+
+
+@pytest.mark.parametrize(
+    ("sandbox_timeouts", "expected_pull_s", "expected_health_s"),
+    [
+        ({"ready_timeout_s": 900, "bootstrap_timeout_s": 240}, 900, 240),
+        ({"ready_timeout_s": 900}, 900, 900),
+    ],
+)
+def test_the_bootstrap_timeout_bounds_the_health_wait_and_not_the_image_pull(
+    monkeypatch, sandbox_timeouts, expected_pull_s, expected_health_s
+):
+    """A Gym-startup budget must not also cap how long the pod may take to pull its image."""
+    host = GymHostHandle(host_id="h1", health_url="http://host/health", rollout_url="http://host/rollouts/run")
+    seen: dict[str, float] = {}
+
+    class HostProvider:
+        async def create_host(self, spec):
+            seen["pull"] = spec.ready_timeout_s
+            return host
+
+        async def wait_ready(self, handle, timeout_s):
+            seen["health"] = timeout_s
+
+        async def destroy_host(self, handle):
+            return None
+
+    monkeypatch.setattr(orchestrator_module, "get_host_provider", lambda name, options: HostProvider())
+    cfg = _minimal_cfg().model_copy(update={"sandbox": _minimal_cfg().sandbox.model_copy(update=sandbox_timeouts)})
+
+    SandboxedGymOrchestrator().start(cfg, broker=_fake_broker()).shutdown()
+
+    assert seen == {"pull": expected_pull_s, "health": expected_health_s}

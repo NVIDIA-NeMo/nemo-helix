@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 try:
     from nemo_scaled_evals_plugin.service import ScaledEvalsService
-    from nmp.platform_runner.plugin_adapter import NemoServiceAdapter
+    from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
     from scaled_evals.api.db import get_conn
     from scaled_evals.api.schemas.common import decode_cursor, encode_cursor
     from scaled_evals.api.settings import settings

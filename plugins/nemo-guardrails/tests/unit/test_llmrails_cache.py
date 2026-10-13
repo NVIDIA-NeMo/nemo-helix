@@ -44,8 +44,8 @@ from nemo_guardrails_plugin.llmrails_cache import (
     source_has_output_flows,
     stabilize,
 )
-from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
-from nemo_platform_plugin.inference_middleware import OpenAICompatibleInferenceTarget
+from nemo_helix_plugin.guardrail.types import RailsConfig as HelixRailsConfig
+from nemo_helix_plugin.inference_middleware import OpenAICompatibleInferenceTarget
 from nemoguardrails import RailsConfig
 from nemoguardrails.rails.llm.config import Model
 
@@ -54,13 +54,13 @@ from nemoguardrails.rails.llm.config import Model
 # =============================================================================
 
 
-def _rails_dict(rails: dict[str, Any] | None = None) -> PlatformRailsConfig:
-    """Bare :class:`PlatformRailsConfig` from a ``rails:`` block, with no models."""
-    return PlatformRailsConfig.model_validate({"rails": rails} if rails else {})
+def _rails_dict(rails: dict[str, Any] | None = None) -> HelixRailsConfig:
+    """Bare :class:`HelixRailsConfig` from a ``rails:`` block, with no models."""
+    return HelixRailsConfig.model_validate({"rails": rails} if rails else {})
 
 
 def _entity(
-    rails: PlatformRailsConfig, *, name: str = "guard", updated_at: str = "2026-01-01T00:00:00Z"
+    rails: HelixRailsConfig, *, name: str = "guard", updated_at: str = "2026-01-01T00:00:00Z"
 ) -> EntityGuardrailConfigSource:
     return EntityGuardrailConfigSource(workspace="ws", name=name, updated_at=updated_at, rails=rails)
 
@@ -127,7 +127,7 @@ class TestSourceEquality:
     """Sources are frozen dataclasses, so equality is structural across all
     fields. The warming dedup in ``on_virtual_model_upserted`` keys on the
     identity triple ``(workspace, name, updated_at)`` — not on source ``==``
-    — precisely because :class:`PlatformRailsConfig` is unhashable, which
+    — precisely because :class:`HelixRailsConfig` is unhashable, which
     makes the source itself unhashable too. These tests pin down the
     structural-equality contract; hashability is intentionally untested.
     """
@@ -189,15 +189,15 @@ def _platform_rails(
     *,
     rails_block: dict[str, Any] | None = None,
     models: list[dict[str, Any]] | None = None,
-) -> PlatformRailsConfig:
-    """Build a minimal :class:`PlatformRailsConfig`. ``models`` defaults to ``[]``
+) -> HelixRailsConfig:
+    """Build a minimal :class:`HelixRailsConfig`. ``models`` defaults to ``[]``
     so the library-side validator (which requires a ``models`` field) is happy.
     """
     payload: dict[str, Any] = {
         "rails": rails_block if rails_block is not None else {"input": {"flows": []}, "output": {"flows": []}},
         "models": models if models is not None else [],
     }
-    return PlatformRailsConfig.model_validate(payload)
+    return HelixRailsConfig.model_validate(payload)
 
 
 class TestStabilizeStripsMain:
@@ -298,8 +298,8 @@ class TestStabilizeHashDeterminism:
         """``exclude_none=True`` means ``foo: None`` and "field absent" hash
         the same — matches the user-intent that an unspecified optional is
         the same as no constraint at all."""
-        without_none = PlatformRailsConfig.model_validate({"rails": {"input": {"flows": []}}, "models": []})
-        with_none = PlatformRailsConfig.model_validate(
+        without_none = HelixRailsConfig.model_validate({"rails": {"input": {"flows": []}}, "models": []})
+        with_none = HelixRailsConfig.model_validate(
             {
                 "rails": {"input": {"flows": []}},
                 "models": [],
@@ -712,11 +712,11 @@ class TestStabilizeWithoutModelsField:
     platform→library boundary."""
 
     def test_models_field_absent_stabilizes_to_empty_list(self) -> None:
-        """``PlatformRailsConfig`` with ``models=None`` (the wire-shape
+        """``HelixRailsConfig`` with ``models=None`` (the wire-shape
         default when the field is omitted) must stabilize. Library
         :class:`LibraryRailsConfig` requires the field, so ``stabilize``
         coerces the missing key to ``[]`` before validating."""
-        rails = PlatformRailsConfig.model_validate({"rails": {"input": {"flows": ["custom check"]}}})
+        rails = HelixRailsConfig.model_validate({"rails": {"input": {"flows": ["custom check"]}}})
         assert rails.models is None
 
         stable = stabilize(rails, _resolve_target)
@@ -729,8 +729,8 @@ class TestStabilizeWithoutModelsField:
         cache key — otherwise a single config could fork the LLMRails
         pool depending on whether the wire payload included the empty
         list explicitly."""
-        omitted = PlatformRailsConfig.model_validate({"rails": {"input": {"flows": ["custom check"]}}})
-        explicit = PlatformRailsConfig.model_validate({"rails": {"input": {"flows": ["custom check"]}}, "models": []})
+        omitted = HelixRailsConfig.model_validate({"rails": {"input": {"flows": ["custom check"]}}})
+        explicit = HelixRailsConfig.model_validate({"rails": {"input": {"flows": ["custom check"]}}, "models": []})
         assert stabilize(omitted, _resolve_target).content_hash == stabilize(explicit, _resolve_target).content_hash
 
     def test_task_only_config_stabilizes(self) -> None:
@@ -740,7 +740,7 @@ class TestStabilizeWithoutModelsField:
         built-in flow-template-binding validators (e.g. ``content safety
         check input`` requires a matching prompt template); those are
         orthogonal to what this test pins."""
-        rails = PlatformRailsConfig.model_validate(
+        rails = HelixRailsConfig.model_validate(
             {
                 "rails": {"input": {"flows": ["custom check"]}},
                 "models": [

@@ -61,12 +61,13 @@ def _method_body(module_path: Path, class_name: str, method_name: str) -> str:
 
 
 def test_spinup_arms_the_termination_cleanup() -> None:
-    """The actor is the only thing that installs the cleanup, so nothing else can catch its loss.
+    """The actor still arms its own teardown for a clean exit of this worker.
 
-    Without this call a cancelled or evicted job leaves its sandbox running until ttl_s. The
-    behaviour of the cleanup itself is covered in ``test_termination_cleanup``; what is asserted
-    here is that the actor still arms it, which no test of the helper alone can see.
+    A cancel kills the worker without running that hook. The driver installs
+    ``install_job_sandbox_reaper`` for that path, sweeping every sandbox for the
+    job. What is asserted here is that the actor still arms its own cleanup.
     """
     body = _method_body(RAY_DIR / "gym_actor.py", "SandboxedGymActor", "spinup")
 
+    assert "install_job_sandbox_reaper(" in body
     assert "install_termination_cleanup(self.shutdown)" in body

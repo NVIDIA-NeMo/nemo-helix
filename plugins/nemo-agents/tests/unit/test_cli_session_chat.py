@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import click
 import httpx
 import pytest
 from nemo_agents_plugin.cli import AgentsCLI, _run_resolved_session_chat
@@ -22,10 +24,42 @@ from nemo_agents_plugin.entities import (
     SessionStatus,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_platform_ext.cli.chat_tui import ExitAction, collect_stream_response
+from nemo_helix_ext.cli.chat_tui import ExitAction, collect_stream_response
+from nemo_helix_plugin.client.client import NemoClient
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+
+class _CLIState:
+    def __init__(self, *, base_url: str = "http://localhost:8080", workspace: str | None = "default") -> None:
+        self.base_url = base_url
+        self.workspace = workspace
+
+    def typed_client(self, client_cls: type[NemoClient], timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        return client_cls(
+            base_url=self.base_url,
+            default_headers={"Authorization": "Bearer token"},
+            timeout=timeout,
+        )
+
+    def get_base_url(self, default: str | None = None) -> str | None:
+        return self.base_url
+
+    def get_workspace(self) -> str | None:
+        return self.workspace
+
+
+@pytest.fixture(autouse=True)
+def _default_cli_state_for_direct_invocations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Direct Typer invocations in these tests still run through a CLI state."""
+    original_invoke = CliRunner.invoke
+
+    def invoke(self: CliRunner, app: Any, args: Any | None = None, *pargs: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("obj", _CLIState())
+        return original_invoke(self, app, args, *pargs, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", invoke)
 
 
 def _deployment_response(
@@ -122,7 +156,8 @@ def test_session_chat_help_describes_new_and_resumed_sessions() -> None:
     assert "--session" in result.stdout
     assert "--session-name" in result.stdout
     assert "--workspace" in result.stdout
-    assert "--base-url" in result.stdout
+    # The platform comes from the global ``nemo --base-url`` / active context.
+    assert "--base-url" not in result.stdout
     assert "--timeout" in result.stdout
     assert "--interactive" not in result.stdout
 
@@ -145,11 +180,10 @@ def test_session_chat_accepts_new_named_session_options() -> None:
                 "Help me debug this",
                 "--workspace",
                 "team-a",
-                "--base-url",
-                "http://platform.test",
                 "--timeout",
                 "42",
             ],
+            obj=SimpleNamespace(get_base_url=lambda default=None: "http://platform.test"),
         )
 
     assert result.exit_code == 0, result.stderr
@@ -250,7 +284,7 @@ def test_session_chat_creates_named_session_and_passes_values_to_transport() -> 
     assert result.exit_code == 0, result.stderr
     assert (
         "Session 'debug-auth' created. Resume with:\n"
-        "  nemo agents chat --session debug-auth --workspace default --base-url http://localhost:8080" in result.stdout
+        "  nemo --base-url http://localhost:8080 agents chat --session debug-auth --workspace default" in result.stdout
     )
     assert [(request.method, request.url.path) for request in requests] == [
         ("GET", "/apis/agents/v2/workspaces/default/deployments/fabric-deployment"),
@@ -461,22 +495,23 @@ def test_resolved_session_chat_streams_each_current_turn_with_session_and_auth_h
             assert usage is None
 
     with (
-        patch("nemo_agents_plugin.cli._resolve_context_headers", return_value={"Authorization": "Bearer token"}),
         patch(
             "nemo_agents_plugin.cli.httpx.Client",
             side_effect=lambda **kwargs: real_client(transport=transport, **kwargs),
         ),
         patch("nemo_agents_plugin.cli.run_chat_tui", side_effect=exercise_tui),
     ):
-        _run_resolved_session_chat(
-            base_url="http://platform.test/",
-            workspace="team-a",
-            deployment=AgentDeployment.model_validate(_deployment_response()),
-            session=AgentSession.model_validate(_session_response(expires_at=expires_at)),
-            session_id="session-id",
-            input="first turn",
-            timeout=42,
-        )
+        ctx = click.Context(click.Command("nemo"), obj=_CLIState())
+        with ctx:
+            _run_resolved_session_chat(
+                base_url="http://localhost:8080/",
+                workspace="team-a",
+                deployment=AgentDeployment.model_validate(_deployment_response()),
+                session=AgentSession.model_validate(_session_response(expires_at=expires_at)),
+                session_id="session-id",
+                input="first turn",
+                timeout=42,
+            )
 
     expected_path = "/apis/agents/v2/workspaces/team-a/deployments/fabric-deployment/-/v1/chat/completions"
     assert [request.url.path for request in requests] == [expected_path, expected_path]
@@ -494,7 +529,7 @@ def test_session_chat_interrupt_detaches_without_closing(exception: type[BaseExc
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         transport,
-        patch("nemo_platform_ext.cli.chat_tui.Prompt.ask", side_effect=exception),
+        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=exception),
     ):
         result = runner.invoke(AgentsCLI().get_cli(), ["chat", "--session", "debug-auth"])
 

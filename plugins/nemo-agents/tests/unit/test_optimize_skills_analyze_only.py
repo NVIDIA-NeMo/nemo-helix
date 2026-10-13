@@ -15,6 +15,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -238,7 +239,7 @@ def _agents_cli_with_jobs():
     """
     from nemo_agents_plugin.cli import AgentsCLI
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
-    from nemo_platform_plugin.commands import add_job_commands
+    from nemo_helix_plugin.commands import add_job_commands
 
     app = AgentsCLI().get_cli()
     add_job_commands(app, {"optimize-skills": OptimizeSkillsJob})
@@ -265,7 +266,7 @@ def test_cli_analyze_only_flag_flows_through_direct_command() -> None:
         return {"name": "optimize-skills-123"}
 
     app = _agents_cli_with_jobs()
-    with patch("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
+    with patch("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
         result = CliRunner().invoke(
             app,
             [
@@ -275,9 +276,8 @@ def test_cli_analyze_only_flag_flows_through_direct_command() -> None:
                 "--evals",
                 "/tmp/x",
                 "--analyze-only",
-                "--base-url",
-                "http://test",
             ],
+            obj=SimpleNamespace(get_base_url=lambda default=None: "http://test"),
         )
 
     assert result.exit_code == 0, _guard_message(result)
@@ -310,16 +310,15 @@ def test_cli_analyze_only_from_spec_file_flows_through_direct_command(tmp_path: 
         return {"name": "optimize-skills-123"}
 
     app = _agents_cli_with_jobs()
-    with patch("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
+    with patch("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
         result = CliRunner().invoke(
             app,
             [
                 "optimize-skills",
                 "--spec-file",
                 str(config),
-                "--base-url",
-                "http://test",
             ],
+            obj=SimpleNamespace(get_base_url=lambda default=None: "http://test"),
         )
 
     assert result.exit_code == 0, _guard_message(result)

@@ -5,6 +5,6 @@
 
 from __future__ import annotations
 
-from nemo_platform_plugin.agent_hardener.types import WarGameSpec
+from nemo_helix_plugin.agent_hardener.types import WarGameSpec
 
 __all__ = ["WarGameSpec"]

@@ -6,7 +6,7 @@
  * Do not edit manually.
  * agent-hardener (plugin)
  */
-import type { PlatformJobStatus } from './PlatformJobStatus.ts';
+import type { HelixJobStatus } from './HelixJobStatus.ts';
 import type { WarGameJobCustomFields } from './WarGameJobCustomFields.ts';
 import type { WarGameJobErrorDetails } from './WarGameJobErrorDetails.ts';
 import type { WarGameJobOwnership } from './WarGameJobOwnership.ts';
@@ -22,7 +22,7 @@ export interface WarGameJob {
   created_at?: string;
   updated_at?: string;
   spec: WarGameSpec;
-  status?: PlatformJobStatus;
+  status?: HelixJobStatus;
   status_details?: WarGameJobStatusDetails;
   error_details?: WarGameJobErrorDetails;
   ownership?: WarGameJobOwnership;

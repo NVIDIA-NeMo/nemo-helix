@@ -3,7 +3,7 @@
 
 import {
   DETECTION_ROLES,
-  GLINER_ROLE,
+  DETECTOR_ROLE,
   MAX_PREVIEW_ROWS,
   REPLACE_ROLE,
   REWRITE_ROLES,
@@ -152,14 +152,14 @@ describe('buildAnonymizerJobRequest', () => {
 
   it('sends no sampling params to the GLiNER detector, even when the form holds them', () => {
     const models = roleModels('nvidia/nemotron-3-nano-30b-a3b', 'default/nvidia');
-    models[GLINER_ROLE] = {
+    models[DETECTOR_ROLE] = {
       modelId: 'gliner',
       model: 'nvidia/gliner-pii',
       provider: 'default/nvidia',
       params: { temperature: 0.9, top_p: 0.5, max_tokens: 2048, max_parallel_requests: 1 },
     };
     const req = buildAnonymizerJobRequest(form({ strategy: 'substitute', roleModels: models }));
-    const detectorAlias = req.spec.selected_models?.detection?.[GLINER_ROLE];
+    const detectorAlias = req.spec.selected_models?.detection?.[DETECTOR_ROLE];
     const detector = req.spec.model_configs?.find((config) => config.alias === detectorAlias);
     expect(detector?.inference_parameters).toEqual({ timeout: 500, max_parallel_requests: 1 });
   });

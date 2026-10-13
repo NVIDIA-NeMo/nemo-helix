@@ -19,9 +19,9 @@ from typing import Any, Dict, List
 from unittest.mock import patch
 
 import yaml
-from nmp.guardrails.app.constants import NIM_CHAT, NIM_LLM
-from nmp.guardrails.app.schemas.global_model_configs import GlobalModelConfig
-from nmp.guardrails.app.services.configs.global_model_config_registry import (
+from nhx.guardrails.app.constants import NIM_CHAT, NIM_LLM
+from nhx.guardrails.app.schemas.global_model_configs import GlobalModelConfig
+from nhx.guardrails.app.services.configs.global_model_config_registry import (
     DEFAULT_PROVIDER_NAME,
     GlobalModelConfigRegistry,
     _standardize_provider_name,
@@ -211,7 +211,7 @@ def test_load_config_argument_demo_false():
         with open(config_file, "w") as outfile:
             outfile.write(APP_MODEL_CONFIG_STRING)
 
-        with patch("nmp.guardrails.app.services.configs.global_model_config_registry.settings") as mock_settings:
+        with patch("nhx.guardrails.app.services.configs.global_model_config_registry.settings") as mock_settings:
             mock_settings.demo = False
             mock_settings.config_store_path = None  #  Force the registry to load from argument
             mock_settings.fetch_nim_app_models = False
@@ -234,7 +234,7 @@ def test_load_config_argument_demo_true():
     with tempfile.TemporaryDirectory() as config_dir:
         # Save the config YAML to a file in the config dir
 
-        with patch("nmp.guardrails.app.services.configs.global_model_config_registry.settings") as mock_settings:
+        with patch("nhx.guardrails.app.services.configs.global_model_config_registry.settings") as mock_settings:
             mock_settings.demo = True
             mock_settings.config_store_path = Path(config_dir)  # Force the registry to load from argument
             mock_settings.fetch_nim_app_models = False
@@ -258,7 +258,7 @@ def test_load_config_settings_demo_false():
         with open(config_file, "w") as outfile:
             outfile.write(APP_MODEL_CONFIG_STRING)
 
-        with patch("nmp.guardrails.app.services.configs.global_model_config_registry.settings") as mock_settings:
+        with patch("nhx.guardrails.app.services.configs.global_model_config_registry.settings") as mock_settings:
             mock_settings.demo = False
             mock_settings.config_store_path = config_dir  #  Force the registry to load from argument
             mock_settings.fetch_nim_app_models = False
@@ -279,7 +279,7 @@ def test_load_config_settings_demo_true():
     # Create a temporary directory, config-store configs will be copied into here as we
     # enabled Demo mode
     with tempfile.TemporaryDirectory() as config_dir:
-        with patch("nmp.guardrails.app.services.configs.global_model_config_registry.settings") as mock_settings:
+        with patch("nhx.guardrails.app.services.configs.global_model_config_registry.settings") as mock_settings:
             mock_settings.demo = True
             mock_settings.config_store_path = Path(config_dir)  #  Force the registry to load from argument
             mock_settings.fetch_nim_app_models = False

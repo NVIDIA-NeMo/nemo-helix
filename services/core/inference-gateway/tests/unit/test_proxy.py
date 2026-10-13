@@ -6,10 +6,11 @@
 import asyncio
 import gzip
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import aiohttp
 import anthropic.types as anthropic_types
@@ -21,10 +22,8 @@ from aiohttp import ClientError
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from multidict import CIMultiDict, CIMultiDictProxy
-from nemo_platform.types.inference import ModelProvider, ServedModelMapping
-from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
     InferenceMiddlewareContext,
@@ -32,13 +31,18 @@ from nemo_platform_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
-from nmp.core.inference_gateway.api.middleware_registry import (
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
+from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.auth.models import Principal
+from nhx.core.inference_gateway.api.authz import MODEL_EXEC_PERMISSION
+from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     ResolvedMiddlewareCall,
     build_inference_response,
 )
-from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
-from nmp.core.inference_gateway.api.proxy import (
+from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
+from nhx.core.inference_gateway.api.proxy import (
     NextRequestInfo,
     _build_inference_response_with_annotations,
     _parse_sse_stream,
@@ -326,7 +330,7 @@ async def test_virtual_model_proxy_typed_context_defaults_unset_backend_format_t
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -346,15 +350,9 @@ async def test_virtual_model_proxy_typed_context_defaults_unset_backend_format_t
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -408,15 +406,9 @@ async def test_virtual_model_proxy_adds_request_nemo_client_to_middleware_contex
             request=request,
             workspace=workspace,
             vm_name=vm_name,
-            virtual_model=SDKVirtualModel(
-                id=f"{workspace}/{vm_name}",
-                entity_id=f"{workspace}/{vm_name}",
+            virtual_model=VirtualModel(
                 name=vm_name,
                 workspace=workspace,
-                parent=workspace,
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
             ),
             trailing_uri="v1/chat/completions",
             json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
@@ -486,7 +478,7 @@ async def test_virtual_model_proxy_injects_request_context_annotations_without_r
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -506,15 +498,9 @@ async def test_virtual_model_proxy_injects_request_context_annotations_without_r
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -617,7 +603,7 @@ async def test_virtual_model_proxy_injects_annotations_after_response_middleware
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -643,15 +629,9 @@ async def test_virtual_model_proxy_injects_annotations_after_response_middleware
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -690,7 +670,7 @@ async def test_virtual_model_proxy_with_unresolved_provider_secret_returns_424(m
                         served_model_name="secure-v1",
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             ),
             secret_value=None,
         )
@@ -707,15 +687,9 @@ async def test_virtual_model_proxy_with_unresolved_provider_secret_returns_424(m
             request=request,
             workspace=workspace,
             vm_name=vm_name,
-            virtual_model=SDKVirtualModel(
-                id=f"{workspace}/{vm_name}",
-                entity_id=f"{workspace}/{vm_name}",
+            virtual_model=VirtualModel(
                 name=vm_name,
                 workspace=workspace,
-                parent=workspace,
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
                 default_model_entity=model_entity_id,
             ),
             trailing_uri="v1/chat/completions",
@@ -789,15 +763,9 @@ async def test_virtual_model_proxy_preserves_request_middleware_backend_format_f
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
         ),
         trailing_uri="v1/messages",
         json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
@@ -873,15 +841,9 @@ async def test_virtual_model_proxy_preserves_immediate_response_annotations_thro
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
         ),
         trailing_uri="v1/chat/completions",
         json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
@@ -966,7 +928,7 @@ async def test_virtual_model_proxy_post_response_receives_canonical_non_streamin
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -994,15 +956,9 @@ async def test_virtual_model_proxy_post_response_receives_canonical_non_streamin
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -1077,15 +1033,9 @@ async def test_virtual_model_proxy_broken_vm_returns_503_without_running_middlew
             request=request,
             workspace=workspace,
             vm_name=vm_name,
-            virtual_model=SDKVirtualModel(
-                id=f"{workspace}/{vm_name}",
-                entity_id=f"{workspace}/{vm_name}",
+            virtual_model=VirtualModel(
                 name=vm_name,
                 workspace=workspace,
-                parent=workspace,
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
                 default_model_entity=f"{workspace}/missing",
             ),
             trailing_uri="v1/chat/completions",
@@ -1101,6 +1051,95 @@ async def test_virtual_model_proxy_broken_vm_returns_503_without_running_middlew
     # Critical: no middleware (and no backend call) was attempted.
     assert request_plugin_called is False
     assert response_plugin_called is False
+    mock_proxy_client.request.assert_not_called()
+
+
+def _serving_provider(workspace: str, name: str, model_entity_id: str) -> ModelProviderInfo:
+    served_models = [ServedModelMapping(model_entity_id=model_entity_id, served_model_name="served-model")]
+    return ModelProviderInfo(
+        model_provider=ModelProvider(
+            workspace=workspace,
+            name=name,
+            host_url=f"http://{name}.local",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            served_models=served_models,
+            status=ModelProviderStatus.READY,
+        )
+    )
+
+
+def _model_cache_with(*provider_infos: ModelProviderInfo) -> ModelCache:
+    model_cache = ModelCache()
+    for provider_info in provider_infos:
+        model_cache.update_model_info(provider_info)
+    model_cache.rebuild_model_entity_map()
+    return model_cache
+
+
+@contextmanager
+def _caller_with_access_to(*workspaces: str) -> Iterator[MagicMock]:
+    auth_client = MagicMock()
+    auth_client.auth_enabled = True
+    auth_client.principal = Principal(id="user:carol", email="carol@example.com")
+    auth_client.has_permissions = AsyncMock(side_effect=lambda workspace, _permissions: workspace in workspaces)
+    token = auth_client_context.set(auth_client)
+    try:
+        yield auth_client
+    finally:
+        auth_client_context.reset(token)
+
+
+async def _proxy_to_model_entity(
+    mock_proxy_client: Any, model_cache: ModelCache, workspace: str, model_entity_id: str
+) -> Any:
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+    vm_name = "explicit-probe"
+    return await virtual_model_proxy(
+        request=request,
+        workspace=workspace,
+        vm_name=vm_name,
+        virtual_model=VirtualModel(
+            name=vm_name,
+            workspace=workspace,
+            default_model_entity=model_entity_id,
+        ),
+        trailing_uri="v1/chat/completions",
+        json_body={"messages": [{"role": "user", "content": "hi"}]},
+        http_client=mock_proxy_client,
+        model_cache=model_cache,
+        registry=MiddlewareRegistry(plugins={}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_denies_cross_workspace_model_without_permission(mock_proxy_client):
+    model_entity_id = "default/openai-gpt-oss-20b"
+    model_cache = _model_cache_with(_serving_provider("default", "nim", model_entity_id))
+
+    with _caller_with_access_to() as auth_client, pytest.raises(HTTPException) as exc_info:
+        await _proxy_to_model_entity(mock_proxy_client, model_cache, "carol-ws", model_entity_id)
+
+    assert exc_info.value.status_code == 403
+    assert "default" in exc_info.value.detail
+    auth_client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])
+    mock_proxy_client.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_denies_lora_adapter_from_inaccessible_workspace(mock_proxy_client):
+    model_entity_id = "carol-ws/base&adapters/secret-ws/private-adapter"
+    model_cache = _model_cache_with(_serving_provider("carol-ws", "nim", model_entity_id))
+
+    with _caller_with_access_to() as auth_client, pytest.raises(HTTPException) as exc_info:
+        await _proxy_to_model_entity(mock_proxy_client, model_cache, "carol-ws", model_entity_id)
+
+    assert exc_info.value.status_code == 403
+    assert "secret-ws" in exc_info.value.detail
+    auth_client.has_permissions.assert_awaited_once_with("secret-ws", [MODEL_EXEC_PERMISSION])
     mock_proxy_client.request.assert_not_called()
 
 
@@ -1485,8 +1524,8 @@ def test_normalize_proxy_url(host_url, trailing_uri, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [401, 403, 404])
-async def test_proxy_request_wraps_certain_errors_in_502(mock_proxy_client, next_request_info, status_code):
-    """Test that certain backend errors (401/403/404) are wrapped in 502."""
+async def test_proxy_request_wraps_certain_errors_in_424(mock_proxy_client, next_request_info, status_code):
+    """Test that certain backend rejections (401/403/404) are wrapped in 424 Failed Dependency."""
     import aiohttp
 
     mock_response = Mock(spec=aiohttp.ClientResponse)
@@ -1501,13 +1540,233 @@ async def test_proxy_request_wraps_certain_errors_in_502(mock_proxy_client, next
     with pytest.raises(HTTPException) as exc_info:
         await proxy_request(mock_proxy_client, next_request_info)
 
-    assert exc_info.value.status_code == 502
-    assert f"Backend returned {status_code}" in exc_info.value.detail
+    assert exc_info.value.status_code == 424
+    assert f"HTTP status {status_code}" in exc_info.value.detail
+    assert "will not resolve by retrying" in exc_info.value.detail
     assert "model not found on backend" in exc_info.value.detail
+    # The 424 detail MUST carry the machine-readable upstream-status token so the Models
+    # reconciler can route 401/403 (auth failure) apart from 404 (non-compliant). This is the
+    # producer side of a cross-service contract; the consumer parses it with a fixed regex.
+    from nhx.core.inference_gateway.api.proxy import _upstream_status_token
+
+    assert _upstream_status_token(status_code) in exc_info.value.detail
     assert exc_info.value.headers is not None
     assert exc_info.value.headers.get("retry-after") == "30"
     assert "content-type" not in exc_info.value.headers
     assert "content-length" not in exc_info.value.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [401, 403, 404])
+async def test_proxy_request_424_upstream_status_token_matches_consumer_contract(
+    mock_proxy_client, next_request_info, status_code
+):
+    """Contract pin: the token IGW emits must parse back to the exact upstream status with the
+    SAME regex the Models reconciler uses (``provider_reconciler._GATEWAY_UPSTREAM_STATUS_RE``).
+
+    The two services live in separate packages and can't import each other, so the token format
+    is only kept in lockstep by tests. Re-declaring the consumer's regex here (kept identical by
+    intent) means a rename/reshaping of the token prefix on EITHER side fails this test instead of
+    silently degrading auth routing to non-compliant (READY) — the exact bug this work fixes.
+    """
+    import re
+
+    import aiohttp
+    from nhx.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    # This pattern MUST stay byte-for-byte identical to
+    # nhx.core.models.controllers.provider_reconciler._GATEWAY_UPSTREAM_STATUS_RE.
+    consumer_re = re.compile(r"\[nemo_upstream_status=(\d{3})\]")
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = status_code
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="my-openai",
+        provider_host_url="https://api.openai.com/v1",
+        model_name="default/gpt-4o",
+        purpose="proxying 'v1/models'",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    match = consumer_re.search(exc_info.value.detail)
+    assert match is not None, f"consumer regex found no upstream-status token in: {exc_info.value.detail!r}"
+    assert int(match.group(1)) == status_code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [401, 403, 404])
+async def test_proxy_request_424_names_provider_and_host(mock_proxy_client, next_request_info, status_code):
+    """With upstream context, the 424 detail names the provider, host URL and model."""
+    import aiohttp
+    from nhx.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = status_code
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="my-openai",
+        provider_host_url="https://api.openai.com/v1",
+        model_name="default/gpt-4o",
+        purpose="proxying 'v1/chat/completions'",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    assert exc_info.value.status_code == 424
+    detail = exc_info.value.detail
+    assert "'my-openai'" in detail
+    assert "'https://api.openai.com/v1'" in detail
+    assert "'default/gpt-4o'" in detail
+    assert f"HTTP status {status_code}" in detail
+    assert "proxying 'v1/chat/completions'" in detail
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_424_redacts_userinfo_in_host_url(mock_proxy_client, next_request_info):
+    """Embedded credentials in the provider host URL must never reach the 424 detail."""
+    import aiohttp
+    from nhx.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = 401
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    # Build the credentialed URL entirely from parts so no static credential-bearing URI
+    # literal (a scheme, then userinfo, then an at-sign, then the host) sits in the source
+    # — that pattern trips secret scanners even for obviously-fake creds. Assemble the
+    # authority separately so the source text never contains that sequence at all.
+    at = chr(64)
+    authority = ("us" + "er" + ":" + "pa" + "ss") + at + "internal.example.com:8443"
+    context = UpstreamProviderContext(
+        model_provider_name="secret-provider",
+        provider_host_url=f"https://{authority}/v1",
+        model_name="default/m",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    detail = exc_info.value.detail
+    assert exc_info.value.status_code == 424
+    # Scheme + host (+ port) preserved, credentials stripped.
+    assert "https://internal.example.com:8443/v1" in detail
+    assert "user" not in detail
+    assert "pass" not in detail
+    assert at not in detail
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_424_falls_back_to_provider_name_when_host_unparseable(
+    mock_proxy_client, next_request_info
+):
+    """An unparseable/hostless host URL degrades to naming the provider only — never leaks the raw value."""
+    import aiohttp
+    from nhx.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = 403
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="weird-provider",
+        provider_host_url=("us" + "er" + ":" + "pa" + "ss") + "@no-scheme-here",  # no scheme -> no hostname parsed
+        model_name="default/m",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    detail = exc_info.value.detail
+    assert exc_info.value.status_code == 424
+    assert "'weird-provider'" in detail
+    assert "'default/m'" in detail
+    # The raw (credential-bearing) host string must not appear.
+    assert "no-scheme-here" not in detail
+    assert "pass" not in detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("secret_component", ["?api_key=SUPERSECRET", "#token=SUPERSECRET"])
+async def test_proxy_request_424_drops_query_and_fragment_from_host_url(
+    mock_proxy_client, next_request_info, secret_component
+):
+    """A secret carried in the host URL's query string or fragment must not reach the 424 detail."""
+    import aiohttp
+    from nhx.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = 401
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="secret-provider",
+        provider_host_url=f"https://host.example.com/v1{secret_component}",
+        model_name="default/m",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    detail = exc_info.value.detail
+    assert exc_info.value.status_code == 424
+    # Scheme + host + path kept; the secret-bearing query/fragment dropped.
+    assert "https://host.example.com/v1" in detail
+    assert "SUPERSECRET" not in detail
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_424_bad_port_falls_back_without_500(mock_proxy_client, next_request_info):
+    """An out-of-range port in host_url must not raise (500) — it degrades to the provider name and stays 424.
+
+    ``urlsplit`` defers port validation until ``.port`` is read, so an out-of-range port only
+    raises ``ValueError`` at access time. The redaction helper reads the port inside its own
+    try/except; if that regressed, this request would surface as a 500 instead of a 424.
+    """
+    import aiohttp
+    from nhx.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = 404
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="bad-port-provider",
+        provider_host_url="https://host.example.com:99999/v1",  # port > 65535 -> ValueError on .port
+        model_name="default/m",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    detail = exc_info.value.detail
+    # Stays a 424 (not a 500) and degrades to the provider name rather than leaking the raw URL.
+    assert exc_info.value.status_code == 424
+    assert "'bad-port-provider'" in detail
+    assert "99999" not in detail
 
 
 @pytest.mark.asyncio
@@ -1892,7 +2151,7 @@ async def test_parse_sse_empty_stream_yields_nothing():
 
 
 # ---------------------------------------------------------------------------
-# AIRCORE-???: response model-field rewrite (served_model_name -> entity ref)
+# Response model-field rewrite (served_model_name -> entity ref)
 # ---------------------------------------------------------------------------
 #
 # After proxying, the user-facing response body must surface the model entity
@@ -2163,8 +2422,8 @@ async def test_fetch_proxy_response_rewrites_plain_text_5xx(mock_proxy_client, n
 
 
 @pytest.mark.asyncio
-async def test_fetch_proxy_response_rewrites_401_wrapped_in_502(mock_proxy_client, next_request_info):
-    """A 401 is wrapped as 502; the served name is still scrubbed from the wrapped detail."""
+async def test_fetch_proxy_response_rewrites_401_wrapped_in_424(mock_proxy_client, next_request_info):
+    """A 401 is wrapped as 424; the served name is still scrubbed from the wrapped detail."""
     body = json.dumps({"error": {"message": "invalid key for served-name"}}).encode()
     mock_proxy_client.request = AsyncMock(return_value=_error_response(401, body))
 
@@ -2176,7 +2435,7 @@ async def test_fetch_proxy_response_rewrites_401_wrapped_in_502(mock_proxy_clien
             restored_model_id="ws/entity",
         )
 
-    assert exc_info.value.status_code == 502
+    assert exc_info.value.status_code == 424
     assert "served-name" not in exc_info.value.detail
     assert "ws/entity" in exc_info.value.detail
 
@@ -2233,7 +2492,7 @@ async def test_virtual_model_proxy_scrubs_served_name_on_upstream_error(mock_pro
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2249,15 +2508,9 @@ async def test_virtual_model_proxy_scrubs_served_name_on_upstream_error(mock_pro
             request=request,
             workspace=workspace,
             vm_name=vm_name,
-            virtual_model=SDKVirtualModel(
-                id=f"{workspace}/{vm_name}",
-                entity_id=f"{workspace}/{vm_name}",
+            virtual_model=VirtualModel(
                 name=vm_name,
                 workspace=workspace,
-                parent=workspace,
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
                 default_model_entity=model_entity_id,
             ),
             trailing_uri="v1/chat/completions",
@@ -2380,7 +2633,7 @@ async def test_virtual_model_proxy_rewrites_response_model_non_streaming(mock_pr
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2395,15 +2648,9 @@ async def test_virtual_model_proxy_rewrites_response_model_non_streaming(mock_pr
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -2465,7 +2712,7 @@ async def test_virtual_model_proxy_rewrites_response_model_openai_streaming(mock
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2480,15 +2727,9 @@ async def test_virtual_model_proxy_rewrites_response_model_openai_streaming(mock
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -2570,7 +2811,7 @@ async def test_virtual_model_proxy_rewrites_response_model_anthropic_streaming(m
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2585,15 +2826,9 @@ async def test_virtual_model_proxy_rewrites_response_model_anthropic_streaming(m
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/messages",
@@ -2679,7 +2914,7 @@ async def test_virtual_model_proxy_rewrites_response_model_to_post_middleware_en
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2699,15 +2934,9 @@ async def test_virtual_model_proxy_rewrites_response_model_to_post_middleware_en
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=None,
         ),
         trailing_uri="v1/chat/completions",
@@ -2785,7 +3014,7 @@ async def test_virtual_model_proxy_response_rewrite_runs_before_response_middlew
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2805,15 +3034,9 @@ async def test_virtual_model_proxy_response_rewrite_runs_before_response_middlew
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",

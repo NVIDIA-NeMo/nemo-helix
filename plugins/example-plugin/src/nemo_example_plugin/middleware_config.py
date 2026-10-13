@@ -23,7 +23,7 @@ config (``MiddlewareCall.config``) and skip the entity + CRUD API entirely.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 
 
 class ExampleMiddlewareConfig(NemoEntity, entity_type="example_middleware_config"):

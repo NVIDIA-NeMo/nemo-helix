@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 
@@ -26,6 +26,19 @@ class OperationsRepository:
             "SELECT benchmark_run_id, generation, status, claim_token, sha256, cleanup_checked_at FROM benchmark_run_archives WHERE false"
         )
 
+    def heartbeat_service(self, service: str, instance_id: str) -> None:
+        """Record liveness for a scaled-evals background service."""
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO service_heartbeats (service, instance_id, heartbeat_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (service, instance_id) DO UPDATE
+                SET heartbeat_at = EXCLUDED.heartbeat_at
+                """,
+                (service, instance_id),
+            )
+
     def has_fresh_service_heartbeat(self, service: str, *, stale_seconds: float) -> bool:
         with self.conn.cursor() as cur:
             cur.execute(
@@ -39,7 +52,7 @@ class OperationsRepository:
                 """,
                 (service, stale_seconds),
             )
-            row = cur.fetchone()
+            row = cast(dict[str, Any] | None, cur.fetchone())
         return bool(row and row["is_fresh"])
 
     def evaluation_status_counts(self) -> dict[str, int]:
@@ -186,17 +199,6 @@ class OperationsRepository:
             )
             backend_failures = [{"runtime": str(row["runtime"]), "count": int(row["count"])} for row in cur.fetchall()]
 
-            cur.execute(
-                """
-                SELECT status::text AS status, COUNT(*) AS count
-                FROM evaluation_runtime_resources
-                WHERE kind = 'switchyard'
-                  AND status IN ('draining', 'delete_failed')
-                GROUP BY status
-                """
-            )
-            switchyard_teardown = {str(row["status"]): int(row["count"]) for row in cur.fetchall()}
-
         return {
             "oldest_queued_seconds": float(summary.get("oldest_queued_seconds") or 0),
             "unclaimed_queued": int(summary.get("unclaimed_queued") or 0),
@@ -205,7 +207,6 @@ class OperationsRepository:
             "oldest_worker_lease_seconds": float(summary.get("oldest_worker_lease_seconds") or 0),
             "stuck_jobs": stuck_jobs,
             "backend_failures": backend_failures,
-            "switchyard_teardown": switchyard_teardown,
         }
 
     def ready_task_pack_revisions(self, *, limit: int) -> list[dict]:

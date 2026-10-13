@@ -6,9 +6,9 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "nemo-platform.platform-configmap" . }}
+  name: {{ include "nemo-helix.platform-configmap" . }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    {{ include "nemo-platform.calculatedConfig" . | nindent 4 }}
+    {{ include "nemo-helix.calculatedConfig" . | nindent 4 }}

@@ -11,7 +11,7 @@ export const JOB_SOURCE = {
 
 export const SOURCE_OPTIONS = [
   { label: 'All', value: '' },
-  { label: 'Customizer', value: JOB_SOURCE.CUSTOMIZATION },
+  { label: 'Fine-tuning', value: JOB_SOURCE.CUSTOMIZATION },
   { label: 'Data Designer', value: JOB_SOURCE.DATA_DESIGNER },
   { label: 'Safe Synthesizer', value: JOB_SOURCE.SAFE_SYNTHESIZER },
   { label: 'Evaluator', value: JOB_SOURCE.EVALUATOR_METRICS },

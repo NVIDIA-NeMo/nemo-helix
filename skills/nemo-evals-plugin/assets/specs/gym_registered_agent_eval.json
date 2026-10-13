@@ -1,0 +1,17 @@
+{
+  "tasks": "default/my-gym-taskset",
+  "target": {
+    "kind": "gym",
+    "source": {
+      "agent": "default/calculator-agent"
+    },
+    "resources_server": "mcqa",
+    "num_repeats": 1,
+    "concurrency": 1
+  },
+  "max_concurrent_tasks": 1,
+  "fail_fast": true,
+  "labels": {
+    "benchmark": "registered-agent-gym"
+  }
+}

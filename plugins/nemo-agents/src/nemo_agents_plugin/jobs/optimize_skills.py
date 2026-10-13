@@ -19,10 +19,10 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 from nemo_agents_plugin.jobs.evaluate_suite import _require_absolute
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -94,24 +94,24 @@ class OptimizeSkillsJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
-        """Single-step PlatformJobSpec running ``nemo_agents_plugin.tasks.optimize_skills``.
+    ) -> HelixJobSpec:
+        """Single-step HelixJobSpec running ``nemo_agents_plugin.tasks.optimize_skills``.
 
         Dispatched by the platform's host-subprocess executor — same machine as the
         platform (and the user's docker daemon / Claude CLI).  No dedicated container image.
         """
-        from nemo_platform_plugin.jobs.api_factory import (
+        from nemo_helix_plugin.jobs.api_factory import (
             EnvironmentVariable,
             EnvironmentVariableFromSecret,
-            PlatformJobStep,
+            HelixJobStep,
             SubprocessExecutionProviderSpec,
         )
-        from nemo_platform_plugin.jobs.constants import (
+        from nemo_helix_plugin.jobs.constants import (
             DEFAULT_JOB_STORAGE_PATH,
             PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         )
 
-        # Subprocess work dir is /tmp/nmp-subprocess-jobs/.../task-..., not the
+        # Subprocess work dir is /tmp/nhx-subprocess-jobs/.../task-..., not the
         # caller's cwd; reject relative paths up front.
         _require_absolute(spec.evals, "evals")
         _require_absolute(spec.agent, "agent")
@@ -121,7 +121,7 @@ class OptimizeSkillsJob(NemoJob):
         # Mirror the run() guard so remote submission fails fast with a 422 instead of
         # spawning a doomed subprocess that errors inside analyze_only.
         if spec.analyze_only and not spec.initial_batch:
-            raise PlatformJobCompilationError(
+            raise HelixJobCompilationError(
                 "'analyze_only' requires 'initial_batch' to point at an existing batch "
                 "directory; the analyze-only path has no batch to consume otherwise."
             )
@@ -149,9 +149,9 @@ class OptimizeSkillsJob(NemoJob):
         if spec.anthropic_base_url:
             environment.append(EnvironmentVariable(name="ANTHROPIC_BASE_URL", value=spec.anthropic_base_url))
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="optimize-skills",
                     executor=SubprocessExecutionProviderSpec(
                         provider="subprocess",

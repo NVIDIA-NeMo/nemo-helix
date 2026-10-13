@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Apt packages removed from nhx-automodel-base early in the image build.
+flac
+lame
+libflac12t64
+libmp3lame0
+libogg0
+libopus0
+libsndfile1
+libsox-fmt-base
+libvorbis0a
+libvorbisenc2
+libvorbisfile3
+sox

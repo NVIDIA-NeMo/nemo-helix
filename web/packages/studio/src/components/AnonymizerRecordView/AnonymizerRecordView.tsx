@@ -35,7 +35,7 @@ export const AnonymizerRecordView: FC<AnonymizerRecordViewProps> = memo(
         {record.replacements.length ? (
           <ReplacementMapTable replacements={record.replacements} />
         ) : (
-          <Text color="secondary" kind="body/regular/md">
+          <Text className="text-secondary" kind="body/regular/md">
             No entities were replaced in this record.
           </Text>
         )}

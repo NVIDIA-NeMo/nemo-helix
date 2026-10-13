@@ -9,15 +9,16 @@
 # docker sandboxes to actually run (the stock OpenShell compose omits them):
 #   1. the port is set via the `command:` override below, because compose's
 #      `command: []` does NOT clear the image's baked `--port 8080` CLI flag;
-#   2. the port is published on all host interfaces (not 127.0.0.1-only) so
-#      sandbox containers can reach the gateway at the host bridge IP;
+#   2. the internal bind port and the published host-loopback port match, because
+#      the docker supervisor runs on the host network and calls the gateway back
+#      at 127.0.0.1:<bind port>;
 #   3. gateway.toml carries JWT signing keys (docker sandboxes need them) that
 #      must be generated once first (see below).
 #
 # Bring up:
 #   # one-time JWT key generation (writes /var/lib/openshell/tls/jwt/*):
 #   docker run --rm --user 0 -v /var/lib/openshell:/var/lib/openshell \
-#     ghcr.io/nvidia/openshell/gateway:0.0.92 generate-certs \
+#     ghcr.io/nvidia/openshell/gateway:0.1.2 generate-certs \
 #     --output-dir /var/lib/openshell/tls --server-san host.openshell.internal
 #   docker compose up -d      # from this directory (examples/openshell/)
 #   openshell gateway add http://127.0.0.1:17670 --local --name docker-dev
@@ -32,7 +33,7 @@ services:
     # Pinned, and kept in step with the `openshell` client pin in the plugin's
     # pyproject: the gateway enforces request limits the client does not, so :latest
     # turns a gateway release into an unexplained deployment failure.
-    image: ghcr.io/nvidia/openshell/gateway:${IMAGE_TAG:-0.0.92}
+    image: ghcr.io/nvidia/openshell/gateway:${IMAGE_TAG:-0.1.2}
     restart: unless-stopped
 
     # The image ENTRYPOINT is the gateway binary and its CMD bakes
@@ -61,12 +62,10 @@ services:
       - "host.openshell.internal:host-gateway"
 
     ports:
-      # gRPC / control-plane API. Published on all host interfaces (NOT
-      # 127.0.0.1-only): sandbox containers reach the gateway via
-      # host.openshell.internal, which resolves to the host's docker bridge
-      # gateway IP, so the port must be reachable there, not just on loopback.
-      # Internal bind port and published port MUST match for that routing.
-      - "${OPENSHELL_PORT:-17670}:17670"
+      # gRPC / control-plane API, on host loopback only: this gateway accepts
+      # unauthenticated users. The docker supervisor runs on the host network and
+      # dials 127.0.0.1:<bind port>, so the published port MUST equal the bind port.
+      - "127.0.0.1:${OPENSHELL_PORT:-17670}:17670"
 
     volumes:
       # Docker socket: lets the gateway create and manage sandbox containers.

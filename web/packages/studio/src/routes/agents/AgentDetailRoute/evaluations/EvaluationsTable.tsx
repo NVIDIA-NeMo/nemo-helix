@@ -8,8 +8,9 @@ import {
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import {
@@ -19,6 +20,7 @@ import {
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
 import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { evaluatorScores } from '@studio/routes/agents/AgentDetailRoute/evaluations/formatRollups';
@@ -39,7 +41,7 @@ interface AgentEvalTableRow {
 }
 
 const isTerminalJob = (job: EvalJobRow): boolean =>
-  PlatformJobTerminalStatuses.some((status) => status === job.status);
+  HelixJobTerminalStatuses.some((status) => status === job.status);
 
 const timestampMs = (value?: string): number => {
   const time = utcToLocalDate(value)?.getTime();
@@ -112,6 +114,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
   jobs,
 }) => {
   const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const queryClient = useQueryClient();
   const dataViewState = useStudioDataViewState();
   const [deleteRows, setDeleteRows] = useState<AgentEvaluationRow[]>([]);
@@ -186,7 +189,14 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           header: 'Status',
           cell: ({ row }) => {
             const { job, evaluation } = row.original;
-            if (job) return <StatusBadge status={job.status} />;
+            if (job) {
+              return (
+                <Flex align="center" gap="density-xs" className="flex-wrap">
+                  <StatusBadge status={job.status} />
+                  <EvalRunOutcomeBadge outcome={job.outcome} />
+                </Flex>
+              );
+            }
             return evaluation ? <StatusBadge status="completed" /> : <Text>—</Text>;
           },
         }),
@@ -216,7 +226,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
                     align="baseline"
                     className="rounded bg-surface-raised px-1.5 py-0.5"
                   >
-                    <Text kind="body/regular/sm" color="secondary">
+                    <Text className="text-secondary" kind="body/regular/sm">
                       {score.label}
                     </Text>
                     <Text kind="body/semibold/sm">{score.value}</Text>
@@ -318,9 +328,9 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
       <StudioDataView<AgentEvalTableRow>
         dataViewState={dataViewState}
         makeColumns={makeColumns}
-        onRowClick={(row) => {
+        onRowClick={(row, _index, event) => {
           const destination = destinationFor(row);
-          if (destination) navigate(destination);
+          if (destination) openRow(event, destination);
         }}
         renderBulkActions={({ selectedRows }) => (
           <Button

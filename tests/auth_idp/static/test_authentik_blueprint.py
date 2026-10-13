@@ -92,12 +92,12 @@ def test_static_authentik_blueprint_declares_workload_provider_defaults() -> Non
 
     workload_provider = _entry_by_id(blueprint, "nemo-workload-provider")
     assert workload_provider["model"] == "authentik_providers_oauth2.oauth2provider"
-    assert workload_provider["identifiers"] == {"name": "nemo-platform-workload"}
+    assert workload_provider["identifiers"] == {"name": "nemo-helix-workload"}
     workload_provider_attrs = _attrs(workload_provider)
 
-    assert workload_provider_attrs["name"] == "nemo-platform-workload"
+    assert workload_provider_attrs["name"] == "nemo-helix-workload"
     assert workload_provider_attrs["client_type"] == "public"
-    assert workload_provider_attrs["client_id"] == "nemo-platform-workload"
+    assert workload_provider_attrs["client_id"] == "nemo-helix-workload"
     assert workload_provider_attrs["access_token_validity"] == "minutes=5"
 
     cli_provider = _entry_by_id(blueprint, "nemo-cli-provider")
@@ -107,7 +107,7 @@ def test_static_authentik_blueprint_declares_workload_provider_defaults() -> Non
     workload_application = _entry_by_identifier(blueprint, "authentik_core.application", "slug", "nemo-workload")
     assert workload_application["identifiers"] == {"slug": "nemo-workload"}
     workload_application_attrs = _attrs(workload_application)
-    assert workload_application_attrs["name"] == "NeMo Platform Workload Identity"
+    assert workload_application_attrs["name"] == "NeMo Helix Workload Identity"
     assert workload_application_attrs["slug"] == "nemo-workload"
     assert workload_application_attrs["provider"] == TaggedYamlValue("!KeyOf", "nemo-workload-provider")
 
@@ -150,6 +150,18 @@ def test_authentik_blueprint_reads_workload_identity_password_from_env() -> None
     assert legacy_secret not in token_keys
 
 
+def test_authentik_blueprint_reads_confidential_callback_from_deployment_environment() -> None:
+    blueprint = _load_blueprint()
+    user_provider = _entry_by_id(blueprint, "nemo-user-provider")
+
+    assert _attrs(user_provider)["redirect_uris"] == [
+        {
+            "url": TaggedYamlValue("!Env", "NHX_OIDC_LOGIN_REDIRECT_URI"),
+            "matching_mode": "strict",
+        }
+    ]
+
+
 def test_authentik_blueprint_declares_e2e_setup_identity_as_test_only() -> None:
     blueprint_text = BLUEPRINT.read_text(encoding="utf-8")
     blueprint = _load_blueprint()
@@ -166,7 +178,7 @@ def test_authentik_blueprint_declares_e2e_setup_identity_as_test_only() -> None:
     setup_token_attrs = _attrs(setup_token)
     assert setup_token_attrs["intent"] == "app_password"
     assert setup_token_attrs["user"] == TaggedYamlValue("!KeyOf", "nemo-setup")
-    assert setup_token_attrs["key"] == "nemo-setup-token-secret-dev"
+    assert setup_token_attrs["key"] == TaggedYamlValue("!Env", "AUTHENTIK_SETUP_PASSWORD")
 
 
 def test_authentik_blueprint_has_single_canonical_source() -> None:

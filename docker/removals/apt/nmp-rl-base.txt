@@ -1,5 +1,0 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Apt packages removed from nmp-rl-base early in the image build.
-# This image currently has no apt package removals.

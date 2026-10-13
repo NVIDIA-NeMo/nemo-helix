@@ -4,7 +4,7 @@
 """Episode provisioning broker contract, shared by NeMo-Gym and NeMo-RL.
 
 Vendored from NeMo-Gym rather than imported. The definitions live on an unmerged branch
-(``soluwalana/Gym@nmp/customizer``, commit ``f2a47392``), which is 180 commits behind upstream and
+(``soluwalana/Gym@nhx/customizer``, commit ``f2a47392``), which is 180 commits behind upstream and
 carries no release — so depending on them would pin the platform to a personal fork. Upstream
 ``NVIDIA-NeMo/Gym`` has no ``sandbox.broker`` module at all.
 

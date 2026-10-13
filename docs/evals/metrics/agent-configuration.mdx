@@ -1,0 +1,237 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Agent Configuration"
+description: ""
+---
+<a id="eval-metrics-agent-configuration"></a>
+
+Online evaluations can target an **agent** instead of a model. An agent is an HTTP endpoint that accepts a request and returns a response, optionally with a trajectory of intermediate steps. Use agents when you want to evaluate an agentic system end to end rather than a standalone LLM endpoint.
+
+Provide a `GenericAgent` or `NemoAgentToolkitAgent` as `target=...`. `Agent` is a union type alias used in SDK signatures, not an instantiable class; instantiate one of the concrete classes instead. The metric, prompt template, target, dataset rows, and runtime parameters are all passed through the Evals plugin SDK call.
+
+## Agent Formats
+
+Two agent formats are supported:
+
+| Format | Value | Description |
+|--------|-------|-------------|
+| **Generic** | `generic` | Configurable HTTP POST with a Jinja-templated request body and JSONPath extraction for response and trajectory. |
+| **NeMo Agent Toolkit** | `nemo_agent_toolkit` | Fixed protocol for [NeMo Agent Toolkit](https://docs.nvidia.com/nemo/agent-toolkit/latest/index.html) endpoints. |
+
+## Initialize the SDK
+
+```python
+import os
+
+from nemo_evals.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
+```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
+## Managing Secrets for Agent Endpoints
+
+If your agent endpoint requires authentication, configure `api_key_secret` on the `Agent`.
+
+For `evaluator.submit(...)` jobs, `api_key_secret` must name a NeMo Helix secret in the target workspace. See [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication).
+
+For remote `evaluator.submit(...)` jobs, create the secret in the platform workspace before submitting the job:
+
+```python
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="my-agent-api-key",
+        value=SecretStr(os.environ["MY_AGENT_API_KEY"]),
+    ),
+)
+```
+
+The secret name may be a workspace-local name such as `"my-agent-api-key"` or a full reference such as `"my-workspace/my-agent-api-key"` for remote jobs.
+
+## Generic Agent
+
+A generic agent is any HTTP endpoint that:
+
+1. Accepts a `POST` request with `Content-Type: application/json`.
+2. Returns a JSON response containing the answer and, optionally, a trajectory.
+
+You control the request shape with `body` and extract values from the response with JSONPath expressions.
+
+### Generic Agent Fields
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `url` | Yes | string | Base URL of the agent endpoint. |
+| `name` | Yes | string | Agent name or identifier. |
+| `format` | No | string |  `generic` (default) or `nemo_agent_toolkit`. |
+| `api_key_secret` | No | `SecretRef` | API key reference. See [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication). |
+| `body` | Yes | dict | Jinja template for the request payload. Use `{{ prompt }}`, `{{ messages }}`, or fields from the rendered prompt context. |
+| `response_path` | Yes | string | [JSONPath](https://datatracker.ietf.org/doc/html/rfc9535) expression to extract the response text. |
+| `trajectory_path` | No | string | JSONPath expression to extract the trajectory. |
+
+### Run a Generic Agent Evaluation
+
+```python
+from nhx_evals_sdk import ExactMatchMetric, GenericAgent, RunConfigOnline, SecretRef
+from nhx_evals_sdk.enums import AgentFormat
+
+metric = ExactMatchMetric(reference="{{item.expected_answer}}")
+agent = GenericAgent(
+    url="https://my-agent.example.com/invoke",
+    name="qa-agent",
+    format=AgentFormat.GENERIC,
+    api_key_secret=SecretRef(root="my-agent-api-key"),
+    body={"question": "{{ prompt }}"},
+    response_path="$.answer",
+    trajectory_path="$.reasoning_steps",
+)
+
+generic_job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {"question": "What is the capital of France?", "expected_answer": "Paris"},
+    ],
+    config=RunConfigOnline(parallelism=4, request_timeout=60, max_retries=2),
+    target=agent,
+    prompt_template="Question: {{item.question}}\nAnswer:",
+)
+generic_job.wait_until_done()
+result = generic_job.get_result()
+for score in result.aggregate_scores.scores:
+    print(f"{score.name}: mean={score.mean}")
+```
+
+Use `evaluator.submit(...)` with the same argument shape when you want a durable remote job, but set `api_key_secret` to a platform secret name for the target workspace.
+
+### Example Generic Agent Endpoint
+
+Your agent endpoint might look like this:
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+class AgentRequest(BaseModel):
+    question: str
+
+class AgentResponse(BaseModel):
+    answer: str
+    reasoning_steps: list[dict]
+
+@app.post("/invoke")
+async def invoke(request: AgentRequest) -> AgentResponse:
+    return AgentResponse(
+        answer="Paris",
+        reasoning_steps=[
+            {"step": "search", "result": "Found relevant documents"},
+            {"step": "synthesize", "result": "Generated answer from context"},
+        ],
+    )
+```
+
+## NeMo Agent Toolkit Agent
+
+Use the `nemo_agent_toolkit` format when evaluating agents built with the [NeMo Agent Toolkit](https://docs.nvidia.com/nemo/agent-toolkit/latest/index.html). This format uses the NAT streaming protocol:
+
+1. Sends a POST to `{url}/generate/full?filter_steps=none` with `{"input_message": "<text>"}`.
+2. Reads the SSE (Server-Sent Events) stream.
+3. Extracts the `value` from each SSE `data:` chunk. NAT emits token-level deltas, so the
+   values are concatenated in order to reconstruct the complete response (`concat` aggregation).
+4. Returns the reconstructed response.
+
+### NeMo Agent Toolkit Fields
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `url` | Yes | string | Base URL of the agent endpoint. |
+| `name` | Yes | string | Agent name or identifier. |
+| `format` | Yes | string | Set to `nemo_agent_toolkit`. |
+| `api_key_secret` | No | `SecretRef` | API key reference. See [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication). |
+
+### Run a NAT Agent Evaluation
+
+Create the platform secret used by the NAT endpoint:
+
+```python
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="my-nat-api-key",
+        value=SecretStr(os.environ["MY_NAT_API_KEY"]),
+    ),
+)
+```
+
+```python
+from nhx_evals_sdk import ExactMatchMetric, NemoAgentToolkitAgent, RunConfigOnline, SecretRef
+from nhx_evals_sdk.enums import AgentFormat
+
+metric = ExactMatchMetric(reference="{{item.expected_answer}}")
+agent = NemoAgentToolkitAgent(
+    url="https://my-nat-agent.example.com",
+    name="nat-research-agent",
+    format=AgentFormat.NEMO_AGENT_TOOLKIT,
+    api_key_secret=SecretRef(root="my-nat-api-key"),
+)
+
+nat_job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {"question": "What is the capital of France?", "expected_answer": "Paris"},
+    ],
+    config=RunConfigOnline(parallelism=4),
+    target=agent,
+    prompt_template={
+        "messages": [
+            {"role": "user", "content": "{{item.question}}"},
+        ],
+    },
+)
+nat_job.wait_until_done()
+result = nat_job.get_result()
+```
+
+## Clean Up
+
+Delete the jobs and secrets created by these examples:
+
+```python
+client.jobs.delete_job(name=generic_job.name, workspace="default")
+client.jobs.delete_job(name=nat_job.name, workspace="default")
+client.secrets.delete_secret(name="my-agent-api-key", workspace="default")
+client.secrets.delete_secret(name="my-nat-api-key", workspace="default")
+```
+
+## Model vs Agent: When to Use Which
+
+| Use Case | Use `Model` | Use `Agent` |
+|----------|:-----------:|:-----------:|
+| Evaluate a standalone LLM endpoint | x | |
+| Evaluate an agentic system with tool use and multi-step reasoning | | x |
+| Evaluate a NeMo Agent Toolkit workflow | | x |
+| Evaluate a custom HTTP endpoint with non-standard response format | | x |
+| Use a standard chat completions API | x | |
+
+<Note>
+
+Online evaluations accept **either** a model **or** an agent as the request target, never both.
+
+</Note>
+## Related
+
+- [Model Configuration](/documentation/evaluate-models/metrics/model-configuration) - Inline model targets for LLM endpoints.
+- [Agentic Evaluation Metrics](/documentation/evaluate-models/metrics/agentic-metrics) - Metrics for evaluating agent tool calling, goal accuracy, and trajectory.
+- [LLM-as-a-Judge](/documentation/evaluate-models/metrics/llm-as-a-judge) - Custom judge-based evaluation with flexible scoring criteria.
+- [Bring Your Own Metric](/documentation/evaluate-models/metrics/bring-your-own-metric) - Integrate custom evaluation endpoints.

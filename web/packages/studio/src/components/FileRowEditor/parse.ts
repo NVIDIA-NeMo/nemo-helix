@@ -54,7 +54,7 @@ const parseJsonl = (content: string): DataFileRow[] =>
  * Parses CSV text into a grid of string cells, honoring RFC-4180 quoting: quoted
  * fields may contain commas and newlines, and `""` is an escaped quote.
  */
-const parseCsvGrid = (content: string): string[][] => {
+export const parseCsvGrid = (content: string): string[][] => {
   const rows: string[][] = [];
   let field = '';
   let row: string[] = [];

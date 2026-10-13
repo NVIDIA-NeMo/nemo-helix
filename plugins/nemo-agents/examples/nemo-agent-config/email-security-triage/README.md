@@ -15,7 +15,7 @@ labeled data.
 
 **Prerequisites:**
 
-- NeMo Platform running locally (see [SETUP.md](../../../../../SETUP.md)); `export NMP_BASE_URL=http://localhost:8080`.
+- NeMo Helix running locally (see [SETUP.md](../../../../../SETUP.md)); `export NHX_BASE_URL=http://localhost:8080`.
 - `export NVIDIA_API_KEY=<your key>`.
 - Dependencies synced from the repo root: `uv sync --all-packages`.
 
@@ -34,12 +34,12 @@ The deploy command waits until the deployment reports `running` on a loopback po
 
 ```bash
 nemo agents invoke --agent-deployment email-security-triage-deployment \
-  --input '{"user_message": "is this legit?", "emails": ["Subject: Verify your account\nFrom: it-support@paypa1-secure.example\n\nYour account is locked. Confirm your password at http://paypa1-secure.example/login"]}'
+  --input '{"user_message": "is this legit?", "emails": ["Subject: Verify your account\nFrom: it-support@account-security.example\n\nYour account is locked. Confirm your password at http://account-security.example/login"]}'
 ```
 
 The first line is exactly `phishing` — one lowercase word, alone. The reasoning
-follows on the lines after it, naming the lookalike sender domain
-(`paypa1-secure.example`) and the credential request.
+follows on the lines after it, naming the unexpected sender domain
+(`account-security.example`) and the credential request.
 
 That answer-first shape is the point: every capability puts a bare answer on line
 one and explains after, so a metric can read the result without an LLM. It is also
@@ -57,7 +57,7 @@ different contract on line one.
 ```bash
 # no question -> general review: line 1 is ANALYSIS, then a block per message
 nemo agents invoke --agent-deployment email-security-triage-deployment \
-  --input '{"user_message": "", "emails": ["Subject: Verify your account\nFrom: it-support@paypa1-secure.example\n\nConfirm your password at http://paypa1-secure.example/login"]}'
+  --input '{"user_message": "", "emails": ["Subject: Verify your account\nFrom: it-support@account-security.example\n\nConfirm your password at http://account-security.example/login"]}'
 
 # "write a warning" -> drafting: line 1 is prose, no verdict word
 nemo agents invoke --agent-deployment email-security-triage-deployment \
@@ -91,7 +91,7 @@ it says.
 
 ## Step 5: Evaluate against labeled emails
 
-This example ships two eval configs, both in the evaluator SDK's format:
+This example ships two eval configs, both in the evals SDK's format:
 
 | File                             | Shape                                                | Scores                           |
 | -------------------------------- | ---------------------------------------------------- | -------------------------------- |
@@ -111,7 +111,7 @@ them yourself.
 > requires a dataset file, and bakes a `dataset:` reference into whatever config
 > you upload — a task-driven config has neither, since its inputs live in
 > `tasks[]`. The submission layer and the runner both handle the task shape
-> (`nemo evaluator agent-evaluate run` scores it end to end); only the upload form
+> (`nemo evals agent-evaluate` scores it end to end); only the upload form
 > rejects it. Run it from the CLI, as below.
 
 Upload the dataset once, so the config can reference it:
@@ -141,13 +141,13 @@ spec["params"] = {"parallelism": 4, "request_timeout": 300, "max_retries": 5, "i
 print(json.dumps(spec, indent=2))
 EOF
 
-nemo evaluator evaluate run --spec-file /tmp/esec-eval-spec.json
+nemo evals evaluate --spec-file /tmp/esec-eval-spec.json
 ```
 
-Note this is `nemo evaluator evaluate run`, not `nemo agents evaluate` — the
-latter takes a NAT-format eval YAML, and these configs are evaluator SDK specs.
+Note this is `nemo evals evaluate`, not `nemo agents evaluate` — the
+latter takes a NAT-format eval YAML, and these configs are evals SDK specs.
 The task-driven config runs the same way through
-`nemo evaluator agent-evaluate run`, whose spec wraps its tasks in an `agent`
+`nemo evals agent-evaluate`, whose spec wraps its tasks in an `agent`
 target instead.
 
 Each row carries the agent's real input — an `emails` array plus a `user_message` —

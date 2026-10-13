@@ -175,6 +175,33 @@ def _wait_timeout_error(response: AnalysisRunResponse, timeout: float) -> Analys
     )
 
 
+def poll_until_terminal(
+    get_run: Callable[[], AnalysisRunResponse],
+    *,
+    timeout: float = DEFAULT_WAIT_TIMEOUT,
+    poll_interval: float = DEFAULT_POLL_INTERVAL,
+    on_status: Callable[[str | None], None] | None = None,
+) -> AnalysisRunResponse:
+    """Call *get_run* until the run's backing job is terminal, then return the final state.
+
+    Raises :class:`AnalysisRunNotSubmittedError` if the run has no job and
+    :class:`AnalysisRunTimeoutError` if *timeout* elapses first.
+    """
+    deadline = _wait_deadline(timeout)
+    last_status: str | None = ""
+    while True:
+        response = get_run()
+        _check_waitable(response)
+        if on_status is not None and response.job_status != last_status:
+            on_status(response.job_status)
+        last_status = response.job_status
+        if response.job_is_terminal:
+            return response
+        if _timed_out(deadline):
+            raise _wait_timeout_error(response, timeout)
+        time.sleep(poll_interval)
+
+
 class _AnalysisRunResource:
     """Sync ``analysis_runs`` sub-resource."""
 
@@ -251,19 +278,12 @@ class _AnalysisRunResource:
         Raises :class:`AnalysisRunNotSubmittedError` if the run has no job and
         :class:`AnalysisRunTimeoutError` if *timeout* elapses first.
         """
-        deadline = _wait_deadline(timeout)
-        last_status: str | None = ""
-        while True:
-            response = self.get(workspace=workspace, name=name)
-            _check_waitable(response)
-            if on_status is not None and response.job_status != last_status:
-                on_status(response.job_status)
-            last_status = response.job_status
-            if response.job_is_terminal:
-                return response
-            if _timed_out(deadline):
-                raise _wait_timeout_error(response, timeout)
-            time.sleep(poll_interval)
+        return poll_until_terminal(
+            lambda: self.get(workspace=workspace, name=name),
+            timeout=timeout,
+            poll_interval=poll_interval,
+            on_status=on_status,
+        )
 
 
 class _AsyncAnalysisRunResource:

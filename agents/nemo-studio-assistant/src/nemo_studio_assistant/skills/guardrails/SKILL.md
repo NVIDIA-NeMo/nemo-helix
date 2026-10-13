@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: guardrails
-description: Create, validate, attach, inspect, update, or remove NeMo Guardrails configurations through the NeMo Platform SDK.
+description: Create, validate, attach, inspect, update, or remove NeMo Guardrails configurations through the NeMo Helix SDK.
 ---
 # Guardrails service
 

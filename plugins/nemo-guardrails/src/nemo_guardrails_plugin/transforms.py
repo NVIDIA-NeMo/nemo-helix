@@ -3,17 +3,17 @@
 
 from typing import Any, TypeAlias
 
-from nemo_platform_plugin.guardrail.types import (
-    ActivatedRail as PlatformActivatedRail,
+from nemo_helix_plugin.guardrail.types import (
+    ActivatedRail as HelixActivatedRail,
 )
-from nemo_platform_plugin.guardrail.types import (
-    GenerationLog as PlatformGenerationLog,
+from nemo_helix_plugin.guardrail.types import (
+    GenerationLog as HelixGenerationLog,
 )
-from nemo_platform_plugin.guardrail.types import (
-    GenerationStats as PlatformGenerationStats,
+from nemo_helix_plugin.guardrail.types import (
+    GenerationStats as HelixGenerationStats,
 )
-from nemo_platform_plugin.guardrail.types import (
-    LLMCallInfo as PlatformLLMCallInfo,
+from nemo_helix_plugin.guardrail.types import (
+    LLMCallInfo as HelixLLMCallInfo,
 )
 from nemoguardrails.logging.explain import LLMCallInfo as LibraryLLMCallInfo
 from nemoguardrails.rails.llm.options import (
@@ -54,12 +54,12 @@ class GenerationResponseMapper:
         return LibraryGenerationResponse.model_validate(value)
 
     @staticmethod
-    def to_platform_generation_log(log: LibraryGenerationLog | None) -> PlatformGenerationLog | None:
+    def to_platform_generation_log(log: LibraryGenerationLog | None) -> HelixGenerationLog | None:
         """Translate nemoguardrails GenerationLog into platform GenerationLog."""
         if log is None:
             return None
 
-        return PlatformGenerationLog(
+        return HelixGenerationLog(
             activated_rails=GenerationResponseMapper.to_platform_activated_rails(log.activated_rails),
             llm_calls=GenerationResponseMapper.to_platform_llm_calls(log.llm_calls),
             internal_events=log.internal_events,
@@ -68,29 +68,29 @@ class GenerationResponseMapper:
         )
 
     @staticmethod
-    def to_platform_generation_stats(stats: LibraryGenerationStats | None) -> PlatformGenerationStats | None:
+    def to_platform_generation_stats(stats: LibraryGenerationStats | None) -> HelixGenerationStats | None:
         """Translate nemoguardrails GenerationStats into platform GenerationStats."""
         if stats is None:
             return None
 
-        return PlatformGenerationStats.model_validate(stats.model_dump(exclude_none=True))
+        return HelixGenerationStats.model_validate(stats.model_dump(exclude_none=True))
 
     @staticmethod
     def to_platform_activated_rails(
         rails: list[LibraryActivatedRail] | None,
-    ) -> list[PlatformActivatedRail] | None:
+    ) -> list[HelixActivatedRail] | None:
         """Translate nemoguardrails ActivatedRail list into platform ActivatedRail list."""
         if rails is None:
             return None
 
-        return [PlatformActivatedRail.model_validate(rail.model_dump(exclude_none=True)) for rail in rails]
+        return [HelixActivatedRail.model_validate(rail.model_dump(exclude_none=True)) for rail in rails]
 
     @staticmethod
     def to_platform_llm_calls(
         llm_calls: list[LibraryLLMCallInfo] | None,
-    ) -> list[PlatformLLMCallInfo] | None:
+    ) -> list[HelixLLMCallInfo] | None:
         """Translate nemoguardrails LLMCallInfo list into platform LLMCallInfo list."""
         if llm_calls is None:
             return None
 
-        return [PlatformLLMCallInfo.model_validate(llm_call.model_dump(exclude_none=True)) for llm_call in llm_calls]
+        return [HelixLLMCallInfo.model_validate(llm_call.model_dump(exclude_none=True)) for llm_call in llm_calls]

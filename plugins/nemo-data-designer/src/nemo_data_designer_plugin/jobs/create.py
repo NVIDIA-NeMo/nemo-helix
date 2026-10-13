@@ -5,23 +5,23 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
-from data_designer_nemo.context import create_validation_context
+from data_designer_nemo.context.validation import create_validation_context
 from data_designer_nemo.errors import raise_if_errors
 from data_designer_nemo.runnable import resolve_runnable_config
 from nemo_data_designer_plugin.jobs.run import run_step_config_result
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig, DataDesignerStepConfig
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
 )
-from nemo_platform_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.image import get_qualified_image
 from pydantic import BaseModel
 
 
@@ -42,11 +42,10 @@ class CreateJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:  # DataDesignerStepConfig
         del entity_client, is_local
-        async_sdk = cast(AsyncNeMoPlatform, async_sdk)
         input_spec = cast(DataDesignerJobConfig, input_spec)
 
         dd_ctx = create_validation_context(async_sdk, workspace)
@@ -67,21 +66,21 @@ class CreateJob(NemoJob):
         spec: BaseModel,  # DataDesignerStepConfig
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
-        options: dict | None = None,
-    ) -> PlatformJobSpec:
+        options: dict[str, Any] | None = None,
+    ) -> HelixJobSpec:
         del workspace, entity_client, job_name, async_sdk, options
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="data-designer-job",
                     executor=CPUExecutionProviderSpec(
                         profile=profile or "default",
                         provider="cpu",
                         container=ContainerSpec(
-                            image=get_qualified_image("nmp-cpu-tasks"),
+                            image=get_qualified_image("nhx-tasks"),
                             entrypoint=["python", "-m"],
                             command=["nemo_data_designer_plugin.jobs.bridge"],
                         ),
@@ -92,6 +91,6 @@ class CreateJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
         step_config = DataDesignerStepConfig.model_validate(config)
         return run_step_config_result(step_config, ctx, sdk)

@@ -12,6 +12,7 @@ import {
   formToUnslothCreate,
   getInitialFormValuesFromState,
   jobToFormFields,
+  templateToFormFields,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
 import {
@@ -190,6 +191,27 @@ describe('formToAutomodelCreate', () => {
     expect(result.name).toBeUndefined();
     expect(result.description).toBeUndefined();
     expect(result.spec.output).toEqual({ name: '', description: undefined });
+  });
+
+  it('sets lora.merge from the fine-tuning type, the only control that offers it', () => {
+    // The backend merges when finetuning_type is lora_merged *or* lora.merge is set. The
+    // form shows only the first, so the second has to follow it rather than persist.
+    const merged = validAutomodel();
+    merged.automodel.training.finetuning_type = 'lora_merged';
+    expect(formToAutomodelCreate(merged).spec.training.lora?.merge).toBe(true);
+
+    const plain = validAutomodel();
+    plain.automodel.training.finetuning_type = 'lora';
+    expect(formToAutomodelCreate(plain).spec.training.lora?.merge).toBe(false);
+  });
+
+  it('clears a stale merge flag carried in from a cloned job', () => {
+    // Without the switch there is nothing to turn this off by hand, so a clone of a job
+    // that merged would otherwise keep merging however the radio is set.
+    const data = validAutomodel();
+    data.automodel.training.finetuning_type = 'lora';
+    data.automodel.training.lora = { ...data.automodel.training.lora, merge: true };
+    expect(formToAutomodelCreate(data).spec.training.lora?.merge).toBe(false);
   });
 
   it('drops the whole distillation block for an sft job', () => {
@@ -431,6 +453,41 @@ describe('jobToFormFields', () => {
     expect(fields.description).toBe(customizationJob1.description);
   });
 
+  it('shows a job that merged via lora.merge as LoRA (Merged)', () => {
+    // The CLI and API accept finetuning_type 'lora' with lora.merge set, which merges
+    // just the same. The form has no switch for it, so replaying the spec verbatim would
+    // present a merged job as an unmerged adapter and clone it as one.
+    const job = {
+      ...customizationJob1,
+      spec: {
+        ...customizationJob1.spec,
+        training: {
+          ...customizationJob1.spec.training,
+          finetuning_type: 'lora',
+          lora: { ...customizationJob1.spec.training?.lora, merge: true },
+        },
+      },
+    } as typeof customizationJob1;
+
+    expect(jobToFormFields(job).automodel.training.finetuning_type).toBe('lora_merged');
+  });
+
+  it('leaves an unmerged LoRA job on the plain LoRA type', () => {
+    const job = {
+      ...customizationJob1,
+      spec: {
+        ...customizationJob1.spec,
+        training: {
+          ...customizationJob1.spec.training,
+          finetuning_type: 'lora',
+          lora: { ...customizationJob1.spec.training?.lora, merge: false },
+        },
+      },
+    } as typeof customizationJob1;
+
+    expect(jobToFormFields(job).automodel.training.finetuning_type).toBe('lora');
+  });
+
   it('maps an unsloth job onto the unsloth backend', () => {
     const fields = jobToFormFields(customizationJob3);
     expect(fields.backend).toBe('unsloth');
@@ -499,4 +556,43 @@ describe('getInitialFormValuesFromState', () => {
       expect(getInitialFormValuesFromState(state)).toBeUndefined();
     }
   );
+});
+
+describe('templateToFormFields', () => {
+  it('replays a saved config the same way a cloned job does', () => {
+    // The stored config is a job spec, so a saved template and a clone must agree.
+    const fromJob = jobToFormFields(customizationJob1);
+    const fromTemplate = templateToFormFields({
+      backend: 'automodel',
+      config: customizationJob1.spec as never,
+      description: customizationJob1.description,
+    });
+
+    expect(fromTemplate?.backend).toBe(fromJob.backend);
+    expect(fromTemplate?.automodel).toEqual(fromJob.automodel);
+  });
+
+  it('refuses a template naming a backend the form has no arm for', () => {
+    // jobToFormFields would otherwise fall back to a default, wrong-backend form.
+    expect(
+      templateToFormFields({ backend: 'something-else', config: {} as never, description: '' })
+    ).toBeNull();
+  });
+
+  it('replays on the persisted backend, not the shape of the config', () => {
+    // `parallelism` is optional on automodel input and shape inference keys on it, so a
+    // template created through the API without it would otherwise be refused.
+    const withoutParallelism = { ...(customizationJob1.spec as object) } as {
+      parallelism?: unknown;
+    };
+    delete withoutParallelism.parallelism;
+
+    expect(
+      templateToFormFields({
+        backend: 'automodel',
+        config: withoutParallelism as never,
+        description: '',
+      })?.backend
+    ).toBe('automodel');
+  });
 });

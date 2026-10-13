@@ -3,11 +3,11 @@
 
 import {
   activeRolesForStrategy,
-  GLINER_ROLE,
+  DETECTOR_ROLE,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
 import { useAnonymizerModels } from '@studio/routes/AnonymizerBuilderRoute/useAnonymizerModels';
-import { isGlinerModel } from '@studio/routes/AnonymizerBuilderRoute/utils';
+import { isNerDetectorModel } from '@studio/routes/AnonymizerBuilderRoute/utils';
 import { pickDefaultModelName } from '@studio/util/buildSuggestedModelOptions';
 import { useEffect, useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -21,18 +21,18 @@ export const useDefaultRoleModels = (): { isLoading: boolean } => {
 
   useEffect(() => {
     if (!models.length) return;
-    const chatModels = models.filter((model) => !isGlinerModel(model));
+    const chatModels = models.filter((model) => !isNerDetectorModel(model));
     const suggestedName = pickDefaultModelName(
       chatModels.map((model) => ({ name: model.served_model_name ?? model.name }))
     );
     const llm =
       chatModels.find((model) => (model.served_model_name ?? model.name) === suggestedName) ??
       chatModels[0];
-    const gliner = models.find(isGlinerModel);
+    const detector = models.find(isNerDetectorModel);
     for (const role of roles) {
       const current = getValues(`roleModels.${role}.modelId`);
       if (current) continue;
-      const pick = role === GLINER_ROLE ? gliner : llm;
+      const pick = role === DETECTOR_ROLE ? detector : llm;
       if (!pick) continue;
       setValue(`roleModels.${role}.modelId`, pick.id);
       applyModel(role, pick.id);

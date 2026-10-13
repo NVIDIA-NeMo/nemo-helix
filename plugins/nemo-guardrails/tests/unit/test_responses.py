@@ -19,7 +19,7 @@ from nemo_guardrails_plugin.responses import (
     extract_upstream_error,
     is_blocked_generation_response,
 )
-from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError, InferenceResponse
+from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError, InferenceResponse
 from nemoguardrails.exceptions import LLMCallException
 from nemoguardrails.rails.llm.options import ActivatedRail, GenerationLog, GenerationResponse
 

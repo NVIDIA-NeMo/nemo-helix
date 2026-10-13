@@ -14,7 +14,9 @@ import { type FieldValues, type UseControllerProps } from 'react-hook-form';
 export interface FilesetSearchableSelectFormFieldProps {
   slotLabel?: ReactNode;
   slotInfo?: ReactNode;
+  slotHelp?: ReactNode;
   slotError?: string;
+  required?: boolean;
 }
 
 export interface FilesetSearchableSelectProps<T extends FieldValues> {
@@ -25,6 +27,8 @@ export interface FilesetSearchableSelectProps<T extends FieldValues> {
   triggerPlaceholder?: string;
   /** Restrict to one fileset `purpose`. Omit to list every purpose. */
   purpose?: FilesetPurpose;
+  /** Restrict to filesets carrying this exact `description`. */
+  description?: string;
   /** Options rendered above the fileset list (e.g. a "New Dataset" entry). */
   leadingOptions?: SelectItemOption[];
   groupLabels?: Record<string, string>;
@@ -54,6 +58,7 @@ export function FilesetSearchableSelect<T extends FieldValues>({
   formFieldProps,
   triggerPlaceholder = 'Select a fileset',
   purpose,
+  description,
   leadingOptions,
   groupLabels,
   renderOption = defaultRenderOption,
@@ -64,6 +69,7 @@ export function FilesetSearchableSelect<T extends FieldValues>({
     useFilesetSearch({
       workspace,
       purpose,
+      description,
       enabled: queryEnabled,
     });
 

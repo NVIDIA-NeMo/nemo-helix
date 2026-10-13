@@ -9,11 +9,10 @@ import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { INTAKE_FILTER_ACTION_TARGET_ID } from '@studio/routes/IntakeLayout/const';
 import { getIntakeSpansRoute, getIntakeTracesRoute } from '@studio/routes/utils';
 import { FC, Suspense, useState } from 'react';
 import { Link, Outlet, matchPath, useLocation } from 'react-router';
-
-export const INTAKE_FILTER_ACTION_TARGET_ID = 'intake-filter-action-target';
 
 /**
  * Layout component for the Intake section.

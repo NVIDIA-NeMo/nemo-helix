@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 import typer
-from nemo_platform_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI
 
 
 class SafeSynthesizerCLI(NemoCLI):

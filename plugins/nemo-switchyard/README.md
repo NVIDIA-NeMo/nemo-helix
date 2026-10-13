@@ -3,32 +3,46 @@
 
 # Switchyard Inference Middleware Plugin
 
-A NeMo Inference Middleware plugin wrapping [Switchyard](https://github.com/NVIDIA-NeMo/Switchyard) —
-a protocol-agnostic request/response router for LLM backends.
+Request-routing middleware backed by
+[Switchyard 0.3.0](https://github.com/NVIDIA-NeMo/Switchyard).
 
-## Features
+The plugin distribution is `nemo-switchyard-plugin`; VirtualModels reference
+its `nemo-switchyard` middleware entry point. The API image installs the
+separate `nemo-switchyard==0.3.0` distribution that provides
+`switchyard_rust`.
 
-- **Random routing** — distribute requests across multiple backend models
-- **Format translation** — convert between OpenAI Chat and Anthropic Messages
-- **Streaming support** — preserves async iterators without buffering the full response
+## Supported requests and algorithms
 
-## Installation
+The middleware supports OpenAI Chat Completions requests and runs only in
+`request_middleware`. Protocol translation and response middleware are not
+supported.
 
-A snapshot of the Switchyard library is vendored at `plugins/nemo-switchyard/vendor/switchyard/`, so no separate Switchyard checkout, `PYTHONPATH` override, or `SWITCHYARD_PATH` env var is required. The plugin is installed by default through the root workspace's `enabled-plugins` group.
+## Upgrading from the legacy middleware
 
-```bash
-uv sync
+Before upgrading an existing Switchyard VirtualModel:
 
-LOG_LEVEL=DEBUG uv run nemo services run \
-  --services entities,models,inference-gateway,secrets \
-  --controllers models
-```
+1. Remove `nemo-switchyard` entries from `response_middleware`.
+2. Remove middleware calls whose `config_type` is `translate`.
+3. Ensure clients and every routed backend use the OpenAI Chat Completions
+   request/response shape.
+4. Update or recreate the VirtualModel with one of the supported request
+   middleware configurations below.
 
-The plugin is discovered at platform startup through the `nemo.inference_middleware` entry point named `nemo-switchyard`. To pin a different upstream commit, follow the instructions in [`vendor/switchyard/README.md`](vendor/switchyard/README.md).
+Perform the VirtualModel migration together with the plugin upgrade. Legacy
+translation and response-middleware configurations are rejected rather than
+silently ignored.
 
-## VirtualModel Configuration
+| `config_type` | Purpose | Required configuration |
+| --- | --- | --- |
+| `random_routing` | Weighted choice between two models | `strong`, `weak`, `strong_probability` |
+| `stage_router` | Route between capable and efficient stages | `confidence_threshold`, `models.capable`, `models.efficient` |
+| `llm_classifier` | Capability classification with a judge model | `base_threshold`, `models.judge`, `models.capable`, `models.efficient` |
 
-Attach this middleware to a VirtualModel via `MiddlewareCall`:
+`llm_classifier` supports capability mode only.
+
+## Random routing
+
+The existing random-routing JSON shape is preserved:
 
 ```json
 {
@@ -39,46 +53,102 @@ Attach this middleware to a VirtualModel via `MiddlewareCall`:
       "config": {
         "strong": {"model": "workspace/model-a"},
         "weak": {"model": "workspace/model-b"},
-        "strong_probability": 0.5
+        "strong_probability": 0.5,
+        "rng_seed": 7
       }
     }
   ]
 }
 ```
 
-### Config Types
+## Stage routing
 
-| Type | Purpose | Required Fields |
-|------|---------|-----------------|
-| `random_routing` | Distribute across models | `strong`, `weak`, `strong_probability` |
-| `translate` | Format translation | derived from VM `backend_format` |
-
-### Phases (request vs. response)
-
-Each `nemo-switchyard` entry is authoritative for the list it appears in.
-The plugin registers and runs only the matching pipeline:
-
-- listed under `request_middleware` → request pipeline runs (e.g. routing
-  decision, format translation of the inbound request).
-- listed under `response_middleware` → response pipeline runs (e.g.
-  translating the backend's response back to the inbound format).
-
-Calling `process_response` for a config that was only listed under
-`request_middleware` (or vice versa) is rejected with `400`.
-
-For full cross-format translation, list `translate` in both `request_middleware` and `response_middleware`. Request-only translation sends the backend a translated request but returns the backend's native response shape to the client.
-
-## Log Output
-
-Switchyard decisions appear in IGW container logs under logger `nemo_switchyard.middleware`:
-
-```
-INFO: Switchyard random routing: selected 'workspace/model-b' from ['workspace/model-a', 'workspace/model-b']
+```json
+{
+  "name": "nemo-switchyard",
+  "config_type": "stage_router",
+  "config": {
+    "picker": "efficient_first",
+    "confidence_threshold": 0.5,
+    "models": {
+      "capable": ["workspace/model-a"],
+      "efficient": ["workspace/model-b"]
+    }
+  }
+}
 ```
 
-## Architecture
+## Capability classifier
 
-The middleware imports Switchyard from the vendored snapshot at `plugins/nemo-switchyard/vendor/switchyard/`. Each config type maps to a Switchyard factory class that builds request/response pipelines.
+```json
+{
+  "name": "nemo-switchyard",
+  "config_type": "llm_classifier",
+  "config": {
+    "mode": "capability",
+    "base_threshold": 0.5,
+    "models": {
+      "judge": ["workspace/judge"],
+      "capable": ["workspace/model-a"],
+      "efficient": ["workspace/model-b"]
+    }
+  }
+}
+```
 
-- Request flow: IGW → `process_request()` → routing/translation → backend model
-- Response flow: backend → `process_response()` → post-processing → IGW
+Judge calls are sent directly to the configured model provider with provider
+credentials from the Inference Gateway model cache. Caller authorization
+headers are never forwarded.
+
+## Optimization strategy
+
+The plugin also ships the `switchyard` strategy for `nemo agents optimize`.
+Given a platform agent, a list of acceptable models and a list of routing
+strategies, the job creates one VirtualModel per (model pair × routing
+strategy) and saves a copy of the agent's `nemo-agents-spec-v1` config per
+combination, pointed at that VirtualModel, to the job's results. The stored
+agent is never modified and no VirtualModel is deleted.
+
+`models` is ordered from most capable to most efficient: every pair `(i < j)`
+routes with `models[i]` as the capable/strong model and `models[j]` as the
+efficient/weak one. VirtualModels are named
+`<agent>-<digest>` in the submission workspace, where `<digest>` is a short
+hash of the routing strategy, the pair's models, and the middleware config;
+`switchyard-result.json` maps each name back to its strategy and models. Re-running
+the same request reuses the same VirtualModels; changing the model list or a
+routing setting creates new ones alongside the old. An existing VirtualModel
+with a matching name is reused only when its models and middleware config match
+the request; otherwise the run fails and asks you to delete it before re-running.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `agent` | required | Platform agent to route, `name` or `workspace/name`. |
+| `models` | required | At least two model entity refs, most capable first. |
+| `routing_strategies` | `["random_routing"]` | Any of `random_routing`, `stage_router`, `llm_classifier`. |
+| `strong_probability` | `0.5` | `random_routing`: share of requests sent to the capable model. |
+| `confidence_threshold` | `0.5` | `stage_router` confidence threshold. |
+| `base_threshold` | `0.5` | `llm_classifier` capability threshold. |
+| `judge_model` | capable model of the pair | `llm_classifier` judge. |
+
+```bash
+uv run nemo agents optimize run-strategy --strategy switchyard --agent my-agent \
+  --spec '{"models": ["default/model-a", "default/model-b"], "routing_strategies": ["random_routing", "stage_router"]}'
+
+# The results download as a tarball holding one agent-<virtual-model>.yaml per combination
+# plus switchyard-result.json, which maps each VirtualModel to its models and middleware config.
+uv run nemo jobs results download switchyard --job <job-name> -o switchyard.tar.gz
+mkdir -p switchyard-results && tar -xzf switchyard.tar.gz -C switchyard-results --strip-components=1
+# Pick a VirtualModel name from switchyard-result.json, e.g. my-agent-3f2a9c1e.
+uv run nemo agents create --name my-agent-3f2a9c1e \
+  --agent-config ./switchyard-results/agent-my-agent-3f2a9c1e.yaml
+```
+
+Each rewritten config points its `models.default` and harness model blocks at
+`<workspace>/<virtual-model>` with no `base_url`, so the platform binds the
+Inference Gateway URL and credential when the agent runs.
+
+## Verification
+
+```bash
+uv run --frozen pytest plugins/nemo-switchyard/tests -v
+```

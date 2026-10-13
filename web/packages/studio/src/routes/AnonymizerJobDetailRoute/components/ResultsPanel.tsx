@@ -3,7 +3,7 @@
 
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { anonymizerDownloadRunJobResult } from '@nemo/sdk/generated/anonymizer/anonymizer';
-import type { PlatformJobResultResponse } from '@nemo/sdk/generated/anonymizer/schema';
+import type { HelixJobResultResponse } from '@nemo/sdk/generated/anonymizer/schema';
 import { Banner, Button, Flex, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { Download } from 'lucide-react';
 import { useState, type FC } from 'react';
@@ -11,7 +11,7 @@ import { useState, type FC } from 'react';
 interface ResultsPanelProps {
   readonly workspace: string;
   readonly jobName: string;
-  readonly results: readonly PlatformJobResultResponse[];
+  readonly results: readonly HelixJobResultResponse[];
   readonly isLoading: boolean;
   readonly isTerminal: boolean;
   readonly loadError: boolean;

@@ -12,14 +12,13 @@ while keeping offline runs that name no target at all.
 import json
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.spec import PlatformJobSpec
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest, ListJobsQueryParams
-from nmp.common.entities import DEFAULT_WORKSPACE
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, ListJobsQueryParams
+from nhx.common.entities import DEFAULT_WORKSPACE
 
-TEST_PLATFORM_SPEC = PlatformJobSpec.model_validate(
+TEST_PLATFORM_SPEC = HelixJobSpec.model_validate(
     {
         "steps": [
             {
@@ -51,7 +50,7 @@ async def _create(jobs: AsyncJobsClient, name: str, spec: dict) -> None:
     (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
-            body=CreatePlatformJobRequest(
+            body=CreateHelixJobRequest(
                 name=name,
                 source=SOURCE,
                 spec=spec,
@@ -72,8 +71,8 @@ async def _list(jobs: AsyncJobsClient, condition: dict) -> set[str]:
 
 
 @pytest.fixture
-async def seeded_jobs(test_sdk: AsyncNeMoPlatform) -> AsyncJobsClient:
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def seeded_jobs(async_client: AsyncNemoClient) -> AsyncJobsClient:
+    jobs = AsyncJobsClient.from_client(async_client)
     await _create(jobs, "agent-job", AGENT_SPEC)
     await _create(jobs, "model-job", MODEL_SPEC)
     await _create(jobs, "offline-job", OFFLINE_SPEC)

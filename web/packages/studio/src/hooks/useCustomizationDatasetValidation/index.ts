@@ -45,6 +45,8 @@ export interface EncodingFileError {
  */
 export interface AnnotatedFilesetFile extends FilesetFileOutput {
   rowCount?: number;
+  /** Bytes `rowCount` was taken from: below `size` when the content was a capped preview. */
+  bytesRead?: number;
 }
 
 /** Per-file completeness check results are capped to keep the UI fast. */
@@ -140,6 +142,18 @@ export interface CustomizationDatasetValidationResult {
   schemaShape: string;
   hasTraining: boolean;
   hasValidation: boolean;
+  /**
+   * Root-level .json files that matched no training/validation pattern.
+   * Only native Unsloth with apply_chat_template disabled should treat these
+   * as training; all other consumers can ignore this field.
+   */
+  unmatchedRootJson: FilesetFileOutput[];
+  /**
+   * True when every file in `unmatchedRootJson` passed its format and encoding
+   * checks. False when any file failed or when validation is still in flight.
+   * Used by native Unsloth to gate whether those files may count as training.
+   */
+  unmatchedRootJsonValid: boolean;
   /** Show "customizer will auto-split 10%" notice. */
   autoSplitNotice: boolean;
   /**
@@ -162,8 +176,9 @@ interface UseCustomizationDatasetValidationOptions {
    * Currently-selected training type from the form. Schema rules differ:
    * SFT accepts messages or prompt+completion; DPO accepts the four preference
    * shapes. Customizer applies the same training-type-aware discrimination.
+   * Omit to detect whichever format the data is in, before a type is chosen.
    */
-  trainingType: TrainingType;
+  trainingType?: TrainingType;
   /**
    * Cap on the number of lines parsed per file. 0 (default) means parse every
    * line of every file. Positive values truncate the sample, useful for
@@ -179,6 +194,7 @@ interface PerFileValidation {
   firstRow: Record<string, unknown> | null;
   /** Non-empty line count from the full content (independent of sampleLimit). */
   rowCount: number;
+  bytesRead: number;
   /**
    * Completeness errors collected for this file, capped at
    * MAX_COMPLETENESS_ERRORS_PER_FILE. Empty when the schema didn't detect
@@ -229,9 +245,10 @@ const validateOne = async (
   content: string,
   encoding: FileEncodingResult,
   sampleLimit: number,
-  trainingType: TrainingType
+  trainingType: TrainingType | undefined
 ): Promise<PerFileValidation> => {
   const rowCount = countRows(content);
+  const bytesRead = new TextEncoder().encode(content).length;
   const sample = buildSampleFile(file.path, content, sampleLimit);
   const formatResult = await validateFileFormat(sample);
   if (!formatResult.isValid || !formatResult.format) {
@@ -241,6 +258,7 @@ const validateOne = async (
       schema: null,
       firstRow: null,
       rowCount,
+      bytesRead,
       completenessErrors: [],
       encoding,
     };
@@ -261,7 +279,13 @@ const validateOne = async (
   forEachParsedRow(sampledContent, (row, index) => {
     if (firstRow === null) {
       firstRow = row;
-      schema = detectCustomizerSchema(row, trainingType);
+      // Without a type, GRPO and DPO go first: their keys are distinctive, while SFT's
+      // `prompt` also appears in preference rows.
+      schema = trainingType
+        ? detectCustomizerSchema(row, trainingType)
+        : (detectCustomizerSchema(row, 'grpo') ??
+          detectCustomizerSchema(row, 'dpo') ??
+          detectCustomizerSchema(row, 'sft'));
     }
     // Skip completeness when the schema didn't match — we don't know what to
     // require. The Schema check already surfaces a warning.
@@ -282,6 +306,7 @@ const validateOne = async (
     schema,
     firstRow,
     rowCount,
+    bytesRead,
     completenessErrors,
     encoding,
   };
@@ -302,11 +327,18 @@ export const useCustomizationDatasetValidation = ({
   const {
     training,
     validation,
+    unmatchedRootJson,
     isPending: isDiscoveryPending,
     error: discoveryError,
   } = useDatasetFileDiscovery({ fileset });
 
-  const allFiles = [...training, ...validation];
+  const mainFiles = [...training, ...validation];
+  // Include unmatchedRootJson in the validation pass so their format and
+  // encoding can be checked before they are allowed to count as training for
+  // native Unsloth. Results are partitioned below — existing checks remain
+  // scoped to mainFiles only.
+  const allFiles = [...mainFiles, ...unmatchedRootJson];
+  const unmatchedRootJsonPaths = new Set(unmatchedRootJson.map((f) => f.path));
   const paths = allFiles.map((f) => f.path);
   const enabled = !!workspace && !!name && allFiles.length > 0;
 
@@ -353,6 +385,7 @@ export const useCustomizationDatasetValidation = ({
               schema: null,
               firstRow: null,
               rowCount: 0,
+              bytesRead: 0,
               completenessErrors: [],
               // Don't double-count this in the encoding row — the format/error
               // row already carries the download failure for this file.
@@ -366,12 +399,17 @@ export const useCustomizationDatasetValidation = ({
     },
   });
 
-  const perFile = data ?? [];
-  const fileErrors: FileValidationError[] = perFile
+  const allResults = data ?? [];
+  // Partition results so unmatchedRootJson files don't affect the checks that
+  // apply to training/validation files (format, schema, completeness, encoding).
+  const mainResults = allResults.filter((r) => !unmatchedRootJsonPaths.has(r.file.path));
+  const unmatchedResults = allResults.filter((r) => unmatchedRootJsonPaths.has(r.file.path));
+
+  const fileErrors: FileValidationError[] = mainResults
     .filter((r) => r.error !== null)
     .map((r) => ({ path: r.file.path, error: r.error as string }));
-  const formatOk = enabled && fileErrors.length === 0 && perFile.length === allFiles.length;
-  const firstDetected = perFile.find((r) => r.schema !== null) ?? null;
+  const formatOk = enabled && fileErrors.length === 0 && mainResults.length === mainFiles.length;
+  const firstDetected = mainResults.find((r) => r.schema !== null) ?? null;
 
   const hasTraining = training.length > 0;
   const hasValidation = validation.length > 0;
@@ -381,21 +419,26 @@ export const useCustomizationDatasetValidation = ({
   // map. rowCount is undefined for any file whose validation hasn't resolved
   // yet (or was skipped because format failed).
   const rowCountsByPath: Record<string, number> = Object.fromEntries(
-    perFile.map((r) => [r.file.path, r.rowCount])
+    allResults.map((r) => [r.file.path, r.rowCount])
+  );
+  const bytesReadByPath: Record<string, number> = Object.fromEntries(
+    allResults.map((r) => [r.file.path, r.bytesRead])
   );
   const annotate = (file: FilesetFileOutput): AnnotatedFilesetFile => ({
     ...file,
     rowCount: rowCountsByPath[file.path],
+    bytesRead: bytesReadByPath[file.path],
   });
   const annotatedTraining = training.map(annotate);
   const annotatedValidation = validation.map(annotate);
 
   const trainingPaths = new Set(training.map((f) => f.path));
-  const trainingRowCount = perFile
+  const validationPaths = new Set(validation.map((f) => f.path));
+  const trainingRowCount = mainResults
     .filter((r) => trainingPaths.has(r.file.path))
     .reduce((sum, r) => sum + r.rowCount, 0);
-  const validationRowCount = perFile
-    .filter((r) => !trainingPaths.has(r.file.path))
+  const validationRowCount = mainResults
+    .filter((r) => validationPaths.has(r.file.path))
     .reduce((sum, r) => sum + r.rowCount, 0);
 
   const schema = firstDetected?.schema ?? null;
@@ -403,40 +446,51 @@ export const useCustomizationDatasetValidation = ({
   // didn't match any customizer shape OR matched a different variant than the
   // one we're treating as "the" schema. Customizer's per-file Pydantic
   // validation would reject these at training time.
-  const schemaMismatchedFiles = perFile
+  const schemaMismatchedFiles = mainResults
     .filter(
       (r) =>
         r.error === null &&
         (r.schema === null || (schema !== null && r.schema?.variant !== schema.variant))
     )
     .map((r) => r.file.path);
-  const completenessErrors = perFile.flatMap((r) => r.completenessErrors);
+  const completenessErrors = mainResults.flatMap((r) => r.completenessErrors);
   const completenessSkipped = !formatOk || schema === null;
   const completeness = {
     ok: !completenessSkipped && completenessErrors.length === 0,
     skipped: completenessSkipped,
     errors: completenessErrors,
   };
-  const encodingFileErrors: EncodingFileError[] = perFile
+  const encodingFileErrors: EncodingFileError[] = mainResults
     .filter((r) => !r.encoding.ok)
     .map((r) => ({ path: r.file.path }));
   const encoding = {
-    ok: enabled && encodingFileErrors.length === 0 && perFile.length === allFiles.length,
+    ok: enabled && encodingFileErrors.length === 0 && mainResults.length === mainFiles.length,
     fileErrors: encodingFileErrors,
   };
+
+  // A root .json file is valid for native Unsloth (apply_chat_template off)
+  // only when it downloaded cleanly and passed the UTF-8 encoding check.
+  // Schema and completeness are intentionally not checked — the caller
+  // (NewCustomizationForm) already skips those for native Unsloth.
+  const unmatchedRootJsonValid =
+    unmatchedRootJson.length === 0 ||
+    (unmatchedResults.length === unmatchedRootJson.length &&
+      unmatchedResults.every((r) => r.error === null && r.encoding.ok));
 
   return {
     isPending: isDiscoveryPending || (enabled && isValidationPending),
     discoveryError,
     format: { ok: formatOk, fileErrors },
     schema,
-    schemaExpectedCopy: expectedSchemaCopy(trainingType),
+    schemaExpectedCopy: trainingType ? expectedSchemaCopy(trainingType) : '',
     schemaMismatchedFiles,
     schemaShape: inferRowSchema(firstDetected?.firstRow ?? null),
     completeness,
     encoding,
     hasTraining,
     hasValidation,
+    unmatchedRootJson,
+    unmatchedRootJsonValid,
     autoSplitNotice: hasTraining && !hasValidation,
     training: annotatedTraining,
     validation: annotatedValidation,

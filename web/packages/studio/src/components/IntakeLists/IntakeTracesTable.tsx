@@ -5,6 +5,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { EditColumnsMenu } from '@nemo/common/src/components/DataView/internal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import type { Trace, TraceFilter, TraceSortField } from '@nemo/sdk/generated/platform/schema';
@@ -22,7 +23,17 @@ import { getIntakeSessionTraceRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { Columns3 } from 'lucide-react';
 import { type FC, useState } from 'react';
-import { useNavigate } from 'react-router';
+
+// Module-level so its identity is stable: DataView rebuilds columns, and remounts every cell,
+// whenever makeColumns changes.
+const makeTraceColumns = makeIntakeTraceColumns({
+  traceIdFilter: true,
+  sessionIdFilter: true,
+  statusFilter: true,
+  agentNameFilter: true,
+  startedAtSort: true,
+  startedAtFilter: true,
+});
 
 export interface IntakeTracesTableProps {
   workspace?: string;
@@ -43,7 +54,7 @@ export const IntakeTracesTable: FC<IntakeTracesTableProps> = (props) => {
 const SeededIntakeTracesTable: FC<
   IntakeTracesTableProps & { defaultStartedAtFilter: StartedAtFilterEntry }
 > = ({ workspace: workspaceProp, slotEndPortalTargetId, defaultStartedAtFilter }) => {
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const routeWorkspace = useWorkspaceFromPathIfExists();
   const workspace = workspaceProp ?? routeWorkspace;
   const hasWorkspace = Boolean(workspace);
@@ -95,13 +106,7 @@ const SeededIntakeTracesTable: FC<
   return (
     <IntakeTelemetryDataView<Trace>
       dataViewState={dataViewState}
-      makeColumns={makeIntakeTraceColumns({
-        traceIdFilter: true,
-        sessionIdFilter: true,
-        statusFilter: true,
-        startedAtSort: true,
-        startedAtFilter: true,
-      })}
+      makeColumns={makeTraceColumns}
       slotEndPortalTargetId={slotEndPortalTargetId}
       toolbarSlotEnd={
         <EditColumnsMenu
@@ -115,8 +120,8 @@ const SeededIntakeTracesTable: FC<
           </>
         </EditColumnsMenu>
       }
-      onRowClick={(trace) =>
-        navigate(getIntakeSessionTraceRoute(requestWorkspace, trace.session_id, trace.id))
+      onRowClick={(trace, _index, event) =>
+        openRow(event, getIntakeSessionTraceRoute(requestWorkspace, trace.session_id, trace.id))
       }
       attributes={{
         DataViewRoot: {

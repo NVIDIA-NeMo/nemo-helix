@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from nmp.unsloth.tasks.training.backends.unsloth_sft import _resolve_local_data_files
+from nhx.unsloth.tasks.training.backends.unsloth_sft import _resolve_local_data_files
 
 
 def test_single_file_passthrough(tmp_path: Path) -> None:

@@ -21,30 +21,20 @@ import pytest
 try:
     import click
     import httpx
-    from botocore.exceptions import ClientError
     from nemo_scaled_evals_plugin import migrations
-    from scaled_evals.api import s3
     from scaled_evals.api.build import buildkit
     from scaled_evals.api.build.errors import BuildError
     from scaled_evals.api.build.image_builder_service import _post_resolve
     from scaled_evals.api.repositories.build_repository import TaskBuildRepository
     from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
-    from scaled_evals.api.repositories.runtime_resource_repository import (
-        RuntimeResourceRepository,
-    )
-    from scaled_evals.api.repositories.switchyard_campaign_repository import (
-        SwitchyardCampaignRepository,
-    )
     from scaled_evals.api.repositories.task_repository import TaskRepository
     from scaled_evals.api.routers import evaluations as evaluations_router
     from scaled_evals.cli.client import download_artifact, make_client, request, upload_file
     from scaled_evals.dispatch import detached_runner
-    from scaled_evals.dispatch import worker as worker_module
     from scaled_evals.dispatch.credentials import write_env_file
     from scaled_evals.dispatch.gym.docker import make_gym_docker_submitter
     from scaled_evals.dispatch.kubectl import execute_kubectl
     from scaled_evals.dispatch.runtime_backend import LaunchSpec
-    from scaled_evals.dispatch.worker import Dispatcher
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -151,60 +141,9 @@ def test_external_commands_and_http_redirects_fail_bounded() -> None:
             request(client, "GET", "/tasks")
 
 
-def test_p1_cleanup_recovery_and_cancellation_are_bounded(
+def test_p1_cancellation_commits_before_teardown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cursor = MagicMock()
-    connection = MagicMock()
-    connection.transaction.return_value = nullcontext()
-    connection.cursor.return_value.__enter__.return_value = cursor
-
-    RuntimeResourceRepository(connection).claim_due_switchyard_teardown(
-        claim_timeout=30,
-        worker_id="worker-a",
-    )
-    claim_sql = cursor.execute.call_args.args[0]
-    assert "r.status IN ('draining', 'deleting', 'delete_failed')" in claim_sql
-
-    cursor.reset_mock()
-    SwitchyardCampaignRepository(connection).mark_delete_unavailable(
-        "bmr-missing",
-        worker_id="worker-a",
-        detail="lease missing after 5 attempts",
-    )
-    terminal_sql, terminal_params = cursor.execute.call_args.args
-    assert "SET status = 'deleted'" in terminal_sql
-    assert "resource_name IS NOT NULL" not in terminal_sql
-    assert terminal_params == ("lease missing after 5 attempts", "bmr-missing", "worker-a")
-
-    campaign_events: list[str] = []
-
-    class _CampaignRepository:
-        def __init__(self, _connection: Any) -> None:
-            pass
-
-        def mark_delete_failed(self, *_args: Any, **_kwargs: Any) -> None:
-            campaign_events.append("retry")
-
-        def mark_delete_unavailable(self, *_args: Any, **_kwargs: Any) -> None:
-            campaign_events.append("terminal")
-
-    monkeypatch.setattr(worker_module, "SwitchyardCampaignRepository", _CampaignRepository)
-    dispatcher = Dispatcher(
-        connect=cast(Any, lambda: nullcontext(connection)),
-        switchyard=MagicMock(),
-        worker_id="worker-a",
-    )
-    campaign = {
-        "benchmark_run_id": "bmr-missing",
-        "status": "deleting",
-        "resource_name": None,
-        "metadata": {},
-    }
-    dispatcher.delete_switchyard_campaign({**campaign, "claim_attempt": 4})
-    dispatcher.delete_switchyard_campaign({**campaign, "claim_attempt": 5})
-    assert campaign_events == ["retry", "terminal"]
-
     request_events: list[str] = []
     row = {"id": "ev-cancel"}
 
@@ -346,26 +285,6 @@ def test_repair_and_cleanup_sql_preserve_recoverability() -> None:
     assert "status = 'pending'" in insert_sql
 
 
-def test_expired_runtime_claim_and_worker_namespace_are_portable() -> None:
-    connection = MagicMock()
-    connection.transaction.return_value = nullcontext()
-    cursor = connection.cursor.return_value.__enter__.return_value
-
-    RuntimeResourceRepository(connection).claim_due_switchyard_teardown(
-        claim_timeout=30,
-        worker_id="worker",
-    )
-    sql, params = cursor.execute.call_args.args
-    assert "r.status = 'deleting'" in sql
-    assert "r.drain_until IS NULL" in sql
-    assert params == (30, 30, "worker")
-
-    workers = (Path(__file__).parents[1] / "deploy/k8s/workers.yaml").read_text()
-    assert 'namespace="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"' in workers
-    assert "namespace: ${namespace}" in workers
-    assert "namespace: nemo-platform-scaled-evals" not in workers
-
-
 def test_detached_spawn_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pid_path = tmp_path / "runner.pid"
     exit_path = tmp_path / "runner.exit.json"
@@ -382,19 +301,6 @@ def test_detached_spawn_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.
     terminal = json.loads(exit_path.read_text())
     assert terminal["exit_code"] == 127
     assert "runner missing" in terminal["error"]
-
-
-def test_streamed_gcs_errors_are_read_before_classification() -> None:
-    response = httpx.Response(
-        404,
-        stream=httpx.ByteStream(b'{"error":{"message":"missing"}}'),
-    )
-
-    with pytest.raises(ClientError) as raised:
-        s3._raise_for_gcs("DownloadObject", response)
-
-    assert response.is_stream_consumed
-    assert "missing" in str(raised.value)
 
 
 def test_cleartext_and_external_targets_are_rejected(tmp_path: Path) -> None:
@@ -423,7 +329,10 @@ def test_cleartext_and_external_targets_are_rejected(tmp_path: Path) -> None:
         "secret",
         transport=httpx.MockTransport(redirect),
     ) as client:
-        with pytest.raises(click.ClickException, match="must use HTTPS"):
+        # The broker upload target is derived from the (HTTPS-validated) client base_url
+        # rather than a client-supplied URL, so the cleartext guard now lives in make_client
+        # (asserted above). upload_file instead rejects a malformed/empty upload block.
+        with pytest.raises(click.ClickException, match="missing workspace/fileset/path"):
             upload_file(client, {"url": "http://storage.example.test/archive"}, source)
         with pytest.raises(click.ClickException, match="must use HTTPS"):
             download_artifact(client, "/artifacts/archive", tmp_path / "download")

@@ -6,7 +6,7 @@
  * Do not edit manually.
  * agent-hardener (plugin)
  */
-import type { PlatformJobStatus } from './PlatformJobStatus.ts';
+import type { HelixJobStatus } from './HelixJobStatus.ts';
 import type { SynthBenignJobCustomFields } from './SynthBenignJobCustomFields.ts';
 import type { SynthBenignJobErrorDetails } from './SynthBenignJobErrorDetails.ts';
 import type { SynthBenignJobOwnership } from './SynthBenignJobOwnership.ts';
@@ -22,7 +22,7 @@ export interface SynthBenignJob {
   created_at?: string;
   updated_at?: string;
   spec: SynthBenignSpec;
-  status?: PlatformJobStatus;
+  status?: HelixJobStatus;
   status_details?: SynthBenignJobStatusDetails;
   error_details?: SynthBenignJobErrorDetails;
   ownership?: SynthBenignJobOwnership;

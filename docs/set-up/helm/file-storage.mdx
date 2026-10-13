@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="file-storage"></a>
 
-The NeMo Platform Files service stores uploaded files and datasets. By default, it uses filesystem storage backed by a Kubernetes ReadWriteMany PersistentVolumeClaim (PVC). Alternatively, you can configure S3-compatible object storage.
+The NeMo Helix Files service stores uploaded files and datasets. By default, it uses filesystem storage backed by a Kubernetes ReadWriteMany PersistentVolumeClaim (PVC). Alternatively, you can configure S3-compatible object storage.
 
 ## Prerequisites
 
@@ -111,12 +111,12 @@ platformConfig:
  default_storage_config:
  type: s3
  bucket: my-nemo-bucket
- prefix: nemo-platform/files
+ prefix: nemo-helix/files
  region: us-east-1
  use_sdk_auth: true
 ```
 
-All files will be stored under `s3://my-nemo-bucket/nemo-platform/files/`.
+All files will be stored under `s3://my-nemo-bucket/nemo-helix/files/`.
 
 #### S3-Compatible Storage
 

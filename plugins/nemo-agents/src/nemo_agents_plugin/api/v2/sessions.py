@@ -24,12 +24,17 @@ from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.entities import AgentDeployment, AgentSession, SessionStatus
 from nemo_agents_plugin.schema import CreateSessionRequest, SessionFilter, SessionPage
 from nemo_agents_plugin.session_lifecycle import cleanup_fabric_runtime as _cleanup_fabric_runtime
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.dependencies import get_effective_principal_id
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.jobs.openapi_utils import generate_openapi_extra_params
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
+from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.schema import PaginationData
 from pydantic import ValidationError
 from starlette.requests import Request
 
@@ -79,6 +84,8 @@ async def create_session(
             status_code=409,
             detail=f"Session '{session_name}' already exists in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to create session for deployment '%s'", body.deployment_id)
         raise HTTPException(status_code=500, detail="Failed to create session.") from exc

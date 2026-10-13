@@ -11,7 +11,7 @@ integration hook for any caller that builds the CLI through that helper instead.
 from __future__ import annotations
 
 import typer
-from nemo_platform_plugin.job import NemoJob
+from nemo_helix_plugin.job import NemoJob
 
 from nemo_rl_plugin.cli.inputs import apply_rl_job_cli_overrides
 from nemo_rl_plugin.jobs.jobs import RlJob

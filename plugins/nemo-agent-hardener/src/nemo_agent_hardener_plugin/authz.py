@@ -9,6 +9,6 @@ without an import cycle. Reads carry ``@scope.read``; mutating routes carry ``@s
 
 from __future__ import annotations
 
-from nemo_platform_plugin.authz import AuthzScope
+from nemo_helix_plugin.authz import AuthzScope
 
 scope = AuthzScope("agent-hardener")

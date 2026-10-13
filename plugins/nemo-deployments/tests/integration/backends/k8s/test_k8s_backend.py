@@ -5,8 +5,8 @@
 
 Namespace defaults to ``default`` (present on any cluster, and where a kind admin
 kubeconfig has full rights). Point at a different namespace you control via
-``NMP_K8S_ITEST_NAMESPACE`` — e.g. your dev-blue namespace, which only has the RBAC
-verbs the deploy chart's ``controller-role.yaml`` grants (see AIRCORE-757 Phase 6).
+``NHX_K8S_ITEST_NAMESPACE`` — e.g. your dev-blue namespace, which only has the RBAC
+verbs the deploy chart's ``controller-role.yaml`` grants.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ pytestmark = [
     skip_without_kubeconfig,
 ]
 
-NAMESPACE = os.environ.get("NMP_K8S_ITEST_NAMESPACE", "default")
+NAMESPACE = os.environ.get("NHX_K8S_ITEST_NAMESPACE", "default")
 LABELS = {"managed-by": MANAGED_BY_LABEL}
 POLL_ATTEMPTS = 60
 POLL_INTERVAL_SECONDS = 1
@@ -46,12 +46,12 @@ def mock_entities() -> AsyncMock:
 
 @pytest.fixture
 def k8s_backend(mock_entities: AsyncMock) -> Iterator[K8sDeploymentBackend]:
-    mock_sdk = MagicMock()
+    mock_client = MagicMock()
     with (
-        patch("nemo_deployments_plugin.backends.k8s.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.k8s.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.k8s.backend.NemoEntitiesClient", return_value=mock_entities),
     ):
-        backend = K8sDeploymentBackend(mock_sdk, {"default_namespace": NAMESPACE, "request_timeout": 30})
+        backend = K8sDeploymentBackend(mock_client, {"default_namespace": NAMESPACE, "request_timeout": 30})
     backend._entities = mock_entities
     try:
         yield backend

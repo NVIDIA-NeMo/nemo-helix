@@ -2,16 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.routers.evaluations import teardown_cancelled_evaluation
@@ -32,6 +33,7 @@ from scaled_evals.api.utils import make_id
 router = APIRouter(prefix="/benchmark-runs", tags=["benchmark-runs"])
 
 Db = Annotated[Database, Depends(get_db)]
+StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 
 
@@ -74,7 +76,6 @@ def _reproduce_request(run: Mapping[str, Any], member: Mapping[str, Any]) -> Cre
         framework_version=run.get("framework_version"),
         framework_profile_id=run.get("framework_profile_id"),
         member_framework_profile_ids=dict(runner_metadata.get("member_framework_profile_ids") or {}),
-        switchyard_profile_id=run.get("switchyard_profile_id"),
         intake_profile_id=run.get("intake_profile_id"),
         credentials=dict(run.get("credentials") or {}),
         agent_bundle_id=_agent_bundle_id(runner_metadata),
@@ -127,7 +128,6 @@ def _create_command(body: CreateBenchmarkRunRequest) -> list[str]:
         )
     for option, value in (
         ("--framework-profile-id", body.framework_profile_id),
-        ("--switchyard-profile-id", body.switchyard_profile_id),
         ("--intake-profile-id", body.intake_profile_id),
         ("--agent-bundle", body.agent_bundle_id),
     ):
@@ -168,7 +168,7 @@ def preflight_benchmark_run_request(
         db,
         body,
         current,
-        object_exists=s3.object_exists,
+        object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
     )
     return result.report
@@ -190,7 +190,7 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         db,
         body,
         current,
-        object_exists=s3.object_exists,
+        object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
     )
     if isinstance(preflight, BlockedPreflight):
@@ -233,7 +233,6 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         members=spawn,
         framework_profile_id=body.framework_profile_id,
         harbor_profile_id=body.harbor_profile_id,
-        switchyard_profile_id=body.switchyard_profile_id,
         intake_profile_id=body.intake_profile_id,
         credentials=body.credentials,
         extra_skill_object_keys=body.extra_skill_object_keys,
@@ -245,11 +244,7 @@ def create_benchmark_run(body: CreateBenchmarkRunRequest, db: Db, current: Princ
         network_policy_config=body.network_policy_config,
         n_attempts=body.n_attempts,
         parallelism=body.parallelism,
-        max_concurrent_members=(
-            body.max_concurrent_members
-            if body.max_concurrent_members is not None
-            else (len(members) if body.switchyard_profile_id is not None else None)
-        ),
+        max_concurrent_members=body.max_concurrent_members,
         visibility=body.visibility,
         owner_id=current.owner_id,
     )
@@ -364,7 +359,7 @@ def cancel_benchmark_run(run_id: str, db: Db) -> BenchmarkRunResponse:
 
     Idempotent: a run already terminal is returned unchanged. The member
     evaluations are flipped to `cancelled`, then launched members follow the
-    same runtime and Switchyard teardown path as single-evaluation cancellation.
+    same runtime teardown path as single-evaluation cancellation.
     """
     row, _cancelled_now, cancelled_members = db.benchmark_runs.cancel(run_id)
     if row is None:
@@ -413,12 +408,15 @@ def request_benchmark_archive(run_id: str, body: BenchmarkArchiveRequest, db: Db
 
 
 @router.get("/{run_id}/archive/download")
-def download_benchmark_archive(run_id: str, db: Db) -> StreamingResponse:
-    row = db.benchmark_archives.get(run_id)
+def download_benchmark_archive(run_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
+    # connection for the entire archive stream and can exhaust the pool.
+    with database_factory() as db:
+        row = db.benchmark_archives.get(run_id)
     if row is None or row["status"] != "ready" or not row["object_key"]:
         raise _http_error(404, "not_found", "benchmark archive not ready")
     return StreamingResponse(
-        s3.stream_object(row["object_key"]),
+        artifacts.stream_object(row["object_key"]),
         media_type="application/gzip",
         headers={"Content-Disposition": f'attachment; filename="{run_id}-results.tar.gz"'},
     )

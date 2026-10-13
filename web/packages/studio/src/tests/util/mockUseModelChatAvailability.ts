@@ -8,12 +8,14 @@ interface MockUseModelChatAvailabilityOptions {
   modelChatStatus?: ModelChatStatus;
   isChatAvailable?: boolean;
   isLoading?: boolean;
+  isAdapterUnserved?: boolean;
 }
 
 const defaults: Required<MockUseModelChatAvailabilityOptions> = {
   modelChatStatus: 'enabled',
   isChatAvailable: true,
   isLoading: false,
+  isAdapterUnserved: false,
 };
 
 export const mockUseModelChatAvailability = (overrides?: MockUseModelChatAvailabilityOptions) => {

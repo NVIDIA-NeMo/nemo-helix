@@ -22,7 +22,7 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
   WorkspaceModelSelect: () => <div data-testid="mock-model-select" />,
 }));
 
-const renderPanel = (modelURN: string | null) => {
+const renderPanel = (modelURN: string | null, adapter: string | null = null) => {
   return render(
     <TestProviders>
       <MemoryRouter>
@@ -31,6 +31,7 @@ const renderPanel = (modelURN: string | null) => {
             id: 0,
             collapsed: false,
             modelURN,
+            adapter,
             roleColor: 'baseline',
             roleLabel: 'Baseline',
             isSinglePanel: true,
@@ -66,6 +67,17 @@ describe('ModelChatPanel — URN routing', () => {
 
     expect(modelChatSpy).toHaveBeenCalledWith(
       expect.objectContaining({ workspace: 'abacusai', model: 'llama-70b' })
+    );
+  });
+
+  // An unresolved adapter used to leave the panel enabled and pointed at the base model, so the
+  // trigger read "llama-70b / support-v1" while the request went to the base weights.
+  it('never sends to the base model while a selected adapter is unresolved', () => {
+    renderPanel('nvidia/llama-70b', 'support-v1');
+
+    expect(modelChatSpy).not.toHaveBeenCalledWith(expect.objectContaining({ model: 'llama-70b' }));
+    expect(modelChatSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ model: '', disabled: true })
     );
   });
 

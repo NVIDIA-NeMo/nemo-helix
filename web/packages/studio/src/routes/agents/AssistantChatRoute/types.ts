@@ -118,7 +118,15 @@ export interface AssistantResponseToolUsePart {
   input: Record<string, unknown>;
 }
 
-export type AssistantResponseHistoryPart = AssistantResponseTextPart | AssistantResponseToolUsePart;
+export interface AssistantResponseThinkingPart {
+  type: 'thinking';
+  thinking: string;
+}
+
+export type AssistantResponseHistoryPart =
+  | AssistantResponseTextPart
+  | AssistantResponseThinkingPart
+  | AssistantResponseToolUsePart;
 
 export interface AssistantResponseHistoryItem {
   kind: 'assistant';

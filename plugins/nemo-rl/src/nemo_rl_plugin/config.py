@@ -5,14 +5,14 @@
 
 from __future__ import annotations
 
-from nmp.customization_common.contributor.config import BaseTrainingPluginConfig, generate_job_id
+from nhx.customization_common.contributor.config import BaseTrainingPluginConfig, generate_job_id
 from pydantic_settings import SettingsConfigDict
 
 
 class RlPluginConfig(BaseTrainingPluginConfig):
-    """Environment-driven NeMo-RL plugin settings (``NMP_RL_`` prefix)."""
+    """Environment-driven NeMo-RL plugin settings (``NHX_RL_`` prefix)."""
 
-    model_config = SettingsConfigDict(env_prefix="NMP_RL_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="NHX_RL_", extra="ignore")
 
 
 def get_config() -> RlPluginConfig:

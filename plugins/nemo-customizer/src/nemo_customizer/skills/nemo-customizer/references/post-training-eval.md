@@ -41,7 +41,7 @@ CHAT_REFERENCE_TEMPLATE = "{{ item.messages[-1].content }}"
 
 Import from `references/eval_helpers.py` — do not re-type these in one-off scripts.
 
-## Inference defaults (thinking models, e.g. Qwen3)
+## Inference defaults (thinking models, e.g. Nemotron 3.5 Lightning, Qwen3)
 
 | Setting | Recommended | Avoid |
 |---------|-------------|-------|
@@ -86,8 +86,8 @@ The model-entity proxy path **always** resolves to the base VirtualModel. Settin
 
 | Target | Gateway route | URL pattern | Request `model` field |
 |--------|---------------|-------------|------------------------|
-| Base entity | **Model entity** | `$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
-| LoRA adapter | **Provider** | `$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<adapter-name>` |
+| Base entity | **Model entity** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
+| LoRA adapter | **Provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<adapter-name>` |
 
 `eval_helpers.py` auto-discovers a READY provider that serves the base entity (or pass `--provider <name>`). LoRA adapter weights hot-reload on that deployment — no provider update per adapter. (Full SFT / merged outputs need a separate deployment — see above.)
 
@@ -121,7 +121,7 @@ Resolve adapter names from completed job specs instead of guessing:
 import os
 from eval_helpers import list_completed_job_adapters, compare_adapters, build_eval_payload
 
-base_url = os.environ.get("NMP_BASE_URL") or "http://127.0.0.1:8080"
+base_url = os.environ.get("NHX_BASE_URL") or "http://127.0.0.1:8080"
 
 jobs = list_completed_job_adapters(
     base_url=base_url,
@@ -151,7 +151,7 @@ When comparing adapters from **different backends** (automodel vs unsloth) or ba
 | HTTP base URL | `…/provider/<provider>/-/v1` | `…/model/<model-entity>/-/v1` |
 | `"model"` | `default--<adapter-name>` | `default/<model-entity>` |
 | `messages` | `messages[:-1]` from the training row (exclude final assistant label) | Same |
-| Short-answer SFT (e.g. Qwen3) | `"chat_template_kwargs": {"enable_thinking": false}` | Same |
+| Short-answer SFT (e.g. Nemotron 3.5 Lightning, Qwen3) | `"chat_template_kwargs": {"enable_thinking": false}` | Same |
 | `max_tokens` / `temperature` | `64` / `0` typical for short labels | Same |
 
 CLI shortcuts (substitute names from the job):
@@ -177,12 +177,16 @@ Val loss from training is **not** accuracy — always run a generation eval for 
 
 ## Helper script
 
-From **nemo-platform** git root:
+From **nemo-helix** git root:
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080   # user platform URL when not localhost
+# eval_helpers.py reads $NHX_BASE_URL when --base-url is omitted and self-defaults to
+# http://127.0.0.1:8080 when it is unset. Do NOT blanket-export localhost — that would
+# override a remote you already configured. For a remote platform, export its URL
+# explicitly (export NHX_BASE_URL=https://…) or pass --base-url; for a local platform
+# with no config, leave it unset and the script defaults to localhost.
 
-# Base vs one adapter (--base-url optional when NMP_BASE_URL is set)
+# Base vs one adapter (--base-url optional when NHX_BASE_URL is set)
 uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \
   --model-entity <model-entity> \
   --adapter <adapter-name> \
@@ -228,4 +232,4 @@ After compare, report for **base and each adapter**:
 - Any `warnings` from routing sanity checks
 - Inference settings (`enable_thinking`, `max_tokens`) and dataset fileset ref
 
-Uses the **nemo-evaluator SDK** (`Evaluator`, metrics, `RunConfigOnlineModel`) under the hood — no separate evaluator skill doc required. For general BYOB/rubric eval outside customization, use the **nemo-evaluator** skill.
+Uses the **nemo-evals SDK** (`Evaluator`, metrics, `RunConfigOnlineModel`) under the hood — no separate evaluator skill doc required. For general BYOB/rubric eval outside customization, use the **nemo-evals** skill.

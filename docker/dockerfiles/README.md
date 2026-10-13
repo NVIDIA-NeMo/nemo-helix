@@ -9,7 +9,7 @@ active build inputs.
 
 Currently active:
 
-- `services/guardrails/callouts/Dockerfile.bake` via the `guardrails-callout-*`
+- `services/guardrails/callouts/Dockerfile.bake` via the `nhx-guardrails-callout-*`
   bake targets.
 
 The other service Dockerfiles are retained for owner review and should be

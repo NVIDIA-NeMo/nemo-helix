@@ -161,7 +161,7 @@ describe('UserPopover', () => {
     expect(screen.queryByText('Report a Trace')).not.toBeInTheDocument();
   });
 
-  it('should render a non-clickable avatar when no profile and telemetry disabled', async () => {
+  it('should render nothing when no profile and telemetry disabled', async () => {
     vi.resetModules();
     vi.doMock('@studio/constants/environment', async (importOriginal) => {
       const actual = await importOriginal<typeof import('@studio/constants/environment')>();
@@ -172,10 +172,11 @@ describe('UserPopover', () => {
     });
     mockUseAuthProfile.mockReturnValue(undefined);
     const { UserPopover: UserPopoverEmpty } = await import('@studio/components/UserPopover');
-    renderWithRouter(<UserPopoverEmpty />);
+    const { container } = renderWithRouter(<UserPopoverEmpty />);
 
     expect(screen.queryByTestId('nv-dropdown-trigger')).not.toBeInTheDocument();
-    expect(screen.getByText('N')).toBeInTheDocument();
+    expect(screen.queryByText('N')).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('should open trace modal when "Report a Trace" is clicked', async () => {

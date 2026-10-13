@@ -11,6 +11,7 @@
  */
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { getBaseModelsQueryKeyPrefix } from '@nemo/common/src/api/entity-store/useBaseModels';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import {
   ROW_ACTIONS_COLUMN_SIZE,
@@ -29,6 +30,7 @@ import {
   useModelsDeleteProvider,
   useModelsListProviders,
 } from '@nemo/sdk/generated/platform/model-providers';
+import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/models';
 import {
   ModelProvider,
   ModelProviderFilter,
@@ -98,6 +100,11 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
     {
       query: {
         placeholderData: keepPreviousData,
+        // Provider status (READY/ERROR/...) is computed asynchronously by the Models
+        // Controller's reconciler, so the badge can go stale between reconcile cycles.
+        // Poll on a modest interval so the list reflects status changes without a manual
+        // remount/refocus.
+        refetchInterval: 20_000,
       },
     }
   );
@@ -108,6 +115,12 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
         toast.success('Inference provider deleted successfully.');
         queryClient.invalidateQueries({
           queryKey: getModelsListProvidersQueryKey(workspace),
+        });
+        queryClient.invalidateQueries({
+          queryKey: getModelsListModelsQueryKey(workspace),
+        });
+        queryClient.invalidateQueries({
+          queryKey: getBaseModelsQueryKeyPrefix(workspace),
         });
       },
     },
@@ -265,7 +278,7 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
           title={`Delete inference provider: ${modalProvider.name}`}
           confirmationText={modalProvider.name}
           onClose={handleModalClose}
-          description="Deleting will also remove any models associated with this provider. Are you sure you want to proceed?"
+          description="Deleting this inference provider will also delete its model entities unless another provider serves them or it is a model deployment's provider. Are you sure you want to proceed?"
         />
       )}
 

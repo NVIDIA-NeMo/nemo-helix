@@ -9,7 +9,7 @@ import re
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
-from nemo_platform_plugin.refs import ENTITY_REF_PATTERN, FilesetRef, OutputTarget
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef, OutputTarget
 from pydantic import BaseModel, Field, ValidationInfo, model_validator
 
 FILESET_REQUIRED = (
@@ -51,7 +51,7 @@ class OptimizeSpec(BaseModel):
         default=None,
         description="Where to publish the study artifacts (optimized config, trials dataframe, "
         "pareto plots, ATIF evidence) once the study succeeds — either a local directory "
-        "(path-shaped: starts with '/', './', '../', '~/') or a NeMo Platform fileset "
+        "(path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset "
         "reference ('name' or 'workspace/name').  Filesets are created on demand if missing.  "
         "This is in addition to the per-job artifacts that ``ctx.results.save`` always "
         "registers; it gives remote clients a stable, addressable location to read from.",

@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="nemo-ms-guardrails-observability"></a>
 
-NeMo Platform centrally manages OpenTelemetry across services. You can configure NeMo Guardrails to additionally enable tracing at the individual guardrail configuration level, providing visibility into how your rails execute - which rails fired, which actions ran, and how long each LLM call took.
+NeMo Helix centrally manages OpenTelemetry across services. You can configure NeMo Guardrails to additionally enable tracing at the individual guardrail configuration level, providing visibility into how your rails execute - which rails fired, which actions ran, and how long each LLM call took.
 
 ---
 
@@ -23,17 +23,19 @@ You also need a VirtualModel configured with guardrails middleware. See [Archite
 
 By default, guardrail configurations do not generate traces. To export traces for interactions using a specific guardrail configuration, set `tracing.enabled` to `true` and specify the `OpenTelemetry` adapter in the configuration.
 
-Instantiate the NeMoPlatform SDK.
+Instantiate the NeMo Helix typed client.
 
 ```python
-import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 Create a guardrail configuration with tracing enabled with the `OpenTelemetry` adapter.
 
@@ -69,10 +71,12 @@ config_data = {
 }
 
 try:
-    client.guardrail.configs.create(
-        name="tracing-config",
-        data=config_data,
-    )
+    client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name="tracing-config",
+            data=config_data,
+        ),
+    ).data()
 except ConflictError:
     print("Config tracing-config already exists, continuing...")
 
@@ -94,16 +98,18 @@ nemo inference virtual-models create guarded-tracing \
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.create(
-    name="guarded-tracing",
-    default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
-    request_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "default/tracing-config",
-        }
-    ],
+VirtualModelsClient.from_client(client).create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="guarded-tracing",
+        default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="default/tracing-config",
+            )
+        ],
+    ),
 )
 ```
 
@@ -220,7 +226,7 @@ The `service.name` for all spans is determined by the platform's `OTEL_SERVICE_N
 ## Cleanup
 
 ```python
-client.inference.virtual_models.delete(name="guarded-tracing")
-client.guardrail.configs.delete(name="tracing-config")
+VirtualModelsClient.from_client(client).delete_virtual_model(name="guarded-tracing")
+client.guardrail.delete_guardrail_config(name="tracing-config")
 print("Cleanup complete")
 ```

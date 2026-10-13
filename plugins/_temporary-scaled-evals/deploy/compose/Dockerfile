@@ -5,7 +5,7 @@
 # Local compose image for the Phase-1 scaled-evals plugin: the platform API and
 # both scaled-evals workers run from this one image.
 #
-# This is NOT the platform's shipping image. `docker/Dockerfile.nmp-api` builds
+# This is NOT the platform's shipping image. `docker/Dockerfile.nhx-api` builds
 # that one through bake, from base images that live in internal registries, and
 # it installs the `functional-services` group — which does not include this
 # ephemeral plugin. Here we install the workspace scoped to the plugin instead
@@ -21,6 +21,14 @@ ARG BUILDKIT_IMAGE=moby/buildkit:rootless@sha256:946cf909534b789c9b84af75e6d4f8c
 ARG KUBECTL_VERSION=v1.33.2
 
 FROM ${BUILDKIT_IMAGE} AS buildkit
+
+FROM --platform=$BUILDPLATFORM golang:1.26.7 AS jobs-launcher
+ARG TARGETOS
+ARG TARGETARCH
+COPY services/core/jobs/jobs-launcher /app/jobs-launcher
+WORKDIR /app/jobs-launcher
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -a -installsuffix cgo -ldflags="-s -w -extldflags '-static'" -trimpath -o jobs-launcher ./main.go
 
 # =============================================================================
 # Harbor runner — the thing that actually executes an evaluation.
@@ -39,6 +47,10 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS harbor
 # rather than inherit somebody else's index:
 #   --build-arg HARBOR_EXTRA_INDEX_URL=https://<index>/simple
 ARG HARBOR_EXTRA_INDEX_URL=""
+# sandbox-k8s is not on public PyPI, so it needs HARBOR_EXTRA_INDEX_URL. Only the
+# sandbox_k8s runtime uses it; SANDBOX_K8S=false builds an image without it for
+# the harbor_opensandbox runtime. Remove this switch when sandbox_k8s is retired.
+ARG SANDBOX_K8S=true
 
 COPY plugins/_temporary-scaled-evals/src/scaled_evals/data/harbor_runner_qualifications.json \
      /opt/harbor/qualification-catalog.json
@@ -53,18 +65,23 @@ RUN set -eu; \
     test -s /opt/harbor/selectable-versions.txt; \
     python -c 'import urllib.request; urllib.request.urlretrieve("https://bootstrap.pypa.io/pip/pip.pyz", "/opt/harbor/pip.pyz")'
 
+# Each selectable Harbor version installs from its own requirements file, so
+# versions can carry different extras. Versions that pin the OpenSandbox SDK
+# also check that Harbor's OpenSandbox environment imports.
+COPY plugins/_temporary-scaled-evals/harbor-runners /opt/harbor/requirements
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eu; \
-    sandbox_k8s_version="$(cat /opt/harbor/sandbox-k8s-version.txt)"; \
     for version in $(cat /opt/harbor/selectable-versions.txt); do \
         runner="/opt/harbor/${version}"; \
         uv venv "${runner}/.venv"; \
-        VIRTUAL_ENV="${runner}/.venv" uv pip install \
-            "harbor==${version}" "sandbox-k8s[harbor]==${sandbox_k8s_version}" \
+        VIRTUAL_ENV="${runner}/.venv" uv pip install -r "/opt/harbor/requirements/${version}.txt" \
             ${HARBOR_EXTRA_INDEX_URL:+--extra-index-url "$HARBOR_EXTRA_INDEX_URL"}; \
         "${runner}/.venv/bin/python" -c \
-            'import importlib.metadata as m, sys; assert m.version("harbor") == sys.argv[1]; assert m.version("sandbox-k8s") == sys.argv[2]' \
-            "${version}" "${sandbox_k8s_version}"; \
+            'import importlib.metadata as m, sys; assert m.version("harbor") == sys.argv[1]' "${version}"; \
+        if grep -q '^opensandbox==' "/opt/harbor/requirements/${version}.txt"; then \
+            "${runner}/.venv/bin/python" -c 'import harbor.environments.opensandbox, opensandbox'; \
+        fi; \
     done
 
 # Upstream sandbox-k8s lacks emptyDir mounts for /solution, /tests, /logs and
@@ -72,8 +89,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # patched adapter the standalone image uses, in place, located via importlib.
 COPY plugins/_temporary-scaled-evals/harbor-patches/sandbox_k8s_harbor.py /tmp/sandbox_k8s_harbor.py
 COPY plugins/_temporary-scaled-evals/harbor-patches/patch_sandbox_k8s_root.py /tmp/patch_sandbox_k8s_root.py
-RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eu; [ "${SANDBOX_K8S}" = "true" ] || exit 0; \
+    sandbox_k8s_version="$(cat /opt/harbor/sandbox-k8s-version.txt)"; \
+    for version in $(cat /opt/harbor/selectable-versions.txt); do \
         runner="/opt/harbor/${version}"; \
+        VIRTUAL_ENV="${runner}/.venv" uv pip install "sandbox-k8s[harbor]==${sandbox_k8s_version}" \
+            ${HARBOR_EXTRA_INDEX_URL:+--extra-index-url "$HARBOR_EXTRA_INDEX_URL"}; \
+        "${runner}/.venv/bin/python" -c \
+            'import importlib.metadata as m, sys; assert m.version("harbor") == sys.argv[1]; assert m.version("sandbox-k8s") == sys.argv[2]' \
+            "${version}" "${sandbox_k8s_version}"; \
         harbor_py="$("${runner}/.venv/bin/python" -c 'import importlib.util; print(importlib.util.find_spec("sandbox_k8s.harbor").origin)')"; \
         cp /tmp/sandbox_k8s_harbor.py "$harbor_py"; \
         "${runner}/.venv/bin/python" /tmp/patch_sandbox_k8s_root.py "$(dirname "$harbor_py")"; \
@@ -95,6 +120,34 @@ RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
         fi; \
     done
 
+# The harbor_opensandbox runtime's Harbor environment takes its egress policy
+# from nhx_sandbox, so every runner venv that carries the OpenSandbox SDK gets it.
+# Not editable: only /opt/harbor is copied into the final image.
+COPY packages/nhx_sandbox /tmp/nhx_sandbox
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
+        runner="/opt/harbor/${version}"; \
+        grep -q '^opensandbox==' "/opt/harbor/requirements/${version}.txt" || continue; \
+        VIRTUAL_ENV="${runner}/.venv" uv pip install /tmp/nhx_sandbox; \
+        "${runner}/.venv/bin/python" -c 'import nhx_sandbox.egress, nhx_sandbox.opensandbox_policy'; \
+    done
+
+# Harbor loads NemoOpenSandboxEnvironment, and the backend runs the cleanup
+# module, inside those same venvs. The rest of scaled_evals is not installed
+# there, so a .pth file adds just these two modules.
+COPY plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_environment.py \
+     plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_cleanup.py \
+     /tmp/nemo-extensions/scaled_evals/
+RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
+        runner="/opt/harbor/${version}"; \
+        grep -q '^opensandbox==' "/opt/harbor/requirements/${version}.txt" || continue; \
+        cp -R /tmp/nemo-extensions "${runner}/nemo-extensions"; \
+        site="$("${runner}/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+        echo "${runner}/nemo-extensions" > "${site}/nemo-extensions.pth"; \
+        "${runner}/.venv/bin/python" -c \
+            'from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment; import scaled_evals.harbor_opensandbox_cleanup'; \
+    done
+
 # Harbor resolves jobs_dir relative to its own root, so point it at the path the
 # runtime mounts writable. /opt/harbor itself stays read-only.
 RUN set -eu; \
@@ -108,8 +161,15 @@ RUN set -eu; \
 
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim
 
+# The python-flavoured tag lags the uv release stream, and the `uv sync` below
+# runs inside the workspace, so it is bound by the root pyproject's
+# `required-version`. Overlay the pinned binary the platform builds with;
+# the harbor stage above is exempt because it installs outside the workspace.
+COPY --from=ghcr.io/astral-sh/uv:0.10.10 /uv /usr/local/bin/uv
+
 # Both the API (`GET /v1/readyz`) and the build worker shell out to buildctl.
 COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl
+COPY --from=jobs-launcher /app/jobs-launcher/jobs-launcher /tools/jobs-launcher
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
@@ -117,24 +177,33 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 COPY . /app
 
-# nmp-platform-runner is what serves the plugin (`nemo services run`); it is not
+# nhx-platform-runner is what serves the plugin (`nemo services run`); it is not
 # in the plugin's dependency closure, since the runner loads plugins rather than
 # the other way round. It costs 3 extra packages.
 #
-# nemo-platform-ext owns the implementation imported by the `nemo` SDK wrapper.
+# nemo-helix-ext owns the implementation imported by the `nemo` SDK wrapper.
 # The SDK aliases it at runtime but does not declare it as a dependency because
 # release wheels vendor the package instead. Source-checkout images need it.
 #
-# nmp-entities is not needed by this plugin at all: the runner's startup banner
-# imports `nmp.core.entities.config` unconditionally to print the database it is
-# using, but does not declare nmp-entities as a dependency. A full `uv sync`
+# nhx-entities is not needed by this plugin at all: the runner's startup banner
+# imports `nhx.core.entities.config` unconditionally to print the database it is
+# using, but does not declare nhx-entities as a dependency. A full `uv sync`
 # hides that, so it only shows up in a scoped install like this one. 28 packages.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev \
+    apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends build-essential \
+    && uv sync --frozen --no-dev \
         --package nemo-scaled-evals-plugin \
-        --package nmp-platform-runner \
-        --package nemo-platform-ext \
-        --package nmp-entities
+        --package nhx-platform-runner \
+        --package nemo-helix-ext \
+        --package nhx-auth \
+        --package nhx-entities \
+        --package nhx-files \
+        --package nhx-jobs \
+        --package nhx-secrets \
+    && apt-get purge -y build-essential \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/app/.venv/bin:$PATH"
 
@@ -155,6 +224,7 @@ RUN apt-get update -qq \
 # SANDBOX_K8S_CONFIG_PATH and TASK_PATH point into.
 COPY --from=harbor /opt/harbor /opt/harbor
 COPY plugins/_temporary-scaled-evals/examples/tasks /harness/tasks
+COPY plugins/_temporary-scaled-evals/deploy/k8s/sandbox.env /harness/sandbox.env
 # 0777 because the runtime picks the uid; the k8s manifests mount a writable
 # volume over this path anyway, so this only matters for bare `docker run`.
 RUN mkdir -p /var/lib/scaled-evals/harbor-jobs \

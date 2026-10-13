@@ -5,11 +5,11 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-from nmp.common.entities import DEFAULT_WORKSPACE
-from nmp.guardrails.app.services.configs.registry import ConfigRegistry
-from nmp.guardrails.app.services.rails.registry import RailsRegistry
-from nmp.guardrails.app.services.rails.service import RailsService
-from nmp.guardrails.app.services.utils import normalize_config_ids
+from nhx.common.entities import DEFAULT_WORKSPACE
+from nhx.guardrails.app.services.configs.registry import ConfigRegistry
+from nhx.guardrails.app.services.rails.registry import RailsRegistry
+from nhx.guardrails.app.services.rails.service import RailsService
+from nhx.guardrails.app.services.utils import normalize_config_ids
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def rails_service(config_registry, rails_registry):
 @pytest.fixture
 def mock_db():
     """Create a mock database with methods for testing."""
-    # TODO: check whether nmp_persistence has such fixture
+    # TODO: check whether nhx_persistence has such fixture
 
     db = MagicMock()
 

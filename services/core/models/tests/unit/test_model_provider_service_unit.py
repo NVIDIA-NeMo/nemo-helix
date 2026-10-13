@@ -5,17 +5,17 @@
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
-from nmp.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
-from nmp.core.models.api.service.model_provider_service import (
+from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
+from nhx.core.models.api.service.model_provider_service import (
     ModelProviderService,
     ModelProviderValidationError,
 )
-from nmp.core.models.entities import Model
-from nmp.core.models.entities import ModelProvider as ModelProviderEntity
-from nmp.core.models.schemas import (
+from nhx.core.models.entities import Model
+from nhx.core.models.entities import ModelProvider as ModelProviderEntity
+from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
     GetModelProviderRequest,
@@ -264,6 +264,139 @@ async def test_upsert_model_provider_update_existing(
 
 
 @pytest.mark.asyncio
+async def test_upsert_resets_status_to_created_on_host_url_change(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """Editing a READY provider's host_url must reset status to CREATED, ignoring any incoming
+    status (Studio's edit modal re-sends the old status), so the reconciler re-evaluates."""
+    # Existing provider is READY.
+    sample_provider_entity.host_url = "https://api.old.com/v1"
+    sample_provider_entity.api_key_secret_name = "secret-a"
+    sample_provider_entity.status = ModelProviderStatus.READY
+    sample_provider_entity.status_message = "ready"
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.update.side_effect = lambda entity: entity
+
+    upsert_request = UpsertModelProviderRequest(
+        host_url="https://api.new.com/v1",  # changed
+        api_key_secret_name="secret-a",  # unchanged
+        status=ModelProviderStatus.READY,  # stale status re-sent by the edit modal
+        status_message="ready",
+    )
+
+    await model_provider_service.upsert_model_provider("default", "test-provider", upsert_request)
+
+    updated = mock_entity_client.update.call_args[0][0]
+    assert updated.status == ModelProviderStatus.CREATED
+    assert updated.host_url == "https://api.new.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_upsert_resets_status_to_created_on_api_key_change(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """Rotating a READY provider's api_key_secret_name must reset status to CREATED."""
+    sample_provider_entity.host_url = "https://api.example.com/v1"
+    sample_provider_entity.api_key_secret_name = "secret-old"
+    sample_provider_entity.status = ModelProviderStatus.READY
+    sample_provider_entity.status_message = "ready"
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.update.side_effect = lambda entity: entity
+
+    upsert_request = UpsertModelProviderRequest(
+        host_url="https://api.example.com/v1",  # unchanged
+        api_key_secret_name="secret-new",  # rotated
+        status=ModelProviderStatus.READY,  # stale status re-sent
+        status_message="ready",
+    )
+
+    await model_provider_service.upsert_model_provider("default", "test-provider", upsert_request)
+
+    updated = mock_entity_client.update.call_args[0][0]
+    assert updated.status == ModelProviderStatus.CREATED
+    assert updated.api_key_secret_name == "secret-new"
+
+
+@pytest.mark.asyncio
+async def test_upsert_preserves_status_when_connection_unchanged(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """When neither host_url nor api_key_secret_name changes, an incoming status is honored
+    verbatim (no spurious reset) — e.g. a metadata-only edit of a READY provider stays READY."""
+    sample_provider_entity.host_url = "https://api.example.com/v1"
+    sample_provider_entity.api_key_secret_name = "secret-a"
+    sample_provider_entity.status = ModelProviderStatus.READY
+    sample_provider_entity.status_message = "ready"
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.update.side_effect = lambda entity: entity
+
+    upsert_request = UpsertModelProviderRequest(
+        host_url="https://api.example.com/v1",  # unchanged
+        api_key_secret_name="secret-a",  # unchanged
+        description="just a description tweak",
+        status=ModelProviderStatus.READY,
+        status_message="ready",
+    )
+
+    await model_provider_service.upsert_model_provider("default", "test-provider", upsert_request)
+
+    updated = mock_entity_client.update.call_args[0][0]
+    assert updated.status == ModelProviderStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_upsert_status_omitted_metadata_edit_preserves_existing_status(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """Mirror the real post-fix Studio edit payload: the edit modal now OMITS status entirely
+    (status=None). On a metadata-only edit (connection unchanged), the existing status must be
+    preserved — a READY provider stays READY, not reset to CREATED."""
+    sample_provider_entity.host_url = "https://api.example.com/v1"
+    sample_provider_entity.api_key_secret_name = "secret-a"
+    sample_provider_entity.status = ModelProviderStatus.READY
+    sample_provider_entity.status_message = "ready"
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.update.side_effect = lambda entity: entity
+
+    upsert_request = UpsertModelProviderRequest(
+        host_url="https://api.example.com/v1",  # unchanged
+        api_key_secret_name="secret-a",  # unchanged
+        description="just a description tweak",
+        # status/status_message deliberately omitted — exactly what the edit modal now sends.
+    )
+
+    await model_provider_service.upsert_model_provider("default", "test-provider", upsert_request)
+
+    updated = mock_entity_client.update.call_args[0][0]
+    assert updated.status == ModelProviderStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_upsert_status_omitted_still_resets_on_key_change(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """Even with status omitted (the new modal payload), a key/host change still resets to
+    CREATED so the reconciler re-evaluates the rotated credential."""
+    sample_provider_entity.host_url = "https://api.example.com/v1"
+    sample_provider_entity.api_key_secret_name = "secret-old"
+    sample_provider_entity.status = ModelProviderStatus.READY
+    sample_provider_entity.status_message = "ready"
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.update.side_effect = lambda entity: entity
+
+    upsert_request = UpsertModelProviderRequest(
+        host_url="https://api.example.com/v1",  # unchanged
+        api_key_secret_name="secret-new",  # rotated
+        # status omitted — the reset must come from the connection-change detection, not a caller.
+    )
+
+    await model_provider_service.upsert_model_provider("default", "test-provider", upsert_request)
+
+    updated = mock_entity_client.update.call_args[0][0]
+    assert updated.status == ModelProviderStatus.CREATED
+
+
+@pytest.mark.asyncio
 async def test_delete_model_provider_success(model_provider_service, mock_entity_client, sample_provider_entity):
     """Test successful model provider deletion."""
     # Arrange
@@ -507,12 +640,14 @@ def _create_model_entity(
     name: str = "test-model",
     workspace: str = "default",
     model_providers: list[str] | None = None,
+    **kwargs: Any,
 ) -> Model:
     """Helper to create a Model entity for testing."""
     model = Model(
         name=name,
         workspace=workspace,
         model_providers=model_providers or [],
+        **kwargs,
     )
     model._id = f"model-{name}"
     model._created_at = datetime.now(timezone.utc)
@@ -544,8 +679,8 @@ def _make_entity_get_dispatcher(
 
 
 @pytest.mark.asyncio
-async def test_delete_provider_cleans_up_model_entity_references(model_provider_service, mock_entity_client):
-    """Deleting a provider removes it from model_providers on linked model entities."""
+async def test_delete_provider_unlinks_shared_model_entity(model_provider_service, mock_entity_client):
+    """Deleting a provider preserves models that are served by another provider."""
     model_entity = _create_model_entity(
         name="my-model",
         workspace="ws",
@@ -575,6 +710,217 @@ async def test_delete_provider_cleans_up_model_entity_references(model_provider_
     mock_entity_client.delete.assert_called_once_with(
         ModelProviderEntity,
         "provider-to-delete",
+        workspace="ws",
+        expected_db_version=provider_entity.db_version,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_deletes_exclusively_served_model_entity(model_provider_service, mock_entity_client):
+    """Deleting a provider deletes a model entity when no other provider serves it."""
+    model_entity = _create_model_entity(
+        name="my-model",
+        workspace="ws",
+        model_providers=["ws/provider-to-delete"],
+    )
+    provider_entity = create_provider_entity(
+        name="provider-to-delete",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/my-model", served_model_name="my-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"my-model": model_entity})
+    mock_entity_client.delete.return_value = None
+
+    request = DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
+    result = await model_provider_service.delete_model_provider(request)
+
+    assert result is True
+    mock_entity_client.update.assert_not_called()
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "provider-to-delete",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "my-model",
+            workspace="ws",
+            expected_db_version=model_entity.db_version,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_deletes_associated_model_that_is_already_orphaned(
+    model_provider_service, mock_entity_client
+):
+    """Deleting a provider deletes its associated models when they already have no providers."""
+    model_entity = _create_model_entity(
+        name="orphaned-model",
+        workspace="ws",
+        model_providers=[],
+    )
+    provider_entity = create_provider_entity(
+        name="provider-to-delete",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/orphaned-model", served_model_name="orphaned-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"orphaned-model": model_entity})
+    mock_entity_client.delete.return_value = None
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
+    )
+
+    assert result is True
+    mock_entity_client.update.assert_not_called()
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "provider-to-delete",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "orphaned-model",
+            workspace="ws",
+            expected_db_version=model_entity.db_version,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_deletes_exclusively_served_user_model_entity(model_provider_service, mock_entity_client):
+    """Deleting a provider deletes a user-created model when no other provider serves it."""
+    model_entity = _create_model_entity(
+        name="user-model",
+        workspace="ws",
+        description="User-managed model metadata",
+        model_providers=["ws/provider-to-delete"],
+    )
+    provider_entity = create_provider_entity(
+        name="provider-to-delete",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/user-model", served_model_name="user-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"user-model": model_entity})
+    mock_entity_client.delete.return_value = None
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
+    )
+
+    assert result is True
+    mock_entity_client.update.assert_not_called()
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "provider-to-delete",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "user-model",
+            workspace="ws",
+            expected_db_version=model_entity.db_version,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_provider_unlinks_exclusively_served_model_entity(
+    model_provider_service, mock_entity_client
+):
+    """Deleting a deployment provider keeps its model even when no other provider serves it."""
+    model_entity = _create_model_entity(
+        name="deployed-model",
+        workspace="ws",
+        model_providers=["ws/deployment-provider"],
+    )
+    provider_entity = create_provider_entity(
+        name="deployment-provider",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        model_deployment_id="ws/deployment",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/deployed-model", served_model_name="deployed-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"deployed-model": model_entity})
+    mock_entity_client.update.return_value = model_entity
+    mock_entity_client.delete.return_value = None
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="ws", name="deployment-provider")
+    )
+
+    assert result is True
+    mock_entity_client.update.assert_called_once()
+    updated_model = mock_entity_client.update.call_args[0][0]
+    assert updated_model.model_providers == []
+    mock_entity_client.delete.assert_called_once_with(
+        ModelProviderEntity,
+        "deployment-provider",
+        workspace="ws",
+        expected_db_version=provider_entity.db_version,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_provider_keeps_already_unlinked_model_entity(
+    model_provider_service, mock_entity_client
+):
+    """Deleting a deployment provider keeps a model the deployment teardown already unlinked."""
+    model_entity = _create_model_entity(
+        name="deployed-model",
+        workspace="ws",
+        fileset="ws/deployed-model-weights",
+        model_providers=[],
+    )
+    provider_entity = create_provider_entity(
+        name="deployment-provider",
+        workspace="ws",
+        host_url="https://api.example.com/v1",
+        model_deployment_id="ws/deployment",
+        served_models=[
+            ServedModelMapping(model_entity_id="ws/deployed-model", served_model_name="deployed-model"),
+        ],
+        status=ModelProviderStatus.READY,
+    )
+
+    mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"deployed-model": model_entity})
+    mock_entity_client.delete.return_value = None
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="ws", name="deployment-provider")
+    )
+
+    assert result is True
+    mock_entity_client.update.assert_not_called()
+    mock_entity_client.delete.assert_called_once_with(
+        ModelProviderEntity,
+        "deployment-provider",
         workspace="ws",
         expected_db_version=provider_entity.db_version,
     )
@@ -752,8 +1098,12 @@ async def test_delete_provider_cleanup_error_does_not_block_deletion(model_provi
 
 @pytest.mark.asyncio
 async def test_delete_provider_cleans_up_multiple_model_entities(model_provider_service, mock_entity_client):
-    """Deletion cleans up all model entities referenced in served_models."""
-    model_a = _create_model_entity(name="model-a", workspace="ws", model_providers=["ws/prov"])
+    """Deletion removes exclusive models and unlinks shared models."""
+    model_a = _create_model_entity(
+        name="model-a",
+        workspace="ws",
+        model_providers=["ws/prov"],
+    )
     model_b = _create_model_entity(name="model-b", workspace="ws", model_providers=["ws/prov", "ws/other"])
     provider_entity = create_provider_entity(
         name="prov",
@@ -776,8 +1126,19 @@ async def test_delete_provider_cleans_up_multiple_model_entities(model_provider_
     result = await model_provider_service.delete_model_provider(request)
 
     assert result is True
-    assert mock_entity_client.update.call_count == 2
-
-    updated_models = [call[0][0] for call in mock_entity_client.update.call_args_list]
-    for m in updated_models:
-        assert "ws/prov" not in m.model_providers
+    mock_entity_client.update.assert_called_once_with(model_b)
+    assert model_b.model_providers == ["ws/other"]
+    assert mock_entity_client.delete.call_args_list == [
+        call(
+            ModelProviderEntity,
+            "prov",
+            workspace="ws",
+            expected_db_version=provider_entity.db_version,
+        ),
+        call(
+            Model,
+            "model-a",
+            workspace="ws",
+            expected_db_version=model_a.db_version,
+        ),
+    ]

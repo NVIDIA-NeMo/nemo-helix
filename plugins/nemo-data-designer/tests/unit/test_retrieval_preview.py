@@ -7,13 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import data_designer.config as dd
-import httpx
 import pytest
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_data_designer_plugin.functions.retrieval_preview import RetrievalPreviewFrame, RetrievalPreviewFunction
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalPreviewSpec
-from nemo_platform_plugin.client.errors import PermissionDeniedError
-from nemo_platform_plugin.functions.frames import Done, Error
+from nemo_helix_plugin.functions.frames import Done, Error
 
 
 def _generate_config(tmp_path) -> RetrievalGenerateJobConfig:
@@ -144,7 +142,7 @@ async def test_retrieval_preview_resolves_hf_token_secret(tmp_path) -> None:
     preview_result = SimpleNamespace(num_seed_records=1, num_preview_records=1)
     resolved: dict[str, str | None] = {}
 
-    async def resolve(async_sdk: object, hf_token_secret: str | None, workspace: str) -> str:
+    async def resolve(async_client: object, hf_token_secret: str | None, workspace: str) -> str:
         resolved.update(secret=hf_token_secret, workspace=workspace)
         return "hf_secret_value"
 
@@ -196,11 +194,7 @@ async def test_retrieval_preview_raises_invalid_config_for_unauthorized_secret(t
         ),
         patch(
             "nemo_data_designer_plugin.functions.retrieval_preview.resolve_hf_token",
-            new=AsyncMock(
-                side_effect=PermissionDeniedError(
-                    httpx.Response(403, json={"detail": "denied"}, request=httpx.Request("GET", "http://secrets"))
-                )
-            ),
+            new=AsyncMock(side_effect=NDDInvalidConfigError("Could not access secret 'other/hf-token'")),
         ),
     ):
         with pytest.raises(NDDInvalidConfigError, match="other/hf-token"):

@@ -7,6 +7,7 @@ import {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
@@ -20,7 +21,6 @@ import { getExperimentDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { FolderTree, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
 
 interface ExperimentsTableProps {
   workspace: string;
@@ -38,7 +38,7 @@ const deleteTitle = (rows: AgentExperimentRow[]): string => {
 /** The agent's evaluations rolled up by the experiment they belong to. Selecting one opens the
  *  experiment's own route, which already lists the evaluations under it. */
 export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experiments }) => {
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const queryClient = useQueryClient();
   const dataViewState = useStudioDataViewState();
   // StudioDataView renders exactly the rows it is given and never slices, so apply the page here.
@@ -115,7 +115,9 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
       <StudioDataView<AgentExperimentRow>
         dataViewState={dataViewState}
         makeColumns={makeColumns}
-        onRowClick={(row) => row.name && navigate(getExperimentDetailRoute(workspace, row.name))}
+        onRowClick={(row, _index, event) =>
+          row.name && openRow(event, getExperimentDetailRoute(workspace, row.name))
+        }
         renderBulkActions={({ selectedRows }) => (
           <Button
             kind="tertiary"

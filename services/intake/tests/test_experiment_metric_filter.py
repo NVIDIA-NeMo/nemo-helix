@@ -11,8 +11,8 @@ field validation must surface as 503 rather than silently dropping every row.
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from nmp.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
-from nmp.intake.api.v2.experiments.endpoints import (
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+from nhx.intake.api.v2.experiments.endpoints import (
     _METRIC_STATS,
     _extract_metric_predicates,
     _is_metric_field,
@@ -20,7 +20,7 @@ from nmp.intake.api.v2.experiments.endpoints import (
     _matches_metric_predicates,
     _operation_references_metric,
 )
-from nmp.intake.api.v2.experiments.schemas import EvaluationResponse, EvaluatorAggregate, MetricStatFilters
+from nhx.intake.api.v2.experiments.schemas import EvaluationResponse, EvaluatorAggregate, MetricStatFilters
 
 EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"

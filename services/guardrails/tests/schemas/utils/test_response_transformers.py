@@ -7,12 +7,12 @@ from typing import Dict, List
 import pytest
 from nemoguardrails.logging.explain import LLMCallInfo
 from nemoguardrails.rails.llm.options import ActivatedRail, ExecutedAction, GenerationLog, GenerationResponse
-from nmp.guardrails.app.schemas.utils.response_transformers import (
+from nhx.guardrails.app.schemas.utils.response_transformers import (
     _extract_status_from_response,
     create_guardrail_chat_completion_response_from_generation_response,
     create_guardrail_completion_response_from_generation_response,
 )
-from nmp.guardrails.entities.enums import StatusEnum
+from nhx.guardrails.entities.enums import StatusEnum
 from pytest import LogCaptureFixture
 from pytest_mock import MockerFixture
 

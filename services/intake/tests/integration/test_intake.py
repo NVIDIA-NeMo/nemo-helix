@@ -8,10 +8,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform import NeMoPlatform
-from nmp.intake.config import ClickHouseConfig, IntakeConfig
-from nmp.intake.service import IntakeService
-from nmp.testing.client import SDKTestClientAdapter, create_test_client
+from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.service import IntakeService
+from nhx.testing.client import create_test_client
 
 
 @pytest.fixture(scope="module")
@@ -30,14 +29,8 @@ def http_client() -> Generator[TestClient, None, None]:
             yield client
 
 
-@pytest.fixture(scope="module")
-def sdk(http_client: TestClient) -> NeMoPlatform:
-    """SDK client backed by the test client."""
-    return NeMoPlatform(base_url="http://testserver", http_client=SDKTestClientAdapter(http_client))
-
-
-def test_intake_openapi_keeps_span_era_routes(sdk: NeMoPlatform) -> None:
-    response = sdk._client.get("/openapi.json")
+def test_intake_openapi_keeps_span_era_routes(http_client: TestClient) -> None:
+    response = http_client.get("/openapi.json")
     assert response.status_code == 200
 
     paths = response.json().get("paths", {})

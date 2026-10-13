@@ -9,16 +9,16 @@ usage() {
 	echo "Usage: $0 <garak version>" 1>&2
 	echo 1>&2
 	echo "By default, script operates on plugin cache under same package root directory as script." 1>&2
-	echo "To operate on alternative garak_api package directory, set NMP_GARAK_PACKAGE_ROOT to the package root eg ~/src/alt_dir/package/garak_api" 1>&2
+	echo "To operate on alternative garak_api package directory, set NHX_GARAK_PACKAGE_ROOT to the package root eg ~/src/alt_dir/package/garak_api" 1>&2
 }
 
-if [[ ! $NMP_GARAK_PACKAGE_ROOT ]]; then
-	NMP_GARAK_PACKAGE_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && cd ../ >/dev/null 2>&1 && pwd )"
+if [[ ! $NHX_GARAK_PACKAGE_ROOT ]]; then
+	NHX_GARAK_PACKAGE_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && cd ../ >/dev/null 2>&1 && pwd )"
 fi
 
-RESOURCES_DIR="${NMP_GARAK_PACKAGE_ROOT}/garakapi/resources"
+RESOURCES_DIR="${NHX_GARAK_PACKAGE_ROOT}/garakapi/resources"
 if [[ ! -d "$RESOURCES_DIR" ]]; then
-	echo "ERROR: Target resources dir '${RESOURCES_DIR}' not found; check NMP_GARAK_PACKAGE_ROOT." 1>&2
+	echo "ERROR: Target resources dir '${RESOURCES_DIR}' not found; check NHX_GARAK_PACKAGE_ROOT." 1>&2
 	echo 1>&2
 	usage
 	exit 1;
@@ -42,7 +42,7 @@ if [ $? -ne 0 ]; then
 	exit 1;
 fi
 
-CODE_DIR="${NMP_GARAK_PACKAGE_ROOT}/garakapi"
+CODE_DIR="${NHX_GARAK_PACKAGE_ROOT}/garakapi"
 
 declare -a pyfiles=("_selection.py" "_spec.py" "_config.py" "_plugins.py" "exception.py")
 

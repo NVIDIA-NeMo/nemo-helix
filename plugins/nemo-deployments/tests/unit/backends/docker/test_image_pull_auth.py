@@ -33,14 +33,14 @@ def _nim_config(*, ngc_api_key: str | None = None) -> DeploymentConfig:
 
 
 @pytest.fixture
-def docker_backend_pull(mock_sdk: MagicMock, mock_entities: AsyncMock, mock_docker_client: MagicMock):
+def docker_backend_pull(mock_client: MagicMock, mock_entities: AsyncMock, mock_docker_client: MagicMock):
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
-        backend = DockerDeploymentBackend(mock_sdk, {"docker_timeout": 60, "pull_images": True})
+        backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": True})
         backend._client = mock_docker_client
         yield backend
 

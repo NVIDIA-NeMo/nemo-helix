@@ -30,6 +30,7 @@ def executors(monkeypatch: pytest.MonkeyPatch) -> None:
     deployments = DeploymentsConfig(
         executors=[
             ExecutorConfigEntry(name="local-docker", backend="docker"),
+            ExecutorConfigEntry(name="local-k8s", backend="k8s"),
             ExecutorConfigEntry(
                 name="openshell",
                 backend="openshell",
@@ -38,7 +39,11 @@ def executors(monkeypatch: pytest.MonkeyPatch) -> None:
         ],
         default_executor="local-docker",
     )
-    agents = AgentsConfig(deployments=DeploymentsRunnerConfig(docker_executor="local-docker", k8s_executor="openshell"))
+    agents = AgentsConfig(
+        deployments=DeploymentsRunnerConfig(
+            docker_executor="local-docker", k8s_executor="local-k8s", openshell_executor="openshell"
+        )
+    )
     monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: deployments))
     monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: agents))
 
@@ -49,4 +54,5 @@ def test_subprocess_deployments_are_always_direct(executors: None) -> None:
 
 def test_container_mode_follows_the_executor_the_deploy_path_chose(executors: None) -> None:
     assert get_deployment_transport(_deployment("docker")) is DIRECT
-    assert get_deployment_transport(_deployment("k8s")).connect_base == "https://openshell.openshell.svc:8080"
+    assert get_deployment_transport(_deployment("k8s")) is DIRECT
+    assert get_deployment_transport(_deployment("openshell")).connect_base == "https://openshell.openshell.svc:8080"

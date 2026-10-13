@@ -9,13 +9,15 @@ import {
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useEntitiesListWorkspaceMembers } from '@nemo/sdk/generated/platform/entity-store';
 import type { WorkspaceMember } from '@nemo/sdk/generated/platform/schema';
 import { type DropdownEntry, Text } from '@nvidia/foundations-react-core';
+import { useWorkspaceMembers } from '@studio/api/entity-store/useWorkspaceMembers';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { Lock } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo } from 'react';
 
 export interface MembersDataViewProps {
@@ -39,7 +41,7 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
     defaultSort: [{ id: 'principal', desc: false }],
   });
 
-  const { data, isLoading, error, isFetching } = useEntitiesListWorkspaceMembers(workspace);
+  const { data, isLoading, error, isFetching, isForbidden } = useWorkspaceMembers(workspace);
 
   const membersWithId = useMemo<WorkspaceMemberWithId[]>(
     () => (data?.data ?? []).map((m) => ({ ...m, id: m.principal })),
@@ -133,6 +135,19 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
 
   if (isLoading) {
     return <Loading description="Loading Members…" />;
+  }
+
+  // A 403 isn't a failure the user can retry their way out of, so skip the generic error panel
+  // (and its "Refresh Page" call to action) and tell them what to do instead.
+  if (isForbidden) {
+    return (
+      <ErrorMessage
+        header="You don't have permission to view members"
+        message="Managing members and access requires workspace admin permissions. Contact your workspace administrator to request access."
+        slotMedia={<Lock className="size-16 stroke-2" />}
+        slotFooter={<></>}
+      />
+    );
   }
 
   return (

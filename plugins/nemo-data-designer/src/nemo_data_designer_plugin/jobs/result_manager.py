@@ -6,7 +6,7 @@ from pathlib import Path
 
 from data_designer.config.analysis.dataset_profiler import DatasetProfilerResults
 from nemo_data_designer_plugin.jobs.task_results import ANALYSIS_RESULT_NAME, ARTIFACTS_RESULT_NAME
-from nemo_platform_plugin.job_results import JobResults, ResultRef
+from nemo_helix_plugin.job_results import JobResults, ResultRef
 
 ANALYSIS_FILENAME = "analysis.json"
 

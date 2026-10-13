@@ -17,13 +17,13 @@ import (
 )
 
 const (
-	nmpBaseURLEnv                      = "NMP_BASE_URL"
-	workloadIdentityTokenFileEnv       = "NMP_WORKLOAD_IDENTITY_TOKEN_FILE"
+	nhxBaseURLEnv                      = "NHX_BASE_URL"
+	workloadIdentityTokenFileEnv       = "NHX_WORKLOAD_IDENTITY_TOKEN_FILE"
 	tokenExchangeGrantType             = "urn:ietf:params:oauth:grant-type:token-exchange"
 	jwtTokenType                       = "urn:ietf:params:oauth:token-type:jwt"
 	accessTokenType                    = "urn:ietf:params:oauth:token-type:access_token"
 	dockerOpaqueWorkloadProofTokenType = "urn:nvidia:nemo:params:oauth:token-type:docker-opaque-workload-proof"
-	dockerOpaqueWorkloadProofPrefix    = "nmp_obo_v1."
+	dockerOpaqueWorkloadProofPrefix    = "nhx_obo_v1."
 	workloadAuthRequestTimeoutSeconds  = 30
 	maxAuthResponseBodyBytes           = 64 * 1024
 	workloadAuthRefreshMarginFraction  = 5
@@ -95,9 +95,9 @@ func newOTLPLogWorkloadAuthTokenSource(ctx context.Context) (*workloadAuthTokenS
 		return nil, nil
 	}
 
-	baseURL := strings.TrimRight(os.Getenv(nmpBaseURLEnv), "/")
+	baseURL := strings.TrimRight(os.Getenv(nhxBaseURLEnv), "/")
 	if baseURL == "" {
-		return nil, fmt.Errorf("%s is required when %s is set", nmpBaseURLEnv, workloadIdentityTokenFileEnv)
+		return nil, fmt.Errorf("%s is required when %s is set", nhxBaseURLEnv, workloadIdentityTokenFileEnv)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, workloadAuthRequestTimeoutSeconds*time.Second)

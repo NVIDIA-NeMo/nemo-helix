@@ -4,12 +4,12 @@
 # `improvement/` — agent-improvement workflow (POC)
 
 This subpackage implements the agent-improvement workflow described in the
-[design plan PR](https://github.com/NVIDIA-NeMo/nemo-platform/pull/141): run
+[design plan PR](https://github.com/NVIDIA-NeMo/nemo-helix/pull/141): run
 containerized eval suites against an agent, analyze failures, and optimize
 agent skills via a coding agent (Claude).
 
-**Replaces `tools/self_improve/` from PR #38.** The standalone `nmp-eval-run`
-/ `nmp-eval-analyze` / `nmp-self-improve` CLI tools are subsumed by these
+**Replaces `tools/self_improve/` from PR #38.** The standalone `nhx-eval-run`
+/ `nhx-eval-analyze` / `nhx-self-improve` CLI tools are subsumed by these
 plugin commands; the canonical NeMo self-improvement config lives at
 `.agent-improver.yml` in the repo root and is invoked from the repo root as:
 
@@ -34,7 +34,7 @@ asks to "improve the agent" / "run agent evals" / etc.
 ## Prerequisites
 
 - Install the agents CLI, for example with `uv sync --package nemo-agents-plugin`.
-- Authenticate to a running NeMo Platform instance and set the active workspace.
+- Authenticate to a running NeMo Helix instance and set the active workspace.
 - Configure the agent-improvement YAML with absolute `evals`, `agent`, `state`,
   and `initial_batch` paths when those fields are present.
 - Create the `anthropic-api-key` platform secret before LLM-backed analysis:
@@ -154,7 +154,7 @@ improvement/
 - **Verified diff producer by default.** Pass `--open-pr` to auto-open a
   GitLab MR via `glab` on improvement.
 
-See [PR #141](https://github.com/NVIDIA-NeMo/nemo-platform/pull/141) for the full
+See [PR #141](https://github.com/NVIDIA-NeMo/nemo-helix/pull/141) for the full
 design rationale.
 
 ## What was ported from PR #38

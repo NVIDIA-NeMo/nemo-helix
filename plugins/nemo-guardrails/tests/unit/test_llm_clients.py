@@ -12,8 +12,8 @@ from nemo_guardrails_plugin.llm_clients import (
     platform_headers_context,
     register_header_aware_nim_provider,
 )
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client_provider import get_forwarding_headers
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client_provider import get_forwarding_headers
 from nemoguardrails.integrations.langchain.llm_adapter import LangChainLLMAdapter
 from nemoguardrails.llm.models.initializer import init_llm_model
 
@@ -53,12 +53,12 @@ class TestGetForwardingHeaders:
     def test_returns_custom_headers_from_sdk(self) -> None:
         client = _make_client(
             **{
-                "X-NMP-Principal-Id": "service:guardrails-test",
+                "X-NHX-Principal-Id": "service:guardrails-test",
                 "traceparent": "00-platform",
             }
         )
         assert get_forwarding_headers(client) == {
-            "X-NMP-Principal-Id": "service:guardrails-test",
+            "X-NHX-Principal-Id": "service:guardrails-test",
             "traceparent": "00-platform",
         }
 
@@ -74,7 +74,7 @@ class TestRequestHeadersContext:
     def test_sets_platform_headers_and_resets_after_exit(self) -> None:
         client = _make_client(
             **{
-                "X-NMP-Principal-Id": "service:guardrails-test",
+                "X-NHX-Principal-Id": "service:guardrails-test",
                 "traceparent": "00-platform",
             }
         )
@@ -84,7 +84,7 @@ class TestRequestHeadersContext:
         with platform_headers_context(client):
             assert get_request_headers() == {
                 "traceparent": "00-platform",
-                "X-NMP-Principal-Id": "service:guardrails-test",
+                "X-NHX-Principal-Id": "service:guardrails-test",
             }
 
         assert get_request_headers() == {}
@@ -128,7 +128,7 @@ class TestHeaderAwareChatNVIDIA:
 
         client_context = _make_client(
             **{
-                "X-NMP-Principal-Id": "service:guardrails-test",
+                "X-NHX-Principal-Id": "service:guardrails-test",
                 "traceparent": "00-platform",
             }
         )
@@ -136,7 +136,7 @@ class TestHeaderAwareChatNVIDIA:
             _inputs, _payload, headers = client._prepare_inputs_and_payload([])
             assert headers == {
                 "X-Static": "yes",
-                "X-NMP-Principal-Id": "service:guardrails-test",
+                "X-NHX-Principal-Id": "service:guardrails-test",
                 "traceparent": "00-platform",
             }
             assert client.default_headers == {"X-Static": "yes"}
@@ -161,13 +161,13 @@ class TestHeaderAwareChatNVIDIA:
             )
         )
 
-        client_context = _make_client(**{"X-NMP-Principal-Id": "service:guardrails-test"})
+        client_context = _make_client(**{"X-NHX-Principal-Id": "service:guardrails-test"})
         with platform_headers_context(client_context):
             _inputs, _payload, headers = client._prepare_inputs_and_payload([])
 
         assert headers == {
             "X-Static": "yes",
-            "X-NMP-Principal-Id": "service:guardrails-test",
+            "X-NHX-Principal-Id": "service:guardrails-test",
         }
         assert client.default_headers == {"X-Static": "yes"}
 

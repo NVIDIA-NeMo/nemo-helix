@@ -8,6 +8,7 @@ import {
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
@@ -32,7 +33,6 @@ import { keepPreviousData } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { Columns3 } from 'lucide-react';
 import { type ComponentProps, type FC, useMemo } from 'react';
-import { useNavigate } from 'react-router';
 
 type SessionRow = EvaluationSessionResponse & { _rowId: string };
 
@@ -96,7 +96,7 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
   experimentName,
 }) => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const dataViewState = useStudioDataViewState<EvaluationSessionFilter>({
     columnVisibility: {},
     multiSort: true,
@@ -269,9 +269,10 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
       dataViewState={dataViewState}
       makeColumns={makeColumns}
       searchField="test_case_name"
-      onRowClick={(row) => {
+      onRowClick={(row, _index, event) => {
         if (row.trace_id) {
-          navigate(
+          openRow(
+            event,
             getEvaluationSessionTraceDetailRoute(
               workspace,
               experimentName,

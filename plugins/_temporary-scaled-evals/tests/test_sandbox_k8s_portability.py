@@ -19,6 +19,7 @@ import yaml
 
 try:
     from scaled_evals.dispatch import sandbox_k8s
+    from scaled_evals.models.runtime import LaunchHandle
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -43,11 +44,13 @@ def _harbor_environment_methods(names: set[str]) -> type:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name in names
     ]
     assert {node.name for node in methods} == names
+    # `list` is invariant, so widen before handing the methods to ClassDef.
+    body: list[ast.stmt] = [*methods]
     isolated = ast.ClassDef(
         name="Environment",
         bases=[],
         keywords=[],
-        body=methods,
+        body=body,
         decorator_list=[],
         type_params=[],
     )
@@ -129,7 +132,7 @@ def test_multi_service_exec_and_artifact_transfer(monkeypatch: pytest.MonkeyPatc
     class ServiceOperationsUnsupportedError(RuntimeError):
         pass
 
-    base = ModuleType("harbor.environments.base")
+    base: Any = ModuleType("harbor.environments.base")
     base.ServiceOperationsUnsupportedError = ServiceOperationsUnsupportedError
     monkeypatch.setitem(sys.modules, "harbor", ModuleType("harbor"))
     monkeypatch.setitem(sys.modules, "harbor.environments", ModuleType("harbor.environments"))
@@ -282,3 +285,67 @@ def test_deployment_owns_baseline_rbac_and_documents_scoped_overrides() -> None:
     assert "environment.kwargs.persistent_env.TMPDIR" in docs
     assert "task-specific `setup_command`" in docs
     assert "ico-path-patch" not in docs
+
+
+def test_cleanup_kubectl_flags_fall_back_when_recorded_path_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cleanup must not replay a kubeconfig, or its context, from another pod.
+
+    Under Platform Jobs both are recorded inside the Job pod (HOME=/tmp), but the
+    cleanup runs in the controller's pod. Passing either made every kubectl call
+    fail and wedged the evaluation in `running`.
+    """
+    present = tmp_path / "config"
+    present.write_text("apiVersion: v1\n")
+    assert sandbox_k8s._kubectl_target_flags(present, "incluster") == [
+        "--kubeconfig",
+        str(present),
+        "--context",
+        "incluster",
+    ]
+    assert sandbox_k8s._kubectl_target_flags(present, None) == ["--kubeconfig", str(present)]
+
+    # The Job pod's path and the context it defines, as seen from the controller.
+    assert sandbox_k8s._kubectl_target_flags("/tmp/.kube/config", "incluster") == []
+    assert sandbox_k8s._kubectl_target_flags(None, "incluster") == []
+    assert sandbox_k8s._kubectl_target_flags("", None) == []
+
+    # A user-token kubeconfig can name another cluster or identity. Falling back
+    # would report "not found" as a successful cleanup and orphan the sandbox.
+    with pytest.raises(RuntimeError, match="refusing to clean up"):
+        sandbox_k8s._kubectl_target_flags("/tmp/eval_1/user-kube/config", "user")
+    with pytest.raises(RuntimeError, match="refusing to clean up"):
+        sandbox_k8s._kubectl_target_flags("/tmp/eval_1/user-kube/config", "user", "https://api.other:6443")
+    # A user token on this cluster reaches the same sandbox through the controller's account.
+    assert sandbox_k8s._kubectl_target_flags("/tmp/gone", "user", "https://kubernetes.default.svc") == []
+    monkeypatch.setattr(sandbox_k8s.shutil, "which", lambda name: "/usr/bin/kubectl" if name == "kubectl" else None)
+    handle = LaunchHandle(
+        backend="sandbox_k8s",
+        external_id="eval_1",
+        raw={"cleanup": {"selector": "s=eval_1", "kubeconfig_path": "/tmp/gone", "context": "user"}},
+    )
+    assert sandbox_k8s._sandbox_kubectl_base(handle) is None  # the best-effort sampler skips it
+
+
+def test_sandbox_kubectl_base_drops_stale_kubeconfig(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The selector-based teardown path uses the same fallback."""
+    monkeypatch.setattr(sandbox_k8s.shutil, "which", lambda name: "/usr/bin/kubectl" if name == "kubectl" else None)
+    handle = LaunchHandle(
+        backend="sandbox_k8s",
+        external_id="eval_1",
+        raw={
+            "cleanup": {
+                "selector": "scaled-evals.nvidia.com/evaluation=eval_1",
+                # The Job pod's path, as seen from the worker draining the cleanup.
+                "kubeconfig_path": "/tmp/.kube/config",
+                "context": "incluster",
+                "namespace": "evals",
+            }
+        },
+    )
+    result = sandbox_k8s._sandbox_kubectl_base(handle)
+    assert result is not None
+    base, selector = result
+    assert base == ["/usr/bin/kubectl", "-n", "evals"]
+    assert selector == "scaled-evals.nvidia.com/evaluation=eval_1"

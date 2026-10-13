@@ -14,10 +14,10 @@ from nemo_deployments_plugin.authz import scope
 from nemo_deployments_plugin.entities import Volume
 from nemo_deployments_plugin.references import deployment_config_names_referencing_volume
 from nemo_deployments_plugin.schema import CreateVolumeRequest, VolumeFilter, VolumePage
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.schema import PaginationData
 
 router = APIRouter()
 
@@ -28,7 +28,7 @@ _volume_filter_dep = make_filter_obj_dep(VolumeFilter)
 
 @router.post("/volumes", response_model=Volume, status_code=201, tags=["Volumes"])
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[VolumePerms.CREATE])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[VolumePerms.CREATE])
 async def create_volume(
     workspace: str,
     body: CreateVolumeRequest,
@@ -51,7 +51,7 @@ async def create_volume(
 
 @router.get("/volumes", response_model=VolumePage, tags=["Volumes"])
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[VolumePerms.LIST])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[VolumePerms.LIST])
 async def list_volumes(
     workspace: str,
     page: int = Query(default=1, ge=1),
@@ -75,7 +75,7 @@ async def list_volumes(
 
 @router.get("/volumes/{name}", response_model=Volume, tags=["Volumes"])
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[VolumePerms.READ])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[VolumePerms.READ])
 async def get_volume(
     workspace: str,
     name: str,
@@ -92,7 +92,7 @@ async def get_volume(
 
 @router.delete("/volumes/{name}", status_code=204, tags=["Volumes"])
 @scope.write
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[VolumePerms.DELETE])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[VolumePerms.DELETE])
 async def delete_volume(
     workspace: str,
     name: str,

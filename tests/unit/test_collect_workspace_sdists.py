@@ -37,7 +37,7 @@ def test_explicit_invalid_projects_are_recorded_as_missing(
         return "built valid-project"
 
     monkeypatch.setattr(module, "run_text", fake_run_text)
-    monkeypatch.setenv("NMP_COLLECT_SOURCES", "1")
+    monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
     monkeypatch.delenv("UV_BIN", raising=False)
     monkeypatch.setattr(
         sys,
@@ -89,7 +89,7 @@ def test_uv_startup_errors_are_recorded_as_missing(
         raise OSError("uv unavailable")
 
     monkeypatch.setattr(module, "run_text", fake_run_text)
-    monkeypatch.setenv("NMP_COLLECT_SOURCES", "1")
+    monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
     monkeypatch.delenv("UV_BIN", raising=False)
     monkeypatch.setattr(
         sys,

@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException, Request
-from nmp.common.api.filter import (
+from nhx.common.api.filter import (
     ComparisonOperation,
     FilterOperator,
     LogicalOperation,
 )
-from nmp.core.entities.utils.filter import make_filter_dep
+from nhx.core.entities.utils.filter import make_filter_dep
 from starlette.datastructures import QueryParams
 
 

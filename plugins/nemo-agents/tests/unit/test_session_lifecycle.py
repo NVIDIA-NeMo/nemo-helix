@@ -37,7 +37,7 @@ def _gateway_routed_deployment() -> AgentDeployment:
         agent="calc",
         status="running",
         endpoint="",
-        deployment_mode="k8s",
+        deployment_mode="openshell",
         endpoints=[Endpoint(name="http", url="https://default--dep--http.openshell.localhost:8080/")],
     )
     deployment._id = "dep-id"

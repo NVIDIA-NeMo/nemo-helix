@@ -15,7 +15,7 @@ PLATFORM_IGW_API_KEY_PLACEHOLDER = "not-used"
 
 
 @dataclass(frozen=True, slots=True)
-class PlatformGatewayCredentialBinding:
+class HelixGatewayCredentialBinding:
     """Runtime-only credential binding required by a Fabric model adapter."""
 
     api_key_env: str
@@ -24,7 +24,7 @@ class PlatformGatewayCredentialBinding:
 
 def resolve_platform_gateway_credential_binding(
     config: Mapping[str, Any],
-) -> PlatformGatewayCredentialBinding | None:
+) -> HelixGatewayCredentialBinding | None:
     """Return the placeholder binding for the selected IGW-routed model."""
     model = _selected_model_config(config)
     if model is None or not _is_platform_gateway_model(model):
@@ -33,7 +33,7 @@ def resolve_platform_gateway_credential_binding(
     api_key_env = model.get("api_key_env")
     if not isinstance(api_key_env, str) or not api_key_env:
         api_key_env = PLATFORM_IGW_API_KEY_ENV
-    return PlatformGatewayCredentialBinding(api_key_env=api_key_env)
+    return HelixGatewayCredentialBinding(api_key_env=api_key_env)
 
 
 def platform_gateway_credential_env(config: Mapping[str, Any]) -> dict[str, str]:

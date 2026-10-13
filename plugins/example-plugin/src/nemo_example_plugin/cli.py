@@ -1,38 +1,58 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Example plugin CLI commands — registered under ``nemo.cli``.
+"""CLI commands for the example plugin: ``nemo example ...``.
 
-Thin wrapper that exposes the core business logic and middleware config CRUD
-via the CLI.
+This is the reference pattern for plugin CLI commands. Everything comes from
+``nemo_helix_plugin``:
+
+- groups from :func:`~nemo_helix_plugin.cli.create_typer_app`;
+- the typed client from the ``nemo`` CLI state, so the global ``--base-url``,
+  ``--context``, and auth apply (``cli_state(ctx).typed_client(ExampleClient)``);
+- the shared ``--workspace`` and ``--output-format`` options, rendered with
+  :func:`~nemo_helix_plugin.cli_output.format_output`;
+- ``-f code`` via :func:`~nemo_helix_plugin.cli_codegen.handle_code_generation`;
+- ``@collect_warnings`` / ``@handle_errors`` for warnings and exit codes.
 """
 
 from __future__ import annotations
 
-import json
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-import httpx
 import typer
+from nemo_example_plugin.client import ExampleClient
 from nemo_example_plugin.core import say_hello
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_example_plugin.types.endpoints import ListMiddlewareConfigsQueryParams
+from nemo_example_plugin.types.payloads import (
+    CreateExampleMiddlewareConfigRequest,
+    UpdateExampleMiddlewareConfigRequest,
+)
+from nemo_helix_plugin.cli import NemoCLI, create_typer_app
+from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_error_handling import handle_errors
+from nemo_helix_plugin.cli_options import (
+    EntityOutputFormatOption,
+    ListOutputFormatOption,
+    NoTruncateOption,
+    OutputColumnsOption,
+    WorkspaceOption,
+)
+from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output
+from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
+from nemo_helix_plugin.cli_warnings import collect_warnings
+
+_MIDDLEWARE_CONFIG_COLUMNS = [
+    Column("name"),
+    Column("workspace"),
+    Column("blocked_keywords"),
+    Column("updated_at"),
+]
+
+NameArgument = Annotated[str, typer.Argument(help="Config name.")]
 
 
-def _request_json(method: str, url: str, *, json_body: dict | None = None) -> Any:
-    try:
-        response = httpx.request(method, url, json=json_body, timeout=30)
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        print_http_status_error(exc, action=f"{method} example API")
-        raise typer.Exit(code=1) from exc
-    except httpx.RequestError as exc:
-        print_http_request_error(exc, action=f"{method} example API")
-        raise typer.Exit(code=1) from exc
-
-    if response.status_code == 204 or not response.content:
-        return None
-    return response.json()
+def _keywords(value: str) -> list[str]:
+    return [keyword.strip() for keyword in value.split(",")]
 
 
 class ExampleCLI(NemoCLI):
@@ -42,7 +62,7 @@ class ExampleCLI(NemoCLI):
     description = "Example plugin commands."
 
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help="Example plugin commands.")
+        app = create_typer_app(help="Example plugin commands.")
 
         # ── hello ─────────────────────────────────────────────────────
 
@@ -53,90 +73,143 @@ class ExampleCLI(NemoCLI):
 
         # ── middleware-configs subgroup ────────────────────────────────
 
-        mw = typer.Typer(help="Manage ExampleMiddlewareConfig entities.")
+        mw = create_typer_app(help="Manage ExampleMiddlewareConfig entities.")
         app.add_typer(mw, name="middleware-configs")
 
         @mw.command("create")
+        @collect_warnings
+        @handle_errors
         def create_middleware_config(
-            workspace: str = typer.Option(..., help="Workspace name."),
-            name: str = typer.Option(..., help="Config name (unique within workspace)."),
+            ctx: typer.Context,
+            name: NameArgument,
             blocked_keywords: Optional[str] = typer.Option(None, help="Comma-separated list of keywords to block."),
             block_message: Optional[str] = typer.Option(
                 None, help="Refusal message returned when a request is blocked."
             ),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            workspace: WorkspaceOption = None,
+            output_format: EntityOutputFormatOption = None,
         ) -> None:
             """Create a new middleware config entity."""
-
-            body: dict = {"name": name}
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            fields: dict[str, Any] = {"name": name}
             if blocked_keywords:
-                body["blocked_keywords"] = [k.strip() for k in blocked_keywords.split(",")]
+                fields["blocked_keywords"] = _keywords(blocked_keywords)
             if block_message:
-                body["block_message"] = block_message
-
-            url = f"{base_url.rstrip('/')}/apis/example/v2/workspaces/{workspace}/middleware-configs"
-            response = _request_json("POST", url, json_body=body)
-            typer.echo(json.dumps(response, indent=2))
+                fields["block_message"] = block_message
+            kwargs = {
+                "workspace": resolve_cli_workspace(ctx, workspace),
+                "body": CreateExampleMiddlewareConfigRequest(**fields),
+            }
+            if handle_code_generation(ExampleClient, "create_middleware_config", kwargs, resolved_output_format, state):
+                return
+            response = state.typed_client(ExampleClient).create_middleware_config(**kwargs)
+            format_output(response, output_format=resolved_output_format)
 
         @mw.command("list")
+        @collect_warnings
+        @handle_errors
         def list_middleware_configs(
-            workspace: str = typer.Option(..., help="Workspace name."),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            ctx: typer.Context,
+            workspace: WorkspaceOption = None,
+            page: Optional[int] = typer.Option(None, "--page", help="Page number (1-indexed)."),
+            page_size: Optional[int] = typer.Option(None, "--page-size", help="Items per page (max 100)."),
+            sort: Optional[str] = typer.Option(None, "--sort", help="Sort field; prefix with '-' for descending."),
+            output_format: ListOutputFormatOption = None,
+            no_truncate: NoTruncateOption = None,
+            columns: OutputColumnsOption = None,
         ) -> None:
             """List middleware configs in a workspace."""
-
-            url = f"{base_url.rstrip('/')}/apis/example/v2/workspaces/{workspace}/middleware-configs"
-            response = _request_json("GET", url)
-            typer.echo(json.dumps(response, indent=2))
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            check_output_columns_with_format(columns, resolved_output_format)
+            query_params: ListMiddlewareConfigsQueryParams = {}
+            if page is not None:
+                query_params["page"] = page
+            if page_size is not None:
+                query_params["page_size"] = page_size
+            if sort is not None:
+                query_params["sort"] = sort
+            kwargs = {"workspace": resolve_cli_workspace(ctx, workspace), "query_params": query_params or None}
+            # The route returns a plain list rather than a paginated envelope, so the
+            # snippet reads the whole response instead of iterating pages.
+            if handle_code_generation(
+                ExampleClient, "list_middleware_configs", kwargs, resolved_output_format, state, result="entity"
+            ):
+                return
+            response = state.typed_client(ExampleClient).list_middleware_configs(**kwargs)
+            format_output(
+                response,
+                is_list=True,
+                output_format=resolved_output_format,
+                output_columns=columns if columns and columns.strip() != "default" else _MIDDLEWARE_CONFIG_COLUMNS,
+                no_truncate=state.get_no_truncate(no_truncate),
+                timestamp_format=state.get_timestamp_format(),
+            )
 
         @mw.command("get")
+        @collect_warnings
+        @handle_errors
         def get_middleware_config(
-            workspace: str = typer.Option(..., help="Workspace name."),
-            name: str = typer.Option(..., help="Config name."),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            ctx: typer.Context,
+            name: NameArgument,
+            workspace: WorkspaceOption = None,
+            output_format: EntityOutputFormatOption = None,
         ) -> None:
             """Get a single middleware config by name."""
-
-            url = f"{base_url.rstrip('/')}/apis/example/v2/workspaces/{workspace}/middleware-configs/{name}"
-            response = _request_json("GET", url)
-            typer.echo(json.dumps(response, indent=2))
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            kwargs = {"workspace": resolve_cli_workspace(ctx, workspace), "name": name}
+            if handle_code_generation(ExampleClient, "get_middleware_config", kwargs, resolved_output_format, state):
+                return
+            response = state.typed_client(ExampleClient).get_middleware_config(**kwargs)
+            format_output(response, output_format=resolved_output_format)
 
         @mw.command("update")
+        @collect_warnings
+        @handle_errors
         def update_middleware_config(
-            workspace: str = typer.Option(..., help="Workspace name."),
-            name: str = typer.Option(..., help="Config name."),
+            ctx: typer.Context,
+            name: NameArgument,
             blocked_keywords: Optional[str] = typer.Option(
                 None, help="Comma-separated keywords (replaces existing list)."
             ),
             block_message: Optional[str] = typer.Option(None, help="New refusal message."),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            workspace: WorkspaceOption = None,
+            output_format: EntityOutputFormatOption = None,
         ) -> None:
             """Partially update a middleware config (omitted fields unchanged)."""
-
-            body: dict = {}
+            state = cli_state(ctx)
+            resolved_output_format = resolve_output_format(ctx, output_format)
+            fields: dict[str, Any] = {}
             if blocked_keywords is not None:
-                body["blocked_keywords"] = [k.strip() for k in blocked_keywords.split(",")]
+                fields["blocked_keywords"] = _keywords(blocked_keywords)
             if block_message is not None:
-                body["block_message"] = block_message
-
-            url = f"{base_url.rstrip('/')}/apis/example/v2/workspaces/{workspace}/middleware-configs/{name}"
-            response = _request_json("PATCH", url, json_body=body)
-            typer.echo(json.dumps(response, indent=2))
+                fields["block_message"] = block_message
+            kwargs = {
+                "workspace": resolve_cli_workspace(ctx, workspace),
+                "name": name,
+                "body": UpdateExampleMiddlewareConfigRequest(**fields),
+            }
+            if handle_code_generation(ExampleClient, "update_middleware_config", kwargs, resolved_output_format, state):
+                return
+            response = state.typed_client(ExampleClient).update_middleware_config(**kwargs)
+            format_output(response, output_format=resolved_output_format)
 
         @mw.command("delete")
+        @collect_warnings
+        @handle_errors
         def delete_middleware_config(
-            workspace: str = typer.Option(..., help="Workspace name."),
-            name: str = typer.Option(..., help="Config name."),
-            base_url: str = typer.Option("http://localhost:8000", envvar="NMP_BASE_URL"),
+            ctx: typer.Context,
+            name: NameArgument,
+            workspace: WorkspaceOption = None,
             yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
         ) -> None:
             """Delete a middleware config."""
-
+            workspace = resolve_cli_workspace(ctx, workspace)
             if not yes:
                 typer.confirm(f"Delete middleware config '{workspace}/{name}'?", abort=True)
-
-            url = f"{base_url.rstrip('/')}/apis/example/v2/workspaces/{workspace}/middleware-configs/{name}"
-            _request_json("DELETE", url)
+            cli_state(ctx).typed_client(ExampleClient).delete_middleware_config(workspace=workspace, name=name)
             typer.echo(f"Deleted '{workspace}/{name}'.")
 
         return app

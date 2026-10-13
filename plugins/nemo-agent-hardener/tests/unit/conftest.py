@@ -3,10 +3,11 @@
 
 """Shared test doubles for the agent-hardener plugin unit tests.
 
-The records/manifest/sdk/events modules talk to the entity store through the typed
-:class:`EntitiesClient` via :func:`client_from_platform`. Unit tests fake the entity store
-as a ``SimpleNamespace(entities=...)`` shape, so ``client_from_platform`` must be patched
-at each consuming module's boundary to route the typed-client calls back onto that fake.
+The records/manifest/sdk modules talk to the entity store through the typed
+:class:`EntitiesClient` via :func:`client_from_platform`, and the events module derives it
+with ``EntitiesClient.from_client``. Unit tests fake the entity store as a
+``SimpleNamespace(entities=...)`` shape, so both boundaries must be patched to route the
+typed-client calls back onto that fake.
 This keeps the per-test ``entities`` fakes (and the capturing run-service doubles) unchanged.
 
 The typed client method calls are translated to the fake's shape here, once:
@@ -80,7 +81,12 @@ def _fake_agent_hardener_resource(platform: Any) -> Any:
 @pytest.fixture(autouse=True)
 def _fake_entities_client_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Route typed-client entity calls onto the fake ``entities`` namespace in every consuming module."""
-    for mod in (records_module, manifest_module, events_module):
+    for mod in (records_module, manifest_module):
         monkeypatch.setattr(mod, "client_from_platform", _fake_entities_client)
     monkeypatch.setattr(sdk_module, "client_from_platform", _fake_entities_client)
+    monkeypatch.setattr(
+        events_module.EntitiesClient,
+        "from_client",
+        classmethod(lambda cls, platform: _fake_entities_client(platform, cls)),
+    )
     monkeypatch.setattr(shared_module, "AgentHardenerPluginResource", _fake_agent_hardener_resource)

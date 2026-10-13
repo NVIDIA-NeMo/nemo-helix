@@ -4,7 +4,7 @@
 """Unit tests for external host validation."""
 
 import pytest
-from nmp.core.files.app.external_hosts import (
+from nhx.core.files.app.external_hosts import (
     ExternalHostInvalidError,
     ExternalHostNotAllowedError,
     validate_external_host,

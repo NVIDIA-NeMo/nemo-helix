@@ -186,13 +186,19 @@ def analyze_tool_calls(trial_dir: Path) -> ToolCallSummary:
     )
 
 
-def extract_token_usage(trial_dir: Path) -> TokenUsage | None:
+def _token_count(value: object) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def extract_token_usage(trial_dir: Path, *, require_token_fields: bool = False) -> TokenUsage | None:
     """Sum token usage across assistant messages in the session JSONL.
 
     Returns None when no session file is present. Each assistant message in a
     Claude Code session JSONL carries a ``message.usage`` block with the
     Anthropic API breakdown (input_tokens / output_tokens /
-    cache_creation_input_tokens / cache_read_input_tokens).
+    cache_creation_input_tokens / cache_read_input_tokens). When
+    ``require_token_fields`` is true, returns None if an assistant usage block
+    omits either the input or output token dimension.
     """
     session_files = find_session_files(trial_dir)
     if not session_files:
@@ -216,11 +222,17 @@ def extract_token_usage(trial_dir: Path) -> TokenUsage | None:
             usage = entry.get("message", {}).get("usage")
             if not isinstance(usage, dict):
                 continue
+            input_tokens = _token_count(usage.get("input_tokens"))
+            output_tokens = _token_count(usage.get("output_tokens"))
+            if require_token_fields and (input_tokens is None or output_tokens is None):
+                return None
+            cache_creation_tokens = _token_count(usage.get("cache_creation_input_tokens"))
+            cache_read_tokens = _token_count(usage.get("cache_read_input_tokens"))
             found_any = True
-            input_total += int(usage.get("input_tokens") or 0)
-            output_total += int(usage.get("output_tokens") or 0)
-            cache_total += int(usage.get("cache_creation_input_tokens") or 0)
-            cache_total += int(usage.get("cache_read_input_tokens") or 0)
+            input_total += input_tokens or 0
+            output_total += output_tokens or 0
+            cache_total += cache_creation_tokens or 0
+            cache_total += cache_read_tokens or 0
 
     if not found_any:
         return None

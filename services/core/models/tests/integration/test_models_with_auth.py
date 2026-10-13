@@ -22,30 +22,29 @@ from typing import Generator
 from unittest.mock import patch
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import PermissionDeniedError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import (
+from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
     CreateModelAdapterRequest,
     CreateModelEntityRequest,
     FinetuningType,
     UpdateModelEntityRequest,
 )
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.core.auth.app.bundle import build_authorization_data as _real_build_authorization_data
-from nmp.core.files.service import FilesService
-from nmp.core.models.config import config as models_config
-from nmp.core.models.service import ModelsService
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import (
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.core.auth.app.bundle import build_authorization_data as _real_build_authorization_data
+from nhx.core.files.service import FilesService
+from nhx.core.models.config import config as models_config
+from nhx.core.models.service import ModelsService
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import (
     TEST_ADMIN_EMAIL,
+    ClientContext,
     as_user,
     create_test_client,
     grant_workspace_role,
@@ -67,11 +66,15 @@ from .conftest import (
     list_deployment_configs,
     list_deployments,
     list_providers,
-    models_client_from_sdk,
     update_deployment,
     update_deployment_config,
     upsert_provider,
 )
+
+# ctx is module-scoped (expensive to boot, auth_enabled=True): keep all classes in this
+# file on one xdist worker so they share it instead of each worker re-provisioning it
+# from scratch.
+pytestmark = pytest.mark.xdist_group("models_with_auth")
 
 
 async def _build_authorization_data_without_secrets(entities_client=None):
@@ -175,15 +178,15 @@ async def _build_authorization_data_without_fileset_read(entities_client=None):
 def patched_authz_data(build_fn):
     """Patch build_authorization_data in both the bundle and embedded PDP modules."""
     with (
-        patch("nmp.core.auth.app.bundle.build_authorization_data", side_effect=build_fn),
-        patch("nmp.core.auth.app.embedded_pdp.data.build_authorization_data", side_effect=build_fn),
+        patch("nhx.core.auth.app.bundle.build_authorization_data", side_effect=build_fn),
+        patch("nhx.core.auth.app.embedded_pdp.data.build_authorization_data", side_effect=build_fn),
     ):
         yield
 
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoPlatform, None, None]:
-    """SDK client with ModelsService, FilesService, and SecretsService (auth enabled).
+def ctx() -> Generator[ClientContext, None, None]:
+    """Test clients with ModelsService, FilesService, and SecretsService (auth enabled).
 
     FilesService is needed for model/adapter create with fileset (validate_fileset_ref_exists).
     SecretsService is needed for provider create with api_key_secret_name (check_secret_access).
@@ -193,8 +196,9 @@ def sdk() -> Generator[NeMoPlatform, None, None]:
         FilesService,
         SecretsService,
         auth_enabled=True,
-    ) as sdk:
-        yield sdk
+        client_type=ClientContext,
+    ) as ctx:
+        yield ctx
 
 
 @pytest.mark.integration
@@ -203,100 +207,100 @@ class TestModelsUnauthenticated:
 
     # -- Models --
 
-    def test_list_models_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.get("/apis/models/v2/workspaces/default/models")
+    def test_list_models_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get("/apis/models/v2/workspaces/default/models")
         assert response.status_code == 401
 
-    def test_get_model_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.get("/apis/models/v2/workspaces/default/models/any-model")
+    def test_get_model_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get("/apis/models/v2/workspaces/default/models/any-model")
         assert response.status_code == 401
 
-    def test_create_model_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.post(
+    def test_create_model_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/models/v2/workspaces/default/models",
             json={"name": "test-model"},
         )
         assert response.status_code == 401
 
-    def test_update_model_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.patch(
+    def test_update_model_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.patch(
             "/apis/models/v2/workspaces/default/models/any-model",
             json={"description": "updated"},
         )
         assert response.status_code == 401
 
-    def test_delete_model_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.delete("/apis/models/v2/workspaces/default/models/any-model")
+    def test_delete_model_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.delete("/apis/models/v2/workspaces/default/models/any-model")
         assert response.status_code == 401
 
     # -- Providers --
 
-    def test_list_providers_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.get("/apis/models/v2/workspaces/default/providers")
+    def test_list_providers_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get("/apis/models/v2/workspaces/default/providers")
         assert response.status_code == 401
 
-    def test_get_provider_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.get("/apis/models/v2/workspaces/default/providers/any-provider")
+    def test_get_provider_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get("/apis/models/v2/workspaces/default/providers/any-provider")
         assert response.status_code == 401
 
-    def test_create_provider_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.post(
+    def test_create_provider_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/models/v2/workspaces/default/providers",
             json={"name": "test-provider", "host_url": "http://example.com"},
         )
         assert response.status_code == 401
 
-    def test_upsert_provider_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.put(
+    def test_upsert_provider_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.put(
             "/apis/models/v2/workspaces/default/providers/any-provider",
             json={"host_url": "http://example.com"},
         )
         assert response.status_code == 401
 
-    def test_delete_provider_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.delete("/apis/models/v2/workspaces/default/providers/any-provider")
+    def test_delete_provider_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.delete("/apis/models/v2/workspaces/default/providers/any-provider")
         assert response.status_code == 401
 
     # -- Deployments --
 
-    def test_list_deployments_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.get("/apis/models/v2/workspaces/default/deployments")
+    def test_list_deployments_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get("/apis/models/v2/workspaces/default/deployments")
         assert response.status_code == 401
 
-    def test_get_deployment_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.get("/apis/models/v2/workspaces/default/deployments/any-deployment")
+    def test_get_deployment_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get("/apis/models/v2/workspaces/default/deployments/any-deployment")
         assert response.status_code == 401
 
-    def test_create_deployment_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.post(
+    def test_create_deployment_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/models/v2/workspaces/default/deployments",
             json={"name": "test-deploy", "config": "some-config"},
         )
         assert response.status_code == 401
 
-    def test_update_deployment_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.post(
+    def test_update_deployment_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/models/v2/workspaces/default/deployments/any-deployment",
             json={"config": "some-config"},
         )
         assert response.status_code == 401
 
-    def test_delete_deployment_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.delete("/apis/models/v2/workspaces/default/deployments/any-deployment")
+    def test_delete_deployment_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.delete("/apis/models/v2/workspaces/default/deployments/any-deployment")
         assert response.status_code == 401
 
     # -- Deployment Configs --
 
-    def test_list_deployment_configs_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.get("/apis/models/v2/workspaces/default/deployment-configs")
+    def test_list_deployment_configs_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get("/apis/models/v2/workspaces/default/deployment-configs")
         assert response.status_code == 401
 
-    def test_get_deployment_config_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.get("/apis/models/v2/workspaces/default/deployment-configs/any-config")
+    def test_get_deployment_config_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.get("/apis/models/v2/workspaces/default/deployment-configs/any-config")
         assert response.status_code == 401
 
-    def test_create_deployment_config_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.post(
+    def test_create_deployment_config_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/models/v2/workspaces/default/deployment-configs",
             json={
                 "name": "test-config",
@@ -307,34 +311,32 @@ class TestModelsUnauthenticated:
         )
         assert response.status_code == 401
 
-    def test_update_deployment_config_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.post(
+    def test_update_deployment_config_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.post(
             "/apis/models/v2/workspaces/default/deployment-configs/any-config",
             json={"engine": "nim", "model_spec": {"model_name": "test"}, "executor_config": {"gpu": 1}},
         )
         assert response.status_code == 401
 
-    def test_delete_deployment_config_without_auth_fails(self, sdk: NeMoPlatform):
-        response = sdk._client.delete("/apis/models/v2/workspaces/default/deployment-configs/any-config")
+    def test_delete_deployment_config_without_auth_fails(self, ctx: ClientContext):
+        response = ctx.test_client.delete("/apis/models/v2/workspaces/default/deployment-configs/any-config")
         assert response.status_code == 401
 
 
 @pytest.fixture()
-def viewer_workspace(sdk: NeMoPlatform):
+def viewer_workspace(ctx: ClientContext):
     """Create a workspace with a Viewer user and pre-populated resources for read tests.
 
-    Returns (workspace, viewer_sdk, admin_sdk, resource_names) where resource_names
+    Returns (workspace, viewer_client, admin_client, resource_names) where resource_names
     contains the names of each resource type created by the admin.
     """
     workspace = short_unique_name("vw")
     viewer_email = unique_email("viewer")
 
-    admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-    client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-        body=CreateWorkspaceRequest(name=workspace)
-    ).data()
+    admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+    WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
     grant_workspace_role(
-        admin_sdk,
+        admin_client,
         workspace=workspace,
         principal=viewer_email,
         roles=["Viewer"],
@@ -345,17 +347,17 @@ def viewer_workspace(sdk: NeMoPlatform):
     config_name = short_unique_name("cfg")
     deployment_name = short_unique_name("dep")
 
-    client_from_platform(admin_sdk, ModelsClient).create_model(
+    ModelsClient.from_client(admin_client).create_model(
         workspace=workspace, body=CreateModelEntityRequest(name=model_name)
     ).data()
     create_provider(
-        models_client_from_sdk(admin_sdk),
+        ModelsClient.from_client(admin_client),
         workspace=workspace,
         name=provider_name,
         host_url="http://example.com",
     )
     create_deployment_config(
-        models_client_from_sdk(admin_sdk),
+        ModelsClient.from_client(admin_client),
         workspace=workspace,
         name=config_name,
         engine="nim",
@@ -363,17 +365,17 @@ def viewer_workspace(sdk: NeMoPlatform):
         executor_config={"gpu": 1},
     )
     create_deployment(
-        models_client_from_sdk(admin_sdk),
+        ModelsClient.from_client(admin_client),
         workspace=workspace,
         name=deployment_name,
         config=config_name,
     )
 
-    viewer_sdk = as_user(sdk, viewer_email)
+    viewer_client = as_user(ctx.client, viewer_email)
     return (
         workspace,
-        viewer_sdk,
-        admin_sdk,
+        viewer_client,
+        admin_client,
         {
             "model": model_name,
             "provider": provider_name,
@@ -390,96 +392,96 @@ class TestViewerModelsAccess:
     # -- Models: allowed --
 
     def test_viewer_can_list_models(self, viewer_workspace):
-        workspace, viewer_sdk, _, _ = viewer_workspace
-        result = client_from_platform(viewer_sdk, ModelsClient).list_models(workspace=workspace)
+        workspace, viewer_client, _, _ = viewer_workspace
+        result = ModelsClient.from_client(viewer_client).list_models(workspace=workspace)
         assert list(result.items()) is not None
 
     def test_viewer_can_get_model(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
-        model = (
-            client_from_platform(viewer_sdk, ModelsClient).get_model(name=names["model"], workspace=workspace).data()
-        )
+        workspace, viewer_client, _, names = viewer_workspace
+        model = ModelsClient.from_client(viewer_client).get_model(name=names["model"], workspace=workspace).data()
         assert model.name == names["model"]
 
     # -- Models: denied --
 
     def test_viewer_cannot_create_model(self, viewer_workspace):
-        workspace, viewer_sdk, _, _ = viewer_workspace
+        workspace, viewer_client, _, _ = viewer_workspace
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(viewer_sdk, ModelsClient).create_model(
+            ModelsClient.from_client(viewer_client).create_model(
                 workspace=workspace, body=CreateModelEntityRequest(name="should-fail")
             ).data()
 
     def test_viewer_cannot_update_model(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(viewer_sdk, ModelsClient).update_model(
+            ModelsClient.from_client(viewer_client).update_model(
                 name=names["model"], workspace=workspace, body=UpdateModelEntityRequest(description="nope")
             ).data()
 
     def test_viewer_cannot_delete_model(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(viewer_sdk, ModelsClient).delete_model(name=names["model"], workspace=workspace)
+            ModelsClient.from_client(viewer_client).delete_model(name=names["model"], workspace=workspace)
 
     # -- Providers: allowed --
 
     def test_viewer_can_list_providers(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
-        result = list_providers(models_client_from_sdk(viewer_sdk), workspace=workspace)
+        workspace, viewer_client, _, names = viewer_workspace
+        result = list_providers(ModelsClient.from_client(viewer_client), workspace=workspace)
         assert any(provider.name == names["provider"] for provider in result)
 
     def test_viewer_can_get_provider(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
-        provider = get_provider(models_client_from_sdk(viewer_sdk), name=names["provider"], workspace=workspace)
+        workspace, viewer_client, _, names = viewer_workspace
+        provider = get_provider(ModelsClient.from_client(viewer_client), name=names["provider"], workspace=workspace)
         assert provider.name == names["provider"]
 
     # -- Providers: denied --
 
     def test_viewer_cannot_create_provider(self, viewer_workspace):
-        workspace, viewer_sdk, _, _ = viewer_workspace
+        workspace, viewer_client, _, _ = viewer_workspace
         with pytest.raises(PermissionDeniedError):
             create_provider(
-                models_client_from_sdk(viewer_sdk),
+                ModelsClient.from_client(viewer_client),
                 workspace=workspace,
                 name="should-fail",
                 host_url="http://example.com",
             )
 
     def test_viewer_cannot_upsert_provider(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
             upsert_provider(
-                models_client_from_sdk(viewer_sdk),
+                ModelsClient.from_client(viewer_client),
                 name=names["provider"],
                 workspace=workspace,
                 host_url="http://updated.com",
             )
 
     def test_viewer_cannot_delete_provider(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
-            delete_provider(models_client_from_sdk(viewer_sdk), name=names["provider"], workspace=workspace)
+            delete_provider(ModelsClient.from_client(viewer_client), name=names["provider"], workspace=workspace)
 
     # -- Deployment Configs: allowed --
 
     def test_viewer_can_list_deployment_configs(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
-        result = list_deployment_configs(models_client_from_sdk(viewer_sdk), workspace=workspace)
+        workspace, viewer_client, _, names = viewer_workspace
+        result = list_deployment_configs(ModelsClient.from_client(viewer_client), workspace=workspace)
         assert any(config.name == names["config"] for config in result)
 
     def test_viewer_can_get_deployment_config(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
-        config = get_deployment_config(models_client_from_sdk(viewer_sdk), name=names["config"], workspace=workspace)
+        workspace, viewer_client, _, names = viewer_workspace
+        config = get_deployment_config(
+            ModelsClient.from_client(viewer_client), name=names["config"], workspace=workspace
+        )
         assert config.name == names["config"]
 
     # -- Deployment Configs: denied --
 
     def test_viewer_cannot_create_deployment_config(self, viewer_workspace):
-        workspace, viewer_sdk, _, _ = viewer_workspace
+        workspace, viewer_client, _, _ = viewer_workspace
         with pytest.raises(PermissionDeniedError):
             create_deployment_config(
-                models_client_from_sdk(viewer_sdk),
+                ModelsClient.from_client(viewer_client),
                 workspace=workspace,
                 name="should-fail",
                 engine="nim",
@@ -488,10 +490,10 @@ class TestViewerModelsAccess:
             )
 
     def test_viewer_cannot_update_deployment_config(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
             update_deployment_config(
-                models_client_from_sdk(viewer_sdk),
+                ModelsClient.from_client(viewer_client),
                 name=names["config"],
                 workspace=workspace,
                 engine="nim",
@@ -500,143 +502,137 @@ class TestViewerModelsAccess:
             )
 
     def test_viewer_cannot_delete_deployment_config(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
-            delete_deployment_config(models_client_from_sdk(viewer_sdk), name=names["config"], workspace=workspace)
+            delete_deployment_config(ModelsClient.from_client(viewer_client), name=names["config"], workspace=workspace)
 
     # -- Deployments: allowed --
 
     def test_viewer_can_list_deployments(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
-        result = list_deployments(models_client_from_sdk(viewer_sdk), workspace=workspace)
+        workspace, viewer_client, _, names = viewer_workspace
+        result = list_deployments(ModelsClient.from_client(viewer_client), workspace=workspace)
         assert any(deployment.name == names["deployment"] for deployment in result)
 
     def test_viewer_can_get_deployment(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
-        deployment = get_deployment(models_client_from_sdk(viewer_sdk), name=names["deployment"], workspace=workspace)
+        workspace, viewer_client, _, names = viewer_workspace
+        deployment = get_deployment(
+            ModelsClient.from_client(viewer_client), name=names["deployment"], workspace=workspace
+        )
         assert deployment.name == names["deployment"]
 
     # -- Deployments: denied --
 
     def test_viewer_cannot_create_deployment(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
             create_deployment(
-                models_client_from_sdk(viewer_sdk),
+                ModelsClient.from_client(viewer_client),
                 workspace=workspace,
                 name="should-fail",
                 config=names["config"],
             )
 
     def test_viewer_cannot_update_deployment(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
             update_deployment(
-                models_client_from_sdk(viewer_sdk),
+                ModelsClient.from_client(viewer_client),
                 name=names["deployment"],
                 workspace=workspace,
                 config=names["config"],
             )
 
     def test_viewer_cannot_delete_deployment(self, viewer_workspace):
-        workspace, viewer_sdk, _, names = viewer_workspace
+        workspace, viewer_client, _, names = viewer_workspace
         with pytest.raises(PermissionDeniedError):
-            delete_deployment(models_client_from_sdk(viewer_sdk), name=names["deployment"], workspace=workspace)
+            delete_deployment(ModelsClient.from_client(viewer_client), name=names["deployment"], workspace=workspace)
 
 
 @pytest.mark.integration
 class TestEditorModelsAccess:
     """Test that Editor role can create, read, update, and delete resources."""
 
-    def test_editor_can_create_and_read_model(self, sdk: NeMoPlatform):
+    def test_editor_can_create_and_read_model(self, ctx: ClientContext):
         workspace = short_unique_name("ed-mdl")
         editor_email = unique_email("editor")
         model_name = short_unique_name("model")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
-        models = client_from_platform(editor_sdk, ModelsClient)
+        editor_client = as_user(ctx.client, editor_email)
+        models = ModelsClient.from_client(editor_client)
         created = models.create_model(workspace=workspace, body=CreateModelEntityRequest(name=model_name)).data()
         assert created.name == model_name
 
         retrieved = models.get_model(name=model_name, workspace=workspace).data()
         assert retrieved.name == model_name
 
-    def test_editor_can_delete_model(self, sdk: NeMoPlatform):
+    def test_editor_can_delete_model(self, ctx: ClientContext):
         workspace = short_unique_name("ed-del")
         editor_email = unique_email("editor")
         model_name = short_unique_name("model")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
-        models = client_from_platform(editor_sdk, ModelsClient)
+        editor_client = as_user(ctx.client, editor_email)
+        models = ModelsClient.from_client(editor_client)
         models.create_model(workspace=workspace, body=CreateModelEntityRequest(name=model_name)).data()
         models.delete_model(name=model_name, workspace=workspace)
 
-    def test_editor_can_create_provider(self, sdk: NeMoPlatform):
+    def test_editor_can_create_provider(self, ctx: ClientContext):
         workspace = short_unique_name("ed-prv")
         editor_email = unique_email("editor")
         provider_name = short_unique_name("prov")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         created = create_provider(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             workspace=workspace,
             name=provider_name,
             host_url="http://example.com",
         )
         assert created.name == provider_name
 
-    def test_editor_can_create_deployment_config(self, sdk: NeMoPlatform):
+    def test_editor_can_create_deployment_config(self, ctx: ClientContext):
         workspace = short_unique_name("ed-cfg")
         editor_email = unique_email("editor")
         config_name = short_unique_name("cfg")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         created = create_deployment_config(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -650,53 +646,49 @@ class TestEditorModelsAccess:
 class TestProviderSecretPermissions:
     """Test that creating/upserting a provider with api_key_secret_name requires secrets.read."""
 
-    def test_editor_can_create_provider_without_secret(self, sdk: NeMoPlatform):
+    def test_editor_can_create_provider_without_secret(self, ctx: ClientContext):
         workspace = short_unique_name("ps-nos")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         provider = create_provider(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             workspace=workspace,
             name=short_unique_name("prov"),
             host_url="http://example.com",
         )
         assert provider.api_key_secret_name is None
 
-    def test_editor_can_create_provider_with_secret(self, sdk: NeMoPlatform):
+    def test_editor_can_create_provider_with_secret(self, ctx: ClientContext):
         """Editor has secrets.read via Viewer inheritance, so this should succeed."""
         workspace = short_unique_name("ps-sec")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, SecretsClient).create_secret(
-            body=PlatformSecretCreateRequest(name="my-api-key", value=SecretStr("test-value")),
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        SecretsClient.from_client(admin_client).create_secret(
+            body=HelixSecretCreateRequest(name="my-api-key", value=SecretStr("test-value")),
             workspace=workspace,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         provider = create_provider(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             workspace=workspace,
             name=short_unique_name("prov"),
             host_url="http://example.com",
@@ -704,30 +696,28 @@ class TestProviderSecretPermissions:
         )
         assert provider.api_key_secret_name == "my-api-key"
 
-    def test_editor_can_upsert_provider_with_secret(self, sdk: NeMoPlatform):
+    def test_editor_can_upsert_provider_with_secret(self, ctx: ClientContext):
         """Editor has secrets.read via Viewer inheritance, so upsert with secret should succeed."""
         workspace = short_unique_name("ps-ups")
         editor_email = unique_email("editor")
         provider_name = short_unique_name("prov")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, SecretsClient).create_secret(
-            body=PlatformSecretCreateRequest(name="my-api-key", value=SecretStr("test-value")),
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        SecretsClient.from_client(admin_client).create_secret(
+            body=HelixSecretCreateRequest(name="my-api-key", value=SecretStr("test-value")),
             workspace=workspace,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         provider = upsert_provider(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             name=provider_name,
             workspace=workspace,
             host_url="http://example.com",
@@ -735,31 +725,31 @@ class TestProviderSecretPermissions:
         )
         assert provider.api_key_secret_name == "my-api-key"
 
-    def test_custom_role_denied_create_provider_with_secret(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_provider_with_secret(self, ctx: ClientContext):
         """A role with provider write but no secrets.read should be denied on create."""
         with patched_authz_data(_build_authorization_data_without_secrets):
             workspace = short_unique_name("ns-crt")
             user_email = unique_email("nosecrets")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            client_from_platform(admin_sdk, SecretsClient).create_secret(
-                body=PlatformSecretCreateRequest(name="should-be-denied", value=SecretStr("test")),
+            SecretsClient.from_client(admin_client).create_secret(
+                body=HelixSecretCreateRequest(name="should-be-denied", value=SecretStr("test")),
                 workspace=workspace,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoSecrets"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
 
             provider_ok = create_provider(
-                models_client_from_sdk(user_sdk),
+                ModelsClient.from_client(user_client),
                 workspace=workspace,
                 name=short_unique_name("prov"),
                 host_url="http://example.com",
@@ -768,39 +758,39 @@ class TestProviderSecretPermissions:
 
             with pytest.raises(PermissionDeniedError):
                 create_provider(
-                    models_client_from_sdk(user_sdk),
+                    ModelsClient.from_client(user_client),
                     workspace=workspace,
                     name=short_unique_name("prov"),
                     host_url="http://example.com",
                     api_key_secret_name="should-be-denied",
                 )
 
-    def test_custom_role_denied_upsert_provider_with_secret(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_upsert_provider_with_secret(self, ctx: ClientContext):
         """A role with provider write but no secrets.read should be denied on upsert."""
         with patched_authz_data(_build_authorization_data_without_secrets):
             workspace = short_unique_name("ns-ups")
             user_email = unique_email("nosecrets")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            client_from_platform(admin_sdk, SecretsClient).create_secret(
-                body=PlatformSecretCreateRequest(name="should-be-denied", value=SecretStr("test")),
+            SecretsClient.from_client(admin_client).create_secret(
+                body=HelixSecretCreateRequest(name="should-be-denied", value=SecretStr("test")),
                 workspace=workspace,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoSecrets"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
 
             with pytest.raises(PermissionDeniedError):
                 upsert_provider(
-                    models_client_from_sdk(user_sdk),
+                    ModelsClient.from_client(user_client),
                     name=short_unique_name("prov"),
                     workspace=workspace,
                     host_url="http://example.com",
@@ -812,25 +802,23 @@ class TestProviderSecretPermissions:
 class TestProviderDeploymentRefPermissions:
     """Test that creating/upserting a provider with model_deployment_id requires inference.deployments.read."""
 
-    def test_editor_can_create_provider_with_deployment_ref(self, sdk: NeMoPlatform):
+    def test_editor_can_create_provider_with_deployment_ref(self, ctx: ClientContext):
         """Editor has inference.deployments.read, so referencing a deployment should succeed."""
         workspace = short_unique_name("pd-ok")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         provider = create_provider(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             workspace=workspace,
             name=short_unique_name("prov"),
             host_url="http://example.com",
@@ -838,25 +826,23 @@ class TestProviderDeploymentRefPermissions:
         )
         assert provider.model_deployment_id == f"{workspace}/some-deployment"
 
-    def test_editor_can_upsert_provider_with_deployment_ref(self, sdk: NeMoPlatform):
+    def test_editor_can_upsert_provider_with_deployment_ref(self, ctx: ClientContext):
         """Editor has inference.deployments.read, so upsert with deployment ref should succeed."""
         workspace = short_unique_name("pd-ups")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         provider = upsert_provider(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             name=short_unique_name("prov"),
             workspace=workspace,
             host_url="http://example.com",
@@ -864,56 +850,56 @@ class TestProviderDeploymentRefPermissions:
         )
         assert provider.model_deployment_id == f"{workspace}/some-deployment"
 
-    def test_custom_role_denied_create_provider_with_deployment_ref(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_provider_with_deployment_ref(self, ctx: ClientContext):
         """A role without inference.deployments.read should be denied when referencing a deployment."""
         with patched_authz_data(_build_authorization_data_without_deployment_read):
             workspace = short_unique_name("pd-ncr")
             user_email = unique_email("noread")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoDeploymentRead"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
 
             with pytest.raises(PermissionDeniedError):
                 create_provider(
-                    models_client_from_sdk(user_sdk),
+                    ModelsClient.from_client(user_client),
                     workspace=workspace,
                     name=short_unique_name("prov"),
                     host_url="http://example.com",
                     model_deployment_id=f"{workspace}/some-deployment",
                 )
 
-    def test_custom_role_denied_upsert_provider_with_deployment_ref(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_upsert_provider_with_deployment_ref(self, ctx: ClientContext):
         """A role without inference.deployments.read should be denied when upserting with a deployment ref."""
         with patched_authz_data(_build_authorization_data_without_deployment_read):
             workspace = short_unique_name("pd-nup")
             user_email = unique_email("noread")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoDeploymentRead"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
 
             with pytest.raises(PermissionDeniedError):
                 upsert_provider(
-                    models_client_from_sdk(user_sdk),
+                    ModelsClient.from_client(user_client),
                     name=short_unique_name("prov"),
                     workspace=workspace,
                     host_url="http://example.com",
@@ -925,25 +911,23 @@ class TestProviderDeploymentRefPermissions:
 class TestDeploymentConfigPermissions:
     """Test that creating/updating a deployment config with model_entity_id requires models.read."""
 
-    def test_editor_can_create_config_with_model_entity_id(self, sdk: NeMoPlatform):
+    def test_editor_can_create_config_with_model_entity_id(self, ctx: ClientContext):
         """Editor has models.read, so referencing a model_entity_id should succeed."""
         workspace = short_unique_name("dc-mei")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         config = create_deployment_config(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             workspace=workspace,
             name=short_unique_name("cfg"),
             engine="nim",
@@ -953,26 +937,24 @@ class TestDeploymentConfigPermissions:
         )
         assert config.model_entity_id == f"{workspace}/my-model"
 
-    def test_editor_cannot_reference_model_in_inaccessible_workspace(self, sdk: NeMoPlatform):
+    def test_editor_cannot_reference_model_in_inaccessible_workspace(self, ctx: ClientContext):
         """Editor should be denied when referencing a model_entity_id in a workspace they can't access."""
         workspace = short_unique_name("dc-nop")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         with pytest.raises(PermissionDeniedError):
             create_deployment_config(
-                models_client_from_sdk(editor_sdk),
+                ModelsClient.from_client(editor_client),
                 workspace=workspace,
                 name=short_unique_name("cfg"),
                 engine="nim",
@@ -981,18 +963,16 @@ class TestDeploymentConfigPermissions:
                 model_entity_id="inaccessible-workspace/some-model",
             )
 
-    def test_editor_can_update_config_with_model_entity_id(self, sdk: NeMoPlatform):
+    def test_editor_can_update_config_with_model_entity_id(self, ctx: ClientContext):
         """Editor has models.read, so updating a config with model_entity_id should succeed."""
         workspace = short_unique_name("dc-upd")
         editor_email = unique_email("editor")
         config_name = short_unique_name("cfg")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         create_deployment_config(
-            models_client_from_sdk(admin_sdk),
+            ModelsClient.from_client(admin_client),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -1000,15 +980,15 @@ class TestDeploymentConfigPermissions:
             executor_config={"gpu": 1},
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         updated = update_deployment_config(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             name=config_name,
             workspace=workspace,
             engine="nim",
@@ -1018,18 +998,16 @@ class TestDeploymentConfigPermissions:
         )
         assert updated.model_entity_id == f"{workspace}/my-model"
 
-    def test_editor_cannot_update_config_with_inaccessible_model(self, sdk: NeMoPlatform):
+    def test_editor_cannot_update_config_with_inaccessible_model(self, ctx: ClientContext):
         """Editor should be denied when updating a config with a model_entity_id in an inaccessible workspace."""
         workspace = short_unique_name("dc-unp")
         editor_email = unique_email("editor")
         config_name = short_unique_name("cfg")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         create_deployment_config(
-            models_client_from_sdk(admin_sdk),
+            ModelsClient.from_client(admin_client),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -1037,16 +1015,16 @@ class TestDeploymentConfigPermissions:
             executor_config={"gpu": 1},
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         with pytest.raises(PermissionDeniedError):
             update_deployment_config(
-                models_client_from_sdk(editor_sdk),
+                ModelsClient.from_client(editor_client),
                 name=config_name,
                 workspace=workspace,
                 engine="nim",
@@ -1055,28 +1033,28 @@ class TestDeploymentConfigPermissions:
                 model_entity_id="inaccessible-workspace/some-model",
             )
 
-    def test_custom_role_denied_create_config_with_model_entity_id_without_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_config_with_model_entity_id_without_read(self, ctx: ClientContext):
         """A role without models.read should be denied when creating a config with model_entity_id."""
         with patched_authz_data(_build_authorization_data_without_model_read):
             workspace = short_unique_name("dc-ncr")
             user_email = unique_email("noread")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoModelRead"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
 
             with pytest.raises(PermissionDeniedError):
                 create_deployment_config(
-                    models_client_from_sdk(user_sdk),
+                    ModelsClient.from_client(user_client),
                     workspace=workspace,
                     name=short_unique_name("cfg"),
                     engine="nim",
@@ -1085,19 +1063,19 @@ class TestDeploymentConfigPermissions:
                     model_entity_id=f"{workspace}/some-model",
                 )
 
-    def test_custom_role_denied_update_config_with_model_entity_id_without_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_update_config_with_model_entity_id_without_read(self, ctx: ClientContext):
         """A role without models.read should be denied when updating a config with model_entity_id."""
         with patched_authz_data(_build_authorization_data_without_model_read):
             workspace = short_unique_name("dc-nup")
             user_email = unique_email("noread")
             config_name = short_unique_name("cfg")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
             create_deployment_config(
-                models_client_from_sdk(admin_sdk),
+                ModelsClient.from_client(admin_client),
                 workspace=workspace,
                 name=config_name,
                 engine="nim",
@@ -1105,17 +1083,17 @@ class TestDeploymentConfigPermissions:
                 executor_config={"gpu": 1},
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoModelRead"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
 
             with pytest.raises(PermissionDeniedError):
                 update_deployment_config(
-                    models_client_from_sdk(user_sdk),
+                    ModelsClient.from_client(user_client),
                     name=config_name,
                     workspace=workspace,
                     engine="nim",
@@ -1129,18 +1107,16 @@ class TestDeploymentConfigPermissions:
 class TestDeploymentPermissions:
     """Test that creating/updating a deployment with a config reference requires inference.deployment-configs.read."""
 
-    def test_editor_can_create_deployment_with_config(self, sdk: NeMoPlatform):
+    def test_editor_can_create_deployment_with_config(self, ctx: ClientContext):
         """Editor has inference.deployment-configs.read, so referencing a config should succeed."""
         workspace = short_unique_name("dp-ok")
         editor_email = unique_email("editor")
         config_name = short_unique_name("cfg")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         create_deployment_config(
-            models_client_from_sdk(admin_sdk),
+            ModelsClient.from_client(admin_client),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -1148,34 +1124,32 @@ class TestDeploymentPermissions:
             executor_config={"gpu": 1},
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         deployment = create_deployment(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             workspace=workspace,
             name=short_unique_name("dep"),
             config=config_name,
         )
         assert deployment.config == config_name
 
-    def test_editor_can_update_deployment_with_config(self, sdk: NeMoPlatform):
+    def test_editor_can_update_deployment_with_config(self, ctx: ClientContext):
         """Editor has inference.deployment-configs.read, so updating a deployment with a config ref should succeed."""
         workspace = short_unique_name("dp-upd")
         editor_email = unique_email("editor")
         config_name = short_unique_name("cfg")
         deploy_name = short_unique_name("dep")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         create_deployment_config(
-            models_client_from_sdk(admin_sdk),
+            ModelsClient.from_client(admin_client),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -1183,40 +1157,40 @@ class TestDeploymentPermissions:
             executor_config={"gpu": 1},
         )
         create_deployment(
-            models_client_from_sdk(admin_sdk),
+            ModelsClient.from_client(admin_client),
             workspace=workspace,
             name=deploy_name,
             config=config_name,
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         updated = update_deployment(
-            models_client_from_sdk(editor_sdk),
+            ModelsClient.from_client(editor_client),
             name=deploy_name,
             workspace=workspace,
             config=config_name,
         )
         assert updated.config == config_name
 
-    def test_custom_role_denied_create_deployment_without_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_deployment_without_read(self, ctx: ClientContext):
         """A role with deployment write but no inference.deployment-configs.read should be denied on create."""
         with patched_authz_data(_build_authorization_data_without_deployment_config_read):
             workspace = short_unique_name("dp-ncr")
             user_email = unique_email("noread")
             config_name = short_unique_name("cfg")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
             create_deployment_config(
-                models_client_from_sdk(admin_sdk),
+                ModelsClient.from_client(admin_client),
                 workspace=workspace,
                 name=config_name,
                 engine="nim",
@@ -1224,23 +1198,23 @@ class TestDeploymentPermissions:
                 executor_config={"gpu": 1},
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoDeploymentConfigRead"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
 
             with pytest.raises(PermissionDeniedError):
                 create_deployment(
-                    models_client_from_sdk(user_sdk),
+                    ModelsClient.from_client(user_client),
                     workspace=workspace,
                     name=short_unique_name("dep"),
                     config=config_name,
                 )
 
-    def test_custom_role_denied_update_deployment_without_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_update_deployment_without_read(self, ctx: ClientContext):
         """A role with deployment write but no inference.deployment-configs.read should be denied on update."""
         with patched_authz_data(_build_authorization_data_without_deployment_config_read):
             workspace = short_unique_name("dp-nup")
@@ -1248,12 +1222,12 @@ class TestDeploymentPermissions:
             config_name = short_unique_name("cfg")
             deploy_name = short_unique_name("dep")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
             create_deployment_config(
-                models_client_from_sdk(admin_sdk),
+                ModelsClient.from_client(admin_client),
                 workspace=workspace,
                 name=config_name,
                 engine="nim",
@@ -1261,23 +1235,23 @@ class TestDeploymentPermissions:
                 executor_config={"gpu": 1},
             )
             create_deployment(
-                models_client_from_sdk(admin_sdk),
+                ModelsClient.from_client(admin_client),
                 workspace=workspace,
                 name=deploy_name,
                 config=config_name,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoDeploymentConfigRead"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
 
             with pytest.raises(PermissionDeniedError):
                 update_deployment(
-                    models_client_from_sdk(user_sdk),
+                    ModelsClient.from_client(user_client),
                     name=deploy_name,
                     workspace=workspace,
                     config=config_name,
@@ -1290,31 +1264,29 @@ class TestFilesetPermissions:
 
     # -- Write: editor allowed (same workspace fileset) --
 
-    def test_editor_can_create_model_with_fileset(self, sdk: NeMoPlatform):
+    def test_editor_can_create_model_with_fileset(self, ctx: ClientContext):
         workspace = short_unique_name("fs-crt")
         editor_email = unique_email("editor")
         fileset_name = short_unique_name("fs")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, FilesClient).create_fileset(
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        FilesClient.from_client(admin_client).create_fileset(
             workspace=workspace, body=CreateFilesetRequest(name=fileset_name)
         )
-        admin_sdk.files.upload_content(
-            content=b"x", remote_path="placeholder.txt", fileset=fileset_name, workspace=workspace
+        FilesClient.from_client(admin_client).upload_file(
+            workspace=workspace, name=fileset_name, path="placeholder.txt", content=b"x"
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         model = (
-            client_from_platform(editor_sdk, ModelsClient)
+            ModelsClient.from_client(editor_client)
             .create_model(
                 workspace=workspace,
                 body=CreateModelEntityRequest(name=short_unique_name("mdl"), fileset=f"{workspace}/{fileset_name}"),
@@ -1323,35 +1295,33 @@ class TestFilesetPermissions:
         )
         assert model.fileset == f"{workspace}/{fileset_name}"
 
-    def test_editor_can_update_model_with_fileset(self, sdk: NeMoPlatform):
+    def test_editor_can_update_model_with_fileset(self, ctx: ClientContext):
         workspace = short_unique_name("fs-upd")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
         fileset_name = short_unique_name("fs")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, ModelsClient).create_model(
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        ModelsClient.from_client(admin_client).create_model(
             workspace=workspace, body=CreateModelEntityRequest(name=model_name)
         ).data()
-        client_from_platform(admin_sdk, FilesClient).create_fileset(
+        FilesClient.from_client(admin_client).create_fileset(
             workspace=workspace, body=CreateFilesetRequest(name=fileset_name)
         )
-        admin_sdk.files.upload_content(
-            content=b"x", remote_path="placeholder.txt", fileset=fileset_name, workspace=workspace
+        FilesClient.from_client(admin_client).upload_file(
+            workspace=workspace, name=fileset_name, path="placeholder.txt", content=b"x"
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         updated = (
-            client_from_platform(editor_sdk, ModelsClient)
+            ModelsClient.from_client(editor_client)
             .update_model(
                 name=model_name,
                 workspace=workspace,
@@ -1361,35 +1331,33 @@ class TestFilesetPermissions:
         )
         assert updated.fileset == f"{workspace}/{fileset_name}"
 
-    def test_editor_can_create_adapter_with_fileset(self, sdk: NeMoPlatform):
+    def test_editor_can_create_adapter_with_fileset(self, ctx: ClientContext):
         workspace = short_unique_name("fs-adp")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
         fileset_name = short_unique_name("adpfs")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, ModelsClient).create_model(
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        ModelsClient.from_client(admin_client).create_model(
             workspace=workspace, body=CreateModelEntityRequest(name=model_name)
         ).data()
-        client_from_platform(admin_sdk, FilesClient).create_fileset(
+        FilesClient.from_client(admin_client).create_fileset(
             workspace=workspace, body=CreateFilesetRequest(name=fileset_name)
         )
-        admin_sdk.files.upload_content(
-            content=b"x", remote_path="placeholder.txt", fileset=fileset_name, workspace=workspace
+        FilesClient.from_client(admin_client).upload_file(
+            workspace=workspace, name=fileset_name, path="placeholder.txt", content=b"x"
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         adapter = (
-            client_from_platform(editor_sdk, ModelsClient)
+            ModelsClient.from_client(editor_client)
             .create_model_adapter(
                 workspace=workspace,
                 model_name=model_name,
@@ -1405,77 +1373,71 @@ class TestFilesetPermissions:
 
     # -- Write: denied (cross-workspace fileset) --
 
-    def test_editor_denied_create_model_with_inaccessible_fileset(self, sdk: NeMoPlatform):
+    def test_editor_denied_create_model_with_inaccessible_fileset(self, ctx: ClientContext):
         workspace = short_unique_name("fs-dnc")
         editor_email = unique_email("editor")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(editor_sdk, ModelsClient).create_model(
+            ModelsClient.from_client(editor_client).create_model(
                 workspace=workspace,
                 body=CreateModelEntityRequest(name=short_unique_name("mdl"), fileset="inaccessible-ws/some-fileset"),
             ).data()
 
-    def test_editor_denied_update_model_with_inaccessible_fileset(self, sdk: NeMoPlatform):
+    def test_editor_denied_update_model_with_inaccessible_fileset(self, ctx: ClientContext):
         workspace = short_unique_name("fs-dnu")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, ModelsClient).create_model(
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        ModelsClient.from_client(admin_client).create_model(
             workspace=workspace, body=CreateModelEntityRequest(name=model_name)
         ).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(editor_sdk, ModelsClient).update_model(
+            ModelsClient.from_client(editor_client).update_model(
                 name=model_name,
                 workspace=workspace,
                 body=UpdateModelEntityRequest(fileset="inaccessible-ws/some-fileset"),
             ).data()
 
-    def test_editor_denied_create_adapter_with_inaccessible_fileset(self, sdk: NeMoPlatform):
+    def test_editor_denied_create_adapter_with_inaccessible_fileset(self, ctx: ClientContext):
         workspace = short_unique_name("fs-dna")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, ModelsClient).create_model(
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        ModelsClient.from_client(admin_client).create_model(
             workspace=workspace, body=CreateModelEntityRequest(name=model_name)
         ).data()
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Editor"],
         )
 
-        editor_sdk = as_user(sdk, editor_email)
+        editor_client = as_user(ctx.client, editor_email)
         with pytest.raises(PermissionDeniedError):
-            client_from_platform(editor_sdk, ModelsClient).create_model_adapter(
+            ModelsClient.from_client(editor_client).create_model_adapter(
                 workspace=workspace,
                 model_name=model_name,
                 body=CreateModelAdapterRequest(
@@ -1485,26 +1447,26 @@ class TestFilesetPermissions:
                 ),
             ).data()
 
-    def test_custom_role_denied_create_model_with_fileset_without_fileset_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_model_with_fileset_without_fileset_read(self, ctx: ClientContext):
         """A role without filesets.read should be denied when creating a model with a fileset."""
         with patched_authz_data(_build_authorization_data_without_fileset_read):
             workspace = short_unique_name("fs-nfr")
             user_email = unique_email("nofileset")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["EditorNoFilesetRead"],
             )
 
-            user_sdk = as_user(sdk, user_email)
+            user_client = as_user(ctx.client, user_email)
             with pytest.raises(PermissionDeniedError):
-                client_from_platform(user_sdk, ModelsClient).create_model(
+                ModelsClient.from_client(user_client).create_model(
                     workspace=workspace,
                     body=CreateModelEntityRequest(name=short_unique_name("mdl"), fileset=f"{workspace}/some-fileset"),
                 ).data()
@@ -1523,32 +1485,30 @@ class TestTrustRemoteCodePermission:
     def _no_hf(self, no_hf_network):
         """These tests verify authorization logic, not HF connectivity."""
 
-    def test_create_model_trust_remote_code_true_has_permission_succeeds(self, sdk: NeMoPlatform):
+    def test_create_model_trust_remote_code_true_has_permission_succeeds(self, ctx: ClientContext):
         """Create with trust_remote_code=True succeeds when principal has models.trust-remote-code.set (repo not on allow list)."""
         workspace = short_unique_name("trc-has")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
         fileset_name = short_unique_name("fs")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, FilesClient).create_fileset(
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        FilesClient.from_client(admin_client).create_fileset(
             workspace=workspace,
             body=CreateFilesetRequest(name=fileset_name, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")),
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Admin"],
         )
 
         with patch.object(models_config.trust_remote_code, "hf_allow_list", ["nvidia/*"]):
-            editor_sdk = as_user(sdk, editor_email)
+            editor_client = as_user(ctx.client, editor_email)
             created = (
-                client_from_platform(editor_sdk, ModelsClient)
+                ModelsClient.from_client(editor_client)
                 .create_model(
                     workspace=workspace,
                     body=CreateModelEntityRequest(
@@ -1559,34 +1519,34 @@ class TestTrustRemoteCodePermission:
             )
         assert created.trust_remote_code is True
 
-    def test_create_model_trust_remote_code_true_without_permission_raises(self, sdk: NeMoPlatform):
+    def test_create_model_trust_remote_code_true_without_permission_raises(self, ctx: ClientContext):
         """Create with trust_remote_code=True returns 403 when repo not on allow list and principal lacks models.trust-remote-code.set."""
         with patched_authz_data(_real_build_authorization_data):
             workspace = short_unique_name("trc-no")
             user_email = unique_email("editor")
             fileset_name = short_unique_name("fs")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            client_from_platform(admin_sdk, FilesClient).create_fileset(
+            FilesClient.from_client(admin_client).create_fileset(
                 workspace=workspace,
                 body=CreateFilesetRequest(
                     name=fileset_name, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")
                 ),
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["Editor"],
             )
 
             with patch.object(models_config.trust_remote_code, "hf_allow_list", ["nvidia/*"]):
-                user_sdk = as_user(sdk, user_email)
+                user_client = as_user(ctx.client, user_email)
                 with pytest.raises(PermissionDeniedError) as exc_info:
-                    client_from_platform(user_sdk, ModelsClient).create_model(
+                    ModelsClient.from_client(user_client).create_model(
                         workspace=workspace,
                         body=CreateModelEntityRequest(
                             name=short_unique_name("mdl"), fileset=f"{workspace}/{fileset_name}", trust_remote_code=True
@@ -1594,35 +1554,33 @@ class TestTrustRemoteCodePermission:
                     ).data()
                 assert "Insufficient permissions to set the trust_remote_code" in str(exc_info.value)
 
-    def test_update_model_trust_remote_code_true_has_permission_succeeds(self, sdk: NeMoPlatform):
+    def test_update_model_trust_remote_code_true_has_permission_succeeds(self, ctx: ClientContext):
         """Update with trust_remote_code=True succeeds when principal has models.trust-remote-code.set (repo not on allow list)."""
         workspace = short_unique_name("trc-upd-has")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
         fileset_name = short_unique_name("fs")
 
-        admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-        client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
-            body=CreateWorkspaceRequest(name=workspace)
-        ).data()
-        client_from_platform(admin_sdk, ModelsClient).create_model(
+        admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+        WorkspacesClient.from_client(admin_client).create_workspace(body=CreateWorkspaceRequest(name=workspace)).data()
+        ModelsClient.from_client(admin_client).create_model(
             workspace=workspace, body=CreateModelEntityRequest(name=model_name)
         ).data()
-        client_from_platform(admin_sdk, FilesClient).create_fileset(
+        FilesClient.from_client(admin_client).create_fileset(
             workspace=workspace,
             body=CreateFilesetRequest(name=fileset_name, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")),
         )
         grant_workspace_role(
-            admin_sdk,
+            admin_client,
             workspace=workspace,
             principal=editor_email,
             roles=["Admin"],
         )
 
         with patch.object(models_config.trust_remote_code, "hf_allow_list", ["nvidia/*"]):
-            editor_sdk = as_user(sdk, editor_email)
+            editor_client = as_user(ctx.client, editor_email)
             updated = (
-                client_from_platform(editor_sdk, ModelsClient)
+                ModelsClient.from_client(editor_client)
                 .update_model(
                     name=model_name,
                     workspace=workspace,
@@ -1632,7 +1590,7 @@ class TestTrustRemoteCodePermission:
             )
         assert updated.trust_remote_code is True
 
-    def test_update_model_trust_remote_code_true_without_permission_raises(self, sdk: NeMoPlatform):
+    def test_update_model_trust_remote_code_true_without_permission_raises(self, ctx: ClientContext):
         """Update with trust_remote_code=True returns 403 when repo not on allow list and principal lacks models.trust-remote-code.set."""
         with patched_authz_data(_real_build_authorization_data):
             workspace = short_unique_name("trc-upd-no")
@@ -1640,21 +1598,21 @@ class TestTrustRemoteCodePermission:
             model_name = short_unique_name("mdl")
             fileset_name = short_unique_name("fs")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            client_from_platform(admin_sdk, ModelsClient).create_model(
+            ModelsClient.from_client(admin_client).create_model(
                 workspace=workspace, body=CreateModelEntityRequest(name=model_name)
             ).data()
-            client_from_platform(admin_sdk, FilesClient).create_fileset(
+            FilesClient.from_client(admin_client).create_fileset(
                 workspace=workspace,
                 body=CreateFilesetRequest(
                     name=fileset_name, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")
                 ),
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["Editor"],
@@ -1663,16 +1621,16 @@ class TestTrustRemoteCodePermission:
             with patch.object(
                 models_config.trust_remote_code, "hf_allow_list", ["nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"]
             ):
-                user_sdk = as_user(sdk, user_email)
+                user_client = as_user(ctx.client, user_email)
                 with pytest.raises(PermissionDeniedError) as exc_info:
-                    client_from_platform(user_sdk, ModelsClient).update_model(
+                    ModelsClient.from_client(user_client).update_model(
                         name=model_name,
                         workspace=workspace,
                         body=UpdateModelEntityRequest(fileset=f"{workspace}/{fileset_name}", trust_remote_code=True),
                     ).data()
                 assert "Insufficient permissions to set the trust_remote_code" in str(exc_info.value)
 
-    def test_update_model_new_fileset_not_trusted_raises_permission_error(self, sdk: NeMoPlatform):
+    def test_update_model_new_fileset_not_trusted_raises_permission_error(self, ctx: ClientContext):
         """Update model (created with valid trust_remote_code) to a new fileset not on allow list returns 403 when principal lacks models.trust-remote-code.set."""
         with patched_authz_data(_real_build_authorization_data):
             workspace = short_unique_name("trc-newfs")
@@ -1681,13 +1639,13 @@ class TestTrustRemoteCodePermission:
             trusted_fs = short_unique_name("fs1")
             new_fs = short_unique_name("fs2")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            files = client_from_platform(admin_sdk, FilesClient)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            files = FilesClient.from_client(admin_client)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
             # Model created with a trusted fileset (on allow list) so it has trust_remote_code=True.
-            files = client_from_platform(admin_sdk, FilesClient)
+            files = FilesClient.from_client(admin_client)
             files.create_fileset(
                 workspace=workspace,
                 body=CreateFilesetRequest(
@@ -1695,7 +1653,7 @@ class TestTrustRemoteCodePermission:
                     storage=HuggingfaceStorageConfig(repo_id="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"),
                 ),
             )
-            client_from_platform(admin_sdk, ModelsClient).create_model(
+            ModelsClient.from_client(admin_client).create_model(
                 workspace=workspace,
                 body=CreateModelEntityRequest(
                     name=model_name, fileset=f"{workspace}/{trusted_fs}", trust_remote_code=True
@@ -1707,23 +1665,23 @@ class TestTrustRemoteCodePermission:
                 body=CreateFilesetRequest(name=new_fs, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")),
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["Editor"],
             )
 
             with patch.object(models_config.trust_remote_code, "hf_allow_list", ["nvidia/*"]):
-                user_sdk = as_user(sdk, user_email)
+                user_client = as_user(ctx.client, user_email)
                 with pytest.raises(PermissionDeniedError) as exc_info:
-                    client_from_platform(user_sdk, ModelsClient).update_model(
+                    ModelsClient.from_client(user_client).update_model(
                         name=model_name,
                         workspace=workspace,
                         body=UpdateModelEntityRequest(fileset=f"{workspace}/{new_fs}"),
                     ).data()
                 assert "Insufficient permissions to set the trust_remote_code" in str(exc_info.value)
 
-    def test_exact_match_on_allow_list_succeeds(self, sdk: NeMoPlatform):
+    def test_exact_match_on_allow_list_succeeds(self, ctx: ClientContext):
         """Update with trust_remote_code=True succeeds when repo matches exactly, not via regex."""
         with patched_authz_data(_real_build_authorization_data):
             workspace = short_unique_name("trc-upd-no")
@@ -1731,11 +1689,11 @@ class TestTrustRemoteCodePermission:
             model_name = short_unique_name("mdl")
             fileset_name = short_unique_name("fs")
 
-            admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            WorkspacesClient.from_client(admin_client).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            client_from_platform(admin_sdk, FilesClient).create_fileset(
+            FilesClient.from_client(admin_client).create_fileset(
                 workspace=workspace,
                 body=CreateFilesetRequest(
                     name=fileset_name,
@@ -1743,7 +1701,7 @@ class TestTrustRemoteCodePermission:
                 ),
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=user_email,
                 roles=["Editor"],
@@ -1752,9 +1710,9 @@ class TestTrustRemoteCodePermission:
             with patch.object(
                 models_config.trust_remote_code, "hf_allow_list", ["nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"]
             ):
-                user_sdk = as_user(sdk, user_email)
+                user_client = as_user(ctx.client, user_email)
                 created = (
-                    client_from_platform(user_sdk, ModelsClient)
+                    ModelsClient.from_client(user_client)
                     .create_model(
                         workspace=workspace,
                         body=CreateModelEntityRequest(

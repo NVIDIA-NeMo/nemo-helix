@@ -13,17 +13,16 @@ from typing import Any, TypedDict
 
 import httpx
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import (
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import (
     CreateGuardrailConfigRequest,
     GuardrailConfig,
     UpdateGuardrailConfigRequest,
 )
-from nemo_platform_plugin.virtual_models.client import VirtualModelsClient
-from nemo_platform_plugin.virtual_models.types import UpdateVirtualModelRequest
-from nmp.testing.utils import short_unique_name
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import UpdateVirtualModelRequest
+from nhx.testing.utils import short_unique_name
 from typing_extensions import Required
 
 DEFAULT_WORKSPACE = "default"
@@ -72,10 +71,9 @@ InlineGuardrailsMiddlewareCall = GuardrailsMiddlewareCall
 def expect_harness_http_error(action: Callable[[], object], expected_status: HTTPStatus) -> HarnessHTTPError:
     """Run a harness action and return HTTP error details.
 
-    The IGW integration harness raises generated SDK HTTP errors for sync SDK
+    The IGW integration harness raises typed-client HTTP errors for client
     calls and ``httpx.HTTPStatusError`` for direct TestClient streaming calls.
-    Keep that dynamic boundary here so tests assert typed status/body values
-    without importing generated SDK errors in the plugin suite.
+    Both are normalized here so tests assert status/body values the same way.
     """
     try:
         action()
@@ -143,7 +141,7 @@ def detach_guardrail_config(harness: Any, config_name: str) -> None:
     """
     config_ref = f"{harness.workspace}/{config_name}"
     phases = ("request_middleware", "response_middleware", "post_response_middleware")
-    virtual_models_client = client_from_platform(harness.sdk, VirtualModelsClient)
+    virtual_models_client = VirtualModelsClient.from_client(harness.client)
 
     for workspace, name in harness.virtual_models:
         try:
@@ -176,7 +174,7 @@ def detach_guardrail_config(harness: Any, config_name: str) -> None:
 
 
 def guardrail_client(harness: Any) -> GuardrailClient:
-    return client_from_platform(harness.sdk, GuardrailClient)
+    return GuardrailClient.from_client(harness.client)
 
 
 def create_guardrail_config(
@@ -239,7 +237,7 @@ def make_guardrail_config(
     *,
     data: dict[str, Any],
 ) -> GuardrailConfig:
-    """Wrap a ``data`` block (the inner PlatformRailsConfig shape) in a GuardrailConfig envelope.
+    """Wrap a ``data`` block (the inner HelixRailsConfig shape) in a GuardrailConfig envelope.
 
     The envelope (``id`` / ``entity_id`` / ``parent`` / timestamps) is
     irrelevant to plugin behaviour but required by the SDK type.
@@ -260,7 +258,7 @@ def make_guardrail_config(
 
 
 def make_middleware_call(config: GuardrailConfig) -> InlineGuardrailsMiddlewareCall:
-    # validate_middleware_config expects the inner PlatformRailsConfig data
+    # validate_middleware_config expects the inner HelixRailsConfig data
     # block (models / rails / prompts), not the entity envelope. The full
     # GuardrailConfig dump silently absorbs envelope fields into model_extra
     # and rails.rails ends up None, so the plugin's input rail gets bypassed.

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import patch
 
 import pytest
-from nmp.guardrails.app.utils.context_utils import (
+from nhx.guardrails.app.utils.context_utils import (
     _response_headers,
     api_key_var,
     get_http_request_uid_from_context,
@@ -51,7 +51,7 @@ def test_set_and_get_http_request_uid():
     assert get_http_request_uid_from_context() == "test_uid"
 
 
-@patch("nmp.guardrails.app.utils.context_utils.logger")
+@patch("nhx.guardrails.app.utils.context_utils.logger")
 def test_logging(mock_logger):
     set_http_request_uid_into_context("test_uid")
     set_x_model_response_headers_into_context({"key": "value"})

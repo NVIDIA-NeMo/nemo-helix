@@ -37,25 +37,25 @@ const preamble = (
 
   const installStep = opts.checkExistingSkill
     ? [
-        `1. Check whether the ${skillList} ${noun} ${are} already installed for this coding agent (look for its existing skill file, e.g. under \`.claude/skills\`, \`.cursor/rules\`, or the equivalent for this coding agent). If ${them} ${are} already installed, skip straight to step 2 — do not reinstall. Otherwise install ${them} (replace \`${CODING_AGENT_PLACEHOLDER}\` with one of: ${SUPPORTED_CODING_AGENTS}):`,
+        `1. Check whether the ${skillList} ${noun} ${are} already installed for this coding agent (look for its existing skill file, e.g. under \`.claude/skills\`, \`.cursor/skills\`, or the equivalent for this coding agent). If ${them} ${are} already installed, skip straight to step 2 — do not reinstall. Otherwise install ${them} (replace \`${CODING_AGENT_PLACEHOLDER}\` with one of: ${SUPPORTED_CODING_AGENTS}):`,
         `   \`\`\`bash`,
         `   nemo skills install --agent ${CODING_AGENT_PLACEHOLDER}`,
         `   \`\`\``,
-        `   If the \`nemo\` CLI is not on PATH here, install it (\`uv tool install nemo-platform\` or \`pip install nemo-platform\`) and re-run.`,
+        `   If the \`nemo\` CLI is not on PATH here, install it (\`uv tool install nemo-helix\` or \`pip install nemo-helix\`) and re-run.`,
       ]
     : [
         `1. Install the NeMo skills into this coding agent (replace \`${CODING_AGENT_PLACEHOLDER}\` with one of: ${SUPPORTED_CODING_AGENTS}):`,
         `   \`\`\`bash`,
         `   nemo skills install --agent ${CODING_AGENT_PLACEHOLDER}`,
         `   \`\`\``,
-        `   If the \`nemo\` CLI is not on PATH here, install it (\`uv tool install nemo-platform\` or \`pip install nemo-platform\`) and re-run.`,
+        `   If the \`nemo\` CLI is not on PATH here, install it (\`uv tool install nemo-helix\` or \`pip install nemo-helix\`) and re-run.`,
       ];
 
   return [
     `## Environment`,
     ``,
     `\`\`\`bash`,
-    `export NMP_BASE_URL=${params.baseUrl}`,
+    `export NHX_BASE_URL=${params.baseUrl}`,
     `export WORKSPACE=${params.workspace}`,
     `export AGENT_NAME=${agentName(params)}`,
     `\`\`\``,
@@ -68,7 +68,7 @@ const preamble = (
     ``,
     `## How to do it`,
     ``,
-    `NeMo Platform ships ${many ? 'skills' : 'a skill'} that ${own} this work end to end. Do not improvise a solution — install the ${noun} and follow ${them} step by step.`,
+    `NeMo Helix ships ${many ? 'skills' : 'a skill'} that ${own} this work end to end. Do not improvise a solution — install the ${noun} and follow ${them} step by step.`,
     ``,
     ...installStep,
     `2. Read the ${skillList} ${noun} and follow the documented steps in order. Run the exact commands documented there and read any \`references/\` file ${theyPoint} at.`,
@@ -101,7 +101,7 @@ export const traceImportPrompt = (params: CodingAgentPromptParams): string =>
     `- Do not rewrite the agent. Instrument it where it already emits telemetry, or import telemetry it has already produced.`,
     `- If my traces already live in MLflow, LangSmith, Arize Phoenix, or Braintrust, use the skill's importer for that provider instead of adding instrumentation — but still make sure the imported spans end up tagged with the agent name \`${agentName(params)}\` (remap it during import if the source system recorded a different name).`,
     `- Otherwise pick the ingest format that matches what the agent actually emits — OTLP (OpenInference or OTel GenAI semantic conventions), chat completions, or ATIF. Read the skill's comparison table before choosing; do not default to generic OpenTelemetry spans.`,
-    `- Every span must carry the agent name \`${agentName(params)}\` exactly as it is named in NeMo Platform (\`gen_ai.agent.name\`, or \`llm.agent.name\` / \`agent.name\` depending on the convention your instrumentation emits). This is the name I created the agent under in Studio, not whatever name the agent's own code, framework, or class defaults to — override it if they differ. Studio's agent overview is keyed on this exact value — if it is missing, inconsistent, or does not match \`${agentName(params)}\` verbatim, the traces land but the agent page stays empty.`,
+    `- Every span must carry the agent name \`${agentName(params)}\` exactly as it is named in NeMo Helix (\`gen_ai.agent.name\`, or \`llm.agent.name\` / \`agent.name\` depending on the convention your instrumentation emits). This is the name I created the agent under in Studio, not whatever name the agent's own code, framework, or class defaults to — override it if they differ. Studio's agent overview is keyed on this exact value — if it is missing, inconsistent, or does not match \`${agentName(params)}\` verbatim, the traces land but the agent page stays empty.`,
     `- Set a stable session ID so multi-turn runs group into one session.`,
     `- Assume volume. Ingest them in batches, keep going after a single bad record, and tell me how many landed versus how many were skipped and why.`,
     `- My exports are probably not clean. Expect mixed shapes, one-trace-per-file directories, JSONL, gzipped archives, extra wrapper keys, or missing agent names. Write a small throwaway script to normalize them before ingesting rather than asking me to hand-edit files.`,
@@ -112,7 +112,7 @@ export const traceImportPrompt = (params: CodingAgentPromptParams): string =>
     `1. The agent has been run at least once against real input with instrumentation enabled.`,
     `2. Querying Intake back returns those spans with the expected hierarchy, inputs, outputs, and statuses. Do not stop at page 1 — page through every result (or read \`pagination.total_results\` from the response) and reconcile it against how many records you sent, how many landed, and how many were skipped and why:`,
     `   \`\`\`bash`,
-    `   curl -g "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[agent_name]=$AGENT_NAME&page=1&page_size=100"`,
+    `   curl -g "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[agent_name]=$AGENT_NAME&page=1&page_size=100"`,
     `   \`\`\``,
     `3. The returned \`agent_name\` matches \`${agentName(params)}\` exactly.`,
     `4. Tell me what to run to keep producing traces going forward, and what I would have to change to switch ingest formats later.`,
@@ -142,7 +142,7 @@ export const traceImportPrompt = (params: CodingAgentPromptParams): string =>
  */
 export const agentIntegrationPrompt = (params: CodingAgentPromptParams): string =>
   [
-    `# Integrate my agent with NeMo Platform`,
+    `# Integrate my agent with NeMo Helix`,
     ``,
     `I want to evaluate this agent, run automatic optimization on it, and manage its deployments from NeMo Studio.`,
     ``,

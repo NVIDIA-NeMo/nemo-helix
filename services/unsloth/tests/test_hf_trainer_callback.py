@@ -6,8 +6,8 @@
 from unittest.mock import MagicMock
 
 import pytest
-from nmp.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
-from nmp.unsloth.tasks.training.backends.hf_trainer_callback import (
+from nhx.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
+from nhx.unsloth.tasks.training.backends.hf_trainer_callback import (
     _epoch_from_value,
     create_hf_trainer_progress_callback,
 )
@@ -47,6 +47,7 @@ class TestEpochFromValue:
 class TestHfTrainerProgressCallback:
     @pytest.fixture
     def progress(self) -> tuple[TrainingProgressCallback, MagicMock]:
+        pytest.importorskip("transformers")
         reporter = MagicMock()
         reporter.fetch_current_metrics.return_value = {"train_loss": [], "val_loss": []}
         return TrainingProgressCallback(reporter), reporter

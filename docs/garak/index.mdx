@@ -1,0 +1,110 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+description: Scan and audit large language models for jailbreaks, prompt injection, encoding bypasses, and other safety failures using NeMo garak, powered by garak.
+---
+
+<a id="about-garak"></a>
+
+<Warning>
+
+NVIDIA NeMo garak is released with _early access_ availability and is subject to limited support and potential API changes in future releases.
+
+</Warning>
+
+NVIDIA NeMo garak audits LLMs by probing them with adversarial prompts and detecting failures such as jailbreaks, prompt injection, encoding bypasses, and unsafe output generation.
+It is powered by [garak](https://github.com/NVIDIA/garak), NVIDIA's open-source LLM vulnerability scanner, and integrates with NeMo Helix so audits can target any model reachable through the Inference Gateway.
+
+<Button href="/documentation/vulnerability-scanning/tutorials" variant="secondary">**Tutorials**</Button>
+<Button href="/documentation/vulnerability-scanning/sdk-resources" variant="secondary">**SDK Resources**</Button>
+
+---
+
+## Typical Workflow
+
+A typical audit looks like the following:
+
+1. Create an [audit target](/documentation/vulnerability-scanning/targets) for the model you want to test.
+1. Create an [audit configuration](/documentation/vulnerability-scanning/configurations) that selects which garak probes and detectors to run, along with reporting settings.
+1. [Run the audit](/documentation/vulnerability-scanning/tutorials/run-an-audit-locally) and inspect the resulting JSONL, HTML, and hitlog reports.
+
+The plugin exposes both [synchronous and asynchronous](/documentation/vulnerability-scanning/sdk-resources) Python entry points for each step.
+
+---
+
+## Setup
+
+Before you can run audits, you need a working NeMo Helix install with the garak plugin enabled and a garak interpreter on disk.
+
+- Follow [Setup](/documentation/get-started) to install the platform and start local services.
+- Install garak in a Python virtual environment. By default the plugin invokes `~/.garak/.venv/bin/python -m garak`; override the interpreter path with `NEMO_GARAK_PYTHON` if you installed it elsewhere.
+- Configure at least one [Inference Gateway provider](/documentation/models-and-inference) so audits can route requests to the model under test.
+
+---
+
+## Upgrading from NeMo Auditor
+
+The plugin was renamed from `auditor` to `garak`. Plan for the following when you upgrade an existing deployment:
+
+- **Drain audit jobs first.** Let queued and running audit jobs finish before you upgrade. A job queued under the old name references the `auditor` executor profile, the `nhx-auditor-tasks` image, and the `nemo_auditor` task module, none of which exist after the upgrade, so it cannot be dispatched or resumed.
+- **Completed jobs stay available.** Previously created jobs remain listed and can be retrieved by name through the new `/apis/garak/` routes.
+- **Update names.** Use `nemo garak` instead of `nemo auditor`, `client.garak` instead of `client.auditor`, `/apis/garak/` instead of `/apis/auditor/`, and `NEMO_GARAK_PYTHON` instead of `NEMO_AUDITOR_GARAK_PYTHON`.
+- **Rename config overrides.** Move any `auditor:` configuration block, including `job_executor_profile`, to `garak:`. The old key is ignored.
+- **Permissions are unchanged.** Existing roles and scopes that use the `auditor` names keep working.
+
+---
+
+## Task Guides
+
+<Cards>
+
+<Card title="Audit Targets" href="/documentation/vulnerability-scanning/targets">
+
+Define the model under test — generator type, model identifier, and inference endpoint.
+
+</Card>
+<Card title="Audit Configurations" href="/documentation/vulnerability-scanning/configurations">
+
+Choose probes, detectors, and reporting settings for the audit.
+
+</Card>
+<Card title="Run an Audit Locally" href="/documentation/vulnerability-scanning/tutorials/run-an-audit-locally">
+
+End-to-end walkthrough: create entities, run the audit in-process, read the report artifacts.
+
+</Card>
+<Card title="SDK Resources" href="/documentation/vulnerability-scanning/sdk-resources">
+
+Reference for the `GarakPluginResource(client)` SDK surface: `configs`, `targets`, and `run()`.
+
+</Card>
+
+</Cards>
+
+## References
+
+<Cards>
+
+<Card title="Configuration Schema" href="/documentation/vulnerability-scanning/configurations/schema">
+
+Field reference for `AuditConfig` and its `system`, `run`, `plugins`, and `reporting` sub-models.
+
+</Card>
+<Card title="Target Schema" href="/documentation/vulnerability-scanning/targets/schema">
+
+Field reference for `AuditTarget` (`type`, `model`, `options`).
+
+</Card>
+<Card title="Selecting Probes" href="/documentation/vulnerability-scanning/configurations/selecting-probes">
+
+`probe_spec`, `probe_tags`, and `detector_spec` syntax with worked examples.
+
+</Card>
+<Card title="Inference Gateway" href="/documentation/vulnerability-scanning/targets/inference-gateway">
+
+How `nhx_uri_spec` resolves a target's URI through a NeMo Helix provider.
+
+</Card>
+
+</Cards>

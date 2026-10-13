@@ -55,10 +55,10 @@ import type {
   ManifestInit,
   ManifestUpdate,
   ModelConfigDefaults,
-  PlatformJobListResultResponse,
-  PlatformJobLogPage,
-  PlatformJobResultResponse,
-  PlatformJobStatusResponse,
+  HelixJobListResultResponse,
+  HelixJobLogPage,
+  HelixJobResultResponse,
+  HelixJobStatusResponse,
   SynthBenignJob,
   SynthBenignJobRequest,
   SynthBenignJobsPage,
@@ -472,7 +472,7 @@ export const agentHardenerGetJobResult = (
 ) => {
 
 
-      return customFetch<PlatformJobResultResponse>(
+      return customFetch<HelixJobResultResponse>(
       {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(job))}/results/${encodeURIComponent(String(name))}`, method: 'GET', signal
     },
       );
@@ -1105,7 +1105,7 @@ export const agentHardenerGetJobLogs = (
 ) => {
 
 
-      return customFetch<PlatformJobLogPage>(
+      return customFetch<HelixJobLogPage>(
       {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(name))}/logs`, method: 'GET',
         params, signal
     },
@@ -1277,7 +1277,7 @@ export const agentHardenerListJobResults = (
 ) => {
 
 
-      return customFetch<PlatformJobListResultResponse>(
+      return customFetch<HelixJobListResultResponse>(
       {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(name))}/results`, method: 'GET', signal
     },
       );
@@ -1437,7 +1437,7 @@ export const agentHardenerGetJobStatus = (
 ) => {
 
 
-      return customFetch<PlatformJobStatusResponse>(
+      return customFetch<HelixJobStatusResponse>(
       {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(name))}/status`, method: 'GET', signal
     },
       );
@@ -3561,7 +3561,7 @@ export const agentHardenerGetSynthBenignJobResult = (
 ) => {
 
 
-      return customFetch<PlatformJobResultResponse>(
+      return customFetch<HelixJobResultResponse>(
       {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(job))}/results/${encodeURIComponent(String(name))}`, method: 'GET', signal
     },
       );
@@ -4194,7 +4194,7 @@ export const agentHardenerGetSynthBenignJobLogs = (
 ) => {
 
 
-      return customFetch<PlatformJobLogPage>(
+      return customFetch<HelixJobLogPage>(
       {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(name))}/logs`, method: 'GET',
         params, signal
     },
@@ -4366,7 +4366,7 @@ export const agentHardenerListSynthBenignJobResults = (
 ) => {
 
 
-      return customFetch<PlatformJobListResultResponse>(
+      return customFetch<HelixJobListResultResponse>(
       {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(name))}/results`, method: 'GET', signal
     },
       );
@@ -4526,7 +4526,7 @@ export const agentHardenerGetSynthBenignJobStatus = (
 ) => {
 
 
-      return customFetch<PlatformJobStatusResponse>(
+      return customFetch<HelixJobStatusResponse>(
       {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(name))}/status`, method: 'GET', signal
     },
       );

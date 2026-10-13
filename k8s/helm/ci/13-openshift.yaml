@@ -31,4 +31,4 @@ postgresql:
 # Since this isn't in the default kube spec, it won't validate correctly.
 #openshiftRoute:
 #  enabled: true
-#  host: "nmp.example.com"
+#  host: "nhx.example.com"

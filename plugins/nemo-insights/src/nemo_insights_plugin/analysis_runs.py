@@ -3,9 +3,7 @@
 
 """High-level Insights analysis-run request helpers.
 
-This module is a thin facade over the generic ``agents.execute`` job. The
-current ``AnalyzeJob`` can continue to run side-by-side while this path
-exercises the Analyst-as-Agent implementation.
+This module is a thin facade over the generic ``agents.execute`` job.
 
 Insights persists one :class:`~nemo_insights_plugin.entities.AnalysisRun` per
 run, holding only what the Jobs layer cannot know: that a job was an analysis
@@ -26,23 +24,25 @@ from collections.abc import Awaitable, Mapping
 from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_helix_plugin.agents.client import AsyncAgentsClient
+from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
+from nemo_helix_plugin.client.response import NemoResponse
+from nemo_helix_plugin.config import get_nemo_config
+from nemo_helix_plugin.dependencies import get_nemo_client
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.types import ModelEntity
+from nemo_helix_plugin.nooa_model_client import supported_backend_format
+from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin._perms import AnalysisRunPerms
 from nemo_insights_plugin.analyst.agent_config import AGENT_CONFIG_FORMAT, build_analyst_agent_config
 from nemo_insights_plugin.authz import scope
+from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.agents.client import AsyncAgentsClient
-from nemo_platform_plugin.agents.types import CreateExecuteJobRequest, JsonObject
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
-from nemo_platform_plugin.client.response import NemoResponse
-from nemo_platform_plugin.dependencies import get_sdk_client
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.models.types import ModelEntity
-from nemo_platform_plugin.schema import PaginationData
 from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
@@ -87,18 +87,45 @@ def mint_analysis_run_name() -> str:
 async def create_analysis_run(
     workspace: str,
     request: CreateAnalysisRunRequest,
-    sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Create an Insights analysis run backed by the generic ``agents.execute`` job."""
-    agents_client = client_from_platform(sdk, AsyncAgentsClient)
-    models_client = client_from_platform(sdk, AsyncModelsClient)
+    config = get_nemo_config(InsightsConfig)
+    return await submit_analysis_run(
+        workspace=workspace,
+        request=request,
+        agents_client=AsyncAgentsClient.from_client(client),
+        models_client=AsyncModelsClient.from_client(client),
+        entity_client=entity_client,
+        profile=config.analyst.job_profile,
+    )
+
+
+async def submit_analysis_run(
+    *,
+    workspace: str,
+    request: CreateAnalysisRunRequest,
+    agents_client: ExecuteJobClient,
+    models_client: ModelLookupClient,
+    entity_client: NemoEntitiesClient,
+    name: str | None = None,
+    profile: str | None = None,
+    base_url: str | None = None,
+) -> AnalysisRunResponse:
+    """Shared submission path for the API and the Insights scheduler.
+
+    The scheduler supplies a name so a persisted intent remains discoverable
+    even if submission or the subsequent scheduler-status write fails.
+    On-demand runs do not advance the scheduled cursor: their evaluation or
+    time scope may omit telemetry that the next scheduled run must still cover.
+    """
     # Resolve before recording anything: a bogus ref would otherwise persist a
     # run and submit a job that cannot start, and the request carries the only
     # copy of the operator's intent.
     request = await _resolve_model_refs(models_client, request, workspace=workspace)
     run = AnalysisRun(
-        name=mint_analysis_run_name(),
+        name=name or mint_analysis_run_name(),
         workspace=workspace,
         agent=request.agent,
         since=request.since,
@@ -113,12 +140,17 @@ async def create_analysis_run(
         logger.exception("Failed to record analysis run for agent '%s'", safe_agent)
         raise HTTPException(status_code=500, detail="Failed to record the analysis run.") from exc
 
-    spec = build_execute_agent_job_config(request, workspace=workspace, run_name=saved.name)
+    spec = build_execute_agent_job_config(request, workspace=workspace, run_name=saved.name, base_url=base_url)
     try:
         job = (
             await agents_client.create_execute_job(
                 workspace=workspace,
-                body=CreateExecuteJobRequest(spec=spec, name=saved.name),
+                body=CreateExecuteJobRequest(
+                    spec=spec,
+                    name=saved.name,
+                    profile=profile,
+                    custom_fields={"insights_analysis_agent": request.agent},
+                ),
             )
         ).data()
     except NemoHTTPError as exc:
@@ -193,11 +225,11 @@ async def list_analysis_runs(
 async def get_analysis_run(
     workspace: str,
     name: str,
-    sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Get one analysis run, joined with the live state of its backing job."""
-    agents_client = client_from_platform(sdk, AsyncAgentsClient)
+    agents_client = AsyncAgentsClient.from_client(client)
     try:
         run = await entity_client.get(AnalysisRun, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
@@ -248,7 +280,7 @@ async def _resolve_model_refs(
 
 
 async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str, workspace: str) -> str:
-    """Return ``<workspace>/<name>`` for an existing Model Entity, or raise 422."""
+    """Return ``<workspace>/<name>`` for an existing Model Entity the Analyst can call, or raise 422."""
     match ref.split("/"):
         case [name]:
             model_workspace = workspace
@@ -261,7 +293,7 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
             )
 
     try:
-        await client.get_model(name=name, workspace=model_workspace)
+        model_entity = (await client.get_model(name=name, workspace=model_workspace)).data()
     except NotFoundError as exc:
         raise HTTPException(
             status_code=422,
@@ -276,10 +308,18 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
         raise HTTPException(
             status_code=503, detail="Could not reach the Models service to validate the model refs."
         ) from exc
+    # The Analyst job would otherwise start and fail when it builds its model
+    # clients, after the run is recorded and a pod has been scheduled.
+    try:
+        supported_backend_format(model_entity)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field}: {exc}") from exc
     return f"{model_workspace}/{name}"
 
 
-def build_execute_agent_job_config(request: CreateAnalysisRunRequest, *, workspace: str, run_name: str) -> JsonObject:
+def build_execute_agent_job_config(
+    request: CreateAnalysisRunRequest, *, workspace: str, run_name: str, base_url: str | None = None
+) -> JsonObject:
     """Translate a high-level Insights request into a generic execute-agent job config."""
     extension_config: JsonObject = {
         "agent": request.agent,
@@ -287,7 +327,7 @@ def build_execute_agent_job_config(request: CreateAnalysisRunRequest, *, workspa
     }
     payload = _json_object(
         {
-            "agent": _inline_analyst(request, workspace=workspace),
+            "agent": _inline_analyst(request, workspace=workspace, base_url=base_url),
             "input": _analysis_prompt(request.agent),
             "extension": {
                 "kind": INSIGHTS_ANALYSIS_EXTENSION_KIND,
@@ -301,7 +341,7 @@ def build_execute_agent_job_config(request: CreateAnalysisRunRequest, *, workspa
     return payload
 
 
-def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str) -> JsonObject:
+def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str, base_url: str | None = None) -> JsonObject:
     """Build the ``agent`` arm of the execute job as an inline definition.
 
     The Analyst has no Agent entity: its config is composed here from the
@@ -317,6 +357,7 @@ def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str) -> Jso
             "config": build_analyst_agent_config(
                 agent=request.agent,
                 workspace=workspace,
+                base_url=base_url,
                 default_model=request.default_model,
                 fast_model=request.fast_model,
                 ethos=request.ethos,

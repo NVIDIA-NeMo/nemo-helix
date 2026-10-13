@@ -68,7 +68,7 @@ def _image_metadata() -> dict[str, str]:
         "agent_id": "abc123",
         "agent_version": "1.0.0",
         "agent_author": "Agent Author",
-        "agent_framework": "nemo_platform_agent",
+        "agent_framework": "nemo_helix_agent",
         "build_timestamp": "2026-08-01T00:00:00+00:00",
         "description": "Fabric agent",
         "licenses": "Apache-2.0",
@@ -145,6 +145,36 @@ class TestValidateFabricAgentPackage:
 
         with pytest.raises(FabricPackageArtifactError, match="skills/missing"):
             await validate_fabric_agent_package(agent_config_path, context_dir=tmp_path)
+
+    async def test_pi_adapter_skips_host_plan_but_validates_artifacts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The Pi adapter's descriptor is staged inside the image, not on the host, so
+        # host-side plan resolution must be skipped — while artifact validation still runs.
+        valid_config = _write_package_config(tmp_path / "agent.yaml")
+        fabric_config = MagicMock()
+        fabric_config.harness.adapter_id = "nvidia.fabric.pi"
+        monkeypatch.setattr(fabric_validator, "translate_agent_config", lambda config: fabric_config)
+        plan = AsyncMock(side_effect=AssertionError("plan_fabric_config must not run for a Pi agent"))
+        monkeypatch.setattr(fabric_validator, "plan_fabric_config", plan)
+
+        result = await validate_fabric_agent_package(valid_config, context_dir=tmp_path)
+
+        plan.assert_not_awaited()
+        assert result.plan is None
+
+    async def test_non_pi_adapter_still_plans_on_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        valid_config = _write_package_config(tmp_path / "agent.yaml")
+        fabric_config = MagicMock()
+        fabric_config.harness.adapter_id = "nvidia.fabric.codex"
+        monkeypatch.setattr(fabric_validator, "translate_agent_config", lambda config: fabric_config)
+        plan = AsyncMock(return_value={"plan": "ok"})
+        monkeypatch.setattr(fabric_validator, "plan_fabric_config", plan)
+
+        result = await validate_fabric_agent_package(valid_config, context_dir=tmp_path)
+
+        plan.assert_awaited_once()
+        assert result.plan == {"plan": "ok"}
 
 
 class TestFabricBuilderValidationHook:
@@ -235,9 +265,8 @@ class TestFabricBuilderValidationHook:
             agent_version="2.0.0",
             agent_author="Agent Author",
             build_env={
-                "agent_framework": "nemo_platform_agent",
+                "agent_framework": "nemo_helix_agent",
                 "contract_version": "1.0.0",
-                "nemo_relay_cli_version": template.PINNED_NEMO_RELAY_CLI_VERSION,
                 "base_image_url": "registry.example/base",
                 "base_image_tag": "release",
                 "python_version": "3.13",
@@ -249,19 +278,15 @@ class TestFabricBuilderValidationHook:
 
     def test_default_tag_uses_fabric_name_and_runtime_identity(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.metadata import (
-            NEMO_PLATFORM_AGENT_FRAMEWORK,
+            NEMO_HELIX_AGENT_FRAMEWORK,
             extract_agent_metadata,
         )
-        from nemo_agents_plugin.container.template import (
-            PINNED_NEMO_RELAY_CLI_VERSION,
-            get_contract_version,
-        )
+        from nemo_agents_plugin.container.template import get_contract_version
 
         agent_config_path = _write_package_config(tmp_path / "agent.yaml")
         build_env = {
-            "agent_framework": NEMO_PLATFORM_AGENT_FRAMEWORK,
+            "agent_framework": NEMO_HELIX_AGENT_FRAMEWORK,
             "contract_version": get_contract_version(),
-            "nemo_relay_cli_version": PINNED_NEMO_RELAY_CLI_VERSION,
             "base_image_url": "registry.example/base",
             "base_image_tag": "release",
             "python_version": "3.13",

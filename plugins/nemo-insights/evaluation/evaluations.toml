@@ -3,7 +3,7 @@
 
 # Evaluation subjects for the analyst harness — one table per subject.
 # Top-level keys are shared defaults merged into every subject.
-base_url = "https://nemo-platform-freeplay.dev.aire.nvidia.com"
+base_url = "https://nemo-helix-freeplay.dev.aire.nvidia.com"
 state_s3_endpoint = "https://pdx.s8k.io"
 state_s3_region = "us-east-1"
 state_s3_bucket = "insights-analyst-evaluation-dataset"
@@ -46,7 +46,7 @@ base_url = "http://localhost:8080"
 [tau2-airline]
 type = "benchmark"
 domain = "airline"
-base_url = "https://nemo-platform-freeplay.dev.aire.nvidia.com"  # remote (freeplay) default
+base_url = "https://nemo-helix-freeplay.dev.aire.nvidia.com"  # remote (freeplay) default
 workspace = "tau2-airline"
 state = "state-v6"
 tau2_repo = "../tau2-bench"   # tau2-bench checkout: relative to the repo root (sibling clone), or absolute

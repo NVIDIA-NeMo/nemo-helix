@@ -27,7 +27,7 @@
 #   OPENSANDBOX_SERVER_CHART     Optional chart path or .tgz URL (overrides download / checkout server)
 #   OPENSANDBOX_CONTROLLER_VERSION  GitHub Release chart version (default: 0.2.0)
 #   OPENSANDBOX_UMBRELLA_VERSION    Umbrella tarball that contains the server chart (default: 0.2.2)
-#   KUBE_NAMESPACE               Job / Helm-release namespace (default: default). Alias: NMP_NAMESPACE
+#   KUBE_NAMESPACE               Job / Helm-release namespace (default: default). Alias: NHX_NAMESPACE
 #   MINIKUBE_PROFILE             kubectl/helm --context (default: minikube). Does not change the current kubeconfig context.
 #   SKIP_VERIFY=1                Skip k8s/helm/examples/opensandbox/verify/shared-kernel.sh
 #   HELM_TIMEOUT                 Helm --wait timeout (default: 10m)
@@ -40,8 +40,8 @@ source "${SCRIPT_DIR}/lib.sh"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 EXAMPLES="${REPO_ROOT}/k8s/helm/examples/opensandbox"
 CONTROL_PLANE_NS="opensandbox-system"
-KUBE_NAMESPACE="${KUBE_NAMESPACE:-${NMP_NAMESPACE:-default}}"
-NMP_NAMESPACE="${KUBE_NAMESPACE}"
+KUBE_NAMESPACE="${KUBE_NAMESPACE:-${NHX_NAMESPACE:-default}}"
+NHX_NAMESPACE="${KUBE_NAMESPACE}"
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${MINIKUBE_PROFILE}}"
 HELM_TIMEOUT="${HELM_TIMEOUT:-10m}"
@@ -191,7 +191,7 @@ kubectl rollout status deployment/opensandbox-server -n "${CONTROL_PLANE_NS}" --
 if [ "${SKIP_VERIFY:-}" != "1" ]; then
     log_info "Verifying shared-kernel OpenSandbox..."
     OPEN_SANDBOX_WORKLOAD_NS="${KUBE_NAMESPACE}" \
-      NMP_NAMESPACE="${KUBE_NAMESPACE}" \
+      NHX_NAMESPACE="${KUBE_NAMESPACE}" \
       "${EXAMPLES}/verify/shared-kernel.sh"
 fi
 

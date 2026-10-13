@@ -230,7 +230,8 @@ def test_startup_loads_and_validates_agent_config(
     assert mock_validate_agent_config == [(app.state.agent_config, tmp_path)]
 
 
-def test_main_starts_packaged_server(tmp_path: Path) -> None:
+@pytest.mark.parametrize("socket_fd", [None, 123])
+def test_main_starts_packaged_server(tmp_path: Path, socket_fd: int | None) -> None:
     config_path = _write_agent_config(tmp_path)
     app = object()
 
@@ -247,11 +248,12 @@ def test_main_starts_packaged_server(tmp_path: Path) -> None:
                 "--port",
                 "8000",
             ]
+            + (["--socket-fd", str(socket_fd)] if socket_fd is not None else [])
         )
 
     assert result == 0
     create_app.assert_called_once_with(config_path, settings=FabricServingSettings())
-    run.assert_called_once_with(app, host="0.0.0.0", port=8000, log_config=None)
+    run.assert_called_once_with(app, host="0.0.0.0", port=8000, fd=socket_fd, log_config=None)
 
 
 def test_shutdown_stops_all_registered_runtimes(

@@ -56,6 +56,10 @@ const hasRlTraining = (spec: unknown): boolean =>
 
 export const isRlSpec = (spec: unknown): spec is RlJobOutput => hasRlTraining(spec);
 
+/** Narrows a persisted backend string, e.g. a saved template's own `backend` field. */
+export const toCustomizationBackend = (value: unknown): CustomizationBackend | undefined =>
+  Object.values(CustomizationBackend).find((backend) => backend === value);
+
 export const getCustomizationBackend = (spec: unknown): CustomizationBackend | undefined => {
   if (isAutomodelSpec(spec)) return CustomizationBackend.automodel;
   if (isUnslothSpec(spec)) return CustomizationBackend.unsloth;

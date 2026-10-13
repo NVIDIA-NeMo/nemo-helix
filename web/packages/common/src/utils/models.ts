@@ -3,6 +3,7 @@
 
 import {
   type Adapter,
+  FinetuningType,
   ModelDeploymentStatus,
   type ModelEntity,
 } from '@nemo/sdk/generated/platform/schema';
@@ -62,30 +63,48 @@ export const getBaseModelURN = (model: ModelEntity) => {
 };
 
 /**
+ * The model name a chat request puts on the wire, for the gateway's model-entity
+ * route (`/workspaces/{workspace}/model/{name}/-/v1/...`).
+ *
+ * For a plain model this is just its name. For a LoRA adapter it is the composite
+ *
+ *     {base_name}&adapters/{adapter_workspace}/{adapter_name}
+ *
+ * The base segment is the **bare** entity name, not `{workspace}/{name}`: the
+ * gateway splits the composite on `&adapters/` and looks up the VirtualModel by
+ * `(workspace, base_name)`, with the workspace taken from the URL. The adapter
+ * segment carries its own workspace because an adapter may live in a different one
+ * from its base.
+ *
+ * The gateway resolves the composite through the base model's VirtualModel — so an
+ * adapter request inherits that VM's middleware (guardrails, Switchyard routing,
+ * translate) — and rewrites the body to the backend's own served name on the way
+ * out. That name is therefore the gateway's concern, not the client's.
+ *
+ * @param model - The base model entity being served
+ * @param adapter - The adapter to target, if any
+ * @returns The value for the request's `model` field and URL name segment
+ */
+export const toInferenceModelName = (model: ModelEntity, adapter?: Adapter | null): string =>
+  adapter ? `${model.name}&adapters/${adapter.workspace}/${adapter.name}` : model.name;
+
+/**
  * Platform-side model entity id, as it appears in a provider's `served_models`.
  *
- * This is an **identity, not a wire value**. Use it to find the provider entry
- * for a model or adapter; the value that goes into a request body is that
- * entry's `served_model_name`, which is the backend's own name and is discovered
- * rather than derived (`{ws}--{name}`, sometimes namespace-qualified, plus two
- * legacy shapes).
+ * This is an **identity, not a wire value** — use {@link toInferenceModelName} for
+ * the latter. Its use is to find the provider entry for a model or adapter, which
+ * answers whether anything actually serves it.
  *
- * A LoRA adapter has no standalone Model Entity, so the platform addresses it
- * with a composite id built by the provider reconciler:
- *
- *     {base_workspace}/{base_name}&adapters/{adapter_workspace}/{adapter_name}
- *
- * The adapter segment carries its own workspace because an adapter may live in a
- * different one from the base model.
+ * A LoRA adapter has no standalone Model Entity, so the platform addresses it with a
+ * composite id built by the provider reconciler; this is {@link toInferenceModelName}
+ * qualified by the base model's workspace.
  *
  * @param model - The base model entity being served
  * @param adapter - The adapter to target, if any
  * @returns The `model_entity_id` to match against `provider.served_models`
  */
-export const toInferenceModelEntityId = (model: ModelEntity, adapter?: Adapter | null): string => {
-  const base = `${model.workspace}/${model.name}`;
-  return adapter ? `${base}&adapters/${adapter.workspace}/${adapter.name}` : base;
-};
+export const toInferenceModelEntityId = (model: ModelEntity, adapter?: Adapter | null): string =>
+  `${model.workspace}/${toInferenceModelName(model, adapter)}`;
 
 /**
  * Build a model config for evaluation related types like targets and metrics
@@ -130,6 +149,50 @@ const isWithinDeploymentGracePeriod = (model: ModelEntity) => {
   const now = Date.now();
   return now - createdAt < MODEL_DEPLOYMENT_GRACE_PERIOD_MS;
 };
+
+/**
+ * Finetuning types that emit an **adapter** rather than a set of weights.
+ *
+ * A model trained this way has nothing to serve on its own: inference runs on a
+ * deployment of its base model, with the adapter loaded alongside. Everything
+ * else in {@link FinetuningType} — `all_weights`, `lora_merged`, the partial-
+ * freeze variants, and every preference-optimisation type — produces a complete
+ * model that owns its own deployment.
+ *
+ * Listed explicitly rather than matched on a `lora` prefix: `lora_merged` starts
+ * with it and is the opposite case, and `prompt_tuning` / `p_tuning` / `soft_prompt`
+ * do not contain it at all.
+ */
+const ADAPTER_FINETUNING_TYPES: ReadonlySet<FinetuningType> = new Set([
+  FinetuningType.lora,
+  FinetuningType.qlora,
+  FinetuningType.adalora,
+  FinetuningType.dora,
+  FinetuningType.lora_plus,
+  FinetuningType.prompt_tuning,
+  FinetuningType.prefix_tuning,
+  FinetuningType.p_tuning,
+  FinetuningType.p_tuning_v2,
+  FinetuningType.soft_prompt,
+]);
+
+/**
+ * Whether inference for this model runs on a deployment of its **base model**.
+ *
+ * `base_model` alone does not answer this. It records what the model was derived
+ * from, and a full-weight fine-tune sets it just as an adapter does — but that run
+ * registers a new Model Entity with its own weights, its own deployment and its own
+ * provider. Reading `base_model` as "served by the base" reports such a model as
+ * having no active deployment whenever the base happens not to be deployed, which is
+ * the normal state after a full-weight run.
+ *
+ * `finetuning_type` is what distinguishes them. Absent, the model is not a fine-tune
+ * at all and is served on its own.
+ */
+export function isServedByBaseModel(model: ModelEntity): boolean {
+  if (!model.base_model) return false;
+  return Boolean(model.finetuning_type && ADAPTER_FINETUNING_TYPES.has(model.finetuning_type));
+}
 
 export type ModelChatStatus = 'enabled' | 'disabled' | 'pending';
 

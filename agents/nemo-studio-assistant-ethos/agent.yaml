@@ -3,12 +3,12 @@
 
 config_format: nemo-agents-spec-v1
 name: nemo-studio-assistant
-description: NeMo Studio assistant for discovering, configuring, operating, evaluating, and troubleshooting NeMo Platform resources through approval-aware SDK actions.
+description: NeMo Studio assistant for discovering, configuring, operating, evaluating, and troubleshooting NeMo Helix resources through approval-aware SDK actions.
 
 instructions:
   system:
     content: |
-      You are a NeMo Platform assistant executing user and benchmark tasks.
+      You are a NeMo Helix assistant executing user and benchmark tasks.
 
       Complete every numbered requirement before returning. Do not return a plan
       for a human to run. Execute requested operations with the available tools,
@@ -75,8 +75,8 @@ mcp:
       transport: stdio
       url: nemo-studio-assistant-mcp
       env:
-        NMP_BASE_URL: http://host.docker.internal:8080
-        NMP_WORKSPACE: default
+        NHX_BASE_URL: http://host.docker.internal:8080
+        NHX_WORKSPACE: default
       exposure: harness_native
 
 tools:

@@ -11,29 +11,25 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform.types.inference.middleware_call import MiddlewareCall as SDKMiddlewareCall
-from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_platform.types.inference.virtual_model_inference_config import (
-    VirtualModelInferenceConfig as SDKVirtualModelInferenceConfig,
-)
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     NemoInferenceMiddleware,
 )
-from nemo_platform_plugin.inference_middleware_models import (
-    VirtualModel as PluginVirtualModel,
+from nemo_helix_plugin.inference_middleware_models import (
+    MiddlewareCall,
+    VirtualModel,
+    VirtualModelInferenceConfig,
 )
-from nmp.core.inference_gateway.api.middleware_registry import (
+from nhx.core.inference_gateway.api.middleware_registry import (
     InferenceMiddlewareCacheAccessorImpl,
     MiddlewareConfigRef,
     MiddlewareRegistry,
     PrefetchResult,
-    _sdk_vm_to_plugin_vm,
     collect_config_refs,
     load_middleware_plugins,
 )
-from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
-from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 skip_flaky_caplog = pytest.mark.skip(reason="Flaky caplog assertions in middleware registry tests")
 
@@ -42,40 +38,41 @@ skip_flaky_caplog = pytest.mark.skip(reason="Flaky caplog assertions in middlewa
 # ---------------------------------------------------------------------------
 
 
-def _make_sdk_vm(
+def _make_vm(
     workspace: str,
     name: str,
-    request_middleware: list[SDKMiddlewareCall] | None = None,
-    response_middleware: list[SDKMiddlewareCall] | None = None,
-    post_response_middleware: list[SDKMiddlewareCall] | None = None,
-    models: list[SDKVirtualModelInferenceConfig] | None = None,
+    request_middleware: list[MiddlewareCall] | None = None,
+    response_middleware: list[MiddlewareCall] | None = None,
+    post_response_middleware: list[MiddlewareCall] | None = None,
+    models: list[VirtualModelInferenceConfig] | None = None,
     updated_at: str = "2026-01-01T00:00:00Z",
-) -> SDKVirtualModel:
-    return SDKVirtualModel(
-        id=f"{workspace}/{name}",
-        entity_id=f"{workspace}/{name}",
-        name=name,
-        workspace=workspace,
-        parent=workspace,
-        db_version=1,
-        created_at="2026-01-01T00:00:00Z",
-        updated_at=updated_at,
-        default_model_entity=f"{workspace}/{name}",
-        request_middleware=request_middleware or [],
-        response_middleware=response_middleware or [],
-        post_response_middleware=post_response_middleware or [],
-        models=models or [],
+) -> VirtualModel:
+    return VirtualModel.model_validate(
+        {
+            "id": f"{workspace}/{name}",
+            "name": name,
+            "workspace": workspace,
+            "parent": workspace,
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": updated_at,
+            "default_model_entity": f"{workspace}/{name}",
+            "request_middleware": [c.model_dump() for c in request_middleware or []],
+            "response_middleware": [c.model_dump() for c in response_middleware or []],
+            "post_response_middleware": [c.model_dump() for c in post_response_middleware or []],
+            "models": [m.model_dump() for m in models or []],
+        }
     )
 
 
-def _make_sdk_call(
+def _make_call(
     name: str, config_type: str = "my_config", config: dict | None = None, config_id: str | None = None
-) -> SDKMiddlewareCall:
-    return SDKMiddlewareCall(name=name, config_type=config_type, config=config, config_id=config_id)
+) -> MiddlewareCall:
+    return MiddlewareCall(name=name, config_type=config_type, config=config, config_id=config_id)
 
 
 def _make_mock_plugin() -> NemoInferenceMiddleware:
     plugin = MagicMock(spec=NemoInferenceMiddleware)
+    plugin.supports_middleware_phase.return_value = True
     plugin.on_startup = AsyncMock()
     plugin.on_shutdown = AsyncMock()
     plugin.on_virtual_model_upserted = AsyncMock()
@@ -91,6 +88,11 @@ def _make_model_provider_info(workspace: str, name: str, host_url: str = "http:/
     provider.name = name
     provider.host_url = host_url
     provider.api_key_secret_name = None
+    provider.auth_header_format = None
+    provider.default_extra_body = {}
+    provider.required_extra_body = {}
+    provider.default_extra_headers = {}
+    provider.required_extra_headers = {}
     return ModelProviderInfo(model_provider=provider)
 
 
@@ -163,7 +165,7 @@ class TestInferenceMiddlewareCacheAccessorImpl:
 
     def test_get_virtual_model_returns_vm(self):
         vm_cache = VirtualModelCache()
-        vm = _make_sdk_vm("ws", "my-vm")
+        vm = _make_vm("ws", "my-vm")
         vm_cache.rebuild([vm])
 
         accessor = self._make_accessor(virtual_model_cache=vm_cache)
@@ -177,7 +179,7 @@ class TestInferenceMiddlewareCacheAccessorImpl:
 
     def test_list_virtual_models_for_workspace(self):
         vm_cache = VirtualModelCache()
-        vm_cache.rebuild([_make_sdk_vm("ws", "vm-a"), _make_sdk_vm("ws", "vm-b"), _make_sdk_vm("other", "vm-c")])
+        vm_cache.rebuild([_make_vm("ws", "vm-a"), _make_vm("ws", "vm-b"), _make_vm("other", "vm-c")])
 
         accessor = self._make_accessor(virtual_model_cache=vm_cache)
         result = accessor.list_virtual_models_for_workspace("ws")
@@ -187,16 +189,56 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         model_cache = ModelCache()
         virtual_model_cache = VirtualModelCache()
         provider_info = _make_model_provider_info("ws", "nim-provider", host_url="http://nim.svc:8080")
+        provider_info.model_provider.api_key_secret_name = "nim-secret"
+        provider_info.model_provider.auth_header_format = "X-Api-Key: {{ auth_secret }}"
+        provider_info.model_provider.default_extra_body = {"temperature": 0.2}
+        provider_info.model_provider.required_extra_body = {"stream": False}
+        provider_info.model_provider.default_extra_headers = {"X-Default": "yes"}
+        provider_info.model_provider.required_extra_headers = {"X-Required": "yes"}
+        provider_info.secret_value = "secret-value"
         entity_info = ModelEntityInfo(workspace="ws", name="llama", backend_format=BackendFormat.ANTHROPIC_MESSAGES)
         entity_info.model_providers.append(("llama-v1", provider_info))
         model_cache.model_entity_info_map[("ws", "llama")] = entity_info
-        virtual_model_cache.rebuild([_make_sdk_vm("ws", "smart-router")])
+        virtual_model_cache.rebuild([_make_vm("ws", "smart-router")])
 
         accessor = self._make_accessor(model_cache=model_cache, virtual_model_cache=virtual_model_cache)
         target = accessor.get_inference_url_and_model("ws/llama")
         assert target.model_provider_gateway_url == "http://nim.svc:8080/v1"
         assert target.served_model_name == "llama-v1"
+        assert target.default_extra_body == {"temperature": 0.2}
+        assert target.required_extra_body == {"stream": False}
+        assert target.outbound_headers == {
+            "X-Api-Key": "secret-value",
+            "X-Default": "yes",
+            "X-Required": "yes",
+        }
+        assert target.missing_secret_name is None
         assert accessor.get_backend_format("ws/smart-router", "ws/llama") is BackendFormat.ANTHROPIC_MESSAGES
+
+    def test_get_inference_url_and_model_merges_headers_case_insensitively(self):
+        model_cache = ModelCache()
+        provider_info = _make_model_provider_info("ws", "nim-provider")
+        provider_info.model_provider.default_extra_headers = {
+            "x-shared": "default",
+            "X-Default": "yes",
+        }
+        provider_info.model_provider.required_extra_headers = {
+            "X-Shared": "required",
+            "X-Required": "yes",
+        }
+        entity_info = ModelEntityInfo(workspace="ws", name="llama")
+        entity_info.model_providers.append(("llama-v1", provider_info))
+        model_cache.model_entity_info_map[("ws", "llama")] = entity_info
+
+        target = self._make_accessor(model_cache=model_cache).get_inference_url_and_model("ws/llama")
+        normalized = {key.lower(): value for key, value in target.outbound_headers.items()}
+
+        assert normalized == {
+            "x-default": "yes",
+            "x-required": "yes",
+            "x-shared": "required",
+        }
+        assert len(target.outbound_headers) == 3
 
     def test_get_backend_format_uses_virtual_model_override(self):
         model_cache = ModelCache()
@@ -207,10 +249,12 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         model_cache.model_entity_info_map[("ws", "llama")] = entity_info
         virtual_model_cache.rebuild(
             [
-                _make_sdk_vm(
+                _make_vm(
                     "ws",
                     "smart-router",
-                    models=[SDKVirtualModelInferenceConfig(model="ws/llama", backend_format="ANTHROPIC_MESSAGES")],
+                    models=[
+                        VirtualModelInferenceConfig(model="ws/llama", backend_format=BackendFormat.ANTHROPIC_MESSAGES)
+                    ],
                 )
             ]
         )
@@ -225,7 +269,7 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         virtual_model_cache = VirtualModelCache()
         entity_info = ModelEntityInfo(workspace="ws", name="llama", backend_format=BackendFormat.ANTHROPIC_MESSAGES)
         model_cache.model_entity_info_map[("ws", "llama")] = entity_info
-        virtual_model_cache.rebuild([_make_sdk_vm("ws", "smart-router")])
+        virtual_model_cache.rebuild([_make_vm("ws", "smart-router")])
 
         accessor = self._make_accessor(model_cache=model_cache, virtual_model_cache=virtual_model_cache)
         backend_format = accessor.get_backend_format("ws/smart-router", "ws/llama")
@@ -237,7 +281,7 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         virtual_model_cache = VirtualModelCache()
         entity_info = ModelEntityInfo(workspace="ws", name="llama")
         model_cache.model_entity_info_map[("ws", "llama")] = entity_info
-        virtual_model_cache.rebuild([_make_sdk_vm("ws", "smart-router")])
+        virtual_model_cache.rebuild([_make_vm("ws", "smart-router")])
 
         accessor = self._make_accessor(model_cache=model_cache, virtual_model_cache=virtual_model_cache)
         backend_format = accessor.get_backend_format("ws/smart-router", "ws/llama")
@@ -263,13 +307,13 @@ class TestInferenceMiddlewareCacheAccessorImpl:
 
     def test_get_openai_compatible_inference_url_and_model_returns_target(self):
         vm_cache = VirtualModelCache()
-        vm_cache.rebuild([_make_sdk_vm("ws", "llama")])
+        vm_cache.rebuild([_make_vm("ws", "llama")])
         platform_config = MagicMock()
         platform_config.base_url = "http://platform.local:8080"
 
         accessor = self._make_accessor(virtual_model_cache=vm_cache)
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.get_platform_config", return_value=platform_config
+            "nhx.core.inference_gateway.api.middleware_registry.get_platform_config", return_value=platform_config
         ):
             target = accessor.get_openai_compatible_inference_url_and_model("ws/llama")
 
@@ -301,7 +345,7 @@ class TestResolveConfigsForVirtualModel:
     @pytest.mark.asyncio
     async def test_empty_middleware_stores_empty_lists(self):
         registry = MiddlewareRegistry()
-        vm = _make_sdk_vm("ws", "passthrough")
+        vm = _make_vm("ws", "passthrough")
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
 
         assert registry.request_middleware_calls[("ws", "passthrough")] == []
@@ -315,8 +359,8 @@ class TestResolveConfigsForVirtualModel:
         plugin.validate_middleware_config = AsyncMock(return_value={"validated": True})
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
 
-        call = _make_sdk_call("my-plugin", config_type="my_config", config={"key": "value"})
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[call])
+        call = _make_call("my-plugin", config_type="my_config", config={"key": "value"})
+        vm = _make_vm("ws", "vm", request_middleware=[call])
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
 
         plugin.validate_middleware_config.assert_awaited_once_with("my_config", {"key": "value"})
@@ -333,8 +377,8 @@ class TestResolveConfigsForVirtualModel:
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
         mref = MiddlewareConfigRef("my-plugin", "my_config", "ws/my-config")
 
-        call = _make_sdk_call("my-plugin", config_type="my_config", config_id="ws/my-config")
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[call])
+        call = _make_call("my-plugin", config_type="my_config", config_id="ws/my-config")
+        vm = _make_vm("ws", "vm", request_middleware=[call])
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult(fetched={mref: {"from": "store"}}))
 
         plugin.get_middleware_config.assert_not_awaited()
@@ -351,8 +395,8 @@ class TestResolveConfigsForVirtualModel:
         plugin.validate_middleware_config = AsyncMock(return_value={"ok": True})
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
         mref = MiddlewareConfigRef("my-plugin", "my_config", "ws/my-config")
-        call = _make_sdk_call("my-plugin", config_type="my_config", config_id="ws/my-config")
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[call])
+        call = _make_call("my-plugin", config_type="my_config", config_id="ws/my-config")
+        vm = _make_vm("ws", "vm", request_middleware=[call])
 
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult(fetched={mref: raw}))
 
@@ -364,8 +408,8 @@ class TestResolveConfigsForVirtualModel:
     @pytest.mark.asyncio
     async def test_unknown_plugin_marks_vm_broken(self, caplog):
         registry = MiddlewareRegistry(plugins={})
-        call = _make_sdk_call("missing-plugin")
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[call])
+        call = _make_call("missing-plugin")
+        vm = _make_vm("ws", "vm", request_middleware=[call])
 
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
 
@@ -391,8 +435,8 @@ class TestResolveConfigsForVirtualModel:
         registry.response_middleware_calls[("ws", "vm")] = [MagicMock()]
         registry.post_response_middleware_calls[("ws", "vm")] = [MagicMock()]
 
-        call = _make_sdk_call("my-plugin", config_id="ws/cfg")
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[call])
+        call = _make_call("my-plugin", config_id="ws/cfg")
+        vm = _make_vm("ws", "vm", request_middleware=[call])
 
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult(missing={mref}))
 
@@ -413,8 +457,8 @@ class TestResolveConfigsForVirtualModel:
         recovers naturally.
         """
         registry = MiddlewareRegistry(plugins={"my-plugin": _make_mock_plugin()})
-        call = _make_sdk_call("my-plugin", config_id="ws/cfg")
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[call])
+        call = _make_call("my-plugin", config_id="ws/cfg")
+        vm = _make_vm("ws", "vm", request_middleware=[call])
 
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
 
@@ -427,12 +471,26 @@ class TestResolveConfigsForVirtualModel:
         plugin.validate_middleware_config = AsyncMock(side_effect=ValueError("bad config"))
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
 
-        call = _make_sdk_call("my-plugin", config={"bad": True})
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[call])
+        call = _make_call("my-plugin", config={"bad": True})
+        vm = _make_vm("ws", "vm", request_middleware=[call])
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
 
         assert ("ws", "vm") not in registry.request_middleware_calls
         assert ("ws", "vm") in registry.broken_vms
+
+    @pytest.mark.asyncio
+    async def test_unsupported_response_phase_marks_vm_broken(self):
+        plugin = _make_mock_plugin()
+        plugin.supports_middleware_phase.side_effect = lambda phase: phase == "request"
+        registry = MiddlewareRegistry(plugins={"request-only": plugin})
+
+        call = _make_call("request-only", config={})
+        vm = _make_vm("ws", "vm", response_middleware=[call])
+        await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
+
+        assert ("ws", "vm") not in registry.response_middleware_calls
+        assert ("ws", "vm") in registry.broken_vms
+        plugin.validate_middleware_config.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_post_response_failure_does_not_mark_vm_broken(self):
@@ -447,10 +505,10 @@ class TestResolveConfigsForVirtualModel:
         plugin.validate_middleware_config = AsyncMock(side_effect=_validate)
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
 
-        req_call = _make_sdk_call("my-plugin", config={"phase": "req"})
-        resp_call = _make_sdk_call("my-plugin", config={"phase": "resp"})
-        post_call = _make_sdk_call("my-plugin", config={"phase": "post"})
-        vm = _make_sdk_vm(
+        req_call = _make_call("my-plugin", config={"phase": "req"})
+        resp_call = _make_call("my-plugin", config={"phase": "resp"})
+        post_call = _make_call("my-plugin", config={"phase": "post"})
+        vm = _make_vm(
             "ws",
             "vm",
             request_middleware=[req_call],
@@ -477,8 +535,8 @@ class TestResolveConfigsForVirtualModel:
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
         registry.broken_vms.add(("ws", "vm"))
 
-        call = _make_sdk_call("my-plugin", config={"phase": "req"})
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[call])
+        call = _make_call("my-plugin", config={"phase": "req"})
+        vm = _make_vm("ws", "vm", request_middleware=[call])
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
 
         assert ("ws", "vm") in registry.request_middleware_calls
@@ -489,10 +547,10 @@ class TestResolveConfigsForVirtualModel:
         plugin = _make_mock_plugin()
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
 
-        req_call = _make_sdk_call("my-plugin", config={"phase": "req"})
-        resp_call = _make_sdk_call("my-plugin", config={"phase": "resp"})
-        post_call = _make_sdk_call("my-plugin", config={"phase": "post"})
-        vm = _make_sdk_vm(
+        req_call = _make_call("my-plugin", config={"phase": "req"})
+        resp_call = _make_call("my-plugin", config={"phase": "resp"})
+        post_call = _make_call("my-plugin", config={"phase": "post"})
+        vm = _make_vm(
             "ws",
             "vm",
             request_middleware=[req_call],
@@ -507,18 +565,9 @@ class TestResolveConfigsForVirtualModel:
         assert len(registry.post_response_middleware_calls[("ws", "vm")]) == 1
 
     @pytest.mark.asyncio
-    async def test_vm_with_none_name_is_skipped(self):
+    async def test_vm_with_empty_name_is_skipped(self):
         registry = MiddlewareRegistry()
-        vm = SDKVirtualModel(
-            id="ws/",
-            entity_id="ws/",
-            name=None,
-            workspace="ws",
-            parent="ws",
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
-        )
+        vm = VirtualModel(name="", workspace="ws")
         # Should not raise
         await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
         assert len(registry.request_middleware_calls) == 0
@@ -532,8 +581,8 @@ class TestResolveConfigsForVirtualModel:
 
 class TestCollectMiddlewareConfigReferences:
     def test_dedupes_across_phases(self):
-        c1 = _make_sdk_call("p1", config_id="ws/a")
-        vm = _make_sdk_vm(
+        c1 = _make_call("p1", config_id="ws/a")
+        vm = _make_vm(
             "ws",
             "vm",
             request_middleware=[c1],
@@ -543,9 +592,9 @@ class TestCollectMiddlewareConfigReferences:
         assert refs == {MiddlewareConfigRef("p1", "my_config", "ws/a")}
 
     def test_all_phases_distinct_ids(self):
-        a = _make_sdk_call("p1", config_id="ws/a")
-        b = _make_sdk_call("p1", config_id="ws/b")
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[a], post_response_middleware=[b])
+        a = _make_call("p1", config_id="ws/a")
+        b = _make_call("p1", config_id="ws/b")
+        vm = _make_vm("ws", "vm", request_middleware=[a], post_response_middleware=[b])
         refs = collect_config_refs([vm])
         assert refs == {
             MiddlewareConfigRef("p1", "my_config", "ws/a"),
@@ -553,7 +602,7 @@ class TestCollectMiddlewareConfigReferences:
         }
 
     def test_skips_inline_config(self):
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[_make_sdk_call("p1", config={"k": 1})])
+        vm = _make_vm("ws", "vm", request_middleware=[_make_call("p1", config={"k": 1})])
         assert collect_config_refs([vm]) == set()
 
 
@@ -580,7 +629,7 @@ class TestFetchMiddlewareConfigResponses:
     @pytest.mark.asyncio
     async def test_partitions_missing_transient_and_fetched(self):
         """Each ref ends up in exactly one bucket based on the plugin's exception."""
-        from nemo_platform_plugin.inference_middleware import MiddlewareConfigNotFoundError
+        from nemo_helix_plugin.inference_middleware import MiddlewareConfigNotFoundError
 
         t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -642,7 +691,7 @@ class TestNotifyHooks:
         plugin_b = _make_mock_plugin()
         registry = MiddlewareRegistry(plugins={"plugin-a": plugin_a, "plugin-b": plugin_b})
 
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[_make_sdk_call("plugin-a", config={})])
+        vm = _make_vm("ws", "vm", request_middleware=[_make_call("plugin-a", config={})])
         await registry.notify_upserted(vm)
 
         plugin_a.on_virtual_model_upserted.assert_awaited_once()
@@ -653,7 +702,7 @@ class TestNotifyHooks:
         plugin_a = _make_mock_plugin()
         registry = MiddlewareRegistry(plugins={"plugin-a": plugin_a})
 
-        vm = _make_sdk_vm("ws", "vm", response_middleware=[_make_sdk_call("plugin-a", config={})])
+        vm = _make_vm("ws", "vm", response_middleware=[_make_call("plugin-a", config={})])
         await registry.notify_destroyed(vm)
 
         plugin_a.on_virtual_model_destroyed.assert_awaited_once()
@@ -665,7 +714,7 @@ class TestNotifyHooks:
         plugin.on_virtual_model_upserted = AsyncMock(side_effect=RuntimeError("boom"))
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
 
-        vm = _make_sdk_vm("ws", "vm", request_middleware=[_make_sdk_call("my-plugin", config={})])
+        vm = _make_vm("ws", "vm", request_middleware=[_make_call("my-plugin", config={})])
         # Should not raise
         await registry.notify_upserted(vm)
         assert "my-plugin" in caplog.text
@@ -675,11 +724,11 @@ class TestNotifyHooks:
         plugin = _make_mock_plugin()
         registry = MiddlewareRegistry(plugins={"my-plugin": plugin})
 
-        vm = _make_sdk_vm("ws", "my-vm", request_middleware=[_make_sdk_call("my-plugin", config={})])
+        vm = _make_vm("ws", "my-vm", request_middleware=[_make_call("my-plugin", config={})])
         await registry.notify_upserted(vm)
 
         call_arg = plugin.on_virtual_model_upserted.call_args[0][0]
-        assert isinstance(call_arg, PluginVirtualModel)
+        assert isinstance(call_arg, VirtualModel)
         assert call_arg.workspace == "ws"
         assert call_arg.name == "my-vm"
         assert call_arg.request_middleware[0].config == {}
@@ -740,7 +789,7 @@ class TestLoadMiddlewarePlugins:
         plugin_cls.return_value = instance
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"my-plugin": plugin_cls},
         ):
             registry = await load_middleware_plugins(ModelCache(), VirtualModelCache())
@@ -755,7 +804,7 @@ class TestLoadMiddlewarePlugins:
         plugin_cls.return_value = instance
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"my-plugin": plugin_cls},
         ):
             await load_middleware_plugins(ModelCache(), VirtualModelCache())
@@ -765,36 +814,30 @@ class TestLoadMiddlewarePlugins:
         assert isinstance(injected, InferenceMiddlewareCacheAccessorImpl)
 
     @pytest.mark.asyncio
-    async def test_load_injects_typed_client_from_plugin_sdk(self):
+    async def test_load_injects_client_from_plugin_client_factory(self):
         plugin_cls = MagicMock()
         instance = _make_mock_plugin()
         plugin_cls.return_value = instance
-        sdk = MagicMock()
         client = MagicMock()
+        factory = MagicMock(return_value=client)
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"my-plugin": plugin_cls},
         ):
-            with patch(
-                "nmp.core.inference_gateway.api.middleware_registry.client_from_platform",
-                return_value=client,
-            ) as adapt:
-                await load_middleware_plugins(
-                    ModelCache(),
-                    VirtualModelCache(),
-                    plugin_sdk_factory=lambda _name: sdk,
-                )
+            await load_middleware_plugins(
+                ModelCache(),
+                VirtualModelCache(),
+                plugin_client_factory=factory,
+            )
 
-        adapt.assert_called_once()
-        assert adapt.call_args.args[0] is sdk
-        instance._inject_platform_sdk.assert_called_once_with(sdk)
+        factory.assert_called_once_with("my-plugin")
         instance._inject_platform_client.assert_called_once_with(client)
 
     @skip_flaky_caplog
     @pytest.mark.asyncio
     async def test_load_fault_isolation_broken_import(self, caplog):
-        caplog.set_level(logging.WARNING, logger="nmp.core.inference_gateway.api.middleware_registry")
+        caplog.set_level(logging.WARNING, logger="nhx.core.inference_gateway.api.middleware_registry")
 
         good_cls = MagicMock()
         good_instance = _make_mock_plugin()
@@ -803,7 +846,7 @@ class TestLoadMiddlewarePlugins:
         bad_cls = MagicMock(side_effect=ImportError("bad module"))
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"good-plugin": good_cls, "bad-plugin": bad_cls},
         ):
             registry = await load_middleware_plugins(ModelCache(), VirtualModelCache())
@@ -825,7 +868,7 @@ class TestLoadMiddlewarePlugins:
         bad_cls.return_value = bad_instance
 
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={"good-plugin": good_cls, "bad-plugin": bad_cls},
         ):
             registry = await load_middleware_plugins(ModelCache(), VirtualModelCache())
@@ -836,50 +879,9 @@ class TestLoadMiddlewarePlugins:
     @pytest.mark.asyncio
     async def test_load_returns_empty_registry_when_no_plugins(self):
         with patch(
-            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            "nhx.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
             return_value={},
         ):
             registry = await load_middleware_plugins(ModelCache(), VirtualModelCache())
 
         assert registry.plugins == {}
-
-
-# ---------------------------------------------------------------------------
-# _sdk_vm_to_plugin_vm helper
-# ---------------------------------------------------------------------------
-
-
-def test_sdk_vm_to_plugin_vm_maps_fields():
-    call = _make_sdk_call("my-plugin", config_type="cfg", config={"k": "v"})
-    vm = _make_sdk_vm(
-        "ws",
-        "my-vm",
-        request_middleware=[call],
-        models=[SDKVirtualModelInferenceConfig(model="ws/claude", backend_format="ANTHROPIC_MESSAGES")],
-    )
-    result = _sdk_vm_to_plugin_vm(vm)
-
-    assert isinstance(result, PluginVirtualModel)
-    assert result.workspace == "ws"
-    assert result.name == "my-vm"
-    assert result.models[0].model == "ws/claude"
-    assert result.models[0].backend_format is BackendFormat.ANTHROPIC_MESSAGES
-    assert len(result.request_middleware) == 1
-    assert result.request_middleware[0].name == "my-plugin"
-    assert result.request_middleware[0].config == {"k": "v"}
-
-
-def test_sdk_vm_to_plugin_vm_handles_none_name():
-    vm = SDKVirtualModel(
-        id="ws/",
-        entity_id="ws/",
-        name=None,
-        workspace="ws",
-        parent="ws",
-        db_version=1,
-        created_at="2026-01-01T00:00:00Z",
-        updated_at="2026-01-01T00:00:00Z",
-    )
-    result = _sdk_vm_to_plugin_vm(vm)
-    assert result.name == ""
-    assert result.workspace == "ws"

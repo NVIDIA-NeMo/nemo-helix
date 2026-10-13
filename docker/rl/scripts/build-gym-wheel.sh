@@ -23,20 +23,32 @@ OUT_DIR=${2:?usage: build-gym-wheel.sh <gym-source-dir> <out-dir>}
 # gitdir pointer file, not a directory). Left alone the wheel builds and installs happily while
 # quietly missing every YAML, including the sandbox provider configs. Declare the data explicitly
 # rather than depend on VCS state this build cannot have.
-PKG_DATA_LINE='nemo_gym = ["resources/*.py"]'
-if ! grep -qxF "${PKG_DATA_LINE}" "${GYM_SRC}/pyproject.toml"; then
+# Anchored on the leading "resources/*.py" entry only: upstream appends further entries to this
+# list (e.g. token_id_capture golden vectors), and those are carried through by the capture group.
+PKG_DATA_RE='^nemo_gym = \["resources/\*\.py"\(.*\)\]$'
+if ! grep -q "${PKG_DATA_RE}" "${GYM_SRC}/pyproject.toml"; then
     echo "build-gym-wheel: Gym's [tool.setuptools.package-data] entry moved;" \
          "re-check this substitution against ${GYM_SRC}/pyproject.toml" >&2
     exit 1
 fi
 # Fully single-quoted, and the brackets/dots/stars escaped: unescaped, `["resources/*.py"]` is a
 # BRE character class, which matches nothing here and would edit the file silently not at all.
-sed -i 's|^nemo_gym = \["resources/\*\.py"\]$|nemo_gym = ["resources/*.py", "**/*.yaml", "**/*.yml", "**/*.md"]\n"*" = ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.md", "**/*.txt"]|' \
+sed -i 's|^nemo_gym = \["resources/\*\.py"\(.*\)\]$|nemo_gym = ["resources/*.py"\1, "**/*.yaml", "**/*.yml", "**/*.md"]\n"*" = ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.md", "**/*.txt"]|' \
     "${GYM_SRC}/pyproject.toml"
+if ! grep -qF '"**/*.yaml"' "${GYM_SRC}/pyproject.toml"; then
+    echo "build-gym-wheel: package-data substitution did not apply to ${GYM_SRC}/pyproject.toml" >&2
+    exit 1
+fi
 
 # --no-config: uv would otherwise discover the platform workspace's `required-version` pin
 # (docker/rl/pyproject.workspace.toml, uv <0.10) and refuse to run as this image's uv 0.11.
-uv build --no-config --wheel --out-dir "${OUT_DIR}" "${GYM_SRC}"
+build_log=$(mktemp)
+if ! uv build --no-config --wheel --out-dir "${OUT_DIR}" "${GYM_SRC}" >"${build_log}" 2>&1; then
+    cat "${build_log}" >&2
+    rm -f "${build_log}"
+    exit 1
+fi
+rm -f "${build_log}"
 
 # Fail here rather than at spin-up on a GPU node: a wheel at the wrong version, or one missing the
 # package data above, installs cleanly and only misbehaves later.

@@ -29,7 +29,7 @@ export const stepHeading = (step: WizardStep): string => {
     case 'experiment':
       return 'Create experiment';
     case 'evaluation':
-      return 'Create evaluation';
+      return 'Run Evaluation';
   }
 };
 

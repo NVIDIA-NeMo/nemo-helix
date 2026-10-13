@@ -3,9 +3,9 @@
 
 import { getJobsPageJobLogsQueryKey, jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import type {
-  PlatformJobLog,
-  PlatformJobLogPage,
-  PlatformJobStatus,
+  HelixJobLog,
+  HelixJobLogPage,
+  HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
 import {
   hashKey,
@@ -61,7 +61,7 @@ export interface UseJobLogsOptions {
   workspace: string;
   name: string;
   enabled?: boolean;
-  jobStatus?: PlatformJobStatus;
+  jobStatus?: HelixJobStatus;
   pageSize?: number;
   /** Max pages of logs to retain in memory. Defaults to LOGS_MAX_PAGES.
    *  Set to Infinity for download scenarios where all logs are needed. */
@@ -69,12 +69,12 @@ export interface UseJobLogsOptions {
 }
 
 interface JobLogsQueryData {
-  logs: PlatformJobLog[];
+  logs: HelixJobLog[];
   total: number;
 }
 
 export interface UseJobLogsResult {
-  data: PlatformJobLog[];
+  data: HelixJobLog[];
   isLoading: boolean;
   error: Error | null;
   total: number;
@@ -122,7 +122,7 @@ export const useJobLogs = ({
   const query = useQuery<JobLogsQueryData>({
     queryKey,
     queryFn: async ({ signal }) => {
-      let allLogs: PlatformJobLog[] = [];
+      let allLogs: HelixJobLog[] = [];
       let cursor: string | undefined;
       let total = 0;
       // Counted separately from allLogs, which the retention cap trims back to the
@@ -137,7 +137,7 @@ export const useJobLogs = ({
 
         const pageCursor = cursor;
         const pageKey = getPageQueryKey(workspace, name, pageCursor);
-        const cached = queryClient.getQueryData<PlatformJobLogPage>(pageKey);
+        const cached = queryClient.getQueryData<HelixJobLogPage>(pageKey);
         const isCachedFullPage = cached !== undefined && cached.data.length >= pageSize;
 
         const page = await queryClient.fetchQuery({

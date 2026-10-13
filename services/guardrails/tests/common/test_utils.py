@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nmp.guardrails.app.common.utils import (
+from nhx.guardrails.app.common.utils import (
     _IMAGE_URL_HINT,
     clean_llm_call_error,
     clean_model_initialization_error,

@@ -19,13 +19,12 @@ from fastapi.testclient import TestClient
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import app, v1
-from scaled_evals.api import s3
-from scaled_evals.api.db import Database, get_db
+from scaled_evals.api import artifacts
+from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import BenchmarkArchiveError, build_benchmark_archive
-from scaled_evals.dispatch.switchyard_archive import check_campaign_evidence
 from scaled_evals.dispatch.worker import Dispatcher
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)
@@ -132,8 +131,8 @@ def build(monkeypatch, tmp_path, sources, *, benchmark_artifacts=None, listing=N
         {"key": key, "size_bytes": len(body), "updated_at": NOW.isoformat()}
         for key, body in (benchmark_artifacts or {}).items()
     ]
-    monkeypatch.setattr(s3, "list_objects", listing or (lambda prefix: objects))
-    monkeypatch.setattr(s3, "stream_object", lambda key: iter([blobs[key]]))
+    monkeypatch.setattr(artifacts, "list_objects", listing or (lambda prefix: objects))
+    monkeypatch.setattr(artifacts, "stream_object", lambda key: iter([blobs[key]]))
     captured = {}
 
     def upload(path, key, *, content_type):
@@ -142,10 +141,8 @@ def build(monkeypatch, tmp_path, sources, *, benchmark_artifacts=None, listing=N
         destination.write_bytes(path.read_bytes())
         return destination.stat().st_size
 
-    monkeypatch.setattr(s3, "upload_file", upload)
-    built = build_benchmark_archive(
-        job(members=members), check_claim=lambda: None, evidence_checks=(check_campaign_evidence,)
-    )
+    monkeypatch.setattr(artifacts, "upload_file", upload)
+    built = build_benchmark_archive(job(members=members), check_claim=lambda: None)
     assert built["size_bytes"] > 0
     assert built["sha256"] == hashlib.sha256((tmp_path / "result.tar.gz").read_bytes()).hexdigest()
     assert captured["key"] == "benchmark-runs/bmr_1/archives/gen/claim.tar.gz"
@@ -217,7 +214,7 @@ def test_export_enforces_aggregate_limits(monkeypatch, tmp_path):
 
 
 def test_export_rejects_changed_source_size(monkeypatch):
-    monkeypatch.setattr(s3, "stream_object", lambda key: iter([b"wrong"]))
+    monkeypatch.setattr(artifacts, "stream_object", lambda key: iter([b"wrong"]))
     with pytest.raises(BenchmarkArchiveError, match="size changed"):
         build_benchmark_archive(job(), check_claim=lambda: None)
 
@@ -227,8 +224,15 @@ def api_db():
     db = MagicMock(spec=Database)
     db.benchmark_runs.exists.return_value = True
     v1.dependency_overrides[get_db] = lambda: db
+
+    @contextmanager
+    def _stream():
+        yield db
+
+    v1.dependency_overrides[get_stream_database_factory] = lambda: _stream
     yield db
     v1.dependency_overrides.pop(get_db)
+    v1.dependency_overrides.pop(get_stream_database_factory, None)
 
 
 def test_api_queues_and_reports_snapshot_without_private_storage_fields(api_db):
@@ -269,7 +273,23 @@ def test_api_missing_and_ready_archive(api_db, monkeypatch):
     assert data["download"] == "/benchmark-runs/bmr_1/archive/download"
     assert data["sha256"] == "a" * 64
     assert "object_key" not in data
-    monkeypatch.setattr(s3, "stream_object", lambda key: iter([b"archive"]))
+    checkout_active = False
+
+    @contextmanager
+    def stream_db():
+        nonlocal checkout_active
+        checkout_active = True
+        try:
+            yield api_db
+        finally:
+            checkout_active = False
+
+    def stream_object(_key):
+        assert not checkout_active, "download retained its database checkout while streaming"
+        yield b"archive"
+
+    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    monkeypatch.setattr(artifacts, "stream_object", stream_object)
     response = client.get("/v1/benchmark-runs/bmr_1/archive/download")
     assert response.content == b"archive"
     assert "bmr_1-results.tar.gz" in response.headers["content-disposition"]
@@ -371,16 +391,10 @@ def test_export_preserves_package_task_identity(monkeypatch, tmp_path):
     assert result["config"]["task"] == task
 
 
-@pytest.mark.parametrize("digest_prefix", ["", "sha256:"])
-def test_export_captures_shared_benchmark_artifacts_once(monkeypatch, tmp_path, digest_prefix):
-    key = "benchmark-runs/bmr_1/artifacts/switchyard/routing_stats_final.json"
+def test_export_captures_shared_benchmark_artifacts_once(monkeypatch, tmp_path):
+    key = "benchmark-runs/bmr_1/artifacts/stats.json"
     stats = b'{"requests": 4, "cost_usd": 0.25}'
     source = harbor_files()
-    source["switchyard/campaign_evidence.json"] = {
-        "status": "ready",
-        "routing_stats_object_key": key,
-        "routing_stats_sha256": digest_prefix + hashlib.sha256(stats).hexdigest(),
-    }
     binary = b"\x00\xffbenchmark evidence"
     artifacts = {key: stats, "benchmark-runs/bmr_1/artifacts/trace.bin": binary}
     files = build(
@@ -398,10 +412,7 @@ def test_export_captures_shared_benchmark_artifacts_once(monkeypatch, tmp_path, 
         assert files[f"bmr_1/{entry['path']}"] == body
         assert entry["sha256"] == hashlib.sha256(body).hexdigest()
         assert entry["size_bytes"] == len(body)
-    assert files["bmr_1/_scaled_evals/benchmark/artifacts/switchyard/routing_stats_final.json"] == stats
-    for member in manifest["members"]:
-        path = f"bmr_1/_scaled_evals/evaluations/{member['id']}/switchyard/campaign_evidence.json"
-        assert json.loads(files[path]) == source["switchyard/campaign_evidence.json"]
+    assert files["bmr_1/_scaled_evals/benchmark/artifacts/stats.json"] == stats
 
 
 @pytest.mark.parametrize("suffix", ["../escape", "/absolute", "a/../escape", "a//b", "a\\b", "."])
@@ -466,34 +477,6 @@ def test_benchmark_artifacts_share_member_resource_limits(monkeypatch, tmp_path,
         )
 
 
-@pytest.mark.parametrize("present", [False, True])
-@pytest.mark.parametrize("digest_prefix", ["", "sha256:"])
-def test_export_rejects_missing_or_mismatched_campaign_evidence(monkeypatch, tmp_path, present, digest_prefix):
-    key = "benchmark-runs/bmr_1/artifacts/switchyard/routing_stats_final.json"
-    source = harbor_files()
-    source["switchyard/campaign_evidence.json"] = {
-        "status": "ready",
-        "routing_stats_object_key": key,
-        "routing_stats_sha256": digest_prefix + "0" * 64,
-    }
-    with pytest.raises(BenchmarkArchiveError, match="missing or changed"):
-        build(
-            monkeypatch,
-            tmp_path,
-            [tar_bytes(source)],
-            benchmark_artifacts={key: b"changed"} if present else {},
-        )
-
-
-def test_export_marks_unavailable_campaign_evidence_partial(monkeypatch, tmp_path):
-    source = harbor_files()
-    source["switchyard/campaign_evidence.json"] = {"status": "unavailable"}
-    files = build(monkeypatch, tmp_path, [tar_bytes(source)])
-    manifest = json.loads(files["bmr_1/scaled-evals-benchmark-archive.json"])
-    assert manifest["partial"] is True
-    assert manifest["unavailable_benchmark_evidence"] == [{"evaluation_id": "ev_1", "kind": "switchyard_campaign"}]
-
-
 def test_mounted_openapi_includes_benchmark_archive_contract():
     schema = app.openapi()
     operations = schema["paths"]["/v1/benchmark-runs/{run_id}/archive"]
@@ -503,36 +486,6 @@ def test_mounted_openapi_includes_benchmark_archive_contract():
     fields = schema["components"]["schemas"]["BenchmarkArchiveResponse"]["properties"]
     assert {"members", "download", "generation", "partial", "sha256"} <= fields.keys()
     assert not {"claim_token", "object_key", "attempts"} & fields.keys()
-
-
-@pytest.mark.parametrize("status", [None, "building", "failed"])
-def test_idle_dispatcher_processes_benchmark_archive_queue(monkeypatch, status):
-    repo = MagicMock(spec=BenchmarkArchiveRepository)
-    repo.claim.return_value = job(status=status) if status else None
-    repo.claim_cleanup.return_value = None
-    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
-    monkeypatch.setattr(settings, "dispatch_kubernetes_jobs_enabled", False)
-
-    @contextmanager
-    def connect():
-        yield MagicMock()
-
-    worker = Dispatcher(connect=connect)
-    for method in (
-        "claim_next_switchyard_teardown",
-        "claim_next_switchyard_campaign_cleanup",
-        "claim_next_switchyard_campaign_finalization",
-        "claim_next_switchyard_campaign_deletion",
-        "claim_next",
-        "claim_next_evidence",
-        "claim_next_archive",
-    ):
-        monkeypatch.setattr(worker, method, lambda: None)
-    builder = MagicMock()
-    monkeypatch.setattr(worker, "build_benchmark_archive", builder)
-    assert worker.work_once() is (status is not None)
-    repo.claim.assert_called_once_with(claim_timeout=worker.claim_timeout)
-    assert builder.call_count == (1 if status == "building" else 0)
 
 
 @pytest.mark.parametrize("ownership_lost", [False, True])
@@ -563,8 +516,7 @@ def test_archive_heartbeat_distinguishes_transient_errors_from_lost_ownership(mo
     def connect():
         yield MagicMock()
 
-    def build_archive(job, *, check_claim, evidence_checks):
-        assert evidence_checks == (check_campaign_evidence,)
+    def build_archive(job, *, check_claim):
         check_claim()
         return {"object_key": "archive", "size_bytes": 123}
 

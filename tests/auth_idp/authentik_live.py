@@ -12,7 +12,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
-from nemo_platform_ext.client.tls import NMP_CLIENT_SSL_CERT_FILE_ENVVAR
+from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AUTHENTIK_ROOT = REPO_ROOT / "contrib/auth/authentik"
@@ -188,14 +188,14 @@ AUTHENTIK_DOCKER_E2E_CONFIG = pytest.mark.e2e_config(
                         "cleanup_completed_jobs_immediately": False,
                         "launcher_tool_path": "/tools/jobs-launcher",
                         "env": {
-                            "SSL_CERT_FILE": "/etc/nmp/gateway-tls/tls.crt",
-                            "REQUESTS_CA_BUNDLE": "/etc/nmp/gateway-tls/tls.crt",
+                            "SSL_CERT_FILE": "/etc/nhx/gateway-tls/tls.crt",
+                            "REQUESTS_CA_BUNDLE": "/etc/nhx/gateway-tls/tls.crt",
                         },
                         "storage": {
                             "additional_volume_mounts": [
                                 {
                                     "volume_name": AUTHENTIK_GATEWAY_TLS_VOLUME_NAME,
-                                    "mount_path": "/etc/nmp/gateway-tls",
+                                    "mount_path": "/etc/nhx/gateway-tls",
                                 }
                             ]
                         },
@@ -220,7 +220,7 @@ AUTHENTIK_DOCKER_E2E_CONFIG = pytest.mark.e2e_config(
                         "additional_volume_mounts": [
                             {
                                 "volume_name": AUTHENTIK_GATEWAY_TLS_VOLUME_NAME,
-                                "mount_path": "/etc/nmp/gateway-tls",
+                                "mount_path": "/etc/nhx/gateway-tls",
                                 "read_only": True,
                             }
                         ],
@@ -251,7 +251,7 @@ AUTHENTIK_DOCKER_E2E_CONFIG = pytest.mark.e2e_config(
             "AUTHENTIK_GATEWAY_TLS_VOLUME": AUTHENTIK_GATEWAY_TLS_VOLUME_NAME,
             "AUTHENTIK_WORKLOAD_NETWORK_NAME": AUTHENTIK_WORKLOAD_NETWORK_NAME,
             "AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD": AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD,
-            NMP_CLIENT_SSL_CERT_FILE_ENVVAR: AUTHENTIK_GATEWAY_TLS_CA_BUNDLE,
+            NHX_CLIENT_SSL_CERT_FILE_ENVVAR: AUTHENTIK_GATEWAY_TLS_CA_BUNDLE,
         },
     },
 )

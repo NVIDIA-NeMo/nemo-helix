@@ -24,6 +24,8 @@ side endpoint that streams content over HTTP.
 from __future__ import annotations
 
 import asyncio
+import copy
+import errno
 import logging
 import os
 import re
@@ -31,6 +33,8 @@ import shutil
 import socket
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -47,10 +51,10 @@ from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_crede
 from nemo_agents_plugin.runner.backend import DeploymentInfo, LocalLog, LogLocation, NotYetAvailable, RunnerBackend
 from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
 from nemo_agents_plugin.spec_revision import SpecRevision, stage_with_spec_revision
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+from nemo_agents_plugin.utils import get_base_url
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client_provider import get_async_nemo_client
+from nemo_helix_plugin.files.client import AsyncFilesClient
 
 # Match characters not safe for filesystem paths.  Deployment names are
 # normally URL-safe identifiers, but we sanitise defensively to ensure we
@@ -80,7 +84,7 @@ def _resolve_nat_bin() -> str:
        container (which prepends ``/app/.venv/bin`` to ``PATH``), and any
        setup where the user has ``nat`` on their shell ``PATH``.
     2. Sibling of ``sys.executable`` — covers ``uv tool install
-       nemo-platform``, where the tool venv's ``bin/`` is **not** prepended
+       nemo-helix``, where the tool venv's ``bin/`` is **not** prepended
        to ``PATH`` (uv only symlinks the declared ``[project.scripts]`` into
        ``~/.local/bin``; the rest of the tool venv stays off ``PATH``).
        ``nat`` is co-installed with ``nemo`` in that same venv, so picking
@@ -99,10 +103,52 @@ def _resolve_nat_bin() -> str:
 
 async def validate_platform_agent_config(config: dict[str, Any], *, base_dir: Path) -> Any:
     """Validate Fabric configs lazily so NAT/container deployments do not import Fabric."""
-    # TODO(AIRCORE-902): Hoist once Fabric runtime is installed in the default Platform image.
+    # TODO: Hoist once Fabric runtime is installed in the default Platform image.
     from nemo_agents_plugin.fabric.validation import validate_platform_agent_config as _validate_platform_agent_config
 
     return await _validate_platform_agent_config(config, base_dir=base_dir)
+
+
+def configure_intake_telemetry(config: dict[str, Any], *, workspace: str, base_dir: Path) -> dict[str, Any]:
+    """Return *config* with its ATIF trajectory export wired to *workspace*'s Intake.
+
+    Returns the config unchanged when the config already made its own choice, or
+    when the agent's adapter cannot export ATIF.
+
+    Unlike container deployments, a subprocess child runs on the platform host,
+    so the platform's own base URL reaches it as-is: there is no container
+    network to rebase onto and no auth-proxy sidecar to route through.
+
+    No identity either. A container deployment gets it from the sidecar and a
+    job from the in-process proxy it runs for the same purpose
+    (``jobs/gateway_proxy.py``). Subprocess has neither, but it is already an
+    auth-disabled shape: the child carries only the placeholder gateway
+    credential, so with platform auth on, its inference calls fail well before
+    its telemetry does. Wiring identity here alone would half-fix a
+    configuration nothing else supports.
+
+    Imported lazily for the same reason as :func:`validate_platform_agent_config`:
+    ``intake_export`` imports Fabric at module scope, and NAT deployments must
+    not pay for it.
+    """
+    # TODO: Hoist once Fabric runtime is installed in the default Platform image.
+    from nemo_agents_plugin.telemetry.intake_export import (
+        configure_intake_atif_export,
+        supports_intake_atif_export,
+        wants_intake_atif_export,
+    )
+
+    if not wants_intake_atif_export(config):
+        return config
+    if not supports_intake_atif_export(config, base_dir=base_dir):
+        return config
+
+    # The caller's mapping is the live AgentDeployment entity the controller
+    # re-saves, so wiring it in place would persist an inferred endpoint into
+    # the stored deployment.
+    wired = copy.deepcopy(config)
+    configure_intake_atif_export(wired, workspace=workspace, base_url=get_base_url())
+    return wired
 
 
 def system_dir(workspace_dir: Path | None = None) -> Path:
@@ -163,7 +209,7 @@ class InMemoryRunnerBackend(RunnerBackend):
     def output_base_dir(self) -> Path:
         """Backend artifact root: ``workspace_dir`` itself (configs/logs live in ``system/``).
 
-        Defaults to ``nmp_user_data_dir() / "agents"`` (e.g.
+        Defaults to ``nhx_user_data_dir() / "agents"`` (e.g.
         ``~/.local/share/nemo/agents``) so artifacts persist across reboots
         and live in a documented, user-accessible location instead of inside
         the plugin source tree.
@@ -199,17 +245,40 @@ class InMemoryRunnerBackend(RunnerBackend):
         Raises:
             RuntimeError: If no free port is found in the entire range.
         """
+        candidate = next(port for port in self._port_candidates() if self._is_port_free(port))
+        self._next_port = candidate + 1 if candidate < self._config.port_range_end else self._config.port_range_start
+        return candidate
+
+    @contextmanager
+    def reserve_socket(self) -> Iterator[socket.socket]:
+        """Reserve a listening loopback socket until context exit for handoff to a child."""
+        for candidate in self._port_candidates():
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    sock.bind(("127.0.0.1", candidate))
+                    # Listening makes the reservation exclusive even with SO_REUSEADDR.
+                    sock.listen()
+                except OSError as exc:
+                    if exc.errno == errno.EADDRINUSE:
+                        continue
+                    raise
+                self._next_port = (
+                    candidate + 1 if candidate < self._config.port_range_end else self._config.port_range_start
+                )
+                yield sock
+                return
+
+    def _port_candidates(self) -> Iterator[int]:
         start = self._config.port_range_start
         end = self._config.port_range_end
         span = end - start + 1
         for offset in range(span):
             candidate = start + (self._next_port - start + offset) % span
-            if self._is_port_free(candidate):
-                self._next_port = candidate + 1 if candidate < end else start
-                return candidate
+            yield candidate
         raise RuntimeError(
             f"No free port available in range [{start}, {end}]. "
-            "Consider adjusting NMP_AGENTS_CONTROLLER_PORT_RANGE_START / _END."
+            "Consider adjusting NHX_AGENTS_CONTROLLER_PORT_RANGE_START / _END."
         )
 
     @staticmethod
@@ -248,8 +317,9 @@ class InMemoryRunnerBackend(RunnerBackend):
         # resource isolation and injects no managed secrets.
         del image, deployment_mode, created_by, auth_context, resources, secrets, use_image_entrypoint
         if config.get("config_format") == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-            return await self._create_fabric_deployment(workspace, name, config, port, agent=agent)
+            return await self._create_fabric_deployment(workspace, name, config, agent=agent)
 
+        port = port or self.allocate_port()
         key = (workspace, name)
         config_path = await asyncio.to_thread(self._write_config, workspace, name, config)
         log_path = self.log_path_for(workspace, name)
@@ -285,7 +355,6 @@ class InMemoryRunnerBackend(RunnerBackend):
         workspace: str,
         name: str,
         config: dict[str, Any],
-        port: int,
         *,
         agent: str = "",
     ) -> DeploymentInfo:
@@ -294,20 +363,43 @@ class InMemoryRunnerBackend(RunnerBackend):
         base_dir = self._fabric_base_dir_for(workspace, name)
         await asyncio.to_thread(base_dir.mkdir, parents=True, exist_ok=True)
         try:
-            staged_spec = await self._stage_ethos(workspace, agent, config, base_dir)
-            config_path = await asyncio.to_thread(self._write_fabric_config, base_dir, config)
-            await validate_platform_agent_config(config, base_dir=base_dir)
-            log_path = self.log_path_for(workspace, name)
-            credential_env = platform_gateway_credential_env(config)
-            proc = await asyncio.to_thread(
-                self._spawn_fabric,
-                name,
-                config_path,
-                log_path,
-                port,
-                credential_env,
-            )
-        except Exception:
+            with self.reserve_socket() as reserved:
+                port = reserved.getsockname()[1]
+                staged_spec = await self._stage_ethos(workspace, agent, config, base_dir)
+                # After staging so the support probe plans against a populated
+                # base_dir, and before the write so the staged config -- which is
+                # what the child process reads -- carries the export.
+                config = await asyncio.to_thread(
+                    configure_intake_telemetry, config, workspace=workspace, base_dir=base_dir
+                )
+                config_path = await asyncio.to_thread(self._write_fabric_config, base_dir, config)
+                await validate_platform_agent_config(config, base_dir=base_dir)
+                log_path = self.log_path_for(workspace, name)
+                credential_env = platform_gateway_credential_env(config)
+                spawn_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        self._spawn_fabric,
+                        name,
+                        config_path,
+                        log_path,
+                        port,
+                        credential_env,
+                        socket_fd=reserved.fileno(),
+                    )
+                )
+                try:
+                    # A cancelled await must not close the socket while Popen still needs it.
+                    proc = await asyncio.shield(spawn_task)
+                except asyncio.CancelledError:
+                    while not spawn_task.done():
+                        try:
+                            await asyncio.shield(spawn_task)
+                        except asyncio.CancelledError:
+                            continue
+                    proc = spawn_task.result()
+                    await asyncio.to_thread(self._terminate, name, proc)
+                    raise
+        except (Exception, asyncio.CancelledError):
             await asyncio.to_thread(shutil.rmtree, base_dir, ignore_errors=True)
             raise
 
@@ -318,8 +410,8 @@ class InMemoryRunnerBackend(RunnerBackend):
             pid=proc.pid,
             endpoint=f"http://127.0.0.1:{port}",
             log_path=str(log_path),
-            extra={"base_dir": str(base_dir)},
             staged_spec=staged_spec,
+            extra={"base_dir": str(base_dir)},
         )
         self._processes[key] = proc
         self._deployments[key] = info
@@ -436,8 +528,8 @@ class InMemoryRunnerBackend(RunnerBackend):
         base_dir: Path,
     ) -> SpecRevision | None:
         """Deliver the agent's Ethos fileset into *base_dir* and report what it staged."""
-        sdk = get_async_platform_sdk(as_service="agents", internal=True) if agent else None
-        files_client = client_from_platform(sdk, AsyncFilesClient) if sdk else None
+        client = get_async_nemo_client(as_service="agents", internal=True) if agent else None
+        files_client = AsyncFilesClient.from_client(client) if client else None
 
         async def _stage() -> None:
             await stage_fabric_ethos_dir(
@@ -504,6 +596,8 @@ class InMemoryRunnerBackend(RunnerBackend):
         log_path: Path,
         port: int,
         credential_env: dict[str, str] | None = None,
+        *,
+        socket_fd: int,
     ) -> subprocess.Popen[bytes]:
         """Spawn the Platform-owned Fabric server on a loopback port."""
         cmd = [
@@ -516,6 +610,8 @@ class InMemoryRunnerBackend(RunnerBackend):
             "127.0.0.1",
             "--port",
             str(port),
+            "--socket-fd",
+            str(socket_fd),
         ]
         log_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info("Spawning: %s  (log: %s)", " ".join(cmd), log_path)
@@ -523,7 +619,9 @@ class InMemoryRunnerBackend(RunnerBackend):
         child_env = os.environ.copy()
         child_env.update(credential_env or {})
         try:
-            return subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, env=child_env)
+            return subprocess.Popen(
+                cmd, stdout=log_file, stderr=subprocess.STDOUT, env=child_env, pass_fds=(socket_fd,)
+            )
         finally:
             log_file.close()
 

@@ -5,9 +5,13 @@ import { EditorView } from '@codemirror/view';
 import {
   knownVariablesField,
   setKnownVariables,
+  setVariableMatcher,
   textareaLook,
+  tooltipWithinEditor,
   variableCompletions,
   variableDecorations,
+  variableMatcherField,
+  type VariableMatcher,
   variablesCompartment,
 } from '@nemo/common/src/components/form/VariableTextArea/extensions';
 import CodeMirror from '@uiw/react-codemirror';
@@ -37,6 +41,9 @@ export interface VariableTextAreaProps {
   value: string;
   onChange: (next: string) => void;
   variables?: VariableDef[];
+  /** Overrides the known/unknown decision for a token. Defaults to exact
+   *  membership of `variables`. */
+  isKnown?: VariableMatcher;
   placeholder?: string;
   disabled?: boolean;
   readOnly?: boolean;
@@ -64,6 +71,7 @@ export const VariableTextArea = forwardRef<VariableTextAreaHandle, VariableTextA
       value,
       onChange,
       variables,
+      isKnown,
       placeholder,
       disabled,
       readOnly,
@@ -106,6 +114,10 @@ export const VariableTextArea = forwardRef<VariableTextAreaHandle, VariableTextA
       view.dom.setAttribute('data-known-variables', JSON.stringify([...next]));
     }, [variableNames]);
 
+    useEffect(() => {
+      viewRef.current?.dispatch({ effects: setVariableMatcher.of(isKnown ?? null) });
+    }, [isKnown]);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -139,7 +151,9 @@ export const VariableTextArea = forwardRef<VariableTextAreaHandle, VariableTextA
             viewRef.current = view;
             view.contentDOM.setAttribute('role', 'textbox');
             const initial = new Set(variableNames);
-            view.dispatch({ effects: setKnownVariables.of(initial) });
+            view.dispatch({
+              effects: [setKnownVariables.of(initial), setVariableMatcher.of(isKnown ?? null)],
+            });
             view.dom.setAttribute('data-known-variables', JSON.stringify([...initial]));
             const attrs = attributes?.TextAreaElement;
             if (attrs) {
@@ -152,8 +166,9 @@ export const VariableTextArea = forwardRef<VariableTextAreaHandle, VariableTextA
           }}
           extensions={[
             textareaLook,
-            variablesCompartment.of([knownVariablesField]),
+            variablesCompartment.of([knownVariablesField, variableMatcherField]),
             variableDecorations,
+            tooltipWithinEditor,
             completionsExtension,
           ]}
           onFocus={onFocus}

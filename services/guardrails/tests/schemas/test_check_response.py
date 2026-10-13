@@ -17,14 +17,14 @@ import logging
 import unittest
 
 from nemoguardrails.rails.llm.options import ActivatedRail, GenerationLog, GenerationResponse
-from nmp.guardrails.app.schemas.utils.generation_options import (
+from nhx.guardrails.app.schemas.utils.generation_options import (
     get_activated_rails_logging_options,
     is_activated_rails_logging_enabled,
 )
-from nmp.guardrails.app.schemas.utils.response_transformers import (
+from nhx.guardrails.app.schemas.utils.response_transformers import (
     create_guardrail_check_response_from_generation_response,
 )
-from nmp.guardrails.entities.enums import (
+from nhx.guardrails.entities.enums import (
     StatusEnum,
 )
 

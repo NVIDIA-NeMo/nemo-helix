@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PlatformJobResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { type EvalRunOutcome, evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import {
   getAgentEvaluationDetailRoute,
   getEvaluationResultDetailsRoute,
@@ -21,6 +22,8 @@ export interface EvalJobRow {
   /** Intake Evaluation the run publishes to, when it asked to. The join key between a job and its
    *  published results — absent for a run submitted without `publication.intake`. */
   evaluationName: string | null;
+  /** The evaluator's run rollup from the job's status details; null for jobs that predate it. */
+  outcome: EvalRunOutcome | null;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -29,9 +32,9 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 const asNonEmptyString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.length > 0 ? value : undefined;
 
-const specOf = (job: PlatformJobResponse): Record<string, unknown> => job.spec ?? {};
+const specOf = (job: HelixJobResponse): Record<string, unknown> => job.spec ?? {};
 
-export const evalJobKind = (job: PlatformJobResponse): EvalJobKind =>
+export const evalJobKind = (job: HelixJobResponse): EvalJobKind =>
   specOf(job).dataset !== undefined ? 'dataset' : 'task';
 
 const stripWorkspacePrefix = (name: string, workspace?: string): string => {
@@ -39,7 +42,7 @@ const stripWorkspacePrefix = (name: string, workspace?: string): string => {
   return prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
 };
 
-export const targetNameForEvalJob = (job: PlatformJobResponse): string | null => {
+export const targetNameForEvalJob = (job: HelixJobResponse): string | null => {
   const target = asRecord(specOf(job).target);
   if (!target) return null;
   const name =
@@ -50,7 +53,7 @@ export const targetNameForEvalJob = (job: PlatformJobResponse): string | null =>
   return stripWorkspacePrefix(name, job.workspace);
 };
 
-export const evalJobConfigLabel = (job: PlatformJobResponse): string | null => {
+export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
   const spec = specOf(job);
   if (evalJobKind(job) === 'dataset') {
     const dataset = asNonEmptyString(spec.dataset);
@@ -83,12 +86,12 @@ export const evalDurationMs = (metadata?: Record<string, string> | null): number
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
 };
 
-export const publishedEvaluationName = (job: PlatformJobResponse): string | null => {
+export const publishedEvaluationName = (job: HelixJobResponse): string | null => {
   const intake = asRecord(asRecord(specOf(job).publication)?.intake);
   return asNonEmptyString(intake?.evaluation_id) ?? null;
 };
 
-export const toEvalJobRow = (job: PlatformJobResponse): EvalJobRow => ({
+export const toEvalJobRow = (job: HelixJobResponse): EvalJobRow => ({
   id: job.id || job.name,
   name: job.name,
   status: job.status,
@@ -97,6 +100,7 @@ export const toEvalJobRow = (job: PlatformJobResponse): EvalJobRow => ({
   agentName: targetNameForEvalJob(job),
   configLabel: evalJobConfigLabel(job),
   evaluationName: publishedEvaluationName(job),
+  outcome: evalRunOutcomeOf(job.status_details),
 });
 
 /** Task result shape with metrics and scores for evaluation results. */

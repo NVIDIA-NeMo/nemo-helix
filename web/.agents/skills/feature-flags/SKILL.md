@@ -57,7 +57,7 @@ Use `previewFlag()` for features that may show an "Early Preview" badge. Use `bo
 
 ### 2. Add the env mapping in `env_mappings.py`
 
-Path: `services/studio/src/nmp/studio/env_mappings.py`
+Path: `services/studio/src/nhx/studio/env_mappings.py`
 
 ```python
 EnvMapping(

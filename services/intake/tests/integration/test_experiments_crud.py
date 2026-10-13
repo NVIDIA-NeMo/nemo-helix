@@ -9,7 +9,7 @@ from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
+from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
 
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
 # The deprecated pre-rename path; kept as a hidden alias for backwards compatibility.
@@ -178,7 +178,7 @@ def test_experiment_group_pareto_defaults_and_round_trips(client: TestClient) ->
 
 
 def test_experiment_group_pareto_rejects_unknown_metric(client: TestClient) -> None:
-    # Studio can only plot cost_usd, latency_ms, or evaluators.<name>; anything else is rejected so it
+    # Studio can only plot cost_usd, latency_ms, tokens, or evaluators.<name>; anything else is rejected so it
     # can't be persisted as an unusable chart default.
     rejected = client.post(
         EXPERIMENTS, json={"name": "bad-pareto", "pareto": {"x_metric": "made_up", "y_metric": "latency_ms"}}
@@ -189,6 +189,10 @@ def test_experiment_group_pareto_rejects_unknown_metric(client: TestClient) -> N
         EXPERIMENTS, json={"name": "ok-pareto", "pareto": {"x_metric": "evaluators.safety", "y_metric": "cost_usd"}}
     )
     assert ok.status_code == 201, ok.text
+    tokens = client.post(
+        EXPERIMENTS, json={"name": "tokens-pareto", "pareto": {"x_metric": "evaluators.safety", "y_metric": "tokens"}}
+    )
+    assert tokens.status_code == 201, tokens.text
 
 
 def test_evaluation_update_moves_between_groups_and_edits(client: TestClient) -> None:

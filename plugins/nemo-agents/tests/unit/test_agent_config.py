@@ -12,6 +12,7 @@ import yaml
 from nemo_agents_plugin.agent_config import (
     AgentConfig,
     AgentConfigLoadError,
+    ModelConfig,
     load_agent_config,
     load_agent_config_from_dir,
 )
@@ -85,6 +86,37 @@ def _example_yaml_config() -> dict:
 
 
 class TestAgentConfig:
+    @pytest.mark.parametrize("top_p", [0, 0.9, 1, None])
+    @pytest.mark.parametrize("max_tokens", [1, 512.0, (1 << 64) - 1, None])
+    def test_model_sampling_parameters(self, top_p: float | None, max_tokens: int | float | None) -> None:
+        model = ModelConfig.model_validate(
+            {"provider": "openai", "model": "test", "top_p": top_p, "max_tokens": max_tokens}
+        )
+        assert model.top_p == top_p
+        assert model.max_tokens == max_tokens
+        assert model.max_tokens is None or isinstance(model.max_tokens, int)
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("top_p", -0.1),
+            ("top_p", 1.1),
+            ("top_p", float("nan")),
+            ("top_p", float("inf")),
+            ("top_p", True),
+            ("top_p", "0.9"),
+            ("max_tokens", 0),
+            ("max_tokens", -1),
+            ("max_tokens", 1.5),
+            ("max_tokens", 1 << 64),
+            ("max_tokens", True),
+            ("max_tokens", "512"),
+        ],
+    )
+    def test_rejects_invalid_model_sampling_parameters(self, field: str, value: object) -> None:
+        with pytest.raises(ValidationError, match=field):
+            ModelConfig.model_validate({"provider": "openai", "model": "test", field: value})
+
     def test_example_yaml_config_validates(self) -> None:
         config = AgentConfig.model_validate(_example_yaml_config())
 
@@ -305,3 +337,58 @@ class TestLoadAgentConfig:
 
         with pytest.raises(AgentConfigLoadError, match="Invalid agent config"):
             load_agent_config(config_path)
+
+
+@pytest.mark.parametrize("target_id", ["nvidia.nooa.coding-agent", "com.example.workflow"])
+def test_workflow_config_round_trip(target_id: str) -> None:
+    config = AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "workflow-agent",
+            "workflow": {"target_id": target_id, "settings": {"limit": 3}},
+        }
+    )
+    assert config.default_harness is None
+    assert config.harnesses == {}
+    assert config.workflow is not None
+    assert config.workflow.settings == {"limit": 3}
+    assert AgentConfig.model_validate(config.model_dump()) == config
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        {"default_harness": "codex"},
+        {"harnesses": {"codex": {"kind": "codex"}}},
+        {"default_harness": "codex", "harnesses": {"codex": {"kind": "codex"}}},
+    ],
+)
+def test_workflow_rejects_harness_selection(selection: dict) -> None:
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        AgentConfig.model_validate(
+            {
+                "config_format": "nemo-agents-spec-v1",
+                "name": "workflow-agent",
+                "workflow": {"target_id": "nvidia.nooa.coding-agent"},
+                **selection,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "workflow", [{}, {"target_id": ""}, {"target_id": "   "}, {"target_id": "target", "unknown": True}]
+)
+def test_rejects_invalid_workflow(workflow: dict) -> None:
+    with pytest.raises(ValidationError):
+        AgentConfig.model_validate(
+            {
+                "config_format": "nemo-agents-spec-v1",
+                "name": "workflow-agent",
+                "workflow": workflow,
+            }
+        )
+
+
+def test_requires_execution_selection() -> None:
+    with pytest.raises(ValidationError, match="Configure workflow or default_harness"):
+        AgentConfig.model_validate({"config_format": "nemo-agents-spec-v1", "name": "agent"})

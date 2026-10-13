@@ -4,7 +4,7 @@
 """Compatibility tests for evaluation-context identifier renames."""
 
 import pytest
-from nmp.intake.spans.ingest.evaluation_context import EvaluationContext
+from nhx.intake.spans.ingest.evaluation_context import EvaluationContext
 from pydantic import ValidationError
 
 EXPECTED_CONTEXT = {

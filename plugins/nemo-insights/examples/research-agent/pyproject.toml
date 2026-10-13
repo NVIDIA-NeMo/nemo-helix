@@ -11,7 +11,7 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.30",
     "opentelemetry-proto>=1.30",
     "python-dotenv>=1.0.1",
-    "nemo-platform[services]",
+    "nemo-helix[services]",
     "nemo-insights-plugin",
     "dataclasses-json>=0.6.7",
 ]
@@ -28,10 +28,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "e2e: real end-to-end test that starts services and hits real LLM APIs (opt-in via NMP_INSIGHTS_E2E=1).",
+    "e2e: real end-to-end test that starts services and hits real LLM APIs (opt-in via NHX_INSIGHTS_E2E=1).",
 ]
 
 [tool.uv.sources]
 nemo-insights-plugin = { path = "../..", editable = true }
-nemo-platform = { path = "../../../../packages/nemo_platform", editable = true }
-nemo-platform-plugin = { path = "../../../../packages/nemo_platform_plugin", editable = true }
+nemo-helix = { path = "../../../../packages/nemo_helix", editable = true }
+nemo-helix-plugin = { path = "../../../../packages/nemo_helix_plugin", editable = true }

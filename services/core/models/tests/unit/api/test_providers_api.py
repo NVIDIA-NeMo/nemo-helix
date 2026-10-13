@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.common.api.common import Page, PaginationData
-from nmp.common.auth import AuthClient, Principal, get_auth_client
-from nmp.common.entities.client import EntityConflictError, EntityValidationError
-from nmp.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
-from nmp.core.models.api.v2.providers import router
-from nmp.core.models.schemas import ModelProvider, ModelProviderStatus
+from nhx.common.api.common import Page, PaginationData
+from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
+from nhx.core.models.api.v2.providers import router
+from nhx.core.models.schemas import ModelProvider, ModelProviderStatus
 
 
 @pytest.fixture
@@ -42,22 +42,21 @@ def mock_auth_client():
 
 
 @pytest.fixture
-def mock_sdk():
-    """Create a mock SDK for create/upsert endpoints that depend on get_sdk_client."""
+def mock_secrets_client():
+    """Create a mock Secrets client for create/upsert endpoints that depend on get_secrets_client."""
     return AsyncMock()
 
 
 @pytest.fixture
-def test_app(mock_model_provider_service, mock_auth_client, mock_sdk):
+def test_app(mock_model_provider_service, mock_auth_client, mock_secrets_client):
     """Create a FastAPI test app with mocked dependencies."""
-    from nmp.common.service.dependencies import get_sdk_client
-    from nmp.core.models.api.dependencies import get_model_provider_service
+    from nhx.core.models.api.dependencies import get_model_provider_service, get_secrets_client
 
     app = FastAPI()
 
     app.dependency_overrides[get_model_provider_service] = lambda: mock_model_provider_service
     app.dependency_overrides[get_auth_client] = lambda: mock_auth_client
-    app.dependency_overrides[get_sdk_client] = lambda: mock_sdk
+    app.dependency_overrides[get_secrets_client] = lambda: mock_secrets_client
     app.include_router(router, prefix="/apis/models")
 
     return app

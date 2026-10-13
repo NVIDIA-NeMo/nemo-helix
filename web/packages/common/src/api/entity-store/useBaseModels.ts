@@ -31,7 +31,7 @@ const SORT_COMPARATORS: Record<ModelEntitySortField, (a: ModelEntity, b: ModelEn
 
 /**
  * Widened input type for `useBaseModels({ filter })`. The generated SDK models
- * filter fields as bare scalars, but the NeMo Platform API accepts operator
+ * filter fields as bare scalars, but the NeMo Helix API accepts operator
  * objects on every field via the same unified filter syntax (`$like`, `$gte`,
  * etc). Coercion back to `ModelEntityFilter` happens once at the SDK boundary
  * below.
@@ -57,11 +57,18 @@ export interface UseBaseModelsResult {
   refetch: () => void;
 }
 
+export const getBaseModelsQueryKeyPrefix = (workspace: string) => [
+  QUERY_PREFIX_ENTITY_STORE,
+  'base-models',
+  'infinite',
+  workspace,
+];
+
 const getBaseModelsQueryKey = (
   workspace: string,
   filter?: ModelEntityFilterInput,
   sort?: ModelEntitySortField
-) => [QUERY_PREFIX_ENTITY_STORE, 'base-models', 'infinite', workspace, filter, sort];
+) => [...getBaseModelsQueryKeyPrefix(workspace), filter, sort];
 
 const getNextPageParam = (lastPage: ModelEntitysPage) => {
   if (!lastPage.pagination) return undefined;

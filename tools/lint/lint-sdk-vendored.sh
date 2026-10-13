@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
-# Verify vendored SDK is in sync (make vendor leaves no uncommitted changes).
+# Verify wrapper wheel metadata is in sync (make vendor leaves no uncommitted changes).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${CI_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 cd "${PROJECT_ROOT}"
@@ -14,14 +14,14 @@ mapfile -t BUNDLE_PACKAGE_PYPROJECTS < <(
   git grep -l '^\[tool\.bundle-package\]' -- '**/pyproject.toml' || true
 )
 
-VENDORED_CHECK_PATHS=("${PROJECT_ROOT}/sdk/python/")
+VENDORED_CHECK_PATHS=()
 for pyproject in "${BUNDLE_PACKAGE_PYPROJECTS[@]}"; do
   VENDORED_CHECK_PATHS+=("${PROJECT_ROOT}/${pyproject}")
 done
 
 git add "${VENDORED_CHECK_PATHS[@]}"
 git diff --cached --exit-code "${VENDORED_CHECK_PATHS[@]}" > "${PROJECT_ROOT}/diff.txt" || {
-  echo "Run 'make vendor' to sync packages with the SDK and wrapper."
+  echo "Run 'make vendor' to sync the wrapper wheel metadata."
   exit 1
 }
 

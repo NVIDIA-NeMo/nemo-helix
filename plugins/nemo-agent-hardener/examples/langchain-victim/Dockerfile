@@ -21,7 +21,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir \
       "langchain>=1.0,<2" \
       "langchain-openai>=1.1.9,<2.0" \
-      "nemo-relay[langchain]>=0.8,<1.0" \
+      "nemo-relay[langchain]>=0.9.3,<0.10" \
       "fastapi>=0.115,<1.0" \
       "uvicorn>=0.30,<1.0"
 

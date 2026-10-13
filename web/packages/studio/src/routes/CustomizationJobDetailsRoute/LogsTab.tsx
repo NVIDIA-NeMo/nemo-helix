@@ -3,14 +3,14 @@
 
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Flex } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
 interface Props {
   customizationJobName: string;
   workspace: string;
-  jobStatus?: PlatformJobStatus;
+  jobStatus?: HelixJobStatus;
 }
 
 export const LogsTab: FC<Props> = ({ customizationJobName, workspace, jobStatus }) => {

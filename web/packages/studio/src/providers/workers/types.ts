@@ -12,4 +12,5 @@ export interface WorkersContextValue {
   workers: Set<Worker>;
   setWorkers: Dispatch<SetStateAction<Set<Worker>>>;
   createWorker: (worker: Worker, options?: CreateWorkerOptions) => void;
+  terminateWorker: (worker: Worker) => void;
 }

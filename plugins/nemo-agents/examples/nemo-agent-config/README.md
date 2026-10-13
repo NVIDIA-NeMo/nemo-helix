@@ -5,22 +5,24 @@
 
 ## Prerequisites
 
-This directory contains Platform-managed `nemo-agents-spec-v1` configs for
+This directory contains NeMo Helix-managed `nemo-agents-spec-v1` configs for
 NeMo Agents. Run the commands below from the repository root.
 
-The plugin installs Fabric, Relay Python bindings, and supported harness
-adapters. The Relay CLI is separate. Hermes is intentionally split out because the Hermes
-Agent runtime dependencies conflict with the Platform environment.
+The base plugin installs Fabric, Relay support, and the supported harness
+adapters. Install the extra for the harness you want to run; the
+[installation matrix](../../README.md#harness-installation-matrix) lists the
+available package expressions. Hermes is intentionally split out because its
+runtime dependencies conflict with the NeMo Helix environment.
 
 Set the credentials required by the selected model provider. The examples use
 `NVIDIA_API_KEY`. Install and authenticate the selected harness CLI when
 required; for example, run `codex login` for Codex or complete the Claude CLI
 login flow.
 
-For Claude or Codex, install and verify the Relay CLI:
+For example, install Codex and its matching Relay CLI from the repository root:
 
 ```bash
-script/dev-install-fabric.sh
+uv sync --package nemo-agents-plugin --extra codex
 nemo-relay --version
 ```
 
@@ -45,33 +47,50 @@ tools:
 DeepAgents, and Hermes. Adapter-specific options stay under
 `harnesses.<name>.settings`; do not put prompt text there.
 
-The selected harness is controlled by `default_harness`. To try another harness
-from the same config today, edit `default_harness` before creating or invoking
-the agent.
+Each harness example selects its adapter with `default_harness`.
+
+## Model parameters
+
+Models can set optional `top_p` and `max_tokens` parameters:
+
+```yaml
+models:
+  default:
+    provider: openai
+    model: openai/gpt-5.4
+    top_p: 0.9
+    max_tokens: 1024
+```
+
+`top_p` must be between 0 and 1, inclusive. `max_tokens` must be a positive
+integer no larger than `18446744073709551615`. Omit either field to keep the
+adapter's default. Support depends on the selected harness and model.
+These fields also work under `harnesses.<name>.model`, which replaces
+`models.default` for the selected harness; individual fields are not merged.
 
 ## Invoke
 
-`agent.yaml` is the telemetry-neutral multi-harness example. Set
-`default_harness` to the harness you want to validate, then create, deploy, and
-invoke the agent through Platform.
+Choose `agent-codex.yaml`, `agent-claude.yaml`, `agent-deepagents.yaml`, or
+`agent-hermes.yaml`, then create, deploy, and invoke the agent through NeMo
+Helix. The commands below use Codex.
 
 ```bash
 make bootstrap-python
 source .venv/bin/activate
 
 export NVIDIA_API_KEY="<your NVIDIA API key>"
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 if curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null; then
-  echo "Using the running NeMo Platform instance at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null; then
+  echo "Using the running NeMo Helix instance at $NHX_BASE_URL"
 else
-  nemo setup --auto --start-services --install-skills --no-deploy-agent
+  nemo setup --auto --start-services --install-skills
 fi
 
 curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Platform is not ready at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null || {
+  echo "NeMo Helix is not ready at $NHX_BASE_URL"
   exit 1
 }
 
@@ -80,7 +99,7 @@ curl -fsS --connect-timeout 2 --max-time 5 \
 
 nemo agents create \
   --name platform-agent \
-  --agent-config plugins/nemo-agents/examples/nemo-agent-config/agent.yaml
+  --agent-config plugins/nemo-agents/examples/nemo-agent-config/agent-codex.yaml
 
 nemo agents deploy \
   --agent platform-agent \
@@ -99,23 +118,23 @@ agent and deployment before recreating them.
 
 ### Codex
 
-Set `default_harness: codex` in `agent.yaml`. Authenticate Codex before
+Use [agent-codex.yaml](agent-codex.yaml). Authenticate Codex before
 invoking:
 
 ```bash
 codex login
 ```
 
-In this example, Codex uses the shared Nemotron model through Platform IGW.
+In this example, Codex uses the Nemotron model through NeMo Helix IGW.
 
 ### DeepAgents
 
-Set `default_harness: deepagents` in `agent.yaml`. In this example, DeepAgents
-uses the shared Nemotron model through Platform IGW.
+Use [agent-deepagents.yaml](agent-deepagents.yaml). In this example, DeepAgents
+uses the Nemotron model through NeMo Helix IGW.
 
 ### Claude
 
-Set `default_harness: claude` in `agent.yaml`. Authenticate Claude Code before
+Use [agent-claude.yaml](agent-claude.yaml). Authenticate Claude Code before
 invoking:
 
 ```bash
@@ -126,24 +145,81 @@ In this example, Claude uses its harness-local Anthropic model config.
 
 ### Hermes
 
-Hermes Agent has dependencies that conflict with the Platform environment, so
-install it with the Fabric adapter in a separate Python 3.12 environment:
+Hermes Agent has dependencies that conflict with the NeMo Helix environment, so
+use the repository helper to install Fabric's pinned Hermes source and matching
+adapter in a separate Python 3.14 environment:
 
 ```bash
-uvx uv@0.9.14 venv --python 3.12 .venv-hermes
-uvx uv@0.9.14 --no-config pip install \
-  --python .venv-hermes/bin/python \
-  "nemo-fabric[relay]==0.3.0b1" \
-  "nemo-fabric-adapters-hermes==0.3.0b1" \
-  "hermes-agent==0.19.0"
-
+script/dev-install-hermes.sh
 export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
 ```
 
-Set `default_harness: hermes` in `agent.yaml`. For subprocess deployments,
-export `ADAPTER_PYTHON` before starting Platform, or restart Platform after
-exporting it. The Platform service launches the agent subprocess, so exporting
+Use [agent-hermes.yaml](agent-hermes.yaml). For subprocess deployments,
+export `ADAPTER_PYTHON` before starting NeMo Helix, or restart NeMo Helix after
+exporting it. The NeMo Helix service launches the agent subprocess, so exporting
 `ADAPTER_PYTHON` only in the later CLI shell is not enough.
+
+### NOOA
+
+Use Python 3.12 or 3.13 and install the NOOA harness:
+
+```bash
+uv sync --package nemo-agents-plugin --extra nooa --python 3.13
+export NVIDIA_API_KEY="<your NVIDIA API key>"
+```
+
+Use [agent-nooa-coding.yaml](agent-nooa-coding.yaml) for CodingAgent or
+[agent-nooa-bench.yaml](agent-nooa-bench.yaml) for BenchAgent with the invoke
+commands above. Both examples call the NVIDIA model endpoint directly.
+
+CodingAgent selects `workflow.target_id: nvidia.nooa.coding-agent`; BenchAgent
+selects `kind: nooa-bench-agent` under `harnesses`. A config uses either
+`workflow` or `default_harness` with `harnesses`, not both. Workflow models go
+under `models.default` and target options under `workflow.settings`.
+
+Helix enables Relay for streaming and sessions. Generated containers install the
+NOOA extra and require Python 3.12 or 3.13.
+
+### Remote Agent
+
+Use [agent-remote.yaml](agent-remote.yaml) to connect to a running agent; no
+harness extra is needed. Set `harnesses.remote-agent.settings.base_url` to its
+API root (including `/v1`), `models.default.model` to its model name, and
+`REMOTE_AGENT_API_KEY` if authentication is required. For an unauthenticated
+endpoint, remove `models.default.api_key_env` to skip credential lookup.
+
+The endpoint must support SSE. Set `api_type` to `openai-responses` (default),
+`openai-completions`, or `anthropic-messages`. Configure skills, MCP, and tool
+policy on the remote agent.
+
+For live streaming and sessions, use a Relay-instrumented OpenAI Responses or
+Chat Completions endpoint and a running collector reachable by both services.
+Update the example config:
+
+```yaml
+harnesses:
+  remote-agent:
+    kind: remote-agent
+    settings:
+      base_url: https://agent.example.com/v1
+      api_type: openai-responses
+      relay_streaming: true
+telemetry:
+  enabled: true
+  provider: relay
+  atof:
+    enabled: true
+    sinks:
+      - type: stream
+        name: nemo-fabric-stream
+        url: https://collector.example.com
+        transport: ndjson
+```
+
+Configure the remote agent to publish NDJSON ATOF events to the collector's
+`/v1/atof` endpoint and carry `metadata.nemo_fabric_request_id` into its Relay
+events. Use `header_env` on the sink if the collector requires authentication.
+Helix connects to the collector without starting or stopping it.
 
 ## Relay Local Files
 
@@ -164,7 +240,7 @@ find ~/.local/share/nemo/agents/system/default \
 ## Relay to Intake
 
 `agent-relay-intake.yaml` enables Relay ATIF export to a locally running
-Platform Intake API. With Docker running, Intake automatically provisions its
+NeMo Helix Intake API. With Docker running, Intake automatically provisions its
 local ClickHouse container during platform startup. Use
 `agent-relay-intake.yaml` with the invoke directions above.
 

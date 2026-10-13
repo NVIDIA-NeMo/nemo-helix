@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import {
@@ -8,9 +9,11 @@ import {
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
 import {
@@ -38,6 +41,7 @@ type AnonymizerJobWithId = AnonymizerJob & { id: string };
 
 export const AnonymizerJobsDataView: FC = () => {
   const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const workspace = useWorkspaceFromPath();
 
   const dataViewState = useStudioDataViewState({
@@ -83,7 +87,12 @@ export const AnonymizerJobsDataView: FC = () => {
     }
   };
 
-  const { data: anonymizerResponse, isLoading } = useAnonymizerListRunJobs(
+  const {
+    data: anonymizerResponse,
+    isLoading,
+    error,
+    refetch,
+  } = useAnonymizerListRunJobs(
     workspace,
     {
       sort: getSortParam(dataViewState.sorting.state) as AnonymizerJobsSortField,
@@ -101,7 +110,8 @@ export const AnonymizerJobsDataView: FC = () => {
     {
       query: {
         placeholderData: keepPreviousData,
-        refetchInterval: JOB_POLLING_INTERVAL_MS,
+        refetchInterval: (query) =>
+          query.state.status === 'error' ? false : JOB_POLLING_INTERVAL_MS,
         refetchOnMount: 'always',
       },
     }
@@ -198,7 +208,9 @@ export const AnonymizerJobsDataView: FC = () => {
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row) => navigate(getAnonymizerJobRoute(workspace, row.name))}
+        onRowClick={(row, _index, event) =>
+          openRow(event, getAnonymizerJobRoute(workspace, row.name))
+        }
         renderBulkActions={({ selectedRows }) => (
           <Button
             kind="tertiary"
@@ -215,9 +227,29 @@ export const AnonymizerJobsDataView: FC = () => {
           DataViewRoot: {
             data: jobs,
             totalCount: totalResults,
-            requestStatus: isLoading && !anonymizerResponse ? 'loading' : undefined,
+            requestStatus: error
+              ? 'error'
+              : isLoading && !anonymizerResponse
+                ? 'loading'
+                : undefined,
           },
           DataViewTableContent: {
+            renderErrorState: () => (
+              <ErrorPanel
+                errorMessage={
+                  getErrorMessage(error ?? new Error()) || 'Failed to load anonymizer jobs'
+                }
+                attributes={{
+                  ErrorMessage: {
+                    slotFooter: (
+                      <Button kind="secondary" onClick={() => refetch()}>
+                        Retry
+                      </Button>
+                    ),
+                  },
+                }}
+              />
+            ),
             renderEmptyState: () =>
               hasActiveFilters ? (
                 <EntityEmptyState

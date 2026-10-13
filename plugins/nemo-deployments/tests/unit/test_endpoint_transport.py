@@ -24,7 +24,7 @@ from cryptography.x509.oid import NameOID
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.endpoint_transport import DIRECT, EndpointTransport, endpoint_transport
 
-MINTED = "https://default--nmp-abc--http.openshell.localhost:8080/v1/chat/completions?stream=true"
+MINTED = "https://default--nhx-abc--http.openshell.localhost:8080/v1/chat/completions?stream=true"
 
 
 def _config(monkeypatch: pytest.MonkeyPatch, *entries: dict[str, Any], default: str | None = None) -> None:
@@ -43,7 +43,7 @@ def test_connect_base_swaps_netloc_and_carries_the_minted_host() -> None:
     transport = EndpointTransport(connect_base="https://openshell.openshell.svc.cluster.local:8080")
     url, headers = transport.target(MINTED)
     assert url == "https://openshell.openshell.svc.cluster.local:8080/v1/chat/completions?stream=true"
-    assert headers == {"Host": "default--nmp-abc--http.openshell.localhost:8080"}
+    assert headers == {"Host": "default--nhx-abc--http.openshell.localhost:8080"}
 
 
 def test_plaintext_transport_has_no_client_kwargs() -> None:
@@ -186,7 +186,7 @@ def test_transport_completes_mtls_and_delivers_the_minted_host(pki: _Pki, mtls_s
     with httpx.Client(timeout=5, **transport.client_kwargs()) as client:
         response = client.get(url, headers=headers)
     assert response.status_code == 200
-    assert response.json() == {"host": "default--nmp-abc--http.openshell.localhost:8080", "path": "/health"}
+    assert response.json() == {"host": "default--nhx-abc--http.openshell.localhost:8080", "path": "/health"}
 
 
 def test_transport_without_a_client_cert_is_refused_by_an_mtls_server(pki: _Pki, mtls_server: str) -> None:
@@ -244,9 +244,9 @@ def test_plaintext_openshell_executor_dials_http_with_no_tls_material(monkeypatc
         },
     )
     transport = endpoint_transport("openshell")
-    url, headers = transport.target("http://default--nmp-abc--http.openshell.localhost:8080/health")
+    url, headers = transport.target("http://default--nhx-abc--http.openshell.localhost:8080/health")
     assert url == "http://openshell.openshell.svc.cluster.local:8080/health"
-    assert headers == {"Host": "default--nmp-abc--http.openshell.localhost:8080"}
+    assert headers == {"Host": "default--nhx-abc--http.openshell.localhost:8080"}
     assert transport.client_kwargs() == {}
 
 

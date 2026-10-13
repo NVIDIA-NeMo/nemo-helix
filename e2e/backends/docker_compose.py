@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 import httpx
-from nemo_platform_ext.client.tls import NMP_CLIENT_SSL_CERT_FILE_ENVVAR
+from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
 
 ComposeLifecycle = Literal["fresh", "reuse"]
 _DIAGNOSTIC_COMMAND_TIMEOUT_SECONDS = 60
@@ -165,7 +165,7 @@ class DockerComposeE2EBackend:
 
     def _wait_ready(self) -> None:
         verify = (
-            self.env.get(NMP_CLIENT_SSL_CERT_FILE_ENVVAR)
+            self.env.get(NHX_CLIENT_SSL_CERT_FILE_ENVVAR)
             or self.env.get("REQUESTS_CA_BUNDLE")
             or self.env.get("SSL_CERT_FILE")
             or True

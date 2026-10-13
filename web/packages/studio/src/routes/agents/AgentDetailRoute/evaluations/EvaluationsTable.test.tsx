@@ -63,6 +63,7 @@ describe('EvaluationsTable Job column', () => {
       agentName: 'my-agent',
       configLabel: null,
       evaluationName: null,
+      outcome: null,
     };
     renderTable([], [job]);
 

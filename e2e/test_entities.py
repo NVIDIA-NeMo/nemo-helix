@@ -4,7 +4,7 @@
 """E2E tests for the entities API.
 
 These tests verify basic internal entity-store operations work correctly when
-running against a fully deployed NMP platform. Direct entity CRUD uses service
+running against a fully deployed NHX platform. Direct entity CRUD uses service
 credentials, matching feature-service access in production. This includes:
 - Entity CRUD operations (create, retrieve, update, delete)
 - Entity creation within and without projects
@@ -20,14 +20,15 @@ import time
 import uuid
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError as APIStatusError
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.entities.types import EntityCreateInput, EntityUpdate, ListEntitiesQueryParams
-from nemo_platform_plugin.projects.client import ProjectsClient
-from nemo_platform_plugin.projects.types import CreateProjectRequest
-from nmp.testing import as_service_for
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError as APIStatusError
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.types import EntityCreateInput, EntityUpdate, ListEntitiesQueryParams
+from nemo_helix_plugin.projects.client import ProjectsClient
+from nemo_helix_plugin.projects.types import CreateProjectRequest
+from nhx.common.auth import Principal
+
+from e2e.services_pool_fixtures import client_as_principal
 
 ENTITY_TYPE = "e2e-test-entity"
 E2E_SERVICE_PRINCIPAL = "entities-e2e"
@@ -40,21 +41,25 @@ def _unique_name(prefix: str = "entity") -> str:
 
 
 @pytest.fixture(scope="module")
-def entity_store_sdk(sdk: NeMoPlatform) -> NeMoPlatform:
-    return as_service_for(
-        sdk,
+def entity_store_client(client: NemoClient) -> EntitiesClient:
+    """Entities client acting as a service principal on behalf of an e2e user."""
+    service_principal = Principal(
+        id=f"service:{E2E_SERVICE_PRINCIPAL}",
+        authz_aliases=[f"service:{E2E_SERVICE_PRINCIPAL}"],
         on_behalf_of=E2E_ON_BEHALF_OF,
-        service_name=E2E_SERVICE_PRINCIPAL,
+        on_behalf_of_email=E2E_ON_BEHALF_OF,
+        on_behalf_of_authz_aliases=[E2E_ON_BEHALF_OF],
     )
+    return EntitiesClient.from_client(client_as_principal(client, service_principal.get_headers()))
 
 
-def test_cluster_info_endpoint_returns_json_with_platform_version_and_revision(sdk: NeMoPlatform):
+def test_cluster_info_endpoint_returns_json_with_platform_version_and_revision(client: NemoClient):
     """Test GET /cluster-info returns JSON with platform_version and revision keys.
 
     Verifies the platform cluster-info endpoint returns a json-encoded response
     and includes platform_version and revision fields (values are not validated).
     """
-    response = sdk._client.get(f"{str(sdk.base_url).rstrip('/')}/cluster-info")
+    response = client._client.get(f"{client.base_url}/cluster-info")
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, dict), "Response body should be JSON object"
@@ -62,7 +67,7 @@ def test_cluster_info_endpoint_returns_json_with_platform_version_and_revision(s
     assert "revision" in data, "Response should include a 'revision' key"
 
 
-def test_entity_crud_lifecycle(entity_store_sdk: NeMoPlatform, workspace: str):
+def test_entity_crud_lifecycle(entity_store_client: EntitiesClient, workspace: str):
     """Test basic entity create, retrieve, update, delete operations.
 
     This test verifies the complete entity lifecycle:
@@ -72,7 +77,7 @@ def test_entity_crud_lifecycle(entity_store_sdk: NeMoPlatform, workspace: str):
     4. Delete the entity
     5. Verify it no longer exists
     """
-    entities = client_from_platform(entity_store_sdk, EntitiesClient)
+    entities = entity_store_client
     entity_name = _unique_name()
     initial_data = {"key": "initial-value", "nested": {"field": 123}}
 
@@ -141,20 +146,20 @@ def test_entity_crud_lifecycle(entity_store_sdk: NeMoPlatform, workspace: str):
     assert exc_info.value.status_code == 404
 
 
-def test_entity_with_project(sdk: NeMoPlatform, entity_store_sdk: NeMoPlatform, workspace: str):
+def test_entity_with_project(client: NemoClient, entity_store_client: EntitiesClient, workspace: str):
     """Test entity creation within a project.
 
     Project setup and cleanup use the caller-facing SDK, while internal entity
     CRUD uses service credentials. Verifies that entities can be associated
     with projects and that the association is persisted and retrievable.
     """
-    entities = client_from_platform(entity_store_sdk, EntitiesClient)
+    entities = entity_store_client
     project_name = _unique_name("project")
     entity_name = _unique_name()
 
     # Create project first
     project = (
-        client_from_platform(sdk, ProjectsClient)
+        ProjectsClient.from_client(client)
         .create_project(
             workspace=workspace,
             body=CreateProjectRequest(name=project_name, description="E2E test project"),
@@ -194,16 +199,16 @@ def test_entity_with_project(sdk: NeMoPlatform, entity_store_sdk: NeMoPlatform, 
 
     finally:
         # Clean up project
-        client_from_platform(sdk, ProjectsClient).delete_project(name=project_name, workspace=workspace)
+        ProjectsClient.from_client(client).delete_project(name=project_name, workspace=workspace)
 
 
-def test_entity_without_project(entity_store_sdk: NeMoPlatform, workspace: str):
+def test_entity_without_project(entity_store_client: EntitiesClient, workspace: str):
     """Test entity creation without a project association.
 
     Verifies that entities can exist at the workspace level without
     being associated with any project.
     """
-    entities = client_from_platform(entity_store_sdk, EntitiesClient)
+    entities = entity_store_client
     entity_name = _unique_name()
 
     entity = entities.create_entity(
@@ -234,7 +239,7 @@ def test_entity_without_project(entity_store_sdk: NeMoPlatform, workspace: str):
         )
 
 
-def test_entity_list_and_sorting(entity_store_sdk: NeMoPlatform, workspace: str):
+def test_entity_list_and_sorting(entity_store_client: EntitiesClient, workspace: str):
     """Test listing entities with sorting.
 
     Creates multiple entities and verifies:
@@ -242,7 +247,7 @@ def test_entity_list_and_sorting(entity_store_sdk: NeMoPlatform, workspace: str)
     2. Sorting by created_at works (ascending and descending)
     3. Sorting by name works
     """
-    entities = client_from_platform(entity_store_sdk, EntitiesClient)
+    entities = entity_store_client
     entity_names = [_unique_name(f"sort-{i:02d}") for i in range(5)]
     created_entities = []
 
@@ -309,7 +314,7 @@ def test_entity_list_and_sorting(entity_store_sdk: NeMoPlatform, workspace: str)
                 pass
 
 
-def test_entity_search_filter(entity_store_sdk: NeMoPlatform, workspace: str):
+def test_entity_search_filter(entity_store_client: EntitiesClient, workspace: str):
     """Test filtering entities with search queries.
 
     Verifies that the search parameter correctly filters entities
@@ -319,7 +324,7 @@ def test_entity_search_filter(entity_store_sdk: NeMoPlatform, workspace: str):
     entity_alpha = f"{prefix}-alpha"
     entity_beta = f"{prefix}-beta"
 
-    entities = client_from_platform(entity_store_sdk, EntitiesClient)
+    entities = entity_store_client
     try:
         # Create two entities with different data
         entities.create_entity(
@@ -384,13 +389,132 @@ def test_entity_search_filter(entity_store_sdk: NeMoPlatform, workspace: str):
                 pass
 
 
-def test_entity_rename(entity_store_sdk: NeMoPlatform, workspace: str):
+def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace: str):
+    """``$elemMatch`` selects on one element of an object array, on whichever database backs the store.
+
+    The SQL differs per dialect (SQLite ``json_each`` vs PostgreSQL ``json_array_elements``) and the
+    Kubernetes e2e deploys PostgreSQL, so this is the CI check for the PostgreSQL branch. The
+    non-array row matters there: expanding an object raises on PostgreSQL unless it is guarded.
+    Scalar elements must be skipped on both: SQLite raises on them, PostgreSQL reads them as null.
+    """
+    prefix = _unique_name("elem-match")
+    owner = _unique_name("owner")
+    rows = {
+        f"{prefix}-match": {
+            "metadata": [
+                {"key": "owner", "value": owner},
+                {"key": "verified", "value": True},
+            ]
+        },
+        f"{prefix}-split": {"metadata": [{"key": "owner", "value": "someone-else"}, {"key": "suite", "value": owner}]},
+        f"{prefix}-object": {"metadata": {"key": "owner", "value": owner}},
+        f"{prefix}-scalars": {"metadata": ["red", 3, None]},
+        f"{prefix}-escaped": {"metadata": [{"key": "city", "value": "café"}, 'a"b', {"key": "n", "value": "abc"}]},
+        f"{prefix}-none": {},
+    }
+
+    def names_matching(condition: dict) -> set[str]:
+        filter_query = json.dumps({"$and": [{"name": {"$like": f"{prefix}%"}}, condition]})
+        response = entity_store_client.list_entities(
+            entity_type=ENTITY_TYPE,
+            workspace=workspace,
+            query_params=ListEntitiesQueryParams(filter=filter_query),
+        )
+        return {entity.name for entity in response.items()}
+
+    try:
+        for name, data in rows.items():
+            entity_store_client.create_entity(
+                entity_type=ENTITY_TYPE, workspace=workspace, body=EntityCreateInput(name=name, data=data)
+            ).data()
+
+        owner_is_mine = {"data.metadata": {"$elemMatch": {"key": "owner", "value": owner}}}
+        assert names_matching(owner_is_mine) == {f"{prefix}-match"}
+        assert names_matching({"$not": owner_is_mine}) == {
+            f"{prefix}-split",
+            f"{prefix}-object",
+            f"{prefix}-scalars",
+            f"{prefix}-escaped",
+            f"{prefix}-none",
+        }
+        assert names_matching({"data.metadata": {"$elemMatch": {"value": None}}}) == set()
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": True}}}) == {
+            f"{prefix}-match"
+        }
+        owner_prefix = {"key": "owner", "value": {"$startsWith": owner[:-2]}}
+        assert names_matching({"data.metadata": {"$elemMatch": owner_prefix}}) == {f"{prefix}-match"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"$startsWith": "re"}}}) == {f"{prefix}-scalars"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"$eq": 3}}}) == {f"{prefix}-scalars"}
+        # Strings compare decoded, and a numeric comparison skips string values instead of failing.
+        city = {"key": "city", "value": "café"}
+        assert names_matching({"data.metadata": {"$elemMatch": city}}) == {f"{prefix}-escaped"}
+        assert names_matching({"data.metadata": {"$contains": 'a"b'}}) == {f"{prefix}-escaped"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "n", "value": {"$gt": 2}}}}) == set()
+        # JSON types: a boolean is neither the string "true" nor a number.
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": "true"}}}) == set()
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": {"$gt": 0}}}}) == set()
+    finally:
+        for name in rows:
+            try:
+                entity_store_client.delete_entity_by_name(name=name, entity_type=ENTITY_TYPE, workspace=workspace)
+            except Exception:
+                pass
+
+
+def test_entity_prefix_suffix_and_object_key_filters(entity_store_client: EntitiesClient, workspace: str):
+    """``$startsWith`` and ``$endsWith`` are case-sensitive and anchored, and ``$hasKey`` treats a dotted key as one key.
+
+    Like ``$elemMatch``, these run on both SQLite and PostgreSQL in CI; under ``$not`` a row without
+    the field must still match on both.
+    """
+    prefix = _unique_name("prefix-key")
+    rows = {
+        f"{prefix}-pins": {"tasks": ["ws/task_a#d1"], "tags": {"v1.2": 1}},
+        f"{prefix}-near": {"tasks": ["other-ws/task_a#d1", "ws/taskXa#d1"], "tags": {"v1": 1}},
+        f"{prefix}-none": {},
+    }
+
+    def names_matching(condition: dict) -> set[str]:
+        filter_query = json.dumps({"$and": [{"name": {"$like": f"{prefix}%"}}, condition]})
+        response = entity_store_client.list_entities(
+            entity_type=ENTITY_TYPE,
+            workspace=workspace,
+            query_params=ListEntitiesQueryParams(filter=filter_query),
+        )
+        return {entity.name for entity in response.items()}
+
+    try:
+        for name, data in rows.items():
+            entity_store_client.create_entity(
+                entity_type=ENTITY_TYPE, workspace=workspace, body=EntityCreateInput(name=name, data=data)
+            ).data()
+
+        has_task_a = {"data.tasks": {"$elemMatch": {"$startsWith": "ws/task_a#"}}}
+        assert names_matching(has_task_a) == {f"{prefix}-pins"}
+        assert names_matching({"$not": has_task_a}) == {f"{prefix}-near", f"{prefix}-none"}
+        assert names_matching({"name": {"$endsWith": "-pins"}}) == {f"{prefix}-pins"}
+        assert names_matching({"name": {"$endsWith": "-PINS"}}) == set()
+        assert names_matching({"created_at": {"$startsWith": "20"}}) == set(rows)
+        has_exact_member = {"data.tasks": {"$contains": "ws/task_a#d1"}}
+        assert names_matching(has_exact_member) == {f"{prefix}-pins"}
+        assert names_matching({"$not": has_exact_member}) == {f"{prefix}-near", f"{prefix}-none"}
+        assert names_matching({"data.tags": {"$hasKey": "v1.2"}}) == {f"{prefix}-pins"}
+        assert names_matching({"data.tags": {"$hasKey": "v1"}}) == {f"{prefix}-near"}
+    finally:
+        for name in rows:
+            try:
+                entity_store_client.delete_entity_by_name(name=name, entity_type=ENTITY_TYPE, workspace=workspace)
+            except Exception:
+                pass
+
+
+def test_entity_rename(entity_store_client: EntitiesClient, workspace: str):
     """Test renaming an entity via update.
 
     Verifies that entities can be renamed and the old name
     no longer works after rename.
     """
-    entities = client_from_platform(entity_store_sdk, EntitiesClient)
+    entities = entity_store_client
     old_name = _unique_name("old")
     new_name = _unique_name("new")
 
@@ -443,12 +567,12 @@ def test_entity_rename(entity_store_sdk: NeMoPlatform, workspace: str):
             pass
 
 
-def test_entity_auto_generated_name(entity_store_sdk: NeMoPlatform, workspace: str):
+def test_entity_auto_generated_name(entity_store_client: EntitiesClient, workspace: str):
     """Test that entities can be created without specifying a name.
 
     When no name is provided, the API should auto-generate a unique name.
     """
-    entities = client_from_platform(entity_store_sdk, EntitiesClient)
+    entities = entity_store_client
     entity = entities.create_entity(
         entity_type=ENTITY_TYPE,
         workspace=workspace,

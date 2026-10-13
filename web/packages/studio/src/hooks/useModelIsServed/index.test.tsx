@@ -62,14 +62,14 @@ describe('useModelIsServed', () => {
     const { result } = renderHook(() => useModelIsServed(undefined), {
       wrapper: createWrapper(),
     });
-    expect(result.current).toEqual({ isServed: false, isLoading: false });
+    expect(result.current).toEqual({ isServed: false, isLoading: false, isError: false });
   });
 
   it('returns isServed=false when model has no providers', () => {
     const { result } = renderHook(() => useModelIsServed(buildModel({ model_providers: [] })), {
       wrapper: createWrapper(),
     });
-    expect(result.current).toEqual({ isServed: false, isLoading: false });
+    expect(result.current).toEqual({ isServed: false, isLoading: false, isError: false });
   });
 
   it('returns isServed=true when model is in provider served_models', async () => {
@@ -102,12 +102,25 @@ describe('useModelIsServed', () => {
     expect(result.current.isServed).toBe(true);
   });
 
-  it('returns isServed=false when provider fetch fails', async () => {
+  // A failed lookup is not evidence that nothing serves the model. Callers that state
+  // the negative affirmatively need to tell the two apart, so surface `isError`.
+  it('returns isServed=false and flags isError when provider fetch fails', async () => {
     mockedGetProvider.mockRejectedValueOnce(new Error('network error'));
     const { result } = renderHook(() => useModelIsServed(buildModel()), {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.isServed).toBe(false);
+    expect(result.current.isError).toBe(true);
+  });
+
+  it('does not flag isError when the lookup succeeds and simply finds nothing', async () => {
+    mockedGetProvider.mockResolvedValueOnce(buildProvider(['ws/other-model']));
+    const { result } = renderHook(() => useModelIsServed(buildModel()), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isServed).toBe(false);
+    expect(result.current.isError).toBe(false);
   });
 });

@@ -1,9 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { StatTile, type StatTileProps } from '@nemo/common/src/components/StatTile/index';
+import {
+  StatTile,
+  type StatTileActionableProps,
+  type StatTileDiagnosticProps,
+} from '@nemo/common/src/components/StatTile/index';
 import { Grid } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
+import { Beaker, Bot, Database, Lightbulb, Layers } from 'lucide-react';
 
 const meta: Meta<typeof StatTile> = {
   component: StatTile,
@@ -111,6 +116,36 @@ export const MetricRow: Story = {
   ),
 };
 
+export const Actionable: Story = {
+  args: {
+    label: 'Agents',
+    value: '1',
+    icon: <Bot width={16} height={16} />,
+    to: '#',
+    variant: 'actionable',
+  },
+};
+
+export const ActionableRow: Story = {
+  render: () => (
+    <Grid cols={{ base: 1, md: 2, lg: 5 }} gap="density-xl">
+      {ACTIONABLE_TILES.map((tile) => (
+        <StatTile key={tile.label} {...tile} />
+      ))}
+    </Grid>
+  ),
+};
+
+export const ActionableWithOnClick: Story = {
+  args: {
+    label: 'Agents',
+    value: '1',
+    icon: <Bot width={16} height={16} />,
+    onClick: () => {},
+    variant: 'actionable',
+  },
+};
+
 export const Borderless: Story = {
   render: () => (
     <Grid cols={2} gap="density-xl" className="max-w-sm">
@@ -132,14 +167,52 @@ export const HintStatuses: Story = {
   ),
 };
 
-const METRIC_TILES: StatTileProps[] = [
+const METRIC_TILES: StatTileDiagnosticProps[] = [
   { label: 'Sessions', value: '0', trailingLabel: 'avg / week' },
   { label: 'Latency', value: '0', trailingLabel: 'avg session latency / week' },
   { label: 'Tokens', value: '0', trailingLabel: 'avg / week' },
   { label: 'Cost', value: '0', trailingLabel: 'avg / week' },
 ];
 
-const SUMMARY_TILES: StatTileProps[] = [
+const ACTIONABLE_TILES: StatTileActionableProps[] = [
+  {
+    label: 'Agents',
+    value: '1',
+    icon: <Bot width={16} height={16} />,
+    to: '#',
+    variant: 'actionable',
+  },
+  {
+    label: 'Insights',
+    value: '4',
+    icon: <Lightbulb width={16} height={16} />,
+    to: '#',
+    variant: 'actionable',
+  },
+  {
+    label: 'Test Cases',
+    value: '120',
+    icon: <Database width={16} height={16} />,
+    to: '#',
+    variant: 'actionable',
+  },
+  {
+    label: 'Experiments',
+    value: '1',
+    icon: <Beaker width={16} height={16} />,
+    to: '#',
+    variant: 'actionable',
+  },
+  {
+    label: 'Custom Models',
+    value: '0',
+    icon: <Layers width={16} height={16} />,
+    to: '#',
+    variant: 'actionable',
+  },
+];
+
+const SUMMARY_TILES: StatTileDiagnosticProps[] = [
   {
     label: 'Final Training Loss',
     value: '0.6420',

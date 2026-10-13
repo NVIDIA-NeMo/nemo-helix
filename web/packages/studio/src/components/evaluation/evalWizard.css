@@ -1,0 +1,38 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * Shared by the agent and model evaluation wizards.
+ *
+ * KUI's horizontal stepper sets each step's label beside its node, which reads as a row of
+ * "1 Begin ---- 2 Run Evaluation". In a modal this wizard's width is short enough that the
+ * labels crowd the connectors, so the node row is re-laid-out as a grid: node and connector on
+ * the first line, label underneath the node it belongs to.
+ *
+ * Only the arrangement changes — the node, label and connector are KUI's own elements, and the
+ * connector keeps its completed-state colour because the rule still targets `::after`.
+ */
+.eval-wizard-stepper .nv-stepper-node-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    'node line'
+    'heading heading';
+  row-gap: calc(var(--spacing) * 1.5);
+  column-gap: calc(var(--spacing) * 3);
+}
+
+.eval-wizard-stepper .nv-stepper-node {
+  grid-area: node;
+}
+
+.eval-wizard-stepper .nv-stepper-item-heading {
+  grid-area: heading;
+}
+
+.eval-wizard-stepper .nv-stepper-node-row::after {
+  grid-area: line;
+  align-self: center;
+}

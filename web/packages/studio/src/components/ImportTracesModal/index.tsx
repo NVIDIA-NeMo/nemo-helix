@@ -4,6 +4,7 @@
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { useInsightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
+import { getInsightsListAnalysisRunsQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import { getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
 import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import {
@@ -177,6 +178,9 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
 
       const started = triggered.filter(({ status }) => status === 'started').length;
       if (started > 0) {
+        void queryClient.invalidateQueries({
+          queryKey: getInsightsListAnalysisRunsQueryKey(workspace),
+        });
         toast.success(`Queued ${started} insights analysis run${started === 1 ? '' : 's'}.`);
       }
       insightsNeedsAttention = started < triggered.length;
@@ -197,7 +201,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
     importable.some(({ detection }) => UNATTRIBUTABLE_FORMATS.has(detection.format as string));
   const invalidSource = needsSource && !SOURCE_PATTERN.test(source.trim());
 
-  /** A malformed override would only fail once the analyze-job is already running. */
+  /** A malformed override would only fail once the analysis run is already running. */
   const hasInvalidModelRef =
     willRunInsights &&
     [defaultModel, fastModel].some(
@@ -259,7 +263,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
 
           <TabsContent value="files" className="items-stretch p-0 pt-density-lg">
             <Stack gap="density-2xl">
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 Each file is read as ATIF, direct spans, captured chat completions, or an OTLP
                 protobuf, and sent to the matching Intake endpoint for workspace{' '}
                 <strong>{workspace}</strong>.
@@ -283,7 +287,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                       Upload files
                     </Button>
                     {files.length === 0 && (
-                      <Text kind="body/regular/sm" color="secondary">
+                      <Text className="text-secondary" kind="body/regular/sm">
                         No files chosen
                       </Text>
                     )}
@@ -308,7 +312,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
               </FormField>
 
               {unattributable && (
-                <Text kind="body/regular/xs" color="secondary">
+                <Text className="text-secondary" kind="body/regular/xs">
                   Chat completions and OTLP protobufs carry no agent field that Studio can rewrite,
                   so those records land in Intake but will not appear under <strong>{agent}</strong>{' '}
                   unless their own spans already name it.
@@ -330,7 +334,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                     placeholder={DEFAULT_SPANS_SOURCE}
                     aria-label="Span source"
                   />
-                  <Text kind="body/regular/xs" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/xs">
                     Recorded on direct-span batches to name where they came from, such as{' '}
                     <code>langsmith</code>. A file that names its own source keeps it.
                   </Text>
@@ -348,7 +352,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                           onChange={(event) => setRunInsights(event.target.checked)}
                           slotLabel="Run insights analysis after import"
                         />
-                        <Text kind="body/regular/xs" color="secondary">
+                        <Text className="text-secondary" kind="body/regular/xs">
                           Queues an analyst run for <strong>{agent}</strong>, which must already be
                           enabled with <code>nemo insights analysis enable</code>.
                         </Text>

@@ -4,7 +4,7 @@
 import axios from 'axios';
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import qs from 'qs';
-import { User } from 'oidc-client-ts';
+import { getStoredOidcBearerToken } from '../../src/utils/oidcBearerToken';
 import { resolveBrowserBaseUrl } from '../../src/utils/url';
 
 const headers = {
@@ -24,27 +24,24 @@ axios.interceptors.request.use((config) => {
     return config;
   }
 
-  // Attach OIDC access token as Bearer token if available
+  // Attach the configured OIDC bearer token if available
   // Guard localStorage access — it is unavailable in Web Worker contexts
   const authority = import.meta.env.VITE_AUTH_AUTHORITY;
   const clientId = import.meta.env.VITE_AUTH_CLIENT_ID;
-  if (authority && clientId && typeof localStorage !== 'undefined') {
-    const oidcStorageKey = `oidc.user:${authority}:${clientId}`;
-    const oidcStorage = localStorage.getItem(oidcStorageKey);
-    if (oidcStorage) {
-      try {
-        const user = User.fromStorageString(oidcStorage);
-        if (user?.access_token && !user.expired) {
-          config.headers.Authorization = `Bearer ${user.access_token}`;
-        }
-      } catch {
-        // Remove malformed storage entry and trigger re-authentication
-        console.warn(
-          'Malformed OIDC storage entry detected. Clearing storage and re-authenticating.'
-        );
-        localStorage.removeItem(oidcStorageKey);
-      }
-    }
+  const bearerToken = getStoredOidcBearerToken({
+    authority,
+    clientId,
+    configuredSource: import.meta.env.VITE_AUTH_BEARER_TOKEN_SOURCE,
+    storage: typeof localStorage === 'undefined' ? undefined : localStorage,
+    onMalformedStorage: () => {
+      // The shared helper removes the malformed entry so the app can re-authenticate.
+      console.warn(
+        'Malformed OIDC storage entry detected. Clearing storage and re-authenticating.'
+      );
+    },
+  });
+  if (bearerToken) {
+    config.headers.Authorization = `Bearer ${bearerToken}`;
   }
 
   return config;

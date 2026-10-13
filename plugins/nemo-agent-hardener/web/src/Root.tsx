@@ -21,7 +21,7 @@ import { Route, Routes } from 'react-router';
  * plugin's mount point and the tables come from Studio's shared `@nemo/common`.
  *
  * The generated agent-hardener client is the plugin's own (Studio's SDK only covers
- * platform services), so it is pointed at the host's token getter here. This runs
+ * Helix services), so it is pointed at the host's token getter here. This runs
  * during render rather than in an effect because child routes issue requests on
  * their first render, before an effect would have fired.
  */

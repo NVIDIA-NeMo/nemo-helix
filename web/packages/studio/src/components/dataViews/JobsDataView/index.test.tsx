@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
+import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import {
-  PlatformJobResponse,
-  PlatformJobResponsesPage,
-  PlatformJobStatus,
+  HelixJobResponse,
+  HelixJobResponsesPage,
+  HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
 import { JobsDataView } from '@studio/components/dataViews/JobsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -14,7 +15,7 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { getWorkspaceJobsRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
-import { fireEvent } from '@testing-library/react';
+import { act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -29,21 +30,21 @@ vi.mock('use-debounce', () => ({
 const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 const WORKSPACE = workspace1.workspace;
 
-const makeJob = (overrides: Partial<PlatformJobResponse> = {}): PlatformJobResponse => ({
+const makeJob = (overrides: Partial<HelixJobResponse> = {}): HelixJobResponse => ({
   id: 'job-id-1',
   attempt_id: 'attempt-1',
   name: 'my-training-job',
   workspace: WORKSPACE,
   source: 'evaluator-metrics',
   fileset: 'fileset-1',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   platform_spec: { steps: [] },
   created_at: '2025-06-01T10:00:00Z',
   updated_at: '2025-06-01T12:00:00Z',
   ...overrides,
 });
 
-const makeJobsPage = (jobs: PlatformJobResponse[]): PlatformJobResponsesPage => ({
+const makeJobsPage = (jobs: HelixJobResponse[]): HelixJobResponsesPage => ({
   data: jobs,
   pagination: {
     page: 1,
@@ -89,6 +90,21 @@ describe('JobsDataView', () => {
     });
   });
 
+  it('names the source the same way in the tag and its tooltip', async () => {
+    // The tooltip otherwise falls back to the raw accessor value — the API's own word for
+    // the service — so a row reads one thing and hovers another. Checked on data-designer
+    // because this file disables the customizer flag, which filters those rows out.
+    const jobs = [makeJob({ name: 'data-designer-run-1', source: 'data-designer' })];
+    server.use(http.get(JOBS_URL, () => HttpResponse.json(makeJobsPage(jobs))));
+
+    renderComponent();
+
+    await screen.findByText('data-designer-run-1');
+
+    expect(screen.getByTitle('Data Designer')).toBeInTheDocument();
+    expect(screen.queryByTitle('data-designer')).not.toBeInTheDocument();
+  });
+
   it('hides customizer jobs when customizer is disabled', async () => {
     const jobs = [
       makeJob({ name: 'customizer-run-1', source: 'customization' }),
@@ -100,7 +116,7 @@ describe('JobsDataView', () => {
 
     expect(await screen.findByText('eval-run-2')).toBeInTheDocument();
     expect(screen.queryByText('customizer-run-1')).not.toBeInTheDocument();
-    expect(screen.queryByText('Customizer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fine-tuning')).not.toBeInTheDocument();
   });
 
   it('renders expected column headers', async () => {
@@ -199,6 +215,45 @@ describe('JobsDataView', () => {
     renderComponent();
 
     expect(await screen.findByTestId('error-panel')).toBeInTheDocument();
+  });
+
+  describe('polling', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('picks up new jobs without user interaction', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let jobs = [makeJob({ name: 'first-job' })];
+      server.use(http.get(JOBS_URL, () => HttpResponse.json(makeJobsPage(jobs))));
+
+      renderComponent();
+      expect(await screen.findByText('first-job')).toBeInTheDocument();
+
+      jobs = [makeJob({ name: 'second-job', id: 'job-id-2' }), ...jobs];
+      await act(() => vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_MS));
+
+      expect(await screen.findByText('second-job')).toBeInTheDocument();
+    });
+
+    it('stops polling while the list is in error', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let requestCount = 0;
+      server.use(
+        http.get(JOBS_URL, () => {
+          requestCount += 1;
+          return HttpResponse.error();
+        })
+      );
+
+      renderComponent();
+      expect(await screen.findByTestId('error-panel')).toBeInTheDocument();
+
+      const countAtError = requestCount;
+      await vi.advanceTimersByTimeAsync(JOB_POLLING_INTERVAL_MS * 3);
+
+      expect(requestCount).toBe(countAtError);
+    });
   });
 
   it('shows search input with correct placeholder', async () => {

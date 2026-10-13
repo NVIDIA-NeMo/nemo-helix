@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from nemo_example_plugin.entities import ExampleItem
 from nemo_example_plugin.seed_job import ExampleSeedJob
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 
 @pytest.mark.asyncio

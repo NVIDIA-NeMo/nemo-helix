@@ -5,7 +5,7 @@
 
 from typing import ClassVar
 
-from nemo_platform_plugin.config import NemoConfig
+from nemo_helix_plugin.config import NemoConfig
 from pydantic import Field
 
 
@@ -21,12 +21,12 @@ class SafeSynthesizerConfig(NemoConfig):
         default_factory=lambda: ["python", "-m", "nemo_safe_synthesizer_plugin.tasks.safe_synthesizer"]
     )
     job_executor_profile: str = "default"
-    container_image: str = "safe-synthesizer-tasks"
+    container_image: str = "nhx-safe-synthesizer-tasks"
     container_image_ref: str | None = Field(
         default=None,
         description=(
             "Optional fully qualified task image reference. When set, this bypasses platform "
-            "NMP_IMAGE_REGISTRY / NMP_IMAGE_TAG qualification for Safe Synthesizer jobs."
+            "NHX_IMAGE_REGISTRY / NHX_IMAGE_TAG qualification for Safe Synthesizer jobs."
         ),
     )
     default_job_resource_memory_request: str = "16G"

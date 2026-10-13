@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.build.errors import BuildError
 from scaled_evals.api.build.uploaded_context import (
     UploadedArchiveMetadata,
@@ -59,7 +59,7 @@ def resolve_uploaded_revision_image(
 
     with tempfile.TemporaryDirectory(prefix="se-upload-") as tmp:
         archive_path = Path(tmp) / "context.tar.gz"
-        s3.download_object(tarball_object_key, str(archive_path))
+        artifacts.download_object(tarball_object_key, str(archive_path))
         data = resolve_uploaded_archive_file_details(
             archive_path,
             context_path=context_path,

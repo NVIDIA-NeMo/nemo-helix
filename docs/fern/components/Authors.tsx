@@ -15,8 +15,6 @@
  *     - jdoe
  *     - asmith
  *   ---
- *
- *   import { Authors } from "@/components/Authors";
  *   <Authors ids={authors} />
  */
 

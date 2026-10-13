@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { agentHardenerDownloadJobResult, useAgentHardenerListJobResults } from '@agent-hardener/generated/api';
-import type { PlatformJobStatus } from '@agent-hardener/generated/schema';
+import type { HelixJobStatus } from '@agent-hardener/generated/schema';
 import { CJobTerminalStatuses, JOB_POLLING_INTERVAL_MS } from '@nemo/common';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -39,7 +39,7 @@ export const useJobArtifact = <T>(
   jobName: string | undefined,
   resultName: string,
   parse: (blob: Blob) => Promise<T>,
-  status?: PlatformJobStatus
+  status?: HelixJobStatus
 ): JobArtifact<T> => {
   const terminal = Boolean(status && CJobTerminalStatuses.includes(status));
   // Only give up once the job has been terminal for the grace period without the artifact showing.

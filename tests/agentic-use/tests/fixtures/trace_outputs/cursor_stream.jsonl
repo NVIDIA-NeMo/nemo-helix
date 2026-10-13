@@ -1,6 +1,0 @@
-{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/app","session_id":"cursor-session-fixture","model":"fixture-model","permissionMode":"default"}
-{"type":"user","message":{"role":"user","content":[{"type":"text","text":"List files."}]},"session_id":"cursor-session-fixture"}
-{"type":"tool_call","subtype":"started","call_id":"cursor-call-1","tool_call":{"shellToolCall":{"args":{"command":"ls","workingDirectory":"","toolCallId":"cursor-call-1"},"description":"List files"}},"session_id":"cursor-session-fixture"}
-{"type":"tool_call","subtype":"completed","call_id":"cursor-call-1","tool_call":{"shellToolCall":{"result":{"completed":{"command":"ls","workingDirectory":"/tmp","exitCode":0,"output":"README.md"}}}},"session_id":"cursor-session-fixture"}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]},"session_id":"cursor-session-fixture"}
-{"type":"result","subtype":"success","duration_ms":1000,"is_error":false,"result":"Done listing files.","session_id":"cursor-session-fixture"}

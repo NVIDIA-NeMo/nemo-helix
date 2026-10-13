@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PlatformJobLog } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { ProgressSection } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/ProgressSection';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -43,7 +43,7 @@ vi.mock('@nvidia/foundations-react-core', async (importOriginal) => {
 const createMockLog = (
   message: string,
   timestamp: string = '2024-01-01T10:00:00.000Z'
-): PlatformJobLog => ({
+): HelixJobLog => ({
   message,
   timestamp,
   job: 'test-job-id',
@@ -111,7 +111,7 @@ beforeEach(() => {
 const renderProgressSection = (
   jobId: string = 'test-job-123',
   isLoading: boolean = false,
-  logs: PlatformJobLog[] = []
+  logs: HelixJobLog[] = []
 ) => {
   return render(<ProgressSection jobId={jobId} isLoading={isLoading} logs={logs} />, {
     wrapper: createWrapper(),

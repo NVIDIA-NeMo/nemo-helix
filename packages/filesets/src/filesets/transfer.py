@@ -5,7 +5,7 @@
 
 ``upload``, ``download``, ``list_files`` and ``delete`` (and their async twins)
 drive :class:`~filesets.filesystem.filesystem.FilesetFileSystem` from a
-:class:`~nemo_platform_plugin.files.client.FilesClient`. They resolve the
+:class:`~nemo_helix_plugin.files.client.FilesClient`. They resolve the
 ``[workspace/]fileset#path`` reference forms, expand glob patterns, create
 filesets on demand, and report progress through fsspec callbacks. The CLI and
 the SDK ``FilesResource`` both build on these functions.
@@ -19,8 +19,8 @@ from pathlib import PurePath
 
 from fsspec.callbacks import DEFAULT_CALLBACK, Callback
 from fsspec.core import has_magic
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import (
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.types import (
     CacheStatus,
     CreateFilesetRequest,
     FilesetFileOutput,

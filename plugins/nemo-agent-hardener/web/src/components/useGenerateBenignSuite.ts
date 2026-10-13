@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { usePlatformSdk } from '@agent-hardener/api/platform';
+import { useHelixSdk } from '@agent-hardener/api/platform';
 import {
   pendingInterview,
   pendingReview,
@@ -105,7 +105,7 @@ export const useGenerateBenignSuite = (
     },
   });
 
-  const { useJobsGetJob, useJobsUpdateJobStatusDetails } = usePlatformSdk();
+  const { useJobsGetJob, useJobsUpdateJobStatusDetails } = useHelixSdk();
   const { data: job } = useJobsGetJob(workspace, jobName, {
     query: {
       enabled: Boolean(jobName),

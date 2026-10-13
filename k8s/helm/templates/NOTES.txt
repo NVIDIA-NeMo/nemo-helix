@@ -1,7 +1,7 @@
-{{- $apiServiceName := include "nmp-api.api-servicename" . -}}
+{{- $apiServiceName := include "nhx-api.api-servicename" . -}}
 {{- $apiServicePort := .Values.api.service.port -}}
-{{- $apiEnvSecretName := include "nemo-platform.apiEnvSecretName" . -}}
-{{- $defaultEncryptionKeySecretKey := include "nemo-platform.defaultEncryptionKeySecretKey" . -}}
+{{- $apiEnvSecretName := include "nemo-helix.apiEnvSecretName" . -}}
+{{- $defaultEncryptionKeySecretKey := include "nemo-helix.defaultEncryptionKeySecretKey" . -}}
 {{- $namespace := .Release.Namespace -}}
 ================================================================================
 🚀 NVIDIA NeMo Microservices Platform
@@ -34,7 +34,7 @@ Successfully installed {{ .Chart.Name }}-{{ .Chart.Version }}, named {{ .Release
   {{- if .Values.openshiftRoute.host }}
     https://{{ .Values.openshiftRoute.host }}
   {{- else }}
-    Check the Route status for the assigned hostname: kubectl get route -n {{ $namespace }} {{ include "nemo-platform.name" . }}
+    Check the Route status for the assigned hostname: kubectl get route -n {{ $namespace }} {{ include "nemo-helix.name" . }}
   {{- end }}
 {{- else if .Values.httpRoute.enabled }}
   External URL (via Gateway API HTTP Route):
@@ -55,7 +55,7 @@ Successfully installed {{ .Chart.Name }}-{{ .Chart.Version }}, named {{ .Release
     http://localhost:8080
 {{- end }}
 
-{{- if not (include "nemo-platform.authEnabled" .) }}
+{{- if not (include "nemo-helix.authEnabled" .) }}
 
   AUTHENTICATION IS DISABLED. This is only suitable for
   development and testing.
@@ -64,12 +64,12 @@ Successfully installed {{ .Chart.Name }}-{{ .Chart.Version }}, named {{ .Release
 
   Install the CLI (if not already installed) and verify:
 
-     > pip install nemo-platform
+     > pip install nemo-helix
      > nemo config set --base-url <URL>
      > nemo auth login --base-url <URL> (If authentication is enabled)
      > nemo workspaces list
 
-  Documentation: https://docs.nvidia.com/nemo-platform
+  Documentation: https://docs.nvidia.com/nemo-helix
 
   Back up the {{ $apiEnvSecretName }} Secret. If it is lost, existing encrypted
   platform secrets become unrecoverable. To print the stored Secret data value
@@ -85,7 +85,7 @@ Successfully installed {{ .Chart.Name }}-{{ .Chart.Version }}, named {{ .Release
     --set externalDatabase.host=my-external-database-host
     --set externalDatabase.port=5432
     --set externalDatabase.user=nemo
-    --set externalDatabase.database=nemoplatform
+    --set externalDatabase.database=nemohelix
     --set externalDatabase.existingSecret=my-existing-secret
     --set externalDatabase.existingSecretPasswordKey=password
 
@@ -109,7 +109,7 @@ Successfully installed {{ .Chart.Name }}-{{ .Chart.Version }}, named {{ .Release
 {{- end }}
 
 {{- if or .Values.multinodeNetworking.aws.enabled .Values.multinodeNetworking.azure.enabled .Values.multinodeNetworking.gcp.enabled .Values.multinodeNetworking.oci.enabled }}
-{{- $ncclFullname := include "nemo-platform.fullname" . }}
+{{- $ncclFullname := include "nemo-helix.fullname" . }}
 {{- $ncclTestBase := printf "%s-nccl-test" ($ncclFullname | trunc 40 | trimSuffix "-") | trunc 42 }}
 {{- $ncclTestConfigMap := printf "%s-cm" $ncclTestBase | trunc 63 }}
 
@@ -159,6 +159,6 @@ Successfully installed {{ .Chart.Name }}-{{ .Chart.Version }}, named {{ .Release
   OPEN_SANDBOX_DOMAIN={{ .Values.opensandbox.domain }} over {{ .Values.opensandbox.protocol }}.
   Copy Secret {{ .Values.opensandbox.apiKeySecret }} into this release namespace.
   The chart does not install OpenSandbox. See helm show readme and
-  https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
+  https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
 
 {{- end }}

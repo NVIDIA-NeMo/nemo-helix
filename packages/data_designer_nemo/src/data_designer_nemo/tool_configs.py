@@ -7,4 +7,4 @@ from data_designer_nemo.errors import NDDInvalidConfigError
 
 def validate_no_tool_configs(config: dd.DataDesignerConfig) -> None:
     if config.tool_configs and len(config.tool_configs) > 0:
-        raise NDDInvalidConfigError("Tool configs are not supported in the NeMo Platform Data Designer service.")
+        raise NDDInvalidConfigError("Tool configs are not supported in the NeMo Helix Data Designer service.")

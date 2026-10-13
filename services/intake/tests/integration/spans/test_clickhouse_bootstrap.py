@@ -7,10 +7,10 @@ from typing import cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
-from nmp.intake.service import IntakeService
-from nmp.intake.spans.clickhouse_client import ClickHouseSpanClient, bootstrap_schema
-from nmp.intake.spans.clickhouse_migrations import quote_clickhouse_identifier
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
+from nhx.intake.service import IntakeService
+from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient, bootstrap_schema
+from nhx.intake.spans.clickhouse_migrations import quote_clickhouse_identifier
 
 
 def test_clickhouse_server_matches_supported_lts(
@@ -37,6 +37,7 @@ def test_clickhouse_bootstrap_is_idempotent(clickhouse_client: ClickHouseSpanCli
         ("ch_annotations_0001",),
         ("ch_evaluator_results_0001",),
         ("ch_evaluator_results_0002",),
+        ("ch_evaluator_results_0003_status",),
         ("ch_spans_0002",),
         ("ch_trace_index_0003",),
         ("ch_trace_index_0004_nemo_keys",),

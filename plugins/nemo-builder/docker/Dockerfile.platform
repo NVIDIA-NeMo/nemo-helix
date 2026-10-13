@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# nhx-api plus this plugin, which isn't a workspace member. Its package and dist-info are copied
+# into the api image's site-packages, which is all `nemo.services` discovery needs.
+ARG NHX_API_IMAGE=my-registry/nhx-api:local
+ARG VENV_PY=python3.13
+# The uv the repo's lockfile is maintained with (`make toolchain-versions`).
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.10.10
+
+FROM ${UV_IMAGE} AS uv
+
+FROM python:3.13.15-slim-trixie AS pkg
+COPY --from=uv /uv /usr/local/bin/uv
+WORKDIR /src
+COPY plugins/nemo-builder ./plugins/nemo-builder
+# The api image already has every dependency at its own pins, so none are installed or resolved
+# here. The build backend is held to the version uv.lock pins.
+RUN echo "hatchling==1.31.0" > /tmp/build-constraints.txt \
+ && uv pip install --no-cache --target /pkg --no-deps --no-sources \
+      --build-constraints /tmp/build-constraints.txt ./plugins/nemo-builder \
+ && test -f /pkg/nemo_builder_plugin/service.py \
+ && ls -d /pkg/nemo_builder_plugin-*.dist-info \
+ && grep -q "nemo.services" /pkg/nemo_builder_plugin-*.dist-info/entry_points.txt
+
+FROM ${NHX_API_IMAGE}
+ARG VENV_PY
+COPY --from=pkg /pkg/ /app/.venv/lib/${VENV_PY}/site-packages/
+# Fails the build if the api image's Python isn't `VENV_PY`: it would never look where the plugin
+# was copied. Exec form: the api image has no shell.
+RUN ["/app/.venv/bin/python", "-c", "import importlib.metadata as m, nemo_builder_plugin.service; assert any(e.name == 'builder' for e in m.entry_points(group='nemo.services')), 'builder service entry point not found'"]

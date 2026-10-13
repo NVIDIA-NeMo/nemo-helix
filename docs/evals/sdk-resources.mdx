@@ -1,0 +1,129 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Evaluator NeMo Helix SDK Resources"
+description: ""
+---
+<a id="evaluator-nhx-sdk-resources"></a>
+
+The `nhx_evals_sdk` package provides context-agnostic objects for defining metrics, datasets, evaluation configuration, and result handling.
+When you want to execute those evaluations through NeMo Helix Evals plugin, use the Evals SDK resource mounted on the `nemo_helix` SDK.
+This page explains NeMo Helix-specific objects used to submit durable platform jobs and retrieve evaluator job results.
+
+## Evaluator
+
+The `Evaluator` resource is the sync SDK object for working with the Evals plugin on NeMo Helix.
+Build it from a `NemoClient` instance:
+
+```python
+from nemo_evals.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
+```
+
+The primary execution method is `submit`, which creates a durable remote platform job whose lifecycle you manage through the returned job resource.
+For local in-process evaluation that returns a completed `EvaluationResult` without the platform, use `nhx_evals_sdk.Evaluator` directly.
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `submit()` | Submits a durable platform job: one metric evaluation over a dataset, or a taskset evaluation run by an agent runner. | `EvaluatorJobResource` or `AgentEvaluatorJobResource` |
+| `plugin_status()` | Returns Evals plugin health information from the service. | `dict[str, object]` |
+| `get_job_resource(job_name: str, workspace: str \\| None = None)` | Returns a resource for an existing Evals plugin job. | `EvaluatorJobResource` |
+
+The `dataset` argument accepts inline rows, local dataset paths, local glob paths, and fileset references with optional fragment selectors. Use `config` for evaluator runtime settings, and `target` plus `prompt_template` when the evaluator should generate model or agent responses before scoring.
+
+### `submit()` arguments
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `metric` | `Metric` | Row evaluation | Metric configuration serialized into the durable platform job. |
+| `dataset` | `PluginDatasetInput` | Row evaluation | Inline rows, local dataset paths, local glob paths, or fileset references with optional fragment selectors. |
+| `tasks` | `TasksetRef \\| None` | Taskset evaluation | Stored taskset the agent runner evaluates. Mutually exclusive with `metric` + `dataset`. |
+| `trials` | `list[AgentEvalTrial] \\| None` | Taskset evaluation | Saved trials to rescore offline, instead of generating them with a runner. Mutually exclusive with `target`. |
+| `config` | `RunConfig \\| RunConfigOnline \\| RunConfigOnlineModel \\| None` | No | Runtime settings applied when the submitted job executes. Row evaluation only. |
+| `target` | `Model \\| ModelRef \\| Agent \\| AgentTaskRunner \\| None` | No | Model, model reference, or agent target for a row evaluation; the live agent runner for a taskset evaluation. |
+| `placement` | `GymPlacement \\| None` | No | Where the platform runs a `GymAgentTaskRunner` — a staged environment FileSet and the agent instance a sandboxed host routes to. Taskset evaluation only. |
+| `prompt_template` | `str \\| dict[str, Any] \\| None` | No | Prompt template used with `target` for online model or agent evaluation. Row evaluation only. |
+
+### Submit a platform job
+
+```python
+from nhx_evals_sdk import ExactMatchMetric
+
+metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
+dataset = [
+    {"expected": "Paris", "output": "Paris"},
+    {"expected": "Berlin", "output": "Munich"},
+]
+
+job = evaluator.submit(metric=metric, dataset=dataset)
+job.wait_until_done()
+result = job.get_result()
+print(result.aggregate_scores)
+```
+
+## AsyncEvaluator
+
+The `AsyncEvaluator` resource provides the same Evals plugin surface for `AsyncNemoClient`.
+Async methods must be awaited:
+
+```python
+from nemo_evals.sdk import AsyncEvaluator
+from nemo_helix_plugin.client.client import AsyncNemoClient
+
+async_client = AsyncNemoClient.from_config()
+async_evaluator = AsyncEvaluator.from_client(async_client)
+```
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `submit()` | Submits a durable platform job: one metric evaluation over a dataset, or a taskset evaluation run by an agent runner. | `AsyncEvaluatorJobResource` or `AsyncAgentEvaluatorJobResource` |
+| `plugin_status()` | Returns Evals plugin health information from the service. | `dict[str, object]` |
+| `get_job_resource(job_name: str, workspace: str \\| None = None)` | Returns a resource for an existing Evals plugin job. | `AsyncEvaluatorJobResource` |
+
+`AsyncEvaluator.submit()` accepts the same arguments as the sync method [above](#submit-arguments).
+
+```python
+import asyncio
+
+from nhx_evals_sdk import ExactMatchMetric
+
+metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
+dataset = [
+    {"expected": "Paris", "output": "Paris"},
+    {"expected": "Berlin", "output": "Munich"},
+]
+
+async def main() -> None:
+    job = await async_evaluator.submit(metric=metric, dataset=dataset)
+    await job.wait_until_done()
+    result = await job.get_result()
+    print(result.aggregate_scores)
+
+asyncio.run(main())
+```
+
+## EvaluatorJobResource
+
+The `EvaluatorJobResource` is the sync job handle returned by `Evaluator.submit`.
+You can also reconnect to an existing job with `Evaluator.get_job_resource`.
+
+Some of the most useful methods and properties are described below.
+
+| Method or property | Description |
+|--------------------|-------------|
+| `name` | Returns the evaluator job name. |
+| `job` | Returns the raw evaluator job payload captured at resource creation. |
+| `get_job_status()` | Fetches the current evaluator job status from the Evals plugin API. |
+| `check_if_complete(raise_if_not_complete: bool = False)` | Returns whether the job is complete. When `raise_if_not_complete` is true, raises for any status other than `completed`. |
+| `wait_until_done()` | Polls the job until it reaches a terminal platform status. Raises if the job fails or times out. |
+| `get_result(aggregate_fields=None)` | Downloads aggregate-score and row-score artifacts and returns an `EvaluationResult`. Optional `aggregate_fields` shapes the returned aggregate scores only. |
+| `download_artifacts(path=None)` | Downloads and extracts the full job artifacts archive under a job-specific directory. |
+
+## AsyncEvaluatorJobResource
+
+The `AsyncEvaluatorJobResource` is the async job handle returned by `AsyncEvaluator.submit`.
+It mirrors `EvaluatorJobResource`, but status and result methods are awaited.

@@ -49,38 +49,7 @@ class TaskBuildWorker:
     retry_delay: float = 30.0
     worker_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{time.time_ns()}")
 
-    def claim_next(self) -> TaskBuildJob | None:
-        with self.connect() as conn:
-            return TaskBuildRepository(conn).claim_next(
-                worker_id=self.worker_id,
-                claim_timeout=self.claim_timeout,
-                max_attempts=self.max_attempts,
-            )
-
-    def work_once(self) -> bool:
-        job = self.claim_next()
-        if job is None:
-            return False
-        self.run(job)
-        return True
-
-    def work_forever(self, *, idle_sleep: float = 2.0) -> None:
-        next_presence_heartbeat = 0.0
-        while True:
-            try:
-                now = time.monotonic()
-                if now >= next_presence_heartbeat:
-                    self._heartbeat_presence()
-                    next_presence_heartbeat = now + self.heartbeat_interval
-                worked = self.work_once()
-            except Exception:  # noqa: BLE001 - transient DB failures must not kill the worker
-                LOG.exception("task build queue poll failed; retrying")
-                self.sleep(idle_sleep)
-                continue
-            if not worked:
-                self.sleep(idle_sleep)
-
-    def run(self, job: TaskBuildJob) -> None:
+    def run(self, job: TaskBuildJob) -> bool:
         stop = threading.Event()
         heartbeat = threading.Thread(
             target=self._heartbeat_forever,
@@ -91,6 +60,7 @@ class TaskBuildWorker:
         heartbeat.start()
         try:
             image_ref, image_digest = self._execute(job)
+            verifier_image = resolve_verifier_image(job)
         except Exception as exc:  # noqa: BLE001 - persisted for retry/diagnosis
             error = str(exc)[:4000]
             LOG.exception(
@@ -109,6 +79,7 @@ class TaskBuildWorker:
                     max_attempts=self.max_attempts,
                     retry_delay=self.retry_delay,
                 )
+            return False
         else:
             with self.connect() as conn:
                 completed = TaskBuildRepository(conn).complete(
@@ -117,6 +88,8 @@ class TaskBuildWorker:
                     worker_id=self.worker_id,
                     image_ref=image_ref,
                     image_digest=image_digest,
+                    verifier_image_ref=verifier_image[0] if verifier_image else None,
+                    verifier_image_digest=verifier_image[1] if verifier_image else None,
                 )
             if not completed:
                 LOG.warning(
@@ -124,43 +97,19 @@ class TaskBuildWorker:
                     job.task_id,
                     job.revision,
                 )
+            return completed
         finally:
             stop.set()
             heartbeat.join(timeout=max(1.0, self.heartbeat_interval * 2))
 
     def _execute(self, job: TaskBuildJob) -> tuple[str, str]:
-        if job.backend == "buildkit":
-            return asyncio.run(build_revision_image(job.task_id, job.revision, job.object_key))
-        if job.backend == "cloudbuild":
-            image_ref, builder_digest = build_cloud_revision_image(job.task_id, job.revision, job.object_key)
-            resolved = resolve_task_image(image_ref, expected_digest=builder_digest)
-            return resolved.runtime_ref, resolved.digest
-        if job.backend == "prebuilt":
-            payload = job.payload
-            resolved = resolve_task_image(
-                str(payload["image_ref"]),
-                expected_digest=str(payload.get("expected_digest") or "") or None,
-            )
-            return resolved.runtime_ref, resolved.digest
-        if job.backend != "image_builder_service":
-            raise ValueError(f"unsupported task build backend: {job.backend}")
-
-        payload = job.payload
-        image_ref, builder_digest = resolve_uploaded_revision_image(
-            tarball_object_key=job.object_key,
-            context_path=str(payload.get("context_path") or "."),
-            builder_source_commit=str(payload.get("builder_source_commit") or settings.image_builder_source_commit),
-        )
-        resolved = resolve_task_image(image_ref, expected_digest=builder_digest)
-        return resolved.runtime_ref, resolved.digest
+        return execute_task_build(job)
 
     def _heartbeat_forever(self, job: TaskBuildJob, stop: threading.Event) -> None:
         while not stop.wait(self.heartbeat_interval):
             try:
                 with self.connect() as conn:
-                    repo = TaskBuildRepository(conn)
-                    repo.heartbeat_worker(self.worker_id)
-                    alive = repo.heartbeat(
+                    alive = TaskBuildRepository(conn).heartbeat(
                         job.task_id,
                         job.revision,
                         worker_id=self.worker_id,
@@ -179,6 +128,47 @@ class TaskBuildWorker:
                     job.revision,
                 )
 
-    def _heartbeat_presence(self) -> None:
-        with self.connect() as conn:
-            TaskBuildRepository(conn).heartbeat_worker(self.worker_id)
+
+def execute_task_build(job: TaskBuildJob) -> tuple[str, str]:
+    """Execute one claimed task-image build through its frozen backend."""
+    if job.backend == "buildkit":
+        return asyncio.run(build_revision_image(job.task_id, job.revision, job.object_key))
+    if job.backend == "cloudbuild":
+        image_ref, builder_digest = build_cloud_revision_image(job.task_id, job.revision, job.object_key)
+        resolved = resolve_task_image(image_ref, expected_digest=builder_digest)
+        return resolved.runtime_ref, resolved.digest
+    if job.backend == "prebuilt":
+        payload = job.payload
+        resolved = resolve_task_image(
+            str(payload["image_ref"]),
+            expected_digest=str(payload.get("expected_digest") or "") or None,
+        )
+        return resolved.runtime_ref, resolved.digest
+    if job.backend != "image_builder_service":
+        raise ValueError(f"unsupported task build backend: {job.backend}")
+
+    payload = job.payload
+    image_ref, builder_digest = resolve_uploaded_revision_image(
+        tarball_object_key=job.object_key,
+        context_path=str(payload.get("context_path") or "."),
+        builder_source_commit=str(payload.get("builder_source_commit") or settings.image_builder_source_commit),
+    )
+    resolved = resolve_task_image(image_ref, expected_digest=builder_digest)
+    return resolved.runtime_ref, resolved.digest
+
+
+def resolve_verifier_image(job: TaskBuildJob) -> tuple[str, str] | None:
+    """Resolve the prebuilt separate-verifier image finalize recorded, if any.
+
+    Only prebuilt jobs carry one: task builds produce the agent image alone.
+    """
+    if job.backend != "prebuilt":
+        return None
+    verifier_ref = str(job.payload.get("verifier_image_ref") or "")
+    if not verifier_ref:
+        return None
+    resolved = resolve_task_image(
+        verifier_ref,
+        expected_digest=str(job.payload.get("verifier_expected_digest") or "") or None,
+    )
+    return resolved.runtime_ref, resolved.digest

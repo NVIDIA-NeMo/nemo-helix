@@ -12,10 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from nemo_deployments_plugin.config import ControllerConfig, DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.controller import DeploymentsController
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import (
+from nemo_deployments_plugin.service import DeploymentsService
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
     ContainerExecutorConfig,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
@@ -31,20 +31,21 @@ from nemo_platform_plugin.models.types import (
     UpdateModelDeploymentRequest,
     UpsertModelProviderRequest,
 )
-from nmp.common.config import Runtime
-from nmp.common.secrets.encryption import get_base64_encoded_random_bytes
-from nmp.core.files.app.backends.base import FileInfo
-from nmp.core.files.app.backends.huggingface import HuggingfaceStorageImpl
-from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate, ServiceBackend
-from nmp.core.models.controllers.backends.deployments_plugin.backend import DeploymentsPluginServiceBackend
-from nmp.core.models.controllers.backends.registry import BackendRegistry
-from nmp.core.models.controllers.context import ModelContext
-from nmp.core.models.controllers.models_controller import ModelsController
-from nmp.core.models.service import ModelsService
-from nmp.core.secrets.config import SecretsServiceConfig
-from nmp.testing import ClientContext, create_test_client
-from nmp.testing.blockbuster import blockbuster_fixture
-from nmp.testing.docker import (
+from nhx.common.config import Runtime
+from nhx.common.secrets.encryption import get_base64_encoded_random_bytes
+from nhx.core.files.app.backends.base import FileInfo
+from nhx.core.files.app.backends.huggingface import HuggingfaceStorageImpl
+from nhx.core.models.controllers.backends.backends import DeploymentStatusUpdate, ServiceBackend
+from nhx.core.models.controllers.backends.deployments_plugin.backend import DeploymentsPluginServiceBackend
+from nhx.core.models.controllers.backends.registry import BackendRegistry
+from nhx.core.models.controllers.context import ModelContext
+from nhx.core.models.controllers.models_controller import ModelsController
+from nhx.core.models.service import ModelsService
+from nhx.core.secrets.config import SecretsServiceConfig
+from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
+from nhx.testing import ClientContext, create_test_client
+from nhx.testing.blockbuster import blockbuster_fixture
+from nhx.testing.docker import (
     MOCK_NIM_IMAGE_TAG,
     MOCK_SIDECAR_IMAGE_TAG,
     DockerTestContext,
@@ -58,6 +59,13 @@ from nmp.testing.docker import (
 import docker
 
 blockbuster = blockbuster_fixture(autouse=True)
+
+
+class _TestDeploymentsService(NemoServiceAdapter):
+    """The deployments plugin mounted as a platform service, as the runner does."""
+
+    def __init__(self) -> None:
+        super().__init__(DeploymentsService())
 
 
 @pytest.fixture
@@ -121,9 +129,9 @@ def secrets_service_config() -> SecretsServiceConfig:
     )
 
 
-def models_client_from_sdk(sdk: NeMoPlatform) -> ModelsClient:
+def models_client_from_client(client: NemoClient) -> ModelsClient:
     """Create a typed Models client sharing the test platform transport."""
-    return client_from_platform(sdk, ModelsClient)
+    return ModelsClient.from_client(client)
 
 
 def create_provider(
@@ -291,11 +299,11 @@ class MockServiceBackend(ServiceBackend):
 
     def __init__(
         self,
-        nmp_sdk: AsyncNeMoPlatform,
+        client: AsyncNemoClient,
         config: dict[str, Any],
     ) -> None:
         """Initialize mock backend without calling parent init."""
-        self._nmp_sdk = nmp_sdk
+        self._client = client
         self._config = config
 
         # Track method calls for assertions
@@ -391,10 +399,12 @@ class MockServiceBackend(ServiceBackend):
 def test_clients() -> Generator[ClientContext, None, None]:
     """Create all client types sharing the same app for controller tests.
 
-    The controller needs an async SDK, but we also need the sync SDK/test client
-    to create test data. ClientContext provides all of these sharing one app.
+    The controller needs an async client, but we also need the sync client/test client
+    to create test data. ClientContext provides all of these sharing one app. The
+    deployments plugin's API is mounted too: the deployments-plugin backend is a pure
+    HTTP consumer of it.
     """
-    with create_test_client(ModelsService, client_type=ClientContext) as clients:
+    with create_test_client(ModelsService, _TestDeploymentsService, client_type=ClientContext) as clients:
         yield clients
 
 
@@ -402,7 +412,7 @@ def test_clients() -> Generator[ClientContext, None, None]:
 def mock_backend(test_clients: ClientContext) -> MockServiceBackend:
     """Create a mock backend for testing."""
     return MockServiceBackend(
-        nmp_sdk=test_clients.async_sdk,
+        client=test_clients.async_client,
         config={},
     )
 
@@ -417,7 +427,7 @@ def mock_backend_registry(mock_backend: MockServiceBackend) -> BackendRegistry:
 def controller_with_mock_backend(
     test_clients: ClientContext, mock_backend_registry: BackendRegistry
 ) -> Generator[tuple[ModelsController, MockServiceBackend, ModelsClient], None, None]:
-    """Create a ModelsController wired to use the test SDK and mock backend.
+    """Create a ModelsController wired to use the test client and mock backend.
 
     Note: The ProviderReconciler's autodiscovery is mocked to avoid issues when
     running tests in parallel. Without this mock, the reconciler would try to
@@ -430,16 +440,16 @@ def controller_with_mock_backend(
     mock_backend = cast(MockServiceBackend, mock_backend_registry.get_backend())
 
     # Create controller with mock backend registry
-    # We need to patch the SDK factory and platform config (used in config and main modules)
+    # We need to patch the client factory and platform config (used in config and main modules)
     mock_platform_config = MagicMock()
     mock_platform_config.models_url = "http://testserver"
     mock_platform_config.get_service_url.return_value = "http://testserver"
     with (
-        patch("nmp.core.models.config.get_platform_config", return_value=mock_platform_config),
-        patch("nmp.core.models.controllers.main.get_platform_config", return_value=mock_platform_config),
-        patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk") as mock_sdk_factory,
+        patch("nhx.core.models.config.get_platform_config", return_value=mock_platform_config),
+        patch("nhx.core.models.controllers.main.get_platform_config", return_value=mock_platform_config),
+        patch("nhx.core.models.controllers.models_controller.get_async_nemo_client") as mock_client_factory,
     ):
-        mock_sdk_factory.return_value = test_clients.async_sdk
+        mock_client_factory.return_value = test_clients.async_client
 
         controller = ModelsController(
             backend_registry=mock_backend_registry,
@@ -451,7 +461,7 @@ def controller_with_mock_backend(
         # which isn't available in models-only tests.
         controller._provider_reconciler.reconcile_model_providers = AsyncMock(return_value=None)
 
-        yield controller, mock_backend, models_client_from_sdk(test_clients.sdk)
+        yield controller, mock_backend, models_client_from_client(test_clients.client)
 
         # Clean up controller resources (event loop, backend registry, etc.)
         controller.shutdown()
@@ -480,7 +490,7 @@ def mock_sidecar_image(docker_client: docker.DockerClient) -> Generator[str, Non
     """Build or retrieve the mock sidecar image with a unique name per service.
 
     Avoids concurrent-build races across workers. The backend's get_qualified_image
-    is patched in controller fixtures to return this name for 'nmp-core'.
+    is patched in controller fixtures to return this name for 'nhx-core'.
     """
     yield ensure_mock_sidecar_image(docker_client, MOCK_SIDECAR_IMAGE_NAME)
 
@@ -506,8 +516,8 @@ def docker_test_context(
 def docker_owner_labels(worker_id: str, testrun_uid: str) -> dict[str, str]:
     """Labels used to scope Docker resources to this pytest worker/run."""
     return {
-        "nmp.nvidia.com/test-run": testrun_uid,
-        "nmp.nvidia.com/test-worker": worker_id,
+        "nhx.nvidia.com/test-run": testrun_uid,
+        "nhx.nvidia.com/test-worker": worker_id,
     }
 
 
@@ -516,7 +526,7 @@ def models_controller_container_cleanup(
     docker_client: docker.DockerClient,
     docker_owner_labels: dict[str, str],
 ) -> Generator[None, None, None]:
-    """Teardown: remove all containers with label nmp.nvidia.com/managed-by=models-controller.
+    """Teardown: remove all containers with label nhx.nvidia.com/managed-by=models-controller.
 
     Ensures failed tests (e.g. stuck in PENDING) don't leave NIM/sidecar containers.
     Request this via controller_with_docker; no per-test try/finally needed.
@@ -534,7 +544,7 @@ def docker_backend_config(
     """Configuration for Docker backend in tests.
 
     Uses worker_id from pytest-xdist to allocate unique port ranges per worker.
-    Depends on mock_sidecar_image so the image get_qualified_image('nmp-core')
+    Depends on mock_sidecar_image so the image get_qualified_image('nhx-core')
     exists before any test runs.
     """
     start_port, end_port = get_worker_port_range(worker_id)
@@ -608,7 +618,7 @@ def controller_with_deployments_plugin(
     deployments_config = mock_platform_config._deployments_config
 
     plugin_backend = DeploymentsPluginServiceBackend(
-        nmp_sdk=test_clients.async_sdk,
+        client=test_clients.async_client,
         config=deployments_plugin_backend_config,
         huggingface_model_puller="alpine:3.20",
     )
@@ -622,24 +632,24 @@ def controller_with_deployments_plugin(
         models_controller._loop.run_until_complete(deployments_controller.reconcile())
 
     with (
-        patch("nmp.core.models.config.get_platform_config", return_value=mock_platform_config),
-        patch("nmp.core.models.controllers.main.get_platform_config", return_value=mock_platform_config),
+        patch("nhx.core.models.config.get_platform_config", return_value=mock_platform_config),
+        patch("nhx.core.models.controllers.main.get_platform_config", return_value=mock_platform_config),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.resolve.get_platform_config",
+            "nhx.core.models.controllers.backends.deployments_plugin.resolve.get_platform_config",
             return_value=mock_platform_config,
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.get_async_platform_sdk"
-        ) as mock_deployments_backend_sdk,
-        patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk") as mock_models_sdk,
-        patch("nemo_deployments_plugin.controller.get_async_platform_sdk") as mock_deployments_controller_sdk,
-        patch("nemo_platform_plugin.sdk_provider.get_async_platform_sdk") as mock_sdk,
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.get_async_nemo_client"
+        ) as mock_deployments_backend_client,
+        patch("nhx.core.models.controllers.models_controller.get_async_nemo_client") as mock_models_client_factory,
+        patch("nemo_deployments_plugin.controller.get_async_nemo_client") as mock_deployments_controller_client,
+        patch("nemo_helix_plugin.client_provider.get_async_nemo_client") as mock_provider_client,
         patch("nemo_deployments_plugin.config.DeploymentsConfig.get", return_value=deployments_config),
     ):
-        mock_deployments_backend_sdk.return_value = test_clients.async_sdk
-        mock_deployments_controller_sdk.return_value = test_clients.async_sdk
-        mock_models_sdk.return_value = test_clients.async_sdk
-        mock_sdk.return_value = test_clients.async_sdk
+        mock_deployments_backend_client.return_value = test_clients.async_client
+        mock_deployments_controller_client.return_value = test_clients.async_client
+        mock_models_client_factory.return_value = test_clients.async_client
+        mock_provider_client.return_value = test_clients.async_client
 
         models_controller = ModelsController(
             backend_registry=backend_registry,
@@ -651,7 +661,7 @@ def controller_with_deployments_plugin(
         yield (
             models_controller,
             deployments_controller,
-            models_client_from_sdk(test_clients.sdk),
+            models_client_from_client(test_clients.client),
             mock_nim_image,
             docker_test_context,
             reconcile_stack,

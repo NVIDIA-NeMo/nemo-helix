@@ -8,7 +8,7 @@ import SafeSynthesizerLogo from '@nemo/common/src/svgs/safe_synthesizer_logo.svg
 import { Grid, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   CUSTOMIZER_ENABLED,
-  EVALUATOR_ENABLED,
+  EVALS_ENABLED,
   MODEL_COMPARE_ENABLED,
   SAFE_SYNTHESIZER_ENABLED,
 } from '@studio/constants/environment';
@@ -38,15 +38,15 @@ export const WorkspaceDashboardRoute: FC = () => {
             slotHeading="Welcome to NeMo Studio"
             slotDescription={
               CUSTOMIZER_ENABLED
-                ? 'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Platform jobs.'
-                : 'Evaluate models, generate synthetic data, and monitor NeMo Platform jobs.'
+                ? 'Fine-tune and evaluate models, generate synthetic data, and monitor NeMo Helix jobs.'
+                : 'Evaluate models, generate synthetic data, and monitor NeMo Helix jobs.'
             }
           />
 
           <Stack gap="density-lg" data-tour="dashboard-get-started">
             <Stack gap="density-sm">
               <Text kind="title/md">Get Started</Text>
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 Kick off a new job that matches your use case.
               </Text>
             </Stack>
@@ -61,7 +61,7 @@ export const WorkspaceDashboardRoute: FC = () => {
                 />
               )}
               {/* Evaluate a Model or Dataset */}
-              {EVALUATOR_ENABLED && (
+              {EVALS_ENABLED && (
                 <DashboardCard
                   icon={<ModelEvaluationIcon className="w-8 h-8" />}
                   title="Evaluate a Model or Dataset"

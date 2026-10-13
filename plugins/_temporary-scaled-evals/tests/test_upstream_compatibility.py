@@ -7,62 +7,16 @@ from __future__ import annotations
 
 import json
 import runpy
-import tomllib
 from pathlib import Path
 
 import pytest
 
 try:
-    from scaled_evals.cli.main import _default_switchyard_dockerfile_path
-    from scaled_evals.dispatch.switchyard import SwitchyardProfileConfig, _routing_profiles_text
     from scaled_evals.harbor_runners import resolve_harbor_runner, supported_harbor_versions
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-
-
-def test_switchyard_defaults_to_native_rust_server_and_parses_toml(tmp_path: Path) -> None:
-    dockerfile = tmp_path / "benchmark" / "switchyard-rust-server.Dockerfile"
-    dockerfile.parent.mkdir()
-    dockerfile.write_text("FROM rust:1.96.1-bookworm\n")
-
-    assert (
-        _default_switchyard_dockerfile_path(tmp_path, context_path=".", requested=None)
-        == "benchmark/switchyard-rust-server.Dockerfile"
-    )
-
-    rendered = _routing_profiles_text(
-        SwitchyardProfileConfig(
-            routing_config_toml="""
-# preserved
-[llm_clients.primary]
-format = "openai_chat_completions"
-extra_headers = { x-inference-priority = "interactive", X-Existing = "retained" }
-
-[llm_clients.fallback]
-format = "anthropic_messages"
-
-[tool.ruff]
-[tool.ruff.lint.a]
-[tool.ruff.lint]
-[[tool.poetry.source]]
-[tool.ruff.lint.b]
-"""
-        )
-    )
-    config = tomllib.loads(rendered)
-    assert "# preserved" in rendered
-    assert config["llm_clients"]["primary"]["extra_headers"] == {
-        "X-Existing": "retained",
-        "X-Inference-Priority": "batch",
-    }
-    assert config["llm_clients"]["fallback"]["extra_headers"] == {"X-Inference-Priority": "batch"}
-    assert config["tool"]["ruff"]["lint"]["a"] == {}
-    assert config["tool"]["ruff"]["lint"]["b"] == {}
-
-    with pytest.raises(ValueError, match="routing config formats are mutually exclusive"):
-        SwitchyardProfileConfig(routing_config_toml="schema_version = 1", routing_profiles={"routes": {}})
 
 
 def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
@@ -72,7 +26,7 @@ def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
     assert "0.20.0" in supported_harbor_versions()
     assert resolve_harbor_runner("0.20.0").harbor_dir == "/opt/harbor/0.20.0"
     assert catalog["adapter"] == {
-        "version": "nemo-platform-plugin-overlay-v1",
+        "version": "nemo-helix-plugin-overlay-v1",
         "files": [
             "harbor-patches/patch_langgraph_writable_venv.py",
             "harbor-patches/patch_pi_extra_env.py",
@@ -85,6 +39,36 @@ def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
     assert "selectable-versions.txt" in dockerfile
     assert "for version in $(cat /opt/harbor/selectable-versions.txt)" in dockerfile
     assert 'test -x "${runner}/.venv/bin/harbor"' in dockerfile
+    harbor_target = dockerfile.split("AS harbor\n", 1)[1].split("\nFROM ", 1)[0]
+    assert 'uv pip install -r "/opt/harbor/requirements/${version}.txt"' in harbor_target
+    assert "ARG SANDBOX_K8S=true" in harbor_target
+    assert "import harbor.environments.opensandbox, opensandbox" in harbor_target
+    assert "0.20.0" not in harbor_target
+    assert "COPY packages/nhx_sandbox /tmp/nhx_sandbox" in harbor_target
+    assert "uv pip install /tmp/nhx_sandbox" in harbor_target
+    assert "sandboxed_gym" not in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_environment.py" in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_cleanup.py" in harbor_target
+    assert 'nemo-extensions" > "${site}/nemo-extensions.pth"' in harbor_target
+    assert "from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment" in harbor_target
+
+
+def test_harbor_runner_requirements_match_the_catalog() -> None:
+    catalog = json.loads((PLUGIN_ROOT / "src/scaled_evals/data/harbor_runner_qualifications.json").read_text())
+    selectable = {version for version, release in catalog["releases"].items() if release["selectable"]}
+    requirements_dir = PLUGIN_ROOT / "harbor-runners"
+
+    assert {path.stem for path in requirements_dir.glob("*.txt")} == selectable
+    for version in selectable:
+        extras = catalog["releases"][version].get("extras", [])
+        lines = [
+            line
+            for line in (requirements_dir / f"{version}.txt").read_text().splitlines()
+            if line and not line.startswith("#")
+        ]
+        harbor = f"harbor[{','.join(extras)}]" if extras else "harbor"
+        assert lines[0] == f"{harbor}=={version}"
+        assert [line.split("==", 1)[0] for line in lines[1:]] == extras
 
 
 def test_generic_harbor_020_patches_cover_langgraph_and_pi(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import typer
-from nemo_platform_plugin.job import NemoJob
+from nemo_helix_plugin.job import NemoJob
 
 from nemo_automodel_plugin.cli.inputs import apply_automodel_job_cli_overrides
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob

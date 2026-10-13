@@ -4,9 +4,9 @@
 """Tests for grouped entity counts."""
 
 import pytest
-from nmp.common.api.filter import ComparisonOperation, FilterOperator
-from nmp.core.entities.app.repository import SQLAlchemyEntityRepository
-from nmp.core.entities.app.repository.sqlalchemy import entity as entity_repository
+from nhx.common.api.filter import ComparisonOperation, FilterOperator
+from nhx.core.entities.app.repository import SQLAlchemyEntityRepository
+from nhx.core.entities.app.repository.sqlalchemy import entity as entity_repository
 
 pytestmark = pytest.mark.asyncio
 

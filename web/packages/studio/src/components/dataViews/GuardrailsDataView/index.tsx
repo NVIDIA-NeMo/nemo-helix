@@ -30,7 +30,7 @@ import { type ComponentProps, type FC, useCallback } from 'react';
 
 export interface GuardrailsDataViewProps {
   workspace: string;
-  onRowClick: (config: GuardrailConfig) => void;
+  onRowClick: (config: GuardrailConfig, event: React.MouseEvent) => void;
   onRequestDuplicate?: (config: GuardrailConfig) => void;
   onRequestDelete?: (config: GuardrailConfig) => void;
   /** Opens the create-guardrail flow from the first-use empty state. */
@@ -188,7 +188,7 @@ export const GuardrailsDataView: FC<GuardrailsDataViewProps> = ({
           <Trash /> Delete
         </Button>
       )}
-      onRowClick={(row: GuardrailConfig) => onRowClick(row)}
+      onRowClick={(row: GuardrailConfig, _index, event) => onRowClick(row, event)}
       attributes={{
         DataViewSearchBar: { placeholder: 'Search Guardrail Configs...' },
         DataViewRoot: {

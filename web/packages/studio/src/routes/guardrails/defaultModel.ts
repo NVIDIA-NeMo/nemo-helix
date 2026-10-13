@@ -5,11 +5,11 @@ import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels'
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import type { ResourceRef } from '@nemo/common/src/types';
 import { hasModelProvider } from '@nemo/common/src/utils/models';
-import { DEFAULT_MODEL_NAME } from '@studio/constants/constants';
+import { DEFAULT_BUILD_MODEL_NAME } from '@studio/constants/constants';
 
 /**
  * Strip the workspace prefix and version suffix so a preferred name matches across
- * workspaces — the URN's prefix varies per user, and `DEFAULT_MODEL_NAME` is written
+ * workspaces — the URN's prefix varies per user, and `DEFAULT_BUILD_MODEL_NAME` is written
  * without a version.
  */
 const bareName = (value: string): string => (value.split('/').pop() ?? value).split('@')[0];
@@ -17,7 +17,7 @@ const bareName = (value: string): string => (value.split('/').pop() ?? value).sp
 /**
  * A model to seed a new guardrail config's `main` entry with, as a URN.
  *
- * Prefers {@link DEFAULT_MODEL_NAME} when the workspace serves it, otherwise the first
+ * Prefers {@link DEFAULT_BUILD_MODEL_NAME} when the workspace serves it, otherwise the first
  * available model. Returns null when nothing qualifies — the Configuration tab then shows
  * an empty required field, which is better than seeding a name that fails at run time.
  *
@@ -26,7 +26,7 @@ const bareName = (value: string): string => (value.split('/').pop() ?? value).sp
  */
 export const resolveDefaultGuardrailModel = (
   groups: ModelWorkspaceGroup[],
-  preferred: string = DEFAULT_MODEL_NAME
+  preferred: string = DEFAULT_BUILD_MODEL_NAME
 ): string | null => {
   const usable = groups
     .flatMap((group) => group.models)

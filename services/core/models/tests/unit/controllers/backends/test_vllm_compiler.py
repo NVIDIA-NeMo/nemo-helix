@@ -5,8 +5,8 @@
 
 from types import SimpleNamespace
 
-from nmp.core.models.controllers.backends import vllm_compiler
-from nmp.core.models.controllers.backends.common import DeploymentConfigView
+from nhx.core.models.controllers.backends import vllm_compiler
+from nhx.core.models.controllers.backends.common import DeploymentConfigView
 
 
 def _view(**kwargs) -> DeploymentConfigView:

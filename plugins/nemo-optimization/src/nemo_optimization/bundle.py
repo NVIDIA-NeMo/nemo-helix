@@ -23,10 +23,16 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from nemo_platform_plugin.refs import FILESET_REF_PATTERN
+from nemo_helix_plugin.refs import FILESET_REF_PATTERN
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config, looks_like_nat_config
 from nemo_optimization.schemas.optimize import is_fileset_relative
+from nemo_optimization.search_space import (
+    LEGACY_SEARCH_SPACE_ERROR,
+    SearchSpaceError,
+    parse_numeric_search_space,
+    parse_prompt_search_space,
+)
 
 
 class BundlePreflightError(ValueError):
@@ -70,7 +76,7 @@ def preflight_bundle(
     config = _load_config(source, optimize_config)
     problems = [
         *_agent_problems(config, agent=agent),
-        *_optimizer_problems(config),
+        *_optimizer_problems(config, agent=agent),
         *_path_problems(source, config),
         *_symlink_problems(source),
     ]
@@ -118,21 +124,62 @@ def _agent_problems(config: Mapping[str, Any], *, agent: str | None) -> Iterator
     )
 
 
-def _optimizer_problems(config: Mapping[str, Any]) -> Iterator[str]:
+def _optimizer_problems(config: Mapping[str, Any], *, agent: str | None) -> Iterator[str]:
     """``OptimizeRouter`` picks its backend off these flags; an unset optimizer has nothing to run."""
     optimizer = config.get("optimizer")
     if not isinstance(optimizer, Mapping):
         yield "optimizer section is missing or is not a mapping"
         return
-    enabled = [
-        name
-        for name in ("numeric", "prompt")
-        if isinstance(optimizer.get(name), Mapping) and optimizer[name].get("enabled")
-    ]
+    if "optimizable_params" in optimizer:
+        yield LEGACY_SEARCH_SPACE_ERROR
+        return
+    enabled: list[str] = []
+    for name in ("numeric", "prompt"):
+        phase_enabled, problem = _phase_enabled(optimizer, name)
+        if problem is not None:
+            yield problem
+        elif phase_enabled:
+            enabled.append(name)
     if not enabled:
         yield "no optimizer is enabled; set optimizer.numeric.enabled or optimizer.prompt.enabled"
     if "numeric" in enabled and not optimizer.get("search_space"):
         yield "optimizer.numeric is enabled but optimizer.search_space is empty"
+    elif "numeric" in enabled:
+        try:
+            parse_numeric_search_space(optimizer)
+        except SearchSpaceError as exc:
+            yield str(exc)
+    if "prompt" in enabled:
+        if not optimizer.get("search_space"):
+            yield "optimizer.prompt is enabled but optimizer.search_space is empty"
+            return
+        prompt = optimizer.get("prompt")
+        model = prompt.get("model") if isinstance(prompt, Mapping) else None
+        if not isinstance(model, str) or not model.strip():
+            yield "optimizer.prompt.model must explicitly reference a model declared under models.*"
+        elif is_fabric_agent_config(config):
+            models = config.get("models")
+            if not isinstance(models, Mapping) or not isinstance(models.get(model.strip()), Mapping):
+                yield f"optimizer.prompt.model references unknown model {model.strip()!r}"
+        try:
+            parse_prompt_search_space(
+                optimizer,
+                payload=config if is_fabric_agent_config(config) and agent is None else None,
+            )
+        except SearchSpaceError as exc:
+            yield str(exc)
+
+
+def _phase_enabled(optimizer: Mapping[str, Any], name: str) -> tuple[bool, str | None]:
+    if name not in optimizer:
+        return False, None
+    section = optimizer[name]
+    if not isinstance(section, Mapping):
+        return False, f"optimizer.{name} must be a mapping"
+    enabled = section.get("enabled")
+    if not isinstance(enabled, bool):
+        return False, f"optimizer.{name}.enabled must be a boolean"
+    return enabled, None
 
 
 def _path_problems(source: Path, config: Mapping[str, Any]) -> Iterator[str]:
@@ -180,8 +227,7 @@ def path_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
 
     An explicit key walk, not a scan for path-looking strings: the config is full of strings that
     resemble paths but are not (``models.default.model: nvidia/meta/llama-3.1-8b-instruct``, and
-    ``optimizer.search_space.<param>.path``, which is a dotted overlay target).  Author-supplied
-    hook payloads are the one open-ended shape, so ``run_hook`` is walked by its documented keys.
+    ``optimizer.search_space.<param>.path``, which is a dotted overlay target).
     """
     runtime = config.get("runtime")
     if isinstance(runtime, Mapping):
@@ -191,6 +237,8 @@ def path_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
     if isinstance(environment, Mapping):
         yield from _optional(environment.get("workspace"), "environment.workspace", must_exist=False, is_dir=True)
         yield from _optional(environment.get("artifacts"), "environment.artifacts", must_exist=False, is_dir=True)
+
+    yield from _mcp_server_references(config)
 
     eval_config = config.get("eval")
     if not isinstance(eval_config, Mapping):
@@ -204,9 +252,38 @@ def path_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
     if isinstance(fabric, Mapping):
         yield from _optional(fabric.get("base_dir"), "eval.fabric.base_dir", must_exist=True, is_dir=True)
 
-    run_hook = eval_config.get("run_hook")
-    if isinstance(run_hook, Mapping):
-        yield from _run_hook_references(run_hook)
+
+def _mcp_server_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
+    """Bundle files a stdio MCP server is launched from: a ``url`` or ``args`` entry that names a script.
+
+    A server shipped in the bundle is spawned as ``url: python3, args: [path/in/bundle.py]`` or
+    directly as ``url: path/in/bundle.py``; the optimizer makes either path absolute at run time
+    (``resolve_mcp_server_paths``), so preflight has to know the file exists. Only values that look
+    like relative files are checked, since ``url`` also names commands on ``PATH`` or absolute host
+    executables, and ``args`` carries flags, URLs and plain values. An extensionless script with no
+    directory part (``analyzer``) is not recognised here; the runtime still resolves it if it exists
+    in the bundle.
+    """
+    mcp = config.get("mcp")
+    servers = mcp.get("servers") if isinstance(mcp, Mapping) else None
+    if not isinstance(servers, Mapping):
+        return
+    for name, server in servers.items():
+        if not isinstance(server, Mapping) or server.get("transport") != "stdio":
+            continue
+        url = server.get("url")
+        if isinstance(url, str) and _looks_like_bundle_script(url):
+            yield from _optional(url, f"mcp.servers.{name}.url", must_exist=True)
+        args = server.get("args")
+        for index, arg in enumerate(args if isinstance(args, list) else []):
+            if isinstance(arg, str) and _looks_like_bundle_script(arg):
+                yield from _optional(arg, f"mcp.servers.{name}.args[{index}]", must_exist=True)
+
+
+def _looks_like_bundle_script(value: str) -> bool:
+    if not value or value.startswith("-") or "://" in value or Path(value).is_absolute():
+        return False
+    return "/" in value or value.endswith((".py", ".js", ".sh"))
 
 
 def _dataset_reference(dataset: Any) -> Iterator[PathReference]:
@@ -219,25 +296,6 @@ def _dataset_reference(dataset: Any) -> Iterator[PathReference]:
         # A `workspace/fileset#path` dataset is staged separately by the job at run time.
         return
     yield PathReference("eval.general.dataset", value, must_exist=True)
-
-
-def _run_hook_references(run_hook: Mapping[str, Any]) -> Iterator[PathReference]:
-    yield from _optional(run_hook.get("path"), "eval.run_hook.path", must_exist=True)
-    yield from _optional(run_hook.get("agent_src"), "eval.run_hook.agent_src", must_exist=True, is_dir=True)
-    bindings = run_hook.get("bindings")
-    if not isinstance(bindings, list):
-        return
-    for index, binding in enumerate(bindings):
-        if not isinstance(binding, Mapping):
-            continue
-        prefix = f"eval.run_hook.bindings[{index}]"
-        # The executable is resolved on PATH inside the task container, so it only has to not be
-        # an absolute client path; the config files it is handed must ship with the bundle.
-        yield from _optional(binding.get("executable"), f"{prefix}.executable", must_exist=False)
-        config_paths = binding.get("config_paths")
-        if isinstance(config_paths, list):
-            for path_index, config_path in enumerate(config_paths):
-                yield from _optional(config_path, f"{prefix}.config_paths[{path_index}]", must_exist=True)
 
 
 def _optional(value: Any, location: str, *, must_exist: bool, is_dir: bool = False) -> Iterator[PathReference]:

@@ -3,7 +3,7 @@
 
 """Filter dependency helper for agent-hardener list endpoints.
 
-Wraps :func:`nemo_platform_plugin.api.filters.make_filter_obj_dep` so an unknown
+Wraps :func:`nemo_helix_plugin.api.filters.make_filter_obj_dep` so an unknown
 ``filter[field]=value`` key (``NemoFilter`` is ``extra="forbid"``) fails with a
 422 instead of the raw ``ValidationError`` FastAPI would otherwise surface as a
 500 — typos must fail loudly, not be silently swallowed.
@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from typing import cast
 
 from fastapi import HTTPException
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from pydantic import BaseModel, ValidationError
 from starlette.requests import Request
 

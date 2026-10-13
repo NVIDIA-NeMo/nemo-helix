@@ -7,16 +7,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pytest
-from nmp.intake.repository.clickhouse.evaluation_session import (
+from nhx.intake.repository.clickhouse.evaluation_session import (
     _MAX_METRIC_SORT_SESSIONS,
     _SORT_EXPR_PAGE,
     ClickHouseEvaluationSessionRepository,
     _build_order_by,
 )
-from nmp.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable
-from nmp.intake.repository.evaluation_session import MetricSortTooLargeError
-from nmp.intake.spans.domain import SpanStatus
+from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.repository.evaluation_session import MetricSortTooLargeError
+from nhx.intake.spans.domain import SpanStatus
 
 
 class _Executor(ClickHouseExecutor):

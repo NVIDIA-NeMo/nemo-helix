@@ -11,7 +11,7 @@ metadata:
   name: {{ include "nemo-common.clickhouse.fullname" . }}
   labels:
     app.kubernetes.io/component: clickhouse
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   {{- with .Values.clickhouse.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -22,7 +22,7 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/component: clickhouse
-      {{- include "nemo-platform.selectorLabels" . | nindent 6 }}
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -32,7 +32,7 @@ spec:
         {{- end }}
       labels:
         app.kubernetes.io/component: clickhouse
-        {{- include "nemo-platform.labels" . | nindent 8 }}
+        {{- include "nemo-helix.labels" . | nindent 8 }}
         {{- with .Values.clickhouse.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -103,7 +103,7 @@ spec:
         name: data
         labels:
           app.kubernetes.io/component: clickhouse
-          {{- include "nemo-platform.selectorLabels" . | nindent 10 }}
+          {{- include "nemo-helix.selectorLabels" . | nindent 10 }}
       spec:
         accessModes:
           - ReadWriteOnce

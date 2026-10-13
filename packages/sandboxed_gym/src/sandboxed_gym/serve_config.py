@@ -20,7 +20,7 @@ from sandboxed_gym.host.models import (
 class SandboxedGymServeConfig(BaseModel):
     """Trusted-side config to start the episode broker + Gym host.
 
-    ``gym_global_config`` is opaque Gym JSON (injected as ``NMP_GYM_GLOBAL_CONFIG``).
+    ``gym_global_config`` is opaque Gym JSON (injected as ``NHX_GYM_GLOBAL_CONFIG``).
     Callers own policy_model_name / policy_base_url / config_paths; this package does
     not inject RL training knobs.
     """
@@ -31,6 +31,9 @@ class SandboxedGymServeConfig(BaseModel):
     host_provider: str = "opensandbox"
     environment_path: str | None = None
     environment_offline: bool = False
+    # wheels-v1 only: a package server's venv is the image's Gym install plus the wheelhouse, so
+    # Gym does not rebuild Gym's own dependency closure from a package index for it.
+    reuse_image_gym_install: bool = False
     sandbox: SandboxConfig
     episode_broker: EpisodeBrokerConfig | dict[str, Any] = Field(default_factory=dict)
     gym_global_config: dict[str, Any] = Field(default_factory=dict)

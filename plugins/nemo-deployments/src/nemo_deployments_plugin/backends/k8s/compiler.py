@@ -26,6 +26,9 @@ from nemo_deployments_plugin.backends.labels import (
     k8s_deployment_secret_name,
     k8s_volume_resource_name,
 )
+from nemo_deployments_plugin.constants import (
+    DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
+)
 from nemo_deployments_plugin.entities import (
     Affinity,
     ConfigFile,
@@ -39,14 +42,14 @@ from nemo_deployments_plugin.entities import (
     VolumeMount,
 )
 from nemo_deployments_plugin.types import RestartPolicy
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth.workload_identity import (
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
     WORKLOAD_IDENTITY_VOLUME_PATH,
     get_workload_identity_token_audience,
     workload_identity_env,
 )
-from nemo_platform_plugin.config import ImagePullSecret, get_platform_config
+from nemo_helix_plugin.config import ImagePullSecret, get_platform_config
 
 CONFIG_FILES_VOLUME = "config-files"
 NATIVE_SIDECAR_RESTART_POLICY: RestartPolicy = "Always"
@@ -171,6 +174,7 @@ class ExecutorK8sDefaults:
     tolerations: list[dict[str, Any]] = field(default_factory=list)
     affinity: dict[str, Any] = field(default_factory=dict)
     topology_spread_constraints: list[dict[str, Any]] = field(default_factory=list)
+    job_ttl_seconds_after_finished: int | None = DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED
 
 
 @dataclass(frozen=True)
@@ -594,11 +598,17 @@ def compile_workload(
     # Auth-proxy sidecar (native sidecar with restartPolicy=Always) is appended so
     # it starts before the main workload and keeps running. No-op when the config
     # does not request it or platform auth is disabled. It is a platform-managed
-    # container and deliberately does NOT receive the workload's secret envFrom.
+    # container. It receives workload identity when enabled because the proxy is
+    # the component that forwards bearer-authenticated platform calls upstream,
+    # but it deliberately does NOT receive the workload's secret envFrom.
     auth_proxy = build_auth_proxy_container(config)
     if auth_proxy is not None:
         init_containers.append(
-            build_container(auth_proxy, config=config, include_probes=True, include_workload_identity=False)
+            build_container(
+                auth_proxy,
+                config=config,
+                include_probes=True,
+            )
         )
     main_containers = [
         build_container(container, config=config, include_probes=True, secret_name=secret_name)

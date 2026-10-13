@@ -64,7 +64,8 @@ export interface PluginHost {
    * VITE_PLATFORM_BASE_URL is set.
    */
   apiBaseUrl: string;
-  // Access tokens only — refresh tokens must not cross the boundary.
+  // The configured platform bearer (access token or ID token); refresh tokens
+  // must never cross the plugin boundary. Property names remain for compatibility.
   auth: {
     accessToken: string;
     getAccessToken: () => string;

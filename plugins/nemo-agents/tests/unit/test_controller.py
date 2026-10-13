@@ -98,6 +98,8 @@ class TestStartDeployment:
 
         assert dep.status == "starting"
         assert dep.port == 50000
+        ctrl.backend.allocate_port.assert_not_called()
+        assert ctrl.backend.create_deployment.await_args.kwargs["port"] == 0
         assert dep.pid == 12345
         assert dep.endpoint == "http://127.0.0.1:50000"
         assert _key(dep) in ctrl._starting_since

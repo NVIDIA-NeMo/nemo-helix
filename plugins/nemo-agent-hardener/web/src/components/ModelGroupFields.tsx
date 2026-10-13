@@ -9,7 +9,7 @@
  * lists the models those credentials can actually reach.
  */
 
-import { usePlatformSdk } from '@agent-hardener/api/platform';
+import { useHelixSdk } from '@agent-hardener/api/platform';
 import { useAgentHardenerValidateModelConfig } from '@agent-hardener/generated/api';
 import type {
   ModelChoice,
@@ -154,7 +154,7 @@ const CredentialedGroupFields: FC<CredentialedGroupProps> = ({
   const [createSecretOpen, setCreateSecretOpen] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const validate = useAgentHardenerValidateModelConfig();
-  const { secretsListSecrets, useSecretsCreateSecret } = usePlatformSdk();
+  const { secretsListSecrets, useSecretsCreateSecret } = useHelixSdk();
   const toast = useToast();
   const notify = (message: string, type?: 'success' | 'error' | 'info' | 'warning') =>
     toast[type ?? 'info'](message);

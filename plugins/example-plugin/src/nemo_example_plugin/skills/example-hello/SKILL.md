@@ -5,6 +5,9 @@
 name: example-hello
 description: Demonstrates a minimal plugin-provided skill from the example plugin.
 version: 0.1
+allowed-tools: Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Example Hello

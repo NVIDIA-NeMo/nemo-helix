@@ -15,22 +15,22 @@ principal_contract:
   internal_service_prefix_reserved: "service:"
 interactive_user_identity:
   username: nemo-user
-  password: nemo-user-password-dev
+  password_env_var: AUTHENTIK_INTERACTIVE_USER_PASSWORD
   expected_email: nemo-user@example.com
 workload_identity:
   principal_id: svc-nemo
   expected_groups:
     - nemo-workloads
 workload_contract:
-  audience: nemo-platform
+  audience: nemo-helix
   principal_claim: sub
   groups_claim: groups
   groups_format: comma_string
   token_env_vars:
-    - NMP_WORKLOAD_IDENTITY_TOKEN_FILE
+    - NHX_WORKLOAD_IDENTITY_TOKEN_FILE
   forwarded_headers:
-    principal_id: X-NMP-Principal-Id
-    principal_groups: X-NMP-Principal-Groups
+    principal_id: X-NHX-Principal-Id
+    principal_groups: X-NHX-Principal-Groups
 token_acquisition:
   token_endpoint: https://127.0.0.1:18080/application/o/token/
   # E2E TEST HARNESS ONLY. This password grant gives auth-idp contract tests a
@@ -39,14 +39,14 @@ token_acquisition:
   # production deployments.
   e2e_setup_password_grant:
     grant_type: password
-    client_id: nemo-platform
-    client_secret: nemo-platform-secret-dev
+    client_id: nemo-helix
+    client_secret_env_var: AUTHENTIK_SETUP_CLIENT_SECRET
     username: nemo-setup
-    password: nemo-setup-token-secret-dev
+    password_env_var: AUTHENTIK_SETUP_PASSWORD
     scope: "openid email groups"
   workload_provider_password_grant:
     grant_type: password
-    client_id: nemo-platform-workload
+    client_id: nemo-helix-workload
     username: svc-nemo
     password_env_var: AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD
     scope: "openid email groups"
@@ -70,11 +70,13 @@ test_runtimes:
       - workload_token_exchange
       - platform_access_keys
       - workspace_rbac
+      - interactive_email_alias
       - workload_job
       - managed_workload_job_obo
       - workload_deployment
       - managed_workload_deployment_obo
       - device_flow
+      - confidential_oidc
   - id: authentik-kubernetes
     backend: kubernetes
     command: k8s
@@ -87,9 +89,11 @@ test_runtimes:
       - workload_token_exchange
       - platform_access_keys
       - workspace_rbac
+      - interactive_email_alias
       - workload_job
       - managed_workload_job_obo
       - workload_deployment
       - managed_workload_deployment_obo
       - device_flow
+      - confidential_oidc
       - kubernetes_token_review

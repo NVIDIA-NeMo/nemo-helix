@@ -10,9 +10,9 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 from filesets import FilesetFileSystem, FilesetPathError, build_fileset_ref, parse_fileset_ref
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import ListFilesQueryParams
-from nemo_platform_plugin.jobs.file_manager import FilesetFileManager, TmpDirPath
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.types import ListFilesQueryParams
+from nemo_helix_plugin.jobs.file_manager import FilesetFileManager, TmpDirPath
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 

@@ -6,7 +6,7 @@
 One route carries a valid ``@path_rule``; one deliberately does not. Under the
 default ``on_invalid_plugin=deny_route`` fail mode (decision D4) the unruled
 route must be explicitly denied for *every* caller — human with permissions,
-service principal (``ServiceSystem`` wildcard), and PlatformAdmin — while the
+service principal (``ServiceSystem`` wildcard), and HelixAdmin — while the
 ruled sibling keeps working. Under ``on_invalid_plugin=quarantine`` the whole
 ``/apis/harness-unruled`` namespace is fenced, ruled route included.
 """
@@ -16,8 +16,8 @@ from __future__ import annotations
 from typing import ClassVar
 
 from fastapi import APIRouter
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 router = APIRouter()
 

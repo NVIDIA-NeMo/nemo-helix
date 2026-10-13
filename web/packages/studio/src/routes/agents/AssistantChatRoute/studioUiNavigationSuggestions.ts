@@ -199,7 +199,7 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Evaluations',
     description: 'Studio has a UI for reviewing model evaluation results.',
     getHref: getEvaluationResultsRoute,
-    requiredFeatureFlags: ['evaluatorEnabled'],
+    requiredFeatureFlags: ['evalsEnabled'],
     patterns: [
       /\bevaluat(e|ing|ion)s? (a )?model\b/i,
       /\bmodel (eval|evaluation|evaluations)\b/i,
@@ -207,7 +207,7 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
       /\b(eval|evaluation) history\b/i,
       /\bnemo[-\s]?evaluator\b/i,
       /\bevaluator (jobs?|sdk specs?)\b/i,
-      /\buse (the )?evaluator plugin\b/i,
+      /\buse (the )?evals plugin\b/i,
     ],
   },
   {

@@ -1,0 +1,39 @@
+{
+  "model": "default/nemotron-3-5-lightning-30b-a3b",
+  "dataset": {
+    "training": "default/commonsense_qa",
+    "validation": "default/commonsense_qa"
+  },
+  "training": {
+    "training_type": "sft",
+    "finetuning_type": "lora",
+    "lora": {
+      "rank": 16,
+      "alpha": 32,
+      "exclude_modules": [
+        "*.out_proj"
+      ]
+    },
+    "max_seq_length": 2048
+  },
+  "schedule": {
+    "epochs": 1
+  },
+  "batch": {
+    "global_batch_size": 8,
+    "micro_batch_size": 1
+  },
+  "optimizer": {
+    "learning_rate": 1e-05,
+    "min_learning_rate": 1e-06
+  },
+  "parallelism": {
+    "num_nodes": 1,
+    "num_gpus_per_node": 4,
+    "tensor_parallel_size": 1,
+    "expert_parallel_size": 4
+  },
+  "output": {
+    "name": "nemotron-3-5-lightning-commonsense-qa-lora"
+  }
+}

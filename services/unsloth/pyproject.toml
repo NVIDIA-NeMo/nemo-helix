@@ -2,15 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-unsloth"
+name = "nhx-unsloth"
 description = "NeMo Unsloth task package — container SFT driver and compile glue. No HTTP server."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
-    "nmp-common",
-    "nmp-customization-common",
-    "nemo-platform-plugin",
-    "nemo-platform-sdk",
+    "nhx-common",
+    "nhx-customization-common",
+    "nemo-helix-plugin",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.6.1",
     "httpx>=0.27.0",
@@ -25,7 +24,7 @@ version = "0.0.0"
 
 [project.optional-dependencies]
 integrations = [
-    "wandb>=0.29.0",
+    "wandb>=0.30.0",
     "mlflow-skinny>=3.15.0,<3.16.0",
 ]
 # We deliberately don't pin transformers / trl / peft / accelerate / bitsandbytes
@@ -42,21 +41,20 @@ unsloth = ["unsloth[huggingface]"]
 
 [project.scripts]
 # Container entrypoints. Each script matches the automodel name pattern for parity.
-nmp-unsloth-training = "nmp.unsloth.tasks.training.__main__:main"
+nhx-unsloth-training = "nhx.unsloth.tasks.training.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]
 
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nmp-customization-common = { workspace = true }
-nemo-platform-plugin = { workspace = true }
-nemo-platform-sdk = { workspace = true }
+nhx-common = { workspace = true }
+nhx-customization-common = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 
 
 [dependency-groups]

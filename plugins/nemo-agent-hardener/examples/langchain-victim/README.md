@@ -21,7 +21,7 @@ is the one interception line — no ToolNode to wire by hand.
 ## Running it
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 nemo agent-hardener init --project-dir plugins/nemo-agent-hardener/examples/langchain-victim \
     --name langchain-victim --harness langchain --relay-confirmed \

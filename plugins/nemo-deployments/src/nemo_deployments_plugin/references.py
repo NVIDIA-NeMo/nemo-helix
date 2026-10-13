@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from nemo_deployments_plugin.entities import Container, Deployment, DeploymentConfig
-from nemo_platform_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
 
 
 async def deployment_names_using_config(

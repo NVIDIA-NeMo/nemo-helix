@@ -1,0 +1,114 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Manage Metrics"
+description: ""
+---
+<a id="eval-metrics-manage-metrics"></a>
+
+Instantiate the metric class you want to run and pass it with `dataset` and optional configuration to `evaluator.submit(...)`.
+
+## Initialize the SDK
+
+```python
+from nemo_evals.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
+```
+
+## Create Metric Objects Inline
+
+Metric objects are normal Python objects from `nhx_evals_sdk.metrics.*`. Keep them close to the evaluation code so the definition, dataset fields, and execution request stay in sync.
+
+```python
+from nhx_evals_sdk import ExactMatchMetric
+
+metric = ExactMatchMetric(
+    reference="{{item.expected}}",
+    candidate="{{item.output}}",
+)
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {"expected": "Paris", "output": "Paris"},
+        {"expected": "Berlin", "output": "Munich"},
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+
+for score in result.aggregate_scores.scores:
+    print(f"{score.name}: mean={score.mean}")
+```
+
+Use `run` for fast local execution while developing a metric. Use `submit` for durable remote execution through the platform job service.
+
+## Reuse a Metric Definition
+
+Because metrics are inline objects, reuse is usually just a Python helper function or module-level factory.
+
+```python
+from nhx_evals_sdk import F1Metric
+
+def answer_f1_metric() -> F1Metric:
+    return F1Metric(
+        reference="{{item.expected_answer}}",
+        candidate="{{item.generated_answer}}",
+        description="Token-level F1 between expected and generated answers.",
+    )
+
+metric = answer_f1_metric()
+```
+
+## Choose Metric Classes
+
+Use the metric-specific pages for configuration details and examples:
+
+| Metric family | Common classes |
+|---------------|----------------|
+| Similarity | `ExactMatchMetric`, `F1Metric`, `BLEUMetric`, `ROUGEMetric`, `StringCheckMetric`, `NumberCheckMetric` |
+| LLM-as-a-Judge | `LLMJudgeMetric` |
+| RAG and agentic | `FaithfulnessMetric`, `ResponseRelevancyMetric`, `TopicAdherenceMetric`, `ToolCallingMetric`, and related RAGAS-backed classes |
+| Custom endpoints | Remote metric classes from `nhx_evals_sdk.metrics.remote` |
+
+## Configure Runtime Parameters
+
+Pass execution settings through the `config` argument.
+
+```python
+from nhx_evals_sdk import RunConfig
+
+config = RunConfig(parallelism=4, limit_samples=100)
+```
+
+For online evaluations, provide a model or agent target and use the online parameter classes described in [Model Configuration](/documentation/evaluate-models/metrics/model-configuration) and [Agent Configuration](/documentation/evaluate-models/metrics/agent-configuration).
+
+## Submit a Durable Job
+
+```python
+from nhx_evals_sdk import RunConfig, ExactMatchMetric
+
+metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {"expected": "Paris", "output": "Paris"},
+        {"expected": "Berlin", "output": "Munich"},
+    ],
+    config=RunConfig(parallelism=4),
+)
+
+job.wait_until_done()
+result = job.get_result()
+```
+
+## Related Topics
+
+- Metric Results - Work with `EvaluationResult`, aggregate scores, and row scores
+- Manage Metric Jobs - Submit, monitor, reconnect to, and download job results
+- [Similarity Metrics](/documentation/evaluate-models/metrics/similarity-metrics) - Configure exact match, F1, BLEU, ROUGE, and string/number checks

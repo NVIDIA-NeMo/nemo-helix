@@ -30,7 +30,7 @@ class FabricValidationResult:
 
 
 @dataclass(frozen=True, slots=True)
-class PlatformFabricValidationResult:
+class HelixFabricValidationResult:
     """Result of Platform config translation and Fabric validation."""
 
     agent_config: AgentConfig
@@ -58,7 +58,7 @@ async def validate_platform_agent_config(
     base_dir: Path | str,
     harness_name: str | None = None,
     fabric: Any | None = None,
-) -> PlatformFabricValidationResult:
+) -> HelixFabricValidationResult:
     """Translate and validate a Platform-owned agent config with Fabric."""
 
     agent_config = _coerce_agent_config(config)
@@ -68,7 +68,7 @@ async def validate_platform_agent_config(
         raise FabricValidationError(f"Fabric config translation failed: {error}") from error
 
     validation_result = await validate_fabric_config(fabric_config, base_dir=base_dir, fabric=fabric)
-    return PlatformFabricValidationResult(
+    return HelixFabricValidationResult(
         agent_config=agent_config,
         fabric_config=fabric_config,
         fabric_validation_result=validation_result,

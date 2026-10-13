@@ -26,11 +26,13 @@ import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import cn from 'classnames';
 import { Plus, Filter } from 'lucide-react';
-import { ChangeEvent, FC, lazy, useMemo, useState } from 'react';
+import { ChangeEvent, FC, lazy, startTransition, Suspense, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
+const loadWorkspaceCreateModal = () => import('@studio/components/WorkspaceCreateModal');
+
 const WorkspaceCreateModal = lazy(() =>
-  import('@studio/components/WorkspaceCreateModal').then((module) => ({
+  loadWorkspaceCreateModal().then((module) => ({
     default: module.WorkspaceCreateModal,
   }))
 );
@@ -56,6 +58,7 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
     data: workspacesResponse,
     isPending,
     isError,
+    refetch,
   } = useEntitiesListWorkspaces(
     {
       page: 1,
@@ -64,7 +67,6 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
     {
       query: {
         // Always enable when there's an active workspace route or dropdown is open
-        // Cache invalidation from WorkspaceCreateModal will trigger refetch automatically
         enabled: open || !mostRecentWorkspace || !!activeWorkspaceName,
         staleTime: 5_000,
       },
@@ -176,7 +178,10 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
       <DropdownRoot
         onOpenChange={(open) => {
           setOpen(open);
-          if (!open) {
+          if (open) {
+            void refetch();
+            loadWorkspaceCreateModal().catch(() => undefined);
+          } else {
             setFilter('');
           }
         }}
@@ -249,7 +254,7 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
               })}
             </div>
             <div className="border-base border-t flex items-center w-full">
-              <DropdownItem onSelect={() => openModal()}>
+              <DropdownItem onSelect={() => startTransition(openModal)}>
                 <Flex gap="density-md">
                   <Plus /> New Workspace
                 </Flex>
@@ -259,7 +264,16 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
         </DropdownContent>
       </DropdownRoot>
 
-      {isModalOpen && <WorkspaceCreateModal open={isModalOpen} onClose={closeModal} />}
+      {/* Kept mounted so the transition in onSelect waits for the lazy modal instead of showing a fallback */}
+      <Suspense fallback={null}>
+        {isModalOpen && (
+          <WorkspaceCreateModal
+            open={isModalOpen}
+            onClose={closeModal}
+            onCreate={(workspace) => addRecentWorkspace(workspace.name)}
+          />
+        )}
+      </Suspense>
     </>
   );
 };

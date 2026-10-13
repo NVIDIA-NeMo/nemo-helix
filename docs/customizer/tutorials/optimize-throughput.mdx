@@ -1,51 +1,65 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
 title: "Optimize for Tokens/GPU Throughput"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/optimize-throughput.ipynb)
+<div className="notebook-actions">
+  <a href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/optimize-throughput.ipynb" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">
+    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>
+  </a>
+</div>
 
 ## About
-Learn how to use the NeMo Platform Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime. 
+Learn how to use the NeMo Helix Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime.
 
 **In this tutorial, you will:**
-1. Fine-tune [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) on the SQuAD dataset using LoRA, with [sequence packing](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) enabled for one run and disabled for another.
+1. Fine-tune [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) on the SQuAD dataset using LoRA, with [sequence packing](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) enabled for one run and disabled for another.
 2. Compare training runtime, GPU utilization, and memory allocation between the two runs.
 3. Verify that validation loss remains comparable, confirming that sequence packing improves throughput without sacrificing model quality.
 
-> **Note:** While this tutorial demonstrates sequence packing with LoRA, the optimization is also available for all_weights (full) SFT customization jobs.
+> **Note:** While this tutorial demonstrates sequence packing with LoRA, the optimization is also available for all_weights (full) SFT customization jobs. To pack sequences for Nemotron 3.5 Lightning 30B-A3B, start from the Automodel reference recipe [`customizer_nemotron_nano_peft_packing.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft_packing.yaml).
 
 ## Prerequisites
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Platform locally
-2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all]"`; source checkout: run `make bootstrap` from the repository root)
+1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
+2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **At least one GPU with CUDA 13+**
 
 ## Quick Start
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Platform server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Platform is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
+The SDK connects to the deployment in your current CLI context, using its base URL, default workspace, and credentials. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments). These examples use the `default` workspace. If your current CLI context uses a different workspace, run `nemo config set --workspace default` first.
 
-```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+In environments without a CLI configuration file, such as Google Colab, set `NHX_BASE_URL` (and `NHX_ACCESS_TOKEN` for an authenticated deployment) before you create the client. `NemoClient.from_config()` reads both:
+
+```python
+import os
+
+os.environ["NHX_BASE_URL"] = "<YOUR_NHX_BASE_URL>"
 ```
 
 ```python
 import json
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nemo_customizer.sdk import Customization
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
+from pydantic import SecretStr
+from nemo_helix_plugin.schema import SecretRef
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(
-    base_url=NMP_BASE_URL,
-    workspace="default"
-)
+client = NemoClient.from_config()
+customization = Customization.from_client(client)
 ```
 
 ### 2. Create Dataset FileSet and Upload Training Data
@@ -137,26 +151,27 @@ print(f"Saved validation.jsonl with {len(validation_ds)} rows")
 # Create fileset to store SFT training data
 
 try:
-    client.files.filesets.create(
-        workspace="default",
-        name=DATASET_NAME,
-        description="SFT training data"
-    )
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            description="SFT training data",
+        ),
+    ).data()
     print(f"Created fileset: {DATASET_NAME}")
 except ConflictError:
     print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
 
 # Upload training data files individually to ensure correct structure
-client.files.upload(
-    local_path=f"{DATASET_PATH}/",  # Trailing slash uploads directory contents to fileset root
-    remote_path="",
-    fileset=DATASET_NAME,
-    workspace="default"
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(
+    lpath=f"{DATASET_PATH}/",  # Trailing slash uploads directory contents to fileset root
+    rpath=f"default/{DATASET_NAME}/",
+    recursive=True,
 )
 
 # Validate training data is uploaded correctly
 print("Training data:")
-print(json.dumps([f.model_dump() for f in client.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_NAME).data().data], indent=2))
 ```
 
 ### 3. Secrets Setup
@@ -166,22 +181,24 @@ If you plan to use NGC or Hugging Face models, you will need to configure authen
 - **NGC models** (`ngc://` URIs): Requires NGC API key
 - **Hugging Face models** (`hf://` URIs): Requires HF token for gated/private models
 
+
 Configure these as secrets in your platform. Refer to [Managing Secrets](/documentation/get-started/core-concepts/manage-secrets) for detailed instructions.
 
 Get your credentials to access base models:
 - [NGC API Key](https://ngc.nvidia.com/) (Setup → Generate API Key)
 - [Hugging Face Token](https://huggingface.co/settings/tokens) (Create token with Read access)
 
+
 ---
 
 #### Quick Setup Example
 
-This tutorial uses the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/tree/main) model from Hugging Face. Ensure that you have sufficient permissions to download the model. If you cannot access the files on the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/tree/main) Hugging Face page, request access.
+This tutorial uses the [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) model from Hugging Face. It is public, so the Hugging Face token is optional.
 
 **Hugging Face Authentication:**
-- For gated models (Llama, Gemma), you must provide a Hugging Face token via the `token_secret` parameter
+- For gated models, you must provide a Hugging Face token via the `token_secret` parameter
 - Get your token from [Hugging Face Settings](https://huggingface.co/settings/tokens) (requires Read access)
-- Accept the model's terms on the Hugging Face model page before using it. Example: [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/tree/main)
+- Accept the model's terms on the Hugging Face model page before using it
 - For public models, you can omit the `token_secret` parameter when creating a fileset for the model in the next step.
 
 ```python
@@ -189,25 +206,27 @@ This tutorial uses the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co
 HF_TOKEN = os.getenv("HF_TOKEN")
 NGC_API_KEY = os.getenv("NGC_API_KEY")
 
+
 def create_or_get_secret(name: str, value: str | None, label: str):
     if not value:
-        raise ValueError(f"{label} environment variable is not set. Set it and try again.")
+        print(f"{label} is not set - skipping setting secret")
+        return None
     try:
-        secret = client.secrets.create(
-            name=name,
-            workspace="default",
-            value=value,
-        )
+        secret = client.secrets.create_secret(
+            body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
+        ).data()
         print(f"Created secret: {name}")
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        return client.secrets.retrieve(name=name, workspace="default")
+        return client.secrets.get_secret(name=name).data()
+
 
 # Create Hugging Face token secret
 hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
-print("HF_TOKEN secret:")
-print(hf_secret.model_dump_json(indent=2))
+if hf_secret:
+    print("HF_TOKEN secret:")
+    print(hf_secret.model_dump_json(indent=2))
 
 # Create NGC API key secret
 # Uncomment the line below if you have NGC API Key and want to finetune NGC models
@@ -216,60 +235,58 @@ print(hf_secret.model_dump_json(indent=2))
 
 ### 4. Create Base Model FileSet
 
-Create a fileset pointing to the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/tree/main) model on Hugging Face. This step creates a pointer to the model on Hugging Face and does not download it. The model is downloaded at job creation time.
+Create a fileset pointing to the [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) model on Hugging Face. This step creates a pointer to the model on Hugging Face and does not download it. The model is downloaded at job creation time.
 
 Note: for public models, you can omit the `token_secret` parameter when creating a model fileset.
 
 ```python
 import time
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
-HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
-MODEL_NAME = "llama-3-2-1b-base"
+HF_REPO_ID = "Qwen/Qwen3-0.6B"
+MODEL_NAME = "qwen3-0.6b"
 
-# Ensure you have a Hugging Face token secret created
 # Create a fileset pointing to the desired Hugging Face model
 try:
-    base_model_fs = client.files.filesets.create(
-        workspace="default",
-        name=MODEL_NAME,
-        description="Llama 3.2 1B base model from Hugging Face",
-        storage=HuggingfaceStorageConfigParam(
-            type="huggingface",
-            # repo_id is the full model name from Hugging Face
-            repo_id=HF_REPO_ID,
-            repo_type="model",
-            # we use the secret created in the previous step
-            token_secret=hf_secret.name
-        )
-    )
+    base_model_fs = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            description="Qwen3 0.6B base model from Hugging Face",
+            storage=HuggingfaceStorageConfig(
+                # repo_id is the full model name from Hugging Face
+                repo_id=HF_REPO_ID,
+                repo_type="model",
+                # we use the secret created in the previous step, if any
+                token_secret=SecretRef(hf_secret.name) if hf_secret else None,
+            ),
+        ),
+    ).data()
     print(f"Created base model fileset: {MODEL_NAME}")
 except ConflictError:
     print(f"Base model fileset already exists. Skipping creation.")
-    base_model_fs = client.files.filesets.retrieve(
-        workspace="default",
-        name=MODEL_NAME,
-    )
+    base_model_fs = client.files.get_fileset(name=MODEL_NAME).data()
 
 # Create the Model Entity representation.
 try:
-    base_model = client.models.create(
-        workspace="default",
-        name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-    )
+    base_model = client.models.create_model(
+        body=CreateModelEntityRequest(
+            name=MODEL_NAME,
+            fileset=f"default/{MODEL_NAME}",
+        ),
+    ).data()
     print(f"Created Model Entity: {MODEL_NAME}")
 except ConflictError:
     print(f"Base model already exists. Updating fileset if different.")
-    base_model = client.models.update(
-        workspace="default",
+    base_model = client.models.update_model(
         name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-    )
+        body=UpdateModelEntityRequest(
+            fileset=f"default/{MODEL_NAME}",
+        ),
+    ).data()
 
 print(f"\nBase model fileset: fileset://default/{base_model.name}")
 print("Base model fileset files list:")
-print(json.dumps([f.model_dump() for f in client.files.list(fileset=MODEL_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=MODEL_NAME).data().data], indent=2))
 
 # Wait for ModelSpec to be populated from the checkpoint
 print("\nWaiting for ModelSpec to be populated...")
@@ -279,16 +296,13 @@ while not base_model.spec:
     if time.time() - spec_start > SPEC_TIMEOUT_SECONDS:
         raise TimeoutError(f"ModelSpec not populated within {SPEC_TIMEOUT_SECONDS} seconds")
     time.sleep(2)
-    base_model = client.models.retrieve(
-        workspace="default",
-        name=MODEL_NAME,
-    )
+    base_model = client.models.get_model(name=MODEL_NAME).data()
 
 print(f"ModelSpec populated: {base_model.spec}")
 ```
 
 ### 5. Create LoRA Job with Sequence Packing
-Create a LoRA customization job with **sequence packing** enabled via `AutomodelJobInput` (`batch.sequence_packing=True`).
+Create a LoRA customization job with **sequence packing** enabled via `AutomodelJobInput` (`batch.sequence_packing=True`). The LoRA rank, alpha, and learning rate follow the Automodel reference recipe [`qwen3_0p6b_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/qwen/qwen3_0p6b_hellaswag_peft.yaml). With packing, `global_batch_size` counts packed sequences, and each pack holds several SQuAD samples. This job therefore uses a smaller `global_batch_size` (4) than the unpacked job (64). With the same value, the packed job would take only a few optimizer steps and its validation loss would not be comparable.
 
 ```python
 import uuid
@@ -306,20 +320,21 @@ spec = AutomodelJobInput(
     training={
         "training_type": "sft",
         "finetuning_type": "lora",
+        "lora": {"rank": 8, "alpha": 32},
         "max_seq_length": 4096,
     },
     schedule={"epochs": 1, "val_check_interval": 0.1},
     batch={
-        "global_batch_size": 64,
+        "global_batch_size": 4,
         "micro_batch_size": 1,
         "sequence_packing": SEQUENCE_PACKING_ENABLED,
     },
-    optimizer={"learning_rate": 5e-5},
+    optimizer={"learning_rate": 1e-5, "weight_decay": 0.0},
     parallelism={"num_gpus_per_node": 1},
     output={"name": PACK_OUTPUT_NAME},
 )
 
-job_with_sequence_packing = client.customization.automodel.jobs.create(
+job_with_sequence_packing = customization.automodel.jobs.create(
     spec=spec, workspace="default", name=JOB_NAME
 )
 
@@ -330,7 +345,7 @@ print(f"Output adapter: {PACK_OUTPUT_NAME}")
 
 ### 6. Track Fine-Tuning Progress
 
-A training job contains multiple steps: 
+A training job contains multiple steps:
 - Model and dataset downloading
 - Fine-tuning where LoRA adapter weights are trained
 - Creating a fileset entry for the fine-tuned model
@@ -339,6 +354,7 @@ A training job contains multiple steps:
 The elapsed time printed below reflects progress of the entire job. We compare the time taken by the fine-tuning step for both jobs in the last section of this tutorial.
 
 #### Define Helper Functions
+
 
 ```python
 # Helpers to draw GPU VRAM Utilization and Validation Loss
@@ -358,7 +374,11 @@ def _get_gpu_snapshot() -> tuple[list[float], list[float]]:
     """Return (vram_usage_pcts, compute_util_pcts) for each GPU."""
     if not _PYNVML_AVAILABLE:
         return [], []
-    pynvml.nvmlInit()
+    try:
+        pynvml.nvmlInit()
+    except pynvml.NVMLError:
+        # No local NVIDIA driver, e.g. the notebook runs on a different host than the GPUs.
+        return [], []
     try:
         vram, util = [], []
         for i in range(pynvml.nvmlDeviceGetCount()):
@@ -370,6 +390,7 @@ def _get_gpu_snapshot() -> tuple[list[float], list[float]]:
         return vram, util
     finally:
         pynvml.nvmlShutdown()
+
 
 # ---------------------------------------------------------------------------
 # Dashboard drawing helpers
@@ -387,6 +408,7 @@ _PALETTE = {
     "tick":       "#666666",
 }
 
+
 def _style_axis(ax):
     """Apply shared cosmetic styling to a subplot axis."""
     ax.set_facecolor("white")
@@ -396,6 +418,7 @@ def _style_axis(ax):
     ax.spines["left"].set_color(_PALETTE["spine"])
     ax.spines["bottom"].set_color(_PALETTE["spine"])
     ax.tick_params(colors=_PALETTE["tick"], labelsize=9)
+
 
 def _plot_line(ax, xs, ys, color, label, fill=True):
     """Plot a time series, gracefully skipping None values."""
@@ -411,6 +434,7 @@ def _plot_line(ax, xs, ys, color, label, fill=True):
     )
     if fill:
         ax.fill_between(px, py, alpha=0.08, color=color)
+
 
 def _plot_gpu_panel(ax, xs, history, colors, fallback_label):
     """Plot per-GPU time series with area fill."""
@@ -429,6 +453,7 @@ def _plot_gpu_panel(ax, xs, history, colors, fallback_label):
         ax.fill_between(xs[: len(vals)], vals, alpha=0.08, color=c)
     if n_gpus > 1:
         ax.legend(fontsize=9, framealpha=0.9, edgecolor="#DDD")
+
 
 def _draw_dashboard(
     elapsed_mins, val_losses, train_losses,
@@ -489,7 +514,7 @@ The cell below polls the job status every 10 seconds and renders a live dashboar
 import time
 from typing import cast
 from IPython.display import clear_output
-from nemo_platform.types.shared import PlatformJobStatusResponse
+from nemo_helix_plugin.jobs.schemas import HelixJobStatusResponse
 
 # Timeout set to 30 minutes to accommodate typical LoRA training duration for this dataset size.
 # Actual training time will vary based on hardware, model size, and dataset complexity.
@@ -497,8 +522,9 @@ TIMEOUT_SECONDS = 30 * 60  # 30 minutes
 VAL_LOSS_KEY = "val_loss"
 TRAIN_LOSS_KEY = "train_loss"
 
+
 def get_training_metric(
-    status: PlatformJobStatusResponse,
+    status: HelixJobStatusResponse,
     metric_key: str,
 ) -> float | None:
     """Return a metric reported by a task in the training step."""
@@ -509,6 +535,7 @@ def get_training_metric(
                 if value is not None:
                     return float(value)
     return None
+
 
 # ---------------------------------------------------------------------------
 # Job polling with live dashboard
@@ -521,7 +548,7 @@ def wait_for_job(
     poll_interval: int = 10,
     val_loss_key: str = VAL_LOSS_KEY,
     train_loss_key: str = TRAIN_LOSS_KEY,
-) -> PlatformJobStatusResponse:
+) -> HelixJobStatusResponse:
     """
     Poll job status until completed, failed, cancelled, or timeout.
     Displays a live dashboard with loss curves and GPU metrics.
@@ -555,7 +582,7 @@ def wait_for_job(
             print("Job did not complete within the timeout period.")
             raise Exception(error_message)
 
-        status = client.jobs.get_status(name=job_name, workspace=workspace)
+        status = client.jobs.get_job_status(name=job_name, workspace=workspace).data()
 
         # -- Extract training progress from nested steps structure --
         step: int | None = None
@@ -677,6 +704,7 @@ def wait_for_job(
 
         time.sleep(poll_interval)
 
+
 # Wait for the job to complete
 job_with_sequence_packing_status = wait_for_job(
     workspace="default",
@@ -709,6 +737,7 @@ spec = AutomodelJobInput(
     training={
         "training_type": "sft",
         "finetuning_type": "lora",
+        "lora": {"rank": 8, "alpha": 32},
         "max_seq_length": 4096,
     },
     schedule={"epochs": 1, "val_check_interval": 0.1},
@@ -717,12 +746,12 @@ spec = AutomodelJobInput(
         "micro_batch_size": 1,
         "sequence_packing": False,
     },
-    optimizer={"learning_rate": 5e-5},
+    optimizer={"learning_rate": 1e-5, "weight_decay": 0.0},
     parallelism={"num_gpus_per_node": 1},
     output={"name": NO_PACK_OUTPUT_NAME},
 )
 
-job_without_sequence_packing = client.customization.automodel.jobs.create(
+job_without_sequence_packing = customization.automodel.jobs.create(
     spec=spec, workspace="default", name=JOB_NAME
 )
 
@@ -754,28 +783,28 @@ else:
 - Sequence packed version should have a higher GPU utilization and higher GPU Memory Allocation.
 
 ```python
-from nemo_platform.types.jobs import PlatformJobStep
+from nemo_helix_plugin.jobs.types import HelixJobStepResponse
 import pandas as pd
 
 STEP_NAME = "training"
 
-def get_elapsed_time(step: PlatformJobStep) -> float:
+def get_elapsed_time(step: HelixJobStepResponse) -> float:
     """Calculate elapsed time in seconds from step's created_at to updated_at."""
     if step.created_at is None or step.updated_at is None:
         raise ValueError("Training step timestamps are unavailable")
     return (step.updated_at - step.created_at).total_seconds()
 
-step_with_sequence_packing = client.jobs.steps.retrieve(
-            name=STEP_NAME,
-            workspace="default",
-            job=job_with_sequence_packing.job.name,
-)
+step_with_sequence_packing = client.jobs.get_job_step(
+    name=STEP_NAME,
+    workspace="default",
+    job=job_with_sequence_packing.job.name,
+).data()
 
-step_without_sequence_packing = client.jobs.steps.retrieve(
-            name=STEP_NAME,
-            workspace="default",
-            job=job_without_sequence_packing.job.name,
-)
+step_without_sequence_packing = client.jobs.get_job_step(
+    name=STEP_NAME,
+    workspace="default",
+    job=job_without_sequence_packing.job.name,
+).data()
 
 time_to_complete_with_sequence_packing = get_elapsed_time(step_with_sequence_packing)
 time_to_complete_without_sequence_packing = get_elapsed_time(step_without_sequence_packing)
@@ -796,7 +825,7 @@ results_df.style.format({"Val Loss": "{:.2f}", "Training Step Time, sec": "{:.0f
 #### Examples of Validation Loss
 
 The expected validation loss curves should match closely for both jobs.
-![Validation loss comparison chart showing similar convergence patterns between sequence-packed and non-packed training runs over training steps](../_images/packed_vs_not_packed_val_loss.png)
+![Validation loss comparison chart showing similar convergence patterns between sequence-packed and non-packed training runs over one training epoch](../_images/packed_vs_not_packed_val_loss.png)
 
 Sequence packed version should complete significantly faster.
 ![Runtime comparison chart demonstrating significantly reduced training time for sequence-packed job compared to non-packed baseline](../_images/runtime.png)

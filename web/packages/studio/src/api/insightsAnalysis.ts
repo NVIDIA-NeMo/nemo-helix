@@ -2,8 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import { insightsCreateAnalyzeJob } from '@nemo/sdk/generated/insights/insights-analysis-jobs';
-import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
+import type {
+  AnalysisConfig,
+  AnalysisRunResponseJob,
+  CreateAnalysisRunRequest,
+} from '@nemo/sdk/generated/insights/schema';
+import { type AtifIngestRequest, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import { AxiosError } from 'axios';
 
 export type InsightsTriggerStatus = 'started' | 'not-enabled' | 'error';
@@ -11,7 +17,7 @@ export type InsightsTriggerStatus = 'started' | 'not-enabled' | 'error';
 export interface InsightsTriggerResult {
   agent: string;
   status: InsightsTriggerStatus;
-  /** Name of the created analyze-job, when one was created. */
+  /** Name shared by the AnalysisRun and its backing execute job. */
   jobName?: string;
   message?: string;
 }
@@ -33,13 +39,32 @@ export interface InsightsModelOverrides {
   fast_model?: string;
 }
 
+/** `evaluation_id` takes an evaluation's name. */
+export interface AnalysisRunOptions extends Pick<
+  CreateAnalysisRunRequest,
+  'since' | 'evaluation_id'
+> {
+  /** Skips the config lookup when the caller already holds the agent's config. */
+  storedConfig?: AnalysisConfig;
+}
+
 /**
- * Model Entity IDs are always `workspace/name`. An unqualified ref survives job
- * creation and only fails inside the running job, so it is rejected here instead.
+ * Studio stores Model Entity references in `workspace/name` format.
  */
 export const isQualifiedModelRef = (ref: string): boolean => {
   const [workspace, ...rest] = ref.split('/');
   return rest.length === 1 && workspace.length > 0 && rest[0].length > 0;
+};
+
+const isHelixJobStatus = (value: unknown): value is HelixJobStatus =>
+  Object.values<unknown>(HelixJobStatus).includes(value);
+
+/** The analysis run's backing job is typed as an open object, so its status is narrowed here. */
+export const analysisJobStatus = (
+  job?: AnalysisRunResponseJob | null
+): HelixJobStatus | undefined => {
+  const status = job?.status;
+  return isHelixJobStatus(status) ? status : undefined;
 };
 
 const statusOf = (error: unknown): number | undefined =>
@@ -49,6 +74,9 @@ const messageOf = (error: unknown): string => {
   if (error instanceof AxiosError) {
     const detail = error.response?.data?.detail;
     if (typeof detail === 'string') return detail;
+    if (detail && typeof detail === 'object' && typeof detail.error === 'string') {
+      return detail.error;
+    }
   }
   return error instanceof Error ? error.message : 'Unknown error.';
 };
@@ -56,14 +84,15 @@ const messageOf = (error: unknown): string => {
 /**
  * Queues one insights analyst run per agent.
  *
- * The analyze-job spec needs the default/fast model pair, which only exists on the
+ * The analysis run needs the default/fast model pair, which only exists on the
  * agent's AnalysisConfig — so an agent that has never been enabled reports
  * `not-enabled` rather than failing the import it followed.
  */
 export const triggerInsightsRun = async (
   workspace: string,
   agent: string,
-  overrides: InsightsModelOverrides = {}
+  overrides: InsightsModelOverrides = {},
+  { since, evaluation_id, storedConfig }: AnalysisRunOptions = {}
 ): Promise<InsightsTriggerResult> => {
   const invalidOverride = [overrides.default_model, overrides.fast_model]
     .map((ref) => ref?.trim())
@@ -78,7 +107,7 @@ export const triggerInsightsRun = async (
 
   let config;
   try {
-    config = await insightsGetAnalysisConfig(workspace, agent);
+    config = storedConfig ?? (await insightsGetAnalysisConfig(workspace, agent));
   } catch (error) {
     if (statusOf(error) === 404) {
       return {
@@ -110,16 +139,25 @@ export const triggerInsightsRun = async (
     };
   }
 
+  const ethos = await readAgentEthos(workspace, agent);
+
   try {
-    const job = await insightsCreateAnalyzeJob(workspace, {
-      description: `Insights analysis triggered by a trace import for ${agent}.`,
-      spec: {
-        agent,
-        default_model: defaultModel,
-        fast_model: fastModel,
-      },
+    const response = await insightsCreateAnalysisRun(workspace, {
+      agent,
+      default_model: defaultModel,
+      fast_model: fastModel,
+      ...(ethos ? { ethos } : {}),
+      ...(since ? { since } : {}),
+      ...(evaluation_id ? { evaluation_id } : {}),
     });
-    return { agent, status: 'started', jobName: job.name };
+    if (!response.job) {
+      return {
+        agent,
+        status: 'error',
+        message: `Analysis run "${response.run.name}" has no backing job.`,
+      };
+    }
+    return { agent, status: 'started', jobName: response.run.name };
   } catch (error) {
     return { agent, status: 'error', message: messageOf(error) };
   }

@@ -17,7 +17,7 @@ def xdist_worker_xdg_cache_home(environ: Mapping[str, str]) -> str | None:
     test-only behavior out of garakapi's production code.
     """
     worker_id = environ.get("PYTEST_XDIST_WORKER")
-    if not worker_id or environ.get("NMP_PYTEST_XDIST_CACHE_HOME_ISOLATED"):
+    if not worker_id or environ.get("NHX_PYTEST_XDIST_CACHE_HOME_ISOLATED"):
         return None
 
     base_cache_home = Path(environ.get("XDG_CACHE_HOME") or environ.get("RUNNER_TEMP") or tempfile.gettempdir())

@@ -25,10 +25,10 @@ def test_compose_deployment_workload_runtime_config_targets_compose_gateway() ->
 
     assert config.config_files == ()
     assert config.env == (
-        {"name": "NMP_BASE_URL", "value": "https://nemo-gateway:8080"},
-        {"name": "NMP_CLIENT_SSL_CERT_FILE", "value": "/etc/nmp/gateway-tls/tls.crt"},
-        {"name": "SSL_CERT_FILE", "value": "/etc/nmp/gateway-tls/tls.crt"},
-        {"name": "REQUESTS_CA_BUNDLE", "value": "/etc/nmp/gateway-tls/tls.crt"},
+        {"name": "NHX_BASE_URL", "value": "https://nemo-gateway:8080"},
+        {"name": "NHX_CLIENT_SSL_CERT_FILE", "value": "/etc/nhx/gateway-tls/tls.crt"},
+        {"name": "SSL_CERT_FILE", "value": "/etc/nhx/gateway-tls/tls.crt"},
+        {"name": "REQUESTS_CA_BUNDLE", "value": "/etc/nhx/gateway-tls/tls.crt"},
     )
 
 
@@ -54,16 +54,16 @@ def test_compose_workload_exchange_posts_token_exchange_grant(monkeypatch) -> No
         interactive_user_expected_email="nemo-user@example.com",
         workload_principal_id="svc-nemo",
         workload_expected_groups=["nemo-workloads"],
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_principal_claim="sub",
         workload_groups_claim="groups",
         workload_groups_format="comma_string",
-        workload_token_env_vars=["NMP_WORKLOAD_IDENTITY_TOKEN_FILE"],
+        workload_token_env_vars=["NHX_WORKLOAD_IDENTITY_TOKEN_FILE"],
         workload_forwarded_headers={},
         token_endpoint="https://127.0.0.1:18080/application/o/token/",
         e2e_setup_password_grant={
             "grant_type": "password",
-            "client_id": "nemo-platform",
+            "client_id": "nemo-helix",
             "username": "nemo-setup",
             "password": "nemo-setup-token-secret-dev",
             "scope": "openid email groups",
@@ -71,7 +71,7 @@ def test_compose_workload_exchange_posts_token_exchange_grant(monkeypatch) -> No
         interactive_user_password_grant=None,
         workload_provider_password_grant={
             "grant_type": "password",
-            "client_id": "nemo-platform-workload",
+            "client_id": "nemo-helix-workload",
             "username": "svc-nemo",
             "password": "secret",
             "scope": "openid email groups",
@@ -95,7 +95,7 @@ def test_compose_workload_exchange_posts_token_exchange_grant(monkeypatch) -> No
         request = httpx.Request("POST", url)
         return httpx.Response(200, json={"access_token": exchanged_token, "token_type": "Bearer"}, request=request)
 
-    monkeypatch.setenv("NMP_CLIENT_SSL_CERT_FILE", "/tmp/nemo-ca.pem")
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", "/tmp/nemo-ca.pem")
     monkeypatch.setattr("tests.auth_idp.runtime_compose.httpx.post", fake_post)
 
     token = runtime.exchange_workload_token(subject_token)
@@ -106,11 +106,11 @@ def test_compose_workload_exchange_posts_token_exchange_grant(monkeypatch) -> No
         "url": "https://127.0.0.1:18080/apis/auth/token",
         "data": {
             "grant_type": TOKEN_EXCHANGE_GRANT_TYPE,
-            "client_id": "nemo-platform-workload",
+            "client_id": "nemo-helix-workload",
             "subject_token": subject_token,
             "subject_token_type": JWT_TOKEN_TYPE,
             "requested_token_type": ACCESS_TOKEN_TYPE,
-            "audience": "nemo-platform",
+            "audience": "nemo-helix",
             "scope": "openid email groups",
         },
         "timeout": TOKEN_EXCHANGE_TIMEOUT_SECONDS,

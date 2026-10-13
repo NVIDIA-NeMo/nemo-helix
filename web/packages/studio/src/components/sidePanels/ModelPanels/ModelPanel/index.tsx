@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import { getPartsFromReference } from '@nemo/common/src/namedEntity';
-import { toInferenceModelEntityId } from '@nemo/common/src/utils/models';
-import { getProviderProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
+import { toInferenceModelName } from '@nemo/common/src/utils/models';
 import {
   getModelsListModelsQueryKey,
   useModelsDeleteModel,
@@ -32,9 +30,7 @@ import {
   ModelDetailOverviewProps,
   ModelParametersAccordion,
 } from '@studio/components/sidePanels/ModelPanels/ModelPanel/components';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
-import { useServedModel } from '@studio/hooks/useServedModel';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   type ComponentProps,
@@ -111,22 +107,11 @@ export const ModelPanel: FC<ModelPanelProps> = ({
   const queryClient = useQueryClient();
   const { mutateAsync: deleteModel } = useModelsDeleteModel();
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const { modelChatStatus, isLoading: isChatStatusLoading } = useModelChatAvailability(model, {
-    adapter,
-  });
-
-  // An adapter is reached through the provider proxy, so the request needs the
-  // backend's own name for it. That mapping is discovered by the platform, so
-  // look it up rather than constructing it.
   const {
-    servedModel: adapterServedModel,
-    providerRef: adapterProviderRef,
-    isLoading: isAdapterTargetLoading,
-  } = useServedModel(
-    adapter ? model : undefined,
-    adapter && model ? toInferenceModelEntityId(model, adapter) : ''
-  );
-  const adapterServedModelName = adapterServedModel?.served_model_name;
+    modelChatStatus,
+    isLoading: isLoadingChat,
+    isAdapterUnserved,
+  } = useModelChatAvailability(model, { adapter });
 
   const [selectedTab, setSelectedTab] = useState<ModelPanelTab>(defaultTab ?? 'model-details');
   const tabItems = useMemo(
@@ -209,32 +194,10 @@ export const ModelPanel: FC<ModelPanelProps> = ({
   } else {
     const workspace = model.workspace;
 
-    // Adapters have no autoprovisioned VirtualModel (the provider reconciler
-    // skips any served model whose id contains "&adapters/"), and both the
-    // model-entity and OpenAI gateway routes 404 without one. So they go through
-    // the provider proxy, which forwards the body to the backend unrewritten —
-    // meaning `model` must be the backend's own name, not a platform id.
-    const adapterProviderParts = adapterProviderRef
-      ? getPartsFromReference(adapterProviderRef)
-      : undefined;
-    const adapterBaseURL = adapterProviderParts
-      ? PLATFORM_BASE_URL +
-        getProviderProxyGetQueryKey(
-          adapterProviderParts.workspace,
-          adapterProviderParts.name,
-          'v1/'
-        )[0]
-      : undefined;
-
-    const isLoadingChat = isChatStatusLoading || isAdapterTargetLoading;
-    // Without the backend's name for the adapter there is nothing safe to send:
-    // falling back to the base model would quietly chat with the wrong weights.
-    const adapterUnresolved = Boolean(adapter) && !(adapterServedModelName && adapterBaseURL);
-
     let chatContent: ReactNode;
     if (isLoadingChat) {
       chatContent = <Loading />;
-    } else if (adapterUnresolved) {
+    } else if (isAdapterUnserved) {
       chatContent = (
         <Empty
           title="Adapter is not currently served"
@@ -247,9 +210,11 @@ export const ModelPanel: FC<ModelPanelProps> = ({
     } else {
       chatContent = (
         <ModelChat
-          model={adapter ? adapterServedModelName! : model.name}
+          // An adapter goes on the wire as `base&adapters/{ws}/{name}`, which the
+          // gateway resolves through the base model's VirtualModel — so it needs no
+          // special base URL and inherits that VM's middleware.
+          model={toInferenceModelName(model, adapter)}
           workspace={workspace}
-          baseURL={adapterBaseURL}
           promptData={model.prompt}
           modelChatStatus={modelChatStatus}
           // `model` is the base model in both branches. Deploying it is what makes

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
-import type { PlatformJobLog, PlatformJobLogPage } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobLog, HelixJobLogPage } from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -22,7 +22,7 @@ const mockJobsPageJobLogs = vi.mocked(jobsPageJobLogs);
 const WORKSPACE = 'test-workspace';
 const JOB_NAME = 'test-job';
 
-function makeLog(index: number): PlatformJobLog {
+function makeLog(index: number): HelixJobLog {
   return {
     timestamp: `2026-01-01T00:00:${String(index).padStart(2, '0')}Z`,
     job: JOB_NAME,
@@ -33,10 +33,10 @@ function makeLog(index: number): PlatformJobLog {
 }
 
 function makePage(
-  logs: PlatformJobLog[],
+  logs: HelixJobLog[],
   total: number,
   nextPage: string | null = null
-): PlatformJobLogPage {
+): HelixJobLogPage {
   return {
     data: logs,
     total,
@@ -244,8 +244,8 @@ describe('useJobLogs', () => {
     // The page walk reports progress via setState from inside the queryFn, so each
     // step has to be flushed inside act() rather than awaited with waitFor.
     it('advances as the walk pages through the log', async () => {
-      const page1 = deferred<PlatformJobLogPage>();
-      const page2 = deferred<PlatformJobLogPage>();
+      const page1 = deferred<HelixJobLogPage>();
+      const page2 = deferred<HelixJobLogPage>();
       mockJobsPageJobLogs.mockReturnValueOnce(page1.promise).mockReturnValueOnce(page2.promise);
 
       const { result } = renderHook(
@@ -306,25 +306,20 @@ describe('useJobLogs', () => {
         { wrapper: createWrapper() }
       );
 
-      await act(async () => {
-        await tick();
-      });
-      expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 }));
 
-      const nextWalk = deferred<PlatformJobLogPage>();
+      const nextWalk = deferred<HelixJobLogPage>();
       mockJobsPageJobLogs.mockReturnValueOnce(nextWalk.promise);
 
-      await act(async () => {
+      act(() => {
         void result.current.refetch();
-        await tick();
       });
-      expect(result.current.loadProgress).toBeNull();
+      await waitFor(() => expect(result.current.loadProgress).toBeNull());
 
-      await act(async () => {
+      act(() => {
         nextWalk.resolve(makePage([makeLog(0), makeLog(1), makeLog(2)], 3));
-        await tick();
       });
-      expect(result.current.loadProgress).toEqual({ loaded: 3, total: 3 });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 3, total: 3 }));
     });
 
     it("never carries a finished job's count into the next job", async () => {
@@ -343,12 +338,9 @@ describe('useJobLogs', () => {
         { wrapper: createWrapper(), initialProps: { name: JOB_NAME } }
       );
 
-      await act(async () => {
-        await tick();
-      });
-      expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 }));
 
-      const nextJob = deferred<PlatformJobLogPage>();
+      const nextJob = deferred<HelixJobLogPage>();
       mockJobsPageJobLogs.mockReturnValueOnce(nextJob.promise);
 
       seen.length = 0;
@@ -357,11 +349,10 @@ describe('useJobLogs', () => {
       expect(seen.length).toBeGreaterThan(0);
       expect(seen).toEqual(seen.map(() => null));
 
-      await act(async () => {
+      act(() => {
         nextJob.resolve(makePage([makeLog(0)], 1));
-        await tick();
       });
-      expect(result.current.loadProgress).toEqual({ loaded: 1, total: 1 });
+      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 1, total: 1 }));
     });
 
     it('reports the same progress to every observer of the job', async () => {
@@ -385,12 +376,10 @@ describe('useJobLogs', () => {
         { wrapper: createWrapper() }
       );
 
-      await act(async () => {
-        await tick();
+      await waitFor(() => {
+        expect(result.current.viewer.loadProgress).toEqual({ loaded: 4, total: 4 });
+        expect(result.current.downloader.loadProgress).toEqual({ loaded: 4, total: 4 });
       });
-
-      expect(result.current.viewer.loadProgress).toEqual({ loaded: 4, total: 4 });
-      expect(result.current.downloader.loadProgress).toEqual(result.current.viewer.loadProgress);
     });
   });
 });

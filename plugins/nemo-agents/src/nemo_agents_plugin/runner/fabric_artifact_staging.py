@@ -23,8 +23,8 @@ from nemo_agents_plugin.entities import (
     ethos_fileset_name,
 )
 from nemo_deployments_plugin.entities import ConfigFile
-from nemo_platform_plugin.client.errors import NotFoundError as PluginClientNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 
 logger = logging.getLogger(__name__)
 _CONTRACT_FILENAMES = {ETHOS_FILENAME, AGENT_SPEC_FILENAME}
@@ -251,8 +251,8 @@ async def stage_fabric_ethos_config_files(
 ) -> list[ConfigFile]:
     """Download the Ethos fileset and return container ``config_files`` entries.
 
-    When the fileset is unavailable, returns a single inline ``agent.yaml`` entry
-    (AIRCORE-947 behavior). When available, maps every fileset file under the same
+    When the fileset is unavailable, returns a single inline ``agent.yaml`` entry.
+    When available, maps every fileset file under the same
     ``base_dir`` as *agent_yaml_path*, substituting the rewritten YAML for
     ``agent.yaml``.
     """

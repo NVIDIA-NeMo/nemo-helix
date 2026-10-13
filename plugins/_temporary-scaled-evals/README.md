@@ -5,19 +5,22 @@ SPDX-License-Identifier: Apache-2.0
 
 # nemo-scaled-evals (Phase 1 ephemeral plugin)
 
-Vendors the scaled-evals control plane into NeMo Platform as an ephemeral plugin so Harbor/Gym scaled evaluation keeps working end-to-end while substrate plugins (builder/registry/sandbox) and the nemo-evaluator API merge land later.
+Vendors the scaled-evals control plane into NeMo Helix as an ephemeral plugin so Harbor/Gym scaled evaluation keeps working end-to-end while substrate plugins (builder/registry/sandbox) and the nemo-evals API merge land later.
 
 Portable behavior is reconciled through standalone scaled-evals `1.13.0`
 (`c64f23e71dc829414ab9279483973a84a17eea8d`). This remains a platform-adapted
 fork: hosted deployment, identity-provider, and private corpus surfaces are not
 vendored. Benchmark-wide Harbor archive exports are additionally ported from
 standalone `1.22.0` (`cffd0af2d7aa3e9cc323cc4c32204faf785688fe`); this does not
-imply reconciliation of the other changes after `1.13.0`.
+imply reconciliation of the other changes after `1.13.0`. Selected portable
+operational fixes are ported through standalone `1.23.1`: threadpool-independent
+liveness (`a5ab1eb3`), short-lived database checkouts for streaming downloads
+(`03efad39`), and JSON-aware artifact redaction (`880ba9d5`).
 
 ## Install (ephemeral — not in `enabled-plugins` yet)
 
 ```bash
-# From nemo-platform repo root
+# From nemo-helix repo root
 uv sync
 uv pip install -e plugins/_temporary-scaled-evals/
 ```
@@ -110,13 +113,11 @@ registries outside `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` before network
 I/O. Bearer-token challenges must remain on the registry host; Docker Hub may
 also use `auth.docker.io`.
 
-**Not mounted:** Switchyard lease/publish (`/v1/switchyard/*`). Switchyard modules remain in-tree for dispatch import compatibility but are out of Phase 1 product surface.
-
 **Removed:** OAuth client discovery (`/v1/auth/config`), which existed only to
 hand the CLI login flow the coordinates of a fixed internal identity provider.
 
 There is no second way to serve these routes. The package used to also ship a
-standalone FastAPI app (`scaled-evals-api`) that mounted the Switchyard router and
+standalone FastAPI app (`scaled-evals-api`) that mounted extra routers and
 registered the external auth middleware, so installing the package handed you a
 command that bypassed the curation above. That app is gone: this service class is
 the only HTTP surface, which makes "not mounted" a property of the code rather
@@ -149,16 +150,17 @@ have not finished execution, evidence, teardown, and individual archive generati
 produce a 409 rather than an incomplete snapshot. Repeated requests reuse queued,
 building, or ready work; `force` replaces a ready/failed export, not an active build.
 
-The separate **dispatch worker must be running**. It processes benchmark archives
-after higher-priority lifecycle, evaluation, evidence, and per-evaluation archive
-work. Leases survive worker restarts, and changed member executions/archives
+The scaled-evals Jobs controller submits
+one `scaled-evals.benchmark-archive-build` Job per claim attempt, and the Job takes
+the lease when it starts. Each evaluation Job builds its own evidence and archive;
+the controller rebuilds any a Job left behind. Leases survive restarts, and changed member executions/archives
 prevent publication of the in-progress export. Upload failures and lease loss
 trigger cleanup of unpublished claim-token objects. Cleanup rechecks the archive
 row under a lock before deleting: a lost commit acknowledgement must not delete
 a successfully published archive. If the database or object store is unavailable,
 cleanup defers rather than guessing.
 
-Idle dispatch workers also reconcile archive prefixes periodically, retaining the
+The controller also reconciles archive prefixes periodically, retaining the
 published object and the current building claim's object. This recovers objects
 left by process crashes, failed deletions, superseded generations, or an upload
 that completed after a revoked worker exited. The per-run throttle is persisted
@@ -212,18 +214,13 @@ and safe to replay at startup. No new platform database or Studio UI is introduc
 ### Provider boundary
 
 Archive assembly, input integrity, and the typed manifest are provider-independent.
-The dispatcher injects evidence checks; Switchyard-specific campaign reference
-validation lives in `dispatch/switchyard_archive.py`, not in the generic exporter.
-Future workload implementations can supply their own evidence checks without
-modifying archive assembly. Callers of the HTTP API cannot disable these checks.
+Workload implementations can supply their own evidence checks without modifying
+archive assembly. Callers of the HTTP API cannot disable these checks.
 
-The existing Switchyard provisioning/cleanup lifecycle still belongs to the
-standalone-compatible dispatcher. When moving it into a separate workload service,
-that boundary should own provisioning, readiness, cleanup, lease persistence and
-public evidence publication together. The dispatcher would sequence the workload
-contract, and the archive would consume its published evidence through the same
-validator seam. This port does not introduce a speculative workload framework or
-rewrite existing execution/credential lifecycle behavior.
+Switchyard is not managed by this plugin. Evaluations and benchmark runs no longer
+accept a Switchyard profile, and any queued evaluation that still references one
+fails with `switchyard_unsupported` instead of running without its
+model-traffic fence.
 
 ## Who a caller is
 
@@ -261,7 +258,7 @@ explicitly rather than assuming.
 
 ```bash
 uv run python -c "
-from nmp.platform_runner.registry import get_available_services, get_service_groups
+from nhx.platform_runner.registry import get_available_services, get_service_groups
 print('discovered:', 'scaled-evals' in get_available_services())
 print('in groups:', [g for g, v in get_service_groups().items() if 'scaled-evals' in v])
 "
@@ -325,7 +322,7 @@ curl -s -X POST $B/v1/tasks -H 'content-type: application/json' \
 ```
 
 `readyz` returns 503 `degraded` with `postgres: ok` and `schema: ok`. The failing
-`object_store`, `buildkit`, `registry`, and `build_worker` checks are expected until
+`object_store`, `buildkit`, and `registry` checks are expected until
 T1.3/T1.5 stand those up; the control plane itself is healthy. `POST /v1/tasks` returns
 201 with a presigned upload URL, which needs an object store before the upload
 completes.
@@ -338,14 +335,38 @@ lsof -ti tcp:8080 | xargs kill
 docker rm -f scaled-evals-pg
 ```
 
-## Workers (separate processes)
+## Background execution
 
-```bash
-scaled-evals-build-worker
-scaled-evals-dispatch-worker
-```
+The `scaled-evals-jobs` controller submits task builds and evaluation executions to
+Platform Jobs. Creating or retrying a single evaluation also submits its Job
+from the API right after the row commits, if the admission caps allow it; the
+controller submits anything that path misses, including benchmark-run members. Postgres remains the admission
+queue and metadata source of truth during this migration.
 
-Workers read the same `SCALED_EVALS_DATABASE_URL` and S3 env as the plugin.
+There is no separate worker process. The controller also runs execution cleanup,
+the evidence and archive backstops, and benchmark archive cleanup.
+
+Before creating an evaluation Job, the submitter writes that execution's
+immutable launch inputs to a `scaled_evals_execution` entity, and the Job
+launches from it. The Job reads only the changing run state from Postgres and
+writes status and results there. Because the inputs include prompt content and
+the private execution snapshot, they are stored in
+`SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE` (default `scaled-evals-internal`).
+The service creates that workspace itself, so only the service has a role in
+it, and it refuses to use a workspace of that name that someone else created.
+
+Each evaluation Job may run for every sequential trial wave
+(`ceil(n_attempts / parallelism)`) times the profile's sandbox
+`lifecycle_timeout` plus a grace, and never less than
+`DISPATCH_RUN_POLL_INTERVAL_SECONDS` x `DISPATCH_RUN_MAX_POLLS`.
+
+**Known limitation: hosted Gym.** `gym_sandbox_opensandbox` evaluations have no
+working path on Kubernetes yet (AALGO-906). The evaluation Job always runs in
+the plugin's app image with a 1 CPU / 1 Gi limit; it does not switch to the
+snapshot-pinned Gym runner image, set `GYM_RUNNER_MODE=process`, or mount
+`/dev/shm`. With the default `GYM_RUNNER_MODE=docker` the run fails, because
+the Job pod has no Docker daemon. Gym evaluations are still accepted, so leave
+`GYM_SANDBOX_OPENSANDBOX_ENABLED` off on hosted deployments until AALGO-906 lands.
 
 ## Licensing
 
@@ -361,4 +382,4 @@ else in the suite would notice.
 - Hosted image-admission canary (stubbed no-op)
 - Hosted auth sidecars (`auth-router` / `preview-router`)
 - Platform image-builder / registry / sandbox plugins (Phase 2)
-- nemo-evaluator API fold (Phase 3)
+- nemo-evals API fold (Phase 3)

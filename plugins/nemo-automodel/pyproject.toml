@@ -3,13 +3,13 @@
 
 [project]
 name = "nemo-automodel-plugin"
-description = "NeMo Automodel customization contributor for NeMo Platform."
+description = "NeMo Automodel customization contributor for NeMo Helix."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
-    "nemo-platform-plugin",
-    "nmp-automodel",
-    "nmp-customization-common",
+    "nemo-helix-plugin",
+    "nhx-automodel",
+    "nhx-customization-common",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.6.1",
     "typer>=0.12.5",
@@ -31,10 +31,10 @@ packages = ["src/nemo_automodel_plugin"]
 
 
 [tool.uv.sources]
-nemo-platform-plugin = { workspace = true }
-nmp-automodel = { workspace = true }
+nemo-helix-plugin = { workspace = true }
+nhx-automodel = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
-nmp-customization-common = { workspace = true }
+nhx-customization-common = { workspace = true }
 
 
 [dependency-groups]

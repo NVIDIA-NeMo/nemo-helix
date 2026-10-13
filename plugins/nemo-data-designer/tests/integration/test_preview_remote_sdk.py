@@ -14,13 +14,18 @@ import pytest
 from data_designer.errors import DataDesignerError
 from data_designer.interface.data_designer import DataDesigner
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
+from filesets import transfer
 from nemo_data_designer_plugin.config import get_config
 from nemo_data_designer_plugin.sdk.errors import DataDesignerConfigValidationError, DataDesignerPreviewError
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nhx.testing import ClientContext
 
 pytestmark = pytest.mark.integration
 
 
-def test_request_too_many_records() -> None:
+def test_request_too_many_records(data_designer: DataDesignerResource) -> None:
     too_many_records = get_config().preview_num_records.max + 1
 
     builder = dd.DataDesignerConfigBuilder(model_configs=[u.make_model_config()])
@@ -32,16 +37,12 @@ def test_request_too_many_records() -> None:
         )
     )
 
-    with (
-        u.make_mock_client_context() as client_context,
-        pytest.raises(DataDesignerConfigValidationError) as exc_info,
-    ):
-        dd_client = u.make_dd_client(client_context)
-        dd_client.preview(builder, num_records=too_many_records)
+    with pytest.raises(DataDesignerConfigValidationError) as exc_info:
+        data_designer.preview(builder, num_records=too_many_records)
     assert "Max num records" in str(exc_info.value)
 
 
-def test_happy_path_preview() -> None:
+def test_happy_path_preview(data_designer: DataDesignerResource) -> None:
     column_name = "column-name"
     value = "a"
 
@@ -54,12 +55,8 @@ def test_happy_path_preview() -> None:
         )
     )
 
-    with (
-        u.make_mock_client_context() as client_context,
-        capture_sdk_preview_log_messages() as log_messages,
-    ):
-        dd_client = u.make_dd_client(client_context)
-        preview_results = dd_client.preview(builder, num_records=3)
+    with capture_sdk_preview_log_messages() as log_messages:
+        preview_results = data_designer.preview(builder, num_records=3)
 
     expected_dataset = pd.DataFrame(data={column_name: [value, value, value]}).convert_dtypes(dtype_backend="pyarrow")
     assert preview_results.dataset is not None
@@ -71,42 +68,35 @@ def test_happy_path_preview() -> None:
     assert_message_with(log_messages, fuzzy="Preview generation in progress")
 
 
-def test_hf_seed_dataset() -> None:
+@pytest.mark.usefixtures("mock_secret")
+def test_hf_seed_dataset(data_designer: DataDesignerResource) -> None:
     builder = dd.DataDesignerConfigBuilder(model_configs=[u.make_model_config()])
     builder.with_seed_dataset(
         dd.HuggingFaceSeedSource(path="my-ws/my-fileset#path/to/data.parquet", token=u.SECRET_NAME)
     )
     builder.add_column(column_config=dd.ExpressionColumnConfig(name="full_name", expr=u.FULL_NAME_EXPR))
 
-    with (
-        u.make_mock_client_context() as client_context,
-        u.setup_mock_secret(client_context),
-        u.mock_hf_seed_reader(),
-    ):
-        dd_client = u.make_dd_client(client_context)
-        preview_results = dd_client.preview(builder, num_records=3)
+    with u.mock_hf_seed_reader():
+        preview_results = data_designer.preview(builder, num_records=3)
 
     assert preview_results.dataset is not None
     assert set(preview_results.dataset["full_name"].values) == u.FULL_NAMES
 
 
-def test_fileset_file_seed_dataset_plugin() -> None:
+@pytest.mark.usefixtures("mock_file")
+def test_fileset_file_seed_dataset_plugin(data_designer: DataDesignerResource) -> None:
     builder = dd.DataDesignerConfigBuilder(model_configs=[u.make_model_config()])
     builder.with_seed_dataset(FilesetFileSeedSource(path=u.FILESET_FILE_SEED_SOURCE_PATH))  # ty: ignore[invalid-argument-type]
     builder.add_column(column_config=dd.ExpressionColumnConfig(name="full_name", expr=u.FULL_NAME_EXPR))
 
-    with (
-        u.make_mock_client_context() as client_context,
-        u.setup_mock_file(client_context),
-    ):
-        dd_client = u.make_dd_client(client_context)
-        preview_results = dd_client.preview(builder, num_records=3)
+    preview_results = data_designer.preview(builder, num_records=3)
 
     assert preview_results.dataset is not None
     assert set(preview_results.dataset["full_name"].values) == u.FULL_NAMES
 
 
-def test_directory_seed_dataset_fileset_root() -> None:
+@pytest.mark.usefixtures("mock_file")
+def test_directory_seed_dataset_fileset_root(data_designer: DataDesignerResource) -> None:
     builder = dd.DataDesignerConfigBuilder(model_configs=[u.make_model_config()])
     builder.with_seed_dataset(dd.DirectorySeedSource(path=f"{u.WORKSPACE_NAME}/{u.FILESET_NAME}"))
     builder.add_column(
@@ -116,12 +106,7 @@ def test_directory_seed_dataset_fileset_root() -> None:
         )
     )
 
-    with (
-        u.make_mock_client_context() as client_context,
-        u.setup_mock_file(client_context),
-    ):
-        dd_client = u.make_dd_client(client_context)
-        preview_results = dd_client.preview(builder, num_records=3)
+    preview_results = data_designer.preview(builder, num_records=3)
 
     assert preview_results.dataset is not None
     assert set(preview_results.dataset["expr"].values) == {
@@ -129,7 +114,9 @@ def test_directory_seed_dataset_fileset_root() -> None:
     }
 
 
-def test_directory_seed_dataset_fileset_subdir() -> None:
+def test_directory_seed_dataset_fileset_subdir(
+    client_context: ClientContext, data_designer: DataDesignerResource
+) -> None:
     subdir = "some/subdir"
 
     builder = dd.DataDesignerConfigBuilder(model_configs=[u.make_model_config()])
@@ -141,18 +128,14 @@ def test_directory_seed_dataset_fileset_subdir() -> None:
         )
     )
 
-    with (
-        u.make_mock_client_context() as client_context,
-        u.setup_mock_file(client_context, remote_path=f"{subdir}/{u.FILE_PATH}"),
-    ):
-        dd_client = u.make_dd_client(client_context)
-        preview_results = dd_client.preview(builder, num_records=3)
+    with u.setup_mock_file(client_context, remote_path=f"{subdir}/{u.FILE_PATH}"):
+        preview_results = data_designer.preview(builder, num_records=3)
 
     assert preview_results.dataset is not None
     assert set(preview_results.dataset["expr"].values) == {f"directory_file :: {u.FILE_PATH}"}
 
 
-def test_file_contents_seed_dataset() -> None:
+def test_file_contents_seed_dataset(files_client: FilesClient, data_designer: DataDesignerResource) -> None:
     subdir = "some/subdir"
 
     builder = dd.DataDesignerConfigBuilder(model_configs=[u.make_model_config()])
@@ -164,23 +147,20 @@ def test_file_contents_seed_dataset() -> None:
         )
     )
 
-    with (
-        u.make_mock_client_context() as client_context,
-        tempfile.TemporaryDirectory() as tmpdir,
-    ):
-        client_context.sdk.files.filesets.create(name=u.FILESET_NAME, workspace=u.WORKSPACE_NAME)
+    files_client.create_fileset(body=CreateFilesetRequest(name=u.FILESET_NAME), workspace=u.WORKSPACE_NAME)
+    with tempfile.TemporaryDirectory() as tmpdir:
         for filename in ["abc.txt", "xyz.txt"]:
             filepath = Path(tmpdir) / filename
             filepath.write_text(f"This is {filename}")
-        client_context.sdk.files.upload(
+        transfer.upload(
+            files_client,
             fileset=u.FILESET_NAME,
             workspace=u.WORKSPACE_NAME,
             local_path=tmpdir,
             remote_path=subdir,
         )
 
-        dd_client = u.make_dd_client(client_context)
-        preview_results = dd_client.preview(builder, num_records=3)
+    preview_results = data_designer.preview(builder, num_records=3)
 
     assert preview_results.dataset is not None
     assert set(preview_results.dataset["expr"].values) == {
@@ -214,7 +194,7 @@ def wrong_function_name() -> dd.DataDesignerConfigBuilder:
     assert "traceback" not in result.output.lower()
 
 
-def test_nemotron_personas_dataset() -> None:
+def test_nemotron_personas_dataset(client_context: ClientContext, data_designer: DataDesignerResource) -> None:
     builder = dd.DataDesignerConfigBuilder(model_configs=[u.make_model_config()])
     builder.add_column(
         column_config=dd.SamplerColumnConfig(
@@ -229,12 +209,8 @@ def test_nemotron_personas_dataset() -> None:
         data={"first_name": ["Charlie"] * 100, "last_name": ["Parker"] * 100, "age": list(range(100))}
     )
 
-    with (
-        u.make_mock_client_context() as client_context,
-        u.setup_mock_nemotron_personas_data(client_context, sample_persona_data),
-    ):
-        dd_client = u.make_dd_client(client_context)
-        preview_results = dd_client.preview(builder, num_records=3)
+    with u.setup_mock_nemotron_personas_data(client_context, sample_persona_data):
+        preview_results = data_designer.preview(builder, num_records=3)
 
     assert preview_results.dataset is not None
 
@@ -246,7 +222,7 @@ def test_nemotron_personas_dataset() -> None:
     assert all(25 <= age <= 45 for age in demo_ages)
 
 
-def test_preview_with_schema_transform_processor() -> None:
+def test_preview_with_schema_transform_processor(data_designer: DataDesignerResource) -> None:
     column_name = "school_subject"
     processor_name = "chat_format"
 
@@ -270,9 +246,7 @@ def test_preview_with_schema_transform_processor() -> None:
         )
     )
 
-    with u.make_mock_client_context() as client_context:
-        dd_client = u.make_dd_client(client_context)
-        preview_results = dd_client.preview(builder, num_records=3)
+    preview_results = data_designer.preview(builder, num_records=3)
 
     assert preview_results.dataset is not None
     assert preview_results.processor_artifacts is not None
@@ -283,7 +257,9 @@ def test_preview_with_schema_transform_processor() -> None:
     assert "messages" in processor_records[0]
 
 
-def test_preview_surfaces_worker_error_through_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preview_surfaces_worker_error_through_sdk(
+    monkeypatch: pytest.MonkeyPatch, data_designer: DataDesignerResource
+) -> None:
     """When the preview worker thread raises, the function emits a ``LogFrame`` and an
     ``Error`` frame instead of ``Done``; the SDK's ``_PreviewFrameCollector`` translates
     that ``Error`` into a typed ``DataDesignerPreviewError`` with the original message.
@@ -304,13 +280,13 @@ def test_preview_surfaces_worker_error_through_sdk(monkeypatch: pytest.MonkeyPat
         )
     )
 
-    with u.make_mock_client_context() as client_context:
-        dd_client = u.make_dd_client(client_context)
-        with pytest.raises(DataDesignerPreviewError, match="forced worker failure"):
-            dd_client.preview(builder, num_records=3)
+    with pytest.raises(DataDesignerPreviewError, match="forced worker failure"):
+        data_designer.preview(builder, num_records=3)
 
 
-def test_preview_model_health_check_failure_returns_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_preview_model_health_check_failure_returns_validation_error(
+    monkeypatch: pytest.MonkeyPatch, data_designer: DataDesignerResource
+) -> None:
     # It would be preferable to set up a mock provider configured to return a 5xx response,
     # which is supported in the shared test helper, but doesn't work here because the call
     # to the provider comes from the Data Designer library's own client, which does not carry
@@ -331,10 +307,8 @@ def test_preview_model_health_check_failure_returns_validation_error(monkeypatch
         )
     )
 
-    with u.make_mock_client_context() as client_context:
-        dd_client = u.make_dd_client(client_context)
-        with pytest.raises(DataDesignerConfigValidationError, match=error_message) as exc_info:
-            dd_client.preview(builder, num_records=3)
+    with pytest.raises(DataDesignerConfigValidationError, match=error_message) as exc_info:
+        data_designer.preview(builder, num_records=3)
 
     assert exc_info.value.status_code == 422
 

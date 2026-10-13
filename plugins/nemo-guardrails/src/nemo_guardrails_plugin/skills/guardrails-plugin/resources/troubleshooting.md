@@ -79,9 +79,9 @@ To evaluate the rail outcomes for a `GuardrailConfig`, query the rails subsystem
 and disabling it or, if needed, redacting captured data before storing or using
 logs in production environments.
 
-## Testing without a real LLM (agentic-use mock harness)
+## Testing without a real LLM (mock provider)
 
-`default/mock-llm` is **not** pre-configured platform-wide. The agentic-use harness wires it up via `tests/agentic-use/guardrails-content-safety-cli/environment/setup-mock.py`:
+`default/mock-llm` is **not** pre-configured platform-wide. To test without a real LLM, set it up yourself:
 
 - IGW runs in mock-provider mode (config `mock_provider_prefix="igw-mock-"`).
 - A provider named `igw-mock-mock-llm` is registered with a static response-map header that always returns `{"role":"assistant","content":"Yes"}`.
@@ -100,13 +100,13 @@ nemo guardrail check \
   --max-tokens 256
 ```
 
-Outside the agentic-use harness, `default/mock-llm` won't resolve — either set up the mock provider yourself or point the rail at a real model.
+Without that setup, `default/mock-llm` won't resolve — set up the mock provider or point the rail at a real model.
 
 ## Failure-case deep dives
 
 ### Plugin attached to only one middleware list
 
-Each list dispatches its own hook independently — `execute_request_middleware` ↔ `process_request` and `execute_response_middleware` ↔ `process_response`, wired in `services/core/inference-gateway/src/nmp/core/inference_gateway/api/middleware_registry.py`. A config with both `rails.input.flows` and `rails.output.flows` attached to only one list silently no-ops on the unlisted side: prompts pass through unblocked, or responses pass through unblocked, even though the config looks complete.
+Each list dispatches its own hook independently — `execute_request_middleware` ↔ `process_request` and `execute_response_middleware` ↔ `process_response`, wired in `services/core/inference-gateway/src/nhx/core/inference_gateway/api/middleware_registry.py`. A config with both `rails.input.flows` and `rails.output.flows` attached to only one list silently no-ops on the unlisted side: prompts pass through unblocked, or responses pass through unblocked, even though the config looks complete.
 
 Attach the same `MiddlewareCall` to **both** `--request-middleware` and `--response-middleware`.
 

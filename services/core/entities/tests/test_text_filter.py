@@ -5,12 +5,12 @@
 
 import pytest
 from lark.exceptions import UnexpectedCharacters, UnexpectedToken
-from nmp.common.api.filter import (
+from nhx.common.api.filter import (
     ComparisonOperation,
     FilterOperator,
     LogicalOperation,
 )
-from nmp.core.entities.utils.text_filter import (
+from nhx.core.entities.utils.text_filter import (
     TextFilterParser,
     parse_text_filter,
 )

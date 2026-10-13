@@ -31,8 +31,8 @@ from nemo_guardrails_plugin.llmrails_cache import (
     Provenance,
     stabilize,
 )
-from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
-from nemo_platform_plugin.inference_middleware import OpenAICompatibleInferenceTarget
+from nemo_helix_plugin.guardrail.types import RailsConfig as HelixRailsConfig
+from nemo_helix_plugin.inference_middleware import OpenAICompatibleInferenceTarget
 from nemoguardrails.integrations.langchain.llm_adapter import LangChainLLMAdapter
 from nemoguardrails.rails.llm.llmrails import LLMRails
 
@@ -46,9 +46,9 @@ def _resolve_target(_model_id: str) -> OpenAICompatibleInferenceTarget:
     )
 
 
-def _platform_rails(models: list[dict[str, Any]] | None = None) -> PlatformRailsConfig:
-    """Minimal :class:`PlatformRailsConfig` — no flows, so no library prompts required."""
-    return PlatformRailsConfig.model_validate(
+def _platform_rails(models: list[dict[str, Any]] | None = None) -> HelixRailsConfig:
+    """Minimal :class:`HelixRailsConfig` — no flows, so no library prompts required."""
+    return HelixRailsConfig.model_validate(
         {
             "rails": {"input": {"flows": []}, "output": {"flows": []}},
             "models": models if models is not None else [],
@@ -231,7 +231,7 @@ def test_supports_colang_version(colang_version: str) -> None:
     the upstream ``LLMGenerationActionsV2dotx`` path also needs to tolerate
     ``llm=None`` at ``__init__`` (it does today; verify per upstream bump).
     """
-    platform_rails_config = PlatformRailsConfig.model_validate(
+    platform_rails_config = HelixRailsConfig.model_validate(
         {
             "rails": {"input": {"flows": []}, "output": {"flows": []}},
             "models": [],

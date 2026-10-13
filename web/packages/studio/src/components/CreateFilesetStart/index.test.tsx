@@ -20,10 +20,20 @@ describe('CreateFilesetStart', () => {
     expect(screen.getByText('Build from scratch')).toBeInTheDocument();
   });
 
-  it('shows no Continue footer until an option is chosen', () => {
+  it('opens on the template rung with its recipes already showing', () => {
     renderStart();
 
-    expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
+    // The likeliest way in, so the page starts there rather than on an empty panel.
+    expect(screen.getByRole('radio', { name: 'Start from a template' })).toBeChecked();
+    expect(screen.getByText('Instruction fine-tuning (SFT)')).toBeInTheDocument();
+  });
+
+  it('waits for a recipe before enabling Continue', () => {
+    renderStart();
+
+    // The option is chosen, but the option alone is not a job.
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(screen.getByText('Pick a recipe to continue.')).toBeInTheDocument();
   });
 
   it('selecting Build from scratch reveals Continue and invokes onContinue with "scratch"', async () => {

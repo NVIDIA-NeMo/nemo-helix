@@ -8,11 +8,12 @@ from typing import cast
 import httpx
 import pytest
 import respx
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nmp.common.config import Configuration, PlatformConfig
-from nmp.common.jobs.constants import TASK_CONFIG_ENVVAR
-from nmp.hello_world.tasks.workload_workspace_get.run import run as task_run
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nhx.common.config import Configuration, HelixConfig
+from nhx.common.jobs.constants import TASK_CONFIG_ENVVAR
+from nhx.hello_world.tasks.workload_workspace_get.run import run as task_run
 
 
 @pytest.fixture(autouse=True)
@@ -26,12 +27,12 @@ def clear_config_cache():
 
 @pytest.fixture
 def platform_base_url():
-    base_url = "http://nmp.example.test"
-    Configuration.set_override(PlatformConfig(base_url=base_url))
+    base_url = "http://nhx.example.test"
+    Configuration.set_override(HelixConfig(base_url=base_url))
     try:
         yield base_url
     finally:
-        Configuration.clear_override(PlatformConfig)
+        Configuration.clear_override(HelixConfig)
 
 
 class _StubWorkspaces:
@@ -46,59 +47,52 @@ class _StubWorkspaces:
 
 
 @pytest.fixture
-def stub_client_from_platform(monkeypatch) -> _StubWorkspaces:
-    """Replace client_from_platform in run.py so the task talks to an in-memory stub."""
+def stub_workspaces_client(monkeypatch) -> _StubWorkspaces:
+    """Replace WorkspacesClient.from_client so the task talks to an in-memory stub."""
     stub = _StubWorkspaces()
-
-    def _fake_client_from_platform(platform, client_cls):
-        return stub
-
-    monkeypatch.setattr(
-        "nmp.hello_world.tasks.workload_workspace_get.run.client_from_platform",
-        _fake_client_from_platform,
-    )
+    monkeypatch.setattr(WorkspacesClient, "from_client", classmethod(lambda cls, client: stub))
     return stub
 
 
-def test_workload_workspace_get_uses_task_sdk_factory(stub_client_from_platform, monkeypatch):
-    sdk_factory_calls: list[str] = []
+def test_workload_workspace_get_uses_task_client_factory(stub_workspaces_client, monkeypatch):
+    client_factory_calls: list[str] = []
 
-    def get_task_sdk(*, as_service: str) -> None:
-        sdk_factory_calls.append(as_service)
+    def get_task_nemo_client(service_name: str) -> None:
+        client_factory_calls.append(service_name)
         return None
 
     monkeypatch.setenv(TASK_CONFIG_ENVVAR, '{"workspace":"workload-read-target"}')
-    monkeypatch.setattr("nmp.hello_world.tasks.workload_workspace_get.run.get_task_sdk", get_task_sdk)
+    monkeypatch.setattr("nhx.hello_world.tasks.workload_workspace_get.run.get_task_nemo_client", get_task_nemo_client)
 
     exit_code = task_run()
 
     assert exit_code == 0
-    assert sdk_factory_calls == ["jobs"]
-    assert stub_client_from_platform.requested == ["workload-read-target"]
+    assert client_factory_calls == ["jobs"]
+    assert stub_workspaces_client.requested == ["workload-read-target"]
 
 
-def test_workload_workspace_get_uses_injected_sdk_without_workload_token(stub_client_from_platform, monkeypatch):
+def test_workload_workspace_get_uses_injected_client_without_workload_token(stub_workspaces_client, monkeypatch):
     monkeypatch.setenv(TASK_CONFIG_ENVVAR, '{"workspace":"workload-read-target"}')
     monkeypatch.delenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, raising=False)
     monkeypatch.delenv("NEMO_WORKLOAD_TOKEN", raising=False)
     monkeypatch.delenv("NEMO_WORKLOAD_TOKEN_FILE", raising=False)
 
-    exit_code = task_run(sdk=cast(NeMoPlatform, object()))
+    exit_code = task_run(client=cast(NemoClient, object()))
 
     assert exit_code == 0
-    assert stub_client_from_platform.requested == ["workload-read-target"]
+    assert stub_workspaces_client.requested == ["workload-read-target"]
 
 
 @respx.mock
-def test_workload_workspace_get_uses_task_sdk_without_workload_token(monkeypatch, tmp_path, platform_base_url):
+def test_workload_workspace_get_uses_task_client_without_workload_token(monkeypatch, tmp_path, platform_base_url):
     config_file = tmp_path / "config.yaml"
     config_file.write_text("{}\n", encoding="utf-8")
 
     monkeypatch.setenv(TASK_CONFIG_ENVVAR, '{"workspace":"workload-read-target"}')
-    monkeypatch.setenv("NMP_CONFIG_FILE", str(config_file))
-    monkeypatch.setenv("NMP_BASE_URL", platform_base_url)
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(config_file))
+    monkeypatch.setenv("NHX_BASE_URL", platform_base_url)
     monkeypatch.setenv(
-        "NMP_PRINCIPAL",
+        "NHX_PRINCIPAL",
         json.dumps(
             {
                 "id": "creator@example.com",
@@ -108,14 +102,14 @@ def test_workload_workspace_get_uses_task_sdk_without_workload_token(monkeypatch
         ),
     )
     monkeypatch.delenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, raising=False)
-    monkeypatch.delenv("NMP_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("NHX_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("NEMO_WORKLOAD_TOKEN", raising=False)
     monkeypatch.delenv("NEMO_WORKLOAD_TOKEN_FILE", raising=False)
 
     def workspace_response(request: httpx.Request) -> httpx.Response:
-        if request.headers.get("X-NMP-Principal-Id") != "service:jobs":
+        if request.headers.get("X-NHX-Principal-Id") != "service:jobs":
             return httpx.Response(401, json={"detail": "Unauthorized"})
-        if request.headers.get("X-NMP-Principal-On-Behalf-Of") != "creator@example.com":
+        if request.headers.get("X-NHX-Principal-On-Behalf-Of") != "creator@example.com":
             return httpx.Response(403, json={"detail": "Forbidden"})
         if request.headers.get("Authorization") == "Bearer service:jobs":
             return httpx.Response(401, json={"detail": "Unauthorized"})

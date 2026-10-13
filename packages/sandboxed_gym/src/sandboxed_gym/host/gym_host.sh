@@ -34,6 +34,9 @@ if [ ! -d "$gym_rw/nemo_gym" ]; then
     mv "$gym_rw.tmp" "$gym_rw"
 fi
 
+# The runtime discovers built-in servers from this variable. The third argument
+# stages the checkout but does not otherwise reach that process.
+export SANDBOXED_GYM_SRC_DIR="$gym_rw"
 export PYTHONPATH="$gym_rw:$root${PYTHONPATH:+:$PYTHONPATH}"
 cd "$root"
 echo "gym-host: starting gym_host_runtime (gym src $gym_rw)" >&2

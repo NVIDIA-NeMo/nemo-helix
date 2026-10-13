@@ -17,7 +17,7 @@ benchmark modules with `PYTHONPATH` pointed at that checkout.
 ```text
 plugins/nemo-guardrails/benchmarks/
   configs/
-    nmp_igw_guardrails_sweep_concurrency.yaml   # AIPerf sweep template
+    nhx_igw_guardrails_sweep_concurrency.yaml   # AIPerf sweep template
     mock_llm/                                   # in-repo mock LLM env files
   artifacts/                                    # per-run outputs (gitignored)
 plugins/nemo-guardrails/src/nemo_guardrails_plugin/benchmarks/
@@ -26,7 +26,7 @@ plugins/nemo-guardrails/src/nemo_guardrails_plugin/benchmarks/
   paths.py           # filesystem layout
   constants.py       # workspace / VM / provider names
   processes.py       # subprocess supervision (process groups + ExitStack)
-  seeding.py         # NMP SDK calls to create the required entities
+  seeding.py         # NHX SDK calls to create the required entities
   aiperf_runner.py   # rewrite AIPerf config + invoke upstream sweep + collect results
   bootstrap.py       # manage the isolated venv that hosts the `aiperf` CLI
   shim.py            # tiny HTTP shim that satisfies AIPerf's `/v1/models` pre-check
@@ -35,12 +35,12 @@ plugins/nemo-guardrails/src/nemo_guardrails_plugin/benchmarks/
 ## Prerequisites
 
 - This repo bootstrapped via `make bootstrap-python` (the harness runs in
-  `.venv` and imports the NMP SDK from the workspace).
+  `.venv` and imports the NHX SDK from the workspace).
 - A local NeMo Guardrails checkout. By default the harness looks at
-  `../NeMo-Guardrails` relative to the NMP repo root.
+  `../NeMo-Guardrails` relative to the NHX repo root.
 - `uv` available on `PATH`.
 - Ports `8000`, `8001`, `8080`, and `8090` available — unless you opt into
-  reusing an already-running local NMP via `--reuse-services`. Port `8090` is
+  reusing an already-running local NHX via `--reuse-services`. Port `8090` is
   used by an internal shim that satisfies AIPerf's hard-coded `/v1/models`
   health probe.
 
@@ -57,7 +57,7 @@ this caches across runs for fast iteration.
 
 ## Run locally
 
-From the NMP repo root:
+From the NHX repo root:
 
 ```bash
 make benchmark-guardrails
@@ -129,9 +129,9 @@ pgrep -fl "benchmark.aiperf"
 
 - The upstream benchmark **mock app LLM** on `http://localhost:8000`,
 - The upstream benchmark **mock content-safety LLM** on `http://localhost:8001`,
-- Local **NMP services** on `http://localhost:8080`, unless `--reuse-services`.
+- Local **NHX services** on `http://localhost:8080`, unless `--reuse-services`.
 
-It then seeds NMP via the SDK with:
+It then seeds NHX via the SDK with:
 
 - workspace `benchmark`,
 - app model provider `benchmark-app-llm`,
@@ -153,9 +153,9 @@ The harness accepts both CLI flags and environment variables:
 | CLI flag                          | Environment variable             | Default                |
 |-----------------------------------|----------------------------------|------------------------|
 | `--nemo-guardrails-repo-root`     | `NEMO_GUARDRAILS_REPO_ROOT`      | `../NeMo-Guardrails`   |
-| `--reuse-services`                | `NMP_BENCHMARK_REUSE_SERVICES=1` | start `nemo services run` |
-| `--keep-running`                  | `NMP_BENCHMARK_KEEP_RUNNING=1`   | tear down on exit      |
-| `--mock-workers`                  | `NMP_BENCHMARK_MOCK_WORKERS`     | `4`                    |
+| `--reuse-services`                | `NHX_BENCHMARK_REUSE_SERVICES=1` | start `nemo services run` |
+| `--keep-running`                  | `NHX_BENCHMARK_KEEP_RUNNING=1`   | tear down on exit      |
+| `--mock-workers`                  | `NHX_BENCHMARK_MOCK_WORKERS`     | `4`                    |
 | `--run-id`                        | _n/a_                            | current timestamp      |
 
 `--keep-running` leaves child processes alive for post-mortem inspection; the
@@ -170,14 +170,14 @@ plugins/nemo-guardrails/benchmarks/artifacts/runs/<timestamp>/
   logs/
     mock-app-llm.log
     mock-content-safety-llm.log
-    nmp-services.log
+    nhx-services.log
     aiperf.log
   generated/
     app_provider.json
     content_safety_provider.json
     virtual_model.json
-    content_safety_local_nmp_request.json
-    nmp_igw_guardrails_sweep_concurrency.yaml   # runtime AIPerf config
+    content_safety_local_nhx_request.json
+    nhx_igw_guardrails_sweep_concurrency.yaml   # runtime AIPerf config
   aiperf_results/<batch>/<timestamp>/<sweep-label>/
     run_metadata.json
     process_result.json
@@ -189,7 +189,7 @@ plugins/nemo-guardrails/benchmarks/artifacts/runs/<timestamp>/
 Two jobs in `.github/workflows/ci.yaml`:
 
 - `guardrails-benchmark` — matrix of two parallel jobs, one per variant
-  (`with-guardrails`, `without-guardrails`), each on its own NMP instance.
+  (`with-guardrails`, `without-guardrails`), each on its own NHX instance.
   Uploads per-variant artifacts (`logs/`, `generated/`, `aiperf_results/`).
 - `guardrails-benchmark-analyze` — joins the two matrix jobs, downloads both
   artifacts, prints a side-by-side comparison via
@@ -265,17 +265,17 @@ justifies it in the commit.
 The harness only stops the processes it started. It will not kill unrelated
 processes on ports `8000`, `8001`, `8080`, or `8090`.
 
-Across runs, NMP's data dir is reused so subsequent benchmarks start
-faster. The harness redirects NMP's writes via the `NMP_DATA_DIR` env var to
+Across runs, NHX's data dir is reused so subsequent benchmarks start
+faster. The harness redirects NHX's writes via the `NHX_DATA_DIR` env var to
 a per-checkout directory:
 
 ```text
-plugins/nemo-guardrails/benchmarks/artifacts/nmp-data
+plugins/nemo-guardrails/benchmarks/artifacts/nhx-data
 ```
 
-This holds NMP's SQLite database, Secrets vault, and other persistent
-service state. It is gitignored and isolated from `~/.nmp/`, so the
-benchmark will not pollute your normal local NMP setup. Reuse is what
+This holds NHX's SQLite database, Secrets vault, and other persistent
+service state. It is gitignored and isolated from `~/.nhx/`, so the
+benchmark will not pollute your normal local NHX setup. Reuse is what
 lets repeat runs skip the workspace / provider / VirtualModel creation
 work (the harness treats `409 Conflict` as "already exists, carry on").
 
@@ -283,7 +283,7 @@ If a benchmark misbehaves and you suspect stale state (ex. after pulling
 a schema change), delete that directory for a fully fresh run:
 
 ```bash
-rm -rf plugins/nemo-guardrails/benchmarks/artifacts/nmp-data
+rm -rf plugins/nemo-guardrails/benchmarks/artifacts/nhx-data
 ```
 
 To remove outputs from a specific run (logs, generated configs, AIPerf results):
@@ -298,5 +298,5 @@ To clear all run outputs:
 rm -rf plugins/nemo-guardrails/benchmarks/artifacts/runs/*
 ```
 
-In CI this is automatic — every job gets a fresh runner, so `nmp-data`
+In CI this is automatic — every job gets a fresh runner, so `nhx-data`
 does not exist.

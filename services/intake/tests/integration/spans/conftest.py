@@ -15,15 +15,15 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from nmp.intake.config import ClickHouseConfig, IntakeConfig
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
-from nmp.intake.service import IntakeService
-from nmp.intake.spans.clickhouse_client import (
+from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
+from nhx.intake.service import IntakeService
+from nhx.intake.spans.clickhouse_client import (
     ClickHouseSettings,
     ClickHouseSpanClient,
     bootstrap_schema,
 )
-from nmp.testing import create_test_client
+from nhx.testing import create_test_client
 
 _CLICKHOUSE_VERSION_FILE = Path(__file__).resolve().parents[3] / ".clickhouse-version"
 CLICKHOUSE_VERSION = _CLICKHOUSE_VERSION_FILE.read_text(encoding="utf-8").strip()

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, call
 
 import pandas as pd
 import pytest
-from nemo_platform_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
 
 
 def _resp(data):
@@ -39,21 +39,15 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     adapter_path.mkdir()
     (adapter_path / "adapter_config.json").write_text("{}", encoding="utf-8")
 
-    sdk = MagicMock()
-    monkeypatch.setattr(task_main, "get_platform_sdk", lambda: sdk)
+    client = MagicMock()
+    monkeypatch.setattr(task_main, "get_nemo_client", lambda: client)
 
     jobs_client = MagicMock()
     jobs_client.get_job.return_value = _resp(SimpleNamespace(attempt_id="attempt-123"))
     files_client = MagicMock()
 
-    def client_from_platform(_sdk, client_cls):
-        if client_cls is task_main.JobsClient:
-            return jobs_client
-        if client_cls is task_main.FilesClient:
-            return files_client
-        raise AssertionError(f"Unexpected client class: {client_cls!r}")
-
-    monkeypatch.setattr(task_main, "client_from_platform", client_from_platform)
+    monkeypatch.setattr(task_main.JobsClient, "from_client", classmethod(lambda _cls, _client: jobs_client))
+    monkeypatch.setattr(task_main.FilesClient, "from_client", classmethod(lambda _cls, _client: files_client))
 
     file_manager = MagicMock()
     file_manager.upload.side_effect = lambda _local_path, remote_path: (
@@ -67,7 +61,10 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
 
     result = SimpleNamespace(
         synthetic_data=pd.DataFrame({"value": [1]}),
-        summary=SimpleNamespace(model_dump=lambda: {"row_count": 1}),
+        summary=SimpleNamespace(
+            num_completion_tokens=42,
+            model_dump=lambda: {"row_count": 1, "num_completion_tokens": 42},
+        ),
         evaluation_report_html=None,
     )
 
@@ -84,10 +81,14 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     file_manager.upload.assert_has_calls([call(adapter_path, "results/attempt-123/adapter")], any_order=True)
 
     jobs_client.get_job.assert_called_once_with(name="safe-synth-job", workspace="test-workspace")
+    jobs_client.update_status_details.assert_called_once_with(
+        "safe-synth-job",
+        workspace="test-workspace",
+        body={"output_tokens": 42},
+    )
 
     # create_job_result is called once per result; assert the adapter call, checking the
-    # artifact fields on the PlatformJobResultCreateRequest body object (which replaced the
-    # flat artifact_url/artifact_storage_type kwargs of the old Stainless call).
+    # artifact fields on the HelixJobResultCreateRequest body object.
     adapter_calls = [c for c in jobs_client.create_job_result.call_args_list if c.kwargs.get("name") == "adapter"]
     assert len(adapter_calls) == 1
     adapter_call = adapter_calls[0]

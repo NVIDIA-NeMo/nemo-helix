@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 # Same defaults as the rest of the project: NVIDIA's OpenAI-compatible endpoint, credential from
 # INFERENCE_API_KEY. Overridable so the image can be pointed at any OpenAI-compatible server.
 BASE_URL = os.environ.get("INFERENCE_BASE_URL") or "https://inference-api.nvidia.com/v1"
-MODEL = os.environ.get("INFERENCE_MODEL") or "nvidia/nvidia/Nemotron-3-Nano-30B-A3B"
+MODEL = os.environ.get("INFERENCE_MODEL") or "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b"
 
 SYSTEM_PROMPT = (
     "You are a general-purpose assistant. Use the tools to help the user with tasks that need "

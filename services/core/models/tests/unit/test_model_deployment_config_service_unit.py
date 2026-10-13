@@ -8,14 +8,14 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nmp.common.entities.client import EntityClient
-from nmp.core.models.api.service.model_deployment_config_service import (
+from nhx.common.entities.client import EntityClient
+from nhx.core.models.api.service.model_deployment_config_service import (
     ModelDeploymentConfigService,
     ReferentialIntegrityError,
 )
-from nmp.core.models.entities import ModelDeployment as ModelDeploymentEntity
-from nmp.core.models.entities import ModelDeploymentConfig as ModelDeploymentConfigEntity
-from nmp.core.models.schemas import (
+from nhx.core.models.entities import ModelDeployment as ModelDeploymentEntity
+from nhx.core.models.entities import ModelDeploymentConfig as ModelDeploymentConfigEntity
+from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     CreateModelDeploymentConfigRequest,
     ModelDeploymentConfig,

@@ -5,14 +5,14 @@
 
 from __future__ import annotations
 
-from nmp.customization_common.contributor.config import BaseTrainingPluginConfig, generate_job_id
+from nhx.customization_common.contributor.config import BaseTrainingPluginConfig, generate_job_id
 from pydantic_settings import SettingsConfigDict
 
 
 class AutomodelPluginConfig(BaseTrainingPluginConfig):
     """Environment-driven Automodel plugin settings."""
 
-    model_config = SettingsConfigDict(env_prefix="NMP_AUTOMODEL_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="NHX_AUTOMODEL_", extra="ignore")
 
 
 def get_config() -> AutomodelPluginConfig:

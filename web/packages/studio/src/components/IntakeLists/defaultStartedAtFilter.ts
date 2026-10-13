@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  encodeColumnFiltersParam,
+  FILTERS_SEARCH_PARAM,
+} from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
@@ -43,7 +47,7 @@ export const isDefaultStartedAtFilter = (
  */
 export const useSeededStartedAtFilter = (defaultFilter: StartedAtFilterEntry | null): boolean => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const urlHasFilters = searchParams.has('filters');
+  const urlHasFilters = searchParams.has(FILTERS_SEARCH_PARAM);
   const [seeded, setSeeded] = useState(() => defaultFilter === null || urlHasFilters);
 
   useEffect(() => {
@@ -55,10 +59,8 @@ export const useSeededStartedAtFilter = (defaultFilter: StartedAtFilterEntry | n
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        if (!next.has('filters')) {
-          // Match useStudioDataViewState's encoding: it decodeURIComponent()s
-          // the param value before JSON.parse.
-          next.set('filters', encodeURIComponent(JSON.stringify([defaultFilter])));
+        if (!next.has(FILTERS_SEARCH_PARAM) && defaultFilter) {
+          next.set(FILTERS_SEARCH_PARAM, encodeColumnFiltersParam([defaultFilter]));
         }
         return next;
       },

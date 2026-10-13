@@ -32,7 +32,7 @@ def test_buildctl_args_omits_platform_when_unset(monkeypatch: pytest.MonkeyPatch
 
 def test_validate_tarball_size_rejects_oversized_object(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "task_pack_max_size_bytes", 100)
-    monkeypatch.setattr(buildkit.s3, "object_size", lambda _key: 101)
+    monkeypatch.setattr(buildkit.artifacts, "object_size", lambda _key: 101)
 
     with pytest.raises(buildkit.BuildError, match="exceeds configured size limit"):
         buildkit._validate_tarball_size("task/rev/1/tarball.tar.gz")

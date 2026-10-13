@@ -6,7 +6,7 @@ UNAME_S := $(shell uname -s)
 ARCH := $(shell uname -m)
 PLATFORM := $(shell echo $(UNAME_S) | tr '[:upper:]' '[:lower:]')
 PROFILE ?= platform
-NMP_CONFIG_FILE_PATH ?= packages/nmp_platform/config/local.yaml
+NHX_CONFIG_FILE_PATH ?= packages/nhx_platform/config/local.yaml
 
 # Normalize architecture names and set arch-specific defaults.
 ifeq ($(ARCH),x86_64)
@@ -22,8 +22,8 @@ endif
 PYTEST_EXTRA ?=
 # Default development toolchain versions. Keep these aligned with Flox; the
 # version-consistency checks validate them in pre-commit and CI.
-PYTHON_VERSION ?= 3.12
-UV_VERSION := 0.9.14
+PYTHON_VERSION ?= 3.13
+UV_VERSION := 0.10.10
 NODE_VERSION := 22.23.2
 PNPM_VERSION := 10.34.5
 GO_VERSION := 1.26.7
@@ -75,38 +75,16 @@ docker-push: ## Build and push Docker bake TARGET, default docker-cpu
 refresh-openapi:  ## Generate the OpenAPI specification
 	$(UV) run --frozen script/generate-openapi-spec.sh
 
-.PHONY: stainless
-stainless: ## Run Stainless to generate the OpenAPI spec and sync it with the SDK
-	SDK_RELEASE_TIER=ga $(FLOX_EXEC) ./sdk/stainless.sh sync
-
-.PHONY: generate
-generate: stainless ## Alias for SDK generation via Stainless
-
 .PHONY: update-web-sdk
 update-web-sdk: verify-toolchain ## Regenerate the TypeScript web SDK (web/packages/sdk) from the OpenAPI spec via Orval
 	cd web && $(PNPM) gen
 
 .PHONY: update-sdk
-update-sdk: build-policy refresh-openapi stainless update-web-sdk update-cli ## Update the SDK by regenerating the OpenAPI spec and syncing it with Stainless
-
-.PHONY: vendor-nemo-platform-ext
-vendor-nemo-platform-ext:
-	$(FLOX_EXEC) $(MAKE) -C packages/nemo_platform_ext vendor
-
-.PHONY: generate-cli-commands
-generate-cli-commands: ## Run generation of the CLI commands
-	$(UV) run --frozen nemo-platform-sdk-tools generate-cli $(ARGS)
-
-	# auto-generated code can be cleaned up more aggressively (in this case, we want to remove unused imports in __init__.py files)
-	$(UV) run --frozen ruff check --fix --preview --unsafe-fixes --extend-select F401,E402 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
-	# ARG001 catches unused function arguments which indicates variable shadowing bugs (no auto-fix)
-	$(UV) run --frozen ruff check --select ARG001 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
-	$(UV) run --frozen ruff check --fix --unsafe-fixes packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
-	$(UV) run --frozen ruff format packages/nemo_platform_ext
+update-sdk: build-policy refresh-openapi update-web-sdk vendor update-cli ## Regenerate the OpenAPI spec, web SDK, wheel metadata, and CLI docs
 
 .PHONY: generate-cli-reference-docs
 generate-cli-reference-docs: ## Generate the CLI reference documentation
-	NMP_CONFIG_FILE_PATH="$(NMP_CONFIG_FILE_PATH)" $(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py all
+	NHX_CONFIG_FILE_PATH="$(NHX_CONFIG_FILE_PATH)" $(UV) run --frozen packages/nemo_helix_ext/scripts/docs_generator.py all
 
 .PHONY: generate-config-reference-docs
 generate-config-reference-docs: ## Generate the platform config reference documentation
@@ -136,6 +114,51 @@ docs-watch: ## Start Fern docs dev plus a repo-level watcher for docs/** changes
 .PHONY: docs-check
 docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link check)
 	cd docs/fern && npm run check
+
+DOCS_TYPED_SNIPPET_PATHS := \
+	docs/agents/add-guardrails.mdx \
+	docs/agents/deploy-agents.mdx \
+	docs/agents/optimization.mdx \
+	docs/anonymizer/tutorials/preview.mdx \
+	docs/garak/targets/index.mdx \
+	docs/garak/targets/inference-gateway.mdx \
+	docs/auth/authorization/plugin-authorization.mdx \
+	docs/auth/authorization/policy-engine.mdx \
+	docs/customizer/tutorials/embedding-customization-job.mdx \
+	docs/customizer/tutorials/grpo-environment-packages.mdx \
+	docs/data-designer/cli.mdx \
+	docs/data-designer/index.mdx \
+	docs/data-designer/retrieval-sdg.mdx \
+	docs/data-designer/tutorials/basics.mdx \
+	docs/data-designer/tutorials/seeding.mdx \
+	docs/evals/agent-eval/gym-runner.mdx \
+	docs/evals/agent-eval/index.mdx \
+	docs/get-started/concepts/filtering.mdx \
+	docs/guardrails/concepts/configurations/default-configs.mdx \
+	docs/guardrails/concepts/inference.mdx \
+	docs/guardrails/observability.mdx \
+	docs/guardrails/tutorials/content-safety.mdx \
+	docs/guardrails/tutorials/injection-detection.mdx \
+	docs/guardrails/tutorials/multimodal-data.mdx \
+	docs/guardrails/tutorials/parallel-rails.mdx \
+	docs/pysdk/client/index.mdx \
+	docs/run-inference/about.mdx \
+	docs/run-inference/tutorials/deploy-models.mdx \
+	docs/run-inference/tutorials/run-inference.mdx \
+	docs/safe-synthesizer/about/jobs.mdx \
+	docs/safe-synthesizer/about/reference.mdx \
+	docs/safe-synthesizer/tutorials/differential-privacy.mdx \
+	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx \
+	docs/troubleshooting/studio.mdx
+
+.PHONY: docs-lint-snippets
+docs-lint-snippets: docs-check-base-url ## Syntax-check all Python fenced snippets, type-check curated executable docs, and check NHX_BASE_URL usage
+	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py docs --no-type-check
+	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py $(DOCS_TYPED_SNIPPET_PATHS)
+
+.PHONY: docs-check-base-url
+docs-check-base-url: ## Flag doc snippets that bypass the CLI context with NHX_BASE_URL
+	$(UV) run --frozen python -m docs._scripts.check_base_url_usage docs
 
 .PHONY: docs-check-python-snippets
 docs-check-python-snippets: ## Syntax-check and type-check Python snippets in one doc (DOCS_PATH=...)
@@ -168,7 +191,7 @@ docs-publish: ## Trigger the Publish Fern Docs workflow (normally runs on push t
 	gh workflow run publish-fern-docs.yaml
 
 .PHONY: update-cli
-update-cli: generate-cli-commands vendor-nemo-platform-ext generate-cli-reference-docs
+update-cli: generate-cli-reference-docs ## Regenerate the CLI reference documentation
 
 .PHONY: clean-python
 clean-python: ## remove python virtual environment
@@ -322,18 +345,18 @@ bootstrap: bootstrap-python ## Bootstrap the local dev environment, including St
 	@$(BOOTSTRAP_ACTIVATION_REMINDER)
 
 .PHONY: run
-run: build-policy ## Run the NeMo Platform locally with Docker job backend
-	NMP_CONFIG_FILE_PATH=${NMP_CONFIG_FILE_PATH} $(UV) run nemo services run
+run: build-policy ## Run the NeMo Helix locally with Docker job backend
+	NHX_CONFIG_FILE_PATH=${NHX_CONFIG_FILE_PATH} $(UV) run nemo services run
 
 .PHONY: clean
-clean: clean-python ## Clean the NeMo Platform DB, files, and Python virtual environment
-	rm -f /tmp/nmp-platform.db*
-	rm -rf /tmp/nmp-files
+clean: clean-python ## Clean the NeMo Helix DB, files, and Python virtual environment
+	rm -f /tmp/nhx-platform.db*
+	rm -rf /tmp/nhx-files
 
 .PHONY: update-licenses
 update-licenses: ## Update the third_party/license.txt file with the latest licenses
 	$(UV) sync --inexact
-	$(UV) run --frozen nemo-platform-sdk-tools license generate
+	$(UV) run --frozen nemo-helix-tools license generate
 
 .PHONY: check-licenses
 check-licenses: ## Check that license files are up to date
@@ -342,7 +365,7 @@ check-licenses: ## Check that license files are up to date
 	export PATH="$$HOME/.local/bin:$$PATH" && \
 	$(MAKE) update-licenses && \
 	diff third_party/licenses.jsonl "$${LICENSE_DIR}/$${LICENSE_NAME}" && \
-	$(UV) run --frozen nemo-platform-sdk-tools license find-missing
+	$(UV) run --frozen nemo-helix-tools license find-missing
 
 CMD_COPYRIGHT_HEADER_FIXER := $(UV) run python tools/lint/copyright_fixer.py
 .PHONY: update-copyright-headers
@@ -354,7 +377,7 @@ check-copyright-headers: ## Checks to see if all copyright headers are appropria
 	$(CMD_COPYRIGHT_HEADER_FIXER) --check
 
 .PHONY: lint
-lint: ## Run all linters (licenses, openapi, config docs, python style/types/sdk, vendored SDK, CLI, auth config)
+lint: ## Run all linters (licenses, openapi, config docs, python style/types, wheel metadata, auth config)
 	$(FLOX_EXEC) bash tools/lint/lint-all.sh
 
 LINT_FIX_VERIFY ?= 0
@@ -384,11 +407,8 @@ lint-github-scripts: verify-node-version ## Lint and format-check GitHub JavaScr
 check-github-scripts: test-github-scripts lint-github-scripts ## Test, lint, and format-check GitHub JavaScript scripts
 
 .PHONY: vendor
-vendor: ## Vendor packages into the SDK and generate wrapper metadata
-	$(UV) run --no-sync nemo-platform-sdk-tools vendor all-from-configs \
-		nemo_platform_ext models filesets \
-		nemo_evaluator_sdk
-	$(UV) run --no-sync nemo-platform-sdk-tools post-generation update-license-headers
+vendor: ## Refresh the nemo-helix wheel metadata generated from [tool.bundle-package]
+	$(UV) run --no-sync nemo-helix-tools vendor bundle-metadata
 
 # ============================================================================
 # Python Testing Targets
@@ -509,12 +529,43 @@ test-coverage-report: ## Generate and display coverage report (run after test-co
 	 echo "Coverage report is at htmlcov/index.html"
 
 .PHONY: test-package
-test-package: ## Run tests for a specific package (usage: make test-package PACKAGE=nmp_common)
+test-package: ## Run tests for a specific package (usage: make test-package PACKAGE=nhx_common)
 ifndef PACKAGE
 	$(error PACKAGE is not set. Usage: make test-package PACKAGE=<package_name>)
 endif
 	@echo "Running tests for package: $(PACKAGE)..."
 	$(UV) run --frozen pytest -v packages/$(PACKAGE)/tests/
+
+.PHONY: test-agents-nooa
+test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
+		python -c 'import nooa_cli; import nooa_bench'
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_nooa.py
+
+.PHONY: test-agents-claude
+test-agents-claude: ## Run Claude Code adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
+		python -c 'import claude_agent_sdk'
+	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_claude.py
+
+.PHONY: test-agents-codex
+test-agents-codex: ## Run Codex adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
+		python -c 'import openai_codex'
+	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_codex.py
+
+.PHONY: test-agents-hermes
+test-agents-hermes: ## Run Hermes adapter integration tests with its isolated harness installed
+	$(UV) run --frozen --package nemo-agents-plugin --extra test bash script/dev-install-hermes.sh
+	ADAPTER_PYTHON="$(CURDIR)/.venv-hermes/bin/python" \
+		$(UV) run --frozen --package nemo-agents-plugin --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_hermes.py
 
 .PHONY: test-deployments-openshell
 test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the platform-restricted [openshell] extra installed
@@ -585,10 +636,10 @@ test-policy: ## Run OPA policy tests for auth service
 		exit 1; \
 	fi
 	@echo "Running OPA policy tests..."
-	opa test services/core/auth/src/nmp/core/auth/app/policies services/core/auth/src/nmp/core/auth/app/policy_tests services/core/auth/src/nmp/core/auth/assets/static-authz.yaml -v
+	opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
 
 # Policy WASM bundle paths
-ASSETS_DIR := services/core/auth/src/nmp/core/auth/assets
+ASSETS_DIR := services/core/auth/src/nhx/core/auth/assets
 
 .PHONY: build-policy
 build-policy: ## Build OPA policies into WASM bundle
@@ -634,7 +685,7 @@ test-e2e-docker-gpu: ## Run GPU e2e tests using docker (requires GPU host and GP
 	$(UV) run --frozen pytest e2e --docker --feature gpu -v --junitxml=report.xml
 
 .PHONY: test-e2e-kubernetes
-test-e2e-kubernetes: ## Run e2e tests against Kubernetes (set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes: ## Run e2e tests against Kubernetes (set NHX_E2E_CLUSTER_URL)
 	@echo "Running e2e tests with Kubernetes..."
 	$(UV) run --frozen pytest e2e --kubernetes -v -n 2 --junitxml=report-kubernetes.xml
 
@@ -644,24 +695,19 @@ test-e2e-kubernetes-network-policies: ## Set up local kind with Calico and run t
 	e2e/k8s/scripts/run_network_policy_e2e.sh
 
 .PHONY: test-e2e-kubernetes-auth
-test-e2e-kubernetes-auth: ## Run e2e tests against Kubernetes with auth enabled (set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes-auth: ## Run e2e tests against Kubernetes with auth enabled (set NHX_E2E_CLUSTER_URL)
 	@echo "Running e2e tests with Kubernetes and feature auth enabled..."
 	$(UV) run --frozen pytest e2e --kubernetes --feature auth -n 2 -v --junitxml=report-kubernetes-auth.xml
 
 .PHONY: test-e2e-kubernetes-kai
-test-e2e-kubernetes-kai: ## Run KAI Scheduler e2e tests against Kubernetes (set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes-kai: ## Run KAI Scheduler e2e tests against Kubernetes (set NHX_E2E_CLUSTER_URL)
 	@echo "Running e2e tests with Kubernetes and feature kai-scheduler..."
 	$(UV) run --frozen pytest e2e --kubernetes --feature kai-scheduler -v --junitxml=report-kubernetes-kai.xml
 
 .PHONY: test-e2e-kubernetes-gpu
-test-e2e-kubernetes-gpu: ## Run GPU e2e tests against Kubernetes (requires GPU nodes; set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes-gpu: ## Run GPU e2e tests against Kubernetes (requires GPU nodes; set NHX_E2E_CLUSTER_URL)
 	@echo "Running GPU e2e tests with Kubernetes with feature gpu enabled..."
 	$(UV) run --frozen pytest e2e --kubernetes --feature gpu -v --junitxml=report-kubernetes-gpu.xml
-
-.PHONY: test-e2e-kubernetes-gpu-automodel
-test-e2e-kubernetes-gpu-automodel: ## Run GPU automodel customization e2e tests against Kubernetes (requires GPU nodes; set NMP_E2E_CLUSTER_URL)
-	@echo "Running GPU automodel customization e2e tests with Kubernetes..."
-	$(UV) run --frozen pytest tests/agentic-use/customizer-lora-job-cli/tests/test_outputs.py --kubernetes --feature gpu --log-cli-level=INFO -v --junitxml=report-kubernetes-gpu-automodel.xml
 
 .PHONY: benchmark-guardrails
 benchmark-guardrails: ## Run nemo-guardrails IGW benchmark sweep (set BENCHMARK_ARGS for extra flags)

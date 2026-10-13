@@ -24,21 +24,21 @@ from nemo_guardrails_plugin.benchmarks.seeding import (
     build_guardrail_config_data,
     seed_benchmark,
 )
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import CreateGuardrailConfigRequest
-from nemo_platform_plugin.inference_middleware import BackendFormat
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import CreateModelProviderRequest, ModelProvider, ServedModelMapping
-from nemo_platform_plugin.virtual_models.client import VirtualModelsClient
-from nemo_platform_plugin.virtual_models.types import (
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.inference_middleware import BackendFormat
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import CreateModelProviderRequest, ModelProvider, ServedModelMapping
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import (
     CreateVirtualModelRequest,
     MiddlewareCall,
     VirtualModel,
     VirtualModelInferenceConfig,
 )
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -117,8 +117,8 @@ def _response(data: ResponseT) -> _ClientResponse[ResponseT]:
 
 
 @pytest.fixture
-def sdk() -> NeMoPlatform:
-    return NeMoPlatform(base_url="http://test:8000")
+def client() -> NemoClient:
+    return NemoClient(base_url="http://test:8000")
 
 
 @pytest.fixture
@@ -182,15 +182,15 @@ class TestBuildGuardrailConfigData:
 
 
 class TestSeedBenchmark:
-    def test_calls_sdk_with_expected_payloads(
-        self, sdk: NeMoPlatform, typed_client_mocks: SimpleNamespace, tmp_path: Path
+    def test_calls_typed_clients_with_expected_payloads(
+        self, client: NemoClient, typed_client_mocks: SimpleNamespace, tmp_path: Path
     ) -> None:
         ng_root = tmp_path / "NeMo-Guardrails"
         _write_upstream_configs(ng_root)
         generated_dir = tmp_path / "generated"
 
         seeded = seed_benchmark(
-            sdk,
+            client,
             nemoguardrails_repo_root=ng_root,
             generated_dir=generated_dir,
             provider_wait_timeout=1.0,
@@ -252,14 +252,14 @@ class TestSeedBenchmark:
         assert control_body.response_middleware == []
 
     def test_generated_dir_contains_artifacts(
-        self, sdk: NeMoPlatform, typed_client_mocks: SimpleNamespace, tmp_path: Path
+        self, client: NemoClient, typed_client_mocks: SimpleNamespace, tmp_path: Path
     ) -> None:
         ng_root = tmp_path / "NeMo-Guardrails"
         _write_upstream_configs(ng_root)
         generated_dir = tmp_path / "generated"
 
         seed_benchmark(
-            sdk,
+            client,
             nemoguardrails_repo_root=ng_root,
             generated_dir=generated_dir,
             provider_wait_timeout=1.0,
@@ -271,20 +271,20 @@ class TestSeedBenchmark:
         assert (generated_dir / "virtual_model_no_guardrails.json").is_file()
 
         request_payload = json.loads(
-            (generated_dir / "content_safety_local_nmp_request.json").read_text(encoding="utf-8")
+            (generated_dir / "content_safety_local_nhx_request.json").read_text(encoding="utf-8")
         )
         assert request_payload["name"] == GUARDRAIL_CONFIG
         assert request_payload["exist_ok"] is True
         assert request_payload["data"]["models"][0]["type"] == "content_safety"
 
     def test_returns_seeded_resources(
-        self, sdk: NeMoPlatform, typed_client_mocks: SimpleNamespace, tmp_path: Path
+        self, client: NemoClient, typed_client_mocks: SimpleNamespace, tmp_path: Path
     ) -> None:
         ng_root = tmp_path / "NeMo-Guardrails"
         _write_upstream_configs(ng_root)
 
         seeded = seed_benchmark(
-            sdk,
+            client,
             nemoguardrails_repo_root=ng_root,
             generated_dir=tmp_path / "generated",
             provider_wait_timeout=1.0,
@@ -296,7 +296,7 @@ class TestSeedBenchmark:
         assert seeded.guardrail_config_ref == f"{WORKSPACE}/{GUARDRAIL_CONFIG}"
 
     def test_raises_if_served_models_never_populated(
-        self, sdk: NeMoPlatform, typed_client_mocks: SimpleNamespace, tmp_path: Path
+        self, client: NemoClient, typed_client_mocks: SimpleNamespace, tmp_path: Path
     ) -> None:
         ng_root = tmp_path / "NeMo-Guardrails"
         _write_upstream_configs(ng_root)
@@ -316,7 +316,7 @@ class TestSeedBenchmark:
 
         with pytest.raises(TimeoutError, match="served model"):
             seed_benchmark(
-                sdk,
+                client,
                 nemoguardrails_repo_root=ng_root,
                 generated_dir=tmp_path / "generated",
                 provider_wait_timeout=0.1,

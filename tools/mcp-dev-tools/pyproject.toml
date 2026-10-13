@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-dev-mcp"
-description = "MCP server for NeMo Platform development tools"
+name = "nhx-dev-mcp"
+description = "MCP server for NeMo Helix development tools"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 
@@ -23,7 +23,7 @@ dependencies = [
 version = "0.0.0"
 
 [project.scripts]
-nmp-dev-mcp = "nmp_dev_mcp:main"
+nhx-dev-mcp = "nhx_dev_mcp:main"
 
 [dependency-groups]
 test = [

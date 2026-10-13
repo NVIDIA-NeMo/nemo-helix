@@ -6,8 +6,8 @@ import uuid
 
 import httpx
 import pytest
-from nemo_platform_ext.client.tls import HttpxTLSConfig
-from nmp.testing import grant_workspace_role
+from nemo_helix_ext.client.tls import HttpxTLSConfig
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
 
@@ -84,18 +84,42 @@ def test_provider_gateway_accepts_e2e_setup_token(auth_idp_case, auth_idp_runtim
     assert response.json()["name"] == auth_idp_workspace
 
 
+def test_provider_gateway_blocks_direct_auth_callout(auth_idp_case, auth_idp_runtime):
+    require_capability(auth_idp_case, "gateway_authn")
+    require_capability(auth_idp_case, "workload_provider_token")
+
+    workload_token = auth_idp_runtime.workload_provider_token()
+
+    tls_config = runtime_tls_config(auth_idp_runtime)
+    response = _gateway_get_with_transient_retries(
+        f"{auth_idp_runtime.gateway_base_url}/apis/auth/ext-authz/apis/entities/v2/workspaces",
+        headers={"Authorization": f"Bearer {workload_token.access_token}"},
+        tls_config=tls_config,
+    )
+
+    assert response.status_code == 404, response.text
+
+
 def test_provider_gateway_rejects_spoofed_principal_headers(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "spoofed_header_rejection")
     require_capability(auth_idp_case, "workload_provider_token")
 
-    workload_provider_token = auth_idp_runtime.workload_provider_token().access_token
+    workload_provider_token = auth_idp_runtime.workload_provider_token()
     workspace_name = f"spoof-check-{uuid.uuid4().hex[:8]}"
-    claims = jwt_claims(workload_provider_token)
-    authenticated_principal_id = str(claims["sub"])
+    authenticated_principal_id = str(workload_provider_token.claims["sub"])
     headers = {
-        "Authorization": f"Bearer {workload_provider_token}",
-        "X-NMP-Principal-Id": "service:bootstrap",
-        "X-NMP-Principal-Email": "attacker@example.com",
+        "Authorization": f"Bearer {workload_provider_token.access_token}",
+        "X-NHX-Principal-Id": "service:bootstrap",
+        "X-NHX-Actor-Account-Id": "account-attacker",
+        "X-NHX-Actor-Aliases": "service:bootstrap,attacker@example.com",
+        "X-NHX-Principal-Email": "attacker@example.com",
+        "X-NHX-Principal-Groups": "platform-admins",
+        "X-NHX-Principal-On-Behalf-Of": "user:attacker",
+        "X-NHX-Principal-On-Behalf-Of-Email": "attacker@example.com",
+        "X-NHX-Principal-On-Behalf-Of-Groups": "platform-admins",
+        "X-NHX-Subject-Account-Id": "account-attacker-subject",
+        "X-NHX-Subject-Aliases": "user:attacker,attacker@example.com",
+        "X-NHX-Scopes": "platform:write",
     }
     tls_config = runtime_tls_config(auth_idp_runtime)
 
@@ -151,9 +175,9 @@ def test_provider_gateway_forwards_workload_groups(
     role_principals = auth_idp_runtime.workload_role_principals()
     assert set(role_principals).intersection(token_groups)
 
-    e2e_setup_sdk = auth_idp_runtime.e2e_setup_sdk()
+    e2e_setup_client = auth_idp_runtime.e2e_setup_client()
     for principal in role_principals:
-        grant_workspace_role(e2e_setup_sdk, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
+        grant_workspace_role(e2e_setup_client, workspace=auth_idp_workspace, principal=principal, roles=["Viewer"])
 
     tls_config = runtime_tls_config(auth_idp_runtime)
     response = _gateway_get_with_transient_retries(

@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.settings import settings
 from scaled_evals.archive_validation import (
@@ -123,7 +123,7 @@ def _benchmark_artifacts(
     run_id: str, output: Path, budget: list[int], check_claim: Callable[[], None]
 ) -> list[BenchmarkArchiveArtifact]:
     prefix = f"benchmark-runs/{run_id}/artifacts/"
-    objects = sorted(s3.list_objects(prefix), key=lambda item: item["key"])
+    objects = sorted(artifacts.list_objects(prefix), key=lambda item: item["key"])
     entries = []
     seen = set()
     for item in objects:
@@ -157,7 +157,7 @@ def _benchmark_artifacts(
         digest = hashlib.sha256()
         size = 0
         with target.open("xb") as destination:
-            for chunk in s3.stream_object(key):
+            for chunk in artifacts.stream_object(key):
                 check_claim()
                 size += len(chunk)
                 budget[1] += len(chunk)
@@ -177,7 +177,7 @@ def _benchmark_artifacts(
             )
         )
     check_claim()
-    if objects != sorted(s3.list_objects(prefix), key=lambda item: item["key"]):
+    if objects != sorted(artifacts.list_objects(prefix), key=lambda item: item["key"]):
         raise BenchmarkArchiveError("benchmark artifacts changed during export; rebuild export")
     return entries
 
@@ -265,7 +265,7 @@ def build_benchmark_archive(
             downloaded = 0
             digest = hashlib.sha256()
             with compressed.open("wb") as destination:
-                for chunk in s3.stream_object(member["archive_object_key"]):
+                for chunk in artifacts.stream_object(member["archive_object_key"]):
                     check_claim()
                     downloaded += len(chunk)
                     if downloaded > settings.benchmark_archive_max_source_bytes:
@@ -394,13 +394,13 @@ def build_benchmark_archive(
         sha256 = file_sha256(archive_path)
         check_claim()
         try:
-            size = s3.upload_file(archive_path, key, content_type="application/gzip")
+            size = artifacts.upload_file(archive_path, key, content_type="application/gzip")
             check_claim()
         except Exception:
             # Publication has not been attempted yet, so this claim's object is
             # safe to remove even if the upload succeeded but its response failed.
             try:
-                s3.delete_object(key)
+                artifacts.delete_object(key)
             except Exception as exc:  # noqa: BLE001 - a later reconciliation sweep retries deletion
                 LOG.warning("benchmark archive upload cleanup deferred for %s: %s", key, redact_secret_text(str(exc)))
             raise

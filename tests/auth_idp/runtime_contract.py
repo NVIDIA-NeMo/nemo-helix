@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from _pytest.mark.structures import Mark, MarkDecorator
-from nemo_platform import NeMoPlatform
+from nemo_helix_ext.client.tls import HttpxTLSConfig
+from nemo_helix_plugin.client.client import NemoClient
 
 from tests.auth_idp.providers import ProviderConfig
 
@@ -38,11 +39,25 @@ class DeploymentWorkloadRuntimeConfig:
 
 
 class AuthIdpRuntime(Protocol):
-    case: AuthIdpCase
-    gateway_base_url: str
-    discovery_url: str
-    token_endpoint: str | None
-    workload_token_endpoint: str | None
+    @property
+    def case(self) -> AuthIdpCase:
+        raise NotImplementedError
+
+    @property
+    def gateway_base_url(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def discovery_url(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def token_endpoint(self) -> str | None:
+        raise NotImplementedError
+
+    @property
+    def workload_token_endpoint(self) -> str | None:
+        raise NotImplementedError
 
     def e2e_setup_token(self) -> TokenSet:
         raise NotImplementedError
@@ -65,16 +80,51 @@ class AuthIdpRuntime(Protocol):
     def deployment_workload_runtime_config(self) -> DeploymentWorkloadRuntimeConfig:
         raise NotImplementedError
 
-    def e2e_setup_sdk(self) -> NeMoPlatform:
+    def e2e_setup_client(self) -> NemoClient:
         raise NotImplementedError
 
-    def interactive_user_sdk(self) -> NeMoPlatform:
+    def interactive_user_client(self) -> NemoClient:
         raise NotImplementedError
 
-    def workload_provider_sdk(self) -> NeMoPlatform:
+    def workload_provider_client(self) -> NemoClient:
         raise NotImplementedError
 
     def workload_role_principals(self) -> list[str]:
+        raise NotImplementedError
+
+    def authenticate_device_flow(
+        self,
+        *,
+        device_authorization_endpoint: str,
+        token_endpoint: str,
+        client_id: str,
+        scope: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> JsonObject:
+        raise NotImplementedError
+
+    def approve_device_authorization(
+        self,
+        *,
+        verification_uri_complete: str,
+        user_code: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> None:
+        raise NotImplementedError
+
+    def complete_confidential_authorization(
+        self,
+        *,
+        authorization_url: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> str:
+        """Complete provider login and return its authorization callback URL."""
         raise NotImplementedError
 
     def cleanup(self) -> None:

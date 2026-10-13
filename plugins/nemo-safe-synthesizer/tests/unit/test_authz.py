@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 from nemo_safe_synthesizer_plugin.service import SafeSynthesizerService
 
 

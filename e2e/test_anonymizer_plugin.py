@@ -4,12 +4,11 @@
 """Minikube E2E coverage for the nemo-anonymizer plugin.
 
 These tests intentionally target an external platform deployment through
-``NMP_BASE_URL``. The anonymizer.run path compiles to CPU task pods, so job
+``NHX_BASE_URL``. The anonymizer.run path compiles to CPU task pods, so job
 lifecycle coverage requires the K8s executor and cannot be fully validated by
 the local subprocess harness.
 """
 
-import os
 import time
 from collections.abc import Iterator
 from contextlib import suppress
@@ -34,15 +33,16 @@ from nemo_anonymizer_plugin.sdk.job_resources import (
     TERMINAL_INCOMPLETE_STATUSES,
     AnonymizerJobResource,
 )
-from nemo_anonymizer_plugin.sdk.resources import AnonymizerPreviewResult
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.testing import MockProviderResponse, add_mock_provider, short_unique_name
+from nemo_anonymizer_plugin.sdk.resources import AnonymizerPreviewResult, AnonymizerResource
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.testing import MockProviderResponse, add_mock_provider, short_unique_name
 
 pytestmark = [
     pytest.mark.container_only,
@@ -106,20 +106,9 @@ def _llm_payload() -> str:
     return LLM_PAYLOAD_PATH.read_text(encoding="utf-8").strip()
 
 
-def _string_headers(sdk: NeMoPlatform) -> dict[str, str]:
-    return {key: value for key, value in sdk.default_headers.items() if isinstance(value, str)}
-
-
-def _workspace_client(sdk: NeMoPlatform, workspace: str) -> NeMoPlatform:
-    return NeMoPlatform(
-        base_url=str(sdk.base_url).rstrip("/"),
-        workspace=workspace,
-        access_token=os.environ.get("NMP_ACCESS_TOKEN"),
-        context_name=os.environ.get("NMP_CONTEXT_NAME"),
-        max_retries=2,
-        timeout=ANONYMIZER_JOB_TIMEOUT_SECONDS,
-        default_headers=_string_headers(sdk),
-    )
+def _anonymizer(client: NemoClient) -> AnonymizerResource:
+    """High-level anonymizer resource driven by the typed platform client."""
+    return AnonymizerResource(client)
 
 
 def _require_workspace(workspace: str | None) -> str:
@@ -127,18 +116,18 @@ def _require_workspace(workspace: str | None) -> str:
     return workspace
 
 
-def _anonymizer_url(sdk: NeMoPlatform, workspace: str, path: str) -> str:
-    return f"{str(sdk.base_url).rstrip('/')}/apis/anonymizer/v2/workspaces/{workspace}/{path.lstrip('/')}"
+def _anonymizer_url(client: NemoClient, workspace: str, path: str) -> str:
+    return f"{client.base_url}/apis/anonymizer/v2/workspaces/{workspace}/{path.lstrip('/')}"
 
 
 def _raw_anonymizer_post(
-    sdk: NeMoPlatform, workspace: str | None, path: str, payload: dict[str, object]
+    client: NemoClient, workspace: str | None, path: str, payload: dict[str, object]
 ) -> httpx.Response:
-    return sdk._client.post(
-        _anonymizer_url(sdk, _require_workspace(workspace), path),
+    return client._client.post(
+        _anonymizer_url(client, _require_workspace(workspace), path),
         json=payload,
-        headers=_string_headers(sdk),
-        timeout=sdk.timeout,
+        headers=client.default_headers,
+        timeout=ANONYMIZER_JOB_TIMEOUT_SECONDS,
     )
 
 
@@ -239,7 +228,9 @@ def _model_configs(provider_name: str) -> list[dd.ModelConfig]:
     return [
         dd.ModelConfig(alias="gliner-pii-detector", provider=provider_name, model="nvidia/gliner-pii"),
         dd.ModelConfig(alias="gpt-oss-120b", provider=provider_name, model="openai/gpt-oss-120b"),
-        dd.ModelConfig(alias="nemotron-30b-thinking", provider=provider_name, model="nvidia/nemotron-3-nano-30b-a3b"),
+        dd.ModelConfig(
+            alias="nemotron-30b-thinking", provider=provider_name, model="nvidia/nemotron-3.5-lightning-30b-a3b"
+        ),
     ]
 
 
@@ -326,17 +317,17 @@ def _wait_for_anonymizer_job(job: AnonymizerJobResource, *, timeout_seconds: flo
     assert status == "completed"
 
 
-def _cleanup_anonymizer_job(sdk: NeMoPlatform, job_name: str) -> None:
+def _cleanup_anonymizer_job(client: NemoClient, job_name: str) -> None:
+    jobs = JobsClient.from_client(client)
     with suppress(Exception):
-        jobs = client_from_platform(sdk, JobsClient)
-        jobs.cancel_job(name=job_name, workspace=sdk.workspace)
+        jobs.cancel_job(name=job_name, workspace=client.workspace)
     with suppress(Exception):
-        jobs.delete_job(name=job_name, workspace=sdk.workspace)
+        jobs.delete_job(name=job_name, workspace=client.workspace)
 
 
 @pytest.fixture(scope="module")
-def anonymizer_workspace(sdk: NeMoPlatform) -> Iterator[str]:
-    workspaces = client_from_platform(sdk, WorkspacesClient)
+def anonymizer_workspace(client: NemoClient) -> Iterator[str]:
+    workspaces = WorkspacesClient.from_client(client)
     name = short_unique_name("e2e-anon")
     workspaces.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
     try:
@@ -347,28 +338,23 @@ def anonymizer_workspace(sdk: NeMoPlatform) -> Iterator[str]:
 
 
 @pytest.fixture(scope="module")
-def anonymizer_sdk(sdk: NeMoPlatform, anonymizer_workspace: str) -> Iterator[NeMoPlatform]:
-    client = _workspace_client(sdk, anonymizer_workspace)
-    try:
-        yield client
-    finally:
-        with suppress(Exception):
-            client.close()
+def anonymizer_client(client: NemoClient, anonymizer_workspace: str) -> Iterator[NemoClient]:
+    yield client.with_workspace(anonymizer_workspace).with_options(timeout=ANONYMIZER_JOB_TIMEOUT_SECONDS)
 
 
 @pytest.fixture(scope="module")
 def anonymizer_fileset(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     files_client: FilesClient,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[str]:
     name = short_unique_name("anon-inputs")
-    files_client.create_fileset(body=CreateFilesetRequest(name=name), workspace=anonymizer_sdk.workspace)
+    files_client.create_fileset(body=CreateFilesetRequest(name=name), workspace=anonymizer_client.workspace)
 
-    files = client_from_platform(anonymizer_sdk, FilesClient)
+    files = FilesClient.from_client(anonymizer_client)
     files.upload_file(
         name=name,
-        workspace=anonymizer_sdk.workspace,
+        workspace=anonymizer_client.workspace,
         path=CSV_REMOTE_PATH,
         content=_input_csv().encode(),
     )
@@ -380,7 +366,7 @@ def anonymizer_fileset(
         pd.DataFrame(_input_rows()).to_parquet(parquet_path, index=False)
         files.upload_file(
             name=name,
-            workspace=anonymizer_sdk.workspace,
+            workspace=anonymizer_client.workspace,
             path=PARQUET_REMOTE_PATH,
             content=parquet_path.read_bytes(),
         )
@@ -390,7 +376,7 @@ def anonymizer_fileset(
 
     files.upload_file(
         name=name,
-        workspace=anonymizer_sdk.workspace,
+        workspace=anonymizer_client.workspace,
         path=NOT_CSV_REMOTE_PATH,
         content=b"not,a,supported,input\n",
     )
@@ -398,20 +384,22 @@ def anonymizer_fileset(
         yield name
     finally:
         with suppress(Exception):
-            files_client.delete_fileset(name=name, workspace=anonymizer_sdk.workspace)
+            files_client.delete_fileset(name=name, workspace=anonymizer_client.workspace)
 
 
 @pytest.fixture(scope="module")
-def mock_model_provider(sdk: NeMoPlatform, anonymizer_workspace: str) -> str:
+def mock_model_provider(client: NemoClient, anonymizer_workspace: str) -> str:
     name = short_unique_name("anon-model")
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=anonymizer_workspace,
         name=name,
         mock_response_body_by_model={
             "nvidia/gliner-pii": [MockProviderResponse(response_body=_detector_completion())],
             "openai/gpt-oss-120b": [MockProviderResponse(response_body=_json_completion(_llm_payload()))],
-            "nvidia/nemotron-3-nano-30b-a3b": [MockProviderResponse(response_body=_json_completion(_llm_payload()))],
+            "nvidia/nemotron-3.5-lightning-30b-a3b": [
+                MockProviderResponse(response_body=_json_completion(_llm_payload()))
+            ],
         },
     )
     # The module-scoped workspace deletion cascades provider/model cleanup.
@@ -425,12 +413,12 @@ def anonymizer_model_configs(mock_model_provider: str) -> list[dd.ModelConfig]:
 
 @pytest.fixture(scope="module")
 def completed_redact_job(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> Iterator[AnonymizerJobResource]:
-    source = _fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH)
-    job = anonymizer_sdk.anonymizer.run(
+    source = _fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH)
+    job = _anonymizer(anonymizer_client).run(
         _request(
             source=source,
             config=_redact_config(),
@@ -442,13 +430,13 @@ def completed_redact_job(
         _wait_for_anonymizer_job(job, timeout_seconds=ANONYMIZER_JOB_TIMEOUT_SECONDS)
         yield job
     finally:
-        _cleanup_anonymizer_job(anonymizer_sdk, _job_name(job))
+        _cleanup_anonymizer_job(anonymizer_client, _job_name(job))
 
 
-def test_health_check_through_minikube_ingress(sdk: NeMoPlatform) -> None:
-    response = sdk._client.get(
-        f"{str(sdk.base_url).rstrip('/')}/status",
-        headers=_string_headers(sdk),
+def test_health_check_through_minikube_ingress(client: NemoClient) -> None:
+    response = client._client.get(
+        f"{client.base_url}/status",
+        headers=client.default_headers,
     )
 
     response.raise_for_status()
@@ -456,18 +444,24 @@ def test_health_check_through_minikube_ingress(sdk: NeMoPlatform) -> None:
 
 
 def test_mock_provider_chat_completion_works_through_minikube_ingress(
-    sdk: NeMoPlatform,
+    client: NemoClient,
     anonymizer_workspace: str,
     mock_model_provider: str,
 ) -> None:
-    response = sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=mock_model_provider,
-        workspace=anonymizer_workspace,
-        body={
-            "model": "openai/gpt-oss-120b",
-            "messages": [{"role": "user", "content": "return empty entities"}],
-        },
+    response = (
+        InferenceGatewayClient.from_client(client)
+        .provider_post(
+            trailing_uri="v1/chat/completions",
+            name=mock_model_provider,
+            workspace=anonymizer_workspace,
+            body=JsonBody(
+                {
+                    "model": "openai/gpt-oss-120b",
+                    "messages": [{"role": "user", "content": "return empty entities"}],
+                }
+            ),
+        )
+        .data()
     )
 
     choices = cast(list[dict[str, object]], response["choices"])
@@ -478,13 +472,13 @@ def test_mock_provider_chat_completion_works_through_minikube_ingress(
 
 
 def test_file_upload_round_trips_through_minikube_ingress(
-    anonymizer_sdk: NeMoPlatform, anonymizer_fileset: str
+    anonymizer_client: NemoClient, anonymizer_fileset: str
 ) -> None:
     content = (
-        client_from_platform(anonymizer_sdk, FilesClient)
+        FilesClient.from_client(anonymizer_client)
         .download_file(
             name=anonymizer_fileset,
-            workspace=anonymizer_sdk.workspace,
+            workspace=anonymizer_client.workspace,
             path=CSV_REMOTE_PATH,
         )
         .read()
@@ -494,13 +488,13 @@ def test_file_upload_round_trips_through_minikube_ingress(
 
 
 def test_preview_redact_csv_happy_path(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
-    result = anonymizer_sdk.anonymizer.preview(
+    result = _anonymizer(anonymizer_client).preview(
         _preview_request(
-            source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+            source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
             config=_redact_config(),
             model_configs=anonymizer_model_configs,
             selected_models=_mock_selected_models(),
@@ -512,13 +506,13 @@ def test_preview_redact_csv_happy_path(
 
 
 def test_preview_hash_csv_happy_path(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
-    result = anonymizer_sdk.anonymizer.preview(
+    result = _anonymizer(anonymizer_client).preview(
         _preview_request(
-            source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+            source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
             config=_hash_config(),
             model_configs=anonymizer_model_configs,
             selected_models=_mock_selected_models(),
@@ -532,11 +526,11 @@ def test_preview_hash_csv_happy_path(
 
 
 def test_preview_accepts_workspace_relative_fileset_ref(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
-    result = anonymizer_sdk.anonymizer.preview(
+    result = _anonymizer(anonymizer_client).preview(
         _preview_request(
             source=f"{anonymizer_fileset}#{CSV_REMOTE_PATH}",
             config=_redact_config(),
@@ -550,13 +544,13 @@ def test_preview_accepts_workspace_relative_fileset_ref(
 
 
 def test_preview_accepts_fileset_uri_ref(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
-    result = anonymizer_sdk.anonymizer.preview(
+    result = _anonymizer(anonymizer_client).preview(
         _preview_request(
-            source=_fileset_uri_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+            source=_fileset_uri_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
             config=_redact_config(),
             model_configs=anonymizer_model_configs,
             selected_models=_mock_selected_models(),
@@ -568,13 +562,13 @@ def test_preview_accepts_fileset_uri_ref(
 
 
 def test_preview_accepts_parquet_fileset_input(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
-    result = anonymizer_sdk.anonymizer.preview(
+    result = _anonymizer(anonymizer_client).preview(
         _preview_request(
-            source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, PARQUET_REMOTE_PATH),
+            source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, PARQUET_REMOTE_PATH),
             config=_redact_config(),
             model_configs=anonymizer_model_configs,
             selected_models=_mock_selected_models(),
@@ -586,12 +580,12 @@ def test_preview_accepts_parquet_fileset_input(
 
 
 def test_preview_missing_text_column_is_rejected(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
     request = _preview_request(
-        source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+        source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
         config=_redact_config(),
         model_configs=anonymizer_model_configs,
         selected_models=_mock_selected_models(),
@@ -599,21 +593,21 @@ def test_preview_missing_text_column_is_rejected(
     )
 
     with pytest.raises(AnonymizerPreviewError, match="missing_column"):
-        anonymizer_sdk.anonymizer.preview(request)
+        _anonymizer(anonymizer_client).preview(request)
 
 
-def test_preview_invalid_strategy_payload_is_rejected(anonymizer_sdk: NeMoPlatform, anonymizer_fileset: str) -> None:
+def test_preview_invalid_strategy_payload_is_rejected(anonymizer_client: NemoClient, anonymizer_fileset: str) -> None:
     payload: dict[str, object] = {
         "config": {"replace": {"kind": "explode"}, "emit_telemetry": False},
         "data": {
-            "source": _fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+            "source": _fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
             "text_column": TEXT_COLUMN,
             "id_column": ID_COLUMN,
         },
         "model_configs": [],
         "num_records": 1,
     }
-    response = _raw_anonymizer_post(anonymizer_sdk, anonymizer_sdk.workspace, "preview", payload)
+    response = _raw_anonymizer_post(anonymizer_client, anonymizer_client.workspace, "preview", payload)
 
     with pytest.raises(httpx.HTTPStatusError) as exc_info:
         response.raise_for_status()
@@ -621,14 +615,14 @@ def test_preview_invalid_strategy_payload_is_rejected(anonymizer_sdk: NeMoPlatfo
 
 
 def test_preview_fileset_ref_must_point_to_file(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
     with pytest.raises(AnonymizerConfigValidationError, match="#path fragment"):
-        anonymizer_sdk.anonymizer.preview(
+        _anonymizer(anonymizer_client).preview(
             _preview_request(
-                source=f"{anonymizer_sdk.workspace}/{anonymizer_fileset}#",
+                source=f"{anonymizer_client.workspace}/{anonymizer_fileset}#",
                 config=_redact_config(),
                 model_configs=anonymizer_model_configs,
                 selected_models=_mock_selected_models(),
@@ -638,14 +632,14 @@ def test_preview_fileset_ref_must_point_to_file(
 
 
 def test_preview_rejects_unsupported_fileset_suffix(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
     with pytest.raises(AnonymizerConfigValidationError, match=".csv or .parquet"):
-        anonymizer_sdk.anonymizer.preview(
+        _anonymizer(anonymizer_client).preview(
             _preview_request(
-                source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, NOT_CSV_REMOTE_PATH),
+                source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, NOT_CSV_REMOTE_PATH),
                 config=_redact_config(),
                 model_configs=anonymizer_model_configs,
                 selected_models=_mock_selected_models(),
@@ -655,12 +649,12 @@ def test_preview_rejects_unsupported_fileset_suffix(
 
 
 def test_preview_rejects_local_path_for_remote_execution(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
     missing_local_path = "./definitely-missing-local-input.csv"
     with pytest.raises(AnonymizerConfigValidationError, match="local path"):
-        anonymizer_sdk.anonymizer.preview(
+        _anonymizer(anonymizer_client).preview(
             _preview_request(
                 source=missing_local_path,
                 config=_redact_config(),
@@ -672,13 +666,13 @@ def test_preview_rejects_local_path_for_remote_execution(
 
 
 def test_preview_selected_models_without_model_configs_is_rejected(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
 ) -> None:
     with pytest.raises(AnonymizerConfigValidationError, match="selected_models requires model_configs"):
-        anonymizer_sdk.anonymizer.preview(
+        _anonymizer(anonymizer_client).preview(
             _preview_request(
-                source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+                source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
                 config=_redact_config(),
                 model_configs=None,
                 selected_models=SelectedModelsOverrides(detection={"entity_detector": "gliner-pii-detector"}),
@@ -688,13 +682,13 @@ def test_preview_selected_models_without_model_configs_is_rejected(
 
 
 def test_preview_substitute_uses_mock_provider(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
-    result = anonymizer_sdk.anonymizer.preview(
+    result = _anonymizer(anonymizer_client).preview(
         _preview_request(
-            source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+            source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
             config=_substitute_config(),
             model_configs=anonymizer_model_configs,
             selected_models=_mock_selected_models(),
@@ -708,13 +702,13 @@ def test_preview_substitute_uses_mock_provider(
 
 
 def test_preview_rewrite_uses_mock_provider(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
     anonymizer_model_configs: list[dd.ModelConfig],
 ) -> None:
-    result = anonymizer_sdk.anonymizer.preview(
+    result = _anonymizer(anonymizer_client).preview(
         _preview_request(
-            source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+            source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
             config=_rewrite_config(),
             model_configs=anonymizer_model_configs,
             selected_models=_mock_selected_models(),
@@ -754,21 +748,21 @@ def test_run_job_artifacts_load_dataset_trace_and_failed_records(
 
 
 def test_run_submit_without_model_configs_is_rejected(
-    anonymizer_sdk: NeMoPlatform,
+    anonymizer_client: NemoClient,
     anonymizer_fileset: str,
 ) -> None:
     with pytest.raises(AnonymizerClientError, match="model_configs are required"):
-        anonymizer_sdk.anonymizer.run(
+        _anonymizer(anonymizer_client).run(
             _request(
-                source=_fileset_ref(anonymizer_sdk.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
+                source=_fileset_ref(anonymizer_client.workspace, anonymizer_fileset, CSV_REMOTE_PATH),
                 config=_redact_config(),
                 model_configs=None,
             )
         )
 
 
-def test_nonexistent_run_job_returns_not_found(anonymizer_sdk: NeMoPlatform) -> None:
+def test_nonexistent_run_job_returns_not_found(anonymizer_client: NemoClient) -> None:
     with pytest.raises(AnonymizerClientError) as exc_info:
-        anonymizer_sdk.anonymizer.get_job_resource(short_unique_name("missing-job"))
+        _anonymizer(anonymizer_client).get_job_resource(short_unique_name("missing-job"))
 
     assert "not found" in str(exc_info.value).lower() or "404" in str(exc_info.value)

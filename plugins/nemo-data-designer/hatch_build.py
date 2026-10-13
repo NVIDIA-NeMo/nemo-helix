@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
-from nmp_build_tools.hatch import (
+from nhx_build_tools.hatch import (
     apply_bundle_force_include,
     rewrite_bundled_dependencies_in_wheel,
 )

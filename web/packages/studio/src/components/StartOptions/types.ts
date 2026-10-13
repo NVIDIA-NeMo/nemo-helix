@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { BadgeProps } from '@nvidia/foundations-react-core';
+import type { BadgeProps, Flex } from '@nvidia/foundations-react-core';
 import type { LucideIcon } from 'lucide-react';
+import type { ComponentProps, ReactNode } from 'react';
 
 export interface StartOptionTag {
   label: string;
@@ -28,15 +29,60 @@ export interface StartOption<Id extends string = string> {
   enabled: boolean;
 }
 
-export interface StartOptionCardProps {
-  option: StartOption;
-  selected: boolean;
-  /** Fired on click / keyboard activation. Only invoked for enabled options. */
-  onSelect: () => void;
-  /**
-   * Lays the icon beside the title instead of above it and drops the fixed height, so the
-   * row takes about half the vertical space. For flows where the tiles are a step on the
-   * way somewhere rather than the main event.
-   */
-  compact?: boolean;
+/** One template tile below the divider. */
+export interface StartTemplate {
+  id: string;
+  name: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+export interface StartTemplateGroup {
+  id: string;
+  title: string;
+  templates: StartTemplate[];
+  /** Holds the section's place while it fetches; an empty group is dropped instead. */
+  loading?: boolean;
+  /** Icon colour for this group's tiles. What it signifies is the caller's to decide. */
+  accent?: string;
+}
+
+export interface StartOptionCardsProps {
+  options: StartOption[];
+  /** The selected option id. Templates are chosen separately, inside the detail panel. */
+  value: string | null;
+  onChange: (value: string) => void;
+  /** Locks the options and the panel. Set while a selection is being acted on. */
+  disabled?: boolean;
+}
+
+export interface StartFooterProps {
+  continueLabel?: ReactNode;
+  continueLoading?: boolean;
+  canContinue: boolean;
+  onContinue: () => void;
+  /** Says what is still missing, next to a disabled Continue. */
+  blockedHint?: string;
+  /** Actions on the current selection, rendered at the start of the footer. */
+  slotFooterStart?: ReactNode;
+  attributes?: {
+    FlexContainer?: ComponentProps<typeof Flex>;
+  };
+}
+
+export interface StartPageProps extends StartOptionCardsProps, StartFooterProps {
+  heading: string;
+  headingDescription: string;
+  /** The selected option's own panel, rendered under the cards. */
+  slotDetail?: ReactNode;
+  /** Rendered above the cards, where it stays in view — an error banner, typically. */
+  slotBanner?: ReactNode;
+}
+
+export interface TemplateGroupsProps {
+  groups: StartTemplateGroup[];
+  /** The selected template id, independent of which option is selected. */
+  value: string | null;
+  onChange: (value: string) => void;
+  disabled?: boolean;
 }

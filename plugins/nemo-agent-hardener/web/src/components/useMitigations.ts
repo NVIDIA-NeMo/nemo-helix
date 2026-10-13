@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseJson, useJobArtifact } from '@agent-hardener/components/useJobArtifact';
-import type { PlatformJobStatus } from '@agent-hardener/generated/schema';
+import type { HelixJobStatus } from '@agent-hardener/generated/schema';
 import { parse } from 'yaml';
 
 // The war-game writes a `mitigations` job result bundling the defenders' before/after policy + guardrails.
@@ -205,7 +205,7 @@ const changedLineCount = (before: string, after: string): number => {
 export const useMitigations = (
   workspace: string,
   jobName: string,
-  status?: PlatformJobStatus
+  status?: HelixJobStatus
 ): UseMitigationsResult => {
   const artifact = useJobArtifact<Mitigations>(
     workspace,

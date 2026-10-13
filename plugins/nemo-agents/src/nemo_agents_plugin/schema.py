@@ -6,7 +6,7 @@
 This module contains only API-layer Pydantic models.  Entity definitions
 (classes stored in the entity store) live in :mod:`nemo_agents_plugin.entities`.
 
-Entity objects (subclasses of :class:`~nemo_platform_plugin.entity.NemoEntity`) are
+Entity objects (subclasses of :class:`~nemo_helix_plugin.entity.NemoEntity`) are
 returned directly from route handlers as the API response — no separate
 response model is needed.  Use ``NemoListResponse[Agent]`` /
 ``NemoListResponse[AgentDeployment]`` for list endpoints.
@@ -14,7 +14,7 @@ response model is needed.  Use ``NemoListResponse[Agent]`` /
 Naming conventions:
 - ``CreateXRequest`` / ``UpdateXRequest`` — plain :class:`~pydantic.BaseModel`
   for request bodies.
-- ``XFilter`` — extends :class:`~nemo_platform_plugin.schema.NemoFilter` to inherit
+- ``XFilter`` — extends :class:`~nemo_helix_plugin.schema.NemoFilter` to inherit
   ``extra="forbid"``.
 """
 
@@ -27,28 +27,29 @@ from nemo_agents_plugin.entities import (
     AgentEnvironment,
     AgentEnvironmentSpec,
     AgentSession,
+    DeploymentMode,
     DeploymentStatus,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateAgentRequest as CreateAgentRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateComputeSpecRequest as CreateComputeSpecRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateDeploymentRequest as CreateDeploymentRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateEnvironmentRequest as CreateEnvironmentRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateEnvironmentSpecRequest as CreateEnvironmentSpecRequest,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     CreateSessionRequest as CreateSessionRequest,
 )
-from nemo_platform_plugin.schema import NemoFilter, NemoListResponse
-from pydantic import Field
+from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Filters — extend NemoFilter so extra fields are rejected (extra="forbid")
@@ -96,6 +97,24 @@ class EnvironmentSpecFilter(NemoFilter):
 
 class ComputeSpecFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/compute-specs``."""
+
+
+class DeploymentModeAvailability(BaseModel):
+    """Whether this platform can run deployments in one ``deployment_mode``."""
+
+    mode: DeploymentMode = Field(description="The deployment mode.")
+    enabled: bool = Field(
+        description="True when a deployment in this mode would run on a matching executor backend.",
+    )
+    requires_image: bool = Field(
+        description="True when a deployment in this mode must set 'image' because no default image is configured.",
+    )
+
+
+class DeploymentModeList(BaseModel):
+    """Response for ``GET /v2/workspaces/{workspace}/deployment-modes``."""
+
+    data: list[DeploymentModeAvailability]
 
 
 # ---------------------------------------------------------------------------

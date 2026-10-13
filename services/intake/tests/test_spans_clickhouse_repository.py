@@ -6,8 +6,8 @@
 from datetime import datetime, timezone
 
 import pytest
-from nmp.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
-from nmp.intake.repository.clickhouse.span import (
+from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
+from nhx.intake.repository.clickhouse.span import (
     SPAN_COLUMNS,
     SPAN_GROUP_COLUMN_FIELDS,
     SPAN_GROUP_SORT_FIELDS,
@@ -15,10 +15,10 @@ from nmp.intake.repository.clickhouse.span import (
     _group_order_by,
     _order_by,
 )
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable
-from nmp.intake.spans.api.spans_schemas import SpanGroupBy, SpanGroupSortField
-from nmp.intake.spans.domain import SpanListFilter, SpanStatus
-from nmp.intake.spans.storage import make_pagination
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.spans.api.spans_schemas import SpanGroupBy, SpanGroupSortField
+from nhx.intake.spans.domain import SpanListFilter, SpanStatus
+from nhx.intake.spans.storage import make_pagination
 
 
 class _QueryResult:
