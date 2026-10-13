@@ -12,6 +12,10 @@ import { isPlainObject } from '@studio/util/functions';
 // translate_agent_config publishes the default harness's model under this key.
 const FABRIC_DEFAULT_MODEL_KEY = 'default';
 
+// The Studio optimize wizard sweeps this as a one-value choice so Fabric has a credential to
+// start with. Agent runtimes bind the same placeholder themselves, so a deploy leaves it out.
+const GATEWAY_CREDENTIAL_PATH = 'environment.env.NEMO_AGENTS_IGW_API_KEY';
+
 // Keys a plain object resolves through its prototype, so writing one would reach Object.prototype.
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -47,6 +51,9 @@ export interface AppliedTrialConfig {
   addedModels: string[];
   modelDifferences: ModelDifference[];
 }
+
+export const isDeployedParam = (entry: SearchSpaceEntry | undefined): boolean =>
+  entry?.path !== GATEWAY_CREDENTIAL_PATH;
 
 export const buildTrialAgentName = (sourceName: string, trial: Trial): string =>
   `${sourceName}-trial-${trial.number}`;
@@ -240,6 +247,7 @@ export const applyTrialToAgentConfig = (
     if (!entry) {
       throw new Error(`Parameter "${param.name}" is not in the study's search space.`);
     }
+    if (!isDeployedParam(entry)) continue;
     const value = coerceParamValue(param.value, entry);
     const segments = toSegments(entry.path);
     const [root, modelKey, ...field] = segments;

@@ -290,6 +290,23 @@ describe('applyTrialToAgentConfig', () => {
     ).toThrow(/only model settings and system instructions are supported/);
   });
 
+  it('leaves out the gateway credential the optimize wizard sweeps', () => {
+    const source = specAgent();
+    const { config: next } = applyTrialToAgentConfig(
+      source,
+      trial({ temperature: '0.5', gateway_credential: 'not-used' }),
+      study({
+        temperature: { path: 'models.default.temperature' },
+        gateway_credential: {
+          path: 'environment.env.NEMO_AGENTS_IGW_API_KEY',
+          values: ['not-used'],
+        },
+      })
+    );
+    expect(next.models).toMatchObject({ default: { temperature: 0.5 } });
+    expect(next).not.toHaveProperty('environment');
+  });
+
   it('writes the system instructions a trial ran onto a platform agent', () => {
     const source = specAgent();
     const { config: next } = applyTrialToAgentConfig(

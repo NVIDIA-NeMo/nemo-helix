@@ -18,6 +18,7 @@ import {
   applyTrialToAgentConfig,
   buildTrialAgentName,
   fetchStudyConfig,
+  isDeployedParam,
   studyConfigLocation,
   withAgentName,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/trialAgentConfig';
@@ -138,6 +139,9 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
     }
   }, [trial, sourceAgent, studyConfig]);
   const appliedConfig = applied?.ok ? applied : undefined;
+  const deployedParams =
+    trial?.params.filter((param) => isDeployedParam(studyConfig?.searchSpace.get(param.name))) ??
+    [];
 
   // The study read the agent's config when it ran, so a later edit was never evaluated.
   const agentChangedSinceStudy =
@@ -225,11 +229,11 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
         label="New agent name"
         formFieldProps={{ slotError: errors.name?.message }}
       />
-      {trial && trial.params.length > 0 && (
+      {trial && deployedParams.length > 0 && (
         <Stack gap="2">
           <Text kind="label/semibold/md">Configuration from trial {trial.number}</Text>
           <Stack gap="1" data-testid="deploy-trial-params">
-            {trial.params.map((param) => (
+            {deployedParams.map((param) => (
               <Flex key={param.name} justify="between" align="center" gap="4">
                 <Text kind="body/regular/sm" className="text-secondary">
                   {studyConfig?.searchSpace.get(param.name)?.path ?? param.name}
