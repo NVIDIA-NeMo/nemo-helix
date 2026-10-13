@@ -3,6 +3,7 @@
 
 import {
   activeRolesForStrategy,
+  BUILTIN_DETECTOR_VALUE,
   DETECTOR_ROLE,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
@@ -28,14 +29,19 @@ export const useDefaultRoleModels = (): { isLoading: boolean } => {
     const llm =
       chatModels.find((model) => (model.served_model_name ?? model.name) === suggestedName) ??
       chatModels[0];
-    const detector = models.find(isNerDetectorModel);
     for (const role of roles) {
       const current = getValues(`roleModels.${role}.modelId`);
       if (current) continue;
-      const pick = role === DETECTOR_ROLE ? detector : llm;
-      if (!pick) continue;
-      setValue(`roleModels.${role}.modelId`, pick.id);
-      applyModel(role, pick.id);
+      // The entity detector defaults to the platform's built-in in-process GLiNER2 (a UI-only
+      // sentinel that makes the request omit entity_detector); selecting a workspace NER model is
+      // an explicit opt-in. Every other role auto-picks a chat model.
+      if (role === DETECTOR_ROLE) {
+        setValue(`roleModels.${role}.modelId`, BUILTIN_DETECTOR_VALUE);
+        continue;
+      }
+      if (!llm) continue;
+      setValue(`roleModels.${role}.modelId`, llm.id);
+      applyModel(role, llm.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models, roles, getValues, setValue]);
