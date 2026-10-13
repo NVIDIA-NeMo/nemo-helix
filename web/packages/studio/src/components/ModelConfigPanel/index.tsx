@@ -40,7 +40,7 @@ export const ModelConfigPanel: FC<ModelConfigPanelProps> = ({ modelId, ...props 
   });
   const modelIndex = modelIds.indexOf(modelId);
   return modelIndex < 0 ? null : (
-    <ModelConfigFields key={`${modelId}:${modelIndex}`} {...props} modelIndex={modelIndex} />
+    <ModelConfigFields key={modelId} {...props} modelIndex={modelIndex} />
   );
 };
 
