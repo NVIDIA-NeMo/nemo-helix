@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from nemo_agent_hardener_plugin.agent_resolver import gateway_backend, resolve_agent_to_manifest
+from nemo_agent_hardener_plugin.agent_resolver import fabric_start_command, gateway_backend, resolve_agent_to_manifest
 from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_MANIFEST_TYPE
 from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
@@ -106,7 +106,11 @@ def _apply_manifest_overrides(manifest: dict[str, Any], data: dict[str, Any]) ->
     # Apply an explicit victim port only when set (stored on the manifest or a per-run override); otherwise
     # leave the port the agent resolver derived from the running deployment.
     if data.get("port"):
-        manifest.setdefault("agent", {})["port"] = int(data["port"])
+        agent = manifest.setdefault("agent", {})
+        port = int(data["port"])
+        if agent.get("start_command") == fabric_start_command(agent.get("port", 8000)):
+            agent["start_command"] = fabric_start_command(port)
+        agent["port"] = port
     safety_model = _safety_model(data)
     enabled = [key for key in (data.get("defenders") or []) if key in DEFENDER_ENTRIES]
     if not enabled:

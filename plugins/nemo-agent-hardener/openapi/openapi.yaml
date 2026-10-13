@@ -2815,6 +2815,8 @@ components:
       properties:
         manifest_id:
           type: string
+          minLength: 1
+          pattern: \S
           title: Manifest Id
         driver:
           type: string
@@ -3095,9 +3097,13 @@ components:
         config:
           title: Config
           type: string
+          minLength: 1
+          pattern: \S
         manifest_id:
           title: Manifest Id
           type: string
+          minLength: 1
+          pattern: \S
         env_file:
           title: Env File
           type: string

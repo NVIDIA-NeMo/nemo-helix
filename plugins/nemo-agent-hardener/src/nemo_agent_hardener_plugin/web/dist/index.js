@@ -23255,7 +23255,7 @@ var Kw = (e) => [{
 	items: [{
 		id: "agent-hardener",
 		iconName: "swords",
-		label: "Agent Hardener",
+		label: "Agent Hardening",
 		href: Fi(e)
 	}]
 }];

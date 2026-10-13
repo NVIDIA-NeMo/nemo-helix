@@ -169,6 +169,7 @@ class AgentHardenerRunJob(NemoJob):
     """Run the attack/defend/validate war-game against the configured agent."""
 
     name = "war-game"  # CLI: `nemo agent-hardener war-game ...`; keeps `run` free for the wrapper command
+    job_collection_path = "/jobs"
     description = "Run the Agent Hardener war-game against a deployed NAT agent."
     container = "cpu-tasks"
     generate_legacy_verbs: ClassVar[bool] = False
@@ -284,6 +285,7 @@ class AgentHardenerRunJob(NemoJob):
         self.report_progress(ctx, work_done=0, work_total=1, status="failed", details=failure.as_error_details())
 
     def _execute(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
+        WarGameSpec.model_validate(config)
         plugin_config = AgentHardenerConfig.get()
         _common.require_provisioned(plugin_config)
 

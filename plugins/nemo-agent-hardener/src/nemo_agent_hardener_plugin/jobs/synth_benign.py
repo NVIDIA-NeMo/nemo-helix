@@ -48,6 +48,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
     """Synthesize and cache the benign request suite for a saved manifest (native TTY or Studio serve HITL)."""
 
     name = "synth"  # keeps the hand-written `nemo agent-hardener synth-benign` command unshadowed (cf. war-game/run)
+    job_collection_path = "/synth-benign/jobs"
     description = "Synthesize a saved manifest's benign request suite and cache it on the manifest."
     container = "cpu-tasks"
     generate_legacy_verbs: ClassVar[bool] = False
@@ -112,6 +113,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
             }
 
     def _execute(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
+        SynthBenignSpec.model_validate(config)
         plugin_config = AgentHardenerConfig.get()
         _common.require_provisioned(plugin_config)
 

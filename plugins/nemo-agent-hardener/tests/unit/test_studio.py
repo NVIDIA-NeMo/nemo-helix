@@ -23,3 +23,11 @@ def test_bundle_ships_with_the_package():
     bundle_path = get_studio_spec().bundle_path
     assert bundle_path is not None
     assert bundle_path.exists()
+
+
+def test_packaged_navigation_label_matches_source():
+    bundle_path = get_studio_spec().bundle_path
+    assert bundle_path is not None
+    source_path = bundle_path.parents[4] / "web" / "src" / "Nav.tsx"
+    assert "label: 'Agent Hardening'" in source_path.read_text(encoding="utf-8")
+    assert 'label: "Agent Hardening"' in bundle_path.read_text(encoding="utf-8")

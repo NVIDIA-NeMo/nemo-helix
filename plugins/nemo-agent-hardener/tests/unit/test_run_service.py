@@ -672,6 +672,22 @@ def test_apply_manifest_overrides_applies_explicit_port_only() -> None:
     assert manifest2["agent"]["port"] == 8000
 
 
+def test_port_override_updates_generated_fabric_listener() -> None:
+    from nemo_agent_hardener_plugin.agent_resolver import fabric_start_command
+
+    manifest = {"agent": {"port": 8000, "start_command": fabric_start_command(8000)}}
+    manifest_mod._apply_manifest_overrides(manifest, {"port": 9001})
+    assert manifest["agent"]["port"] == 9001
+    assert manifest["agent"]["start_command"] == fabric_start_command(9001)
+
+
+def test_port_override_preserves_byo_start_command() -> None:
+    manifest = {"agent": {"port": 8000, "start_command": "python server.py --port 8000"}}
+    manifest_mod._apply_manifest_overrides(manifest, {"port": 9001})
+    assert manifest["agent"]["port"] == 9001
+    assert manifest["agent"]["start_command"] == "python server.py --port 8000"
+
+
 def test_materialize_manifest_overlays_per_run_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Stored manifest config: standard intensity, port 8000. Override to thorough + port 9100 for this run only.
     record = SimpleNamespace(data={"agent": "default/clockbot", "attack_intensity": "standard", "port": 8000})
