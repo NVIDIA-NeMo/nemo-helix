@@ -65,6 +65,7 @@ def provision_venv(config: AgentHardenerConfig, *, force: bool) -> None:
     run_subprocess(["uv", "venv", "--python", "3.12", str(config.venv_path)], "create venv")
 
     typer.echo(f"Installing {config.spec} into the venv ...")
+    # Remove prerelease allowance once agent-hardener pins a final nemo-relay release.
     install_cmd = [
         "uv",
         "pip",

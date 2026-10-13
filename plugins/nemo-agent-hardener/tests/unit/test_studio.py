@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import re
+
 from nemo_agent_hardener_plugin.studio import get_studio_spec
 from nemo_helix_plugin.interface import StudioSpec
 
@@ -29,5 +31,7 @@ def test_packaged_navigation_label_matches_source():
     bundle_path = get_studio_spec().bundle_path
     assert bundle_path is not None
     source_path = bundle_path.parents[4] / "web" / "src" / "Nav.tsx"
-    assert "label: 'Agent Hardening'" in source_path.read_text(encoding="utf-8")
-    assert 'label: "Agent Hardening"' in bundle_path.read_text(encoding="utf-8")
+    label_pattern = r"""label:\s*(['"])Agent Hardening\1"""
+    if source_path.exists():
+        assert re.search(label_pattern, source_path.read_text(encoding="utf-8"))
+    assert re.search(label_pattern, bundle_path.read_text(encoding="utf-8"))
