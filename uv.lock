@@ -109,6 +109,7 @@ constraints = [
     { name = "nemo-fabric-adapters-common", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-deepagents", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-remote-agent", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-collector", specifier = ">=0.4.0,<0.5.0" },
@@ -3744,6 +3745,31 @@ wheels = [
 ]
 
 [[package]]
+name = "mini-swe-agent"
+version = "2.4.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "datasets", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "litellm", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "openai", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "platformdirs", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "prompt-toolkit", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "python-dotenv", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "requests", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "tenacity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "textual", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f0/ad/34da734871a702f815b75fb9f997e2fb75091736ba8ed16e4c318b558257/mini_swe_agent-2.4.6.tar.gz", hash = "sha256:0532c8193a763409fa52bb2b5a5d7ac9052dcb1c2cae43945b14b1b7f6ba869a", size = 67060, upload-time = "2026-07-23T03:13:01.113Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/00/a2f454775f69f540ab529c5f5e35d672f6491f0e6edab7cb196a0d2a0e2e/mini_swe_agent-2.4.6-py3-none-any.whl", hash = "sha256:a35463c553ac825c7773b03cfa69cd44958e3af20155dcc5711fdf9e4c67cd54", size = 115037, upload-time = "2026-07-23T03:12:59.856Z" },
+]
+
+[[package]]
 name = "miniaudio"
 version = "1.71"
 source = { registry = "https://pypi.org/simple" }
@@ -4230,6 +4256,7 @@ dependencies = [
     { name = "nemo-fabric-adapters-codex", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4254,6 +4281,9 @@ codex = [
 ]
 deepagents = [
     { name = "nemo-fabric-adapters-deepagents", extra = ["harness"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+mini-swe-agent = [
+    { name = "nemo-fabric-adapters-mini-swe-agent", extra = ["harness"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 nooa = [
     { name = "nemo-fabric-adapters-nooa", extra = ["harness"], marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4288,6 +4318,8 @@ requires-dist = [
     { name = "nemo-fabric-adapters-deepagents", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-deepagents", extras = ["harness"], marker = "extra == 'deepagents'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", extras = ["harness"], marker = "extra == 'mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", extras = ["harness"], marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'nooa'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-remote-agent", specifier = ">=0.4.0,<0.5.0" },
@@ -4306,7 +4338,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.7.1" },
 ]
-provides-extras = ["claude", "codex", "deepagents", "nooa", "container", "test"]
+provides-extras = ["claude", "codex", "deepagents", "mini-swe-agent", "nooa", "container", "test"]
 
 [[package]]
 name = "nemo-anonymizer"
@@ -4747,6 +4779,23 @@ wheels = [
 ]
 
 [[package]]
+name = "nemo-fabric-adapters-mini-swe-agent"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nemo-fabric-adapter-contract", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/02/4e7ec3227ec384d27039b1516af3aee3a3b8fa446d839eca752053ca0654/nemo_fabric_adapters_mini_swe_agent-0.4.0-py3-none-any.whl", hash = "sha256:9b82c3d4dcc17d93b10f043e85c9c1e64111e59cc7ea769d61ff8c84e98f4732", size = 13652, upload-time = "2026-10-02T00:32:39.887Z" },
+]
+
+[package.optional-dependencies]
+harness = [
+    { name = "mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
+[[package]]
 name = "nemo-fabric-adapters-nooa"
 version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4960,6 +5009,7 @@ all = [
     { name = "nemo-fabric-adapters-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5250,6 +5300,7 @@ nemo-agents-plugin = [
     { name = "nemo-fabric-adapters-codex", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5277,6 +5328,7 @@ nemo-agents-plugin-claude = [
     { name = "nemo-fabric-adapters-codex", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5304,6 +5356,7 @@ nemo-agents-plugin-codex = [
     { name = "nemo-fabric-adapters-codex", extra = ["harness"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5331,6 +5384,35 @@ nemo-agents-plugin-deepagents = [
     { name = "nemo-fabric-adapters-codex", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", extra = ["harness"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nvidia-nat-atif", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nvidia-nat-config-optimizer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nvidia-nat-core", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nvidia-nat-eval", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nvidia-nat-langchain", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nvidia-nat-opentelemetry", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "python-on-whales", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+nemo-agents-plugin-mini-swe-agent = [
+    { name = "anthropic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "boto3", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "botocore", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "langchain-aws", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-agent-config-example-email-security-triage", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-deployments-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric", extra = ["relay", "streaming"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-claude", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-codex", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", extra = ["harness"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5358,6 +5440,7 @@ nemo-agents-plugin-nooa = [
     { name = "nemo-fabric-adapters-codex", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", extra = ["harness"], marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5624,6 +5707,7 @@ plugins = [
     { name = "nemo-fabric-adapters-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5725,6 +5809,7 @@ services = [
     { name = "nemo-fabric-adapters-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-nooa", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-garak-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5834,6 +5919,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.88.0" },
     { name = "anthropic", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.88.0" },
     { name = "anthropic", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.88.0" },
+    { name = "anthropic", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.88.0" },
     { name = "anthropic", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.88.0" },
     { name = "anthropic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.88.0" },
     { name = "anthropic", marker = "extra == 'plugins'", specifier = ">=0.88.0" },
@@ -5862,6 +5948,7 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=1.40.46,<1.40.62" },
     { name = "boto3", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=1.40.46,<1.40.62" },
     { name = "boto3", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=1.40.46,<1.40.62" },
+    { name = "boto3", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=1.40.46,<1.40.62" },
     { name = "boto3", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.40.46,<1.40.62" },
     { name = "boto3", marker = "extra == 'plugins'", specifier = ">=1.40.46,<1.40.62" },
     { name = "boto3", marker = "extra == 'services'", specifier = ">=1.40.46,<1.40.62" },
@@ -5870,6 +5957,7 @@ requires-dist = [
     { name = "botocore", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=1.40.46,<1.40.62" },
+    { name = "botocore", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", marker = "extra == 'plugins'", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", marker = "extra == 'services'", specifier = ">=1.40.46,<1.40.62" },
@@ -5998,6 +6086,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-anonymizer-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-data-designer-plugin'", specifier = ">=0.27" },
@@ -6032,6 +6121,7 @@ requires-dist = [
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=3.1" },
+    { name = "jinja2", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'nhx-evals-sdk'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'plugins'", specifier = ">=3.1" },
@@ -6058,6 +6148,7 @@ requires-dist = [
     { name = "langchain-aws", marker = "extra == 'nemo-agents-plugin-claude'", specifier = "==1.1.0" },
     { name = "langchain-aws", marker = "extra == 'nemo-agents-plugin-codex'", specifier = "==1.1.0" },
     { name = "langchain-aws", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = "==1.1.0" },
+    { name = "langchain-aws", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = "==1.1.0" },
     { name = "langchain-aws", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = "==1.1.0" },
     { name = "langchain-aws", marker = "extra == 'plugins'", specifier = "==1.1.0" },
     { name = "langchain-aws", marker = "extra == 'services'", specifier = "==1.1.0" },
@@ -6098,6 +6189,7 @@ requires-dist = [
     { name = "nemo-agent-config-example-email-security-triage", marker = "extra == 'nemo-agents-plugin-claude'", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
     { name = "nemo-agent-config-example-email-security-triage", marker = "extra == 'nemo-agents-plugin-codex'", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
     { name = "nemo-agent-config-example-email-security-triage", marker = "extra == 'nemo-agents-plugin-deepagents'", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
+    { name = "nemo-agent-config-example-email-security-triage", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
     { name = "nemo-agent-config-example-email-security-triage", marker = "extra == 'nemo-agents-plugin-nooa'", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
     { name = "nemo-agent-config-example-email-security-triage", marker = "extra == 'plugins'", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
     { name = "nemo-agent-config-example-email-security-triage", marker = "extra == 'services'", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
@@ -6120,6 +6212,7 @@ requires-dist = [
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin-claude'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin-codex'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin-deepagents'", editable = "plugins/nemo-deployments" },
+    { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin-nooa'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'plugins'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'services'", editable = "plugins/nemo-deployments" },
@@ -6130,6 +6223,7 @@ requires-dist = [
     { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
@@ -6142,6 +6236,7 @@ requires-dist = [
     { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-claude", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-claude", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
@@ -6151,6 +6246,7 @@ requires-dist = [
     { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-codex", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-codex", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
@@ -6164,6 +6260,7 @@ requires-dist = [
     { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
@@ -6173,14 +6270,26 @@ requires-dist = [
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-mini-swe-agent", extras = ["harness"], marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'nemo-agents-plugin'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-nooa", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
@@ -6190,6 +6299,7 @@ requires-dist = [
     { name = "nemo-fabric-adapters-remote-agent", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-remote-agent", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-remote-agent", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
@@ -6213,6 +6323,7 @@ requires-dist = [
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-agents-plugin-claude'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-agents-plugin-codex'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-agents-plugin-deepagents'", editable = "packages/nemo_helix_plugin" },
+    { name = "nemo-helix-plugin", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-agents-plugin-nooa'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-anonymizer-plugin'", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'nemo-automodel-plugin'", editable = "packages/nemo_helix_plugin" },
@@ -6336,6 +6447,7 @@ requires-dist = [
     { name = "nvidia-nat-atif", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-atif", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-atif", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=1.9.0a20260811,<1.10" },
+    { name = "nvidia-nat-atif", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-atif", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-atif", marker = "extra == 'plugins'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-atif", marker = "extra == 'services'", specifier = ">=1.9.0a20260811,<1.10" },
@@ -6344,6 +6456,7 @@ requires-dist = [
     { name = "nvidia-nat-config-optimizer", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-config-optimizer", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-config-optimizer", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=1.9.0a20260811,<1.10" },
+    { name = "nvidia-nat-config-optimizer", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-config-optimizer", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-config-optimizer", marker = "extra == 'plugins'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-config-optimizer", marker = "extra == 'services'", specifier = ">=1.9.0a20260811,<1.10" },
@@ -6352,6 +6465,7 @@ requires-dist = [
     { name = "nvidia-nat-core", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-core", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-core", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=1.9.0a20260811,<1.10" },
+    { name = "nvidia-nat-core", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-core", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-core", marker = "extra == 'plugins'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-core", marker = "extra == 'services'", specifier = ">=1.9.0a20260811,<1.10" },
@@ -6360,6 +6474,7 @@ requires-dist = [
     { name = "nvidia-nat-eval", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-eval", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-eval", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=1.9.0a20260811,<1.10" },
+    { name = "nvidia-nat-eval", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-eval", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-eval", marker = "extra == 'plugins'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-eval", marker = "extra == 'services'", specifier = ">=1.9.0a20260811,<1.10" },
@@ -6368,6 +6483,7 @@ requires-dist = [
     { name = "nvidia-nat-langchain", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-langchain", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-langchain", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=1.9.0a20260811,<1.10" },
+    { name = "nvidia-nat-langchain", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-langchain", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-langchain", marker = "extra == 'plugins'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-langchain", marker = "extra == 'services'", specifier = ">=1.9.0a20260811,<1.10" },
@@ -6376,6 +6492,7 @@ requires-dist = [
     { name = "nvidia-nat-opentelemetry", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-opentelemetry", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-opentelemetry", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=1.9.0a20260811,<1.10" },
+    { name = "nvidia-nat-opentelemetry", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-opentelemetry", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-opentelemetry", marker = "extra == 'plugins'", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-opentelemetry", marker = "extra == 'services'", specifier = ">=1.9.0a20260811,<1.10" },
@@ -6551,6 +6668,7 @@ requires-dist = [
     { name = "python-on-whales", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.60" },
     { name = "python-on-whales", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.60" },
     { name = "python-on-whales", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.60" },
+    { name = "python-on-whales", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.60" },
     { name = "python-on-whales", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.60" },
     { name = "python-on-whales", marker = "extra == 'plugins'", specifier = ">=0.60" },
     { name = "python-on-whales", marker = "extra == 'services'", specifier = ">=0.60" },
@@ -6571,6 +6689,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'nemo-anonymizer-plugin'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=6.0" },
@@ -6602,6 +6721,7 @@ requires-dist = [
     { name = "rich", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=13.7.1" },
     { name = "rich", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=13.7.1" },
     { name = "rich", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=13.7.1" },
+    { name = "rich", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=13.7.1" },
     { name = "rich", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=13.7.1" },
     { name = "rich", marker = "extra == 'nemo-helix-ext'", specifier = ">=13.7.1" },
     { name = "rich", marker = "extra == 'plugins'", specifier = ">=13.7.1" },
@@ -6702,7 +6822,7 @@ requires-dist = [
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.1" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.1" },
 ]
-provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
+provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-mini-swe-agent", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
 
 [[package]]
 name = "nemo-helix-ext"

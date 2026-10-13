@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+config_format: nemo-agents-spec-v1
+name: mini-swe-agent-example
+
+default_harness: mini-swe-agent
+harnesses:
+  mini-swe-agent:
+    kind: mini-swe-agent
+    settings:
+      timeout: 30
+
+instructions:
+  system:
+    content: Inspect the task, make the requested change, and verify the result.
+
+models:
+  default:
+    provider: nvidia
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
+    api_key_env: NVIDIA_API_KEY
+    base_url: https://integrate.api.nvidia.com/v1
+
+runtime:
+  max_turns: 50
+  timeout_seconds: 1800
+
+environment:
+  workspace: ./workspace
+  artifacts: ./artifacts
+
+telemetry:
+  enabled: false
