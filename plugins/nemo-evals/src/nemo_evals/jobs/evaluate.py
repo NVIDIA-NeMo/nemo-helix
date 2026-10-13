@@ -220,7 +220,6 @@ class _EvaluateJobBase(NemoJob):
     input_spec_schema: ClassVar[type[BaseModel] | None] = EvaluateInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = EvaluateSpec
     job_collection_path: ClassVar[str | None] = "/evaluate/jobs"
-    generate_legacy_verbs: ClassVar[bool] = False
 
     @classmethod
     async def compile(

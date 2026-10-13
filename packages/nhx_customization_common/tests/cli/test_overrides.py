@@ -3,10 +3,10 @@
 
 """Tests for the shared customization CLI override.
 
-Focus: the hand-written flat command installed by ``apply_job_cli_overrides``
-must resolve ``--workspace`` the same way the auto-generated verbs do — explicit
-flag > ``$NHX_WORKSPACE`` > the active CLI context's configured workspace >
-``"default"``.
+Focus: the hand-written flat backend command installed by
+``apply_job_cli_overrides`` must resolve ``--workspace`` the same way the
+auto-generated verbs do — explicit flag > ``$NHX_WORKSPACE`` > the active
+CLI context's configured workspace > ``"default"``.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
 
-        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file), "--workspace", "acme-corp"])
+        result = CliRunner().invoke(parent, ["plugin", "--workspace", "acme-corp", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "acme-corp"
@@ -97,7 +97,7 @@ class TestSubmitWorkspaceResolution:
         calls: list[dict[str, object]] = []
         parent = _app_with_state(_build_app(calls), _ContextState("my-team-ws"))
 
-        result = CliRunner().invoke(parent, ["plugin", "--job-json", str(job_file), "-w", "default"])
+        result = CliRunner().invoke(parent, ["plugin", "-w", "default", "--job-json", str(job_file)])
 
         assert result.exit_code == 0, result.output
         assert calls[0]["workspace"] == "default"

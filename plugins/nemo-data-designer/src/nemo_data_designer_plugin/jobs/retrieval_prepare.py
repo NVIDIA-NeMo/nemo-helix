@@ -32,7 +32,6 @@ class RetrievalPrepareJob(NemoJob):
     name: ClassVar[str] = "retrieval-prepare"
     description: ClassVar[str] = "Convert retrieval SDG output to eval_beir and training JSONL (Nemotron Stage 1)."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
 
     input_spec_schema = RetrievalPrepareJobConfig
     spec_schema = RetrievalPrepareStepConfig
