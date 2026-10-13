@@ -111,6 +111,7 @@ def test_invalid_manifests_are_rejected(raw_manifest: str) -> None:
         (
             [
                 "nemo-environment.yaml",
+                "resources_servers/custom/app.py",
                 "resources_servers/custom/configs/custom.yaml",
                 "wheels/custom_dependency-1.0-py3-none-any.whl",
             ],
@@ -158,8 +159,34 @@ def test_native_v1_requires_an_install_marker_too() -> None:
     manifest = parse_environment_manifest(NATIVE_MANIFEST)
     with pytest.raises(GymEnvironmentPackageError, match="exactly one of requirements.txt or pyproject.toml"):
         validate_environment_manifest_against_listing(
-            manifest, ["nemo-environment.yaml", "resources_servers/custom/configs/custom.yaml"]
+            manifest,
+            [
+                "nemo-environment.yaml",
+                "resources_servers/custom/app.py",
+                "resources_servers/custom/configs/custom.yaml",
+            ],
         )
+
+
+def test_a_config_only_server_directory_references_the_images_server() -> None:
+    """Configs alone under a built-in's directory run the image's server, so no marker is needed."""
+    manifest = parse_environment_manifest(
+        "format: native-v1\n"
+        "config_paths:\n"
+        "  - resources_servers/custom/configs/custom.yaml\n"
+        "  - responses_api_agents/simple_agent/configs/simple_agent.yaml\n"
+        "metadata:\n  name: custom\n"
+    )
+    validate_environment_manifest_against_listing(
+        manifest,
+        [
+            "nemo-environment.yaml",
+            "resources_servers/custom/app.py",
+            "resources_servers/custom/requirements.txt",
+            "resources_servers/custom/configs/custom.yaml",
+            "responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        ],
+    )
 
 
 def test_an_extras_only_wheels_v1_listing_is_accepted() -> None:

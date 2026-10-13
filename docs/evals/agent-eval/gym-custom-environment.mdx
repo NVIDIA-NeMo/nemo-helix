@@ -42,10 +42,12 @@ wheelhouse carries only what your servers add on top of that: the packages your 
 files name, and their dependencies, as wheels built for the image's Python and platform. Do not
 vendor `nemo-gym`, `ray`, or the rest of Gym's own dependencies.
 
-Every agent and resources-server directory needs exactly one of `requirements.txt` or
-`pyproject.toml`, in both formats. Gym recognises a server directory by that file; without it the
-directory is invisible to Gym, and with both Gym refuses to start it. Evaluator checks for the file
-at submit time.
+Every agent and resources-server directory that ships code needs exactly one of `requirements.txt`
+or `pyproject.toml`, in both formats. Gym recognises a server directory by that file; without it the
+directory is invisible to Gym, and with both Gym refuses to start it. A directory holding only
+`configs/` is different: it references the image's server of that name, such as
+`responses_api_agents/simple_agent/configs/simple_agent.yaml` to run the built-in `simple_agent`
+with your settings, and needs no marker. Evaluator checks these rules at submit time.
 
 A minimal `native-v1` resource-server package looks like this:
 
@@ -114,8 +116,9 @@ The package must follow these rules:
 
 - Every `config_paths` entry is relative to the FileSet root and names an uploaded file.
 - `native-v1` config paths stay under `resources_servers/` or `responses_api_agents/`.
-- Every `resources_servers/<name>/` and `responses_api_agents/<name>/` directory in the package has
-  exactly one of `requirements.txt` or `pyproject.toml`, wherever its config file lives.
+- Every `resources_servers/<name>/` and `responses_api_agents/<name>/` directory that ships code
+  has exactly one of `requirements.txt` or `pyproject.toml`, wherever its config file lives. A
+  directory with only `configs/` references the image's server of that name.
 - `wheels/` is flat and contains only `.whl` files.
 - Do not include `responses_api_models/`; model configuration is operator-owned.
 - Do not include dataset `.jsonl` files. Store evaluation rows in a separate taskset.

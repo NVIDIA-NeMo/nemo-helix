@@ -158,14 +158,21 @@ def _shipped_server_directories(entries: Iterable[str]) -> list[str]:
 
 
 def _missing_server_install_markers(entries: set[str]) -> list[str]:
-    """Shipped server directories with no ``requirements.txt`` or ``pyproject.toml``, or with both.
+    """Server directories that ship an implementation without exactly one install marker.
 
-    Gym recognises a server directory only by one of those files and refuses a directory that has
-    both. A directory without one is invisible: Gym silently runs a same-named built-in instead, or
-    fails at startup with its own error.
+    Gym recognises a server directory by ``requirements.txt`` or ``pyproject.toml`` and refuses one
+    with both. A directory holding only ``configs/`` is a reference to the image's server of that
+    name, which Gym resolves by falling back to the built-in, so it needs no marker. A directory
+    with anything else and no marker is invisible: Gym runs the built-in instead, or fails at
+    startup with its own error.
     """
     problems: list[str] = []
     for directory in _shipped_server_directories(entries):
+        ships_code = any(
+            entry.startswith(f"{directory}/") and not entry.startswith(f"{directory}/configs/") for entry in entries
+        )
+        if not ships_code:
+            continue
         present = [marker for marker in SERVER_INSTALL_MARKERS if f"{directory}/{marker}" in entries]
         if len(present) != 1:
             problems.append(directory)
@@ -209,7 +216,8 @@ def validate_environment_manifest_against_listing(
     bad_server_dirs = _missing_server_install_markers(entries)
     if bad_server_dirs:
         raise GymEnvironmentPackageError(
-            "each agent and resources-server directory needs exactly one of requirements.txt or pyproject.toml "
+            "each agent and resources-server directory that ships code needs exactly one of requirements.txt or "
+            "pyproject.toml "
             f"(Gym discovers servers by that file): {', '.join(bad_server_dirs)}"
         )
 

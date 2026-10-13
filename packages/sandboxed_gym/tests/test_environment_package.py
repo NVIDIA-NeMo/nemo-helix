@@ -370,12 +370,41 @@ def test_listing_requires_exactly_one_install_marker_per_server(
     """Gym discovers a server only by requirements.txt or pyproject.toml, and refuses a directory with both."""
     config_path = "resources_servers/test/configs/test.yaml"
     manifest = parse_environment_manifest(_complete_manifest(format_name, config_path))
-    listing = [config_path, *(f"resources_servers/test/{m}" for m in markers), "wheels/dep-1.0-py3-none-any.whl"]
+    listing = [
+        config_path,
+        "resources_servers/test/app.py",
+        *(f"resources_servers/test/{m}" for m in markers),
+        "wheels/dep-1.0-py3-none-any.whl",
+    ]
 
     with pytest.raises(
         EnvironmentPackageError, match="exactly one of requirements.txt or pyproject.toml.*resources_servers/test"
     ):
         validate_environment_manifest_against_listing(manifest, listing)
+
+
+@pytest.mark.parametrize("format_name", ["native-v1", "wheels-v1"])
+def test_a_config_only_server_directory_references_the_images_server(format_name: str) -> None:
+    """Shipping `responses_api_agents/simple_agent/configs/*.yaml` alone is the documented way to
+    run the image's own `simple_agent`: Gym falls back to the built-in when the package directory
+    has no install marker, so demanding one here would force users to vendor code they do not own."""
+    manifest = parse_environment_manifest(
+        f"format: {format_name}\n"
+        "config_paths:\n"
+        "  - resources_servers/weather_verifier/configs/weather_verifier.yaml\n"
+        "  - responses_api_agents/simple_agent/configs/simple_agent.yaml\n"
+        "metadata:\n  name: weather\n"
+    )
+    listing = [
+        "nemo-environment.yaml",
+        "resources_servers/weather_verifier/app.py",
+        "resources_servers/weather_verifier/requirements.txt",
+        "resources_servers/weather_verifier/configs/weather_verifier.yaml",
+        "responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        "wheels/dep-1.0-py3-none-any.whl",
+    ]
+
+    validate_environment_manifest_against_listing(manifest, listing)
 
 
 def test_listing_accepts_a_pyproject_marker() -> None:
