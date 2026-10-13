@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BuilderPreviewPanel } from '@studio/routes/DataDesignerJobBuildRoute/BuilderPreviewPanel';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 const renderPanel = (onClose: () => void = () => undefined) =>
   render(
@@ -64,6 +64,21 @@ describe('BuilderPreviewPanel', () => {
     fireEvent.mouseMove(window, { clientY: 5000 });
     expect(handle).toHaveAttribute('aria-valuenow', String(min));
     fireEvent.mouseUp(window);
+  });
+
+  it('pulls the panel back within the limit when the window shrinks', () => {
+    renderPanel();
+    const handle = screen.getByRole('separator', { name: 'Resize preview panel' });
+    fireEvent.keyDown(handle, { key: 'Home' });
+    expect(handle).toHaveAttribute('aria-valuenow', '800');
+
+    act(() => {
+      window.innerHeight = 500;
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    expect(handle).toHaveAttribute('aria-valuemax', '400');
+    expect(handle).toHaveAttribute('aria-valuenow', '400');
   });
 
   it('resizes with the arrow, Home and End keys', () => {

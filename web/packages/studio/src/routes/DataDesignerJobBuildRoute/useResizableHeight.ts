@@ -33,11 +33,18 @@ export const useResizableHeight = ({
 }: UseResizableHeightOptions) => {
   const [rawHeight, setRawHeight] = useState(defaultHeight);
   const [isDragging, setIsDragging] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
   const dragStartRef = useRef<DragStart | null>(null);
 
+  useEffect(() => {
+    const handleResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const getMaxHeight = useCallback(
-    () => Math.max(minHeight, Math.floor(window.innerHeight * maxViewportRatio)),
-    [minHeight, maxViewportRatio]
+    () => Math.max(minHeight, Math.floor(viewportHeight * maxViewportRatio)),
+    [minHeight, maxViewportRatio, viewportHeight]
   );
   const clamp = useCallback(
     (value: number) => Math.max(minHeight, Math.min(getMaxHeight(), value)),
