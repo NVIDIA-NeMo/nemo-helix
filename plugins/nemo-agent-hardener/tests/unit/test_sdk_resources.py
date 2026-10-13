@@ -23,6 +23,13 @@ from nemo_helix_plugin.agent_hardener.types import (
 )
 
 
+@pytest.mark.parametrize("method", ["run", "submit"])
+def test_sdk_rejects_config_and_manifest_id_before_launch(method: str) -> None:
+    resource = AgentHardenerPluginResource(make_sdk())
+    with pytest.raises(ValueError, match="exactly one"):
+        getattr(resource, method)(config="manifest.yaml", manifest_id="m1")
+
+
 class _AutoPaginatingPage:
     """Stand-in for `SyncDefaultPagination`: iterating it walks every page, like the real client.
 

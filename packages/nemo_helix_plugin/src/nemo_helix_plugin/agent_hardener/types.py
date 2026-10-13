@@ -194,8 +194,8 @@ class WarGameSpec(BaseModel):
     agent ref) or a ready ``config`` manifest path (the CLI path).
     """
 
-    config: str | None = None
-    manifest_id: str | None = None
+    config: str | None = Field(default=None, min_length=1, pattern=r"\S")
+    manifest_id: str | None = Field(default=None, min_length=1, pattern=r"\S")
     env_file: str | None = None
     driver: str | None = None
     stop_after_synth: bool = False
@@ -211,11 +211,19 @@ class WarGameSpec(BaseModel):
     models: WarGameModels | None = None
     source_run: str | None = None
 
+    @model_validator(mode="after")
+    def _validate_target_and_replay(self) -> WarGameSpec:
+        if (self.config is None) == (self.manifest_id is None):
+            raise ValueError("pass exactly one of 'config' or 'manifest_id'")
+        if self.validate_only and not (self.replay_hitlog_fileset and self.replay_hitlog_fileset.strip()):
+            raise ValueError("validate_only requires replay_hitlog_fileset")
+        return self
+
 
 class SynthBenignSpec(BaseModel):
     """Inputs for the benign-suite synthesis phase (the shape ``run()``/``compile()`` see)."""
 
-    manifest_id: str
+    manifest_id: str = Field(min_length=1, pattern=r"\S")
     driver: str = "native"
     env_file: str | None = None
     interview: str = "interactive"

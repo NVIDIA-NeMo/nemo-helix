@@ -300,6 +300,13 @@ def gateway_backend(base_url: str) -> dict[str, Any] | None:
     return {"name": "nemo-inference-gateway", "ports": [port]}
 
 
+def fabric_start_command(port: int) -> str:
+    return (
+        f"{IMAGE_VENV}/bin/python -m nemo_agents_plugin.fabric.server "
+        f"--agent-config {IMAGE_AGENT_CONFIG} --host 0.0.0.0 --port {port}"
+    )
+
+
 def build_manifest_dict(
     *,
     agent_name: str,
@@ -326,10 +333,7 @@ def build_manifest_dict(
         # Not a victim *kind* — the launch shape is identical for every harness.
         "harness": harness,
         "dockerfile": DOCKERFILE_FILENAME,
-        "start_command": (
-            f"{IMAGE_VENV}/bin/python -m nemo_agents_plugin.fabric.server "
-            f"--agent-config {IMAGE_AGENT_CONFIG} --host 0.0.0.0 --port {port}"
-        ),
+        "start_command": fabric_start_command(port),
         "binaries": list(VICTIM_BINARIES),
         "port": port,
         "secrets": secrets,
