@@ -229,6 +229,7 @@ def test_schedule_preserves_uds_otlp_metadata_in_runtime_env(mock_nemo_client, t
     )
     assert captured_env[NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR] == "uds"
     assert captured_env[NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR] == "/tmp/nemo-helix.sock"
+    assert captured_env["NEMO_JOB_UID"] == "platform-job-test-uid"
 
 
 def test_schedule_terminates_process_when_post_popen_setup_fails(

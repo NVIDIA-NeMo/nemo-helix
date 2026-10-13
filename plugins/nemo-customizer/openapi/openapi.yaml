@@ -288,6 +288,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel/jobs/{name}/control:
+    patch:
+      tags:
+      - Automodel Jobs
+      summary: Update Job Control
+      operationId: update_job_control_apis_customization_v2_workspaces__workspace__automodel_jobs__name__control_patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobControl'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/automodel/jobs/{name}/logs:
     get:
       tags:
@@ -340,6 +378,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel/jobs/{name}/pause:
+    post:
+      tags:
+      - Automodel Jobs
+      summary: Pause Job
+      operationId: pause_job_apis_customization_v2_workspaces__workspace__automodel_jobs__name__pause_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel/jobs/{name}/rerun:
+    post:
+      tags:
+      - Automodel Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_customization_v2_workspaces__workspace__automodel_jobs__name__rerun_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/automodel/jobs/{name}/results:
     get:
       tags:
@@ -366,6 +468,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel/jobs/{name}/resume:
+    post:
+      tags:
+      - Automodel Jobs
+      summary: Resume Job
+      operationId: resume_job_apis_customization_v2_workspaces__workspace__automodel_jobs__name__resume_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelJobsJob'
         '422':
           description: Validation Error
           content:
@@ -856,6 +990,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/rl/jobs/{name}/control:
+    patch:
+      tags:
+      - Rl Jobs
+      summary: Update Job Control
+      operationId: update_job_control_apis_customization_v2_workspaces__workspace__rl_jobs__name__control_patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobControl'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RlJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/rl/jobs/{name}/logs:
     get:
       tags:
@@ -908,6 +1080,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/rl/jobs/{name}/pause:
+    post:
+      tags:
+      - Rl Jobs
+      summary: Pause Job
+      operationId: pause_job_apis_customization_v2_workspaces__workspace__rl_jobs__name__pause_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RlJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/rl/jobs/{name}/rerun:
+    post:
+      tags:
+      - Rl Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_customization_v2_workspaces__workspace__rl_jobs__name__rerun_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RlJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/rl/jobs/{name}/results:
     get:
       tags:
@@ -934,6 +1170,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/rl/jobs/{name}/resume:
+    post:
+      tags:
+      - Rl Jobs
+      summary: Resume Job
+      operationId: resume_job_apis_customization_v2_workspaces__workspace__rl_jobs__name__resume_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RlJobsJob'
         '422':
           description: Validation Error
           content:
@@ -1242,6 +1510,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/unsloth/jobs/{name}/control:
+    patch:
+      tags:
+      - Unsloth Jobs
+      summary: Update Job Control
+      operationId: update_job_control_apis_customization_v2_workspaces__workspace__unsloth_jobs__name__control_patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobControl'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnslothJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/unsloth/jobs/{name}/logs:
     get:
       tags:
@@ -1294,6 +1600,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/unsloth/jobs/{name}/pause:
+    post:
+      tags:
+      - Unsloth Jobs
+      summary: Pause Job
+      operationId: pause_job_apis_customization_v2_workspaces__workspace__unsloth_jobs__name__pause_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnslothJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/unsloth/jobs/{name}/rerun:
+    post:
+      tags:
+      - Unsloth Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_customization_v2_workspaces__workspace__unsloth_jobs__name__rerun_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnslothJobsJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/unsloth/jobs/{name}/results:
     get:
       tags:
@@ -1320,6 +1690,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/unsloth/jobs/{name}/resume:
+    post:
+      tags:
+      - Unsloth Jobs
+      summary: Resume Job
+      operationId: resume_job_apis_customization_v2_workspaces__workspace__unsloth_jobs__name__resume_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnslothJobsJob'
         '422':
           description: Validation Error
           content:
@@ -2764,6 +3166,30 @@ components:
         disable it. Activation at training time still requires credentials/URIs
 
         (see compile-time warnings and runtime builders).'
+    JobControl:
+      properties:
+        pause_ttl_seconds:
+          title: Pause Ttl Seconds
+          description: How long this job keeps storage after it pauses, measured from
+            stopped_at. When the job has no value, the platform paused-storage TTL
+            applies. Cannot exceed the platform maximum. 0 reclaims on the next retention
+            pass. In a control update, an omitted or null value keeps the current
+            value. Changing this value does not move the start time.
+          nullable: true
+          type: integer
+          minimum: 0.0
+      type: object
+      title: JobControl
+      description: 'Mutable job behavior, stored on the job and kept off the execution
+        spec.
+
+
+        The attempt spec stays the immutable snapshot of what a run executes. Rerun
+
+        copies the job spec into the next attempt and keeps using this object. In
+        a
+
+        control update, an omitted or null value keeps the job''s current value.'
     MlflowIntegration:
       properties:
         experiment_name:

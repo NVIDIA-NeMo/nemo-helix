@@ -21,6 +21,7 @@ from nemo_helix_plugin.jobs.constants import (
 )
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_STEP_ENVVAR as NEMO_JOB_STEP_ENVVAR
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_TASK_ENVVAR as NEMO_JOB_TASK_ENVVAR
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_UID_ENVVAR as NEMO_JOB_UID_ENVVAR
 from nemo_helix_plugin.jobs.constants import NEMO_JOB_WORKSPACE_ENVVAR as NEMO_JOB_WORKSPACE_ENVVAR
 from nemo_helix_plugin.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR as PERSISTENT_JOB_STORAGE_PATH_ENVVAR,

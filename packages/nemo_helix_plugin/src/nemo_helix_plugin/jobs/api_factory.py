@@ -492,6 +492,7 @@ class JobRouteOption(StrEnum):
 
     CORE = auto()
     PAUSE_RESUME = auto()
+    RERUN = auto()
 
 
 class HelixJobResultRoute(BaseModel):
@@ -1438,17 +1439,6 @@ def job_route_factory(
             ).data()
             return from_response(job_resp)
 
-        @router.post("/jobs/{name}/rerun")
-        async def rerun_job(
-            name: str,
-            workspace: str,
-            async_client: AsyncNemoClient = Depends(get_nemo_client),
-        ) -> TypedJobResponse:
-            f"""Rerun a failed job by name for the {service_name} microservice."""
-
-            job_resp = (await AsyncJobsClient.from_client(async_client).rerun_job(job=name, workspace=workspace)).data()
-            return from_response(job_resp)
-
         @router.patch("/jobs/{name}/control")
         async def update_job_control(
             name: str,
@@ -1467,7 +1457,22 @@ def job_route_factory(
 
         _stamp(pause_job, perm="pause", write=True)
         _stamp(resume_job, perm="resume", write=True)
-        _stamp(rerun_job, perm="rerun", write=True)
         _stamp(update_job_control, perm="control", write=True)
+
+    # Some jobs can be rerun from what survives on job storage after they fail.
+    if JobRouteOption.RERUN in route_options:
+
+        @router.post("/jobs/{name}/rerun")
+        async def rerun_job(
+            name: str,
+            workspace: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+        ) -> TypedJobResponse:
+            f"""Rerun a failed job by name for the {service_name} microservice."""
+
+            job_resp = (await AsyncJobsClient.from_client(async_client).rerun_job(job=name, workspace=workspace)).data()
+            return from_response(job_resp)
+
+        _stamp(rerun_job, perm="rerun", write=True)
 
     return router

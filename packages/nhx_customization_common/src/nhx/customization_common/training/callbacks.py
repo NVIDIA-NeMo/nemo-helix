@@ -360,6 +360,28 @@ class TrainingProgressCallback:
     def reporter(self) -> JobsServiceProgressReporter:
         return self._reporter
 
+    def rewind_to(self, step: int) -> None:
+        """Drop recorded points past ``step``, the step training restored to.
+
+        A rerun after a crash restores the newest complete checkpoint, which can
+        be behind the last reported step. The seeded points past it describe
+        training that no longer exists, and this run will record new ones for
+        those steps. Call this once, after restoring and before the first report.
+        The next report sends the shortened series, which replaces the stored one.
+        A resume after a pause drops nothing: the pause checkpoint is where
+        training stopped.
+        """
+        dropped = 0
+        for name, value in list(self._metrics.items()):
+            if not isinstance(value, list):
+                continue
+            kept = [point for point in value if (point_step := _point_step(point)) is not None and point_step <= step]
+            dropped += len(value) - len(kept)
+            self._metrics[name] = kept
+        if dropped:
+            self._series_dirty = True
+            logger.info("Dropped %d recorded metric points past restored step %d", dropped, step)
+
     def _resolve_backend(self, backend: str | None) -> str | None:
         return backend if backend is not None else self._default_backend
 
