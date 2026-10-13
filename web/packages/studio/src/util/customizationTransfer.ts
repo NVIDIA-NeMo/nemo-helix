@@ -55,14 +55,16 @@ export const resolveCustomizationTransfer = (
     return undefined;
   }
 
-  const details =
+  const taskDetails =
     transferStep.tasks?.find((task) => task.status === HelixJobStatus.active)?.status_details ??
     transferStep.status_details;
+  const stepDetails = transferStep.status_details;
 
   return {
     stepLabel: formatPipelineStepName(transferStep.name),
-    uploadedFiles: readNumber(details, 'uploaded_files'),
-    totalFiles: readNumber(details, 'total_files'),
-    totalBytes: readNumber(details, 'total_size'),
+    uploadedFiles:
+      readNumber(taskDetails, 'uploaded_files') ?? readNumber(stepDetails, 'uploaded_files'),
+    totalFiles: readNumber(taskDetails, 'total_files') ?? readNumber(stepDetails, 'total_files'),
+    totalBytes: readNumber(taskDetails, 'total_size') ?? readNumber(stepDetails, 'total_size'),
   };
 };
