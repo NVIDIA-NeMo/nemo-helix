@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 try:
+    from nemo_scaled_evals_plugin import migrations
     from scaled_evals.api.repositories.base_repository import (
         order_by_clause,
         patch_set_clause,
@@ -159,6 +161,40 @@ def test_task_prebuilt_finalize_is_atomic_and_parameterized() -> None:
     assert MALICIOUS not in update.args[0]
     assert update.args[1][0] == MALICIOUS
     assert "status = 'ready'" in update.args[0]
+    assert update.args[1][2:4] == (None, None)
+
+
+def test_verifier_image_columns_exist_in_baseline_and_replayable_migration() -> None:
+    root = migrations.sql_root()
+    migration = (root / "migrations" / "043_task_verifier_image.sql").read_text()
+    baseline = (root / "schema" / "01_tasks.sql").read_text()
+
+    for column in ("verifier_image_ref", "verifier_image_digest"):
+        assert f"ADD COLUMN IF NOT EXISTS {column} TEXT" in migration
+        assert re.search(rf"^\s+{column}\s+TEXT,$", baseline, re.MULTILINE)
+
+
+def test_task_prebuilt_finalize_persists_verifier_image() -> None:
+    conn, cur = _conn()
+    cur.fetchone.side_effect = [
+        {"id": "task_safe"},
+        {"revision": 3, "status": "uploading", "tarball_object_key": "k"},
+    ]
+    cur.rowcount = 1
+
+    TaskRepository(conn).finalize_latest_revision_prebuilt(
+        "task_safe",
+        image_ref="registry/task:signed",
+        image_digest="sha256:" + "a" * 64,
+        tarball_sha256=None,
+        verifier_image_ref=MALICIOUS,
+        verifier_image_digest="sha256:" + "b" * 64,
+    )
+
+    sql, params = cur.execute.call_args_list[2].args
+    assert MALICIOUS not in sql
+    assert "verifier_image_ref = %s, verifier_image_digest = %s" in sql
+    assert params[2:4] == (MALICIOUS, "sha256:" + "b" * 64)
 
 
 def test_config_profile_create_parameterizes_name() -> None:
@@ -344,6 +380,8 @@ def test_evaluation_load_for_dispatch_selects_provenance_inputs() -> None:
     assert "e.dispatch_job_uid" in sql
     assert "b.slug AS task_slug" in sql
     assert "r.image_digest" in sql
+    assert "r.verifier_image_ref" in sql
+    assert "r.verifier_image_digest" in sql
     assert "r.tarball_sha256" in sql
     assert "r.tarball_object_key" in sql
 

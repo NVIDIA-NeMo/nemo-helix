@@ -18,6 +18,12 @@ This tutorial assumes you have an external provider registered. The platform pre
 
 </Note>
 <Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
+
+The Python SDK examples on this page also use this import:
+
+```python
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+```
 ---
 
 ## Listing Models
@@ -48,11 +54,11 @@ nemo inference models list
 
 ```python
 # All registered model entities
-for model in client.models.list():
+for model in client.models.list_models().items():
     print(model.name)
 
 # Models available for inference via the gateway
-models = client.inference.models.list()
+models = InferenceGatewayClient.from_client(client).list_openai_models().data()
 for model in models.data:
     print(model.id)  # format: workspace/model_entity_name
 ```
@@ -80,7 +86,7 @@ nemo models list
 <Tab title="Python SDK">
 
 ```python
-for model in client.models.list():
+for model in client.models.list_models().items():
     print(model.name)
 ```
 
@@ -104,9 +110,9 @@ nemo chat -m meta-llama-3-2-1b-instruct 'Hello!' --max-tokens 100
 
 ```python
 # Model entities are auto-discovered from deployments
-response = client.inference.gateway.model.post(
-    "v1/chat/completions",
-    name="meta-llama-3-2-1b-instruct",  # Model entity name
+response = InferenceGatewayClient.from_client(client).model_post(
+    name="meta-llama-3-2-1b-instruct",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "meta/llama-3.2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -141,13 +147,13 @@ nemo inference gateway provider get v1/models --name llama-3-2-1b-deployment
 <Tab title="Python SDK">
 
 ```python
-for provider in client.inference.providers.list():
+for provider in client.models.list_providers().items():
     print(f"{provider.name}: {provider.status}")
 
 # List models available on a provider if its API is OpenAI compliant
-models = client.inference.gateway.provider.get(
-    "v1/models",
+models = InferenceGatewayClient.from_client(client).provider_get(
     name="llama-3-2-1b-deployment",
+    trailing_uri="v1/models",
 )
 print(models)
 ```
@@ -173,9 +179,9 @@ nemo chat -m meta/llama-3.2-1b-instruct 'Hello!' \
 
 ```python
 # Provider name matches deployment name for auto-created providers
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
-    name="llama-3-2-1b-deployment",  # Provider name
+response = InferenceGatewayClient.from_client(client).provider_post(
+    name="llama-3-2-1b-deployment",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "meta/llama-3.2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -222,7 +228,7 @@ nemo inference models list
 <Tab title="Python SDK">
 
 ```python
-models = client.inference.models.list()
+models = InferenceGatewayClient.from_client(client).list_openai_models().data()
 for model in models.data:
     print(model.id)  # format: workspace/model_entity_name
 ```
@@ -235,8 +241,8 @@ for model in models.data:
 Make requests to the OpenAI-compatible Inference Gateway route with NeMo Helix SDK.
 
 ```python
-response = client.inference.gateway.openai.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).openai_post(
+    trailing_uri="v1/chat/completions",
     body={
         "model": "default/meta-llama-3-2-1b-instruct",  # workspace/model-entity
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -262,7 +268,7 @@ response = oai_client.chat.completions.create(
 
 ### Using Common OpenAI-Compatible Clients
 
-If you construct third-party clients manually, pass the headers returned by `client.models.get_client_default_headers()` so auth and identity headers are preserved when authorization is enabled.
+If you construct third-party clients manually, pass the headers returned by `client.request_headers()` so auth and identity headers are preserved when authorization is enabled.
 
 <Tabs>
 
@@ -272,12 +278,12 @@ If you construct third-party clients manually, pass the headers returned by `cli
 from openai import OpenAI
 
 base_url = client.models.get_openai_route_base_url()
-headers = client.models.get_client_default_headers()
+headers = client.request_headers()
 
 oai_client = OpenAI(
     base_url=base_url,
     api_key="not-needed",
-    default_headers=headers,
+    default_headers=headers or None,
 )
 
 response = oai_client.chat.completions.create(
@@ -298,14 +304,14 @@ pip install litellm
 from litellm import completion
 
 base_url = client.models.get_openai_route_base_url()
-headers = client.models.get_client_default_headers()
+headers = client.request_headers()
 
 response = completion(
     model="openai/default/meta-llama-3-2-1b-instruct",
     messages=[{"role": "user", "content": "Hello!"}],
     api_base=base_url,
     api_key="not-needed",
-    extra_headers=headers,
+    extra_headers=headers or None,
 )
 ```
 

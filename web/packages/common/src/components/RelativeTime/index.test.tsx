@@ -126,6 +126,18 @@ describe('<RelativeTime />', () => {
     expect(hoursLater).toBeInTheDocument();
   });
 
+  it.each([
+    ['2024-04-08T10:12:25.506-07:00', false, 'an hour ago'],
+    ['2024-04-08T10:09:25.506-07:00', false, 'an hour ago'],
+    ['2024-04-08T10:08:25.506-07:00', false, 'an hour ago'],
+    ['2024-04-08T12:05:25.506-07:00', false, 'in an hour'],
+    ['2024-04-08T10:09:25.506-07:00', true, '1 h ago'],
+    ['2024-04-08T12:05:25.506-07:00', true, 'in 1 h'],
+  ])('Rounds 55-59 minutes to one hour (%s, abbreviated=%s)', (event, abbreviated, expected) => {
+    render(<RelativeTime datetime={event} abbreviated={abbreviated} />);
+    expect(screen.getByText(expected)).toBeInTheDocument();
+  });
+
   it('Displays special labels for specific time periods', () => {
     // Test "yesterday"
     const yesterday = '2024-04-07T11:07:25.506-07:00';

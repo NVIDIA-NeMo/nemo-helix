@@ -291,7 +291,7 @@ import time
 
 status = None
 while True:
-    status = client.jobs.get_status(name=job.job.name, workspace="default")
+    status = client.jobs.get_job_status(name=job.job.name, workspace="default").data()
     print(f"Status: {status.status}")
     if status.status.lower() in ("completed", "failed", "cancelled", "error"):
         break

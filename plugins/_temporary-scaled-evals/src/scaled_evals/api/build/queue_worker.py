@@ -93,6 +93,7 @@ class TaskBuildWorker:
         heartbeat.start()
         try:
             image_ref, image_digest = self._execute(job)
+            verifier_image = resolve_verifier_image(job)
         except Exception as exc:  # noqa: BLE001 - persisted for retry/diagnosis
             error = str(exc)[:4000]
             LOG.exception(
@@ -120,6 +121,8 @@ class TaskBuildWorker:
                     worker_id=self.worker_id,
                     image_ref=image_ref,
                     image_digest=image_digest,
+                    verifier_image_ref=verifier_image[0] if verifier_image else None,
+                    verifier_image_digest=verifier_image[1] if verifier_image else None,
                 )
             if not completed:
                 LOG.warning(
@@ -190,4 +193,21 @@ def execute_task_build(job: TaskBuildJob) -> tuple[str, str]:
         builder_source_commit=str(payload.get("builder_source_commit") or settings.image_builder_source_commit),
     )
     resolved = resolve_task_image(image_ref, expected_digest=builder_digest)
+    return resolved.runtime_ref, resolved.digest
+
+
+def resolve_verifier_image(job: TaskBuildJob) -> tuple[str, str] | None:
+    """Resolve the prebuilt separate-verifier image finalize recorded, if any.
+
+    Only prebuilt jobs carry one: task builds produce the agent image alone.
+    """
+    if job.backend != "prebuilt":
+        return None
+    verifier_ref = str(job.payload.get("verifier_image_ref") or "")
+    if not verifier_ref:
+        return None
+    resolved = resolve_task_image(
+        verifier_ref,
+        expected_digest=str(job.payload.get("verifier_expected_digest") or "") or None,
+    )
     return resolved.runtime_ref, resolved.digest

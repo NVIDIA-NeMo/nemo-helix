@@ -222,8 +222,8 @@ For the complete default values, see [values.yaml](values.yaml).
 | api.replicaCount | int | `1` | Number of replicas for the API service. |
 | api.resources | object | `{}` | Kubernetes deployment resources configuration for the API service. Utilization-based autoscaling requires a matching resource request. |
 | api.securityContext | object | `{}` | Container-level security context settings for the API service. |
-| api.server | object | `{"keepAliveTimeoutSeconds":5}` | Platform API server settings. |
-| api.server.keepAliveTimeoutSeconds | int | `5` | Seconds Uvicorn keeps idle HTTP connections open. Must be greater than envoyProxy.timeouts.upstreamIdle when Envoy is enabled. |
+| api.server | object | `{"keepAliveTimeoutSeconds":10}` | Platform API server settings. |
+| api.server.keepAliveTimeoutSeconds | int | `10` | Seconds Uvicorn keeps idle HTTP connections open. Must be greater than envoyProxy.timeouts.upstreamIdle when Envoy is enabled. |
 | api.service | object | [See values.yaml](values.yaml#L828) | Service configuration for the API service. |
 | api.service.annotations | object | `{}` | Annotations for the API service. |
 | api.service.port | int | `8080` | The port number to expose for the service. |

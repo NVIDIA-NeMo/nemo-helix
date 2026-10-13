@@ -215,6 +215,8 @@ _LOAD_FOR_DISPATCH_SQL = """
         b.slug AS task_slug,
         r.image_ref,
         r.image_digest,
+        r.verifier_image_ref,
+        r.verifier_image_digest,
         r.tarball_sha256,
         r.tarball_object_key,
         r.tarball_size_bytes,

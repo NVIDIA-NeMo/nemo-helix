@@ -47,6 +47,7 @@ Instantiate the platform client.
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
 client = NemoClient.from_config()
@@ -120,7 +121,7 @@ except ConflictError:
 The plugin runs only when a VirtualModel references it in its middleware list. Wire the config on both `request_middleware` (input rails) and `response_middleware` (output rails).
 
 ```python
-client.inference.virtual_models.create_virtual_model(
+VirtualModelsClient.from_client(client).create_virtual_model(
     body=CreateVirtualModelRequest(
         name="guarded-content-safety",
         default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -319,7 +320,7 @@ print(response.model_dump_json(indent=2))
 ## Cleanup
 
 ```python
-client.inference.virtual_models.delete_virtual_model(name="guarded-content-safety")
+VirtualModelsClient.from_client(client).delete_virtual_model(name="guarded-content-safety")
 client.guardrail.delete_guardrail_config(name="content-safety-config")
 print("Cleanup complete")
 ```

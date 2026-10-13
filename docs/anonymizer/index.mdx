@@ -45,7 +45,7 @@ Submit the config to the Anonymizer service with NeMo Helix SDK:
 
 {/* @nemo-docs: skip-python-type-check */}
 ```python
-from nemo_anonymizer_plugin.app.task_config import PreviewRequest
+from nemo_anonymizer_plugin.app.task_config import AnonymizerConfigRequest, PreviewRequest
 from nemo_anonymizer_plugin.sdk.resources import AnonymizerResource
 from nemo_helix_plugin.client.client import NemoClient
 
@@ -53,7 +53,7 @@ client = NemoClient(base_url="...", workspace="default")
 anonymizer = AnonymizerResource(client)
 
 preview_result = anonymizer.preview(PreviewRequest(
-    config=config,
+    config=AnonymizerConfigRequest.model_validate(config),
     data={"source": "my-fileset#data/input.csv", "text_column": "biography"},
     model_configs=[...],
     num_records=10,

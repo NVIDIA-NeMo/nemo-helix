@@ -283,7 +283,7 @@ import csv
 import tempfile
 from pathlib import Path
 
-results = client.jobs.results.list(prepare_job.name, workspace="default").data
+results = client.jobs.list_job_results(name=prepare_job.name, workspace="default").data().data
 artifacts = next(row for row in results if row.name == "artifacts")
 ARTIFACTS_REF = artifacts.artifact_url
 print("Stage 1 artifacts:", ARTIFACTS_REF)
@@ -473,7 +473,7 @@ import time
 
 # Poll the job until it reaches a terminal state
 while True:
-    status = client.jobs.get_status(name=JOB_NAME, workspace="default")
+    status = client.jobs.get_job_status(name=JOB_NAME, workspace="default").data()
     print(f"Status: {status.status}")
     if status.status.lower() in ("completed", "failed", "cancelled", "error"):
         break
@@ -659,7 +659,7 @@ eval_job_name = json.loads(proc.stdout[proc.stdout.index("{") :])["name"]
 print("retrieve-eval job:", eval_job_name)
 
 while True:
-    status = client.jobs.get_status(name=eval_job_name, workspace="default")
+    status = client.jobs.get_job_status(name=eval_job_name, workspace="default").data()
     print("eval status:", status.status)
     if status.status in ("completed", "failed", "cancelled", "error"):
         break
@@ -667,7 +667,7 @@ while True:
 if status.status != "completed":
     raise RuntimeError(f"retrieve-eval finished with status: {status.status}")
 
-for row in client.jobs.results.list(eval_job_name, workspace="default").data:
+for row in client.jobs.list_job_results(name=eval_job_name, workspace="default").data().data:
     print(json.dumps(row.model_dump(), default=str, indent=2)[:4000])
 ```
 

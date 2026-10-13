@@ -32,6 +32,10 @@ class LaunchSpec(BaseModel):
     harbor_dir: str | None = None
     image_ref: str
     image_digest: str | None = None
+    # Image for a verifier that runs in its own sandbox, built from the task's tests/.
+    # ``None`` when the task revision recorded none.
+    verifier_image_ref: str | None = None
+    verifier_image_digest: str | None = None
     n_attempts: int = 1
     parallelism: int
     network_policy: str = "unrestricted"

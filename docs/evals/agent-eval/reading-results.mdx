@@ -210,9 +210,17 @@ publishes two named job results:
 Wait for the platform job to reach a terminal state before reading either result:
 
 ```python
-job.wait_until_done()
-stored = evaluator.agent_eval_results.retrieve("<result-name>")
-sdk.files.download(remote_path=stored.bundle_ref, local_path="agent-eval-run")
+from pathlib import Path
+
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+for _event in client.jobs.watch_job("<job-name>"):
+    pass  # yields status and log events until the job reaches a terminal state
+
+stored = client.evals.get_agent_eval_result(name="<result-name>").data()
+bundle = client.evals.download_agent_eval_job_result(job="<job-name>", name="agent-eval-results").read()
+Path("agent-eval-results.tar.gz").write_bytes(bundle)
 ```
 
 You can also download the bundle through the Jobs CLI:

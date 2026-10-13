@@ -20,7 +20,7 @@ Select **New experiment** from the Experiments list. In the **Create experiment*
 
 ## Experiment Detail
 
-Select an experiment to open its detail page, which shows aggregate metrics across its evaluations and a table of the evaluations in the group. Toggle **Pareto view** to plot evaluations on a chart instead of the table, by default cost against latency. Change either axis to cost, latency, or any evaluator's score (`cost_usd`, `latency_ms`, or `evaluators.<name>`); the selection is saved per experiment.
+Select an experiment to open its detail page, which shows aggregate metrics across its evaluations and a table of the evaluations in the group. Toggle **Pareto view** to plot evaluations on a chart instead of the table, by default cost against latency. Change either axis to cost, latency, tokens, or any evaluator's score (`cost_usd`, `latency_ms`, `tokens`, or `evaluators.<name>`); the selection is saved per experiment. When the saved axes have no data to plot together, such as cost for a self-hosted model, the chart falls back to an evaluator's score against cost or tokens.
 
 Select **Edit** to update the experiment's name, description, or default sort order.
 

@@ -479,17 +479,22 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
-    Annotate:
+    AnnotateRequest:
       properties:
         format_template:
           type: string
           title: Format Template
           description: Template with {text} and {label} placeholders.
           default: <{text}, {label}>
+        kind:
+          type: string
+          const: annotate
+          title: Kind
+          default: annotate
       type: object
-      title: Annotate
+      title: AnnotateRequest
       description: Tag each entity with a readable label token.
-    AnonymizerConfig:
+    AnonymizerConfigRequest:
       properties:
         detect:
           allOf:
@@ -500,10 +505,17 @@ components:
           description: Replacement method (Substitute(), Redact(), Annotate(), or
             Hash()).
           oneOf:
-          - $ref: '#/components/schemas/Annotate'
-          - $ref: '#/components/schemas/Redact'
-          - $ref: '#/components/schemas/Hash'
-          - $ref: '#/components/schemas/Substitute'
+          - $ref: '#/components/schemas/SubstituteRequest'
+          - $ref: '#/components/schemas/RedactRequest'
+          - $ref: '#/components/schemas/AnnotateRequest'
+          - $ref: '#/components/schemas/HashRequest'
+          discriminator:
+            propertyName: kind
+            mapping:
+              annotate: '#/components/schemas/AnnotateRequest'
+              hash: '#/components/schemas/HashRequest'
+              redact: '#/components/schemas/RedactRequest'
+              substitute: '#/components/schemas/SubstituteRequest'
         rewrite:
           allOf:
           - $ref: '#/components/schemas/Rewrite'
@@ -516,8 +528,9 @@ components:
             out at the environment or CLI level.
           default: true
       type: object
-      title: AnonymizerConfig
-      description: Primary user-facing config for anonymization behavior.
+      title: AnonymizerConfigRequest
+      description: Wire-level ``AnonymizerConfig`` with a ``kind``-discriminated ``replace``
+        union.
     AnonymizerInputSpec:
       properties:
         source:
@@ -555,7 +568,7 @@ components:
     AnonymizerRequest:
       properties:
         config:
-          $ref: '#/components/schemas/AnonymizerConfig'
+          $ref: '#/components/schemas/AnonymizerConfigRequest'
         data:
           $ref: '#/components/schemas/AnonymizerInputSpec'
         model_configs:
@@ -571,11 +584,11 @@ components:
       - data
       title: AnonymizerRequest
       description: "User-facing anonymizer execution request.\n\nFields:\n  config:\
-        \           AnonymizerConfig \u2014 replace/rewrite mode + detection params.\n\
-        \  data:             AnonymizerInputSpec \u2014 HTTP(S) URL or fileset source\
-        \ + text/id columns.\n  model_configs:    DD ``ModelConfig`` list. ``provider``\
-        \ on each entry must\n                    reference a NeMo Helix inference\
-        \ provider name (optionally\n                    ``workspace/provider``).\
+        \           AnonymizerConfigRequest \u2014 replace/rewrite mode + detection\
+        \ params.\n  data:             AnonymizerInputSpec \u2014 HTTP(S) URL or fileset\
+        \ source + text/id columns.\n  model_configs:    DD ``ModelConfig`` list.\
+        \ ``provider`` on each entry must\n                    reference a NeMo Helix\
+        \ inference provider name (optionally\n                    ``workspace/provider``).\
         \ Optional on the request model for\n                    compatibility, but\
         \ required by plugin preview/run execution\n                    so requests\
         \ route through NeMo Helix Inference Gateway.\n  selected_models:  Optional\
@@ -837,7 +850,7 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
-    Hash:
+    HashRequest:
       properties:
         algorithm:
           type: string
@@ -860,8 +873,13 @@ components:
           title: Format Template
           description: Template with {digest} required and optional {label}.
           default: <HASH_{label}_{digest}>
+        kind:
+          type: string
+          const: hash
+          title: Kind
+          default: hash
       type: object
-      title: Hash
+      title: HashRequest
       description: Replace each entity with a deterministic hash token.
     Heartbeat:
       properties:
@@ -1344,7 +1362,7 @@ components:
     PreviewRequest:
       properties:
         config:
-          $ref: '#/components/schemas/AnonymizerConfig'
+          $ref: '#/components/schemas/AnonymizerConfigRequest'
         data:
           $ref: '#/components/schemas/AnonymizerInputSpec'
         model_configs:
@@ -1385,7 +1403,7 @@ components:
       - preserve
       title: PrivacyGoal
       description: Structured privacy and utility goal for rewrite mode.
-    Redact:
+    RedactRequest:
       properties:
         format_template:
           type: string
@@ -1397,8 +1415,13 @@ components:
           title: Normalize Label
           description: Uppercase and clean label before substitution.
           default: true
+        kind:
+          type: string
+          const: redact
+          title: Kind
+          default: redact
       type: object
-      title: Redact
+      title: RedactRequest
       description: Replace each entity with a configurable redaction template.
     Rewrite:
       properties:
@@ -1664,14 +1687,19 @@ components:
           type: array
       title: StringFilter
       type: object
-    Substitute:
+    SubstituteRequest:
       properties:
         instructions:
           title: Instructions
           description: Additional instructions for the LLM replacement generator.
           type: string
+        kind:
+          type: string
+          const: substitute
+          title: Kind
+          default: substitute
       type: object
-      title: Substitute
+      title: SubstituteRequest
       description: Replace entities with LLM-generated synthetic values.
     TraceDatasetFrame:
       properties:

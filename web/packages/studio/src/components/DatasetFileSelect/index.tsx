@@ -12,6 +12,7 @@ import {
   FormField,
   SelectContent,
   SelectItem,
+  SelectListbox,
   SelectRoot,
   SelectTrigger,
 } from '@nvidia/foundations-react-core';
@@ -121,27 +122,32 @@ export const DatasetFileSelect: FC<Props> = ({
               aria-label="dataset-file-select"
             />
             <SelectContent>
-              {isError && (
-                <SelectItem value="" disabled>
-                  Error loading files
-                </SelectItem>
-              )}
-              {!isDisabled && !isError && (
-                <>
-                  {fileOptions.map((fileOpt, idx) => (
-                    <SelectItem key={idx} value={fileOpt.value} className="kui-select-item">
-                      {fileOpt.value}
-                    </SelectItem>
-                  ))}
-                  {!hideNew && (
-                    <SelectItem className="border-t border-interaction-primary-base" value="Other">
-                      <Flex gap="density-md">
-                        <Plus /> Create New File
-                      </Flex>
-                    </SelectItem>
-                  )}
-                </>
-              )}
+              <SelectListbox>
+                {isError && (
+                  <SelectItem value="" disabled>
+                    Error loading files
+                  </SelectItem>
+                )}
+                {!isDisabled && !isError && (
+                  <>
+                    {fileOptions.map((fileOpt, idx) => (
+                      <SelectItem key={idx} value={fileOpt.value} className="kui-select-item">
+                        {fileOpt.value}
+                      </SelectItem>
+                    ))}
+                    {!hideNew && (
+                      <SelectItem
+                        className="border-t border-interaction-primary-base"
+                        value="Other"
+                      >
+                        <Flex gap="density-md">
+                          <Plus /> Create New File
+                        </Flex>
+                      </SelectItem>
+                    )}
+                  </>
+                )}
+              </SelectListbox>
             </SelectContent>
           </SelectRoot>
         )}

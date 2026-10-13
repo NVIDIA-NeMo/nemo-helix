@@ -133,9 +133,20 @@ client's transport. For endpoint details, see the [REST API Reference](/document
 
 ### Model Management
 
-- **models**: Model entity CRUD
-- **inference**: Providers, deployments, deployment configs, and virtual models (`client.inference.providers`, `client.inference.deployments`, `client.inference.deployment_configs`, `client.inference.virtual_models`)
+- **models**: Model entities, model providers, deployment configs, and deployments (`client.models.create_provider`, `client.models.create_deployment_config`, `client.models.create_deployment`, ...)
 - **evaluator**: Evaluations
+
+Virtual models and the inference gateway have typed clients without a shortcut property. Build them from the main client:
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+
+client = NemoClient.from_config()
+virtual_models = VirtualModelsClient.from_client(client)
+gateway = InferenceGatewayClient.from_client(client)
+```
 
 ### Data & Synthesis
 

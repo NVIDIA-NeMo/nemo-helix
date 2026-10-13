@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import weakref
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
@@ -126,6 +127,11 @@ def _get_job_mutation_lock(job_name: str, workspace: str) -> asyncio.Lock:
     return lock
 
 
+def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime:
+    # Status changes only rewrite the attempt, so the job entity's own timestamp stays at creation.
+    return max(ts for ts in (job.updated_at, attempt.updated_at) if ts is not None)
+
+
 def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> HelixJobResponse:
     """Helper to create HelixJobResponse from job and attempt entities."""
     ownership = job.ownership
@@ -139,7 +145,7 @@ def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> Hel
         workspace=job.workspace,
         project=job.project,
         created_at=job.created_at,  # type: ignore
-        updated_at=job.updated_at,  # type: ignore
+        updated_at=_job_updated_at(job, attempt),
         source=job.source,
         spec=job.spec,
         platform_spec=job.platform_spec,
@@ -159,41 +165,44 @@ def _format_status_for_message(status: HelixJobStatus | str) -> str:
     return str(status)
 
 
-# Status lives on HelixJobAttempt, not HelixJob, so it cannot be
-# resolved by the HelixJob entity-store query. Instead, the full filter tree
-# is evaluated in-memory (op.apply(InMemoryFilterRepository(virtual_job))) against
-# a "virtual job" entity that carries the attempt's status. The store query
-# receives only a status-free *superset* of the filter (see _status_free_superset)
-# so it never drops a row the in-memory pass would accept; that pass then narrows
+# Status lives on HelixJobAttempt, not HelixJob, and the reported updated_at
+# folds in the attempt's timestamp, so neither can be resolved by the HelixJob
+# entity-store query. Instead, the full filter tree is evaluated in-memory
+# (op.apply(InMemoryFilterRepository(virtual_job))) against a "virtual job"
+# entity that carries the attempt-derived values. The store query receives only
+# an attempt-free *superset* of the filter (see _attempt_free_superset) so it
+# never drops a row the in-memory pass would accept; that pass then narrows
 # exactly.
 _STATUS_FIELD = "data.status"
+_ATTEMPT_DERIVED_FIELDS = frozenset({_STATUS_FIELD, "updated_at"})
 
 
-def _references_status(operation: FilterOperation | None) -> bool:
-    """Whether the operation tree contains any comparison on the status field."""
+def _references_attempt_field(operation: FilterOperation | None) -> bool:
+    """Whether the operation tree contains any comparison on an attempt-derived field."""
     if operation is None:
         return False
     if isinstance(operation, ComparisonOperation):
-        return operation.field == _STATUS_FIELD
+        return operation.field in _ATTEMPT_DERIVED_FIELDS
     if isinstance(operation, LogicalOperation):
-        return any(_references_status(child) for child in operation.operations)
+        return any(_references_attempt_field(child) for child in operation.operations)
     return False
 
 
-def _status_free_superset(operation: FilterOperation | None) -> FilterOperation | None:
-    """Build a status-free store filter that accepts a SUPERSET of ``operation``.
+def _attempt_free_superset(operation: FilterOperation | None) -> FilterOperation | None:
+    """Build an attempt-free store filter that accepts a SUPERSET of ``operation``.
 
-    Status lives on the attempt, not the job, so it cannot be pushed to the
-    HelixJob store query. We push down a relaxed, status-independent filter
-    that is guaranteed to keep every row the in-memory evaluation would accept;
-    that evaluation then narrows the candidate set exactly.
+    Status and the reported updated_at derive from the attempt, so they cannot
+    be pushed to the HelixJob store query. We push down a relaxed,
+    attempt-independent filter that is guaranteed to keep every row the
+    in-memory evaluation would accept; that evaluation then narrows the
+    candidate set exactly.
 
     ``None`` means "no store constraint" (accept all jobs in scope) — always a
     valid superset. The relaxation rules below preserve the superset property:
 
-    - Status comparison -> None. Replacing a constraint with "accept all" only
-      widens.
-    - Non-status comparison -> itself. Status-independent, so it is exact and
+    - Attempt-derived comparison -> None. Replacing a constraint with "accept
+      all" only widens.
+    - Any other comparison -> itself. Attempt-independent, so it is exact and
       safe to push verbatim.
     - ``$and`` -> AND of the children's supersets (children that relax to None
       are dropped). Any row satisfying the original AND satisfies every child,
@@ -203,21 +212,21 @@ def _status_free_superset(operation: FilterOperation | None) -> FilterOperation 
       None, in which case the whole OR relaxes to None (an unconstrained branch
       makes the union unconstrained). Each child-superset is a superset of its
       child, so the OR of supersets is a superset of the OR of children.
-    - ``$not`` -> kept verbatim only when its operand is status-free (then the
-      whole negation is exact and status-independent). If the operand references
-      status, negation can invert sub/superset relationships, so we relax the
+    - ``$not`` -> kept verbatim only when its operand is attempt-free (then the
+      whole negation is exact and attempt-independent). If the operand references
+      an attempt-derived field, negation can invert sub/superset relationships, so we relax the
       entire ``$not`` to None and let the in-memory pass do the work.
     """
     if operation is None:
         return None
     if isinstance(operation, ComparisonOperation):
-        return None if operation.field == _STATUS_FIELD else operation
+        return None if operation.field in _ATTEMPT_DERIVED_FIELDS else operation
     if isinstance(operation, LogicalOperation):
         if operation.operator == FilterOperator.NOT:
-            # not X is status-independent only when X is; otherwise relax to None.
-            return None if _references_status(operation) else operation
+            # not X is attempt-independent only when X is; otherwise relax to None.
+            return None if _references_attempt_field(operation) else operation
 
-        relaxed = [_status_free_superset(child) for child in operation.operations]
+        relaxed = [_attempt_free_superset(child) for child in operation.operations]
 
         if operation.operator == FilterOperator.OR:
             # An unconstrained branch makes the union unconstrained.
@@ -257,7 +266,7 @@ def _build_virtual_job_entity(job: HelixJob, attempt: HelixJobAttempt) -> dict[s
         "project": job.project,
         "entity_type": HelixJob.__entity_type__,
         "created_at": job.created_at,
-        "updated_at": job.updated_at,
+        "updated_at": _job_updated_at(job, attempt),
         "data": data,
     }
 
@@ -456,11 +465,11 @@ class JobDispatcher:
         """List platform jobs with their current attempts."""
         # Status lives on HelixJobAttempt, not HelixJob, so the full filter
         # tree is evaluated in-memory against a virtual job entity that carries the
-        # attempt status. The store query receives a status-free SUPERSET of the
-        # filter so it never drops a row the in-memory pass would accept (see
-        # _status_free_superset); that pass then narrows the page exactly.
+        # attempt-derived fields. The store query receives an attempt-free SUPERSET
+        # of the filter so it never drops a row the in-memory pass would accept (see
+        # _attempt_free_superset); that pass then narrows the page exactly.
         # The operation is already entity-translated by make_filter_dep.
-        store_operation = _status_free_superset(parsed.operation)
+        store_operation = _attempt_free_superset(parsed.operation)
 
         # Calculate page from offset
         page = 1

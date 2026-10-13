@@ -25,7 +25,12 @@ from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_anonymizer_plugin.app import context as context_module
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
-from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, AnonymizerStepConfig
+from nemo_anonymizer_plugin.app.task_config import (
+    AnonymizerConfigRequest,
+    AnonymizerRequest,
+    AnonymizerStepConfig,
+    RedactRequest,
+)
 from nemo_anonymizer_plugin.jobs import run as run_module
 from nemo_anonymizer_plugin.jobs.run import RunJob
 from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
@@ -105,7 +110,7 @@ async def test_run_job_rejects_selected_models_without_model_configs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = AnonymizerRequest(
-        config=AnonymizerConfig(replace=Redact()),
+        config=AnonymizerConfigRequest(replace=RedactRequest()),
         data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
         selected_models=SelectedModelsOverrides(detection={"entity_detector": "detector"}),
     )
@@ -120,7 +125,7 @@ async def test_run_job_wraps_shared_provider_config_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = AnonymizerRequest(
-        config=AnonymizerConfig(replace=Redact()),
+        config=AnonymizerConfigRequest(replace=RedactRequest()),
         data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
         model_configs=[dd.ModelConfig(alias="detector", model="test/model", provider="missing")],
     )
@@ -140,7 +145,7 @@ async def test_run_submit_requires_model_configs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = AnonymizerRequest(
-        config=AnonymizerConfig(replace=Redact()),
+        config=AnonymizerConfigRequest(replace=RedactRequest()),
         data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
@@ -158,7 +163,7 @@ async def test_run_job_uses_igw_provider_registry(
     )
     igw_lookup = AsyncMock(return_value=igw_registry)
     request = AnonymizerRequest(
-        config=AnonymizerConfig(replace=Redact()),
+        config=AnonymizerConfigRequest(replace=RedactRequest()),
         data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
         model_configs=[dd.ModelConfig(alias="detector", model="test/model", provider="provider")],
     )
@@ -182,7 +187,7 @@ async def test_run_serialized_step_config_can_be_revalidated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = AnonymizerRequest(
-        config=AnonymizerConfig(replace=Redact()),
+        config=AnonymizerConfigRequest(replace=RedactRequest()),
         data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
         model_configs=[dd.ModelConfig(alias="detector", model="test/model", provider="provider")],
     )
@@ -256,7 +261,7 @@ def test_run_step_config_uses_ctx_results(
 
     step_config = AnonymizerStepConfig(
         request=AnonymizerRequest(
-            config=AnonymizerConfig(replace=Redact()),
+            config=AnonymizerConfigRequest(replace=RedactRequest()),
             data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
         ),
         model_configs_yaml="model_configs:\n- alias: detector\n  model: test/model\n  provider: provider\n",
@@ -297,7 +302,7 @@ def test_run_step_config_uses_ctx_results(
 def test_run_step_config_remote_requires_sdk(tmp_path: Path) -> None:
     step_config = AnonymizerStepConfig(
         request=AnonymizerRequest(
-            config=AnonymizerConfig(replace=Redact()),
+            config=AnonymizerConfigRequest(replace=RedactRequest()),
             data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
         ),
         model_configs_yaml="",
@@ -318,7 +323,7 @@ def test_run_step_config_requires_resolved_model_configs(
 ) -> None:
     step_config = AnonymizerStepConfig(
         request=AnonymizerRequest(
-            config=AnonymizerConfig(replace=Redact()),
+            config=AnonymizerConfigRequest(replace=RedactRequest()),
             data=AnonymizerInputSpec(source="https://example.com/input.csv", text_column="text"),
         ),
         model_configs_yaml="",
@@ -346,7 +351,7 @@ async def test_run_submit_rejects_local_file(
     csv = tmp_path / "input.csv"
     csv.write_text("text\nhello\n")
     request = AnonymizerRequest(
-        config=AnonymizerConfig(replace=Redact()),
+        config=AnonymizerConfigRequest(replace=RedactRequest()),
         data=AnonymizerInputSpec(source=str(csv), text_column="text"),
         model_configs=[dd.ModelConfig(alias="detector", model="test/model", provider="provider")],
     )

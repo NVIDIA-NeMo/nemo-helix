@@ -75,6 +75,21 @@ def read_refusal(row: ContainerImage, caller: Caller) -> str | None:
     return None
 
 
+def submit_refusal(caller: Caller) -> str | None:
+    """Why ``caller`` may not submit builds, or None if it may.
+
+    A service must act for a person, as a platform service building for a user does. The entity store records the
+    rows as created by that person; acting for no one, or for a service, they would be the builder's own, which no push
+    step acts for, so none would ever complete. The policy admits a service on its own permissions, whoever it acts
+    for.
+    """
+    if not caller.auth or caller.actor is None or not is_service_principal_id(caller.actor):
+        return None
+    if caller.submitter is None or is_service_principal_id(caller.submitter):
+        return "a service may submit builds only acting for a person"
+    return None
+
+
 class CompletionConflict(Exception):
     """The row has already settled, and not as this completion would settle it (409)."""
 

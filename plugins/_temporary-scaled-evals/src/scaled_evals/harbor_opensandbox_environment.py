@@ -14,6 +14,9 @@ This subclass keeps all of that and changes what the sandbox is allowed to reach
   if it cannot be read at all.
 * Every create attempt is labelled, so a sandbox the server created but whose handle was lost to a
   failed or retried request can still be found and killed.
+* On an image with a non-root ``USER``, Harbor's ``user="root"`` commands run as the image's user.
+  ``execd`` runs as that user and the kernel refuses its switch to uid 0, so asking for root fails
+  every such command before it starts, even checks like ``tmux -V``.
 
 Loaded by Harbor through ``environment.import_path``; see ``NEMO_OPENSANDBOX_IMPORT_PATH`` in
 ``scaled_evals.dispatch.harbor_opensandbox``. This is the interim home until ``nhx-sandbox`` owns
@@ -22,12 +25,15 @@ OpenSandbox access.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, override
 from uuid import uuid4
 
+from harbor.environments.base import ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.opensandbox import OpenSandboxEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
@@ -49,6 +55,7 @@ MANAGED_BY_METADATA_KEY = "nemo-managed-by"
 MANAGED_BY_METADATA_VALUE = "scaled-evals"
 # Sandbox metadata label shared by every sandbox one create call made, including Harbor's retries.
 CREATE_ATTEMPT_METADATA_KEY = "nemo-scaled-evals-create-attempt"
+_IMAGE_UID_PROBE_TIMEOUT = timedelta(seconds=30)
 
 
 class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
@@ -82,6 +89,10 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
         self._egress_verification: EgressVerificationMode = egress_verification
         self._expected_egress: EgressPolicy | None = None
+        self._image_uid: int | None = None
+        self._image_uid_probed = False
+        self._image_uid_lock = asyncio.Lock()
+        self._warned_root_unavailable = False
         super().__init__(
             environment_dir,
             environment_name,
@@ -233,6 +244,58 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
                 await manager.close()
             except Exception:
                 pass
+
+    @override
+    async def exec(
+        self,
+        command: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_sec: int | None = None,
+        user: str | int | None = None,
+    ) -> ExecResult:
+        """Learn the image's uid before the first root command, so ``_resolve_uid`` can map it."""
+        if not self._image_uid_probed and self._requests_root(user):
+            await self._probe_image_uid()
+        return await super().exec(command, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user)
+
+    @override
+    def _resolve_uid(self, user: str | int) -> int | None:
+        """Drop a uid 0 request on a non-root image, so the command runs as the image's user."""
+        uid = super()._resolve_uid(user)
+        if uid != 0 or self._image_uid in (None, 0):
+            return uid
+        if not self._warned_root_unavailable:
+            self._warned_root_unavailable = True
+            self.logger.warning(
+                "Sandbox image runs as uid %s and OpenSandbox can't switch it to root; running root "
+                "commands as uid %s instead. Commands that need root, such as package installs, will fail.",
+                self._image_uid,
+                self._image_uid,
+            )
+        return None
+
+    def _requests_root(self, user: str | int | None) -> bool:
+        resolved = self._resolve_user(user)
+        return resolved is not None and super()._resolve_uid(resolved) == 0
+
+    async def _probe_image_uid(self) -> None:
+        """Run ``id -u`` once as the sandbox default user; on failure, root requests stay uid 0."""
+        async with self._image_uid_lock:
+            if self._image_uid_probed or self._sandbox is None:
+                return
+            self._image_uid_probed = True
+            sdk = self._load_opensandbox()
+            try:
+                execution = await self._sandbox.commands.run(
+                    "id -u",
+                    opts=sdk["RunCommandOpts"](working_directory="/", timeout=_IMAGE_UID_PROBE_TIMEOUT),
+                )
+                self._image_uid = int("".join(message.text for message in execution.logs.stdout).strip())
+            except Exception:
+                self.logger.warning(
+                    "Could not read the sandbox image's uid; root commands are sent as uid 0", exc_info=True
+                )
 
     @override
     def _load_opensandbox(self) -> dict[str, Any]:

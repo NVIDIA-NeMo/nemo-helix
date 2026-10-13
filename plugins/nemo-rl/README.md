@@ -16,7 +16,7 @@ Thin contributor layer only — the heavy compile glue and container tasks live 
   there is no local `run` verb or local execution path).
 - **REST:** `POST /apis/customization/v2/workspaces/{workspace}/rl/jobs`
 - **List:** `GET .../rl/jobs` returns jobs whose spec stores `backend`. To list jobs submitted before that field existed, use `nemo jobs list` (`GET /apis/jobs/v2/workspaces/{workspace}/jobs`).
-- **SDK:** `client.customization.rl.jobs.create(...).data()`
+- **SDK:** `Customization.from_client(client).rl.jobs.create(...).data()` (`from nemo_customizer.sdk import Customization`)
 
 ## Constraints
 

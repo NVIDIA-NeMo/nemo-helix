@@ -506,6 +506,15 @@ class Settings(BaseSettings):
     harbor_opensandbox_work_dir: str = "/tmp/harbor-opensandbox"
     # Harbor's jobs_dir relative to the selected Harbor runner directory.
     harbor_opensandbox_jobs_dir: str = "jobs/harbor-opensandbox"
+    # Absolute directory holding the per-evaluation job directories Harbor writes
+    # to <runner>/<harbor_opensandbox_jobs_dir>, after any symlinks or mounts.
+    # The status reader, terminator and artifact upload read from here.
+    # In the shipped image every runner's jobs/ is a symlink to the mounted
+    # /var/lib/scaled-evals/harbor-jobs, so this is
+    # /var/lib/scaled-evals/harbor-jobs/harbor-opensandbox. When unset, they read
+    # <harbor_dir>/<harbor_opensandbox_jobs_dir>, which matches only when harbor_dir
+    # is the evaluation's runner.
+    harbor_opensandbox_artifact_root: str | None = None
     # Protocol for OpenSandbox API calls, used by both Harbor and the cleanup module.
     harbor_opensandbox_protocol: Literal["http", "https"] = "https"
     # Comma-separated. The model endpoint trial agents call (inference gateway or

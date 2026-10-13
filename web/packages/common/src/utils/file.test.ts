@@ -6,6 +6,7 @@ import {
   findMessagesArray,
   getFirstRow,
   extractUserFriendlyKeysFromRow,
+  resolveKeyPath,
 } from './file';
 
 describe('triggerDownload', () => {
@@ -876,5 +877,43 @@ describe('extractUserFriendlyKeysFromRow', () => {
       { label: 'tags', value: 'tags' },
       { label: 'scores', value: 'scores' },
     ]);
+  });
+});
+
+describe('resolveKeyPath', () => {
+  const row = {
+    question: 'q',
+    messages: [
+      { role: 'system', content: 's' },
+      { role: 'user', content: 'u1' },
+      { role: 'assistant', content: 'a1' },
+      { role: 'user', content: 'u2' },
+      { role: 'assistant', content: 'a2' },
+    ],
+  };
+
+  it('resolves plain and positional paths', () => {
+    expect(resolveKeyPath(row, 'question')).toBe('q');
+    expect(resolveKeyPath(row, 'messages[1].content')).toBe('u1');
+    expect(resolveKeyPath(row, 'messages[9].content')).toBeUndefined();
+  });
+
+  it('selects the last element matching a predicate', () => {
+    expect(resolveKeyPath(row, 'messages[role=user].content')).toBe('u2');
+    expect(resolveKeyPath(row, 'messages[role=assistant].content')).toBe('a2');
+    expect(resolveKeyPath(row, 'messages[role=system]')).toEqual({ role: 'system', content: 's' });
+  });
+
+  it('returns undefined when a predicate matches nothing', () => {
+    expect(resolveKeyPath(row, 'messages[role=tool].content')).toBeUndefined();
+  });
+
+  it('returns undefined when a predicate is applied to a non-array', () => {
+    expect(resolveKeyPath(row, 'question[role=user]')).toBeUndefined();
+    expect(resolveKeyPath({ messages: { role: 'user' } }, 'messages[role=user]')).toBeUndefined();
+  });
+
+  it('matches string-valued fields only', () => {
+    expect(resolveKeyPath({ items: [{ done: true }] }, 'items[done=true]')).toBeUndefined();
   });
 });

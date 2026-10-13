@@ -63,9 +63,9 @@ _DEFAULT_SORT_HELP = (
 )
 _PARETO_HELP = (
     "Default X/Y metrics for a group's cost-vs-accuracy Pareto view. Metric ids use the same vocabulary as the "
-    "evaluations list sort/filter fields — `cost_usd`, `latency_ms`, or `evaluators.<name>`. Defaults to cost (x) "
-    "vs latency (y): both exist for every group, so the chart always has something to render before anyone "
-    "customizes it. (JSON string)"
+    "evaluations list sort/filter fields — `cost_usd`, `latency_ms`, `tokens`, or `evaluators.<name>`. Defaults to "
+    "cost (x) vs latency (y): both exist for every group, so the chart always has something to render before "
+    "anyone customizes it. (JSON string)"
 )
 _IS_FAVORITE_HELP = (
     "Whether this Experiment is marked as a favorite. Defaults to false on create; omit on update to preserve "

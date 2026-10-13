@@ -116,7 +116,12 @@ docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link ch
 	cd docs/fern && npm run check
 
 DOCS_TYPED_SNIPPET_PATHS := \
+	docs/agents/add-guardrails.mdx \
+	docs/agents/deploy-agents.mdx \
+	docs/agents/optimization.mdx \
 	docs/anonymizer/tutorials/preview.mdx \
+	docs/garak/targets/index.mdx \
+	docs/garak/targets/inference-gateway.mdx \
 	docs/auth/authorization/plugin-authorization.mdx \
 	docs/auth/authorization/policy-engine.mdx \
 	docs/customizer/tutorials/embedding-customization-job.mdx \
@@ -128,11 +133,23 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/data-designer/tutorials/seeding.mdx \
 	docs/evals/agent-eval/gym-runner.mdx \
 	docs/evals/agent-eval/index.mdx \
+	docs/get-started/concepts/filtering.mdx \
+	docs/guardrails/concepts/configurations/default-configs.mdx \
+	docs/guardrails/concepts/inference.mdx \
+	docs/guardrails/observability.mdx \
+	docs/guardrails/tutorials/content-safety.mdx \
+	docs/guardrails/tutorials/injection-detection.mdx \
+	docs/guardrails/tutorials/multimodal-data.mdx \
+	docs/guardrails/tutorials/parallel-rails.mdx \
 	docs/pysdk/client/index.mdx \
+	docs/run-inference/about.mdx \
+	docs/run-inference/tutorials/deploy-models.mdx \
+	docs/run-inference/tutorials/run-inference.mdx \
 	docs/safe-synthesizer/about/jobs.mdx \
 	docs/safe-synthesizer/about/reference.mdx \
 	docs/safe-synthesizer/tutorials/differential-privacy.mdx \
-	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx
+	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx \
+	docs/troubleshooting/studio.mdx
 
 .PHONY: docs-lint-snippets
 docs-lint-snippets: docs-check-base-url ## Syntax-check all Python fenced snippets, type-check curated executable docs, and check NHX_BASE_URL usage

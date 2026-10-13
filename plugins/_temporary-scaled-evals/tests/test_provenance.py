@@ -206,6 +206,44 @@ def test_opensandbox_provenance_records_egress_and_verified_isolation(tmp_path) 
     assert isolation.warnings == []
 
 
+def test_opensandbox_provenance_records_separate_verifier_image(tmp_path) -> None:  # noqa: ANN001
+    verifier_digest = "sha256:" + "b" * 64
+    row = _opensandbox_row(
+        verifier_image_ref="registry.example/task_abc-verifier:rev2",
+        verifier_image_digest=verifier_digest,
+    )
+    row["backend_handle"]["raw"]["provenance"].update(
+        verifier_image_ref=f"registry.example/task_abc-verifier@{verifier_digest}",
+        verifier_image_digest=verifier_digest,
+    )
+
+    manifest = build_run_provenance_manifest(
+        row,
+        status="succeeded",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    assert manifest.task.verifier_image_ref == "registry.example/task_abc-verifier:rev2"
+    assert manifest.task.verifier_image_digest == verifier_digest
+    assert manifest.runtime.sandbox["verifier_image_ref"] == f"registry.example/task_abc-verifier@{verifier_digest}"
+    assert manifest.runtime.sandbox["verifier_image_digest"] == verifier_digest
+
+
+def test_opensandbox_provenance_omits_verifier_image_for_shared_verifier(tmp_path) -> None:  # noqa: ANN001
+    manifest = build_run_provenance_manifest(
+        _opensandbox_row(),
+        status="succeeded",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    assert manifest.task.verifier_image_ref is None
+    assert manifest.task.verifier_image_digest is None
+    assert "verifier_image_ref" not in manifest.runtime.sandbox
+    assert "verifier_image_digest" not in manifest.runtime.sandbox
+
+
 def test_opensandbox_provenance_warns_when_only_default_action_was_verified(tmp_path) -> None:  # noqa: ANN001
     manifest = build_run_provenance_manifest(
         _opensandbox_row(verification="default_action", opensandbox_applied_egress=_opensandbox_applied("1" * 64)),

@@ -1085,12 +1085,24 @@ def task_upload(ctx: click.Context, task_id: str, tarball_path: Path) -> None:
     default=None,
     help="Immutable digest for --image-ref. Required by hosted policy.",
 )
+@click.option(
+    "--verifier-image-ref",
+    default=None,
+    help="Prebuilt image, from the task's tests/, for a verifier that runs in its own sandbox. Requires --image-ref.",
+)
+@click.option(
+    "--verifier-image-digest",
+    default=None,
+    help="Immutable digest for --verifier-image-ref.",
+)
 @click.pass_context
 def task_finalize(
     ctx: click.Context,
     task_id: str,
     image_ref: str | None,
     image_digest: str | None,
+    verifier_image_ref: str | None,
+    verifier_image_digest: str | None,
 ) -> None:
     """Finalize the latest revision so it can be evaluated.
 
@@ -1098,15 +1110,22 @@ def task_finalize(
     Hosted deployments use their managed builder (the image-builder service,
     Cloud Build + GAR on GKE); local deployments without one keep the
     BuildKit fallback. Pass `--image-ref` with `--image-digest` to reuse an
-    already signed or otherwise approved image.
+    already signed or otherwise approved image. Tasks whose verifier runs in its
+    own sandbox also pass `--verifier-image-ref` with `--verifier-image-digest`.
     """
     if image_digest and not image_ref:
         raise click.ClickException("--image-digest requires --image-ref")
+    if verifier_image_digest and not verifier_image_ref:
+        raise click.ClickException("--verifier-image-digest requires --verifier-image-ref")
+    if verifier_image_ref and not image_ref:
+        raise click.ClickException("--verifier-image-ref requires --image-ref")
     body: dict[str, object] = {
         k: v
         for k, v in (
             ("image_ref", image_ref),
             ("image_digest", image_digest),
+            ("verifier_image_ref", verifier_image_ref),
+            ("verifier_image_digest", verifier_image_digest),
         )
         if v
     }
@@ -1150,7 +1169,13 @@ def _task_summary(data: dict[str, object]) -> list[str]:
         f"  revision:   {data.get('revision', data.get('current_revision'))}",
         f"  status:     {data.get('status')}",
     ]
-    extra = (("image", "image_ref"), ("digest", "image_digest"), ("error", "build_error"))
+    extra = (
+        ("image", "image_ref"),
+        ("digest", "image_digest"),
+        ("verifier", "verifier_image_ref"),
+        ("verifier digest", "verifier_image_digest"),
+        ("error", "build_error"),
+    )
     for label, key in extra:
         if data.get(key):
             summary.append(f"  {label + ':':11} {data[key]}")

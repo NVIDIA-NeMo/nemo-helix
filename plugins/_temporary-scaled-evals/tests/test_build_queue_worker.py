@@ -50,7 +50,94 @@ def test_worker_completes_claimed_job(monkeypatch: pytest.MonkeyPatch) -> None:
         worker_id=worker.worker_id,
         image_ref="registry/image",
         image_digest="sha256:abc",
+        verifier_image_ref=None,
+        verifier_image_digest=None,
     )
+
+
+def _prebuilt_job(**payload: str) -> TaskBuildJob:
+    return TaskBuildJob(
+        task_id="task_1",
+        revision=2,
+        backend="prebuilt",
+        payload={"image_ref": "registry.example.com/team/task:signed", **payload},
+        credentials={},
+        object_key="task_1/rev/2/tarball.tar.gz",
+        attempt=1,
+    )
+
+
+def test_worker_completes_prebuilt_job_with_resolved_verifier_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = MagicMock()
+    repo.complete.return_value = True
+    monkeypatch.setattr(queue_worker, "TaskBuildRepository", lambda conn: repo)
+    resolved = MagicMock(
+        runtime_ref="registry.example.com/team/task-verifier:signed",
+        digest="sha256:" + "b" * 64,
+    )
+    verify = MagicMock(return_value=resolved)
+    monkeypatch.setattr(queue_worker, "resolve_task_image", verify)
+    worker = TaskBuildWorker(connect=_connect, heartbeat_interval=60)
+    monkeypatch.setattr(worker, "_execute", lambda job: ("registry/image", "sha256:abc"))
+
+    worker.run(
+        _prebuilt_job(
+            verifier_image_ref="registry.example.com/team/task-verifier:signed",
+            verifier_expected_digest="sha256:" + "b" * 64,
+        )
+    )
+
+    verify.assert_called_once_with(
+        "registry.example.com/team/task-verifier:signed",
+        expected_digest="sha256:" + "b" * 64,
+    )
+    repo.complete.assert_called_once_with(
+        "task_1",
+        2,
+        worker_id=worker.worker_id,
+        image_ref="registry/image",
+        image_digest="sha256:abc",
+        verifier_image_ref=resolved.runtime_ref,
+        verifier_image_digest=resolved.digest,
+    )
+
+
+def test_worker_retries_when_verifier_image_does_not_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = MagicMock()
+    monkeypatch.setattr(queue_worker, "TaskBuildRepository", lambda conn: repo)
+    monkeypatch.setattr(queue_worker, "resolve_task_image", MagicMock(side_effect=RuntimeError("digest mismatch")))
+    worker = TaskBuildWorker(connect=_connect, heartbeat_interval=60, max_attempts=3)
+    monkeypatch.setattr(worker, "_execute", lambda job: ("registry/image", "sha256:abc"))
+
+    worker.run(_prebuilt_job(verifier_image_ref="registry.example.com/team/task-verifier:signed"))
+
+    repo.complete.assert_not_called()
+    assert repo.retry_or_fail.call_args.kwargs["build_error"] == "digest mismatch"
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        _prebuilt_job(),
+        TaskBuildJob(
+            task_id="task_1",
+            revision=2,
+            backend="cloudbuild",
+            payload={"verifier_image_ref": "registry.example.com/team/task-verifier:signed"},
+            credentials={},
+            object_key="k",
+            attempt=1,
+        ),
+    ],
+)
+def test_resolve_verifier_image_skips_jobs_without_prebuilt_verifier(
+    monkeypatch: pytest.MonkeyPatch, job: TaskBuildJob
+) -> None:
+    verify = MagicMock()
+    monkeypatch.setattr(queue_worker, "resolve_task_image", verify)
+
+    assert queue_worker.resolve_verifier_image(job) is None
+    verify.assert_not_called()
 
 
 def test_worker_retries_failure_without_losing_job(monkeypatch: pytest.MonkeyPatch) -> None:

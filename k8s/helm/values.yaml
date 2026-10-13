@@ -787,7 +787,7 @@ api:
   # -- Platform API server settings.
   server:
     # -- Seconds Uvicorn keeps idle HTTP connections open. Must be greater than envoyProxy.timeouts.upstreamIdle when Envoy is enabled.
-    keepAliveTimeoutSeconds: 5
+    keepAliveTimeoutSeconds: 10
 
   # -- Predefined service group passed to `nemo services run` with `--service-group`. Ignored when api.services is non-empty.
   serviceGroup: all

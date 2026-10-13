@@ -71,6 +71,34 @@ def test_retry_or_fail_persists_retry_or_terminal_state(attempt: int, terminal: 
         assert params == ("builder unavailable", 30, "task_1", 2, "worker-1")
 
 
+def test_complete_persists_verifier_image() -> None:
+    conn = MagicMock()
+    cur = conn.cursor.return_value.__enter__.return_value
+    cur.rowcount = 1
+
+    assert TaskBuildRepository(conn).complete(
+        "task_1",
+        2,
+        worker_id="worker-1",
+        image_ref="registry/task@sha256:a",
+        image_digest="sha256:a",
+        verifier_image_ref="registry/verifier@sha256:b",
+        verifier_image_digest="sha256:b",
+    )
+
+    sql, params = cur.execute.call_args_list[0].args
+    assert "verifier_image_ref = %s, verifier_image_digest = %s" in sql
+    assert params == (
+        "registry/task@sha256:a",
+        "sha256:a",
+        "registry/verifier@sha256:b",
+        "sha256:b",
+        "task_1",
+        2,
+        "worker-1",
+    )
+
+
 def test_platform_job_claim_binding_and_listing() -> None:
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value

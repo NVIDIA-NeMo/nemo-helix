@@ -118,7 +118,7 @@ def _run_with_step_config(
                 )
         logger.info("Running anonymizer pipeline")
         with capture_data_designer_token_usage(ctx.usage):
-            result = anonymizer.run(config=request.config, data=prepared_input.input)
+            result = anonymizer.run(config=request.config.to_anonymizer_config(), data=prepared_input.input)
     finally:
         prepared_input.cleanup()
         if use_in_process_detector:

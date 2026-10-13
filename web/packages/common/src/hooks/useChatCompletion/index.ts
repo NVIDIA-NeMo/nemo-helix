@@ -77,7 +77,6 @@ export const createChatCompletion = async (
       model,
       max_tokens,
       messages,
-      temperature: 1,
       stream,
       ...moreOptions,
     },

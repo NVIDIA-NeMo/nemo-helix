@@ -294,6 +294,136 @@ def test_finalize_prebuilt_image_queues_registry_resolution(
     assert credentials.obj == {}
 
 
+def _prebuilt_finalize_params(conn: MagicMock) -> tuple:
+    cur = conn.cursor.return_value.__enter__.return_value
+    for call in cur.execute.call_args_list:
+        sql, params = call.args
+        if "verifier_image_ref = %s" in sql:
+            return params
+    raise AssertionError("prebuilt finalize update was not executed")
+
+
+def test_finalize_prebuilt_records_verifier_image_without_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "buildkit_enabled", False)
+    monkeypatch.setattr(settings, "task_image_validation_mode", "disabled")
+    _mock_task_pack_size(monkeypatch, 12)
+    conn = _conn_returning(
+        [
+            _latest_revision_row(),
+            {"id": "task_x"},
+            {"revision": 1, "status": "uploading", "tarball_object_key": "k"},
+            {"previous_storage_bytes": 0},
+        ]
+    )
+    _use_conn(conn)
+
+    response = client.post(
+        "/v1/tasks/task_x/finalize",
+        json={
+            "image_ref": "registry.example.com/bp:dev",
+            "verifier_image_ref": "registry.example.com/bp-verifier:dev",
+            "verifier_image_digest": "sha256:" + "b" * 64,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    image_ref, _digest, verifier_ref, verifier_digest, *_ = _prebuilt_finalize_params(conn)
+    assert image_ref == "registry.example.com/bp:dev"
+    assert verifier_ref == "registry.example.com/bp-verifier:dev"
+    assert verifier_digest == "sha256:" + "b" * 64
+
+
+def test_finalize_rejects_verifier_image_without_digest_when_validation_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "task_image_validation_mode", "disabled")
+
+    response = client.post(
+        "/v1/tasks/task_x/finalize",
+        json={
+            "image_ref": "registry.example.com/bp:dev",
+            "verifier_image_ref": "registry.example.com/bp-verifier:dev",
+        },
+    )
+
+    assert response.status_code == 422
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "invalid_request"
+    assert "verifier_image_digest" in error["message"]
+
+
+def test_finalize_prebuilt_queues_verifier_image_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "buildkit_enabled", False)
+    monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
+    _mock_task_pack_size(monkeypatch, 12)
+    conn = _conn_returning(
+        [
+            _latest_revision_row(),
+            {"id": "task_x"},
+            {"revision": 1, "status": "uploading", "tarball_object_key": "k"},
+            {"previous_storage_bytes": 0},
+        ]
+    )
+    _use_conn(conn)
+
+    response = client.post(
+        "/v1/tasks/task_x/finalize",
+        json={
+            "image_ref": "registry.example.com/team/task:signed",
+            "image_digest": "sha256:" + "a" * 64,
+            "verifier_image_ref": "registry.example.com/team/task-verifier:signed",
+            "verifier_image_digest": "sha256:" + "b" * 64,
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    _backend, payload, *_ = _build_queue_params(conn)
+    assert payload.obj == {
+        "image_ref": "registry.example.com/team/task:signed",
+        "expected_digest": "sha256:" + "a" * 64,
+        "verifier_image_ref": "registry.example.com/team/task-verifier:signed",
+        "verifier_expected_digest": "sha256:" + "b" * 64,
+    }
+
+
+def test_finalize_rejects_verifier_image_from_disallowed_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "buildkit_enabled", False)
+    monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
+    monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
+
+    response = client.post(
+        "/v1/tasks/task_x/finalize",
+        json={
+            "image_ref": "registry.example.com/team/task:signed",
+            "verifier_image_ref": "evil.example.com/team/task-verifier:signed",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"]["code"] == "invalid_verifier_image"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"image_ref": "registry.example.com/bp:dev", "verifier_image_digest": "sha256:" + "b" * 64},
+        {"verifier_image_ref": "registry.example.com/bp-verifier:dev"},
+    ],
+)
+def test_finalize_rejects_incomplete_verifier_image_request(body: dict) -> None:
+    response = client.post("/v1/tasks/task_x/finalize", json=body)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"]["code"] == "invalid_request"
+
+
 def test_finalize_rejects_legacy_source_fields() -> None:
     response = client.post(
         "/v1/tasks/task_x/finalize",
