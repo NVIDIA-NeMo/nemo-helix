@@ -67,11 +67,17 @@ export function usePreview({
   }, []);
 
   const runPreview = useCallback(async () => {
+    const runId = ++runIdRef.current;
+    const isCurrent = () => runIdRef.current === runId;
+    abortRef.current?.abort();
+    abortRef.current = null;
+
     const failBeforeStreaming = (message: string) => {
       setPreviewLogs(message);
       setPreviewRecords(undefined);
       setPreviewError(message);
       setHasPreviewRun(true);
+      setIsPreviewing(false);
     };
 
     let config: DataDesignerConfig | undefined;
@@ -93,11 +99,8 @@ export function usePreview({
     setPreviewColumnOrder(configColumnNames(config));
     setPreviewError(undefined);
     setHasPreviewRun(true);
-    abortRef.current?.abort();
     abortRef.current = new AbortController();
     const signal = abortRef.current.signal;
-    const runId = ++runIdRef.current;
-    const isCurrent = () => runIdRef.current === runId;
     setIsPreviewing(true);
 
     try {
@@ -107,7 +110,9 @@ export function usePreview({
         accessToken,
         signal,
         {
-          onLog: appendLogLine,
+          onLog: (line) => {
+            if (isCurrent()) appendLogLine(line);
+          },
           onRecords: (records) => {
             if (isCurrent()) setPreviewRecords(records);
           },
@@ -121,9 +126,11 @@ export function usePreview({
         if (isCurrent()) appendLogLine('Preview stopped.');
         return;
       }
-      const message = getErrorMessage(err, 'Preview request failed.');
-      appendLogLine(message);
-      if (isCurrent()) setPreviewError(message);
+      if (isCurrent()) {
+        const message = getErrorMessage(err, 'Preview request failed.');
+        appendLogLine(message);
+        setPreviewError(message);
+      }
     } finally {
       if (isCurrent()) {
         setIsPreviewing(false);

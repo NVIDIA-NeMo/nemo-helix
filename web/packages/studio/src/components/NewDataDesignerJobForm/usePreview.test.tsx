@@ -117,6 +117,93 @@ describe('usePreview', () => {
     expect(result.current.previewLogs).toContain('Preview failed: 500');
   });
 
+  describe('superseded runs', () => {
+    interface OpenStream {
+      handlers: PreviewStreamHandlers;
+      reject: (error: Error) => void;
+    }
+
+    const openStreams = (): OpenStream[] => {
+      const streams: OpenStream[] = [];
+      streamPreviewMock.mockImplementation(
+        (...args: unknown[]) =>
+          new Promise((_resolve, reject) => {
+            streams.push({ handlers: args[4] as PreviewStreamHandlers, reject });
+          })
+      );
+      return streams;
+    };
+
+    const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+
+    it('ignores an earlier run that reports after the next run fails to build its config', async () => {
+      const streams = openStreams();
+      let config: DataDesignerConfig | undefined = CONFIG;
+      const { result } = renderHook(() =>
+        usePreview({ workspace: 'ws', accessToken: 'token', getCurrentConfig: () => config })
+      );
+
+      let first!: Promise<void>;
+      await act(async () => {
+        first = result.current.runPreview();
+      });
+      config = undefined;
+      await act(async () => {
+        await result.current.runPreview();
+      });
+
+      act(() => {
+        streams[0].handlers.onRecords([{ stale: 'row' }]);
+        streams[0].handlers.onError('stale error');
+      });
+      await act(async () => {
+        streams[0].reject(new Error('stale failure'));
+        await first;
+      });
+
+      expect(result.current.previewRecords).toBeUndefined();
+      expect(result.current.previewError).toBe('Generate a job spec first, then run Preview.');
+      expect(result.current.previewLogs).not.toContain('stale failure');
+      expect(result.current.isPreviewing).toBe(false);
+    });
+
+    it('keeps an earlier run’s logs and failure out of the newer run', async () => {
+      const streams = openStreams();
+      const { result } = renderHook(() =>
+        usePreview({ workspace: 'ws', accessToken: 'token', getCurrentConfig: () => CONFIG })
+      );
+
+      let first!: Promise<void>;
+      await act(async () => {
+        first = result.current.runPreview();
+      });
+      let second!: Promise<void>;
+      await act(async () => {
+        second = result.current.runPreview();
+      });
+
+      act(() => {
+        streams[0].handlers.onLog('stale log');
+        streams[1].handlers.onLog('fresh log');
+      });
+      await act(async () => {
+        streams[0].reject(new Error('stale failure'));
+        await first;
+      });
+
+      expect(result.current.previewLogs).toContain('fresh log');
+      expect(result.current.previewLogs).not.toContain('stale log');
+      expect(result.current.previewLogs).not.toContain('stale failure');
+      expect(result.current.previewError).toBeUndefined();
+      expect(result.current.isPreviewing).toBe(true);
+
+      await act(async () => {
+        streams[1].reject(abortError());
+        await second;
+      });
+    });
+  });
+
   describe('stopPreview', () => {
     /**
      * Hangs until the caller's signal aborts, standing in for a long-running stream.
