@@ -14859,6 +14859,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/HelixJobStatus'
           description: The new status to set for the job.
+        expected_step_id:
+          title: Expected Step Id
+          description: Reject the update if the step's entity ID has changed.
+          type: string
         status_details:
           title: Status Details
           description: Optional status details related to the status update.
@@ -15166,6 +15170,10 @@ components:
           description: The source of the job steps.
           title: Source
           type: string
+        task_cleanup_pending:
+          description: Whether terminal child-task cleanup is unfinished.
+          title: Task Cleanup Pending
+          type: boolean
       title: HelixJobStepsListFilter
       type: object
     HelixJobTask:
