@@ -7,15 +7,16 @@ import importlib
 import inspect
 import json
 import logging
-import shutil
 import os
+import shutil
+import tempfile
 from datetime import datetime, timezone
-from threading import Lock
-from typing import List, Callable, Union
 from pathlib import Path
+from threading import Lock
+from typing import Callable, List, Union
 
 from garak import _config
-from garak.exception import GarakException, ConfigFailure
+from garak.exception import ConfigFailure, GarakException
 
 PLUGIN_TYPES = ("probes", "detectors", "generators", "harnesses", "buffs")
 PLUGIN_CLASSES = ("Probe", "Detector", "Generator", "Harness", "Buff")
@@ -82,9 +83,9 @@ class PluginCache:
         ]
 
     def _load_plugin_cache(self):
-        assert os.path.exists(
-            self._plugin_cache_filename
-        ), f"{self._plugin_cache_filename} is missing or corrupt."
+        assert os.path.exists(self._plugin_cache_filename), (
+            f"{self._plugin_cache_filename} is missing or corrupt."
+        )
 
         base_time = datetime.fromtimestamp(
             os.path.getmtime(self._plugin_cache_filename), tz=timezone.utc
@@ -102,7 +103,19 @@ class PluginCache:
             self._user_plugin_cache_filename.parent.mkdir(
                 mode=0o740, parents=True, exist_ok=True
             )
-            shutil.copy2(self._plugin_cache_filename, self._user_plugin_cache_filename)
+            # Imports in separate processes share this cache. Publish only a
+            # complete copy, preserving the source metadata used for freshness.
+            with tempfile.NamedTemporaryFile(
+                dir=self._user_plugin_cache_filename.parent,
+                prefix=f"{self._user_plugin_cache_filename.name}.",
+                delete=False,
+            ) as temporary_file:
+                temporary_path = Path(temporary_file.name)
+            try:
+                shutil.copy2(self._plugin_cache_filename, temporary_path)
+                os.replace(temporary_path, self._user_plugin_cache_filename)
+            finally:
+                temporary_path.unlink(missing_ok=True)
             user_time = base_time
 
         with open(
