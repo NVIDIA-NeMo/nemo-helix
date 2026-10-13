@@ -25,7 +25,7 @@ from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from ngc_metadata import (  # noqa: E402
+from ngc_metadata import (  # noqa: E402  # ty: ignore[unresolved-import]  # resolved via the sys.path insert above
     DEFAULT_LABELS,
     DEFAULT_LOGO,
     PUBLISHER,

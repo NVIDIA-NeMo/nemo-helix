@@ -147,14 +147,16 @@ class _AsyncJobsCompat:
 class AgentsClient(_AgentsMethods, NemoClient):
     """Sync client for the Agents service API."""
 
+    # Shadows the base client's Jobs-service accessor with the agents job namespace.
     @property
-    def jobs(self) -> _JobsCompat:
+    def jobs(self) -> _JobsCompat:  # ty: ignore[invalid-property-type-override]
         return _JobsCompat(self)
 
 
 class AsyncAgentsClient(_AgentsMethods, AsyncNemoClient):
     """Async client for the Agents service API."""
 
+    # Shadows the base client's Jobs-service accessor with the agents job namespace.
     @property
-    def jobs(self) -> _AsyncJobsCompat:
+    def jobs(self) -> _AsyncJobsCompat:  # ty: ignore[invalid-property-type-override]
         return _AsyncJobsCompat(self)

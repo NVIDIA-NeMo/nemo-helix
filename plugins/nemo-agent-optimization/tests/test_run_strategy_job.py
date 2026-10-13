@@ -52,7 +52,7 @@ class _FakeStrategySpec(BaseModel):
 class _FakeStrategyJob(NemoJob):
     name: ClassVar[str] = "optimize"
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="fake", title="Fake")
-    spec_schema: ClassVar[type[BaseModel]] = _FakeStrategySpec
+    spec_schema: ClassVar[type[BaseModel] | None] = _FakeStrategySpec
 
     #: Recorded by ``compile`` so tests can assert what the router forwarded.
     compiled_with: ClassVar[dict[str, Any]] = {}

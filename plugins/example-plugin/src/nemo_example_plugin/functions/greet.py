@@ -57,7 +57,7 @@ class GreetFunction(NemoFunction[GreetSpec]):
 
     name: ClassVar[str] = "greet"
     description: ClassVar[str] = "Greet a name and echo back the active workspace."
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec, *, ctx: FunctionContext) -> GreetResponse:
         return GreetResponse(message=say_hello(spec.name), workspace=ctx.workspace)
@@ -96,7 +96,7 @@ class CountFunction(NemoFunction[CountSpec]):
 
     name: ClassVar[str] = "count"
     description: ClassVar[str] = "Stream a sequence of NDJSON tick frames."
-    spec_schema: ClassVar[type[BaseModel]] = CountSpec
+    spec_schema: ClassVar[type[CountSpec]] = CountSpec
 
     async def run(self, spec: CountSpec) -> AsyncIterator[BaseModel]:
         for n in range(spec.upto):

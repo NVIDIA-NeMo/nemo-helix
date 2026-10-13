@@ -67,7 +67,7 @@ class _MarkerSdk:
 class _NonStreamingGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "greet"
     description: ClassVar[str] = "Say hello."
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> GreetResponse:
         return GreetResponse(message=f"Hello, {spec.name}!")
@@ -76,7 +76,7 @@ class _NonStreamingGreet(NemoFunction[GreetSpec]):
 class _StreamingGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "stream-greet"
     description: ClassVar[str] = "Stream greetings."
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> AsyncIterator[BaseModel]:
         yield GreetResponse(message=f"Hello, {spec.name}!")
@@ -86,7 +86,7 @@ class _StreamingGreet(NemoFunction[GreetSpec]):
 
 class _PrimedStreamingGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "primed-stream-greet"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> AsyncIterator[BaseModel]:
         yield GreetResponse(message=f"Hello, {spec.name}!")
@@ -97,7 +97,7 @@ class _PrimedStreamingGreet(NemoFunction[GreetSpec]):
 
 class _PrimedEarlyFailure(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "primed-early-failure"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> AsyncIterator[BaseModel]:
         raise HTTPException(status_code=418, detail=f"Cannot greet {spec.name}")
@@ -106,7 +106,7 @@ class _PrimedEarlyFailure(NemoFunction[GreetSpec]):
 
 class _ContextSensitiveGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "ctx-greet"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec, *, ctx: FunctionContext) -> dict:
         return {
@@ -118,7 +118,7 @@ class _ContextSensitiveGreet(NemoFunction[GreetSpec]):
 
 class _SdkGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "sdk-greet"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec, *, async_sdk: _MarkerSdk) -> dict:
         # Echo a marker attribute so the test can assert the override
@@ -128,7 +128,7 @@ class _SdkGreet(NemoFunction[GreetSpec]):
 
 class _SyncSdkGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "sync-sdk-greet"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec, *, sdk: _MarkerSdk) -> dict:
         return {"name": spec.name, "sdk_marker": sdk.marker}
@@ -136,7 +136,7 @@ class _SyncSdkGreet(NemoFunction[GreetSpec]):
 
 class _BothSdkGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "both-sdk-greet"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec, *, sdk: _MarkerSdk, async_sdk: _MarkerSdk) -> dict:
         return {
@@ -148,7 +148,7 @@ class _BothSdkGreet(NemoFunction[GreetSpec]):
 
 class _LocalityGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "locality-greet"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
 
     async def run(self, spec: GreetSpec, *, is_local: bool) -> dict:
         return {"name": spec.name, "is_local": is_local}
@@ -441,7 +441,7 @@ class TestSignatureDi:
 
 class _LegacyEndpointGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "legacy"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
     endpoint: ClassVar[str | None] = "/legacy-{name}"
 
     async def run(self, spec: GreetSpec) -> dict:
@@ -498,7 +498,7 @@ class GreetFrame(FrameModel):
 
 class _FramedGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "framed-greet"
-    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+    spec_schema: ClassVar[type[GreetSpec]] = GreetSpec
     frame_schema: ClassVar[Any] = Annotated[GreetFrame | Done, Field(discriminator="kind")]
 
     async def run(self, spec: GreetSpec) -> AsyncIterator[BaseModel]:

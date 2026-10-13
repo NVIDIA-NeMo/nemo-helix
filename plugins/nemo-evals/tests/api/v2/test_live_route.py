@@ -461,7 +461,7 @@ class _FakeBundleFiles(AsyncFilesClient):
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
 
-    async def download_file(self, *, path: str, name: str, workspace: str | None = None) -> _StoredBundleResponse:
+    async def download_file(self, *, path: str, name: str, workspace: str | None = None) -> _StoredBundleResponse:  # ty: ignore[invalid-attribute-override]
         del path, name, workspace
         return _StoredBundleResponse(self._payload)
 

@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from check_skill_frontmatter import (  # noqa: E402
+from check_skill_frontmatter import (  # noqa: E402  # ty: ignore[unresolved-import]  # resolved via the sys.path insert above
     MalformedFrontmatterError,
     check_file,
     is_canonical_skill,

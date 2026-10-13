@@ -191,7 +191,7 @@ class _FakeClient(AsyncIntakeClient):
         )
 
     @property
-    def intake(self) -> SimpleNamespace:
+    def intake(self) -> SimpleNamespace:  # ty: ignore[invalid-property-type-override]
         return self._intake
 
     def with_http_client(self, http_client: httpx.AsyncClient) -> _FakeClient:
@@ -199,11 +199,11 @@ class _FakeClient(AsyncIntakeClient):
         self.with_http_client_calls += 1
         return self
 
-    async def get_evaluation(self, *, workspace: str | None = None, name: str) -> object:
+    async def get_evaluation(self, *, workspace: str | None = None, name: str) -> object:  # ty: ignore[invalid-attribute-override]
         result = await self.evaluations.retrieve(name, workspace=workspace)
         return SimpleNamespace(data=lambda: result)
 
-    async def patch_evaluation(
+    async def patch_evaluation(  # ty: ignore[invalid-attribute-override]
         self, *, workspace: str | None = None, name: str, body: EvaluationPatchRequest
     ) -> object:
         result = await self.evaluations.patch(
@@ -213,13 +213,13 @@ class _FakeClient(AsyncIntakeClient):
         )
         return SimpleNamespace(data=lambda: result)
 
-    async def create_atif(self, *, workspace: str | None = None, body: AtifCreateRequest) -> object:
+    async def create_atif(self, *, workspace: str | None = None, body: AtifCreateRequest) -> object:  # ty: ignore[invalid-attribute-override]
         payload = dict(body.root)
         payload["workspace"] = workspace or self.workspace
         await self.intake.ingest.atif.create(**payload)
         return SimpleNamespace(data=lambda: None)
 
-    async def create_evaluator_result(
+    async def create_evaluator_result(  # ty: ignore[invalid-attribute-override]
         self, *, workspace: str | None = None, body: EvaluatorResultCreateRequest
     ) -> object:
         payload = body.model_dump(mode="json", exclude_none=True)
@@ -227,7 +227,7 @@ class _FakeClient(AsyncIntakeClient):
         result = await self.intake.evaluator_results.create(**payload)
         return SimpleNamespace(data=lambda: result)
 
-    async def list_traces(
+    async def list_traces(  # ty: ignore[invalid-attribute-override]
         self, *, workspace: str | None = None, query_params: ListTracesQueryParams | None = None
     ) -> _FakePaginatedResponse:
         params = query_params or {}

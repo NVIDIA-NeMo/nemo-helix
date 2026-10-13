@@ -210,7 +210,7 @@ class FakeSecretsClient(AsyncSecretsClient):
         self._secrets = secrets or {}
         self.lookups: list[tuple[str, str]] = []
 
-    async def access_secret(self, *, workspace: str | None = None, name: str) -> FakeAccessResponse:
+    async def access_secret(self, *, workspace: str | None = None, name: str) -> FakeAccessResponse:  # ty: ignore[invalid-attribute-override]
         key = (workspace or "default", name)
         self.lookups.append(key)
         if key not in self._secrets:

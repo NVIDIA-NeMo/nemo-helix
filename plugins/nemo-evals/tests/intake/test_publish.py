@@ -139,13 +139,13 @@ class _FakeClient(AsyncIntakeClient):
         self._evaluator_results = _FakeEvaluatorResults(self.eval_calls, fail_session=fail_eval_session)
         self._traces = _FakeTraces(root_span_id=root_span_id)
 
-    async def create_atif(self, *, workspace: str | None = None, body: AtifCreateRequest) -> object:
+    async def create_atif(self, *, workspace: str | None = None, body: AtifCreateRequest) -> object:  # ty: ignore[invalid-attribute-override]
         payload = dict(body.root)
         payload["workspace"] = workspace or self.workspace
         await self._atif.create(**payload)
         return SimpleNamespace(data=lambda: None)
 
-    async def create_otlp_traces(
+    async def create_otlp_traces(  # ty: ignore[invalid-attribute-override]
         self,
         *,
         workspace: str | None = None,
@@ -153,7 +153,7 @@ class _FakeClient(AsyncIntakeClient):
     ) -> object:
         return await self._otlp_traces.create(workspace=workspace or self.workspace, body=content)
 
-    async def create_evaluator_result(
+    async def create_evaluator_result(  # ty: ignore[invalid-attribute-override]
         self, *, workspace: str | None = None, body: EvaluatorResultCreateRequest
     ) -> object:
         payload = body.model_dump(mode="json", exclude_none=True)
@@ -161,7 +161,7 @@ class _FakeClient(AsyncIntakeClient):
         result = await self._evaluator_results.create(**payload)
         return SimpleNamespace(data=lambda: result)
 
-    async def list_traces(
+    async def list_traces(  # ty: ignore[invalid-attribute-override]
         self, *, workspace: str | None = None, query_params: ListTracesQueryParams | None = None
     ) -> _FakePaginatedResponse:
         params = query_params or {}
@@ -169,7 +169,7 @@ class _FakeClient(AsyncIntakeClient):
             self._traces.list(workspace=workspace or self.workspace or "", filter=dict(params.get("filter") or {}))
         )
 
-    async def get_evaluation(self, *, workspace: str | None = None, name: str) -> object:
+    async def get_evaluation(self, *, workspace: str | None = None, name: str) -> object:  # ty: ignore[invalid-attribute-override]
         return await self._evaluations.get(name, workspace=workspace or self.workspace or "")
 
 

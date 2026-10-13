@@ -231,4 +231,4 @@ class TestNoRun:
         the ``nhx-unsloth-training`` container's ``__main__`` now.
         """
         with pytest.raises(TypeError, match="abstract"):
-            UnslothJob()
+            UnslothJob()  # ty: ignore[call-non-callable]

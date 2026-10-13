@@ -49,7 +49,7 @@ class _FakeFiles(AsyncFilesClient):
     def __init__(self) -> None:
         self._store: dict[tuple[str, str], dict[str, bytes]] = {}
 
-    async def create_fileset(
+    async def create_fileset(  # ty: ignore[invalid-attribute-override]
         self,
         *,
         workspace: str | None = None,
@@ -60,11 +60,11 @@ class _FakeFiles(AsyncFilesClient):
         self._store.setdefault((workspace or "default", body.name), {})
         return object()
 
-    async def delete_fileset(self, *, workspace: str | None = None, name: str) -> object:
+    async def delete_fileset(self, *, workspace: str | None = None, name: str) -> object:  # ty: ignore[invalid-attribute-override]
         self._store.pop((workspace or "default", name), None)
         return object()
 
-    async def upload_file(
+    async def upload_file(  # ty: ignore[invalid-attribute-override]
         self,
         *,
         content: bytes,
@@ -75,7 +75,7 @@ class _FakeFiles(AsyncFilesClient):
         self._store.setdefault((workspace or "default", name), {})[path] = bytes(content)
         return object()
 
-    async def download_file(
+    async def download_file(  # ty: ignore[invalid-attribute-override]
         self,
         *,
         path: str,
