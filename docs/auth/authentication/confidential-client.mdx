@@ -83,6 +83,12 @@ api:
           key: session-encryption-key
 ```
 
+Generate both values and confirm they are present on the API pods before you
+add `confidential_client`. A confidential client requires the session key.
+Public-client web sessions are separate: set
+`public_client.server_side_sessions` only when you want them. Both use the same
+`server_sessions` key. See
+[Deployment Secrets](/documentation/access-control/deployment/deployment-secrets).
 Do not put either secret value in `platformConfig`, Helm values that render to a
 ConfigMap, the Studio bundle, discovery output, or CLI configuration. Provider
 refresh tokens used by the CLI stay encrypted on the server.

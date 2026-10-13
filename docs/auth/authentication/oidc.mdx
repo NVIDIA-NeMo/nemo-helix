@@ -57,6 +57,9 @@ auth:
       encryption_key_env_var: NHX_AUTH_SESSION_ENCRYPTION_KEY
 ```
 
+Create the session encryption key and inject it before setting
+`server_side_sessions`. See
+[Deployment Secrets](/documentation/access-control/deployment/deployment-secrets).
 The environment variable must come from a deployment secret, not from the
 platform ConfigMap. Studio does not use the login broker yet, so deployments
 that serve Studio must leave this option disabled.
@@ -92,15 +95,14 @@ auth:
       # authorization_endpoint: "https://your-idp.example.com/oauth2/authorize"
       # token_endpoint: "https://your-idp.example.com/oauth2/token"
       # device_authorization_endpoint: "https://your-idp.example.com/oauth2/device"
+      # Resource qualifier for IdPs that require api://<client-id>/platform:read
+      # while default_scopes keeps the short name platform:read.
+      # scope_prefix: "api://your-public-client-id/"
     # Optional: override claim names if your IdP uses non-standard names
     # email_claim: "upn"
     # subject_claim: "oid"
     # Groups are identity claims used for workspace role bindings.
     # groups_claim: "groups"
-    # Optional: for IdPs that require resource-qualified API scopes.
-    # Clients prepend this to short Helix API scopes during login, and
-    # NeMo Helix strips it from returned token scopes before authorization.
-      # scope_prefix: "api://your-public-client-id/"
 ```
 
 By default, NeMo Helix extracts group principals from the JWT `groups` claim. If your IdP sends group or entitlement values such as `employee`, `ml-team`, or `employee.profile.read` in a different claim, set `groups_claim` to that claim name, then grant roles to those exact principal strings. Values inside the OAuth `scope` or `scp` claim are not group principals and do not grant workspace roles.
@@ -146,7 +148,7 @@ auth:
 
 These are the scopes requested from the IdP during login. Most deployments request OIDC protocol scopes such as `openid`, `profile`, `email`, and `offline_access`. A deployment can also request NeMo Helix API scope names, such as `platform:read` and `platform:write`, when those scopes are exposed by the IdP application. If your IdP application does not expose NeMo Helix API scopes, omit them; RBAC still applies.
 
-Keep short NeMo Helix scope names in `default_scopes`. When auth discovery includes a resource scope prefix, the CLI shows both forms. For example, the login prompt might display `platform:read (api://<app-client-id>/platform:read)`: `platform:read` is the NeMo Helix scope name, and the parenthesized value is the OAuth scope sent to the IdP. Users should pass the short NeMo Helix scope names to the CLI; the CLI applies the discovered prefix automatically.
+Keep the short NeMo Helix names in `default_scopes`. When the IdP expects `api://<client-id>/platform:read`, set `public_client.scope_prefix` to `api://<client-id>/`. The CLI and Studio add that prefix to scopes that contain `:` or end with `.default`, and send `openid`, `profile`, `email`, and `offline_access` unchanged. Discovery includes the prefix on the interactive client. The login prompt prints both forms, for example `platform:read (api://<client-id>/platform:read)`. Pass the short name to `nemo auth login --scope`. See [API Scopes](/documentation/access-control/authorization/api-scopes) for the scope value stored on the token.
 
 ### Step 5: Verify
 
