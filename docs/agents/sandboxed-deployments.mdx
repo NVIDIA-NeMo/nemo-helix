@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Sandboxed Deployments"
-description: "Package a Fabric agent for OpenShell, deploy it, and verify inference and network policy."
+description: "Deploy a prepared Fabric agent through OpenShell and verify inference and network policy."
 ---
 
 Deploy a registered Fabric agent with `--mode openshell` to run it under the
@@ -17,8 +17,10 @@ Kubernetes compute driver. Requests still go through the platform's Agents gatew
   [OpenShell operator guide](/documentation/kubernetes-deployment/setup/helm/openshell).
 - Prepare a working Fabric `agent.yaml`, with a model available through the
   platform's Inference Gateway. See [Agents](/documentation/agents).
-- Choose an image registry reachable by the gateway's compute nodes. Configure
-  private-registry credentials on OpenShell when needed.
+- Have an agent image built with the OpenShell runtime profile, compatible with
+  your platform version and compute-node architecture, and already accessible to
+  the gateway's compute nodes. See [Deploy Agents](/documentation/agents/deploy-agents)
+  for packaging guidance.
 
 Use the same workspace for registration, deployment, invocation, and cleanup:
 
@@ -26,41 +28,11 @@ Use the same workspace for registration, deployment, invocation, and cleanup:
 export WORKSPACE=default
 export AGENT_NAME=sandbox-hello
 export AGENT_CONFIG="agents/$AGENT_NAME/agent.yaml"
-export IMAGE_TAG="registry.example.com/team/$AGENT_NAME:0.1"
+export IMAGE_TAG="<accessible-agent-image>"
 ```
 
-Replace the registry with yours and confirm the model works before diagnosing
-sandbox connectivity. Keep secrets out of the agent config and image build context.
-
-## Package and publish
-
-Build with the OpenShell runtime profile so the image includes the required
-user and operating-system dependencies:
-
-```sh
-nemo agents package --agent "$AGENT_CONFIG" \
-  --sandbox-runtime openshell --tag "$IMAGE_TAG"
-docker push "$IMAGE_TAG"
-```
-
-For an agent with local Python code, include its `--pyproject` file as described
-in [Deploy Agents](/documentation/agents/deploy-agents). Match the image architecture
-to the gateway's compute nodes. A local image must be loaded into those nodes or
-published; building it on the CLI host alone does not make it available remotely.
-
-For a source checkout, run these commands from the repository root with that
-checkout's CLI on `PATH`:
-
-```sh
-uv build --package nemo-helix --wheel --out-dir dist
-NEMO_AGENTS_WHEEL=LATEST nemo agents package --agent "$AGENT_CONFIG" \
-  --sandbox-runtime openshell --tag "$IMAGE_TAG"
-```
-
-Do not bypass package validation.
-Rebuild older agent images after platform schema changes. An image built against
-an older agent schema can reject the configuration delivered by a newer platform
-before its server becomes ready, even when sandbox creation succeeds.
+Set `IMAGE_TAG` to the prepared image reference. Confirm the model works before
+diagnosing sandbox connectivity. Keep secrets out of the agent config.
 
 ## Register and deploy
 
@@ -120,6 +92,5 @@ nemo agents undeploy "$AGENT_NAME-sandbox" --workspace "$WORKSPACE" --yes
 nemo agents delete "$AGENT_NAME" --workspace "$WORKSPACE" --yes
 ```
 
-Verify the sandbox is gone from the gateway. The published image is retained in
-your registry. See the operator guide for gateway authentication, image-pull,
+Verify the sandbox is gone from the gateway. The agent image is retained. See the operator guide for gateway authentication, image-pull,
 working-directory, and policy troubleshooting.
