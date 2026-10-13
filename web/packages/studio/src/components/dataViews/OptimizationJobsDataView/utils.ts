@@ -3,8 +3,6 @@
 
 import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 
-export const EM_DASH = '—';
-
 /** Sort id prefix for the one-column-per-objective metric columns. */
 export const METRIC_SORT_PREFIX = 'metric:';
 

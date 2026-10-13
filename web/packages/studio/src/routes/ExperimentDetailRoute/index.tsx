@@ -23,7 +23,7 @@ import { ExperimentMetrics } from '@studio/routes/ExperimentDetailRoute/Experime
 import { getExperimentRoute } from '@studio/routes/utils';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { ChartLine, ChartScatter, Pencil, Star } from 'lucide-react';
+import { ChartLine, ChartScatter, Pencil, Star, Table2 } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 
 export const ExperimentDetailRoute: FC = () => {
@@ -42,6 +42,12 @@ export const ExperimentDetailRoute: FC = () => {
     false
   );
   const paretoVisible = storedParetoVisible ?? false;
+
+  const [storedCompareVisible, setCompareVisible] = useLocalStorage<boolean>(
+    `nemo-studio:experiment-compare:${group?.id ?? ''}`,
+    false
+  );
+  const compareVisible = storedCompareVisible ?? false;
 
   // Over-time trend visibility. The default is the experiment's own `show_evaluations_over_time`
   // flag — a flagged experiment is one whose owner has said its evaluations are comparable, so the
@@ -153,6 +159,14 @@ export const ExperimentDetailRoute: FC = () => {
                       <ChartScatter width={12} height={12} className="text-brand" />
                       {paretoVisible ? 'Hide Pareto' : 'Pareto view'}
                     </Button>
+                    <Button
+                      kind="tertiary"
+                      aria-pressed={compareVisible}
+                      onClick={() => setCompareVisible(!compareVisible)}
+                    >
+                      <Table2 width={12} height={12} className="text-brand" />
+                      {compareVisible ? 'Hide scorecard' : 'Scorecard'}
+                    </Button>
                   </>
                 )}
               </div>
@@ -163,6 +177,7 @@ export const ExperimentDetailRoute: FC = () => {
                   group={group}
                   paretoVisible={paretoVisible}
                   trendVisible={trendVisible}
+                  compareVisible={compareVisible}
                 />
               )}
             </div>
