@@ -34,14 +34,18 @@ from nemo_helix_plugin.client.oidc import (
     DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
     JWT_TOKEN_TYPE,
     TOKEN_EXCHANGE_GRANT_TYPE,
+    AdvertisedOidcClient,
+    BearerTokenSource,
     NHXOIDCConfig,
     OIDCTokenProvider,
+    TokenPersistenceError,
     TokenSet,
     WorkloadTokenExchangeError,
     WorkloadTokenExchangeProvider,
     discover_nhx_config,
     generate_unsigned_jwt,
     refresh_token_grant,
+    resolve_refresh_settings,
     token_exchange_grant,
 )
 from nemo_helix_plugin.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
@@ -342,7 +346,7 @@ class TestAsyncNemoClientAuth:
 
 # Any fixed instant; only its constancy across processes matters.
 _FIXED_IAT = 1_700_000_000
-_NON_FINITE_EXPIRY_CASES = [
+_NON_FINITE_EXPIRY_CASES: tuple[tuple[str, dict[str, float], str], ...] = (
     (
         generate_unsigned_jwt(
             "user",
@@ -363,7 +367,7 @@ _NON_FINITE_EXPIRY_CASES = [
         {"expires_in": float("-inf")},
         "expires_in",
     ),
-]
+)
 
 
 def _make_jwt(exp: float | None = None, sub: str = "user") -> str:
@@ -372,6 +376,93 @@ def _make_jwt(exp: float | None = None, sub: str = "user") -> str:
         principal_id=sub,
         expires_in_seconds=int(exp - time.time()) if exp else 3600,
     )
+
+
+def _public_discovery_config(
+    *,
+    client_id: str = "cli-client",
+    token_endpoint: str = "https://idp/token",
+    bearer_token_source: BearerTokenSource = "access_token",
+) -> NHXOIDCConfig:
+    return NHXOIDCConfig(
+        auth_enabled=True,
+        clients=(
+            AdvertisedOidcClient(
+                name="public",
+                client_id=client_id,
+                client_authentication="public",
+                default=True,
+                token_endpoint=token_endpoint,
+                bearer_token_source=bearer_token_source,
+            ),
+        ),
+    )
+
+
+class TestOIDCRefreshSettings:
+    def test_provider_refresh_uses_public_client_settings(self):
+        config = _public_discovery_config(
+            client_id="public-client",
+            token_endpoint="https://idp.example.com/token",
+            bearer_token_source="id_token",
+        )
+
+        settings = resolve_refresh_settings(config, None)
+
+        assert settings.token_endpoint == "https://idp.example.com/token"
+        assert settings.client_id == "public-client"
+        assert settings.refresh_kind == "provider"
+        assert settings.refresh_scope == "openid profile email offline_access"
+        assert settings.bearer_token_source == "id_token"
+
+    def test_broker_refresh_uses_matching_broker_client_settings(self):
+        broker_url = "https://nemo.example.com/apis/auth/v2/token"
+        config = NHXOIDCConfig(
+            auth_enabled=True,
+            clients=(
+                AdvertisedOidcClient(
+                    name="confidential",
+                    client_id="confidential-client",
+                    client_authentication="client_secret_basic",
+                    default=True,
+                    default_scopes="openid platform:read",
+                    scope_prefix="api://nhx",
+                    authorization_start_endpoint="https://nemo.example.com/apis/auth/v2/authorize",
+                    broker_token_endpoint=broker_url,
+                ),
+            ),
+        )
+
+        settings = resolve_refresh_settings(config, broker_url)
+
+        assert settings.token_endpoint == broker_url
+        assert settings.client_id == "confidential-client"
+        assert settings.refresh_kind == "broker"
+        assert settings.refresh_scope == "openid api://nhx/platform:read"
+        assert settings.bearer_token_source == "access_token"
+
+    def test_stale_broker_url_returns_missing_refresh_configuration(self):
+        config = NHXOIDCConfig(
+            auth_enabled=True,
+            clients=(
+                AdvertisedOidcClient(
+                    name="confidential",
+                    client_id="confidential-client",
+                    client_authentication="client_secret_basic",
+                    default=True,
+                    authorization_start_endpoint="https://nemo.example.com/apis/auth/v2/authorize",
+                    broker_token_endpoint="https://nemo.example.com/apis/auth/v2/token",
+                ),
+            ),
+        )
+
+        settings = resolve_refresh_settings(config, "https://old.example.com/apis/auth/v2/token")
+
+        assert settings.token_endpoint == ""
+        assert settings.client_id == ""
+        assert settings.refresh_kind == "broker"
+        assert settings.refresh_scope is None
+        assert settings.bearer_token_source == "access_token"
 
 
 class TestOIDCTokenProvider:
@@ -398,7 +489,24 @@ class TestOIDCTokenProvider:
         with patch("nemo_helix_plugin.client.oidc.httpx.get") as mock_get:
             mock_get.return_value = httpx.Response(
                 200,
-                json={"auth_enabled": True, "oidc": {"bearer_token_source": "refresh_token"}},
+                json={
+                    "auth_enabled": True,
+                    "oidc": {
+                        "issuer": "https://idp.example.com",
+                        "clients": [
+                            {
+                                "name": "public",
+                                "client_id": "public",
+                                "client_authentication": "public",
+                                "default": True,
+                                "default_scopes": "openid",
+                                "bearer_token_source": "refresh_token",
+                                "device_authorization_requires_device_id": False,
+                                "device_token_request_includes_scope": True,
+                            }
+                        ],
+                    },
+                },
                 request=httpx.Request("GET", "https://nemo.example.com/apis/auth/discovery"),
             )
 
@@ -518,6 +626,29 @@ class TestOIDCTokenProvider:
         assert persisted[0].access_token == new_token
         assert persisted[0].refresh_token == "new-refresh"
 
+    def test_rotated_refresh_token_persistence_error_propagates(self):
+        expired_token = _make_jwt(exp=time.time() - 100)
+        new_token = _make_jwt(exp=time.time() + 3600)
+
+        def fail_persist(_tokens: TokenSet) -> None:
+            raise OSError("disk full")
+
+        provider = OIDCTokenProvider(
+            token_endpoint="https://idp/token",
+            client_id="client",
+            tokens=TokenSet(access_token=expired_token, refresh_token="old-refresh", expires_at=time.time() - 100),
+            on_tokens_refreshed=fail_persist,
+        )
+
+        with (
+            patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_grant,
+            pytest.raises(TokenPersistenceError, match="rotated the refresh token") as exc_info,
+        ):
+            mock_grant.return_value = {"access_token": new_token, "refresh_token": "new-refresh"}
+            provider.get_access_token()
+
+        assert isinstance(exc_info.value.__cause__, OSError)
+
     def test_raises_when_no_refresh_token(self):
         provider = OIDCTokenProvider(
             token_endpoint="https://idp/token",
@@ -565,6 +696,43 @@ class TestOIDCTokenProvider:
         assert result == {"access_token": "new-access"}
         assert mock_post.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"
 
+    def test_refresh_token_grant_uses_context_certificate_authority(self, monkeypatch):
+        monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
+
+        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+            mock_post.return_value = httpx.Response(200, json={"access_token": "new-access"})
+
+            result = refresh_token_grant(
+                token_endpoint="https://idp.example.com/token",
+                client_id="client",
+                refresh_token="refresh-token",
+                certificate_authority="/tmp/context-ca.pem",
+            )
+
+        assert result == {"access_token": "new-access"}
+        assert mock_post.call_args.kwargs["verify"] == "/tmp/context-ca.pem"
+
+    def test_broker_refresh_uses_json_without_provider_client_fields(self, monkeypatch):
+        monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
+
+        with patch("nemo_helix_plugin.client.oidc.httpx.post") as mock_post:
+            mock_post.return_value = httpx.Response(200, json={"access_token": "new-access"})
+
+            result = refresh_token_grant(
+                token_endpoint="https://nemo.example.com/apis/auth/v2/token",
+                client_id="confidential-client",
+                refresh_token="opaque-refresh-handle",
+                scope="openid email",
+                refresh_kind="broker",
+            )
+
+        assert result == {"access_token": "new-access"}
+        assert mock_post.call_args.kwargs["json"] == {
+            "grant_type": "refresh_token",
+            "refresh_token": "opaque-refresh-handle",
+        }
+        assert "data" not in mock_post.call_args.kwargs
+
 
 class TestWorkloadTokenExchangeProvider:
     def test_token_exchange_grant_sends_rfc8693_request(self, monkeypatch):
@@ -595,7 +763,6 @@ class TestWorkloadTokenExchangeProvider:
                 "scope": "openid email groups",
             },
             timeout=5.0,
-            verify=True,
         )
 
     def test_token_exchange_grant_uses_docker_opaque_subject_token_type(self, monkeypatch):
@@ -874,14 +1041,8 @@ class TestFromConfig:
         config_file.write_text(yaml.safe_dump(config_data))
 
         with patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover:
-            from nemo_helix_plugin.client.oidc import NHXOIDCConfig
-
-            mock_discover.return_value = NHXOIDCConfig(
-                auth_enabled=True,
-                client_id="web-client",
-                cli_client_id="cli-client",
-                bearer_token_source="id_token",
-                token_endpoint="https://idp/token",
+            mock_discover.return_value = _public_discovery_config(
+                client_id="cli-client", bearer_token_source="id_token"
             )
             client = NemoClient.from_config(config_path=config_file)
 
@@ -910,15 +1071,116 @@ class TestFromConfig:
         config_file.write_text(yaml.safe_dump(config_data))
 
         with patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover:
-            mock_discover.return_value = NHXOIDCConfig(
-                auth_enabled=True,
-                client_id="cli-client",
-                token_endpoint="https://idp/token",
-            )
+            mock_discover.return_value = _public_discovery_config()
             client = NemoClient.from_config(config_path=config_file)
 
         assert isinstance(client._auth, OIDCTokenProvider)
         assert client._auth.tokens.expires_at == expires_at
+
+    @respx.mock
+    def test_from_config_allows_valid_token_with_stale_broker_refresh_endpoint(self, tmp_path):
+        token = _make_jwt()
+        config_data = {
+            "current_context": "test",
+            "clusters": [{"name": "test-cluster", "base_url": "http://localhost:9090"}],
+            "users": [
+                {
+                    "name": "test-user",
+                    "type": "oauth",
+                    "token": token,
+                    "refresh_token": "refresh-token",
+                    "token_broker_url": "https://old.example.com/apis/auth/v2/token",
+                }
+            ],
+            "contexts": [{"name": "test", "cluster": "test-cluster", "user": "test-user"}],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump(config_data))
+        route = respx.get("http://localhost:9090/test").mock(return_value=httpx.Response(200, json={"ok": True}))
+        discovery = NHXOIDCConfig(
+            auth_enabled=True,
+            clients=(
+                AdvertisedOidcClient(
+                    name="confidential",
+                    client_id="confidential-client",
+                    client_authentication="client_secret_basic",
+                    default=True,
+                    authorization_start_endpoint="https://nemo.example.com/apis/auth/v2/authorize",
+                    broker_token_endpoint="https://nemo.example.com/apis/auth/v2/token",
+                ),
+            ),
+        )
+
+        with patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover:
+            mock_discover.return_value = discovery
+            client = NemoClient.from_config(config_path=config_file)
+
+            from nemo_helix_plugin.client.types import PreparedRequest
+
+            req = PreparedRequest(
+                method="GET",
+                path_template="/test",
+                path_params={},
+                content=None,
+                content_type=None,
+                response_type=None,
+            )
+            client.send(req)
+
+        assert route.calls[0].request.headers["Authorization"] == f"Bearer {token}"
+
+    @respx.mock
+    def test_from_config_raises_on_refresh_with_stale_broker_refresh_endpoint(self, tmp_path):
+        token = _make_jwt(time.time() - 3600)
+        config_data = {
+            "current_context": "test",
+            "clusters": [{"name": "test-cluster", "base_url": "http://localhost:9090"}],
+            "users": [
+                {
+                    "name": "test-user",
+                    "type": "oauth",
+                    "token": token,
+                    "refresh_token": "refresh-token",
+                    "token_broker_url": "https://old.example.com/apis/auth/v2/token",
+                }
+            ],
+            "contexts": [{"name": "test", "cluster": "test-cluster", "user": "test-user"}],
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump(config_data))
+        route = respx.get("http://localhost:9090/test").mock(return_value=httpx.Response(200, json={"ok": True}))
+        discovery = NHXOIDCConfig(
+            auth_enabled=True,
+            clients=(
+                AdvertisedOidcClient(
+                    name="confidential",
+                    client_id="confidential-client",
+                    client_authentication="client_secret_basic",
+                    default=True,
+                    authorization_start_endpoint="https://nemo.example.com/apis/auth/v2/authorize",
+                    broker_token_endpoint="https://nemo.example.com/apis/auth/v2/token",
+                ),
+            ),
+        )
+
+        with patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover:
+            mock_discover.return_value = discovery
+            client = NemoClient.from_config(config_path=config_file)
+
+            from nemo_helix_plugin.client.types import PreparedRequest
+
+            req = PreparedRequest(
+                method="GET",
+                path_template="/test",
+                path_params={},
+                content=None,
+                content_type=None,
+                response_type=None,
+            )
+            with pytest.raises(RuntimeError, match="Stored OIDC refresh credentials do not match"):
+                client.send(req)
+
+        assert not route.called
 
     def test_from_config_does_not_downgrade_discovery_validation_failure(self, tmp_path):
         token = _make_jwt()
@@ -995,8 +1257,6 @@ class TestFromConfig:
         ):
             mock_discover.return_value = NHXOIDCConfig(
                 auth_enabled=True,
-                client_id="nemo-helix-cli",
-                token_endpoint="https://idp.example.com/token",
                 workload_token_exchange_enabled=True,
                 workload_client_id="nemo-helix-workload",
                 workload_token_endpoint="https://workload-idp.example.com/token",
@@ -1047,8 +1307,6 @@ class TestFromConfig:
         ):
             mock_discover.return_value = NHXOIDCConfig(
                 auth_enabled=True,
-                client_id="nemo-helix-cli",
-                token_endpoint="https://idp.example.com/token",
                 workload_token_exchange_enabled=True,
                 workload_client_id="nemo-helix-workload",
                 workload_token_endpoint="http://idp.example.com/token",

@@ -14,6 +14,7 @@ from nemo_helix_plugin.auth.access_keys.issuer import AccessKeyOperationNotImple
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
+from nhx.common.api.common import PaginatedResult, PaginationData
 from nhx.common.auth.access_keys import AccessKeyValidationError
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.dependencies import auth_client_context
@@ -24,7 +25,14 @@ from nhx.common.config import AuthConfig
 from nhx.common.config.base import AccessKeyConfig, TokenSigningConfig
 from nhx.common.entities import EntityConflictError
 from nhx.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, get_workspaces_client, router
-from nhx.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyStateConflictError, get_access_key_registry
+from nhx.core.auth.app.access_key_credentials import AccessKeyCredentialAdapter
+from nhx.core.auth.app.access_keys import (
+    AccessKeyNotFoundError,
+    AccessKeyRegistry,
+    AccessKeyStateConflictError,
+    get_access_key_registry,
+)
+from nhx.core.auth.entities import AccessKeyEntity
 
 
 class InMemoryAccessKeyRegistry:
@@ -53,7 +61,7 @@ class InMemoryAccessKeyRegistry:
         self.add_commits_before_error = False
         self.discarded = set()
 
-    async def add(self, key, *, owner_principal=None):
+    async def add(self, key, *, owner_principal=None, owner_account_id=None):
         if self.add_error is not None and not self.add_commits_before_error:
             raise self.add_error
         self.keys[key.jti] = key
@@ -83,7 +91,15 @@ class InMemoryAccessKeyRegistry:
             return key
         return None
 
-    async def list_for_principal(self, principal, *, page, page_size, include_service_accounts=False):
+    async def list_for_principal(
+        self,
+        principal,
+        *,
+        page,
+        page_size,
+        include_service_accounts=False,
+        owner_account_id=None,
+    ):
         from nemo_helix_plugin.auth.access_keys.types import AccessKeyListResponse, AccessKeyMetadataResponse
 
         # Sort newest-first then by jti to match the real registry's `sort="-issued_at"`.
@@ -977,7 +993,7 @@ def test_access_key_issuer_uses_effective_principal_for_delegated_requests():
 
     issuer = get_access_key_issuer(
         auth_client=auth_client,
-        registry=InMemoryAccessKeyRegistry(),
+        registry=AccessKeyRegistry(entity_client=AsyncMock()),
         workspaces_client=AsyncMock(),
     )
 
@@ -1266,6 +1282,69 @@ async def test_in_memory_access_key_registry_reports_expired_status() -> None:
 
     assert result.data[0].status == "EXPIRED"
     assert not await registry.is_active("ak_expired", "alice@example.com")
+
+
+@pytest.mark.asyncio
+async def test_mixed_store_listing_does_not_drop_fetched_rows() -> None:
+    issued_at = datetime.now(tz=UTC)
+    legacy = AccessKeyEntity(
+        name="ak_legacy",
+        workspace="system",
+        key_name="legacy",
+        principal="alice@example.com",
+        issuer="https://nemo.example.com/apis/auth",
+        audiences=["nemo-helix-access-key"],
+        issued_at=issued_at - timedelta(seconds=1),
+    )
+    credential = AccessKeyEntity(
+        name="ak_credential",
+        workspace="system",
+        key_name="credential",
+        principal="alice@example.com",
+        issuer="https://nemo.example.com/apis/auth",
+        audiences=["nemo-helix-access-key"],
+        issued_at=issued_at,
+    )
+
+    class StubCredentialAdapter(AccessKeyCredentialAdapter):
+        def __init__(self, record: AccessKeyEntity) -> None:
+            self.record = record
+
+        async def list_for_owner(
+            self,
+            owner_account_id: str,
+            *,
+            include_service_accounts: bool,
+            offset: int,
+            limit: int,
+        ) -> tuple[list[AccessKeyEntity], bool]:
+            return [self.record], False
+
+    entity_client = AsyncMock()
+    entity_client.list.return_value = PaginatedResult(
+        data=[legacy],
+        pagination=PaginationData(
+            page=1,
+            page_size=1,
+            current_page_size=1,
+            total_pages=1,
+            total_results=1,
+        ),
+    )
+    registry = AccessKeyRegistry(
+        entity_client=entity_client,
+        credential_adapter=StubCredentialAdapter(credential),
+    )
+
+    result = await registry.list_for_principal(
+        "alice@example.com",
+        page=1,
+        page_size=1,
+        owner_account_id="account-1",
+    )
+
+    assert [record.jti for record in result.data] == ["ak_credential", "ak_legacy"]
+    assert result.has_more is False
 
 
 def test_create_access_key_allows_unnamed_tokens(client):
@@ -1928,6 +2007,7 @@ def test_rotate_access_key_rejects_grace_period_seconds_above_configured_max(cli
     created = client.post("/v2/access-keys", json={}).json()
     jti = created["jti"]
     max_grace_period_seconds = AccessKeyConfig().max_rotation_grace_period_seconds
+    assert max_grace_period_seconds is not None
 
     response = client.post(
         f"/v2/access-keys/{jti}/rotate",

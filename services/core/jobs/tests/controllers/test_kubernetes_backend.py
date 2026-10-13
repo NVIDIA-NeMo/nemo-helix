@@ -160,8 +160,7 @@ def _kubernetes_pod(uid: str, *, phase: str = "Running") -> client.V1Pod:
 def workload_exchange_auth_config():
     return SimpleNamespace(
         oidc=SimpleNamespace(
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
+            workload=SimpleNamespace(client_id="nemo-helix-workload", audience="nemo-helix"),
             audience=None,
         )
     )
@@ -994,14 +993,13 @@ def test_kubernetes_job_rejects_reserved_step_auth_env_vars(kubernetes_job, cpu_
 
 
 def test_kubernetes_job_injects_projected_workload_identity_token_when_exchange_enabled(
-    kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context
+    kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):
     kubernetes_job._execution_profile_config.workload_identity.token_expiration_seconds = 600
     kubernetes_job._execution_profile_config.workload_identity.token_audience = "test-audience"
-    auth_config = SimpleNamespace(oidc=SimpleNamespace(workload_token_exchange_enabled=True))
 
     with (
-        patch("nhx.common.config.get_auth_config", return_value=auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(kubernetes_job._workload_delegations, "ensure_for_target_after_initial_pod_wait"),
     ):
         kubernetes_job.schedule(cpu_execution_provider, test_step_pending_with_auth_context)
@@ -1054,11 +1052,9 @@ def test_kubernetes_job_waits_for_initial_pod_uid_workload_delegation(
 
 
 def test_kubernetes_job_does_not_mount_workload_identity_without_auth_context(
-    kubernetes_job, cpu_execution_provider, test_step_pending
+    kubernetes_job, cpu_execution_provider, test_step_pending, workload_exchange_auth_config
 ):
-    auth_config = SimpleNamespace(oidc=SimpleNamespace(workload_token_exchange_enabled=True))
-
-    with patch("nhx.common.config.get_auth_config", return_value=auth_config):
+    with patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config):
         kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
 
     call_args = kubernetes_job._batch_v1.create_namespaced_job.call_args

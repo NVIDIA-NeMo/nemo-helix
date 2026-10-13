@@ -21,16 +21,18 @@ pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 import harbor.environments.opensandbox as harbor_opensandbox
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
-from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_FILENAME
+from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_GLOB, applied_egress_filename
 from scaled_evals.harbor_opensandbox_environment import (
     CREATE_ATTEMPT_METADATA_KEY,
     MANAGED_BY_METADATA_KEY,
     MANAGED_BY_METADATA_VALUE,
     NemoOpenSandboxEnvironment,
+    _sandbox_role,
 )
 from tenacity import wait_none
 
 TRUSTED = ["10.96.0.20", "*.nvidia.com", "2001:db8::/48"]
+TRIAL = "hello-world__abc"
 
 
 class SandboxApiException(Exception):
@@ -96,6 +98,36 @@ class _Manager:
         pass
 
 
+class _RunCommandOpts:
+    model_fields = {"working_directory": None, "timeout": None, "envs": None, "uid": None}
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+
+
+class _Commands:
+    """``sandbox.commands`` whose default user is ``image_uid``; ``None`` makes ``id -u`` fail."""
+
+    def __init__(self, image_uid: int | None) -> None:
+        self.image_uid = image_uid
+        self.runs: list[tuple[str, dict[str, Any]]] = []
+
+    async def run(self, command: str, opts: _RunCommandOpts) -> SimpleNamespace:
+        self.runs.append((command, opts.kwargs))
+        stdout = []
+        if command == "id -u":
+            if self.image_uid is None:
+                raise SandboxApiException("execd unavailable")
+            stdout = [SimpleNamespace(text=f"{self.image_uid}\n")]
+        return SimpleNamespace(logs=SimpleNamespace(stdout=stdout, stderr=[]), exit_code=0, error=None)
+
+    def uids_sent(self, command: str) -> list[int | None]:
+        return [opts.get("uid") for run, opts in self.runs if run == command]
+
+    def probes(self) -> int:
+        return sum(run == "id -u" for run, _ in self.runs)
+
+
 def _fake_sdk(server: _Server) -> dict[str, Any]:
     class Sandbox:
         @staticmethod
@@ -115,6 +147,7 @@ def _fake_sdk(server: _Server) -> dict[str, Any]:
 
     return {
         "Sandbox": Sandbox,
+        "RunCommandOpts": _RunCommandOpts,
         "ConnectionConfig": lambda **kwargs: SimpleNamespace(**kwargs),
         "NetworkPolicy": SimpleNamespace(model_validate=lambda payload: SimpleNamespace(payload=payload)),
         "SandboxManager": SandboxManager,
@@ -139,13 +172,16 @@ def _environment(
     tmp_path: Path,
     mode: NetworkMode,
     allowed_hosts: list[str] | None = None,
+    *,
+    trial_name: str = TRIAL,
+    session_id: str | None = None,
     **kwargs: Any,
 ) -> NemoOpenSandboxEnvironment:
     return NemoOpenSandboxEnvironment(
         environment_dir=tmp_path,
         environment_name="hello-world",
-        session_id="hello-world__abc__env",
-        trial_paths=TrialPaths(trial_dir=tmp_path),
+        session_id=session_id or f"{trial_name}__env",
+        trial_paths=TrialPaths(trial_dir=tmp_path / trial_name),
         task_env_config=EnvironmentConfig(docker_image="registry.example/hello:1"),
         network_policy=NetworkPolicy(network_mode=mode, allowed_hosts=allowed_hosts or []),
         domain="opensandbox.example",
@@ -170,6 +206,9 @@ def test_harbor_private_hooks_still_exist() -> None:
     assert "self._build_network_policy(sdk)" in inspect.getsource(base._create_sandbox)
     assert hasattr(base, "_safe_kill")
     assert hasattr(base, "_build_connection_config")
+    assert list(inspect.signature(base._resolve_uid).parameters) == ["self", "user"]
+    assert "self._resolve_uid(" in inspect.getsource(base._build_run_command_opts)
+    assert "self._sandbox.commands.run(" in inspect.getsource(base.exec)
 
 
 def _policy_sent(server: _Server) -> dict[str, Any]:
@@ -203,12 +242,66 @@ async def test_records_the_verified_policy_for_the_supervisor(tmp_path: Path, se
 
     sandbox = await environment._create_sandbox(environment._load_opensandbox())
 
-    record = json.loads((tmp_path / APPLIED_EGRESS_FILENAME).read_text())
+    record = json.loads((tmp_path / TRIAL / applied_egress_filename(sandbox.id)).read_text())
     canonical = json.dumps(record["policy"], sort_keys=True, separators=(",", ":"))
     assert record["sandbox_id"] == sandbox.id
+    assert record["role"] == "agent"
     assert record["network_mode"] == "public"
     assert record["policy"] == _policy_sent(server)
     assert record["policy_sha256"] == hashlib.sha256(canonical.encode()).hexdigest()
+
+
+async def test_agent_and_separate_verifier_each_keep_their_record(tmp_path: Path, server: _Server) -> None:
+    agent = _environment(tmp_path, NetworkMode.PUBLIC)
+    verifier = _environment(tmp_path, NetworkMode.NO_NETWORK, session_id=f"{TRIAL}__verifier__task")
+
+    agent_sandbox = await agent._create_sandbox(agent._load_opensandbox())
+    verifier_sandbox = await verifier._create_sandbox(verifier._load_opensandbox())
+
+    records = {
+        record["sandbox_id"]: record
+        for record in (json.loads(path.read_text()) for path in (tmp_path / TRIAL).glob(APPLIED_EGRESS_GLOB))
+    }
+    assert set(records) == {agent_sandbox.id, verifier_sandbox.id}
+    assert records[agent_sandbox.id]["role"] == "agent"
+    assert records[verifier_sandbox.id]["role"] == "verifier"
+    assert records[verifier_sandbox.id]["network_mode"] == "no-network"
+
+
+@pytest.mark.parametrize(
+    ("trial_name", "session_id", "role"),
+    [
+        ("trial-1", "trial-1__env", "agent"),
+        ("trial-1", "trial-1__verifier__task", "verifier"),
+        ("trial-1", "trial-1__verifier__env", "verifier"),
+        ("trial-1-with-a-long-name", "trial-1-with-a-long-name__verifier__step-o__1a2b3c4d", "verifier"),
+        ("a__verifier__b__xyz", "a__verifier__b__xyz__env", "agent"),
+        ("a__verifier__b__xyz", "a__verifier__b__xyz__verifier__env", "verifier"),
+    ],
+)
+def test_sandbox_role_from_harbor_session_id(trial_name: str, session_id: str, role: str) -> None:
+    assert _sandbox_role(session_id, trial_name) == role
+
+
+async def test_agent_is_recorded_as_agent_when_the_trial_name_contains_verifier(
+    tmp_path: Path, server: _Server
+) -> None:
+    environment = _environment(tmp_path, NetworkMode.PUBLIC, trial_name="task__verifier__x__Ab12Cd3")
+
+    sandbox = await environment._create_sandbox(environment._load_opensandbox())
+
+    record = json.loads((tmp_path / "task__verifier__x__Ab12Cd3" / applied_egress_filename(sandbox.id)).read_text())
+    assert record["role"] == "agent"
+
+
+def test_harbor_session_naming_still_matches_sandbox_role() -> None:
+    """``_sandbox_role`` relies on Harbor's session ID naming; an upgrade that changes it must fail here."""
+    import inspect
+
+    from harbor.trial.trial import Trial
+
+    assert "}__verifier__{" in inspect.getsource(Trial._separate_verifier_session_id)
+    assert '}__env"' in inspect.getsource(Trial)
 
 
 async def test_allowlist_task_narrows_the_trusted_allowlist(tmp_path: Path, server: _Server) -> None:
@@ -310,3 +403,58 @@ async def test_strict_verification_rejects_a_dropped_rule(tmp_path: Path, server
         await environment._create_sandbox(sdk)
 
     assert server.live() == set()
+
+
+def _started(tmp_path: Path, image_uid: int | None) -> tuple[NemoOpenSandboxEnvironment, _Commands]:
+    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
+    commands = _Commands(image_uid)
+    environment._sandbox = SimpleNamespace(commands=commands)
+    return environment, commands
+
+
+async def test_root_commands_run_as_the_image_user_on_a_non_root_image(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=10001)
+
+    await environment.exec("tmux -V", user="root")
+    await environment.exec("chmod 777 /logs/agent", user=0)
+
+    assert commands.uids_sent("tmux -V") == [None]
+    assert commands.uids_sent("chmod 777 /logs/agent") == [None]
+    assert commands.probes() == 1
+
+
+async def test_a_root_default_user_is_mapped_too(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=10001)
+    environment.default_user = "root"
+
+    await environment.exec("mkdir -p /installed-agent")
+
+    assert commands.uids_sent("mkdir -p /installed-agent") == [None]
+
+
+async def test_root_images_keep_uid_0(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=0)
+
+    await environment.exec("apt-get install -y curl", user="root")
+
+    assert commands.uids_sent("apt-get install -y curl") == [0]
+
+
+async def test_non_root_requests_do_not_probe(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=10001)
+
+    await environment.exec("whoami")
+    await environment.exec("whoami", user=1234)
+
+    assert commands.uids_sent("whoami") == [None, 1234]
+    assert commands.probes() == 0
+
+
+async def test_a_failed_probe_keeps_harbor_behavior(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=None)
+
+    await environment.exec("tmux -V", user="root")
+    await environment.exec("tmux -V", user="root")
+
+    assert commands.uids_sent("tmux -V") == [0, 0]
+    assert commands.probes() == 1

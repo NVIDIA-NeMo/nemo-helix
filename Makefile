@@ -116,7 +116,12 @@ docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link ch
 	cd docs/fern && npm run check
 
 DOCS_TYPED_SNIPPET_PATHS := \
+	docs/agents/add-guardrails.mdx \
+	docs/agents/deploy-agents.mdx \
+	docs/agents/optimization.mdx \
 	docs/anonymizer/tutorials/preview.mdx \
+	docs/garak/targets/index.mdx \
+	docs/garak/targets/inference-gateway.mdx \
 	docs/auth/authorization/plugin-authorization.mdx \
 	docs/auth/authorization/policy-engine.mdx \
 	docs/customizer/tutorials/embedding-customization-job.mdx \
@@ -128,11 +133,23 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/data-designer/tutorials/seeding.mdx \
 	docs/evals/agent-eval/gym-runner.mdx \
 	docs/evals/agent-eval/index.mdx \
+	docs/get-started/concepts/filtering.mdx \
+	docs/guardrails/concepts/configurations/default-configs.mdx \
+	docs/guardrails/concepts/inference.mdx \
+	docs/guardrails/observability.mdx \
+	docs/guardrails/tutorials/content-safety.mdx \
+	docs/guardrails/tutorials/injection-detection.mdx \
+	docs/guardrails/tutorials/multimodal-data.mdx \
+	docs/guardrails/tutorials/parallel-rails.mdx \
 	docs/pysdk/client/index.mdx \
+	docs/run-inference/about.mdx \
+	docs/run-inference/tutorials/deploy-models.mdx \
+	docs/run-inference/tutorials/run-inference.mdx \
 	docs/safe-synthesizer/about/jobs.mdx \
 	docs/safe-synthesizer/about/reference.mdx \
 	docs/safe-synthesizer/tutorials/differential-privacy.mdx \
-	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx
+	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx \
+	docs/troubleshooting/studio.mdx
 
 .PHONY: docs-lint-snippets
 docs-lint-snippets: docs-check-base-url ## Syntax-check all Python fenced snippets, type-check curated executable docs, and check NHX_BASE_URL usage
@@ -519,6 +536,14 @@ endif
 	@echo "Running tests for package: $(PACKAGE)..."
 	$(UV) run --frozen pytest -v packages/$(PACKAGE)/tests/
 
+.PHONY: test-agents-mini-swe-agent
+test-agents-mini-swe-agent: ## Run Mini-SWE-Agent adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra mini-swe-agent --extra test \
+		python -c 'import minisweagent'
+	$(UV) run --frozen --package nemo-agents-plugin --extra mini-swe-agent --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_mini_swe_agent.py
+
 .PHONY: test-agents-nooa
 test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
 	# Fail on missing harnesses instead of passing with every test skipped.
@@ -691,11 +716,6 @@ test-e2e-kubernetes-kai: ## Run KAI Scheduler e2e tests against Kubernetes (set 
 test-e2e-kubernetes-gpu: ## Run GPU e2e tests against Kubernetes (requires GPU nodes; set NHX_E2E_CLUSTER_URL)
 	@echo "Running GPU e2e tests with Kubernetes with feature gpu enabled..."
 	$(UV) run --frozen pytest e2e --kubernetes --feature gpu -v --junitxml=report-kubernetes-gpu.xml
-
-.PHONY: test-e2e-kubernetes-gpu-automodel
-test-e2e-kubernetes-gpu-automodel: ## Run GPU automodel customization e2e tests against Kubernetes (requires GPU nodes; set NHX_E2E_CLUSTER_URL)
-	@echo "Running GPU automodel customization e2e tests with Kubernetes..."
-	$(UV) run --frozen pytest tests/agentic-use/customizer-lora-job-cli/tests/test_outputs.py --kubernetes --feature gpu --log-cli-level=INFO -v --junitxml=report-kubernetes-gpu-automodel.xml
 
 .PHONY: benchmark-guardrails
 benchmark-guardrails: ## Run nemo-guardrails IGW benchmark sweep (set BENCHMARK_ARGS for extra flags)

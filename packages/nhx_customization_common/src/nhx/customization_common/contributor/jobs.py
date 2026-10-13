@@ -94,7 +94,7 @@ def require_distributed_runtime(backend_label: str) -> None:
 
 
 class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
-    """Shared submit-only job scaffold.
+    """Shared Jobs-service-only job scaffold.
 
     Subclasses set the ``NemoJob`` ClassVars (``name``, ``description``,
     ``job_collection_path``, ``input_spec_schema``, ``spec_schema``), implement

@@ -14,7 +14,9 @@ import { type FieldValues, type UseControllerProps } from 'react-hook-form';
 export interface FilesetSearchableSelectFormFieldProps {
   slotLabel?: ReactNode;
   slotInfo?: ReactNode;
+  slotHelp?: ReactNode;
   slotError?: string;
+  required?: boolean;
 }
 
 export interface FilesetSearchableSelectProps<T extends FieldValues> {

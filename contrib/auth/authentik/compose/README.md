@@ -14,14 +14,20 @@ For Compose-specific architecture and wiring, see:
 
 - [Implementation Details](implementation-details.md)
 
-The Compose runtime starts with:
+From the repo root, start the Compose runtime with:
 
 ```bash
-cd contrib/auth/authentik/compose
-docker compose up
+contrib/auth/authentik/run.sh up compose
 ```
 
-The Compose project name defaults to `nemo-helix-authentik`, so container,
-network, and volume names do not inherit the generic `compose` directory name.
-Set `COMPOSE_PROJECT_NAME` before running `docker compose` if you need a
-different local namespace.
+The harness prepares the generated local secrets, starts Compose, waits for the
+gateway, and registers the `authentik-compose` NeMo CLI context. Stop it with:
+
+```bash
+contrib/auth/authentik/run.sh down compose
+```
+
+The harness Compose project name defaults to `authentik-e2e-reuse`, so
+container, network, and volume names do not inherit the generic `compose`
+directory name. Set `NHX_AUTHENTIK_COMPOSE_PROJECT_NAME` before running the
+harness if you need a different local namespace.

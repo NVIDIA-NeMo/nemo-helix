@@ -133,6 +133,7 @@ def test_evaluate_job_runs_multiple_inline_metrics(tmp_path: Path) -> None:
     assert by_name["string-check.string-check"]["mean"] == 0.5
 
 
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
 def test_evaluate_job_runs_hybrid_bundled_mixed_metrics(tmp_path: Path) -> None:
     """Hybrid bundling: built-in goes inline, custom is cloudpickled, and both execute in one job."""
     packager = HybridMetricBundlePackager()

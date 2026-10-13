@@ -38,7 +38,7 @@ class ParetoConfig(BaseModel):
     """Default X/Y metrics for a group's cost-vs-accuracy Pareto view.
 
     Metric ids use the same vocabulary as the evaluations list sort/filter fields — ``cost_usd``,
-    ``latency_ms``, or ``evaluators.<name>``. Defaults to cost (x) vs latency (y): both exist for
+    ``latency_ms``, ``tokens``, or ``evaluators.<name>``. Defaults to cost (x) vs latency (y): both exist for
     every group, so the chart always has something to render before anyone customizes it.
     """
 
@@ -48,14 +48,14 @@ class ParetoConfig(BaseModel):
     @field_validator("x_metric", "y_metric")
     @classmethod
     def _validate_metric(cls, value: str) -> str:
-        """Restrict axes to metrics Studio can actually plot: the two fixed metrics or a dynamic
+        """Restrict axes to metrics Studio can actually plot: the fixed metrics or a dynamic
         ``evaluators.<name>``. Evaluator names are customer-specific, so only the prefix is checked."""
-        if value in ("cost_usd", "latency_ms"):
+        if value in ("cost_usd", "latency_ms", "tokens"):
             return value
         if value.startswith("evaluators.") and value != "evaluators.":
             return value
         raise ValueError(
-            f"Unsupported Pareto metric {value!r}; expected 'cost_usd', 'latency_ms', or 'evaluators.<name>'."
+            f"Unsupported Pareto metric {value!r}; expected 'cost_usd', 'latency_ms', 'tokens', or 'evaluators.<name>'."
         )
 
 

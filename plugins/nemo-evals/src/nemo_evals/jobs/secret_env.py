@@ -15,8 +15,11 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable
 
+from nemo_evals.config import EvaluatorConfig
+from nemo_helix_plugin.config import NHX_PREFIX_BASE
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx_evals_sdk.resolver_protocols import MissingSecretError
 from nhx_evals_sdk.values.common import SecretRef
 
@@ -25,6 +28,13 @@ GYM_SANDBOX_PLAN_ENVVAR = "NEMO_EVALS_GYM_SANDBOX_PLAN"
 
 #: Env names a job sets itself, so they cannot be sourced from a secret ref.
 RESERVED_SECRET_ENV_NAMES = frozenset({PERSISTENT_JOB_STORAGE_PATH_ENVVAR, GYM_SANDBOX_PLAN_ENVVAR})
+
+#: Env prefixes that configure the platform or Evals, so they cannot be sourced from a secret ref.
+RESERVED_SECRET_ENV_PREFIXES = (NHX_PREFIX_BASE, EvaluatorConfig.model_config["env_prefix"])
+
+
+class SecretEnvError(HelixJobCompilationError, ValueError):
+    """A job's secret refs cannot be turned into its environment; the submission is rejected with 422."""
 
 
 class JobEnvSecretSource:
@@ -69,11 +79,11 @@ def build_task_environment(secret_refs: Iterable[tuple[str, str]]) -> list[Envir
     environment = [EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)]
     resolved: dict[str, str] = {}
     for env_name, secret_name in secret_refs:
-        if env_name in RESERVED_SECRET_ENV_NAMES:
-            raise ValueError(f"{env_name!r} is reserved and cannot be sourced from secret refs")
+        if env_name in RESERVED_SECRET_ENV_NAMES or env_name.upper().startswith(RESERVED_SECRET_ENV_PREFIXES):
+            raise SecretEnvError(f"{env_name!r} is reserved and cannot be sourced from secret refs")
         existing = resolved.get(env_name)
         if existing is not None and existing != secret_name:
-            raise ValueError(
+            raise SecretEnvError(
                 f"conflicting secret references for environment variable {env_name!r}: {existing!r} and {secret_name!r}"
             )
         resolved[env_name] = secret_name

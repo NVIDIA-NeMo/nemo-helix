@@ -7,6 +7,8 @@ import { useSubmitOptimization } from '@studio/routes/agents/AgentDetailRoute/op
 import { OptimizationStrategySelect } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect';
 import type { OptimizationStrategyId } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/types';
 import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
+import { SwitchyardOptimizationForm } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm';
+import { useSubmitSwitchyardOptimization } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/useSubmitSwitchyardOptimization';
 import { OptimizationView } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { type FC } from 'react';
@@ -21,8 +23,8 @@ export interface OptimizationsTabProps {
   onUploadConfig: () => void;
 }
 
-/** The tab's views: the studies table, the strategy picker, and the form that creates one. The
- *  picker and form take over the tab rather than opening a dialog, so each has its own back button;
+/** The tab's views: the studies table, the strategy picker, and the forms that create one. The
+ *  picker and forms take over the tab rather than opening a dialog, so each has its own back button;
  *  only the upload strategy hands off to a dialog, the launch modal the route owns. */
 export const OptimizationsTab: FC<OptimizationsTabProps> = ({
   agentName,
@@ -35,9 +37,11 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
 }) => {
   const workspace = useWorkspaceFromPath();
   const submitOptimization = useSubmitOptimization({ workspace, agentName, evals });
+  const submitRouting = useSubmitSwitchyardOptimization({ workspace, agentName });
   // A record rather than a switch, so a strategy added without a handler fails to compile.
   const continueWith: Record<OptimizationStrategyId, () => void> = {
     hyperparameter: () => onViewChange(OptimizationView.Form),
+    routing: () => onViewChange(OptimizationView.Routing),
     upload: onUploadConfig,
   };
 
@@ -59,6 +63,15 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
           isEvalsPending={isEvalsPending}
           onBack={() => onViewChange(OptimizationView.Strategy)}
           onSubmit={submitOptimization}
+        />
+      );
+    case OptimizationView.Routing:
+      return (
+        <SwitchyardOptimizationForm
+          key={agentName}
+          agentName={agentName}
+          onBack={() => onViewChange(OptimizationView.Strategy)}
+          onSubmit={submitRouting}
         />
       );
     case OptimizationView.Table:

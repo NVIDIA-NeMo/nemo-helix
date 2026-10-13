@@ -5,7 +5,7 @@
 
 These types define what job endpoints accept and return.  Both the server
 (FastAPI routes in ``nhx.core.jobs.api``) and the typed HTTP client import
-from here — one source of truth, no Stainless-generated duplicates.
+from here, so there is one source of truth.
 
 The deep spec types live in sibling modules:
 - :mod:`nemo_helix_plugin.jobs.spec` — ``HelixJobSpec`` and children

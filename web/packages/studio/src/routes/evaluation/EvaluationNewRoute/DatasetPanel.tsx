@@ -15,12 +15,12 @@ import {
   type CanonicalField,
   EMPTY_FIELD_MAPPING,
   type EvaluationFormValues,
-  isSupportedMappingPath,
+  isArrayPath,
   MAPPABLE_FILE_TYPES,
   PRIMARY_CANONICAL_FIELDS,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import {
-  lastExchange,
+  messagesShape,
   useDatasetPreview,
 } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 import { useMessagesBinding } from '@studio/routes/evaluation/EvaluationNewRoute/useMessagesBinding';
@@ -60,14 +60,12 @@ export const DatasetPanel: FC = () => {
   const { row: previewRow, rowCount, isPartial } = useDatasetPreview(dataset ?? null, rowIndex);
   const fileName = dataset ? parseFilesetLocation(dataset)?.objectPath.split('/').pop() : null;
 
-  const exchange = lastExchange(messageSelectors);
-  const assistantSelector = exchange.assistant ?? '';
-  const userSelector = exchange.user ?? '';
+  const shape = messagesShape(messageSelectors);
 
   const formatLabel = (dataset?.split('.').pop() ?? '').toUpperCase() || 'File';
 
   const bindableOptions = useMemo(
-    () => keyOptions.filter((option) => isSupportedMappingPath(option.value)),
+    () => keyOptions.filter((option) => !isArrayPath(option.value)),
     [keyOptions]
   );
 
@@ -141,13 +139,20 @@ export const DatasetPanel: FC = () => {
             {messagesColumn ? (
               <>
                 <Check ok label={`Standard messages array found in "${messagesColumn}"`} />
-                <Check ok={Boolean(userSelector)} label="Input mapped to the user message" />
                 <Check
-                  ok={Boolean(assistantSelector)}
+                  ok={shape.input}
                   label={
-                    assistantSelector
-                      ? 'Reference mapped to the assistant message'
-                      : 'No assistant message to use as Reference'
+                    shape.input
+                      ? 'Input mapped to the last user message'
+                      : 'No user message to use as Input'
+                  }
+                />
+                <Check
+                  ok={shape.reference}
+                  label={
+                    shape.reference
+                      ? 'Reference mapped to the last assistant message'
+                      : 'No assistant reply to the last user message to use as Reference'
                   }
                 />
               </>
@@ -158,9 +163,9 @@ export const DatasetPanel: FC = () => {
         ) : null}
 
         {/* Mapping is only for ambiguity. An OpenAI messages array has none: the
-            user turn is the input and the assistant turn is the ground truth, so
-            the whole column binds to canonical `messages` and the templates index
-            it positionally. Asking the user to map that would be busywork. */}
+            last user turn is the input and the last assistant turn is the ground
+            truth, bound by role in useMessagesBinding. Asking the user to map
+            that would be busywork. */}
         {hasIngestedKeys && !messagesColumn ? (
           <Stack gap="density-sm" className="min-w-0">
             <Text kind="body/bold/lg">Field Mapping</Text>

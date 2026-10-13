@@ -106,6 +106,7 @@ entities-service = [
   "uvicorn[standard]>=0.23.0",
   "sqlalchemy>=2.0.0",
   "asyncpg>=0.31.0",
+  "aiosqlite>=0.20.0",
   "psycopg2-binary>=2.9.10",
   "greenlet>=3.0.0",
   "pydantic>=2.0.0",
@@ -286,6 +287,7 @@ nemo-agents-plugin = [
   "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-mini-swe-agent>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-nooa>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'",
   "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
@@ -307,6 +309,12 @@ nemo-agents-plugin-codex = [
 nemo-agents-plugin-deepagents = [
   "nemo-helix[nemo-agents-plugin]",
   "nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+nemo-agents-plugin-mini-swe-agent = [
+  "nemo-helix[nemo-agents-plugin]",
+  "nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -859,7 +867,7 @@ nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/pla
 garak-api = { source = "../../packages/garak_api/garakapi", module = "garakapi", deps_group = "garak-service" }
 
 # Default first-party plugins
-nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents", "nooa"] } }
+nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", optional-dependencies-prefix = "nemo-agents-plugin-", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"], "optional-dependencies" = ["claude", "codex", "deepagents", "mini-swe-agent", "nooa"] } }
 nemo-agent-optimization-plugin = { source = "../../plugins/nemo-agent-optimization/src/nemo_agent_optimization_plugin", module = "nemo_agent_optimization_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-anonymizer-plugin = { source = "../../plugins/nemo-anonymizer/src/nemo_anonymizer_plugin", module = "nemo_anonymizer_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-garak-plugin = { source = "../../plugins/nemo-garak/src/nemo_garak", module = "nemo_garak", inherit = { "entry-points" = ["nemo.*"] } }

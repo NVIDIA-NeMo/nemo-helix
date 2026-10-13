@@ -17,13 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
-
-from scaled_evals.intake.harbor_lab_pricing import (
-    HARBOR_LAB_PRICING_SOURCE,
-    estimate_cost,
-)
-
 DEFAULT_SOURCE = "scaled-evals"
 PLATFORM_AGENTIC_USE_DATASET = "platform-agentic-use"
 GENERATED_STAGE_MARKERS = ("_skills_stage.json", "_gke_image_stage.json")
@@ -535,119 +528,6 @@ def atif_final_metrics_payload(
     return payload
 
 
-_SESSION_TOTAL_FIELDS = {
-    "total_calls": "calls",
-    "total_prompt_tokens": "prompt_tokens",
-    "total_cached_tokens": "cached_tokens",
-    "total_cache_creation_tokens": "cache_creation_tokens",
-    "total_completion_tokens": "completion_tokens",
-}
-
-
-class _SwitchyardModelUsage(BaseModel):
-    """Validated model counters from one Switchyard routing session."""
-
-    model_config = ConfigDict(extra="ignore", strict=True)
-
-    calls: int = Field(ge=0)
-    prompt_tokens: int = Field(ge=0)
-    cached_tokens: int = Field(ge=0)
-    cache_creation_tokens: int = Field(ge=0)
-    completion_tokens: int = Field(ge=0)
-
-
-class _SwitchyardSessionStats(BaseModel):
-    """Validated, internally consistent Switchyard session snapshot."""
-
-    model_config = ConfigDict(extra="ignore", strict=True)
-
-    session_id: str = Field(min_length=1)
-    total_calls: int = Field(ge=0)
-    total_prompt_tokens: int = Field(ge=0)
-    total_cached_tokens: int = Field(ge=0)
-    total_cache_creation_tokens: int = Field(ge=0)
-    total_completion_tokens: int = Field(ge=0)
-    models: dict[str, _SwitchyardModelUsage]
-
-    @field_validator("models")
-    @classmethod
-    def _nonempty_named_models(cls, models: dict[str, _SwitchyardModelUsage]) -> dict[str, _SwitchyardModelUsage]:
-        if not models:
-            raise ValueError("models must not be empty")
-        if any(not model.strip() for model in models):
-            raise ValueError("model names must not be blank")
-        return models
-
-    @model_validator(mode="after")
-    def _totals_match_models(self) -> _SwitchyardSessionStats:
-        for total_field, model_field in _SESSION_TOTAL_FIELDS.items():
-            if getattr(self, total_field) != sum(getattr(usage, model_field) for usage in self.models.values()):
-                raise ValueError(f"{total_field} does not match model totals")
-        return self
-
-
-def _validated_switchyard_session(value: Any) -> _SwitchyardSessionStats | None:
-    try:
-        return _SwitchyardSessionStats.model_validate(value)
-    except ValidationError:
-        return None
-
-
-def switchyard_session_stats(routing_stats: dict[str, Any], session_id: str) -> dict[str, Any] | None:
-    """Return one internally consistent Switchyard session snapshot."""
-    sessions = routing_stats.get("sessions")
-    raw = sessions.get(session_id) if isinstance(sessions, dict) else None
-    if raw is None and routing_stats.get("session_id") == session_id:
-        raw = routing_stats
-    session = _validated_switchyard_session(raw)
-    if session is None or session.session_id != session_id:
-        return None
-    return session.model_dump()
-
-
-def switchyard_model_metrics(routing_stats: dict[str, Any]) -> dict[str, dict[str, int | float]]:
-    """Aggregate per-model usage metrics from a final Switchyard stats snapshot.
-
-    Cache hit rate is the fraction of a model's input tokens served from cache.
-    Models with no input tokens have a rate of ``0.0``.
-    """
-    raw_sessions = routing_stats.get("sessions")
-    sessions: list[_SwitchyardSessionStats] = []
-    if isinstance(raw_sessions, dict):
-        if not raw_sessions:
-            return {}
-        for session_id, raw_session in raw_sessions.items():
-            session = _validated_switchyard_session(raw_session)
-            if session is None or session.session_id != session_id:
-                return {}
-            sessions.append(session)
-    else:
-        session = _validated_switchyard_session(routing_stats)
-        if session is None:
-            return {}
-        sessions.append(session)
-
-    input_tokens: dict[str, int] = {}
-    output_tokens: dict[str, int] = {}
-    cached_tokens: dict[str, int] = {}
-
-    for session in sessions:
-        for model, usage in session.models.items():
-            input_tokens[model] = input_tokens.get(model, 0) + usage.prompt_tokens
-            output_tokens[model] = output_tokens.get(model, 0) + usage.completion_tokens
-            cached_tokens[model] = cached_tokens.get(model, 0) + usage.cached_tokens
-
-    if not input_tokens:
-        return {}
-    return {
-        "input_tokens_by_model": dict(sorted(input_tokens.items())),
-        "output_tokens_by_model": dict(sorted(output_tokens.items())),
-        "cache_hit_rate_by_model": {
-            model: cached_tokens[model] / tokens if tokens else 0.0 for model, tokens in sorted(input_tokens.items())
-        },
-    }
-
-
 def native_atif_model_name(trajectory: dict[str, Any]) -> str | None:
     agent = trajectory.get("agent")
     if not isinstance(agent, dict):
@@ -656,139 +536,6 @@ def native_atif_model_name(trajectory: dict[str, Any]) -> str | None:
     if not isinstance(model, str) or not model.strip():
         return None
     return model.strip()
-
-
-def _is_gateway_model_name(model: str) -> bool:
-    normalized = model.strip().casefold().strip("/")
-    return normalized == "unknown" or normalized == "switchyard" or normalized.endswith("/switchyard")
-
-
-def preserve_native_single_model_metrics(
-    native_model: str | None,
-    final_metrics: dict[str, Any],
-    session_stats: dict[str, Any],
-) -> bool:
-    """Keep complete native totals when they agree with a concrete single routed model."""
-    if native_model is None or _is_gateway_model_name(native_model):
-        return False
-    if len(session_stats["models"]) != 1:
-        return False
-    for field in (
-        "total_prompt_tokens",
-        "total_cached_tokens",
-        "total_completion_tokens",
-    ):
-        if integer_or_none(final_metrics.get(field)) != session_stats[field]:
-            return False
-    total_cost = number_or_none(final_metrics.get("total_cost_usd"))
-    if total_cost is None or total_cost < 0:
-        return False
-    has_billable_tokens = bool(session_stats["total_prompt_tokens"] or session_stats["total_completion_tokens"])
-    return not has_billable_tokens or total_cost > 0
-
-
-def hydrate_atif_from_switchyard(
-    payload: dict[str, Any],
-    session_stats: dict[str, Any],
-    *,
-    native_model: str | None,
-) -> None:
-    """Hydrate only ATIF root attribution from authoritative session totals."""
-    raw_models = session_stats["models"]
-    routed_models: dict[str, dict[str, Any]] = {}
-    total_cost = 0.0
-    complete_cost = True
-    for model, usage in raw_models.items():
-        model_usage = dict(usage)
-        priced = estimate_cost(
-            model,
-            usage["prompt_tokens"],
-            usage["cached_tokens"],
-            usage["cache_creation_tokens"],
-            usage["completion_tokens"],
-        )
-        if priced is None:
-            model_usage["pricing"] = {
-                "source": HARBOR_LAB_PRICING_SOURCE,
-                "status": "unknown_model",
-            }
-            if usage["prompt_tokens"] or usage["completion_tokens"]:
-                complete_cost = False
-        else:
-            model_usage["cost_usd"] = priced["total_cost"]
-            model_usage["pricing"] = {
-                "source": HARBOR_LAB_PRICING_SOURCE,
-                "status": "priced",
-                "matched_model": priced["matched_model"],
-                "input_cost_usd": priced["input_cost"],
-                "cache_cost_usd": priced["cache_cost"],
-                "cache_creation_cost_usd": priced["cache_creation_cost"],
-                "output_cost_usd": priced["output_cost"],
-            }
-            total_cost += float(priced["total_cost"])
-        routed_models[model] = model_usage
-
-    final_metrics = payload.get("final_metrics")
-    if not isinstance(final_metrics, dict):
-        final_metrics = {}
-        payload["final_metrics"] = final_metrics
-    final_metrics.update(
-        {
-            "total_prompt_tokens": session_stats["total_prompt_tokens"],
-            "total_cached_tokens": session_stats["total_cached_tokens"],
-            "total_completion_tokens": session_stats["total_completion_tokens"],
-        }
-    )
-    if complete_cost:
-        final_metrics["total_cost_usd"] = total_cost
-    else:
-        final_metrics.pop("total_cost_usd", None)
-
-    models = list(raw_models)
-    resolved_model = models[0] if len(models) == 1 else "unknown"
-    replace_model = native_model is None or _is_gateway_model_name(native_model)
-    if replace_model:
-        agent = payload.get("agent")
-        if isinstance(agent, dict):
-            agent["model_name"] = resolved_model
-
-    extra = payload.get("extra")
-    if not isinstance(extra, dict):
-        extra = {}
-        payload["extra"] = extra
-    experiment = extra.get("experiment")
-    if replace_model and isinstance(experiment, dict):
-        experiment["model"] = resolved_model
-    extra["switchyard_routing"] = {
-        "source": "switchyard-session-stats",
-        "pricing_source": HARBOR_LAB_PRICING_SOURCE,
-        "session_id": session_stats["session_id"],
-        "total_calls": session_stats["total_calls"],
-        "total_prompt_tokens": session_stats["total_prompt_tokens"],
-        "total_cached_tokens": session_stats["total_cached_tokens"],
-        "total_cache_creation_tokens": session_stats["total_cache_creation_tokens"],
-        "total_completion_tokens": session_stats["total_completion_tokens"],
-        "cost_status": "complete" if complete_cost else "unknown_pricing",
-        "models": routed_models,
-    }
-
-
-def _persist_hydrated_trajectory(path: Path, payload: dict[str, Any]) -> None:
-    """Preserve the native trajectory once, then write the exact Intake payload."""
-    backup_path = path.with_name(f"{path.name}.bak")
-    try:
-        original = path.read_bytes()
-        try:
-            with backup_path.open("xb") as backup:
-                backup.write(original)
-        except FileExistsError:
-            pass
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        raise IntakeError(f"failed to persist hydrated ATIF trajectory {path}: {exc}") from exc
 
 
 def atif_content(value: Any) -> str | list[Any]:
@@ -1040,16 +787,12 @@ def trial_payloads(
     evaluation_run_id: str,
     test_case_id: str | None = None,
     evaluation_id: str | None = None,
-    routing_stats: dict[str, Any] | None = None,
 ) -> list[TrialPayload]:
     job_result = load_json_if_exists(job_dir / "result.json")
     job_config = load_json_if_exists(job_dir / "config.json")
     eval_run_id = evaluation_run_id
-    if routing_stats is None:
-        routing_stats = load_json_if_exists(job_dir / "switchyard" / "routing_stats_final.json")
 
     payloads: list[TrialPayload] = []
-    session_candidates: list[tuple[TrialPayload, Path | None, tuple[str, ...], str | None]] = []
     trial_records: list[tuple[Path, Path | None, dict[str, Any], dict[str, Any], str]] = []
     for trial_dir in sorted(child for child in job_dir.iterdir() if child.is_dir()):
         result_path = trial_dir / "result.json"
@@ -1150,39 +893,7 @@ def trial_payloads(
         payload["extra"]["trial_result"] = trial_result
         if trajectory_status != "native":
             payload["extra"]["trajectory_status"] = trajectory_status
-        trial_payload = TrialPayload(external_id=external_id, payload=payload)
-        payloads.append(trial_payload)
-        candidates = tuple(
-            dict.fromkeys(
-                value
-                for candidate in (trajectory.get("session_id"), trial_name, trial_id)
-                if candidate is not None and (value := str(candidate).strip())
-            )
-        )
-        session_candidates.append((trial_payload, atif_path, candidates, native_model))
-
-    for trial_payload, atif_path, candidates, native_model in session_candidates:
-        candidate_ids = (*candidates, eval_run_id) if len(payloads) == 1 else candidates
-        for candidate in candidate_ids:
-            session_stats = switchyard_session_stats(routing_stats, candidate)
-            if session_stats is not None:
-                final_metrics = trial_payload.payload.get("final_metrics")
-                preserve_native_metrics = isinstance(final_metrics, dict) and preserve_native_single_model_metrics(
-                    native_model,
-                    final_metrics,
-                    session_stats,
-                )
-                if not preserve_native_metrics:
-                    hydrate_atif_from_switchyard(
-                        trial_payload.payload,
-                        session_stats,
-                        native_model=native_model,
-                    )
-                if atif_path is not None and (
-                    not preserve_native_metrics or atif_path.with_name(f"{atif_path.name}.bak").is_file()
-                ):
-                    _persist_hydrated_trajectory(atif_path, trial_payload.payload)
-                break
+        payloads.append(TrialPayload(external_id=external_id, payload=payload))
 
     return payloads
 

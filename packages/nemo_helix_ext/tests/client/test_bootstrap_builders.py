@@ -8,15 +8,13 @@ from __future__ import annotations
 import json
 import time
 from base64 import urlsafe_b64encode
-from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Literal
 from unittest.mock import patch
 
 import httpx
 import pytest
 import yaml
-from nemo_helix_ext.auth.helpers import NHXOIDCConfig
+from nemo_helix_ext.auth.helpers import AdvertisedOidcClient, NHXOIDCConfig
 from nemo_helix_ext.auth.token_provider import OIDCTokenProvider
 from nemo_helix_ext.client.bootstrap import (
     DEFAULT_CONNECT_TIMEOUT,
@@ -27,7 +25,6 @@ from nemo_helix_ext.client.bootstrap import (
     build_nemo_client,
     resolve_timeout,
 )
-from nemo_helix_ext.client.factory import build_async_client_init_kwargs, build_client_init_kwargs
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.endpoint import get
@@ -56,7 +53,18 @@ def _wire(client: NemoClient) -> list[httpx.Request]:
     return seen
 
 
-_OIDC = NHXOIDCConfig(auth_enabled=True, client_id="nhx-client-id", token_endpoint="https://idp/token")
+_OIDC = NHXOIDCConfig(
+    auth_enabled=True,
+    clients=(
+        AdvertisedOidcClient(
+            name="public",
+            client_id="nhx-client-id",
+            client_authentication="public",
+            default=True,
+            token_endpoint="https://idp/token",
+        ),
+    ),
+)
 
 
 def _jwt(exp: float) -> str:
@@ -261,69 +269,6 @@ def test_oauth_builder_passes_the_final_transport_to_discovery(discover, tmp_pat
     assert discover.call_args.kwargs["http_client"] is client._http
 
 
-@patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)
-def test_sync_factory_closes_auth_transport_when_seeded_auth_fails(_discover, tmp_path: Path) -> None:
-    config = _write_config(tmp_path, user={"type": "oauth", "token": _jwt(time.time() - 3600)})
-    built_clients: list[httpx.Client] = []
-
-    def factory(_hook: Callable[[httpx.Request], None], _verify: str | Literal[True]) -> httpx.Client:
-        client = httpx.Client()
-        built_clients.append(client)
-        return client
-
-    with pytest.raises(RuntimeError, match="no refresh token is available"):
-        build_client_init_kwargs(config_path=config, http_client_factory=factory)
-
-    assert len(built_clients) == 1
-    assert built_clients[0].is_closed
-
-
-@pytest.mark.asyncio
-async def test_async_factory_reuses_auth_transport_for_lazy_discovery(tmp_path: Path) -> None:
-    token = _jwt(time.time() + 3600)
-    config = _write_config(tmp_path, user={"type": "oauth", "token": token, "refresh_token": "r"})
-    requests: list[httpx.Request] = []
-    built_clients: list[httpx.AsyncClient] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.url.path == "/apis/auth/discovery":
-            return httpx.Response(
-                200,
-                json={
-                    "auth_enabled": True,
-                    "oidc": {
-                        "client_id": "nhx-client-id",
-                        "token_endpoint": "https://idp/token",
-                    },
-                },
-            )
-        return httpx.Response(200, json={"ok": True})
-
-    def factory(hook: Callable[[httpx.Request], Awaitable[None]], _verify: str | Literal[True]) -> httpx.AsyncClient:
-        client = httpx.AsyncClient(
-            event_hooks={"request": [hook], "response": []},
-            transport=httpx.MockTransport(handler),
-        )
-        built_clients.append(client)
-        return client
-
-    init_config = build_async_client_init_kwargs(config_path=config, http_client_factory=factory)
-    assert isinstance(init_config.http_client, httpx.AsyncClient)
-    try:
-        await init_config.http_client.get("http://localhost:8080/apis/test/v2/probe")
-    finally:
-        await init_config.http_client.aclose()
-
-    assert built_clients == [init_config.http_client]
-    assert [request.url.path for request in requests] == [
-        "/apis/auth/discovery",
-        "/apis/test/v2/probe",
-    ]
-    assert "Authorization" not in requests[0].headers
-    assert requests[1].headers["Authorization"] == f"Bearer {token}"
-
-
 def test_oauth_builder_reuses_discovery_transport_and_attaches_auth(tmp_path: Path) -> None:
     token = _jwt(time.time() + 3600)
     config = _write_config(tmp_path, user={"type": "oauth", "token": token, "refresh_token": "r"})
@@ -339,8 +284,20 @@ def test_oauth_builder_reuses_discovery_transport_and_attaches_auth(tmp_path: Pa
                 json={
                     "auth_enabled": True,
                     "oidc": {
-                        "client_id": "nhx-client-id",
-                        "token_endpoint": "https://idp/token",
+                        "issuer": "https://idp.example.com",
+                        "clients": [
+                            {
+                                "name": "public",
+                                "client_id": "nhx-client-id",
+                                "client_authentication": "public",
+                                "default": True,
+                                "default_scopes": "openid profile email",
+                                "bearer_token_source": "access_token",
+                                "token_endpoint": "https://idp/token",
+                                "device_authorization_requires_device_id": False,
+                                "device_token_request_includes_scope": True,
+                            }
+                        ],
                     },
                 },
             )
@@ -384,8 +341,20 @@ async def test_async_oauth_builder_reuses_discovery_transport_and_attaches_auth(
                 json={
                     "auth_enabled": True,
                     "oidc": {
-                        "client_id": "nhx-client-id",
-                        "token_endpoint": "https://idp/token",
+                        "issuer": "https://idp.example.com",
+                        "clients": [
+                            {
+                                "name": "public",
+                                "client_id": "nhx-client-id",
+                                "client_authentication": "public",
+                                "default": True,
+                                "default_scopes": "openid profile email",
+                                "bearer_token_source": "access_token",
+                                "token_endpoint": "https://idp/token",
+                                "device_authorization_requires_device_id": False,
+                                "device_token_request_includes_scope": True,
+                            }
+                        ],
                     },
                 },
             )
@@ -413,20 +382,27 @@ async def test_async_oauth_builder_reuses_discovery_transport_and_attaches_auth(
     assert requests[1].headers["Authorization"] == f"Bearer {token}"
 
 
-def test_oauth_builder_uses_discovered_cli_client_and_bearer_source(tmp_path: Path) -> None:
+def test_oauth_builder_uses_discovered_user_login_client_and_bearer_source(tmp_path: Path) -> None:
     oidc = NHXOIDCConfig(
         auth_enabled=True,
-        client_id="web-client",
-        cli_client_id="cli-client",
-        bearer_token_source="id_token",
-        token_endpoint="https://idp/token",
+        clients=(
+            AdvertisedOidcClient(
+                name="public",
+                client_id="user-login-client",
+                client_authentication="public",
+                default=True,
+                bearer_token_source="id_token",
+                token_endpoint="https://idp/token",
+            ),
+        ),
     )
 
     with patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=oidc):
         client = build_nemo_client(config_path=_oauth_config(tmp_path))
 
+    assert client._auth is not None
     assert isinstance(client._auth, OIDCTokenProvider)
-    assert client._auth.client_id == "cli-client"
+    assert client._auth.client_id == "user-login-client"
     assert client._auth.bearer_token_source == "id_token"
 
 
@@ -440,6 +416,75 @@ def test_oauth_builder_sends_the_stored_token_on_the_wire(_discover, tmp_path: P
     client.send(probe())
 
     assert seen[0].headers["Authorization"] == f"Bearer {token}"
+
+
+def test_oauth_builder_allows_valid_token_with_stale_broker_refresh_endpoint(tmp_path: Path) -> None:
+    token = _jwt(time.time() + 3600)
+    config = _write_config(
+        tmp_path,
+        user={
+            "type": "oauth",
+            "token": token,
+            "refresh_token": "r",
+            "token_broker_url": "https://old.example.com/apis/auth/v2/token",
+        },
+    )
+    oidc = NHXOIDCConfig(
+        auth_enabled=True,
+        clients=(
+            AdvertisedOidcClient(
+                name="confidential",
+                client_id="confidential-client",
+                client_authentication="client_secret_basic",
+                default=True,
+                authorization_start_endpoint="https://nemo.example.com/apis/auth/v2/authorize",
+                broker_token_endpoint="https://nemo.example.com/apis/auth/v2/token",
+            ),
+        ),
+    )
+
+    with patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=oidc):
+        client = build_nemo_client(config_path=config)
+    seen = _wire(client)
+
+    client.send(probe())
+
+    assert seen[0].headers["Authorization"] == f"Bearer {token}"
+
+
+def test_oauth_builder_fails_on_refresh_with_stale_broker_refresh_endpoint(tmp_path: Path) -> None:
+    token = _jwt(time.time() - 3600)
+    config = _write_config(
+        tmp_path,
+        user={
+            "type": "oauth",
+            "token": token,
+            "refresh_token": "r",
+            "token_broker_url": "https://old.example.com/apis/auth/v2/token",
+        },
+    )
+    oidc = NHXOIDCConfig(
+        auth_enabled=True,
+        clients=(
+            AdvertisedOidcClient(
+                name="confidential",
+                client_id="confidential-client",
+                client_authentication="client_secret_basic",
+                default=True,
+                authorization_start_endpoint="https://nemo.example.com/apis/auth/v2/authorize",
+                broker_token_endpoint="https://nemo.example.com/apis/auth/v2/token",
+            ),
+        ),
+    )
+
+    with patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=oidc):
+        client = build_nemo_client(config_path=config)
+    seen = _wire(client)
+
+    with pytest.raises(RuntimeError, match="Stored OIDC refresh credentials do not match"):
+        client.send(probe())
+
+    assert seen == []
 
 
 @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)

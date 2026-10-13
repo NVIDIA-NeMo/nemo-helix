@@ -3,6 +3,7 @@
 
 import httpx
 import pytest
+from nemo_helix_ext.auth.helpers import select_advertised_client
 from nemo_helix_ext.client.tls import httpx_tls_config_from_env
 
 from tests.auth_idp.authentik_live import AUTHENTIK_DOCKER_E2E_CONFIG
@@ -24,17 +25,21 @@ def test_authentik_discovery_exposes_gateway_reachable_device_flow(authentik_sta
     )
 
     assert oidc.auth_enabled is True
-    assert oidc.client_id == "nemo-helix-cli"
-    assert oidc.token_endpoint == f"{authentik_stack.gateway_base_url}/application/o/token/"
-    assert oidc.device_authorization_endpoint == f"{authentik_stack.gateway_base_url}/application/o/device/"
-    assert oidc.default_scopes == "openid email offline_access groups"
+    public_client = select_advertised_client(oidc, "public")
+    confidential_client = select_advertised_client(oidc, "confidential")
+    assert public_client.client_id == "nemo-helix-cli"
+    assert confidential_client.client_id == "nemo-helix-user"
+    assert confidential_client.client_authentication == "client_secret_basic"
+    assert public_client.token_endpoint == f"{authentik_stack.gateway_base_url}/application/o/token/"
+    assert public_client.device_authorization_endpoint == f"{authentik_stack.gateway_base_url}/application/o/device/"
+    assert public_client.default_scopes == "openid email offline_access groups"
 
-    assert oidc.device_authorization_endpoint is not None
+    assert public_client.device_authorization_endpoint is not None
     response = httpx.post(
-        oidc.device_authorization_endpoint,
+        public_client.device_authorization_endpoint,
         data={
-            "client_id": oidc.client_id,
-            "scope": oidc.default_scopes,
+            "client_id": public_client.client_id,
+            "scope": public_client.default_scopes,
         },
         timeout=30.0,
         **httpx_tls_config_from_env(),

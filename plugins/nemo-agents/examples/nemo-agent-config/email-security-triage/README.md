@@ -34,12 +34,12 @@ The deploy command waits until the deployment reports `running` on a loopback po
 
 ```bash
 nemo agents invoke --agent-deployment email-security-triage-deployment \
-  --input '{"user_message": "is this legit?", "emails": ["Subject: Verify your account\nFrom: it-support@paypa1-secure.example\n\nYour account is locked. Confirm your password at http://paypa1-secure.example/login"]}'
+  --input '{"user_message": "is this legit?", "emails": ["Subject: Verify your account\nFrom: it-support@account-security.example\n\nYour account is locked. Confirm your password at http://account-security.example/login"]}'
 ```
 
 The first line is exactly `phishing` — one lowercase word, alone. The reasoning
-follows on the lines after it, naming the lookalike sender domain
-(`paypa1-secure.example`) and the credential request.
+follows on the lines after it, naming the unexpected sender domain
+(`account-security.example`) and the credential request.
 
 That answer-first shape is the point: every capability puts a bare answer on line
 one and explains after, so a metric can read the result without an LLM. It is also
@@ -57,7 +57,7 @@ different contract on line one.
 ```bash
 # no question -> general review: line 1 is ANALYSIS, then a block per message
 nemo agents invoke --agent-deployment email-security-triage-deployment \
-  --input '{"user_message": "", "emails": ["Subject: Verify your account\nFrom: it-support@paypa1-secure.example\n\nConfirm your password at http://paypa1-secure.example/login"]}'
+  --input '{"user_message": "", "emails": ["Subject: Verify your account\nFrom: it-support@account-security.example\n\nConfirm your password at http://account-security.example/login"]}'
 
 # "write a warning" -> drafting: line 1 is prose, no verdict word
 nemo agents invoke --agent-deployment email-security-triage-deployment \

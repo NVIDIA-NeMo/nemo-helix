@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 import yaml
-from nemo_helix_ext.auth.helpers import NHXOIDCConfig, decode_jwt_claims
+from nemo_helix_ext.auth.helpers import AdvertisedOidcClient, NHXOIDCConfig, decode_jwt_claims
 from nemo_helix_ext.client.bootstrap import build_async_nemo_client, build_nemo_client
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -76,14 +76,19 @@ def _write_config(
 
 _MOCK_NHX_CONFIG = NHXOIDCConfig(
     auth_enabled=True,
-    client_id="nhx-client-id",
-    token_endpoint="https://idp/token",
+    clients=(
+        AdvertisedOidcClient(
+            name="public",
+            client_id="nhx-client-id",
+            client_authentication="public",
+            default=True,
+            token_endpoint="https://idp/token",
+        ),
+    ),
 )
 
 _MOCK_WORKLOAD_NHX_CONFIG = NHXOIDCConfig(
     auth_enabled=True,
-    client_id="nhx-client-id",
-    token_endpoint="https://idp/token",
     workload_token_exchange_enabled=True,
     workload_client_id="nhx-workload-client-id",
     workload_token_endpoint="https://workload-idp/token",
@@ -219,7 +224,7 @@ class TestBuildNemoClientOAuth:
         assert _mock_discover.call_args.kwargs["http_client"] is mock_httpx_client.return_value
 
     @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    @patch("nemo_helix_ext.auth.token_provider.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.httpx.post")
     def test_persist_refreshed_tokens_writes_to_config(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
         new_token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
@@ -259,9 +264,9 @@ class TestBuildNemoClientAuthDisabledCluster:
 
     @patch(
         "nemo_helix_ext.auth.bootstrap.discover_nhx_config",
-        return_value=NHXOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
+        return_value=NHXOIDCConfig(auth_enabled=False),
     )
-    @patch("nemo_helix_ext.auth.token_provider.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.httpx.post")
     def test_expired_token_on_auth_disabled_cluster_does_not_attempt_refresh(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
         config_path = _write_config(tmp_path, token=expired_token, refresh_token="refresh_abc")
@@ -274,7 +279,7 @@ class TestBuildNemoClientAuthDisabledCluster:
 
     @patch(
         "nemo_helix_ext.auth.bootstrap.discover_nhx_config",
-        return_value=NHXOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
+        return_value=NHXOIDCConfig(auth_enabled=False),
     )
     def test_valid_token_on_auth_disabled_cluster_skips_token_provider(self, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
@@ -625,7 +630,7 @@ class TestBuildNemoClientBootstrapFailures:
             _sent_authorization(client)
 
     @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    @patch("nemo_helix_ext.auth.token_provider.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.httpx.post")
     def test_refresh_grant_failure_surfaces_clear_error(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
         config_path = _write_config(tmp_path, token=expired_token, refresh_token="refresh_abc")

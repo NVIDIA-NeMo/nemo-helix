@@ -22,7 +22,6 @@ _INFRASTRUCTURE_CODES = frozenset(
         "OSError",
         "KubernetesJobError",
         "SandboxExecutionError",
-        "SwitchyardReadinessError",
     }
 )
 _PROVIDER_CODES = frozenset(
@@ -45,7 +44,6 @@ _RETRYABLE_INFRASTRUCTURE_CODES = frozenset(
         "runner_deadline_exceeded",
         "runner_handoff_lost",
         "object_store_unavailable",
-        "SwitchyardReadinessError",
     }
 )
 _RETRYABLE_PROVIDER_CODES = frozenset(
@@ -60,6 +58,9 @@ _RETRYABLE_PROVIDER_CODES = frozenset(
     }
 )
 _RETRYABLE_TASK_CODES = frozenset({"NonZeroAgentExitCodeError"})
+# Task codes whose detail text names the runtime (e.g. "harbor_opensandbox"), so they would
+# otherwise match an infrastructure pattern such as "sandbox".
+_UNAMBIGUOUS_TASK_CODES = frozenset({"IncompatibleTaskError"})
 _TASK_CODES = frozenset(
     {
         "NonZeroAgentExitCodeError",
@@ -68,6 +69,7 @@ _TASK_CODES = frozenset(
         "InvalidReference",
         "ValidationError",
         "ValueError",
+        "IncompatibleTaskError",
     }
 )
 _INFRASTRUCTURE_PATTERNS = (
@@ -103,6 +105,8 @@ def failure_category_for_code(
 
     code = str(failure_code or "").strip()
     text = f"{code} {detail or ''}".lower()
+    if code in _UNAMBIGUOUS_TASK_CODES:
+        return "task"
     if code in _PROVIDER_CODES or any(pattern in text for pattern in _PROVIDER_PATTERNS):
         return "provider"
     if code in _INFRASTRUCTURE_CODES or any(pattern in text for pattern in _INFRASTRUCTURE_PATTERNS):

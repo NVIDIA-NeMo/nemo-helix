@@ -417,6 +417,9 @@ def _docker_compose_generated_config_dir() -> Path:
 def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any]]:
     marker = node.get_closest_marker("e2e_config")
     if marker is None or not marker.args:
+        config_ref = os.environ.get("NHX_E2E_CONFIG_REF")
+        if config_ref:
+            return [config_ref]
         return [
             str(_DEFAULT_E2E_PLATFORM_CONFIG),
             str(_DEFAULT_E2E_DISABLE_DEPLOYMENTS_ORPHAN_CLEANUP),
@@ -433,7 +436,7 @@ def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any
 def _resolve_e2e_harness_config_from_node(node: Node) -> E2EHarnessConfig:
     marker = node.get_closest_marker("e2e_config")
     if marker is None:
-        return {"backend": "subprocess"}
+        return {"backend": os.environ.get("NHX_E2E_HARNESS_BACKEND", "subprocess")}
     unknown = set(marker.kwargs) - {"harness"}
     if unknown:
         raise pytest.UsageError(f"pytest.mark.e2e_config only supports the 'harness' keyword, got: {sorted(unknown)}")
@@ -673,6 +676,8 @@ def _docker_backend_overrides() -> DockerBackendOverrides:
         overrides["registry"] = registry
     if tag:
         overrides["tag"] = tag
+    if os.environ.get("NHX_E2E_GPU_REQUESTED", "").lower() in {"1", "true", "yes"}:
+        overrides["gpu_requested"] = True
     return overrides
 
 

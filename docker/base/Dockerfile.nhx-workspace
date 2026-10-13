@@ -13,6 +13,5 @@ COPY packages/ packages/
 COPY plugins/ plugins/
 COPY services/ services/
 COPY packages/nhx_platform/ entrypoint/
-COPY sdk/ sdk/
 COPY script/ script/
 COPY tools/ tools/

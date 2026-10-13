@@ -9,11 +9,11 @@ one step, used by two surfaces:
 
 - ``nemo customization --upload-model ... --upload-dataset ...`` creates the
   resources and prints the references to put in a job JSON.
-- ``nemo customization <backend> submit --upload-model ... --upload-dataset ...``
+- ``nemo customization <backend> --job-json job.json --upload-model ... --upload-dataset ...``
   does the same and submits the job with the references already filled in.
 
 Neither needs to know the backend. Files keep their local names, so a fileset
-holds exactly what was on disk, and only ``submit`` cares where the reference
+holds exactly what was on disk, and only ``--job-json`` cares where the reference
 lands in the job JSON.
 
 ``--exist-ok`` follows the Files service: an existing fileset is reused **and its

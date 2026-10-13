@@ -14,7 +14,10 @@ from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.entities import MetricBundleEntity
 from nemo_evals.metric_storage import parse_bundle_ref
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.cloudpickle import (
+    CloudpickleMetricsDisabledError,
+)
+from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.entities import ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -162,7 +165,7 @@ def service(fake_files: _FakeFiles, fake_entity_client: _FakeEntityClient) -> Me
 def _bundle(metric=None) -> MetricInline:
     """Build a runtime bundle and return it as the API wire DTO (what requests carry)."""
     metric = metric or ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
-    runtime_bundle = bundle_metric(metric, CloudpickleMetricBundlePackager())
+    runtime_bundle = bundle_metric(metric, InlineMetricBundlePackager())
     return MetricInline.model_validate_json(runtime_bundle.model_dump_json())
 
 
@@ -188,7 +191,7 @@ async def test_create_stores_bundle_and_indexes_entity(
 
     assert created.name == "exact"
     assert created.metric_type == bundle.metric_type
-    assert created.payload_kind == "cloudpickle"
+    assert created.payload_kind == "inline"
     assert created.payload_digest == bundle.payload.digest
     assert created.bundle_ref.startswith("default/metric-bundle.")
     assert created.description == bundle.metadata.description
@@ -332,3 +335,41 @@ async def test_list_excludes_derived_by_default(service: MetricService, fake_ent
 
     assert fake_entity_client.list_filter_operations[0] is not None
     assert fake_entity_client.list_filter_operations[1] is None
+
+
+async def test_create_refuses_cloudpickle_metric_by_default_and_stores_nothing(
+    service: MetricService,
+    fake_files: _FakeFiles,
+    fake_entity_client: _FakeEntityClient,
+    detonating_cloudpickle_metric: dict,
+) -> None:
+    with pytest.raises(CloudpickleMetricsDisabledError):
+        await service.create_metric(
+            "custom", MetricInline.model_validate(detonating_cloudpickle_metric), workspace="default"
+        )
+
+    assert not fake_files._store
+    assert not fake_entity_client.entities
+
+
+async def test_store_derived_metric_refuses_cloudpickle_metric_by_default(
+    service: MetricService, fake_entity_client: _FakeEntityClient, detonating_cloudpickle_metric: dict
+) -> None:
+    """Tasks persist inline metrics through here, so this is the task-creation ingress."""
+    with pytest.raises(CloudpickleMetricsDisabledError):
+        await service.store_derived_metric(
+            MetricInline.model_validate(detonating_cloudpickle_metric), workspace="default"
+        )
+
+    assert not fake_entity_client.entities
+
+
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
+async def test_create_stores_cloudpickle_metric_without_loading_it_when_enabled(
+    service: MetricService, detonating_cloudpickle_metric: dict
+) -> None:
+    created = await service.create_metric(
+        "custom", MetricInline.model_validate(detonating_cloudpickle_metric), workspace="default"
+    )
+
+    assert created.payload_kind == "cloudpickle"

@@ -57,13 +57,22 @@ def _make_mock_model_entity(
     )
 
 
+def _no_in_flight_jobs() -> MagicMock:
+    """Jobs client whose in-flight output-name check finds no pending or running job."""
+    page = MagicMock()
+    page.items.return_value.__aiter__.return_value = []
+    jobs = MagicMock()
+    jobs.list_jobs = AsyncMock(return_value=page)
+    return jobs
+
+
 @pytest.fixture
 def platform_clients() -> AsyncCustomizationHelixClients:
     models = AsyncMock()
     # Default to "no adapter with this output name exists", which is what every test that is
     # not about adapter re-parenting assumes.
     models.get_adapter.side_effect = _not_found()
-    return AsyncCustomizationHelixClients(files=AsyncMock(), models=models, jobs=MagicMock())
+    return AsyncCustomizationHelixClients(files=AsyncMock(), models=models, jobs=_no_in_flight_jobs())
 
 
 def _not_found() -> NotFoundError:
@@ -922,7 +931,8 @@ async def test_full_weight_job_rejects_an_output_name_a_running_job_will_registe
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     running = SimpleNamespace(name="automodel-job-1", status=HelixJobStatus.ACTIVE, spec={"output": {"name": "out"}})
-    cast(MagicMock, platform_clients.jobs).list.return_value.__aiter__.return_value = [running]
+    jobs_page = cast(MagicMock, platform_clients.jobs).list_jobs.return_value
+    jobs_page.items.return_value.__aiter__.return_value = [running]
     job = CustomizationJobOutput(
         model="default/test-target",
         dataset="default/my-dataset",

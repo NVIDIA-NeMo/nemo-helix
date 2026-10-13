@@ -2,48 +2,38 @@
 # SPDX-License-Identifier: Apache-2.0
 
 workloadTokenSigningKey:
-  create: true
   secretName: &workloadTokenSigningKeySecretName nemo-workload-token-signing-key
   key: private-key.pem
   mountPath: &workloadTokenSigningKeyMountPath /etc/nhx/workload-token
-  privateKeyPem: ""
 
 workloadTokenTls:
-  create: true
   secretName: &workloadTokenTlsSecretName nemo-helix-envoy-tls
   mountPath: &workloadTokenTlsMountPath /etc/nhx/workload-token-tls
   caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nhx/workload-token-ca
   caBundleFile: &workloadTokenTlsCaBundleFile /etc/nhx/workload-token-ca/ca.crt
-  durationDays: 3650
-  ipAddresses:
-    - 127.0.0.1
-  dnsNames: []
 
 zitadelSecrets:
+  prepared:
+    secretName: &preparedSecretName nemo-zitadel-prepared
   masterkey:
-    create: true
     secretName: &zitadelMasterkeySecretName zitadel-masterkey
     key: masterkey
   demo:
-    create: true
-    secretName: &zitadelDemoCredentialsSecretName nemo-zitadel-demo-credentials
-    interactiveUserPasswordKey: interactive-user-password
+    secretName: *preparedSecretName
+    interactiveUserPasswordKey: ZITADEL_INTERACTIVE_USER_PASSWORD
   postgresql:
-    create: true
-    secretName: &zitadelPostgresqlSecretName zitadel-postgresql
-    adminPasswordKey: &zitadelPostgresqlAdminPasswordKey postgres-password
-    userPasswordKey: &zitadelPostgresqlUserPasswordKey password
-    dsnKey: &zitadelPostgresqlDsnKey dsn
+    secretName: &zitadelPostgresqlSecretName nemo-zitadel-prepared
+    adminPasswordKey: &zitadelPostgresqlAdminPasswordKey ZITADEL_POSTGRES_ADMIN_PASSWORD
+    userPasswordKey: &zitadelPostgresqlUserPasswordKey ZITADEL_POSTGRES_USER_PASSWORD
+    dsnKey: &zitadelPostgresqlDsnKey ZITADEL_POSTGRES_DSN
 
 nemoHelixSecrets:
   ngc:
-    create: true
-    secretName: &nemoHelixNgcSecretName nemo-helix-ngc-api
+    secretName: &nemoHelixNgcSecretName nemo-zitadel-prepared
     key: NGC_API_KEY
   postgresql:
-    create: true
-    secretName: &nemoHelixPostgresqlSecretName nemo-helix-postgres
-    passwordKey: password
+    secretName: &nemoHelixPostgresqlSecretName nemo-zitadel-prepared
+    passwordKey: NEMO_POSTGRES_PASSWORD
 
 zitadelDemo:
   groupsClaim: groups
@@ -176,12 +166,21 @@ nemo-helix:
     enabled: true
     auth:
       existingSecret: *nemoHelixPostgresqlSecretName
+      existingSecretPasswordKey: NEMO_POSTGRES_PASSWORD
+      secretKeys:
+        userPasswordKey: NEMO_POSTGRES_PASSWORD
+        adminPasswordKey: NEMO_POSTGRES_PASSWORD
   clickhouse:
     enabled: false
   externalClickhouse:
     host: unused-clickhouse
-    existingSecret: nemo-helix-postgres
-    existingSecretPasswordKey: password
+    existingSecret: *nemoHelixPostgresqlSecretName
+    existingSecretPasswordKey: NEMO_POSTGRES_PASSWORD
+  secrets:
+    defaultEncryptionKey:
+      existingSecret:
+        name: *preparedSecretName
+        key: NHX_SECRETS_DEFAULT_ENCRYPTION_KEY
   core:
     controller:
       controllerGroup: core
@@ -230,6 +229,7 @@ nemo-helix:
       - secrets
       - entities
       - deployments
+      - studio
     env:
       NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nhx/workload-token/private-key.pem"
       NHX_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET:
@@ -237,6 +237,18 @@ nemo-helix:
           secretKeyRef:
             name: *zitadelSeedStateSecretName
             key: nemo_client_secret
+            optional: true
+      NHX_OIDC_CLIENT_SECRET:
+        valueFrom:
+          secretKeyRef:
+            name: *zitadelSeedStateSecretName
+            key: user_login_client_secret
+            optional: true
+      NHX_AUTH_SESSION_ENCRYPTION_KEY:
+        valueFrom:
+          secretKeyRef:
+            name: *zitadelSeedStateSecretName
+            key: session_encryption_key
             optional: true
       SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
       REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
@@ -324,6 +336,7 @@ nemo-helix:
   platformConfig:
     platform:
       base_url: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}'
+      advertised_base_url: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}'
     auth:
       enabled: true
       allow_unsigned_jwt: false
@@ -343,9 +356,22 @@ nemo-helix:
         issuer: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}'
         additional_issuers:
           - '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "zitadel" "scheme" "http" "port" 8080) }}'
-        client_id: "__ZITADEL_NEMO_CLIENT_ID__"
-        token_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/token'
-        device_authorization_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/device_authorization'
+        public_client:
+          client_id: "__ZITADEL_NEMO_CLIENT_ID__"
+          server_side_sessions: false
+          authorization_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/authorize'
+          token_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/token'
+          device_authorization_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/device_authorization'
+          default_scopes: "openid email profile offline_access groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud"
+        server_sessions:
+          encryption_key_env_var: NHX_AUTH_SESSION_ENCRYPTION_KEY
+        confidential_client:
+          client_id: "__ZITADEL_USER_LOGIN_CLIENT_ID__"
+          client_secret_env_var: NHX_OIDC_CLIENT_SECRET
+          login_redirect_uri: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/apis/auth/v2/login/callback'
+          authorization_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/authorize'
+          token_endpoint: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/token'
+          default_scopes: "openid email profile offline_access groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud"
         jwks_uri: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/keys'
         introspect_opaque_tokens: true
         introspection_endpoint: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/introspect'
@@ -353,16 +379,15 @@ nemo-helix:
         introspection_client_secret_env_var: "NHX_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET"
         resolve_opaque_tokens_via_userinfo: false
         userinfo_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oidc/v1/userinfo'
-        workload_token_exchange_enabled: true
-        workload_client_id: "nemo-helix-workload"
-        workload_audience: "nemo-helix"
-        workload_scope: "openid email groups"
-        workload_token_endpoint: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
-        workload_kubernetes_token_review_enabled: true
+        workload:
+          client_id: "nemo-helix-workload"
+          token_endpoint: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
+          audience: "nemo-helix"
+          scope: "openid email groups"
+          kubernetes_token_review_enabled: true
         subject_claim: "sub"
         email_claim: "email"
         groups_claim: "groups"
-        default_scopes: "openid email profile offline_access groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud"
     jobs:
       executor_defaults:
         kubernetes_job:

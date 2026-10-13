@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.customization_common.service.context import NHXJobContext
@@ -12,7 +12,6 @@ from nhx.customization_common.tasks.file_io_progress_reporter import JobsService
 
 
 def test_progress_reporter_calls_sdk_create_or_update() -> None:
-    sdk = MagicMock()
     mock_jobs = MagicMock()
     ctx = NHXJobContext(
         workspace="ws-a",
@@ -25,13 +24,9 @@ def test_progress_reporter_calls_sdk_create_or_update() -> None:
         storage_path=Path("/tmp/job"),
         config_path=Path("/tmp/job/config.json"),
     )
-    reporter = JobsServiceProgressReporter(sdk, ctx.workspace, ctx.job_id, ctx.step, ctx.normalized_task)
+    reporter = JobsServiceProgressReporter(mock_jobs, ctx.workspace, ctx.job_id, ctx.step, ctx.normalized_task)
 
-    with patch(
-        "nhx.customization_common.tasks.file_io_progress_reporter.client_from_platform",
-        return_value=mock_jobs,
-    ):
-        reporter.update_progress(HelixJobStatus.ACTIVE, status_details={"phase": "training"})
+    reporter.update_progress(HelixJobStatus.ACTIVE, status_details={"phase": "training"})
 
     mock_jobs.update_job_step_task.assert_called_once()
     call_kwargs = mock_jobs.update_job_step_task.call_args.kwargs

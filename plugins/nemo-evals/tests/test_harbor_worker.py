@@ -21,7 +21,7 @@ from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec, Harbor
 from nemo_evals.jobs.metric_resolution import to_inline
 from nemo_evals.revisions import publish_revision
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
@@ -195,7 +195,7 @@ def test_worker_executes_additional_metric_and_view(tmp_path, stored_packages, m
     monkeypatch.setattr("nemo_evals.jobs.utils.httpx", SimpleNamespace(AsyncClient=lambda **_: async_http))
     metric = to_inline(
         bundle_metric(
-            ExactMatchMetric(reference="Fix it", candidate="{{inputs.instruction}}"), CloudpickleMetricBundlePackager()
+            ExactMatchMetric(reference="Fix it", candidate="{{inputs.instruction}}"), HybridMetricBundlePackager()
         )
     )
     views = {

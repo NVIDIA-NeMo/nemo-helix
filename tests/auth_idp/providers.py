@@ -4,8 +4,11 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
+
+ProviderName = Literal["authentik", "zitadel"]
 
 
 @dataclass(frozen=True)
@@ -18,7 +21,7 @@ class ProviderRuntimeConfig:
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    name: str
+    name: ProviderName
     mode: str
     compose_file: Path | None
     gateway_base_url: str
@@ -56,7 +59,7 @@ def load_provider_config(manifest_path: Path) -> ProviderConfig:
     data = yaml.safe_load(manifest_path.read_text())
     token_acquisition = data.get("token_acquisition", {})
     return ProviderConfig(
-        name=data["provider"],
+        name=_provider_name(data["provider"]),
         mode=data["mode"],
         compose_file=(None if not data.get("compose_file") else manifest_path.parent / data["compose_file"]),
         gateway_base_url=data["gateway_base_url"],
@@ -89,6 +92,14 @@ def load_provider_config(manifest_path: Path) -> ProviderConfig:
         startup_timeouts=dict(data.get("startup_timeouts", {})),
         test_runtimes=_load_provider_runtimes(data),
     )
+
+
+def _provider_name(value: str) -> ProviderName:
+    if value == "authentik":
+        return "authentik"
+    if value == "zitadel":
+        return "zitadel"
+    raise ValueError(f"unsupported auth-idp provider: {value}")
 
 
 def _load_provider_runtimes(data: dict) -> tuple[ProviderRuntimeConfig, ...]:

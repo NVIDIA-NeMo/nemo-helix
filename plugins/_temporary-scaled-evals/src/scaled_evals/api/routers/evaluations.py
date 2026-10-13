@@ -20,7 +20,6 @@ from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.evaluation_logs import collect_log_lines
-from scaled_evals.api.repositories.runtime_resource_repository import switchyard_lease_from_row
 from scaled_evals.api.runnability import BlockedPreflight, preflight_evaluation
 from scaled_evals.api.schemas.common import (
     DeleteResponse,
@@ -87,6 +86,15 @@ def _evaluation_reads(db: Database) -> Any:
     from nemo_scaled_evals_plugin.projection import evaluation_reader  # noqa: PLC0415
 
     return evaluation_reader()
+
+
+def _submit_now(evaluation_id: str) -> None:
+    """Start a just-committed evaluation instead of waiting for the controller's next pass."""
+    try:
+        from nemo_scaled_evals_plugin.submitter import submit_evaluation_now  # noqa: PLC0415
+    except ImportError:
+        return
+    submit_evaluation_now(evaluation_id)
 
 
 _EVENT_STREAM_BATCH_SIZE = 100
@@ -199,7 +207,6 @@ def _reproduce_request(row: Mapping[str, Any]) -> CreateEvaluationRequest:
         framework=row.get("framework") or "harbor",
         framework_version=row.get("framework_version"),
         framework_profile_id=row.get("framework_profile_id"),
-        switchyard_profile_id=row.get("switchyard_profile_id"),
         intake_profile_id=row.get("intake_profile_id"),
         credentials=dict(row.get("credentials") or {}),
         agent_bundle_id=agent_bundle_id,
@@ -249,7 +256,6 @@ def _create_command(body: CreateEvaluationRequest) -> list[str]:
         )
     for option, value in (
         ("--framework-profile-id", body.framework_profile_id),
-        ("--switchyard-profile-id", body.switchyard_profile_id),
         ("--intake-profile-id", body.intake_profile_id),
     ):
         if value:
@@ -451,37 +457,6 @@ def teardown_cancelled_evaluation(db: Database, row: dict[str, Any]) -> dict[str
                 backend.teardown(handle)
     except Exception as exc:  # noqa: BLE001 — cancellation must remain durable
         failures.append(f"evaluation-runtime cleanup failed: {exc}")
-    try:
-        has_switchyard = bool(row.get("switchyard_profile_id")) or bool(
-            handle is not None and handle.raw.get("switchyard")
-        )
-        if has_switchyard:
-            execution_number = int(row.get("current_execution") or 1)
-            switchyard_row = db.runtime_resources.get_switchyard(
-                row["id"],
-                execution_number,
-            )
-            lease = switchyard_lease_from_row(switchyard_row)
-            if lease is not None:
-                drain_seconds = (
-                    lease.drain_seconds if lease.drain_seconds is not None else settings.switchyard_drain_seconds
-                )
-                marked = db.runtime_resources.mark_switchyard_draining(
-                    row["id"],
-                    execution_number,
-                    drain_seconds=drain_seconds,
-                )
-                if marked is not None:
-                    drain_until = marked.get("drain_until")
-                    drain_text = drain_until.isoformat() if hasattr(drain_until, "isoformat") else drain_until
-                    db.evaluations.append_event(
-                        row["id"],
-                        status="cancelled",
-                        type="switchyard",
-                        detail=f"switchyard draining until {drain_text}: {lease.name}",
-                    )
-    except Exception as exc:  # noqa: BLE001 — cancellation must remain durable
-        failures.append(f"switchyard drain mark failed: {exc}")
     if failures:
         return _record_cancel_teardown_failure(
             db,
@@ -557,7 +532,6 @@ def create_evaluation(
         task_revision=body.task_revision,
         framework_profile_id=body.framework_profile_id,
         harbor_profile_id=body.harbor_profile_id,
-        switchyard_profile_id=body.switchyard_profile_id,
         intake_profile_id=body.intake_profile_id,
         credentials=body.credentials,
         extra_skill_object_keys=body.extra_skill_object_keys,
@@ -573,9 +547,10 @@ def create_evaluation(
         owner_id=current.owner_id,
     )
 
-    # Dispatch loads this row on its own connection, so commit before returning —
-    # get_conn otherwise defers COMMIT past the response and the worker sees nothing.
+    # Submission loads this row on its own connection, so commit first —
+    # get_conn otherwise defers COMMIT past the response and the submitter sees nothing.
     db.commit()
+    _submit_now(ev_id)
     return _response(row)
 
 
@@ -828,6 +803,7 @@ def retry_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
             )
         raise _http_error(409, "evaluation_not_retryable", "evaluation cannot be retried right now")
     db.commit()
+    _submit_now(str(row["id"]))
     return _response(row)
 
 

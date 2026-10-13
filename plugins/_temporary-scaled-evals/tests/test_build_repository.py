@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 pytest.importorskip("scaled_evals")
 
-from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.repositories.build_repository import TaskBuildRepository
 
 
@@ -33,8 +31,8 @@ def test_claim_expires_stale_final_attempt_before_selecting_work() -> None:
     assert "build worker lease expired after final attempt" in expire_sql
     assert "build_attempts >= %s" in expire_sql
     assert expire_params == (3, 90)
-    assert "FOR UPDATE SKIP LOCKED" in claim_sql
-    assert claim_params == (3, 90, "worker-1")
+    assert "SKIP LOCKED" not in claim_sql
+    assert claim_params == (3, 90, "worker-1", 3, 90)
 
 
 @pytest.mark.parametrize(
@@ -71,6 +69,34 @@ def test_retry_or_fail_persists_retry_or_terminal_state(attempt: int, terminal: 
         assert params == ("builder unavailable", 30, "task_1", 2, "worker-1")
 
 
+def test_complete_persists_verifier_image() -> None:
+    conn = MagicMock()
+    cur = conn.cursor.return_value.__enter__.return_value
+    cur.rowcount = 1
+
+    assert TaskBuildRepository(conn).complete(
+        "task_1",
+        2,
+        worker_id="worker-1",
+        image_ref="registry/task@sha256:a",
+        image_digest="sha256:a",
+        verifier_image_ref="registry/verifier@sha256:b",
+        verifier_image_digest="sha256:b",
+    )
+
+    sql, params = cur.execute.call_args_list[0].args
+    assert "verifier_image_ref = %s, verifier_image_digest = %s" in sql
+    assert params == (
+        "registry/task@sha256:a",
+        "sha256:a",
+        "registry/verifier@sha256:b",
+        "sha256:b",
+        "task_1",
+        2,
+        "worker-1",
+    )
+
+
 def test_platform_job_claim_binding_and_listing() -> None:
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
@@ -99,17 +125,3 @@ def test_platform_job_claim_binding_and_listing() -> None:
     list_sql, list_params = cur.execute.call_args.args
     assert "build_claimed_by LIKE 'scaled-evals-build-%%'" in list_sql
     assert list_params == (10,)
-
-
-def test_legacy_worker_does_not_claim_platform_owned_queue(monkeypatch: pytest.MonkeyPatch) -> None:
-    worker = TaskBuildWorker()
-    claim_next = MagicMock()
-    monkeypatch.setattr(worker, "claim_next", claim_next)
-    monkeypatch.setitem(
-        TaskBuildWorker.work_once.__globals__,
-        "settings",
-        SimpleNamespace(platform_build_jobs_enabled=True),
-    )
-
-    assert worker.work_once() is False
-    claim_next.assert_not_called()

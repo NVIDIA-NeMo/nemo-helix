@@ -91,15 +91,8 @@ class InMemoryFilterRepository(FilterRepository):
         return _compare(self._value(field), FilterOperator.ENDS_WITH, suffix)
 
     def contains(self, field: str, value: Any) -> bool:
-        """Array membership: true when the list at ``field`` contains ``value``.
-
-        Absent/None/non-list fields match nothing (mirrors the SQL path, where a missing
-        or scalar element can't contain the token). Elements are compared by native value.
-        """
-        field_value = self._value(field)
-        if field_value is _MISSING or not isinstance(field_value, (list, tuple)):
-            return False
-        return value in field_value
+        """Array membership: some scalar element of the list at ``field`` equals ``value`` by JSON type."""
+        return self.elem_match(field, [ElemMatchCondition(None, FilterOperator.EQ, value)])
 
     def elem_match(self, field: str, conditions: List[ElemMatchCondition]) -> bool:
         field_value = self._value(field)
@@ -161,10 +154,39 @@ def _element_matches(element: Any, conditions: List[ElemMatchCondition]) -> bool
     if conditions[0].key is None:
         if isinstance(element, (dict, list, tuple)):
             return False
-        return all(_compare(element, c.operator, c.value) for c in conditions)
+        return all(_compare_element(element, c.operator, c.value) for c in conditions)
     if not isinstance(element, dict):
         return False
-    return all(_compare(element.get(c.key, _MISSING), c.operator, c.value) for c in conditions)
+    return all(_compare_element(element.get(c.key, _MISSING), c.operator, c.value) for c in conditions)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _json_equal(element: Any, value: Any) -> bool:
+    """Equality by JSON type: ``true`` is not ``1`` and ``"1"`` is not ``1``, but ``3`` equals ``3.0``."""
+    if element is _MISSING or element is None or value is None:
+        return element in (_MISSING, None) and value is None
+    if isinstance(element, bool) or isinstance(value, bool):
+        return isinstance(element, bool) and isinstance(value, bool) and element == value
+    if _is_number(value):
+        return _is_number(element) and element == value
+    return isinstance(element, str) and element == value
+
+
+def _compare_element(element: Any, op: FilterOperator, value: Any) -> bool:
+    """One comparison against an array element (or one of its fields), by JSON type."""
+    if op == FilterOperator.EQ:
+        return _json_equal(element, value)
+    if element is _MISSING or element is None:
+        return False
+    if op in (FilterOperator.IN, FilterOperator.NIN):
+        found = any(_json_equal(element, v) for v in value if v is not None)
+        return found if op == FilterOperator.IN else not found
+    if _is_number(value):
+        return _is_number(element) and _compare(element, op, value)
+    return isinstance(element, str) and _compare(element, op, value)
 
 
 def _has_attr(entity: Any, field: str) -> bool:

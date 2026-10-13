@@ -3,8 +3,9 @@
 
 """SDK resource class for the Agents plugin.
 
-Registered under the ``nemo.sdk`` entry-point group. The platform lazily
-instantiates this plugin's sync or async SDK resource as ``client.agents``.
+Registered under the ``nemo.sdk`` entry-point group. ``client.agents`` is the
+typed ``AgentsClient`` property, so build this resource explicitly from a
+``NemoClient``.
 
 Usage::
 
@@ -62,11 +63,8 @@ Usage::
     results = agents.jobs.execute.list_results(job["name"])
     run = agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
 
-Async jobs use ``AsyncNemoClient`` with ``AsyncAgentsResource``.
-
-An async namespace is mounted as ``client.agents`` on ``AsyncNemoClient``.
-It currently exposes ``jobs`` only — agent CRUD, deployments, and ``invoke``
-remain sync-only.
+``AsyncAgentsResource`` is the ``AsyncNemoClient`` counterpart. It currently
+exposes ``jobs`` only; agent CRUD, deployments, and ``invoke`` remain sync-only.
 """
 
 from __future__ import annotations

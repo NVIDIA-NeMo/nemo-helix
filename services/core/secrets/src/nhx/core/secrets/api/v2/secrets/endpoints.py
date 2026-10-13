@@ -3,8 +3,9 @@
 
 import logging
 import math
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.auth import AuthClient, get_auth_client
@@ -27,6 +28,16 @@ from nhx.core.secrets.entities import HelixSecret
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+_UPDATE_SECRET_OPENAPI_EXAMPLES = {
+    "secret": {
+        "summary": "Update secret metadata and value",
+        "value": {
+            "description": "Updated secret description",
+            "value": "new-secret-value",
+        },
+    }
+}
 
 ENCRYPTION_PROVIDER_NOT_CONFIGURED = "ENCRYPTION_PROVIDER_NOT_CONFIGURED"
 ENCRYPTION_PROVIDER_NOT_CONFIGURED_MESSAGE = "Secret management requires a configured encryption provider."
@@ -168,7 +179,10 @@ async def get_secret(
 async def update_secret(
     name: str,
     workspace: str,
-    patch_request: schemas.HelixSecretUpdateRequest,
+    patch_request: Annotated[
+        schemas.HelixSecretUpdateRequest,
+        Body(openapi_examples=_UPDATE_SECRET_OPENAPI_EXAMPLES),
+    ],
     entity_store: EntityClient = Depends(get_entity_client),
     platform_config: HelixConfig = Depends(get_platform_config),
 ) -> schemas.HelixSecretResponse | JSONResponse:

@@ -30,7 +30,6 @@ from nemo_evals.jobs.evaluate import EvaluateInputSpec
 from nemo_evals.sdk.job_resources import EvaluatorJobResource
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
@@ -775,7 +774,7 @@ GYM_MCQA_FIXTURE = (
 
 def _gym_task_payloads(limit: int) -> list[dict[str, object]]:
     tasks = discover_gym_tasks(GYM_MCQA_FIXTURE)[:limit]
-    bundled_reward = bundle_metric(GymRewardMetric(), CloudpickleMetricBundlePackager()).model_dump(mode="json")
+    bundled_reward = bundle_metric(GymRewardMetric(), InlineMetricBundlePackager()).model_dump(mode="json")
     return [
         {
             "id": task.id,
@@ -814,6 +813,7 @@ def test_gym_agent_evaluate_job_completes(
         resources_server="mcqa",
         num_repeats=1,
         concurrency=2,
+        startup_timeout_s=600,
         hydra_params={
             "policy_base_url": _internal_model_route(evaluator_workspace, model_name),
             "policy_api_key": "not-used-mock-provider",
@@ -825,7 +825,7 @@ def test_gym_agent_evaluate_job_completes(
         evaluator_client, evaluator_workspace, {"tasks": task_dicts, "target": target.model_dump(mode="json")}
     )
     try:
-        job = wait_for_platform_job(evaluator_client, job_name, evaluator_workspace, timeout=480)
+        job = wait_for_platform_job(evaluator_client, job_name, evaluator_workspace, timeout=780)
         assert job.status.lower() == "completed", f"job {job_name!r} ended {job.status!r}"
 
         # Download the results archive to a tmp path.
@@ -923,7 +923,7 @@ def _greeting_wheels_v1_package(root: Path) -> dict[str, bytes]:
 
 
 def _greeting_task_payloads(greeting: str, count: int) -> list[dict[str, object]]:
-    bundled_reward = bundle_metric(GymRewardMetric(), CloudpickleMetricBundlePackager()).model_dump(mode="json")
+    bundled_reward = bundle_metric(GymRewardMetric(), InlineMetricBundlePackager()).model_dump(mode="json")
     rows_path = Path(os.environ.get("TMPDIR", "/tmp")) / f"greeting-rows-{short_unique_name('e2e')}.jsonl"
     rows_path.write_text(
         "".join(

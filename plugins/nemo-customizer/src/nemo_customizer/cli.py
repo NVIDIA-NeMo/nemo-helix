@@ -27,10 +27,9 @@ from nhx.customization_common.cli.uploads import UploadReport
 # rl. Backend-specific text comes from each contributor's get_cli_summary().
 _OVERVIEW = """Train a model on your own data.
 
-Choose a backend, write a job JSON for it, and submit it. The platform
-creates the job and runs the training on a GPU execution profile. Each backend
-trains a different way, and the schema of the job JSON depends on the backend
-you choose."""
+Choose a backend and pass it a job JSON. The platform creates the job and runs
+the training on a GPU execution profile. Each backend trains a different way,
+and the schema of the job JSON depends on the backend you choose."""
 
 _UPLOAD_PANEL = "Resource Creation Options"
 
@@ -100,7 +99,7 @@ def _add_upload_callback(app: typer.Typer) -> None:
     """Let ``nemo customization`` create a model and a dataset on its own.
 
     Creating these needs no backend: it is the same fileset, upload and model
-    entity that ``nemo files`` and ``nemo models`` create today. Only ``submit``
+    entity that ``nemo files`` and ``nemo models`` create today. Only ``--job-json``
     has to know where the reference belongs in a backend's job JSON.
     """
 
@@ -164,7 +163,7 @@ def _add_upload_callback(app: typer.Typer) -> None:
             if misplaced:
                 typer_ctx.fail(
                     f"{', '.join(misplaced)} must come after the subcommand: "
-                    f"'nemo customization {typer_ctx.invoked_subcommand} submit [OPTIONS] JOB_JSON'."
+                    f"'nemo customization {typer_ctx.invoked_subcommand} --job-json JOB_JSON [OPTIONS]'."
                 )
             return
         if upload_model is None and upload_dataset is None and upload_environment is None:

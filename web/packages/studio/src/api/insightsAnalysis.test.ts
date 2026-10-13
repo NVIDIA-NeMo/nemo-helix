@@ -105,6 +105,27 @@ describe('triggerInsightsRun', () => {
     });
   });
 
+  it('uses a config the caller already holds instead of fetching it', async () => {
+    createRun.mockResolvedValue({
+      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
+      job: { name: 'analysis-run-1', status: 'created' },
+    });
+
+    const result = await triggerInsightsRun(
+      'default',
+      'email-security-triage',
+      {},
+      { storedConfig: config({ fast_model: 'default/held-fast' }) }
+    );
+
+    expect(result.status).toBe('started');
+    expect(getConfig).not.toHaveBeenCalled();
+    expect(createRun).toHaveBeenCalledWith(
+      'default',
+      expect.objectContaining({ fast_model: 'default/held-fast' })
+    );
+  });
+
   it('reports not-enabled when the agent has no analysis config', async () => {
     getConfig.mockRejectedValue(axiosErrorWithStatus(404));
 

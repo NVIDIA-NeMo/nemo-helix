@@ -36,7 +36,11 @@ from nemo_evals.shared.metric_bundles.bundles import (
     register_metric_bundle_kind,
     unbundle_metric,
 )
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.cloudpickle import (
+    CloudpickleMetricBundlePackager,
+    CloudpickleMetricsDisabledError,
+)
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evals.tasks.evaluate import main as evaluate_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
@@ -95,7 +99,7 @@ def _exact_match_spec() -> dict:
 
 
 def _bundle_payload(metric) -> dict[str, Any]:
-    return bundle_metric(metric, CloudpickleMetricBundlePackager()).model_dump(mode="json")
+    return bundle_metric(metric, HybridMetricBundlePackager()).model_dump(mode="json")
 
 
 def _repo_root() -> Path:
@@ -397,6 +401,7 @@ def test_evaluate_job_fails_when_no_row_scored(tmp_path: Path, mocker: MockerFix
     assert report.call_args.args[0].failed
 
 
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
 def test_evaluate_job_applies_metric_job_params_once(tmp_path: Path) -> None:
     spec = {
         "metrics": [_bundle_payload(_CountingJobParamsMetric())],
@@ -553,7 +558,7 @@ def test_unbundle_metric_dispatches_mixed_bundle_kinds_by_payload_kind() -> None
     """Metric bundle hydration dispatches per bundle instead of assuming one packager."""
     cloudpickle_bundle = bundle_metric(
         ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}"),
-        CloudpickleMetricBundlePackager(),
+        HybridMetricBundlePackager(),
     )
     static_bundle = bundle_metric(_StaticMetric("test-static"), _StaticMetricBundlePackager())
 
@@ -1484,3 +1489,40 @@ class TestEvaluateTask:
         get_task_client.assert_called_once_with("evals")
         get_async_task_client.assert_not_called()
         run_task.assert_not_called()
+
+
+async def test_evaluate_job_to_spec_refuses_cloudpickle_metric_by_default(detonating_cloudpickle_metric: dict) -> None:
+    with pytest.raises(CloudpickleMetricsDisabledError):
+        await EvaluateJob.to_spec(
+            EvaluateInputSpec.model_validate(
+                {"metrics": [detonating_cloudpickle_metric], "dataset": [{"output_text": "hello"}]}
+            ),
+            workspace="default",
+            entity_client=object(),
+            async_sdk=_async_sdk(),
+            is_local=False,
+        )
+
+
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
+def test_reading_a_stored_evaluate_spec_never_deserializes_its_cloudpickle_metric(
+    detonating_cloudpickle_metric: dict,
+) -> None:
+    """The job API re-validates the stored spec on every GET and list, for any reader of the workspace."""
+    spec = EvaluateSpec.model_validate(
+        {"metrics": [detonating_cloudpickle_metric], "dataset": [{"output_text": "hello"}]}
+    )
+
+    assert spec.metrics[0].payload.kind == "cloudpickle"
+
+
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
+def test_evaluate_job_rejects_unresolved_model_ref_on_cloudpickle_metric_before_scoring(tmp_path: Path) -> None:
+    """The spec validator skips cloudpickle metrics, so the worker checks their model refs after hydrating them."""
+    config = {
+        "metrics": [bundle_metric(_llm_judge_ref_metric(), CloudpickleMetricBundlePackager()).model_dump(mode="json")],
+        "dataset": [{"output_text": "hello"}],
+    }
+
+    with pytest.raises(ValueError, match="EvaluateSpec metric models must be resolved before run: default/judge"):
+        _run_evaluate_job(config, tmp_path)

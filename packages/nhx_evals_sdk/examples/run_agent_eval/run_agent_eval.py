@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -30,18 +29,9 @@ if __package__ in {None, ""}:
     )
 
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
-from nhx_evals_sdk.metrics.protocol import Metric
 
-from .aut_runtime import AutConfig, NatAutRuntime
 from .gating import GateThresholds
 from .pipeline import AgentEvalPipeline, PipelineConfig
-from .platform_runtime import (
-    NatWorkflowConfig,
-    NatWorkflowRuntime,
-    VerifierRewardMetric,
-    agentic_task_from_dir,
-    ensure_task_image,
-)
 from .workflow_runtime import (
     WorkflowAgentRuntime,
     WorkflowRuntimeConfig,
@@ -58,7 +48,7 @@ def _configure_logging() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def _pipeline(min_pass_rate: float, *, extra_metrics: tuple[Metric, ...] = ()) -> AgentEvalPipeline:
+def _pipeline(min_pass_rate: float) -> AgentEvalPipeline:
     return AgentEvalPipeline(
         config=PipelineConfig(
             parallelism=2,
@@ -66,7 +56,6 @@ def _pipeline(min_pass_rate: float, *, extra_metrics: tuple[Metric, ...] = ()) -
             write_gate=True,
             gate_thresholds=GateThresholds(min_pass_rate=min_pass_rate),
         ),
-        extra_metrics=extra_metrics,
     )
 
 
@@ -78,62 +67,6 @@ async def run_online(task_names: list[str], *, output_dir: Path, min_pass_rate: 
         target=runtime,
         labels={"example": "run-agent-eval", "mode": "online"},
         output_dir=output_dir,
-    )
-
-
-async def run_agentic_task(
-    task_name: str,
-    *,
-    output_dir: Path,
-    min_pass_rate: float,
-    nhx_base_url: str,
-    agent_model: str | None,
-    skip_build: bool,
-    verify: bool,
-    backend: str,
-    aut_agent_name: str | None,
-    aut_agent_config: Path | None,
-    seed_providers: bool,
-) -> AgentEvalResult:
-    """Run a real ``tests/agentic-use`` task: BUILD → AGENT → VERIFY → score → gate.
-
-    ``backend='workflow'`` runs the task-local ``nat run`` workflow; ``backend='aut'``
-    drives a deployed platform agent-under-test (the canonical ``nat_runner`` path).
-    """
-    task = agentic_task_from_dir(task_name)
-    runtime: NatWorkflowRuntime | NatAutRuntime
-    if backend == "aut":
-        if not aut_agent_name:
-            raise ValueError("--backend aut requires --aut-agent-name")
-        runtime = NatAutRuntime(
-            AutConfig(
-                aut_agent_name=aut_agent_name,
-                aut_agent_config=aut_agent_config,
-                aut_seed_providers=seed_providers,
-                agent_model=agent_model,
-                nhx_base_url=nhx_base_url,
-                nvidia_api_key=os.environ.get("NVIDIA_API_KEY"),
-                inference_nvidia_api_key=os.environ.get("INFERENCE_NVIDIA_API_KEY"),
-                anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
-                run_verify=verify,
-            ),
-        )
-    else:
-        runtime = NatWorkflowRuntime(
-            NatWorkflowConfig(
-                nhx_base_url=nhx_base_url,
-                nvidia_api_key=os.environ.get("NVIDIA_API_KEY"),
-                agent_model=agent_model,
-                run_verify=verify,
-            ),
-        )
-    extra_metrics: tuple[Metric, ...] = (VerifierRewardMetric(),) if verify else ()
-    return await _pipeline(min_pass_rate, extra_metrics=extra_metrics).run_tasks(
-        [task],
-        target=runtime,
-        labels={"example": "agentic-use", "task": task_name, "backend": backend},
-        output_dir=output_dir,
-        prepare_task=lambda t: ensure_task_image(t, skip_build=skip_build),
     )
 
 
@@ -164,7 +97,7 @@ def _print_result(result: AgentEvalResult) -> None:
 
 
 def _print_measurements(result: AgentEvalResult) -> None:
-    """Print token/runtime totals (the same measurements nat_runner records)."""
+    """Print token/runtime totals recorded on the trials."""
     measurements = [trial.measurements for trial in result.trials]
     total_tokens = [m.total_tokens for m in measurements if m.total_tokens is not None]
     runtimes = [m.runtime_sec for m in measurements if m.runtime_sec is not None]
@@ -203,38 +136,7 @@ async def _main() -> int:
     )
     parser.add_argument("--min-pass-rate", type=float, default=1.0, help="Gate threshold for the pass rate.")
     parser.add_argument("--list-tasks", action="store_true", help="List available example tasks and exit.")
-    parser.add_argument(
-        "--agentic-task",
-        default=None,
-        help="Run a real tests/agentic-use/<name> task end to end via the NAT workflow runtime "
-        "(requires Docker, nhx-agentic-base, and a running NeMo Helix).",
-    )
-    parser.add_argument(
-        "--backend",
-        choices=("workflow", "aut"),
-        default="workflow",
-        help="Agentic-task backend: 'workflow' (task-local nat run) or 'aut' (deployed agent-under-test).",
-    )
-    parser.add_argument("--aut-agent-name", default=None, help="Name of the deployed agent-under-test (aut backend).")
-    parser.add_argument(
-        "--aut-agent-config",
-        type=Path,
-        default=None,
-        help="Path to the AUT agent NAT config; created/recreated on the platform if needed.",
-    )
-    parser.add_argument(
-        "--no-seed-providers",
-        action="store_true",
-        help="Skip seeding inference providers from providers.yaml (aut backend).",
-    )
-    parser.add_argument("--skip-build", action="store_true", help="Skip the BUILD phase (image must exist).")
-    parser.add_argument("--verify", action="store_true", help="Run the pytest VERIFY phase for the agentic task.")
-    parser.add_argument("--nhx-base-url", default=os.environ.get("NHX_BASE_URL", "http://localhost:8080"))
-    parser.add_argument("--agent-model", default=os.environ.get("NAT_AGENT_MODEL"), help="Model for the agent.")
     args = parser.parse_args()
-
-    if args.agentic_task and args.backend == "aut" and not args.aut_agent_name:
-        parser.error("--backend aut requires --aut-agent-name")
 
     if args.list_tasks:
         for task in example_tasks():
@@ -243,26 +145,7 @@ async def _main() -> int:
 
     _configure_logging()
 
-    if args.agentic_task:
-        try:
-            result = await run_agentic_task(
-                args.agentic_task,
-                output_dir=args.output_dir,
-                min_pass_rate=args.min_pass_rate,
-                nhx_base_url=args.nhx_base_url,
-                agent_model=args.agent_model,
-                skip_build=args.skip_build,
-                verify=args.verify,
-                backend=args.backend,
-                aut_agent_name=args.aut_agent_name,
-                aut_agent_config=args.aut_agent_config,
-                seed_providers=not args.no_seed_providers,
-            )
-        except (RuntimeError, FileNotFoundError, OSError) as exc:
-            print(f"agentic-task run failed: {exc}")
-            print("Real tasks need Docker, the nhx-agentic-base image, and a running NeMo Helix (see README).")
-            return 1
-    elif args.rescore_dir:
+    if args.rescore_dir:
         result = await rescore(args.rescore_dir, output_dir=args.output_dir, min_pass_rate=args.min_pass_rate)
     else:
         task_names = [task.id for task in example_tasks()] if args.task == "all" else [args.task]

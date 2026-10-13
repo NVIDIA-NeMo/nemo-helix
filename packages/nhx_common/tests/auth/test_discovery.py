@@ -6,6 +6,7 @@ from nhx.common.auth.discovery import (
     AuthDiscoveryBearerTokenSourceError,
     AuthDiscoveryResponse,
     OIDCDiscoveryResponse,
+    PublicOidcAdvertisedClient,
     parse_bearer_token_source,
 )
 from pydantic import ValidationError
@@ -16,14 +17,19 @@ def test_auth_discovery_response_accepts_endpoint_shape() -> None:
         auth_enabled=True,
         oidc=OIDCDiscoveryResponse(
             issuer="https://sso.example.com",
-            client_id="nhx",
-            bearer_token_source="id_token",
+            clients=[
+                PublicOidcAdvertisedClient(
+                    client_id="nhx",
+                    default=True,
+                    bearer_token_source="id_token",
+                )
+            ],
         ),
     )
 
     assert response.auth_enabled is True
     assert response.oidc is not None
-    assert response.oidc.bearer_token_source == "id_token"
+    assert response.oidc.clients[0].bearer_token_source == "id_token"
 
 
 def test_auth_discovery_response_rejects_malformed_scalar_types() -> None:
@@ -36,8 +42,14 @@ def test_oidc_discovery_response_rejects_unknown_bearer_token_source() -> None:
         OIDCDiscoveryResponse.model_validate(
             {
                 "issuer": "https://sso.example.com",
-                "client_id": "nhx",
-                "bearer_token_source": "refresh_token",
+                "clients": [
+                    {
+                        "name": "public",
+                        "client_id": "nhx",
+                        "default": True,
+                        "bearer_token_source": "refresh_token",
+                    }
+                ],
             }
         )
 

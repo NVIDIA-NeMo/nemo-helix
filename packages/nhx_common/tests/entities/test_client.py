@@ -14,7 +14,7 @@ from nemo_helix_plugin.entities import _convert_filter_obj_to_filter_str
 from nemo_helix_plugin.entities.types import DeleteResponse, Entity
 from nhx.common.auth.models import AuthContext
 from nhx.common.config import AuthConfig, Configuration
-from nhx.common.config.base import OIDCConfig
+from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig
 from nhx.common.entities import (
     ALL_WORKSPACES,
     DEFAULT_WORKSPACE,
@@ -66,8 +66,10 @@ def _auth_config_with_token_exchange() -> AuthConfig:
     return AuthConfig(
         enabled=True,
         oidc=OIDCConfig(
-            workload_token_exchange_enabled=True,
-            workload_token_private_key_file="/tmp/test-workload-token-private-key.pem",
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-helix-workload",
+                token_private_key_file="/tmp/test-workload-token-private-key.pem",
+            ),
         ),
     )
 
@@ -1558,7 +1560,7 @@ def test_as_service_returns_new_client_without_mutating_the_original():
 
 
 def test_as_service_preserves_the_platform_url_resolver():
-    """The regression the Stainless path needed a dedicated helper to avoid."""
+    """``as_service`` keeps the platform URL resolver on the cloned client."""
 
     def resolver(url: str) -> str:
         return url.replace("http://platform", "http://uds-resolved")

@@ -5,7 +5,7 @@
 
 # Unsloth job JSON
 
-Job JSON for `nemo customization unsloth submit` uses **`UnslothJobInput`** (`plugins/nemo-unsloth/src/nemo_unsloth_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). The canonical post-transform shape lives in `services/unsloth/src/nhx/unsloth/schemas.py` (`UnslothJobOutput`) and is what the training driver consumes in the GPU container.
+Job JSON for `nemo customization unsloth --job-json` uses **`UnslothJobInput`** (`plugins/nemo-unsloth/src/nemo_unsloth_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). The canonical post-transform shape lives in `services/unsloth/src/nhx/unsloth/schemas.py` (`UnslothJobOutput`) and is what the training driver consumes in the GPU container.
 
 **Schema dump:**
 
@@ -13,7 +13,7 @@ Job JSON for `nemo customization unsloth submit` uses **`UnslothJobInput`** (`pl
 nemo customization unsloth explain
 ```
 
-Unsloth is **submit-only, single-GPU inside the training container**. There is no `parallelism` block and no `training.execution_profile` in job JSON — pass `--profile` on `nemo customization unsloth submit` instead (default `gpu`). `hardware.gpus` sets `CUDA_VISIBLE_DEVICES` in the container before `import torch`. Multi-GPU sharding → use automodel.
+Unsloth is **Jobs-service-only, single-GPU inside the training container**. There is no `parallelism` block and no `training.execution_profile` in job JSON — pass `--profile` on `nemo customization unsloth --job-json` instead (default `gpu`). `hardware.gpus` sets `CUDA_VISIBLE_DEVICES` in the container before `import torch`. Multi-GPU sharding → use automodel.
 
 ## Job JSON layout (unsloth)
 

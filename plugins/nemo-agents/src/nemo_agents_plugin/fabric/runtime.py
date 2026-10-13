@@ -285,10 +285,13 @@ def _with_platform_invocation_context(request: FabricInvocationRequest | FabricO
 def _normalize_fabric_run_result(result: RunResult) -> FabricRuntimeResult:
     """Convert Fabric's SDK result into the Platform runtime result shape."""
     output = _to_plain_value(result.output)
+    response = output.get("response") if isinstance(output, Mapping) else None
+    if isinstance(output, Mapping) and "response" not in output and isinstance(output.get("output"), str):
+        response = output["output"]
     return FabricRuntimeResult(
         status=result.status,
         output=output,
-        response=output.get("response") if isinstance(output, Mapping) else None,
+        response=response,
         error=_to_plain_value(result.error),
         artifacts=_to_plain_value(result.artifacts),
         telemetry=_to_plain_value(result.telemetry),

@@ -150,19 +150,27 @@ class StudioConfig(create_service_config_class("studio")):  # type: ignore[misc]
 
         for mapping in ENV_MAPPINGS:
             value = self._resolve_config_path(mapping.config_path)
-            if value == "":
-                value = None
-            # Fall back to own pydantic-settings fields for paths under "studio.*"
-            # (env vars like NHX_STUDIO_PLATFORM_BASE_URL set pydantic fields but
-            # aren't reflected in the YAML-backed global_settings dict).
-            if value is None and mapping.config_path.startswith("studio."):
-                value = self._resolve_field_path(mapping.config_path.removeprefix("studio."))
-            if value == "":
-                value = None
-            if value is None and mapping.config_path == "studio.platform_base_url":
-                value = self._resolve_config_path("platform.base_url")
-            if value == "":
-                value = None
+
+            # studio.platform_base_url is browser-facing. An explicit empty string
+            # means "same origin" and must not fall back to the in-cluster
+            # platform.base_url, which browsers outside Kubernetes cannot resolve.
+            if mapping.config_path == "studio.platform_base_url":
+                field_value = self._resolve_field_path("platform_base_url")
+                if field_value not in (None, ""):
+                    value = field_value
+                elif value is None:
+                    value = ""
+            else:
+                if value == "":
+                    value = None
+                # Fall back to own pydantic-settings fields for paths under "studio.*"
+                # (env vars like NHX_STUDIO_PLATFORM_BASE_URL set pydantic fields but
+                # aren't reflected in the YAML-backed global_settings dict).
+                if value is None and mapping.config_path.startswith("studio."):
+                    value = self._resolve_field_path(mapping.config_path.removeprefix("studio."))
+                if value == "":
+                    value = None
+
             if value is not None:
                 replacements[mapping.marker] = value
                 logger.debug(f"Resolved {mapping.marker} -> {value}")

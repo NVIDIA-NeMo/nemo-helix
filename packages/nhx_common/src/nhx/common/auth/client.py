@@ -126,7 +126,7 @@ class AuthClient(BaseModel):
 
         headers = MARK_INTERNAL_REQUEST_HEADERS.copy()
         service_name = self.service_name or "unknown"
-        if self.config.enabled and self.config.oidc.workload_token_exchange_enabled:
+        if self.config.enabled and self.config.oidc.workload is not None:
             from .workload_tokens import ServiceWorkloadAccessTokenProvider
 
             if not self.policy_decision_point_base_url:

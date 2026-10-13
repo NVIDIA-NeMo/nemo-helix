@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Overlay that enables auth for e2e runs whose harness authenticates with principal headers.
+#
+# Usage (layer on any cluster values file, e.g. kind.yaml or minikube.yaml):
+#   helm upgrade -i nemo-helix k8s/helm -f e2e/k8s/values/minikube.yaml \
+#     -f e2e/k8s/values/auth-overlay.yaml
+
+# The edge proxy strips X-NHX-Principal-* headers from external requests; the e2e
+# harness authenticates with those headers. Authorization is still enforced by the API.
+envoyProxy:
+  enabled: false
+
+platformConfig:
+  auth:
+    enabled: true
+    policy_decision_point_provider: embedded
+    policy_data_refresh_interval: 2
+    bundle_cache_seconds: 2
+    # Admin principal the nemo-helix e2e harness sends.
+    admin_email: "admin@example.com"
+    allowed_service_principals:
+      - e2e-test
+      - e2e-test-on-behalf

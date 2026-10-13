@@ -5,7 +5,7 @@
 
 These types define the HTTP contract for the generic entity-store routes.
 Both the server (FastAPI routes) and the client (NemoClient endpoints) can
-import from here — one source of truth, no Stainless-generated duplicates.
+import from here, so there is one source of truth.
 
 This module must stay free of ``nhx_common`` (server-only) imports, so any
 server constant it needs is inlined with a pointer back to the original.

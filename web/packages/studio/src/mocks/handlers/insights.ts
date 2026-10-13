@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getInsightsGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-configs';
-import { getInsightsListAnalysisRunsQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-runs';
+import { getInsightsGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-run-statuses';
+import {
+  getInsightsGetAnalysisRunQueryKey,
+  getInsightsListAnalysisRunsQueryKey,
+} from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
 import type {
   AnalysisRunResponse,
   CreateAnalysisRunRequest,
   InsightListItem,
 } from '@nemo/sdk/generated/insights/schema';
+import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import { getFilesDownloadFileQueryKey } from '@nemo/sdk/generated/platform/files';
+import type { EvaluationResponse, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { AGENT_ETHOS_FILE } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
@@ -22,6 +28,12 @@ const ANALYSIS_CONFIG_URL = mockApiUrl(
   ':agent'
 );
 const ANALYSIS_RUNS_URL = mockApiUrl(getInsightsListAnalysisRunsQueryKey, ':workspace');
+const ANALYSIS_RUN_URL = mockApiUrl(getInsightsGetAnalysisRunQueryKey, ':workspace', ':name');
+const ANALYSIS_RUN_STATUS_URL = mockApiUrl(
+  getInsightsGetStatusesAnalysisRunStatusQueryKey,
+  ':workspace',
+  ':agent'
+);
 
 export const mockAnalysisRunResponse = (
   workspace: string,
@@ -44,6 +56,99 @@ export const mockAnalysisRunResponse = (
   },
   job: { name: 'analysis-run-1', status: 'created' },
 });
+
+/** An analysis run for `agent` whose backing job is in `status`, or has no job when `status` is null. */
+export const mockAnalysisRunWithJob = (
+  agent: string,
+  status: HelixJobStatus | null,
+  { name = 'analysis-run-1', created_at = '2026-08-14T09:00:00Z', workspace = 'default' } = {}
+): AnalysisRunResponse => {
+  const response = mockAnalysisRunResponse(workspace, {
+    agent,
+    default_model: mockAnalysisConfig.default_model,
+    fast_model: mockAnalysisConfig.fast_model,
+  });
+  return {
+    run: { ...response.run, name, created_at },
+    job: status ? { ...response.job, name, status } : undefined,
+  };
+};
+
+/** Serves `runs()`, newest first, reading it per request so a test can advance a job between polls. */
+export const analysisRunHandlers = (runs: () => AnalysisRunResponse[]) => [
+  http.get(ANALYSIS_RUNS_URL, ({ request }) => {
+    const params = new URL(request.url).searchParams;
+    const agent = params.get('agent');
+    const pageSize = Number(params.get('page_size') ?? 20);
+    const matches = runs()
+      .map(({ run }) => run)
+      .filter((run) => !agent || run.agent === agent);
+    const data = matches.slice(0, pageSize);
+    return HttpResponse.json({
+      data,
+      pagination: {
+        page: 1,
+        page_size: pageSize,
+        current_page_size: data.length,
+        total_pages: matches.length > 0 ? 1 : 0,
+        total_results: matches.length,
+      },
+    });
+  }),
+  http.get<{ name: string }>(ANALYSIS_RUN_URL, ({ params }) => {
+    const response = runs().find(({ run }) => run.name === params.name);
+    return response
+      ? HttpResponse.json(response)
+      : HttpResponse.json({ detail: 'Not Found' }, { status: 404 });
+  }),
+];
+
+/** The scheduler's run status for `agent`, or a 404 when it has never run. */
+export const analysisRunStatusHandler = (agent: string, lastSuccessfulRunAt: string | null) =>
+  http.get<{ agent: string }>(ANALYSIS_RUN_STATUS_URL, ({ params }) =>
+    lastSuccessfulRunAt && params.agent === agent
+      ? HttpResponse.json({
+          id: `insights-analysis-run-status-${agent}`,
+          name: agent,
+          agent,
+          status: 'idle',
+          last_successful_run_at: lastSuccessfulRunAt,
+        })
+      : HttpResponse.json({ detail: 'Not Found' }, { status: 404 })
+  );
+
+/** Answers run creation like the default handler and hands each request body to `onCreate`. */
+export const analysisRunCreateHandler = (
+  onCreate: (body: CreateAnalysisRunRequest, response: AnalysisRunResponse) => void
+) =>
+  http.post<{ workspace: string }, CreateAnalysisRunRequest>(
+    ANALYSIS_RUNS_URL,
+    async ({ params, request }) => {
+      const body = await request.json();
+      const response = mockAnalysisRunResponse(params.workspace, body);
+      onCreate(body, response);
+      return HttpResponse.json(response);
+    }
+  );
+
+/** Intake evaluations named `names` that recorded traces for `agent`. */
+export const agentEvaluationsHandler = (agent: string, names: string[]) =>
+  http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), ({ request }) => {
+    const filtered = new URL(request.url).searchParams.get('filter[agent_name]');
+    const data: EvaluationResponse[] =
+      !filtered || filtered === agent
+        ? names.map((name) => ({
+            id: `experiment-${name}`,
+            name,
+            workspace: 'default',
+            experiment_ids: [],
+            experiment_group_id: '',
+            dataset_name: 'sample-dataset',
+            agent_names: [agent],
+          }))
+        : [];
+    return HttpResponse.json({ data });
+  });
 
 /** Serves `content` as the agent's ETHOS.md, or 404s the file when `content` is null. */
 export const agentEthosHandlers = (agent: string, content: string | null) => {
@@ -121,11 +226,11 @@ export const mockInsights: InsightListItem[] = [
 ];
 
 export const insightsHandlers = [
-  http.post<{ workspace: string }, CreateAnalysisRunRequest>(
-    ANALYSIS_RUNS_URL,
-    async ({ params, request }) =>
-      HttpResponse.json(mockAnalysisRunResponse(params.workspace, await request.json()))
-  ),
+  ...analysisRunHandlers(() => []),
+
+  analysisRunStatusHandler('', null),
+
+  analysisRunCreateHandler(() => undefined),
 
   http.get(ANALYSIS_CONFIG_URL, ({ params }) =>
     HttpResponse.json({ ...mockAnalysisConfig, name: params.agent, agent: params.agent })

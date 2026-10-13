@@ -183,7 +183,7 @@ async def _resolve_experiment_scope(
                 "page_size": PAGE_SIZE,
                 "mode": "preview",
                 "sort": "started_at",
-                "filter": {"evaluation_id": evaluation_name, "started_at": {"gte": lower}},
+                "filter": {"evaluation_id": evaluation_name, "started_at": {"$gte": lower}},
             },
         )
         async for trace in _items(paginator):
@@ -232,7 +232,7 @@ async def _export_scoped_workspace(
                             "page_size": PAGE_SIZE,
                             "mode": "detailed",
                             "sort": "started_at",
-                            "filter": {"trace_id": trace_id, "started_at": {"gte": epoch}},
+                            "filter": {"trace_id": trace_id, "started_at": {"$gte": epoch}},
                         },
                     )
                 ),
@@ -269,7 +269,7 @@ async def _export_scoped_workspace(
                             query_params={
                                 "page_size": PAGE_SIZE,
                                 "sort": "created_at",
-                                "filter": {"session_id": session_id, "created_at": {"gte": epoch}},
+                                "filter": {"session_id": session_id, "created_at": {"$gte": epoch}},
                             },
                         )
                     ),
@@ -347,7 +347,7 @@ async def _export_workspaces(
                     "page_size": PAGE_SIZE,
                     "mode": "detailed",
                     "sort": "started_at",
-                    "filter": {"started_at": {"gte": lower}},
+                    "filter": {"started_at": {"$gte": lower}},
                 },
             )
             n_spans = await _drain_to_jsonl(_items(spans), ws_dir / "spans.jsonl", on_doc=bounds.note)
@@ -356,7 +356,7 @@ async def _export_workspaces(
                 query_params={
                     "page_size": PAGE_SIZE,
                     "sort": "created_at",
-                    "filter": {"created_at": {"gte": lower}},
+                    "filter": {"created_at": {"$gte": lower}},
                 },
             )
             n_annotations = await _drain_to_jsonl(_items(annotations), ws_dir / "annotations.jsonl")
@@ -365,7 +365,7 @@ async def _export_workspaces(
                 query_params={
                     "page_size": PAGE_SIZE,
                     "sort": "created_at",
-                    "filter": {"created_at": {"gte": lower}},
+                    "filter": {"created_at": {"$gte": lower}},
                 },
             )
             n_results = await _drain_to_jsonl(_items(results), ws_dir / "evaluator_results.jsonl")

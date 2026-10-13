@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-_PLATFORM_SKILL_SOURCE_DISTS = frozenset({"nemo-helix-ext", "nemo-helix-sdk"})
+_PLATFORM_SKILL_SOURCE_DISTS = frozenset({"nemo-helix-ext"})
 _AGGREGATE_SKILL_SOURCE_DIST = "nemo-helix"
 
 
@@ -63,8 +63,6 @@ def _skill_entry_point_preference(entry_point: Any) -> tuple[int, str]:
             return (0, dist_name)
         if dist_name == _AGGREGATE_SKILL_SOURCE_DIST:
             return (1, dist_name)
-        if dist_name == "nemo-helix-sdk":
-            return (2, dist_name)
     if dist_name == _AGGREGATE_SKILL_SOURCE_DIST:
         return (1, dist_name)
     return (0, dist_name or "")
@@ -190,7 +188,7 @@ def load_skills() -> dict[str, Skill]:
 
 
 def _load_skills_from_preferred_entry_points() -> dict[str, Skill]:
-    """Load skills for Studio while preferring editable source providers over vendored mirrors."""
+    """Load skills for Studio while preferring editable source providers over the bundled wrapper."""
     allowed_names = _allowed_skill_provider_names()
     candidates_by_name: dict[str, list[tuple[Any, Path]]] = {}
     for entry_point in _raw_skill_entry_points():

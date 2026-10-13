@@ -34,7 +34,10 @@ from nhx.platform_runner.registry import (
 DEFAULT_SCOPE = "default"
 DEFAULT_PLATFORM_BIND_HOST = "0.0.0.0"
 DEFAULT_LOCAL_SERVICES_BIND_HOST = "127.0.0.1"
-DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS = 5
+# Keep this above httpx's default client keepalive_expiry (5s) so pooled client
+# connections are retired before the server closes them; otherwise a request
+# sent on a just-closed connection fails with ReadError/RemoteProtocolError.
+DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS = 10
 
 _SCOPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _INSTANCES_DIRNAME = "instances"

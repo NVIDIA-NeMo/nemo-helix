@@ -12,9 +12,8 @@ from pydantic import BaseModel, Field, model_validator
 # dispatch turns into a per-evaluation kubeconfig so the run acts as that user
 # (lets a user run custom-image / direct-mode Harbor tasks with their own
 # cluster rights — no service-account NetworkPolicy grant). See
-# scaled_evals.dispatch.sandbox_k8s. 'switchyard' is an evaluation-scoped
-# client token for an operator-approved external Switchyard endpoint.
-CredentialProvider = Literal["openai", "anthropic", "nvidia", "nhx", "openshift", "switchyard"]
+# scaled_evals.dispatch.sandbox_k8s.
+CredentialProvider = Literal["openai", "anthropic", "nvidia", "nhx", "openshift"]
 # Which write-once payload was supplied. Both are secret material (the whole
 # resource is a secrets store); `key` is a single-string secret (model API
 # key), `yaml` is a structured secret blob (intake workspace token).

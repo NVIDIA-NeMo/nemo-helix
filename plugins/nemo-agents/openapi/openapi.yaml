@@ -517,7 +517,7 @@ paths:
       tags:
       - Agent Deployments
       summary: Get Deployment Logs
-      description: Return the most recent *tail* lines from the deployment's log file.
+      description: Return the most recent *tail* lines from the deployment's logs.
       operationId: get_deployment_logs_apis_agents_v2_workspaces__workspace__deployments__name__logs_get
       parameters:
       - name: workspace
@@ -559,7 +559,7 @@ paths:
       tags:
       - Agent Deployments
       summary: Stream Deployment Logs
-      description: SSE tail-follow of the deployment's log file; resumes via ``Last-Event-ID``.
+      description: SSE tail-follow of deployment logs; resumes via ``Last-Event-ID``.
       operationId: stream_deployment_logs_apis_agents_v2_workspaces__workspace__deployments__name__logs_stream_get
       parameters:
       - name: workspace
@@ -4724,10 +4724,12 @@ components:
           title: Total Lines
           description: Number of lines actually returned.
         next_offset:
-          type: integer
+          anyOf:
+          - type: integer
+          - type: string
           title: Next Offset
-          description: Byte offset just past the returned tail; pass as Last-Event-ID
-            to resume the stream without gaps.
+          description: Resume cursor; pass as Last-Event-ID to continue the stream
+            without gaps.
       type: object
       required:
       - data

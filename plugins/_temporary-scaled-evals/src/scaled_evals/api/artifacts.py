@@ -397,8 +397,8 @@ def _upload_archive(evaluation_id: str, tmp: Any, size_bytes: int) -> dict[str, 
 def build_evaluation_archive_from_directory(evaluation_id: str, root: Path | str) -> dict[str, Any]:
     """Create ``results.tar.gz`` directly from local artifacts, then upload it.
 
-    This is the dispatch-worker happy path after an evaluation finishes: artifacts
-    are still on the local worker filesystem, so we avoid listing and downloading
+    This is the evaluation Job's happy path after an evaluation finishes: artifacts
+    are still on the Job's local filesystem, so we avoid listing and downloading
     the just-synced S3 objects only to re-compress them.
     """
     root_path = Path(root)
@@ -501,11 +501,6 @@ def build_evaluation_archive(evaluation_id: str) -> dict[str, Any]:
         "file_count": len(objects),
         "source_bytes": fetched_bytes,
     }
-
-
-def upload_context_archive(archive_path: Path, object_key: str) -> None:
-    """Upload a local build-context archive to its fileset (server-side put)."""
-    _files_backend.upload_file(archive_path, object_key, content_type="application/gzip")
 
 
 def download_object(object_key: str, dest_path: str) -> None:

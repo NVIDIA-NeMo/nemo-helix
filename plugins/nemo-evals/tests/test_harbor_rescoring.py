@@ -14,7 +14,7 @@ from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evals.jobs.metric_resolution import to_inline
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.task_refs import validate_scoring
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
@@ -30,7 +30,7 @@ def _source(reward_key="grade"):
     metric = to_inline(
         bundle_metric(
             ExactMatchMetric(reference="{{inputs.instruction}}", candidate="{{sample.output_text}}"),
-            CloudpickleMetricBundlePackager(),
+            HybridMetricBundlePackager(),
         )
     )
     return [

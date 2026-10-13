@@ -72,23 +72,23 @@ def test_authentik_compose_runs_required_services_and_controllers():
         "--host",
         "0.0.0.0",
         "--services",
-        "auth,models,files,inference-gateway,jobs,secrets,entities,deployments",
+        "auth,models,files,inference-gateway,jobs,secrets,entities,deployments,studio",
         "--controllers",
         "jobs,models,entities,deployments",
     ]
 
 
-def test_authentik_compose_defaults_support_direct_docker_compose_start():
+def test_authentik_compose_requires_prepared_workload_identity_secret():
     compose_path = Path("contrib/auth/authentik/compose/docker-compose.yml")
     compose_text = compose_path.read_text(encoding="utf-8")
     compose = yaml.safe_load(compose_text)
 
-    password_default = "${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:-svc-nemo-token-secret-dev}"
+    prepared_password = "${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}"
     blueprint_mount = "${AUTHENTIK_BLUEPRINT_DIR:-../helm/files/blueprints}:/blueprints/custom:ro"
 
     assert compose["name"] == "${COMPOSE_PROJECT_NAME:-nemo-helix-authentik}"
-    assert compose["x-authentik-env"]["AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD"] == password_default
-    assert compose["services"]["nemo"]["environment"]["AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD"] == password_default
+    assert compose["x-authentik-env"]["AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD"] == prepared_password
+    assert compose["services"]["nemo"]["environment"]["AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD"] == prepared_password
     assert (
         compose["services"]["nemo"]["environment"]["NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE"]
         == "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem"
@@ -106,7 +106,13 @@ def test_authentik_compose_defaults_support_direct_docker_compose_start():
     assert blueprint_mount not in compose["services"]["authentik-worker"]["volumes"]
     blueprint_init = compose["services"]["authentik-blueprint-init"]
     assert blueprint_init["image"] == "ghcr.io/goauthentik/server:${AUTHENTIK_TAG:-2024.12}"
-    assert blueprint_init["environment"] == compose["x-authentik-env"]
+    assert blueprint_init["environment"] == {
+        **compose["x-authentik-env"],
+        "NHX_OIDC_LOGIN_REDIRECT_URI": (
+            "https://127.0.0.1:${AUTHENTIK_GATEWAY_PORT:-18080}/apis/auth/v2/login/callback"
+        ),
+        "NHX_OIDC_CLIENT_SECRET": "${NHX_OIDC_CLIENT_SECRET:?run contrib/auth/authentik/run.sh prepare-local}",
+    }
     assert blueprint_mount in blueprint_init["volumes"]
     assert blueprint_init["depends_on"]["authentik-server"]["condition"] == "service_healthy"
     assert blueprint_init["depends_on"]["authentik-worker"]["condition"] == "service_healthy"
@@ -129,6 +135,15 @@ def test_authentik_compose_platform_config_uses_global_docker_workload_identity_
     )
 
     assert "workload_identity" not in workload_executor["config"]
+
+
+def test_authentik_compose_confidential_client_has_explicit_endpoints():
+    config = yaml.safe_load(Path("contrib/auth/authentik/config/platform-compose-authentik.yaml").read_text())
+    oidc = config["auth"]["oidc"]
+    confidential_client = oidc["confidential_client"]
+
+    assert confidential_client["authorization_endpoint"] == "https://127.0.0.1:18080/application/o/authorize/"
+    assert confidential_client["token_endpoint"] == "http://authentik-server:9000/application/o/token/"
 
 
 def test_authentik_compose_uses_liveness_for_container_health_and_routes_status_through_gateway():
@@ -215,20 +230,35 @@ def test_authentik_compose_uses_liveness_for_container_health_and_routes_status_
     }
     allowed_headers = ext_authz["http_service"]["authorization_response"]["allowed_upstream_headers"]["patterns"]
     assert AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS.issubset(_exact_header_patterns(allowed_headers))
+    assert "authorization" in _exact_header_patterns(allowed_headers)
+    authorization_request = ext_authz["http_service"]["authorization_request"]
+    assert {"cookie", "x-source"}.issubset(_exact_header_patterns(authorization_request["allowed_headers"]["patterns"]))
+    assert "headers_to_add" not in authorization_request
 
     protected_api_route = next(route for route in routes if route["match"] == {"prefix": "/apis/"})
     assert "typed_per_filter_config" not in protected_api_route
 
+    public_broker_route = next(route for route in routes if "safe_regex" in route["match"])
+    assert public_broker_route["match"]["safe_regex"]["regex"] == (
+        "^/apis/auth/v2/(login(/callback)?|authorize(/[^/]+)?|token|logout|session)$"
+    )
+    assert public_broker_route["typed_per_filter_config"]["envoy.filters.http.ext_authz"] == {
+        "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
+        "disabled": True,
+    }
     public_authenticate_route = next(route for route in routes if route["match"] == {"path": "/apis/auth/authenticate"})
     assert public_authenticate_route["typed_per_filter_config"]["envoy.filters.http.ext_authz"] == {
         "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
         "disabled": True,
     }
     public_ext_authz_route = next(route for route in routes if route["match"] == {"prefix": "/apis/auth/ext-authz"})
+    assert public_ext_authz_route["direct_response"] == {"status": 404}
+    assert "route" not in public_ext_authz_route
     assert public_ext_authz_route["typed_per_filter_config"]["envoy.filters.http.ext_authz"] == {
         "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
         "disabled": True,
     }
+    assert routes.index(public_broker_route) < routes.index(protected_api_route)
     assert routes.index(public_ext_authz_route) < routes.index(protected_api_route)
 
 
@@ -262,20 +292,25 @@ def test_authentik_compose_uses_https_gateway_for_workloads():
     assert nemo["environment"]["NHX_AUTH_POLICY_DECISION_POINT_BASE_URL"] == "http://127.0.0.1:8080"
     assert "loopback_address" not in config["platform"]
     assert "service_discovery" not in config["platform"]
-    assert config["auth"]["oidc"]["token_endpoint"] == "https://127.0.0.1:18080/application/o/token/"
+    assert config["auth"]["oidc"]["public_client"]["token_endpoint"] == ("https://127.0.0.1:18080/application/o/token/")
+    assert config["auth"]["oidc"]["public_client"]["server_side_sessions"] is False
+    assert config["auth"]["oidc"]["server_sessions"] == {"encryption_key_env_var": "NHX_AUTH_SESSION_ENCRYPTION_KEY"}
     assert config["auth"]["token_signing"]["issuer"] == "https://nemo-gateway:8080/apis/auth"
     assert config["auth"]["token_signing"]["key_id"] == "nemo-helix-signing"
     assert config["auth"]["access_keys"]["enabled"] is True
     assert "workload_token_issuer" not in config["auth"]["oidc"]
-    assert config["auth"]["oidc"]["workload_token_endpoint"] == "https://nemo-gateway:8080/apis/auth/token"
+    assert config["auth"]["oidc"]["workload"]["client_id"] == "nemo-helix-workload"
+    assert config["auth"]["oidc"]["workload"]["token_endpoint"] == ("https://nemo-gateway:8080/apis/auth/token")
     assert (
-        "https://nemo-gateway:8080/application/o/nemo-workload/" in config["auth"]["oidc"]["workload_subject_issuers"]
+        "https://nemo-gateway:8080/application/o/nemo-workload/"
+        in config["auth"]["oidc"]["workload"]["subject_issuers"]
     )
     workload_executor = next(
         executor
         for executor in config["jobs"]["executors"]
         if executor["provider"] == "cpu" and executor["profile"] == "workload"
     )
+    assert workload_executor["config"]["cleanup_completed_jobs_immediately"] is True
     assert "workload_identity" not in workload_executor["config"]
     assert set(nemo["networks"]) == {"nemo-internal"}
     assert "nemo-direct" not in yaml.safe_dump(nemo)

@@ -116,6 +116,7 @@ def test_v2_bundle_format_is_rejected(model: type[MetricBundle] | type[MetricInl
         model.model_validate(_bundle_data(version="v2", outputs=[_required_output(required=False)]))
 
 
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
 def test_runtime_optional_metric_bundle_is_v1_and_hydrates() -> None:
     bundle = bundle_metric(_OptionalMetric(), CloudpickleMetricBundlePackager())
 
@@ -141,6 +142,7 @@ def test_explicit_required_true_has_same_identity_as_omission() -> None:
     assert _sorted_json_digest(optional) != _sorted_json_digest(omitted)
 
 
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
 def test_hydration_output_contract_mismatch_reports_required() -> None:
     bundle = bundle_metric(_RequiredMetric(), CloudpickleMetricBundlePackager())
     mismatched = bundle.model_copy(

@@ -56,6 +56,8 @@ from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
 from nhx_evals_sdk.values import Model, SecretRef
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore, RemoteScore
 
+pytestmark = pytest.mark.usefixtures("allow_cloudpickle_metrics")
+
 
 class _CustomMetric:
     type = "custom-score"

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import cast
 
+import pytest
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric, unbundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
@@ -39,6 +40,7 @@ def test_hybrid_inlines_builtin_metric() -> None:
     assert type(_roundtrip(bundle)) is ExactMatchMetric
 
 
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
 def test_hybrid_cloudpickles_custom_metric() -> None:
     bundle = bundle_metric(cast(Metric, _CustomMetric()), HybridMetricBundlePackager())
 
@@ -59,6 +61,7 @@ def test_hybrid_routes_each_metric_independently() -> None:
     assert kinds == ["inline", "cloudpickle"]
 
 
+@pytest.mark.usefixtures("allow_cloudpickle_metrics")
 def test_hybrid_load_dispatches_by_payload_kind() -> None:
     packager = HybridMetricBundlePackager()
     inline_bundle = bundle_metric(

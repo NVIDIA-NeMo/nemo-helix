@@ -24,7 +24,7 @@ import pytest
 from nemo_evals.api.schemas import EvaluatorTaskDefinition, MetricInline, MetricRef, TaskInput, TaskInputs
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.evals.client import EvaluatorClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
@@ -46,7 +46,7 @@ def _inline_metric(marker: str) -> MetricInline:
         # The literal suffix only perturbs the template text — it keeps the metric valid while making
         # this run's content (and therefore its content-addressed derived name) distinct from others'.
         ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}" + marker),
-        CloudpickleMetricBundlePackager(),
+        InlineMetricBundlePackager(),
     )
     return MetricInline.model_validate_json(bundle.model_dump_json())
 

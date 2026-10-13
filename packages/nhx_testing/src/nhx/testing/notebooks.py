@@ -251,6 +251,7 @@ def execute_notebook(
     language_filter: str = "all",
     kernel_name: str = "python3",
     execution_timeout: int | None = None,
+    output_path: Path | None = None,
 ) -> Path:
     """Execute a single ``.md`` or ``.ipynb`` notebook via papermill.
 
@@ -264,6 +265,7 @@ def execute_notebook(
         language_filter: Which cells to run (``"all"``, ``"python"``, ``"shell"``).
         kernel_name: Jupyter kernel to use.
         execution_timeout: Per-cell timeout in seconds (``None`` for no limit).
+        output_path: Optional path for the executed notebook artifact.
 
     Returns:
         Path to the executed ``.executed.ipynb`` output file.
@@ -273,7 +275,7 @@ def execute_notebook(
     """
     import papermill  # noqa: PLC0415 — lazy import to allow importing this module without papermill installed
 
-    output_path = notebook_path.with_suffix(".executed.ipynb")
+    output_path = output_path or notebook_path.with_suffix(".executed.ipynb")
 
     if notebook_path.suffix == ".md":
         temp_nb = convert_md_to_notebook(notebook_path, language_filter)

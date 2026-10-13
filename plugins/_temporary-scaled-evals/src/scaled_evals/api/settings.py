@@ -6,7 +6,7 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from cryptography.fernet import Fernet
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Development default when SCALED_EVALS_DATABASE_URL is unset. Matches upstream.
@@ -18,7 +18,6 @@ _STANDALONE_DATABASE_URL = "postgresql://scaled_evals:scaled_evals@localhost:543
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    dispatch_worker_health_url: str = ""
     # scaled-evals owns its own Postgres, so this names it. Deliberately not
     # `DATABASE_URL`: the platform injects that into the same process, and reusing
     # it would run these migrations and claim queues inside the platform database.
@@ -131,11 +130,12 @@ class Settings(BaseSettings):
     cloud_build_service_account: str = ""
     cloud_build_timeout_seconds: float = 2100.0
     cloud_build_poll_interval_seconds: float = 5.0
-    # A separate durable worker executes queued build jobs. Hosted
-    # deployments set this from buildWorker.enabled so readyz catches a chart
-    # that deploys the API without the worker.
-    build_worker_required: bool = True
-    build_worker_stale_seconds: float = 60.0
+    # Staleness bound for the Platform Jobs controller heartbeat in readyz.
+    # Hosted charts still set the old BUILD_WORKER_STALE_SECONDS name.
+    platform_jobs_controller_stale_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("PLATFORM_JOBS_CONTROLLER_STALE_SECONDS", "BUILD_WORKER_STALE_SECONDS"),
+    )
     # Target platform for finalize image builds. Pinned to the runtime cluster's
     # arch (hosted nodes are amd64) so an arm64 build host (Apple Silicon under
     # Colima) does not produce images that `exec format error` on amd64 nodes.
@@ -158,22 +158,7 @@ class Settings(BaseSettings):
     dispatch_run_poll_interval_seconds: float = 10.0
     resource_usage_sample_interval_seconds: float = 30.0
     dispatch_run_max_polls: int = 360
-    # Hosted Kubernetes can move each evaluation into a standalone Job so
-    # control-plane Deployment rollouts do not terminate active orchestration.
-    dispatch_kubernetes_jobs_enabled: bool = False
     dispatch_job_reconcile_stale_seconds: float = 60.0
-    # Platform Jobs migration flags. Postgres remains the admission and
-    # compatibility source of truth while these are enabled. Default-on since
-    # the GKE acceptance matrix passed end to end; set either to false to fall
-    # back to the legacy in-process workers.
-    platform_build_jobs_enabled: bool = Field(
-        default=True,
-        validation_alias="SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED",
-    )
-    platform_evaluation_jobs_enabled: bool = Field(
-        default=True,
-        validation_alias="SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED",
-    )
     platform_jobs_workspace: str = Field(
         default="default",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_WORKSPACE",
@@ -245,6 +230,12 @@ class Settings(BaseSettings):
     entity_store_workspace: str = Field(
         default="default",
         validation_alias="SCALED_EVALS_ENTITY_STORE_WORKSPACE",
+    )
+    # Holds execution inputs (prompts, private snapshots). The service creates it,
+    # so with auth on no user can read it without an explicit role binding.
+    entity_store_private_workspace: str = Field(
+        default="scaled-evals-internal",
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE",
     )
     entity_store_projection_batch_size: int = Field(
         default=100,
@@ -506,6 +497,15 @@ class Settings(BaseSettings):
     harbor_opensandbox_work_dir: str = "/tmp/harbor-opensandbox"
     # Harbor's jobs_dir relative to the selected Harbor runner directory.
     harbor_opensandbox_jobs_dir: str = "jobs/harbor-opensandbox"
+    # Absolute directory holding the per-evaluation job directories Harbor writes
+    # to <runner>/<harbor_opensandbox_jobs_dir>, after any symlinks or mounts.
+    # The status reader, terminator and artifact upload read from here.
+    # In the shipped image every runner's jobs/ is a symlink to the mounted
+    # /var/lib/scaled-evals/harbor-jobs, so this is
+    # /var/lib/scaled-evals/harbor-jobs/harbor-opensandbox. When unset, they read
+    # <harbor_dir>/<harbor_opensandbox_jobs_dir>, which matches only when harbor_dir
+    # is the evaluation's runner.
+    harbor_opensandbox_artifact_root: str | None = None
     # Protocol for OpenSandbox API calls, used by both Harbor and the cleanup module.
     harbor_opensandbox_protocol: Literal["http", "https"] = "https"
     # Comma-separated. The model endpoint trial agents call (inference gateway or
@@ -550,31 +550,6 @@ class Settings(BaseSettings):
     gym_runner_shm_size: str = "2g"
     # Grace period for SIGTERM traps to close remote Daytona/OpenSandbox sandboxes.
     gym_runner_teardown_timeout_seconds: int = 60
-    # Runtime-specific evaluation Job sizing. Queue workers keep their small
-    # control-plane footprint; only Gym Jobs receive these resources.
-    gym_job_cpu_request: str = "1"
-    gym_job_cpu_limit: str = "4"
-    gym_job_memory_request: str = "2Gi"
-    gym_job_memory_limit: str = "8Gi"
-    gym_job_shm_size: str = "2Gi"
-
-    # --- Per-evaluation Switchyard dispatch --------------------------------
-    # When an evaluation sets switchyard_profile_id, dispatch provisions one
-    # Switchyard Deployment/Service/Secret/ConfigMap before launching the runner.
-    # The profile should normally supply the image and namespace; these settings
-    # are service defaults/fallbacks for local compose and cluster deployments.
-    switchyard_image: str | None = None
-    # Comma-separated imagePullSecret names automatically applied to every
-    # ephemeral Switchyard Deployment. Hosted deployments point this at a
-    # platform-provided pull secret so end users never need registry credentials.
-    switchyard_image_pull_secrets: str = ""
-    switchyard_namespace: str | None = None
-    switchyard_kube_context: str | None = None
-    switchyard_kube_insecure_skip_tls_verify: bool = False
-    switchyard_drain_seconds: float = 300.0
-    # Comma-separated exact hosts or leading-wildcard DNS suffixes approved for
-    # external Switchyard profiles. Empty disables external endpoints.
-    switchyard_external_allowed_hosts: str = ""
 
     # --- NHX Intake (post-run ATIF upload) ---------------------------------
     # Platform root; the client appends ``/apis/intake/v2/...``. No default: an

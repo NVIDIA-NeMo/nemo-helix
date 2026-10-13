@@ -28,6 +28,7 @@ import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CustomizationFailureBanner } from '@studio/routes/CustomizationJobDetailsRoute/CustomizationFailureBanner';
+import { CustomizationTransferBanner } from '@studio/routes/CustomizationJobDetailsRoute/CustomizationTransferBanner';
 import { DetailActions } from '@studio/routes/CustomizationJobDetailsRoute/DetailActions';
 import { LogsTab } from '@studio/routes/CustomizationJobDetailsRoute/LogsTab';
 import { getCustomizationJobListRoute } from '@studio/routes/utils';
@@ -40,6 +41,7 @@ import {
   getGrpoRunProgressSummary,
   getTrainingTelemetry,
 } from '@studio/util/customizations';
+import { resolveCustomizationTransfer } from '@studio/util/customizationTransfer';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { Dot } from 'lucide-react';
 import { type FC, Fragment, useState } from 'react';
@@ -69,11 +71,11 @@ export const CustomizationJobDetailsRoute: FC = () => {
   const showChat = Boolean(output_model) && status === 'completed';
   const isTerminalStatus = Boolean(status && CJobTerminalStatuses.includes(status));
 
-  // Steps aren't on the job record; only fetch them once terminal, since a banner is impossible before then.
-  const { steps } = useCustomizationJobStatus(workspace, customizationJobName, backend, status, {
-    enabled: isTerminalStatus,
-  });
+  // Steps aren't on the job record. Fetch them while the job runs as well as after it ends: the
+  // transfer banner needs them mid-run, and the failure banner needs them once it has failed.
+  const { steps } = useCustomizationJobStatus(workspace, customizationJobName, backend, status);
   const failure = resolveCustomizationFailure(job, steps);
+  const transfer = resolveCustomizationTransfer(job, steps);
 
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -131,6 +133,12 @@ export const CustomizationJobDetailsRoute: FC = () => {
         />
         {failure && (
           <CustomizationFailureBanner failure={failure} onViewLogs={() => setActiveTab('logs')} />
+        )}
+        {transfer && (
+          <CustomizationTransferBanner
+            transfer={transfer}
+            onViewLogs={() => setActiveTab('logs')}
+          />
         )}
         <TabsRoot
           className="flex min-h-0 flex-1 flex-col"

@@ -7,7 +7,7 @@ Unlike the unit tests (which fake the evaluator so the Harbor runner is built bu
 This drives ``AgentEvalJob.run(...)`` against a *real* HarborRunnerTarget using an explicit
 ``JobContext`` and sync typed client. The Harbor runner resolves to a native
 ``HarborAgentTaskRunner``, Harbor runs the bundled hello-world task in Docker, and the verifier
-reward is scored (by a cloudpickle-bundled ``HarborRewardMetric``) and persisted into the run bundle.
+reward is scored (by an inline-bundled ``HarborRewardMetric``) and persisted into the run bundle.
 It is the plugin analog of the SDK's ``tests/e2e/test_harbor_runtime.py``.
 
 Needs the ``harbor`` extra (Python >=3.12; ``pip install nhx-evals-sdk[harbor]``) and a working
@@ -38,7 +38,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
@@ -141,8 +141,7 @@ def _docker_available() -> bool:
 
 
 def _reward_metric() -> MetricInline:
-    # HarborRewardMetric is a custom metric (not in MetricsUnion), so it rides as a cloudpickle bundle.
-    bundle = bundle_metric(HarborRewardMetric(), CloudpickleMetricBundlePackager())
+    bundle = bundle_metric(HarborRewardMetric(), InlineMetricBundlePackager())
     return MetricInline.model_validate(bundle.model_dump(mode="json"))
 
 

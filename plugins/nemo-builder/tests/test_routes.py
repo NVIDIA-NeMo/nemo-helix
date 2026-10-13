@@ -12,10 +12,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from nemo_builder_plugin.completion import Caller, current_caller
+from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.service import BuilderService
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
+from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 
 
@@ -208,8 +209,39 @@ class TestReadingOneImage:
         assert TestClient(_app(entities, SERVICE_STEP)).get(IMAGE).status_code == 404
 
 
+class TestSubmitting:
+    BUILDS = "/v2/workspaces/ws-a/builds"
+    BODY = {"name": "demo", "revision": 1, "build_specs": [{"source": {"fileset": "fs-a"}}]}
+
+    @pytest.mark.parametrize(
+        "caller",
+        [Caller(auth=True, actor="service:evals"), Caller(auth=True, actor="service:evals", submitter="service:other")],
+        ids=["acting-for-no-one", "acting-for-a-service"],
+    )
+    def test_a_service_not_acting_for_a_person_is_a_403_and_nothing_is_written(self, caller: Caller) -> None:
+        entities, client = AsyncMock(), MagicMock()
+        app = _app(entities, caller)
+        app.dependency_overrides[get_nemo_client] = lambda: client
+        response = TestClient(app).post(self.BUILDS, json=self.BODY)
+        assert response.status_code == 403
+        assert "acting for a person" in response.json()["detail"]
+        assert entities.mock_calls == client.mock_calls == []
+
+    @pytest.mark.parametrize(
+        "caller",
+        [
+            Caller(auth=False),
+            Caller(auth=True, actor="alice"),
+            Caller(auth=True, actor="service:evals", submitter="alice"),
+        ],
+        ids=["auth-off", "a-person", "a-service-acting-for-a-person"],
+    )
+    def test_anyone_else_may(self, caller: Caller) -> None:
+        assert submit_refusal(caller) is None
+
+
 class TestWhoTheRoutesAdmit:
-    """The push step's two routes admit a service; the others, people only."""
+    """Submitting and the push step's two routes admit a service; listing, people only."""
 
     @staticmethod
     def _callers() -> dict[tuple[str, str], set[CallerKind]]:
@@ -221,13 +253,13 @@ class TestWhoTheRoutesAdmit:
             for method in route.methods or ()
         }
 
-    def test_the_push_steps_routes_admit_a_service(self) -> None:
+    def test_submitting_and_the_push_steps_routes_admit_a_service(self) -> None:
         callers = self._callers()
         both = {CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL}
+        assert callers[("POST", "/builds")] == both
         assert callers[("GET", "/container-images/{name}")] == both
         assert callers[("POST", "/container-images/{name}/complete")] == both
 
-    def test_submitting_and_listing_admit_people_only(self) -> None:
-        callers = self._callers()
-        assert callers[("POST", "/builds")] == {CallerKind.PRINCIPAL}
-        assert callers[("GET", "/container-images")] == {CallerKind.PRINCIPAL}
+    def test_listing_admits_people_only(self) -> None:
+        """A service could see every row, and the handler holds it to the submitter only one row at a time."""
+        assert self._callers()[("GET", "/container-images")] == {CallerKind.PRINCIPAL}

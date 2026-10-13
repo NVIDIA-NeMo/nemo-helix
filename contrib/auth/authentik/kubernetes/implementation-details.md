@@ -150,22 +150,13 @@ Scoped Access Keys remain disabled in the checked-in chart values by default.
 Runtime tests and local experiments can enable them with
 `nemo-helix.platformConfig.auth.access_keys.enabled=true`.
 
-The manual walkthrough can rely on the Helm chart to create and preserve this
-Secret.
+The provider runner creates or reuses the local signing key, runtime-specific
+gateway certificate, Authentik internal key, OIDC client secret, and session
+encryption key under `.generated`. It reconciles their Kubernetes Secrets
+before invoking Helm. The chart receives only Secret and key names.
 
-If you need the same deterministic key for manual debugging, generate one and
-add the `--set-file` line to the Helm upgrade command:
-
-```bash
-mkdir -p contrib/auth/authentik/.generated
-openssl genrsa -out contrib/auth/authentik/.generated/workload-token-private-key.pem 2048
-chmod 600 contrib/auth/authentik/.generated/workload-token-private-key.pem
---set-file workloadTokenSigningKey.privateKeyPem=contrib/auth/authentik/.generated/workload-token-private-key.pem
-```
-
-For production-style deployments, provide an externally managed RSA private-key
-Secret instead of relying on the demo-generated key. Set
-`workloadTokenSigningKey.create=false`, keep
-`workloadTokenSigningKey.secretName` and
-`nemo-helix.api.extraVolumes[].secret.secretName` aligned, and keep
-`auth.token_signing.private_key_file` pointed at the mounted file path.
+For production-style deployments, provide externally managed Secrets with the
+same names and keys. Keep `workloadTokenSigningKey.secretName`,
+`nemo-helix.api.extraVolumes[].secret.secretName`, and
+`auth.token_signing.private_key_file` aligned. Helm must not receive private
+key contents through values or `--set-file`.

@@ -276,6 +276,7 @@ def _write_quickstart_config(port: int = 8080, *, admin_email: str | None = None
             email=admin_email,
             expires_in_seconds=24 * 60 * 60,
         )
+        config_params["token_broker_url"] = None
 
     Config.write(
         config_params,

@@ -471,7 +471,6 @@ def test_code_output_does_not_send_request() -> None:
     assert 'workspace="other"' in result.stdout
     assert 'CreateProjectRequest(name="ml-project", description="d")' in result.stdout
     assert "exist_ok=True" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_code_output_for_list_renders_query_params() -> None:
@@ -485,4 +484,3 @@ def test_code_output_for_list_renders_query_params() -> None:
     assert "client.list_projects(" in result.stdout
     assert 'query_params={"page_size": 5, "sort": "name"}' in result.stdout
     assert "for item in response.page().items:" in result.stdout
-    assert "NeMoHelix" not in result.stdout

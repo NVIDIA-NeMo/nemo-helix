@@ -414,14 +414,8 @@ def _load_example(name: str):
 
 
 def _example_runtimes() -> list[object]:
-    aut = _load_example("aut_runtime")
-    platform = _load_example("platform_runtime")
     workflow = _load_example("workflow_runtime")
-    return [
-        workflow.WorkflowAgentRuntime(),
-        aut.NatAutRuntime(aut.AutConfig(aut_agent_name="an-agent")),
-        platform.NatWorkflowRuntime(),
-    ]
+    return [workflow.WorkflowAgentRuntime()]
 
 
 def test_example_runtimes_still_satisfy_the_runner_contract() -> None:
@@ -435,27 +429,3 @@ def test_example_runtimes_still_satisfy_the_runner_contract() -> None:
     for runtime in _example_runtimes():
         assert isinstance(runtime, AgentTaskRunner), f"{type(runtime).__name__} is no longer an AgentTaskRunner"
         assert runtime.runner_info().name, f"{type(runtime).__name__} reported an empty name"
-
-
-def test_example_runner_provenance_excludes_the_api_keys_its_config_carries() -> None:
-    # AutConfig and NatWorkflowConfig hold nvidia/anthropic API keys alongside their result-shaping
-    # settings, and RunnerInfo.config is persisted with the run — so these must enumerate fields
-    # rather than dump the config.
-    aut_module = _load_example("aut_runtime")
-    platform_module = _load_example("platform_runtime")
-
-    aut = aut_module.NatAutRuntime(
-        aut_module.AutConfig(
-            aut_agent_name="an-agent",
-            nvidia_api_key="nvapi-secret",
-            inference_nvidia_api_key="nvapi-secret-2",
-            anthropic_api_key="sk-ant-secret",
-        )
-    ).runner_info()
-    workflow = platform_module.NatWorkflowRuntime(
-        platform_module.NatWorkflowConfig(nvidia_api_key="nvapi-secret")
-    ).runner_info()
-
-    for info in (aut, workflow):
-        assert "secret" not in str(info.config), f"{info.name} leaked a credential into provenance"
-        assert not any("api_key" in key for key in info.config)

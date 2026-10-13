@@ -80,7 +80,6 @@ class OptimizeSkillsJob(NemoJob):
     name: ClassVar[str] = "optimize-skills"
     description: ClassVar[str] = "Optimize an agent's skills against eval failures via a coding agent (Claude)."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = OptimizeSkillsConfig
 
     @classmethod

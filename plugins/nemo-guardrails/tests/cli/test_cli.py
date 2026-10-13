@@ -192,7 +192,6 @@ def test_check_code_output_renders_typed_client_without_request(guardrail_cli) -
     assert "response = client.check_guardrail(" in result.stdout
     assert 'GuardrailCheckRequest(model="m", messages=[{"role": "user", "content": "hello"}])' in result.stdout
     assert "print(response.data())" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +242,6 @@ def test_configs_get_code_output(guardrail_cli) -> None:
     assert result.exit_code == 0, result.output
     assert recorder.requests == []
     assert 'response = client.get_guardrail_config(name="safety")' in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +353,6 @@ def test_configs_create_code_output_renders_typed_client_without_request(guardra
     assert 'client = GuardrailClient(base_url="http://test/")' in result.stdout
     assert 'body=CreateGuardrailConfigRequest(name="safety", description="demo")' in result.stdout
     assert "exist_ok=True" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -571,4 +568,3 @@ def test_configs_list_code_output(guardrail_cli) -> None:
     assert recorder.requests == []
     assert 'response = client.list_guardrail_configs(query_params={"sort": "name"})' in result.stdout
     assert "for item in response.page().items:" in result.stdout
-    assert "NeMoHelix" not in result.stdout

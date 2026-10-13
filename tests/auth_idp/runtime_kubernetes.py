@@ -27,8 +27,9 @@ from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.auth.token_claims import groups_from_claim
 
 from tests.auth_idp.common import jwt_claims
-from tests.auth_idp.device_flow import authenticate_authentik_device_flow, authenticate_zitadel_device_flow
+from tests.auth_idp.oidc_test_driver import create_oidc_test_driver
 from tests.auth_idp.runtime_contract import AuthIdpCase, DeploymentWorkloadRuntimeConfig, JsonObject, TokenSet
+from tests.auth_idp.token_acquisition import exchange_token_with_retries
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NAMESPACE = os.environ.get("NHX_AUTHENTIK_K8S_NAMESPACE", "nemo-authentik")
@@ -241,6 +242,28 @@ def _run(args: list[str], *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS) -
         args,
         cwd=REPO_ROOT,
         text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if completed.returncode != 0:
+        command = " ".join(args)
+        stdout = completed.stdout[-4000:]
+        stderr = completed.stderr[-4000:]
+        raise AssertionError(
+            f"command failed ({completed.returncode}): {command}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        )
+    return completed
+
+
+def _run_with_input(
+    args: list[str], input_text: str, *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS
+) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        args,
+        cwd=REPO_ROOT,
+        text=True,
+        input=input_text,
         capture_output=True,
         timeout=timeout,
         check=False,
@@ -818,15 +841,83 @@ def _helm_upgrade_args(context: str, kubeconfig: Path | None = None) -> list[str
                 f"{settings.gateway_port_value_key}={gateway_port}",
             ]
         )
-    workload_token_private_key = os.environ.get(WORKLOAD_TOKEN_PRIVATE_KEY_FILE_ENV)
-    if workload_token_private_key:
-        args.extend(
-            [
-                "--set-file",
-                f"workloadTokenSigningKey.privateKeyPem={workload_token_private_key}",
-            ]
-        )
     return args
+
+
+def _required_prepared_path(settings: KubernetesProviderSettings, name: str) -> Path:
+    env_name = f"{settings.env_prefix}_{name}"
+    value = os.environ.get(env_name)
+    if not value:
+        raise RuntimeError(f"{env_name} is required; run the provider test through contrib/auth/{PROVIDER_NAME}/run.sh")
+    path = Path(value)
+    if not path.exists():
+        raise RuntimeError(f"{env_name} does not exist: {path}")
+    return path
+
+
+def _apply_manifest(context: str, manifest: str, kubeconfig: Path | None = None) -> None:
+    _run_with_input(_kubectl_command(context, ["apply", "-f", "-"], kubeconfig), manifest)
+
+
+def _reconcile_secret(
+    context: str,
+    name: str,
+    source_args: list[str],
+    kubeconfig: Path | None = None,
+) -> None:
+    rendered = _run(
+        _kubectl_command(
+            context,
+            ["-n", NAMESPACE, "create", "secret", "generic", name, *source_args, "--dry-run=client", "-o", "yaml"],
+            kubeconfig,
+        )
+    )
+    _apply_manifest(context, rendered.stdout, kubeconfig)
+
+
+def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) -> None:
+    settings = _settings_for_provider(PROVIDER_NAME)
+    namespace_manifest = json.dumps({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": NAMESPACE}})
+    _apply_manifest(context, namespace_manifest, kubeconfig)
+
+    signing_key = _required_prepared_path(settings, "WORKLOAD_TOKEN_PRIVATE_KEY_FILE")
+    tls_dir = _required_prepared_path(settings, "GATEWAY_TLS_DIR")
+    _reconcile_secret(
+        context,
+        "nemo-workload-token-signing-key",
+        [f"--from-file=private-key.pem={signing_key}"],
+        kubeconfig,
+    )
+    _reconcile_secret(
+        context,
+        ENVOY_TLS_SECRET,
+        [
+            f"--from-file=tls.crt={tls_dir / 'tls.crt'}",
+            f"--from-file=tls.key={tls_dir / 'tls.key'}",
+            f"--from-file=ca.crt={tls_dir / 'ca.crt'}",
+        ],
+        kubeconfig,
+    )
+    if PROVIDER_NAME == "authentik":
+        _reconcile_secret(
+            context,
+            "nemo-authentik-secret-key",
+            [f"--from-env-file={_required_prepared_path(settings, 'AUTHENTIK_ENV_FILE')}"],
+            kubeconfig,
+        )
+        _reconcile_secret(
+            context,
+            "nemo-helix-user-oidc",
+            [f"--from-env-file={_required_prepared_path(settings, 'USER_OIDC_ENV_FILE')}"],
+            kubeconfig,
+        )
+    else:
+        _reconcile_secret(
+            context,
+            "zitadel-masterkey",
+            [f"--from-file=masterkey={_required_prepared_path(settings, 'MASTERKEY_FILE')}"],
+            kubeconfig,
+        )
 
 
 def _add_platform_helm_repositories() -> None:
@@ -843,6 +934,7 @@ def _add_platform_helm_repositories() -> None:
 
 def _helm_install_auth_idp_demo(context: str, kubeconfig: Path | None = None) -> None:
     _require_tool("helm")
+    _prepare_precreated_secrets(context, kubeconfig)
     _add_platform_helm_repositories()
     _run(["helm", "dependency", "build", "k8s/helm"], timeout=HELM_DEPENDENCY_TIMEOUT_SECONDS)
     _run(["helm", "dependency", "build", str(HELM_CHART)], timeout=HELM_DEPENDENCY_TIMEOUT_SECONDS)
@@ -1091,6 +1183,11 @@ class KubernetesAuthIdpRuntime:
         self._keep_cluster = False
         self._previous_client_ssl_cert_file = os.environ.get(NHX_CLIENT_SSL_CERT_FILE_ENVVAR)
         self._start()
+        self._oidc_test_driver = create_oidc_test_driver(
+            gateway_base_url=self.gateway_base_url,
+            provider_name=self.provider.name,
+            zitadel_login_client_pat=self._zitadel_login_client_pat,
+        )
 
     @property
     def verify(self) -> str:
@@ -1214,30 +1311,32 @@ class KubernetesAuthIdpRuntime:
         password: str,
         tls_config: HttpxTLSConfig,
     ) -> JsonObject:
-        if self.provider.name == "zitadel":
-            if self._zitadel_login_client_pat is None:
-                raise AssertionError("ZITADEL device flow requires the seeded login client PAT")
-            return authenticate_zitadel_device_flow(
-                gateway_base_url=self.gateway_base_url,
+        with httpx.Client(follow_redirects=False, **tls_config) as client:
+            return self._oidc_test_driver.authenticate_device_flow(
+                client,
                 device_authorization_endpoint=device_authorization_endpoint,
                 token_endpoint=token_endpoint,
                 client_id=client_id,
                 scope=scope,
-                login_name=self.provider.interactive_user_username,
-                password=self.provider.interactive_user_password,
-                admin_token=self._zitadel_login_client_pat,
-                tls_config=tls_config,
+                username=username,
+                password=password,
             )
-        return authenticate_authentik_device_flow(
-            gateway_base_url=self.gateway_base_url,
-            device_authorization_endpoint=device_authorization_endpoint,
-            token_endpoint=token_endpoint,
-            client_id=client_id,
-            scope=scope,
-            username=username,
-            password=password,
-            tls_config=tls_config,
-        )
+
+    def complete_confidential_authorization(
+        self,
+        *,
+        authorization_url: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> str:
+        with httpx.Client(follow_redirects=False, **tls_config) as client:
+            return self._oidc_test_driver.complete_authorization(
+                client,
+                authorization_url=authorization_url,
+                username=username,
+                password=password,
+            )
 
     def _collect_diagnostics_best_effort(
         self,
@@ -1398,9 +1497,7 @@ class KubernetesAuthIdpRuntime:
         return claims
 
     def _exchange_token(self, token_endpoint: str, grant: dict[str, str]) -> str:
-        from tests.auth_idp.conftest import _exchange_token_with_retries
-
-        return _exchange_token_with_retries(token_endpoint, grant, tls_config={"verify": self.verify})
+        return exchange_token_with_retries(token_endpoint, grant, tls_config={"verify": self.verify})
 
     def _client_for_token(self, token: str) -> NemoClient:
         return NemoClient(

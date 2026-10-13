@@ -818,10 +818,8 @@ def update_object_type(spec: dict) -> dict:
     The `additionalProperties: true` is default (based on OpenAPI 3.1.0) for object types
     (see https://swagger.io/docs/specification/v3_0/data-models/data-types/#objects).
 
-    However, some tools (e.g. Stainless, which we use for generating client SDKs) uses a different default.
-    This leads to issues, where a field with type `dict[str, Any]` in Python code generates as `object` in client SDKs,
-
-    See https://www.stainless.com/docs/reference/diagnostics#Schema/ObjectHasNoProperties
+    However, some client generators use a different default, so a field typed `dict[str, Any]` in Python
+    would generate as a property-less `object` in client SDKs. Making it explicit keeps generated clients open.
     """
     if "components" not in spec or "schemas" not in spec["components"]:
         return spec
@@ -869,18 +867,6 @@ def update_object_type(spec: dict) -> dict:
     return spec
 
 
-def mark_direct_span_json_value_for_stainless(spec: dict) -> dict:
-    """Mark the direct-span API's intentionally unconstrained JsonValue for Stainless."""
-
-    schemas = spec.get("components", {}).get("schemas", {})
-    if "DirectSpanInput" not in schemas:
-        return spec
-    json_value = schemas.get("JsonValue")
-    if isinstance(json_value, dict):
-        json_value["x-stainless-any"] = True
-    return spec
-
-
 @app.command(name="fix-schema")
 def fix_schema(
     spec_file: str = typer.Argument(..., help="Path to OpenAPI specification file (YAML or JSON)"),
@@ -896,7 +882,6 @@ def fix_schema(
         spec = remove_invalid_components(spec)
         spec = fix_recursive_schemas(spec)
         spec = update_object_type(spec)
-        spec = mark_direct_span_json_value_for_stainless(spec)
 
         # Make sure the version is set to 3.1.0
         spec["openapi"] = "3.1.0"

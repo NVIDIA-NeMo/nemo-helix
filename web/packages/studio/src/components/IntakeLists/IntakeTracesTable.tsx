@@ -5,6 +5,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { EditColumnsMenu } from '@nemo/common/src/components/DataView/internal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
@@ -72,7 +73,8 @@ const SeededIntakeTracesTable: FC<
 
   const {
     data: tracesResponse,
-    isFetching,
+    isLoading,
+    isPlaceholderData,
     error,
   } = useListTraces(
     requestWorkspace,
@@ -91,11 +93,12 @@ const SeededIntakeTracesTable: FC<
       query: {
         enabled: hasWorkspace,
         placeholderData: keepPreviousData,
+        refetchInterval: JOB_POLLING_INTERVAL_LONG,
       },
     }
   );
 
-  if (error) {
+  if (error && !tracesResponse) {
     return <ErrorMessage message={getErrorMessage(error)} />;
   }
 
@@ -127,7 +130,7 @@ const SeededIntakeTracesTable: FC<
         DataViewRoot: {
           data: tracesResponse?.data ?? [],
           totalCount: tracesResponse?.pagination?.total_results,
-          requestStatus: isFetching ? 'loading' : undefined,
+          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
         },
         DataViewTableContent: {
           renderEmptyState: () =>

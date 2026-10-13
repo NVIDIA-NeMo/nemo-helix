@@ -19,6 +19,7 @@ from nemo_evals.api.schemas import (
 from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.authz import scope
 from nemo_evals.entities import MAX_NAME_LENGTH, NAME_PATTERN
+from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisabledError
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.entities import EntityValidationError
@@ -110,6 +111,8 @@ async def create_metric(
     logger.info(f"Creating metric: {safe_workspace}/{safe_name}")
     try:
         return await service.create_metric(name, metric, workspace=workspace, project=project)
+    except CloudpickleMetricsDisabledError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
     except EntityValidationError as e:
         logger.warning(f"Entity store validation error during metric creation: {e}")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))

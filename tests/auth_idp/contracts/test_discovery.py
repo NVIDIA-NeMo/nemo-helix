@@ -5,12 +5,10 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+from nemo_helix_ext.auth.helpers import select_advertised_client
 
 from tests.auth_idp.common import discover_runtime_nhx_config, require_capability, runtime_tls_config
-from tests.auth_idp.device_flow import (
-    url_origin,
-    with_url_origin,
-)
+from tests.auth_idp.device_flow import url_origin
 
 pytestmark = [
     pytest.mark.auth_idp,
@@ -30,40 +28,40 @@ def test_provider_gateway_serves_oidc_discovery(auth_idp_case, auth_idp_runtime)
     discovery = response.json()
     expected_issuer_path = urlparse(auth_idp_case.provider.issuer_url).path.rstrip("/")
     actual_issuer = urlparse(discovery["issuer"])
+    assert actual_issuer.scheme == "https"
+    assert actual_issuer.netloc
     if expected_issuer_path:
         assert actual_issuer.path.rstrip("/") == expected_issuer_path
     else:
-        assert discovery["issuer"].rstrip("/") == auth_idp_runtime.gateway_base_url.rstrip("/")
+        assert actual_issuer.path.rstrip("/") == ""
     assert discovery["jwks_uri"]
+    assert url_origin(discovery["jwks_uri"]) == url_origin(discovery["issuer"])
 
 
 def test_provider_discovery_exposes_device_flow_when_supported(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "device_flow")
 
     oidc = discover_runtime_nhx_config(auth_idp_runtime)
+    public_client = select_advertised_client(oidc, "public")
 
     assert oidc.auth_enabled is True
-    assert oidc.client_id
-    assert oidc.token_endpoint
-    assert oidc.device_authorization_endpoint
-    assert oidc.default_scopes
+    assert public_client.token_endpoint
+    assert public_client.device_authorization_endpoint
+    assert public_client.default_scopes
 
 
 def test_provider_device_authorization_endpoint_issues_user_code(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "device_flow")
 
     oidc = discover_runtime_nhx_config(auth_idp_runtime)
+    public_client = select_advertised_client(oidc, "public")
     tls_config = runtime_tls_config(auth_idp_runtime)
-    assert oidc.device_authorization_endpoint is not None
-    device_authorization_endpoint = with_url_origin(
-        oidc.device_authorization_endpoint,
-        auth_idp_runtime.gateway_base_url,
-    )
+    assert public_client.device_authorization_endpoint is not None
     response = httpx.post(
-        device_authorization_endpoint,
+        public_client.device_authorization_endpoint,
         data={
-            "client_id": oidc.client_id,
-            "scope": oidc.default_scopes,
+            "client_id": public_client.client_id,
+            "scope": public_client.default_scopes,
         },
         timeout=30.0,
         **tls_config,
@@ -73,7 +71,9 @@ def test_provider_device_authorization_endpoint_issues_user_code(auth_idp_case, 
     body = response.json()
     assert body["device_code"]
     assert body["user_code"]
-    assert body["verification_uri"].startswith(url_origin(device_authorization_endpoint))
+    assert url_origin(body["verification_uri"]) in {
+        url_origin(public_client.device_authorization_endpoint),
+    }
 
     verification_complete = urlparse(body["verification_uri_complete"])
     verification_uri = urlparse(body["verification_uri"])
@@ -88,22 +88,17 @@ def test_provider_device_flow_returns_refresh_token(auth_idp_case, auth_idp_runt
     require_capability(auth_idp_case, "device_flow")
 
     oidc = discover_runtime_nhx_config(auth_idp_runtime)
-    assert oidc.client_id is not None
-    assert oidc.token_endpoint
-    assert oidc.device_authorization_endpoint
-    assert "offline_access" in oidc.default_scopes.split()
+    public_client = select_advertised_client(oidc, "public")
+    assert public_client.token_endpoint
+    assert public_client.device_authorization_endpoint
+    assert "offline_access" in public_client.default_scopes.split()
 
     tls_config = runtime_tls_config(auth_idp_runtime)
-    device_authorization_endpoint = with_url_origin(
-        oidc.device_authorization_endpoint,
-        auth_idp_runtime.gateway_base_url,
-    )
-    token_endpoint = with_url_origin(oidc.token_endpoint, auth_idp_runtime.gateway_base_url)
     token_response = auth_idp_runtime.authenticate_device_flow(
-        device_authorization_endpoint=device_authorization_endpoint,
-        token_endpoint=token_endpoint,
-        client_id=oidc.client_id,
-        scope=oidc.default_scopes,
+        device_authorization_endpoint=public_client.device_authorization_endpoint,
+        token_endpoint=public_client.token_endpoint,
+        client_id=public_client.client_id,
+        scope=public_client.default_scopes,
         username=auth_idp_case.provider.interactive_user_username,
         password=auth_idp_case.provider.interactive_user_password,
         tls_config=tls_config,
@@ -115,12 +110,12 @@ def test_provider_device_flow_returns_refresh_token(auth_idp_case, auth_idp_runt
     assert refresh_token
 
     refresh_response = httpx.post(
-        token_endpoint,
+        public_client.token_endpoint,
         data={
             "grant_type": "refresh_token",
-            "client_id": oidc.client_id,
+            "client_id": public_client.client_id,
             "refresh_token": refresh_token,
-            "scope": oidc.default_scopes,
+            "scope": public_client.default_scopes,
         },
         timeout=30.0,
         **tls_config,

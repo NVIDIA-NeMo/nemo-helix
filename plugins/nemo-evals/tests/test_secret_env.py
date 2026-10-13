@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 from nemo_evals.jobs.secret_env import JobEnvSecretSource, build_task_environment
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx_evals_sdk.resolver_protocols import MissingSecretError
 from nhx_evals_sdk.values.common import SecretRef
 
@@ -42,3 +43,30 @@ def test_job_resolver_reads_only_injected_keys(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(MissingSecretError, match="nemo secrets get openai-key --workspace my-workspace"):
         resolver.env_var_for(ref, "OPENAI_API_KEY")
     assert resolver.env_var_for(ref, "LLM_API_KEY") == "LLM_API_KEY"
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS",
+        "nemo_evals_allow_insecure_cloudpickle_metrics",
+        "NHX_CONFIG_FILE_PATH",
+    ],
+)
+def test_submitter_secrets_cannot_set_evals_or_platform_config(env_name: str) -> None:
+    """Config reads env case-insensitively, and a worker would honour any of these as operator settings."""
+    with pytest.raises(ValueError, match="reserved"):
+        build_task_environment([(env_name, "ws/attacker-controlled")])
+
+
+def test_other_plugins_env_names_stay_available_to_secrets() -> None:
+    environment = build_task_environment([("NEMO_AGENTS_IGW_API_KEY", "igw-key")])
+    assert "NEMO_AGENTS_IGW_API_KEY" in [variable.name for variable in environment]
+
+
+def test_secret_env_errors_reject_the_submission_rather_than_failing_the_server() -> None:
+    """The job API maps HelixJobCompilationError to 422; any other compile error becomes an opaque 500."""
+    with pytest.raises(HelixJobCompilationError):
+        build_task_environment([("nemo_evals_allow_insecure_cloudpickle_metrics", "ws/self-grant")])
+    with pytest.raises(HelixJobCompilationError):
+        build_task_environment([("OPENAI_API_KEY", "team-a/key"), ("OPENAI_API_KEY", "team-b/key")])

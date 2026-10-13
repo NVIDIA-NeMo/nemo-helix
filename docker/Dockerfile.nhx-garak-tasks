@@ -38,7 +38,6 @@ RUN mkdir -p ${CACHE_HOME} && chmod 777 ${CACHE_HOME}
 # Copy dependencies that garak references
 # Copy the workspace lock file and pyproject.toml for workspace dependency resolution
 COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
-COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
 COPY --from=root-lib-source-artifacts /artifacts/skills /app/skills
 COPY --from=root-lib-source-artifacts /artifacts/docs /app/docs
 COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi

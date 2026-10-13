@@ -339,7 +339,6 @@ class AuditJob(NemoJob):
     container: ClassVar[str] = "nhx-garak-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = AuditInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = AuditSpec
-    generate_legacy_verbs: ClassVar[bool] = False
 
     @classmethod
     async def to_spec(

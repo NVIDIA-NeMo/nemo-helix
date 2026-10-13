@@ -308,7 +308,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         if isinstance(config, dict):
             payload = dict(config)
             # ``HelixRailsConfig`` has no ``name`` field but is configured
-            # with ``extra="allow"`` (Stainless default), so leaving ``name``
+            # with ``extra="allow"``, so leaving ``name``
             # in the payload wouldn't fail validation — it would silently
             # land in ``model_extra`` where the inline source can't see it.
             # Pop it explicitly so envelope-style inline payloads surface

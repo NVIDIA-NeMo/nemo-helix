@@ -50,7 +50,7 @@ from nemo_evals.jobs.publication_spec import (
     RowPublicationSpec,
 )
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.intake.types import (
@@ -81,7 +81,7 @@ STARTED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 _INLINE_METRIC = MetricInline.model_validate(
     bundle_metric(
         ExactMatchMetric(reference="{{item.question}}", candidate="{{item.question}}"),
-        CloudpickleMetricBundlePackager(),
+        HybridMetricBundlePackager(),
     ).model_dump(mode="json")
 )
 

@@ -197,6 +197,7 @@ describe('CreateCustomizationStart', () => {
 
   it('offers every way in at once', () => {
     renderStart();
+    expect(screen.getByText('Describe with AI')).toBeInTheDocument();
     expect(screen.getByText('Build from scratch')).toBeInTheDocument();
     for (const template of CUSTOMIZATION_TEMPLATES) {
       expect(screen.getByText(template.title)).toBeInTheDocument();
@@ -233,6 +234,62 @@ describe('CreateCustomizationStart', () => {
     await user.click(continueButton());
 
     expect(onContinue).toHaveBeenCalledWith({ optionId: 'scratch' });
+  });
+
+  describe('describe with AI', () => {
+    const openAi = async () => {
+      const user = userEvent.setup();
+      renderStart();
+      await user.click(screen.getByRole('radio', { name: /Describe with AI/ }));
+      // The panel loads lazily, and its first import can outlast findBy's 1s default.
+      await screen.findByText('Training dataset', {}, { timeout: 10_000 });
+      return user;
+    };
+
+    it('keeps Continue disabled until a draft passes the checks', async () => {
+      await openAi();
+
+      expect(screen.getByText('Training dataset')).toBeInTheDocument();
+      expect(continueButton()).toBeDisabled();
+      expect(
+        screen.getByText('Draft settings that pass the checks to continue.')
+      ).toBeInTheDocument();
+    });
+
+    it('asks for every input instead of calling the model empty', async () => {
+      const user = await openAi();
+      await user.click(await screen.findByRole('button', { name: 'Draft settings' }));
+
+      expect(await screen.findByText('Pick the model to fine-tune.')).toBeInTheDocument();
+      expect(screen.getByText('Pick the training dataset.')).toBeInTheDocument();
+      expect(screen.getByText('Describe the goal of this fine-tune.')).toBeInTheDocument();
+    });
+
+    it("starts on Studio's suggested chat model for drafting", async () => {
+      server.use(
+        http.get(`${PLATFORM_BASE_URL}/apis/models/v2/workspaces/:workspace/models`, () =>
+          HttpResponse.json({
+            data: [
+              { id: '1', name: 'nv-embedqa-e5', workspace: DEFAULT_WORKSPACE },
+              { id: '2', name: 'nvidia-nemotron-nano-9b', workspace: DEFAULT_WORKSPACE },
+            ],
+            pagination: { page: 1, page_size: 25, total_pages: 1, total_results: 2 },
+          })
+        )
+      );
+      await openAi();
+
+      expect(await screen.findByText('nvidia-nemotron-nano-9b')).toBeInTheDocument();
+      expect(screen.queryByText('nv-embedqa-e5')).not.toBeInTheDocument();
+    });
+
+    it('drafts from the goal box with Cmd/Ctrl+Enter', async () => {
+      const user = await openAi();
+      await user.click(screen.getByRole('textbox', { name: /goal of this fine-tune/i }));
+      await user.keyboard('{Control>}{Enter}{/Control}');
+
+      expect(await screen.findByText('Pick the model to fine-tune.')).toBeInTheDocument();
+    });
   });
 
   describe('templates', () => {

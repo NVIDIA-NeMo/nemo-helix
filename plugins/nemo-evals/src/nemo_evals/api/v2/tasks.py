@@ -16,6 +16,7 @@ from nemo_evals.authz import scope
 from nemo_evals.entities import MAX_NAME_LENGTH, NAME_PATTERN
 from nemo_evals.harbor.materialization import HarborArtifactError
 from nemo_evals.revisions import RevisionConflictError, RevisionNotFoundError
+from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisabledError
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.entities import EntityValidationError
@@ -111,6 +112,8 @@ async def create_task(
         return created
     except HarborArtifactError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+    except CloudpickleMetricsDisabledError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
     except EntityValidationError as e:
         logger.warning(f"Entity store validation error during task creation: {e}")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
@@ -170,6 +173,8 @@ async def replace_task(
         replaced, published = await service.replace_task(name, task, workspace=workspace, project=project)
     except HarborArtifactError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+    except CloudpickleMetricsDisabledError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
     except EntityValidationError as e:
         logger.warning(f"Entity store validation error during task replace: {e}")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))

@@ -103,8 +103,8 @@ def _operator_conditions(key: str | None, operators: Dict[str, Any]) -> List[Ele
         elif operator == FilterOperator.EQ:
             if not _is_scalar(operand):
                 raise ValueError(f"{name} for {target} in $elemMatch requires a string, number, boolean, or null")
-        elif operand is None or not _is_scalar(operand):
-            raise ValueError(f"{name} for {target} in $elemMatch requires a string, number, or boolean")
+        elif not isinstance(operand, (str, int, float)) or isinstance(operand, bool):
+            raise ValueError(f"{name} for {target} in $elemMatch requires a string or number")
         conditions.append(ElemMatchCondition(key, operator, operand))
     return conditions
 

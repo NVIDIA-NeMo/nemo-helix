@@ -10,6 +10,7 @@ These tests verify that the JobDispatcher correctly manages job lifecycle operat
 import asyncio
 import gc
 import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -768,6 +769,30 @@ async def test_create_then_delete_auto_fileset_round_trip(
     mock_files_client.delete_fileset.assert_awaited_once_with(
         name=f"job-fileset-{job.name}", workspace=DEFAULT_WORKSPACE
     )
+
+
+@pytest.mark.asyncio
+async def test_get_job_updated_at_tracks_attempt_status_change(
+    mock_dispatcher: JobDispatcher,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+
+    step, _ = await mock_dispatcher.update_job_status_from_step(step=step, status=HelixJobStatus.ACTIVE)
+    await asyncio.sleep(0.01)
+    _, attempt = await mock_dispatcher.update_job_status_from_step(
+        step=step,
+        status=HelixJobStatus.COMPLETED,
+        error_details={},
+    )
+    assert attempt.status == HelixJobStatus.COMPLETED
+
+    updated_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
+    assert updated_job is not None
+    assert updated_job.updated_at == attempt.updated_at
+    assert updated_job.updated_at > updated_job.created_at
 
 
 @pytest.mark.asyncio
@@ -1845,6 +1870,27 @@ async def test_list_jobs_filter_status_single_excludes_non_matching(
 
     assert len(jobs) == 1
     assert jobs[0].id == active_job.id
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_filter_updated_at_matches_attempt_change(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+):
+    job = await _make_job(mock_dispatcher, mock_store, "job-updated", HelixJobStatus.ACTIVE)
+    await asyncio.sleep(0.01)
+    cutoff = datetime.now(timezone.utc)
+    await asyncio.sleep(0.01)
+    await _set_attempt_status(mock_store, job.attempt_id, HelixJobStatus.COMPLETED)
+
+    jobs, _ = await mock_dispatcher.list_jobs(
+        parsed=ParsedFilter(
+            operation=ComparisonOperation(field="updated_at", operator=FilterOperator.GTE, value=cutoff.isoformat()),
+        ),
+        workspace=DEFAULT_WORKSPACE,
+    )
+
+    assert [j.id for j in jobs] == [job.id]
 
 
 @pytest.mark.asyncio

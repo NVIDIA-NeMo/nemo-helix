@@ -15,13 +15,14 @@ import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute, getAgentOptimizeRoute } from '@studio/routes/utils';
 import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
 import { renderRoute, screen } from '@studio/tests/util/render';
-import { within } from '@testing-library/react';
+import { waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
 
+const STRATEGIES_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/strategies`;
 const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
 
 const renderDetail = (search = '?tab=optimizations') =>
@@ -93,9 +94,39 @@ describe('AgentDetailRoute optimization form', () => {
     expect(
       await screen.findByRole('radio', { name: /Hyper-parameter optimization/ })
     ).toBeEnabled();
-    for (const name of [/Skill optimization/, /Model Routing \(Switchyard\)/]) {
-      expect(screen.getByRole('radio', { name })).toBeDisabled();
-    }
+    expect(screen.getByRole('radio', { name: /Skill optimization/ })).toBeDisabled();
+  });
+
+  it('enables model routing when the platform has the switchyard strategy', async () => {
+    renderDetail('?tab=optimizations&view=strategy');
+
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /Model Routing \(Switchyard\)/ })).toBeEnabled()
+    );
+  });
+
+  it('disables model routing when switchyard is not installed', async () => {
+    server.use(http.get(STRATEGIES_URL, () => HttpResponse.json({ data: [{ name: 'legacy' }] })));
+    renderDetail('?tab=optimizations&view=strategy');
+
+    expect(await screen.findByText('Not installed')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Model Routing \(Switchyard\)/ })).toBeDisabled();
+  });
+
+  it('continues to the routing form from the model routing strategy, and back', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=strategy');
+
+    const tile = await screen.findByRole('radio', { name: /Model Routing \(Switchyard\)/ });
+    await waitFor(() => expect(tile).toBeEnabled());
+    await user.click(tile);
+
+    expect(await screen.findByText('Which models can it use?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    expect(
+      await screen.findByRole('radio', { name: /Model Routing \(Switchyard\)/ })
+    ).toBeInTheDocument();
   });
 
   it('continues to the form from the hyper-parameter optimization strategy', async () => {

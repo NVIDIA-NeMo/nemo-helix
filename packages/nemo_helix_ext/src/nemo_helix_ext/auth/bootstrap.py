@@ -18,14 +18,19 @@ from typing import Literal, Protocol
 
 import httpx
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.oidc import (
+    BearerTokenSource,
+    OIDCTokenProvider,
+    TokenRefreshKind,
+    TokenSet,
+    resolve_refresh_settings,
+)
 
 from nemo_helix_ext.auth.helpers import (
     NHXOIDCConfig,
-    build_effective_scope,
     discover_nhx_config,
     discover_nhx_config_async,
 )
-from nemo_helix_ext.auth.token_provider import OIDCTokenProvider, TokenSet
 from nemo_helix_ext.auth.workload_exchange import WorkloadTokenExchangeProvider
 from nemo_helix_ext.config.models import Context, OAuthUser
 
@@ -33,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 # Refresh the access token when fewer than 60 s remain before expiry.
 _TOKEN_REFRESH_MARGIN_SECONDS = 60
+_MISSING_REFRESH_CONFIGURATION_MESSAGE = (
+    "Stored OIDC refresh credentials do not match this cluster's auth discovery. Run `nemo auth login` again."
+)
 
 # Guards _TOKEN_PROVIDER_CACHE; acquired only during dict lookup/insert (fast).
 _TOKEN_PROVIDER_CACHE_LOCK = threading.Lock()
@@ -203,7 +211,8 @@ class _ProviderCacheKey:
     token_endpoint: str
     client_id: str
     refresh_scope: str | None
-    bearer_token_source: str
+    bearer_token_source: BearerTokenSource
+    refresh_kind: TokenRefreshKind
     certificate_authority: str | None
 
 
@@ -213,10 +222,6 @@ _TOKEN_PROVIDER_CACHE: dict[_ProviderCacheKey, OIDCTokenProvider] = {}
 
 _OIDC_DISCOVERY_FALLBACK = NHXOIDCConfig(
     auth_enabled=False,
-    client_id="",
-    token_endpoint="",
-    default_scopes="openid profile email",
-    scope_prefix=None,
 )
 
 
@@ -469,16 +474,14 @@ def _create_workload_exchange_provider(
             f"{WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR} is set but workload token exchange is not enabled by auth discovery"
         )
 
-    token_endpoint = oidc_config.workload_token_endpoint or oidc_config.token_endpoint or ""
-    client_id = oidc_config.workload_client_id or oidc_config.client_id or ""
+    token_endpoint = oidc_config.workload_token_endpoint or ""
+    client_id = oidc_config.workload_client_id or ""
     if not token_endpoint:
         raise RuntimeError(
-            "Workload token exchange is enabled but auth discovery did not return workload_token_endpoint or token_endpoint"
+            "Workload token exchange is enabled but auth discovery did not return workload_token_endpoint"
         )
     if not client_id:
-        raise RuntimeError(
-            "Workload token exchange is enabled but auth discovery did not return workload_client_id or client_id"
-        )
+        raise RuntimeError("Workload token exchange is enabled but auth discovery did not return workload_client_id")
 
     return WorkloadTokenExchangeProvider(
         token_endpoint=token_endpoint,
@@ -503,29 +506,30 @@ def _build_oauth_token_provider(
         expires_at=user.expires_at,
     )
 
-    token_endpoint = oidc_config.token_endpoint or ""
-    client_id = oidc_config.cli_client_id or oidc_config.client_id or ""
-    refresh_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
+    refresh_settings = resolve_refresh_settings(oidc_config, user.token_broker_url)
 
     if not (context.config_exists and context.access_token is None):
         return OIDCTokenProvider(
-            token_endpoint=token_endpoint,
-            client_id=client_id,
+            token_endpoint=refresh_settings.token_endpoint,
+            client_id=refresh_settings.client_id,
             tokens=tokens,
             refresh_margin_seconds=_TOKEN_REFRESH_MARGIN_SECONDS,
-            refresh_scope=refresh_scope,
-            bearer_token_source=oidc_config.bearer_token_source,
+            refresh_scope=refresh_settings.refresh_scope,
+            bearer_token_source=refresh_settings.bearer_token_source,
+            refresh_kind=refresh_settings.refresh_kind,
             certificate_authority=context.certificate_authority,
+            missing_refresh_configuration_message=_MISSING_REFRESH_CONFIGURATION_MESSAGE,
         )
 
     normalized_config_path = _normalize_config_path(context.config_path)
     provider_key = _ProviderCacheKey(
         config_path=normalized_config_path,
         context_name=context.resolved.context_name,
-        token_endpoint=token_endpoint,
-        client_id=client_id,
-        refresh_scope=refresh_scope,
-        bearer_token_source=oidc_config.bearer_token_source,
+        token_endpoint=refresh_settings.token_endpoint,
+        client_id=refresh_settings.client_id,
+        refresh_scope=refresh_settings.refresh_scope,
+        bearer_token_source=refresh_settings.bearer_token_source,
+        refresh_kind=refresh_settings.refresh_kind,
         certificate_authority=context.certificate_authority,
     )
     on_refreshed = _make_config_persister(context.resolved.context_name, context.config_path)
@@ -535,13 +539,15 @@ def _build_oauth_token_provider(
     return _get_or_create_provider(
         provider_key,
         lambda: OIDCTokenProvider(
-            token_endpoint=token_endpoint,
-            client_id=client_id,
+            token_endpoint=refresh_settings.token_endpoint,
+            client_id=refresh_settings.client_id,
             tokens=tokens,
             refresh_margin_seconds=_TOKEN_REFRESH_MARGIN_SECONDS,
-            refresh_scope=refresh_scope,
-            bearer_token_source=oidc_config.bearer_token_source,
+            refresh_scope=refresh_settings.refresh_scope,
+            bearer_token_source=refresh_settings.bearer_token_source,
+            refresh_kind=refresh_settings.refresh_kind,
             certificate_authority=context.certificate_authority,
+            missing_refresh_configuration_message=_MISSING_REFRESH_CONFIGURATION_MESSAGE,
             load_tokens=load_tokens,
             refresh_lock=refresh_lock,
             on_tokens_refreshed=on_refreshed,

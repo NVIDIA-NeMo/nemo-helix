@@ -73,6 +73,10 @@ class OAuthUser(BaseUser):
     token: SecretStr = Field(..., min_length=1, description="Access token (JWT)")
     refresh_token: SecretStr | None = Field(default=None, description="Refresh token for automatic renewal")
     expires_at: float | None = Field(default=None, description="Access token expiry as a Unix timestamp")
+    token_broker_url: str | None = Field(
+        default=None,
+        description="NeMo token endpoint used to refresh a server-side OIDC session",
+    )
 
     @field_validator("name")
     @classmethod
@@ -105,6 +109,7 @@ class OAuthUser(BaseUser):
             access_token=self.token.get_secret_value(),
             refresh_token=self.refresh_token.get_secret_value() if self.refresh_token else None,
             expires_at=self.expires_at,
+            token_broker_url=self.token_broker_url,
             config_exists=context.config_exists,
             config_path=context.config_path,
             explicit_access_token=context.explicit_access_token,
@@ -120,6 +125,7 @@ class OAuthUser(BaseUser):
                 access_token=self.token.get_secret_value(),
                 refresh_token=self.refresh_token.get_secret_value() if self.refresh_token else None,
                 expires_at=self.expires_at,
+                token_broker_url=self.token_broker_url,
                 config_exists=context.config_exists,
                 config_path=context.config_path,
                 explicit_access_token=context.explicit_access_token,
@@ -213,6 +219,7 @@ class ConfigParams(TypedDict, total=False):
     access_token: str | None
     refresh_token: str | None
     expires_at: float | None
+    token_broker_url: str | None
     workspace: str
     default_model: str
     fast_model: str
@@ -267,6 +274,9 @@ class ConfigFile(BaseModel):
         access_token = params.get("access_token")
         refresh_token = params.get("refresh_token")
         expires_at = params.get("expires_at")
+        token_broker_url = user.token_broker_url if isinstance(user, OAuthUser) else None
+        if "token_broker_url" in params:
+            token_broker_url = params.get("token_broker_url")
 
         if user is None:
             if access_token:
@@ -275,6 +285,7 @@ class ConfigFile(BaseModel):
                     token=SecretStr(access_token),
                     refresh_token=SecretStr(refresh_token) if refresh_token else None,
                     expires_at=expires_at,
+                    token_broker_url=token_broker_url,
                 )
             else:
                 user = NoAuthUser(name=user_name)
@@ -287,6 +298,7 @@ class ConfigFile(BaseModel):
                     token=SecretStr(access_token),
                     refresh_token=SecretStr(refresh_token) if refresh_token else None,
                     expires_at=expires_at,
+                    token_broker_url=token_broker_url,
                 )
             else:
                 user = NoAuthUser(name=user_name)
@@ -300,6 +312,7 @@ class ConfigFile(BaseModel):
                 if refresh_token_provided
                 else user.refresh_token,
                 expires_at=expires_at if expires_at_provided else user.expires_at,
+                token_broker_url=token_broker_url if "token_broker_url" in params else user.token_broker_url,
             )
             self.users[idx] = user
 

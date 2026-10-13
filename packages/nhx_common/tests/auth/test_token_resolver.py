@@ -7,7 +7,7 @@ import pytest
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims
 from nhx.common.auth.token_resolver import ResolvedBearerToken, ResolvedTokenKind, resolve_bearer_token
 from nhx.common.config import AuthConfig
-from nhx.common.config.base import AccessKeyConfig, OIDCConfig
+from nhx.common.config.base import AccessKeyConfig, OIDCConfig, OIDCPublicClientConfig
 
 
 def _claims(subject: str = "alice@example.com") -> TokenClaims:
@@ -56,6 +56,26 @@ def test_resolved_token_maps_actor_claims_to_delegated_principal_headers() -> No
         "X-NHX-Subject-Aliases": "user:alice,alice@example.test",
         "X-NHX-Scopes": "models.read",
     }
+
+
+def test_workload_access_token_preserves_signed_account_context() -> None:
+    claims = TokenClaims(
+        subject="user:alice",
+        email="alice@example.test",
+        groups=["researchers"],
+        scopes=[],
+        raw_claims={
+            "sub": "user:alice",
+            "nhx_actor_account_id": "account-1",
+            "nhx_actor_aliases": ["user:alice", "alice@example.test"],
+        },
+    )
+
+    principal = ResolvedBearerToken(claims=claims, token_kind="workload_access_token").principal
+
+    assert principal.id == "user:alice"
+    assert principal.account_id == "account-1"
+    assert principal.authz_aliases == ["user:alice", "alice@example.test"]
 
 
 @pytest.mark.parametrize("token_kind", ["oidc_access_token", "access_key", "workload_subject_token"])
@@ -127,7 +147,11 @@ async def test_resolver_uses_extra_resolvers_before_oidc() -> None:
     config = AuthConfig(
         enabled=True,
         access_keys=AccessKeyConfig(enabled=False),
-        oidc=OIDCConfig(enabled=True, issuer="https://sso.example.com", client_id="nemo-helix-cli"),
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
+        ),
     )
     workload_claims = _claims("system:serviceaccount:nemo:job")
     extra_resolver = AsyncMock(
@@ -155,7 +179,11 @@ async def test_resolver_falls_back_to_oidc_validator() -> None:
     config = AuthConfig(
         enabled=True,
         access_keys=AccessKeyConfig(enabled=True),
-        oidc=OIDCConfig(enabled=True, issuer="https://sso.example.com", client_id="nemo-helix-cli"),
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
+        ),
     )
     oidc_claims = _claims("bob@example.com")
     jwt_validator = MagicMock()

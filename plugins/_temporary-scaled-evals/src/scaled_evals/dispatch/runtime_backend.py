@@ -28,6 +28,14 @@ from scaled_evals.models.resource_usage import ResourceUsageSample
 from scaled_evals.models.runtime import LaunchHandle, LaunchSpec, ResultSummary, RuntimeStatus
 
 
+class IncompatibleTaskError(ValueError):
+    """The task, as finalized, can't run on the selected runtime.
+
+    A launch that raises it fails with this class name as its failure code, which is always
+    classified as a task failure, whatever words the message contains.
+    """
+
+
 @runtime_checkable
 class RuntimeBackend(Protocol):
     """Contract every dispatch backend implements.
@@ -162,15 +170,6 @@ class RuntimeBackendCapabilities:
         paths: list[Path] = []
         if dispatch_log := self.dispatch_log_path(evaluation_id):
             paths.append(dispatch_log)
-
-        artifact_root = self.artifact_root(evaluation_id)
-        paths.extend(
-            [
-                artifact_root / "switchyard" / "switchyard.log",
-                artifact_root / "switchyard" / "switchyard.previous.log",
-                artifact_root / "switchyard" / "status.json",
-            ]
-        )
 
         if work_dir := self.dispatch_work_dir(evaluation_id):
             paths.extend(work_dir / name for name in self.extra_dispatch_log_names)

@@ -915,8 +915,6 @@ def test_code_output_renders_typed_client_call_without_sending(
     assert expected_call in result.stdout
     if expected_type_import is not None:
         assert f"from nemo_helix_plugin.workspaces.types import {expected_type_import}" in result.stdout
-    assert "NeMoHelix" not in result.stdout
-    assert "nemo_helix." not in result.stdout
 
 
 def test_code_output_for_create_includes_query_params_and_exist_ok() -> None:

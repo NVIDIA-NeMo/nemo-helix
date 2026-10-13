@@ -5,8 +5,7 @@
 
 These types define the HTTP contract for secret CRUD, value access, and the
 admin key-rotation endpoint. Both the server (FastAPI routes) and the client
-(NemoClient endpoints) import from here — one source of truth, no
-Stainless-generated duplicates.
+(NemoClient endpoints) import from here, so there is one source of truth.
 """
 
 from __future__ import annotations

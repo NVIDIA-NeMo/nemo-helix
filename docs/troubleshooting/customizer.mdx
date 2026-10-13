@@ -10,7 +10,7 @@ description: ""
 
 - Verify the Hugging Face token secret is configured correctly
 - For gated Hugging Face repositories, accept the model's license on its Hugging Face model page
-- Check job status: `client.jobs.get_status(name=job.name, workspace="default")`
+- Check job status: `client.jobs.get_job_status(name=job.name, workspace="default").data()`
 
 **Job fails with disk full or 500 error when retrieving logs:**
 
@@ -48,7 +48,7 @@ Batch and sequence-length fields differ by backend. Use the fully qualified path
 
 **Deployment fails:**
 
-- Verify the base model and adapter exist: `client.models.retrieve(name=MODEL_NAME, workspace="default")` -- the LoRA adapter appears in the base model's `adapters` list, not as a separate model entity
-- Check job logs: `client.jobs.get_logs(name=job.name, workspace="default")`
-- Check deployment status: `client.inference.deployments.retrieve(name=DEPLOYMENT_NAME, workspace="default")`
+- Verify the base model and adapter exist: `client.models.get_model(name=MODEL_NAME, workspace="default").data()` -- the LoRA adapter appears in the base model's `adapters` list, not as a separate model entity
+- Check job logs: `client.jobs.list_job_logs(name=job.name, workspace="default").items()`
+- Check deployment status: `client.models.get_deployment(name=DEPLOYMENT_NAME, workspace="default").data()`
 - Ensure sufficient GPU resources for the model size

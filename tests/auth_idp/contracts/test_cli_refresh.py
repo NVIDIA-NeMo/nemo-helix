@@ -2,19 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import time
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import yaml
-from nemo_helix_ext.auth.helpers import decode_jwt_claims, generate_unsigned_jwt
+from nemo_helix_ext.auth.helpers import (
+    decode_jwt_claims,
+    generate_unsigned_jwt,
+    select_advertised_client,
+)
 from nemo_helix_ext.cli.app import app
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from typer.testing import CliRunner
 
 from tests.auth_idp.common import discover_runtime_nhx_config, require_capability, runtime_tls_config
-from tests.auth_idp.device_flow import with_url_origin
 from tests.auth_idp.runtime_contract import JsonObject
 
 pytestmark = [
@@ -88,22 +90,17 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
     require_capability(auth_idp_case, "gateway_authn")
 
     oidc = discover_runtime_nhx_config(auth_idp_runtime)
-    assert oidc.client_id
-    assert oidc.device_authorization_endpoint
-    assert oidc.token_endpoint
-    assert "offline_access" in oidc.default_scopes.split()
+    public_client = select_advertised_client(oidc, "public")
+    assert public_client.device_authorization_endpoint
+    assert public_client.token_endpoint
+    assert "offline_access" in public_client.default_scopes.split()
 
     tls_config = runtime_tls_config(auth_idp_runtime)
-    runtime_device_authorization_endpoint = with_url_origin(
-        oidc.device_authorization_endpoint,
-        auth_idp_runtime.gateway_base_url,
-    )
-    runtime_token_endpoint = with_url_origin(oidc.token_endpoint, auth_idp_runtime.gateway_base_url)
     token_response = auth_idp_runtime.authenticate_device_flow(
-        device_authorization_endpoint=runtime_device_authorization_endpoint,
-        token_endpoint=runtime_token_endpoint,
-        client_id=oidc.client_id,
-        scope=oidc.default_scopes,
+        device_authorization_endpoint=public_client.device_authorization_endpoint,
+        token_endpoint=public_client.token_endpoint,
+        client_id=public_client.client_id,
+        scope=public_client.default_scopes,
         username=auth_idp_case.provider.interactive_user_username,
         password=auth_idp_case.provider.interactive_user_password,
         tls_config=tls_config,
@@ -116,7 +113,7 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
         auth_idp_case.provider.interactive_user_username,
         email=auth_idp_case.provider.interactive_user_expected_email,
         groups=auth_idp_case.provider.workload_expected_groups,
-        scopes=oidc.default_scopes.split(),
+        scopes=public_client.default_scopes.split(),
         expires_in_seconds=-120,
     )
     config_path = tmp_path / "config.yaml"
@@ -130,14 +127,9 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
     monkeypatch.setenv("NHX_CONFIG_FILE", str(config_path))
     monkeypatch.delenv("NHX_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, raising=False)
-    runtime_oidc = replace(
-        oidc,
-        device_authorization_endpoint=runtime_device_authorization_endpoint,
-        token_endpoint=runtime_token_endpoint,
-    )
     monkeypatch.setattr(
         "nemo_helix_ext.auth.bootstrap.discover_nhx_config",
-        lambda *_args, **_kwargs: runtime_oidc,
+        lambda *_args, **_kwargs: oidc,
     )
 
     cli_env = {"NHX_CONFIG_FILE": str(config_path)}

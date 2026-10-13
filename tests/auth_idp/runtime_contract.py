@@ -39,11 +39,25 @@ class DeploymentWorkloadRuntimeConfig:
 
 
 class AuthIdpRuntime(Protocol):
-    case: AuthIdpCase
-    gateway_base_url: str
-    discovery_url: str
-    token_endpoint: str | None
-    workload_token_endpoint: str | None
+    @property
+    def case(self) -> AuthIdpCase:
+        raise NotImplementedError
+
+    @property
+    def gateway_base_url(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def discovery_url(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def token_endpoint(self) -> str | None:
+        raise NotImplementedError
+
+    @property
+    def workload_token_endpoint(self) -> str | None:
+        raise NotImplementedError
 
     def e2e_setup_token(self) -> TokenSet:
         raise NotImplementedError
@@ -89,6 +103,28 @@ class AuthIdpRuntime(Protocol):
         password: str,
         tls_config: HttpxTLSConfig,
     ) -> JsonObject:
+        raise NotImplementedError
+
+    def approve_device_authorization(
+        self,
+        *,
+        verification_uri_complete: str,
+        user_code: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> None:
+        raise NotImplementedError
+
+    def complete_confidential_authorization(
+        self,
+        *,
+        authorization_url: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> str:
+        """Complete provider login and return its authorization callback URL."""
         raise NotImplementedError
 
     def cleanup(self) -> None:

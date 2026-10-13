@@ -10,15 +10,17 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.auth import get_principal_auth_headers, principal_from_env
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
 from nhx.common.config import AuthConfig, Configuration
-from nhx.common.config.base import OIDCConfig
+from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig
 
 
 def _auth_config_with_token_exchange() -> AuthConfig:
     return AuthConfig(
         enabled=True,
         oidc=OIDCConfig(
-            workload_token_exchange_enabled=True,
-            workload_token_private_key_file="/tmp/test-workload-token-private-key.pem",
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-helix-workload",
+                token_private_key_file="/tmp/test-workload-token-private-key.pem",
+            ),
         ),
     )
 

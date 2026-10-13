@@ -26,6 +26,7 @@ from nemo_evals.api.schemas import (
 from nemo_evals.api.service.task_service import TaskService
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evals.api.v2 import tasks as tasks_routes
+from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisabledError
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 
@@ -470,3 +471,20 @@ def test_metadata_filter_matches_key_and_value_on_the_same_annotation(filterable
 )
 def test_list_rejects_unsupported_metadata_and_field_filters(client: TestClient, params: dict[str, str]) -> None:
     assert client.get(_BASE, params=params).status_code == 400
+
+
+@pytest.mark.parametrize("method", ["post", "put"])
+def test_task_with_disabled_cloudpickle_metric_returns_422(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, detonating_cloudpickle_metric: dict, method: str
+) -> None:
+    async def refuse(self, metric: MetricInline, *, workspace: str) -> MetricRef:
+        raise CloudpickleMetricsDisabledError("cloudpickle metrics are disabled on this deployment")
+
+    monkeypatch.setattr(_FakeMetricService, "store_derived_metric", refuse)
+    body = _body()
+    body["spec"]["metrics"] = [detonating_cloudpickle_metric]
+
+    resp = getattr(client, method)(f"{_BASE}/task-1", json=body)
+
+    assert resp.status_code == 422
+    assert "cloudpickle metrics are disabled" in resp.json()["detail"]

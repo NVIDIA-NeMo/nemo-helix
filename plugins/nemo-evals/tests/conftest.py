@@ -6,17 +6,23 @@
 from __future__ import annotations
 
 import math
+import pickle
 import tempfile
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from nemo_evals.api.schemas import MetricInline
+from nemo_evals.config import get_config
+from nemo_evals.shared.metric_bundles.bundles import bundle_metric
+from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretAccessResponse
+from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
 
 def matches_filter(entity, operation) -> bool:
@@ -33,6 +39,7 @@ def matches_filter(entity, operation) -> bool:
         "workspace": entity.workspace,
         "project": entity.project,
         "parent": entity.parent,
+        "created_by": entity.created_by,
         "data": entity.model_dump(mode="json", exclude=set(entity.__base_fields__)),
     }
     return operation.apply(InMemoryFilterRepository(row))
@@ -63,6 +70,8 @@ class FakeEntityStore(EntityClient):
         # The job transformer now accepts only the concrete typed-client boundary. This fake
         # implements that boundary directly while keeping all storage in memory.
         self.entities: dict[tuple[str, str, str, str | None], EntityBase] = {}
+        #: Principal stamped as ``created_by``, as the real store does from the request identity.
+        self.caller = "user:alice"
         #: Monotonic tick for creation timestamps. Wall-clock ``now()`` can repeat within a test,
         #: which would make ``-created_at`` ordering non-deterministic — the real store's inserts
         #: are genuinely ordered, so the fake must be too.
@@ -82,6 +91,7 @@ class FakeEntityStore(EntityClient):
         now = self._now()
         entity._id = f"{entity.__entity_type__}-{self._tick}"
         entity._created_at = now
+        entity._created_by = self.caller
         entity._updated_at = now
         entity._db_version = 0
         self.entities[key] = entity.model_copy(deep=True)
@@ -206,6 +216,26 @@ class FakeSecretsClient(AsyncSecretsClient):
         if key not in self._secrets:
             raise NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "/")))
         return FakeAccessResponse(HelixSecretAccessResponse(name=name, workspace=key[0], value=self._secrets[key]))
+
+
+@pytest.fixture
+def allow_cloudpickle_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run as a deployment whose operator has enabled cloudpickle metrics."""
+    monkeypatch.setattr(get_config(), "allow_insecure_cloudpickle_metrics", True)
+
+
+class _Detonator:
+    def __reduce__(self):
+        return (pytest.fail, ("a cloudpickle metric payload was deserialized",))
+
+
+@pytest.fixture
+def detonating_cloudpickle_metric() -> dict:
+    """A cloudpickle ``MetricInline`` whose payload fails the test if anything deserializes it."""
+    bundle = bundle_metric(ExactMatchMetric(reference="a", candidate="a"), CloudpickleMetricBundlePackager())
+    payload = CloudpickleMetricPayload.from_blob(pickle.dumps(_Detonator()))
+    detonating = bundle.model_copy(update={"payload": payload})
+    return MetricInline.model_validate_json(detonating.model_dump_json()).model_dump(mode="json")
 
 
 @pytest.fixture

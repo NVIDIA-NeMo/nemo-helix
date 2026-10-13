@@ -237,7 +237,7 @@ job: images in a set finish independently.
 | `201` | Rows created and job submitted, or the same request was submitted before and these are its rows and job. |
 | `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. |
 | `401` | Platform auth is on and the request names no one. |
-| `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and stay `pending`. |
+| `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and stay `pending`. Or you're a service that isn't acting for a person. |
 | `409` | The deployment can't build: `registry` or `sandbox.image` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
 | `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and stay `pending`. |
@@ -581,6 +581,12 @@ other and with the manifests:
   the platform, so a Dockerfile can read every workspace's signing key and registry credential,
   sign as any workspace, and push to its repositories. With exchange on, the platform refuses those
   headers, but the builder doesn't work with exchange on yet (below).
+- **A service can submit builds for anyone it names.** `POST /builds` admits a service acting for a
+  person, so that a platform service, such as evaluations, can build for its user. The policy
+  admits a service on its own permissions, so the checks behind `403` and `409`, that the person
+  may submit builds in the workspace and read the push step's secrets, pass whoever it names: the
+  calling service has to check that its user may build there. And anything inside the cluster can
+  name a service (above).
 - **A signature shows only that something holding the workspace's key signed the image.** Any
   member who can run a job that reads the key can sign any image with it, and so can anything that
   can read it (above). A signature doesn't show that the platform built the image.

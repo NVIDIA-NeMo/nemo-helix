@@ -159,6 +159,27 @@ export `ADAPTER_PYTHON` before starting NeMo Helix, or restart NeMo Helix after
 exporting it. The NeMo Helix service launches the agent subprocess, so exporting
 `ADAPTER_PYTHON` only in the later CLI shell is not enough.
 
+### Mini-SWE-Agent
+
+Install the harness and set the model credential:
+
+```bash
+uv sync --package nemo-agents-plugin --extra mini-swe-agent
+export NVIDIA_API_KEY="<your NVIDIA API key>"
+```
+
+Use [agent-mini-swe-agent.yaml](agent-mini-swe-agent.yaml) with the invoke
+commands above. The example calls the NVIDIA model endpoint directly.
+
+`harnesses.mini-swe-agent.settings.timeout` limits each shell command;
+`runtime.timeout_seconds` limits the invocation. Helix enables Relay for
+streaming and sessions. Mini-SWE-Agent supports replacement system instructions,
+but not appended instructions, skills, MCP, or tool policy.
+
+Fabric 0.4 reports degraded Relay telemetry for Mini-SWE-Agent tool results.
+Invocation and session history still work; complete tool telemetry needs an
+upstream adapter fix.
+
 ### NOOA
 
 Use Python 3.12 or 3.13 and install the NOOA harness:

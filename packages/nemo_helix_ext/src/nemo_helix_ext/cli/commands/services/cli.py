@@ -679,7 +679,7 @@ def restart_services(
         typer.Option(
             "--keep-alive-timeout-seconds",
             min=1,
-            help="Seconds Uvicorn keeps idle HTTP connections open. Defaults to the previous value or 5.",
+            help="Seconds Uvicorn keeps idle HTTP connections open. Defaults to the previous value or 10.",
         ),
     ] = None,
     instance: Annotated[

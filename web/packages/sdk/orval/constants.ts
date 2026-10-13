@@ -21,7 +21,7 @@ export type ServiceConfig = {
 export const serviceConfigs: Record<string, ServiceConfig> = {
   platform: {
     path: 'platform',
-    url: `../../../../openapi/ga/individual/platform.openapi.yaml`,
+    url: `../../../../openapi/openapi.yaml`,
     apiEnvKeys: ['VITE_PLATFORM_BASE_URL'],
     zod: true,
   },

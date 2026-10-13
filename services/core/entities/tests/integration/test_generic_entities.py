@@ -227,6 +227,22 @@ class TestEntityCRUD:
 
         assert response.status_code == 400, response.text
 
+    @pytest.mark.parametrize(
+        "filter_query",
+        [
+            {"name": {"$contains": "x"}},
+            {"no_such_field": "x"},
+        ],
+    )
+    async def test_list_entities_rejects_filters_the_store_cannot_apply(self, client: AsyncClient, ctx, filter_query):
+        """Errors raised while building the query are the caller's mistake, so they are 400s, not 500s."""
+        response = await client.get(
+            "/apis/entities/v2/workspaces/default/entities/elem_match_case",
+            params={"filter": json.dumps(filter_query)},
+        )
+
+        assert response.status_code == 400, response.text
+
     async def test_list_entities_rejects_malformed_bracket_operand(self, client: AsyncClient, ctx):
         response = await client.get(
             "/apis/entities/v2/workspaces/default/entities/elem_match_case",

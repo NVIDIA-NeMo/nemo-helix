@@ -564,7 +564,6 @@ class TestFilesetsCrud:
         assert_exit_code(result, 0)
         assert "from nemo_helix_plugin.files.client import FilesClient" in result.stdout
         assert "client.create_fileset(" in result.stdout
-        assert "NeMoHelix" not in result.stdout
 
         result = runner.invoke(app, ["files", "filesets", "list", "--workspace", random_workspace])
         assert json.loads(result.stdout)["data"] == []

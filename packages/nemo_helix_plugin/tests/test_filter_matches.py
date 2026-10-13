@@ -389,6 +389,7 @@ class TestElemMatch:
             {"$startsWith": ""},
             {"key": {}},
             {"value": {"$gt": None}},
+            {"value": {"$gt": True}},
         ],
     )
     def test_rejects_malformed_criteria(self, criteria):

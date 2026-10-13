@@ -21,6 +21,7 @@ from nemo_builder_plugin.completion import (
     complete,
     current_caller,
     read_refusal,
+    submit_refusal,
 )
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
@@ -80,17 +81,22 @@ def _build_router() -> APIRouter:
 
     @router.post("/builds", response_model=SubmitBuildResponse, status_code=201, tags=["Builder"])
     @scope.write
-    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[BuildPerms.CREATE])
+    # A service too, for a platform service that builds for a user, acting for that user.
+    @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[BuildPerms.CREATE])
     async def submit_build(
         workspace: str,
         body: BuildSet,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         client: AsyncNemoClient = Depends(get_nemo_client),
+        caller: Caller = Depends(current_caller),
     ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 
         Creates one `pending` ``ContainerImage`` per spec, then the job that builds them.
         """
+        refusal = submit_refusal(caller)
+        if refusal is not None:
+            raise HTTPException(status_code=403, detail=refusal)
         jobs_client = AsyncJobsClient.from_client(client)
 
         async def create_job(request):

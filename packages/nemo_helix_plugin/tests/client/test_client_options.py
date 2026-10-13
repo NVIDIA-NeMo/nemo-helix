@@ -24,7 +24,7 @@ from nemo_helix_plugin.client.types import BinaryContent, PreparedRequest, Retry
 from pydantic import BaseModel
 
 BASE = "http://test:8000"
-STAINLESS_RETRY = RetryPolicy(
+PLATFORM_RETRY = RetryPolicy(
     max_retries=1,
     backoff_base=0.25,
     retryable_status_codes=(408, 409, 429),
@@ -547,7 +547,7 @@ class TestRetryPolicy:
         assert policy.respect_retry_after_headers is False
 
     @pytest.mark.parametrize("status_code", [408, 409, 500])
-    def test_standalone_policy_does_not_add_stainless_statuses(self, status_code: int) -> None:
+    def test_standalone_policy_does_not_add_platform_statuses(self, status_code: int) -> None:
         mock_http = MagicMock(spec=httpx.Client)
         mock_http.request.return_value = httpx.Response(
             status_code,
@@ -566,7 +566,7 @@ class TestRetryPolicy:
         assert mock_http.request.call_count == 1
 
     @pytest.mark.parametrize("status_code", [408, 409, 500])
-    def test_stainless_policy_retries_all_expected_statuses(self, status_code: int) -> None:
+    def test_platform_policy_retries_all_expected_statuses(self, status_code: int) -> None:
         mock_http = MagicMock(spec=httpx.Client)
         mock_http.request.side_effect = [
             httpx.Response(
@@ -580,7 +580,7 @@ class TestRetryPolicy:
                 json={"id": 1, "name": "alice"},
             ),
         ]
-        client = NemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with patch("nemo_helix_plugin.client.client.time.sleep"):
             response = client.send(GET_ITEM(name="alice"))
@@ -588,7 +588,7 @@ class TestRetryPolicy:
         assert response.body.name == "alice"
         assert mock_http.request.call_count == 2
 
-    def test_stainless_true_header_forces_retry(self) -> None:
+    def test_platform_true_header_forces_retry(self) -> None:
         mock_http = MagicMock(spec=httpx.Client)
         mock_http.request.side_effect = [
             httpx.Response(
@@ -603,7 +603,7 @@ class TestRetryPolicy:
                 json={"id": 1, "name": "alice"},
             ),
         ]
-        client = NemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with patch("nemo_helix_plugin.client.client.time.sleep"):
             response = client.send(GET_ITEM(name="alice"))
@@ -611,7 +611,7 @@ class TestRetryPolicy:
         assert response.body.name == "alice"
         assert mock_http.request.call_count == 2
 
-    def test_stainless_true_header_does_not_retry_success(self) -> None:
+    def test_platform_true_header_does_not_retry_success(self) -> None:
         mock_http = MagicMock(spec=httpx.Client)
         mock_http.request.return_value = httpx.Response(
             200,
@@ -619,14 +619,14 @@ class TestRetryPolicy:
             request=httpx.Request("GET", f"{BASE}/apis/test/v2/items/alice"),
             json={"id": 1, "name": "alice"},
         )
-        client = NemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         response = client.send(GET_ITEM(name="alice"))
 
         assert response.body.name == "alice"
         assert mock_http.request.call_count == 1
 
-    def test_stainless_false_header_suppresses_retry(self) -> None:
+    def test_platform_false_header_suppresses_retry(self) -> None:
         mock_http = MagicMock(spec=httpx.Client)
         mock_http.request.return_value = httpx.Response(
             500,
@@ -634,7 +634,7 @@ class TestRetryPolicy:
             request=httpx.Request("GET", f"{BASE}/apis/test/v2/items/alice"),
             json={"detail": "do not retry"},
         )
-        client = NemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with pytest.raises(NemoHTTPError):
             client.send(GET_ITEM(name="alice"))
@@ -651,7 +651,7 @@ class TestRetryPolicy:
             ({"retry-after": "60"}, 60.0),
         ],
     )
-    def test_stainless_policy_honors_retry_after(self, headers: dict[str, str], expected_delay: float) -> None:
+    def test_platform_policy_honors_retry_after(self, headers: dict[str, str], expected_delay: float) -> None:
         mock_http = MagicMock(spec=httpx.Client)
         mock_http.request.side_effect = [
             httpx.Response(
@@ -666,7 +666,7 @@ class TestRetryPolicy:
                 json={"id": 1, "name": "alice"},
             ),
         ]
-        client = NemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with (
             patch("nemo_helix_plugin.client.client.time.time", return_value=1_000_000),
@@ -687,7 +687,7 @@ class TestRetryPolicy:
             {"retry-after": "Mon, 12 Jan 1970 13:46:39 GMT"},
         ],
     )
-    def test_stainless_policy_falls_back_for_unreasonable_retry_after(self, headers: dict[str, str]) -> None:
+    def test_platform_policy_falls_back_for_unreasonable_retry_after(self, headers: dict[str, str]) -> None:
         mock_http = MagicMock(spec=httpx.Client)
         mock_http.request.side_effect = [
             httpx.Response(
@@ -702,7 +702,7 @@ class TestRetryPolicy:
                 json={"id": 1, "name": "alice"},
             ),
         ]
-        client = NemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with (
             patch("nemo_helix_plugin.client.client.time.time", return_value=1_000_000),
@@ -710,7 +710,7 @@ class TestRetryPolicy:
         ):
             client.send(GET_ITEM(name="alice"))
 
-        sleep.assert_called_once_with(STAINLESS_RETRY.backoff_base)
+        sleep.assert_called_once_with(PLATFORM_RETRY.backoff_base)
 
     def test_retry_after_swallows_overflow_from_parsing_far_future_date(self) -> None:
         response = httpx.Response(
@@ -822,7 +822,7 @@ class TestAsyncRetryPolicy:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status_code", [408, 409, 500])
-    async def test_stainless_policy_retries_expected_statuses_async(self, status_code: int) -> None:
+    async def test_platform_policy_retries_expected_statuses_async(self, status_code: int) -> None:
         mock_http = AsyncMock(spec=httpx.AsyncClient)
         mock_http.request.side_effect = [
             httpx.Response(
@@ -836,7 +836,7 @@ class TestAsyncRetryPolicy:
                 json={"id": 1, "name": "alice"},
             ),
         ]
-        client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with patch("nemo_helix_plugin.client.client.asyncio.sleep", new_callable=AsyncMock):
             response = await client.send(GET_ITEM(name="alice"))
@@ -845,7 +845,7 @@ class TestAsyncRetryPolicy:
         assert mock_http.request.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_stainless_true_header_forces_retry_async(self) -> None:
+    async def test_platform_true_header_forces_retry_async(self) -> None:
         mock_http = AsyncMock(spec=httpx.AsyncClient)
         mock_http.request.side_effect = [
             httpx.Response(
@@ -860,7 +860,7 @@ class TestAsyncRetryPolicy:
                 json={"id": 1, "name": "alice"},
             ),
         ]
-        client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with patch("nemo_helix_plugin.client.client.asyncio.sleep", new_callable=AsyncMock):
             response = await client.send(GET_ITEM(name="alice"))
@@ -869,7 +869,7 @@ class TestAsyncRetryPolicy:
         assert mock_http.request.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_stainless_true_header_does_not_retry_success_async(self) -> None:
+    async def test_platform_true_header_does_not_retry_success_async(self) -> None:
         mock_http = AsyncMock(spec=httpx.AsyncClient)
         mock_http.request.return_value = httpx.Response(
             200,
@@ -877,7 +877,7 @@ class TestAsyncRetryPolicy:
             request=httpx.Request("GET", f"{BASE}/apis/test/v2/items/alice"),
             json={"id": 1, "name": "alice"},
         )
-        client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         response = await client.send(GET_ITEM(name="alice"))
 
@@ -885,7 +885,7 @@ class TestAsyncRetryPolicy:
         assert mock_http.request.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_stainless_false_header_suppresses_retry_async(self) -> None:
+    async def test_platform_false_header_suppresses_retry_async(self) -> None:
         mock_http = AsyncMock(spec=httpx.AsyncClient)
         mock_http.request.return_value = httpx.Response(
             500,
@@ -893,7 +893,7 @@ class TestAsyncRetryPolicy:
             request=httpx.Request("GET", f"{BASE}/apis/test/v2/items/alice"),
             json={"detail": "do not retry"},
         )
-        client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=STAINLESS_RETRY)
+        client = AsyncNemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with pytest.raises(NemoHTTPError):
             await client.send(GET_ITEM(name="alice"))

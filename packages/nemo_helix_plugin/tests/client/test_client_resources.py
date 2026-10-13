@@ -3,10 +3,8 @@
 
 """Tests for typed resource dispatch and transport auth.
 
-Covers two behaviours that only surface through the compatibility layer:
-
-- ``sdk.inference.*`` must hand back a resource client matching the owning
-  client's sync/async flavour.
+- Resource properties hand back a client matching the owning client's
+  sync/async flavour.
 - Raw calls through the exposed ``_client`` transport must stay authenticated.
 """
 
@@ -18,47 +16,6 @@ from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 BASE = "http://test:8000"
-
-
-# ---------------------------------------------------------------------------
-# sdk.inference.* sync/async dispatch
-# ---------------------------------------------------------------------------
-
-
-def test_inference_namespace_returns_sync_clients_for_sync_client() -> None:
-    from nemo_helix_plugin.models.client import ModelsClient
-    from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
-
-    client = NemoClient(base_url=BASE)
-
-    assert isinstance(client.inference.providers, ModelsClient)
-    assert isinstance(client.inference.deployments, ModelsClient)
-    assert isinstance(client.inference.deployment_configs, ModelsClient)
-    assert isinstance(client.inference.virtual_models, VirtualModelsClient)
-
-
-def test_inference_namespace_returns_async_clients_for_async_client() -> None:
-    """An async client must never wrap its AsyncClient in a sync resource."""
-    from nemo_helix_plugin.models.client import AsyncModelsClient
-    from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
-
-    client = AsyncNemoClient(base_url=BASE)
-
-    assert isinstance(client.inference.providers, AsyncModelsClient)
-    assert isinstance(client.inference.deployments, AsyncModelsClient)
-    assert isinstance(client.inference.deployment_configs, AsyncModelsClient)
-    assert isinstance(client.inference.virtual_models, AsyncVirtualModelsClient)
-
-
-@pytest.mark.parametrize(
-    ("client_factory", "transport_type"),
-    [(NemoClient, httpx.Client), (AsyncNemoClient, httpx.AsyncClient)],
-)
-def test_inference_resources_transport_matches_flavour(client_factory, transport_type) -> None:
-    client = client_factory(base_url=BASE)
-
-    assert isinstance(client.inference.providers._http, transport_type)
-    assert isinstance(client.inference.virtual_models._http, transport_type)
 
 
 def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
