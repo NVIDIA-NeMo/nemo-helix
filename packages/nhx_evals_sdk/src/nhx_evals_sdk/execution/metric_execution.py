@@ -49,7 +49,7 @@ from nhx_evals_sdk.metrics.protocol import (
 )
 from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resilience.api import run_indexed_tasks, use_resilience_session
-from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime, timed_target_call
+from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime, timed_target_call, untimed
 from nhx_evals_sdk.resilience.errors import get_evaluation_error
 from nhx_evals_sdk.session import begin_evaluation_session
 from nhx_evals_sdk.structured_output import (
@@ -290,11 +290,12 @@ async def resolve_target_structured_output_mode(
     if structured_hook is None:
         return
 
-    mode = await detect_structured_output_mode(
-        model=model,
-        inference_fn=inference_fn,
-        api_key=model.api_key,
-    )
+    with untimed():
+        mode = await detect_structured_output_mode(
+            model=model,
+            inference_fn=inference_fn,
+            api_key=model.api_key,
+        )
     structured_hook.set_mode(mode)
     log.info("Structured output mode selected for target %s: %s", escape_log_value(model.name), mode.value)
 

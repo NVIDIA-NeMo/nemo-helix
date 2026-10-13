@@ -126,9 +126,12 @@ class ResilienceScheduler:
             controller.state.counters.operations_started += 1
         async with self._lock:
             self._metrics.operations_started += 1
+        operation_key = object()
         for attempt in range(1, max_attempts + 1):
             try:
-                result = await self._run_once(endpoint_key, operation, *args, attempt=attempt, **kwargs)
+                result = await self._run_once(
+                    endpoint_key, operation, *args, attempt=attempt, operation_key=operation_key, **kwargs
+                )
             except ResilienceCancelledError:
                 raise
             except Exception as exc:
@@ -209,6 +212,7 @@ class ResilienceScheduler:
         operation: Callable[_P, Awaitable[_T]],
         *args: _P.args,
         attempt: int,  # ty: ignore[invalid-paramspec]
+        operation_key: object,
         **kwargs: _P.kwargs,
     ) -> _T:
         controller = await self._get_controller(endpoint_key)
@@ -242,7 +246,7 @@ class ResilienceScheduler:
             dispatched = dispatched_at is not None
             elapsed = max(0.0, self.now() - dispatched_at) if dispatched_at is not None else 0.0
             if dispatched:
-                record_attempt(elapsed, succeeded=succeeded)
+                record_attempt(elapsed, succeeded=succeeded, operation=operation_key)
             await self._on_complete(controller.state, dispatched=dispatched, elapsed_seconds=elapsed)
             if global_acquired:
                 self._global_limiter.release()

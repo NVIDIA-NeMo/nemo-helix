@@ -33,6 +33,7 @@ from nhx_evals_sdk.execution.metric_execution import (
     evaluate_metric,
     generate_online_sample,
     generate_online_sample_agent,
+    resolve_target_structured_output_mode,
     run_generated_sample_scoring_pipeline,
     run_sync,
 )
@@ -45,7 +46,7 @@ from nhx_evals_sdk.metrics.hooks import HooksBase
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric as RuntimeLLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nhx_evals_sdk.metrics.utils import metric_type_name
-from nhx_evals_sdk.resilience.api import use_resilience_session
+from nhx_evals_sdk.resilience.api import run_with_resilience, use_resilience_session
 from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime
 from nhx_evals_sdk.resolvers import LocalSecretResolver, _candidate_env_names
 from nhx_evals_sdk.structured_output import StructuredOutputMode
@@ -703,6 +704,32 @@ class TestTargetStructuredOutputPreflight:
         assert len(probes) == 3, "expected all three placements to be probed"
         assert generation, "expected a generation request"
         assert generation[0]["extra_body"]["nvext"]["guided_json"] is not None
+
+    @pytest.mark.asyncio
+    async def test_probe_requests_are_not_counted_as_target_runtime(self):
+        async def probe_through_scheduler(model, request, max_retries, **kwargs):
+            async def answer() -> dict:
+                await asyncio.sleep(0.01)
+                return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
+
+            return await run_with_resilience("probe-endpoint", answer, max_attempts=1)
+
+        params = RunConfigOnlineModel(
+            parallelism=1,
+            structured_output={"schema": {"type": "object", "properties": {"a": {"type": "string"}}}},
+        )
+        preprocess_hooks, _ = inference.new_hooks(params)
+
+        async with use_resilience_session():
+            with measure_target_runtime() as runtime:
+                await resolve_target_structured_output_mode(
+                    preprocess_hooks=preprocess_hooks,
+                    model=_make_model(),
+                    inference_fn=probe_through_scheduler,
+                    params=params,
+                )
+
+        assert runtime.seconds is None
 
 
 class TestBenchmarkPathStructuredOutput:
