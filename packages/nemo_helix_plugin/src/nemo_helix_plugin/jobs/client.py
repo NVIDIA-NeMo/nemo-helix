@@ -107,7 +107,6 @@ class _JobsMethods:
     cancel_job = method(endpoints.cancel_job)
     pause_job = method(endpoints.pause_job)
     resume_job = method(endpoints.resume_job)
-    rerun_job = method(endpoints.rerun_job)
     update_job_control = method(endpoints.update_job_control)
 
     # Job status

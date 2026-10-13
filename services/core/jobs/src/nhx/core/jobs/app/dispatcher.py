@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
-import datetime
 import json
 import logging
 import weakref
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
@@ -38,8 +38,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     get_model_id,
     job_artifact_base_path,
 )
-from nhx.core.jobs.app.constants import STORAGE_RECLAIMED_AT
-from nhx.core.jobs.app.lifecycle import attempt_can_transition, rerun_status_details, with_lifecycle_timestamps
+from nhx.core.jobs.app.lifecycle import attempt_can_transition, with_lifecycle_timestamps
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
@@ -66,7 +65,7 @@ class StateTransitionConflictError(Exception):
 
 
 class JobOperationConflictError(Exception):
-    """Exception raised when pause, resume, rerun, or a control update cannot proceed."""
+    """Exception raised when a pause or resume cannot proceed."""
 
     def __init__(self, detail: str):
         super().__init__(detail)
@@ -156,7 +155,7 @@ def _reject_pause_ttl_over_maximum(pause_ttl_seconds: int | None) -> None:
         raise PauseTTLLimitError(f"pause_ttl_seconds cannot exceed the platform maximum of {maximum} seconds.")
 
 
-def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime.datetime:
+def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime:
     # Status changes only rewrite the attempt, so the job entity's own timestamp stays at creation.
     return max(ts for ts in (job.updated_at, attempt.updated_at) if ts is not None)
 
@@ -1321,24 +1320,16 @@ class JobDispatcher:
         operations_counter.add(1, attributes={"operation": "cancel_job"})
         return create_platform_job_response(job_entity, attempt)
 
-    async def rerun_job(
-        self, identifier: str, workspace: str, auth_context: AuthContext | None = None
-    ) -> HelixJobResponse | None:
+    async def rerun_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
         """Re-run a job (by name or ID)."""
         job_entity = await self._resolve_job(identifier, workspace)
         if job_entity is None:
             return None
         async with _get_job_mutation_lock(job_entity.name, workspace):
-            return await self._rerun_job_locked(
-                job_entity.name, workspace, expected_id=job_entity.id, auth_context=auth_context
-            )
+            return await self._rerun_job_locked(job_entity.name, workspace, expected_id=job_entity.id)
 
     async def _rerun_job_locked(
-        self,
-        job_name: str,
-        workspace: str,
-        expected_id: str | None = None,
-        auth_context: AuthContext | None = None,
+        self, job_name: str, workspace: str, expected_id: str | None = None
     ) -> HelixJobResponse | None:
         """Re-run a terminal job while holding the per-job mutation lock.
 
@@ -1357,52 +1348,40 @@ class JobDispatcher:
         if attempt is None:
             return None
 
-        # Rerun continues a failed attempt from surviving storage. Other statuses
-        # are a different operation: paused jobs resume, and successful or cancelled
-        # jobs are finished.
-        if attempt.status != HelixJobStatus.ERROR:
-            if attempt.status == HelixJobStatus.PAUSED:
-                detail = f"Cannot rerun job '{job_entity.name}': this job is paused, use resume."
-            else:
-                detail = (
-                    f"Cannot rerun job '{job_entity.name}': rerun applies to a job that ended in error "
-                    f"(current status is '{attempt.status.value}')."
+        # Only allow re-run if the attempt is in a terminal state
+        if attempt.status.is_terminal():
+            seq = attempt.seq + 1
+            # Use short ID prefix to stay within 32 char name limit
+            attempt_ref_id = get_model_id("att")
+            next_attempt = await self.store.create(
+                HelixJobAttempt(
+                    name=attempt_ref_id,
+                    workspace=job_entity.workspace,
+                    job=job_entity.id,
+                    seq=seq,
+                    status=HelixJobStatus.CREATED,
+                    spec=job_entity.spec,
+                    platform_spec=job_entity.platform_spec,
                 )
-            raise JobOperationConflictError(detail)
-
-        previous_details = dict(attempt.status_details or {})
-        if previous_details.get(STORAGE_RECLAIMED_AT):
-            raise JobOperationConflictError(
-                f"Cannot rerun job '{job_entity.name}': storage has been reclaimed. Create a new job."
             )
-
-        seq = attempt.seq + 1
-        # Use short ID prefix to stay within 32 char name limit
-        attempt_ref_id = get_model_id("att")
-        next_details = rerun_status_details(previous_details)
-        next_attempt = await self.store.create(
-            HelixJobAttempt(
-                name=attempt_ref_id,
-                workspace=job_entity.workspace,
-                job=job_entity.id,
-                seq=seq,
-                status=HelixJobStatus.CREATED,
-                spec=job_entity.spec,
-                platform_spec=job_entity.platform_spec,
-                status_details=next_details,
+            # Update job with new attempt ID
+            job_entity.current_attempt_id = next_attempt.id
+            job_entity = await self.store.update(job_entity)
+            await self._start_attempt(job_entity, next_attempt)
+            operations_counter.add(1, attributes={"operation": "rerun_job"})
+            return create_platform_job_response(job_entity, next_attempt)
+        else:
+            logger.warning(
+                "Attempt to re-run job not in terminal state",
+                extra={
+                    "job": job_entity.name,
+                    "attempt": attempt.id,
+                    "status": attempt.status,
+                    "workspace": job_entity.workspace,
+                },
             )
-        )
-        # Update job with new attempt ID. Re-apply the caller's auth context the
-        # same way create does, so the rerun runs as the person who requested it.
-        job_entity.current_attempt_id = next_attempt.id
-        if auth_context is not None:
-            job_entity.with_auth_context(auth_context)
-        job_entity = await self.store.update(job_entity)
-        if auth_context is not None:
-            job_entity.with_auth_context(auth_context)
-        await self._start_attempt(job_entity, next_attempt)
-        operations_counter.add(1, attributes={"operation": "rerun_job"})
-        return create_platform_job_response(job_entity, next_attempt)
+            operations_counter.add(1, attributes={"operation": "rerun_job"})
+            return create_platform_job_response(job_entity, attempt)
 
     async def pause_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
         """Pause a job (by name or ID)."""
@@ -1456,10 +1435,6 @@ class JobDispatcher:
             return create_platform_job_response(job, attempt)
 
         if attempt.status == HelixJobStatus.PAUSED:
-            if (attempt.status_details or {}).get(STORAGE_RECLAIMED_AT):
-                raise JobOperationConflictError(
-                    f"Cannot resume job '{job.name}': storage has been reclaimed. Create a new job."
-                )
             paused_step = await self._get_step_by_status(job, workspace, [HelixJobStatus.PAUSED])
             if paused_step is None:
                 raise JobOperationConflictError(f"Cannot resume job '{job.name}': no paused step was found.")
@@ -1472,7 +1447,7 @@ class JobDispatcher:
     @staticmethod
     def _resume_conflict_detail(job_name: str, status: HelixJobStatus) -> str:
         if status == HelixJobStatus.ERROR:
-            return f"Cannot resume job '{job_name}': this job failed rather than paused, use rerun."
+            return f"Cannot resume job '{job_name}': this job failed rather than paused."
         if status == HelixJobStatus.COMPLETED:
             return f"Cannot resume job '{job_name}': the job succeeded."
         if status == HelixJobStatus.CANCELLED:
@@ -1492,13 +1467,12 @@ class JobDispatcher:
     ) -> HelixJobResponse | None:
         """Change mutable job behavior without rewriting the attempt spec.
 
-        The pause window is measured from the paused step's ``stopped_at``, so
-        a longer or shorter value does not move the start. Fields omitted from
-        ``update`` stay as they are. A null pause window clears the override
-        and the platform default applies again.
+        Only the values set in ``update`` change. An omitted or null value keeps the
+        job's current value. The pause window is measured from the paused step's
+        ``stopped_at``, so a new value does not move the start.
         """
-        if "pause_ttl_seconds" in update.model_fields_set:
-            _reject_pause_ttl_over_maximum(update.pause_ttl_seconds)
+        changes = update.model_dump(exclude_none=True)
+        _reject_pause_ttl_over_maximum(changes.get("pause_ttl_seconds"))
 
         job = await self._resolve_job(identifier, workspace)
         if job is None:
@@ -1507,15 +1481,8 @@ class JobDispatcher:
         attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
         if attempt is None:
             raise Exception(f"Job Attempt with Job ID {job.id} does not exist.")
-        if (attempt.status_details or {}).get(STORAGE_RECLAIMED_AT):
-            raise JobOperationConflictError(
-                f"Cannot update control for job '{job.name}': storage has been reclaimed. Create a new job."
-            )
 
-        control = job.control.model_copy()
-        if "pause_ttl_seconds" in update.model_fields_set:
-            control.pause_ttl_seconds = update.pause_ttl_seconds
-        job.control = control
+        job.control = job.control.model_copy(update=changes)
         # Restore auth context around the write. The store can sanitize it for
         # non-service principals, and the next run still needs the caller.
         if auth_context is not None:

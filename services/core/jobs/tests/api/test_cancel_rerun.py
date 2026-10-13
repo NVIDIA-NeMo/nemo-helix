@@ -85,38 +85,31 @@ async def test_job_rerun_functionality(test_client: AsyncClient):
     job_name = job_data["name"]  # API URLs use job name, not ID
     original_attempt_id = job_data["attempt_id"]
 
-    # Move job through lifecycle to error. Rerun applies only to failed jobs.
+    # Move job through lifecycle to completed
     response = await test_client.patch(
         f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status", json={"status": "active"}
     )
     assert response.status_code == 200
 
     response = await test_client.patch(
-        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details",
-        json={"percentage_done": 40, "resumable": True},
-    )
-    assert response.status_code == 200
-    response = await test_client.patch(
-        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status",
-        json={"status": "error"},
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status", json={"status": "completed"}
     )
     assert response.status_code == 200
 
-    # Verify job is failed
+    # Verify job is completed
     response = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}")
     assert response.status_code == 200
     job_data = response.json()
-    assert job_data["status"] == "error"
+    assert job_data["status"] == "completed"
 
     # Rerun the job
     response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/rerun")
     assert response.status_code == 200
     rerun_job_data = response.json()
 
-    # Verify a new attempt was created and kept the previous progress.
+    # Verify a new attempt was created
     assert rerun_job_data["attempt_id"] != original_attempt_id
     assert rerun_job_data["status"] == "created"
-    assert rerun_job_data["status_details"]["percentage_done"] == 40
 
     # Verify that the new attempt has a fresh first step created
     response = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1")
@@ -178,19 +171,28 @@ async def test_job_cancel_rerun_lifecycle(test_client: AsyncClient):
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
 
-    # A cancelled job cannot be rerun.
+    # Rerun the job
     response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/rerun")
-    assert response.status_code == 409
-    response = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}")
-    assert response.json()["attempt_id"] == original_attempt_id
-    assert response.json()["status"] == "cancelled"
+    assert response.status_code == 200
+    rerun_job_data = response.json()
 
+    # Verify new attempt was created
+    assert rerun_job_data["attempt_id"] != original_attempt_id
+    assert rerun_job_data["status"] == "created"
+
+    # Verify new attempt has fresh first step
     response = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1")
     assert response.status_code == 200
     step_data = response.json()
-    assert step_data["attempt_id"] == original_attempt_id
+
+    # The first step should belong to the new attempt and be in created status
+    assert step_data["attempt_id"] == rerun_job_data["attempt_id"]
     assert step_data["name"] == "step1"
-    assert step_data["status"] == "cancelled"
+    assert step_data["status"] == "created"
+
+    # The second step should not exist yet (only created when first step completes)
+    response = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step2")
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -331,7 +333,7 @@ async def test_job_cancel_no_active_steps(test_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_job_rerun_active_job(test_client: AsyncClient):
-    """Rerun is rejected while a job is still running and accepted after it fails."""
+    """Test rerunning a job that is still active."""
     req = CreateHelixJobRequest(
         name="test-job-rerun-active",
         source="test-source",
@@ -343,10 +345,11 @@ async def test_job_rerun_active_job(test_client: AsyncClient):
         ),
     )
 
+    # Create job and move to active
     response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
     assert response.status_code == 201
     job_data = response.json()
-    job_name = job_data["name"]
+    job_name = job_data["name"]  # API URLs use job name, not ID
     original_attempt_id = job_data["attempt_id"]
 
     response = await test_client.patch(
@@ -354,23 +357,17 @@ async def test_job_rerun_active_job(test_client: AsyncClient):
     )
     assert response.status_code == 200
 
-    response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/rerun")
-    assert response.status_code == 409
-
+    # must be cancelled before rerun
     response = await test_client.patch(
-        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details",
-        json={"resumable": False, "non_resumable_reason": "out of memory"},
-    )
-    assert response.status_code == 200
-    response = await test_client.patch(
-        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status",
-        json={"status": "error"},
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1/status", json={"status": "cancelled"}
     )
     assert response.status_code == 200
 
+    # Rerun the cancelled job
     response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/rerun")
     assert response.status_code == 200
     rerun_job_data = response.json()
+
+    # Verify new attempt was created
     assert rerun_job_data["attempt_id"] != original_attempt_id
     assert rerun_job_data["status"] == "created"
-    assert rerun_job_data["status_details"]["rerun_warning"] == "out of memory"

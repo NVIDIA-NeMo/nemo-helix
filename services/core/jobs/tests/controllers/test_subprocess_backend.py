@@ -11,7 +11,6 @@ from unittest.mock import patch
 from nhx.common.config import HelixConfig
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
-from nhx.core.jobs.app.schemas import StepLifecycle
 from nhx.core.jobs.controllers.backends.base import (
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
     NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
@@ -130,7 +129,10 @@ def test_subprocess_persistent_storage_is_shared_across_job_attempt(
     assert second_metadata.process.wait(timeout=5) == 0
     assert first_metadata.work_dir != second_metadata.work_dir
     assert first_metadata.persistent_dir == second_metadata.persistent_dir
-    assert first_metadata.persistent_dir == tmp_path / first_step.workspace / first_step.job / "job-storage"
+    assert (
+        first_metadata.persistent_dir
+        == tmp_path / first_step.workspace / first_step.job / str(first_step.attempt_id) / "job-storage"
+    )
 
 
 def test_schedule_uses_allowlisted_host_environment(
@@ -605,107 +607,3 @@ def test_pending_step_missing_metadata_stale_check_accepts_typed_timestamp(test_
     step.created_at = None
 
     assert SubprocessJobBackend._pending_step_missing_metadata_is_stale(step) is False
-
-
-def _mark_pausing(step, *, ago_seconds: int = 0, deadline_seconds: int = 3600):
-    step.status = HelixJobStatus.PAUSING
-    requested_at = datetime.now(timezone.utc) - timedelta(seconds=ago_seconds)
-    step.status_details = {"pause_requested_at": requested_at.isoformat()}
-    step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=deadline_seconds)
-    return step
-
-
-def test_sync_pausing_does_not_terminate_a_running_process(
-    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
-):
-    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
-    step = _mark_pausing(_step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"]))
-    mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
-
-    update = _schedule_without_otel_export(backend, step)
-    assert update.status == HelixJobStatus.PENDING
-    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
-    metadata = backend._process_registry.get(key)
-    assert metadata is not None
-    try:
-        with patch.object(backend, "_terminate_process", wraps=backend._terminate_process) as terminate:
-            synced = backend.sync(step)
-        assert synced.status == HelixJobStatus.PAUSING
-        terminate.assert_not_called()
-        assert metadata.process.poll() is None
-    finally:
-        metadata.process.kill()
-        metadata.process.wait(timeout=5)
-
-
-def test_sync_pausing_nonzero_exit_is_error(
-    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
-):
-    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
-    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "exit 1"])
-    mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
-    _schedule_without_otel_export(backend, step)
-    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
-    metadata = backend._process_registry.get(key)
-    assert metadata is not None
-    assert metadata.process.wait(timeout=5) != 0
-
-    _mark_pausing(step)
-    update = backend.sync(step)
-
-    assert update.status == HelixJobStatus.ERROR
-
-
-def test_sync_pausing_exit_75_is_paused(mock_nemo_client, tmp_path, mock_platform_config, test_step_pending):
-    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
-    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "exit 75"])
-    _schedule_without_otel_export(backend, step)
-    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
-    metadata = backend._process_registry.get(key)
-    assert metadata is not None
-    assert metadata.process.wait(timeout=5) == 75
-
-    _mark_pausing(step)
-    update = backend.sync(step)
-
-    assert update.status == HelixJobStatus.PAUSED
-
-
-def test_sync_pausing_step_older_than_the_ttl_is_not_timed_out(
-    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
-):
-    """A long training step is bounded by its pause deadline while pausing, not by the TTLs."""
-    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
-    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"])
-    mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
-    _schedule_without_otel_export(backend, step)
-    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
-    metadata = backend._process_registry.get(key)
-    assert metadata is not None
-    ttl_seconds = backend._execution_profile_config.ttl_seconds_active
-    step.created_at = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds + 300)
-    _mark_pausing(step)
-    try:
-        update = backend.sync(step)
-        assert update.status == HelixJobStatus.PAUSING
-        assert metadata.process.poll() is None
-    finally:
-        metadata.process.kill()
-        metadata.process.wait(timeout=5)
-
-
-def test_sync_cancelling_step_older_than_the_ttl_is_cancelled(
-    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
-):
-    """Cancel terminates the process, so an old step ends cancelled rather than timed out."""
-    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
-    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"])
-    mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
-    _schedule_without_otel_export(backend, step)
-    ttl_seconds = backend._execution_profile_config.ttl_seconds_active
-    step.created_at = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds + 300)
-    step.status = HelixJobStatus.CANCELLING
-
-    update = backend.sync(step)
-
-    assert update.status == HelixJobStatus.CANCELLED

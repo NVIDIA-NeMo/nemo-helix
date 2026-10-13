@@ -1443,7 +1443,7 @@ async def test_cancel_job_conflict_sanitizes_log_fields(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["cancel", "pause", "resume", "rerun"])
+@pytest.mark.parametrize("operation", ["cancel", "pause", "resume"])
 @pytest.mark.parametrize(
     "error,expected_status",
     [

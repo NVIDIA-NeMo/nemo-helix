@@ -25,7 +25,6 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
-from nhx.core.jobs.app.lifecycle import describe_paused_exit, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import DistributedGPUExecutionProvider
 from nhx.core.jobs.app.schemas import BaseExecutionProfile
 from nhx.core.jobs.controllers.backends.base import (
@@ -38,7 +37,6 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     BaseKubernetesExecutionProfileConfig,
     build_event_field_selector,
     build_metadata,
-    classify_task_containers,
     cleanup_job_persistent_storage,
     common_labels_for_step,
     create_configmap,
@@ -46,7 +44,6 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     delete_configmap,
     get_namespace_from_environment,
     image_pull_backoff_failure,
-    list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
     update_all_tasks,
@@ -206,15 +203,6 @@ class VolcanoJobBackend(
         Schedule a Volcano Job using the Volcano Job CRD.
         """
         job_name = name_for_step(step)
-        existing_job = self.get_volcano_job_by_name(job_name)
-        if existing_job is not None:
-            phase = (existing_job.get("status") or {}).get("state", {}).get("phase")
-            if phase in ("Completed", "Failed"):
-                logger.info(
-                    "Removing finished Volcano job before scheduling the step again",
-                    extra={"job_name": job_name, "namespace": self.namespace, "phase": phase},
-                )
-                self.terminate_job(existing_job)
 
         # Basic labels for tracking
         common_labels = common_labels_for_step(step)
@@ -422,45 +410,9 @@ class VolcanoJobBackend(
         elif step.status == HelixJobStatus.CANCELLING:
             return self.sync_remove_job_with_status(step, HelixJobStatus.CANCELLED, volcano_job)
         elif step.status == HelixJobStatus.PAUSING:
-            return self.sync_pausing(step, volcano_job)
+            raise NotImplementedError("Pausing not yet implemented for volcano backend.")
         else:
             raise ValueError(f"Unhandled step status for sync: {step.status}")
-
-    def sync_pausing(self, step: HelixJobStepWithContext, volcano_job: dict | None) -> JobUpdate:
-        """Leave a pausing VolcanoJob running until it exits or the pause deadline passes.
-
-        Exit 75 is a pause. A Completed phase is exit 0, so training finished.
-        """
-        if pause_deadline_exceeded(step):
-            message = "Pause deadline exceeded"
-            return self.sync_remove_job_with_status(
-                step,
-                HelixJobStatus.ERROR,
-                volcano_job,
-                status_details={"message": message},
-                error_details={"message": message},
-            )
-        if volcano_job is None:
-            return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
-
-        phase = (volcano_job.get("status") or {}).get("state", {}).get("phase")
-        if phase not in ("Completed", "Failed"):
-            return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
-
-        pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
-        running, exit_code = classify_task_containers(pods)
-        if running:
-            return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
-        if exit_code is None:
-            exit_code = 0 if phase == "Completed" else 1
-        status, message, error_details = describe_paused_exit(exit_code)
-        if status == HelixJobStatus.PAUSED:
-            self.terminate_job(volcano_job)
-        return JobUpdate(
-            status=status,
-            status_details={"message": message},
-            error_details=error_details or None,
-        )
 
     def cleanup_steps(self):
         jobs = self.get_volcano_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)

@@ -107,9 +107,9 @@ def pause_job(*, workspace: str | None = None, name: str) -> HelixJobResponse: .
 def resume_job(*, workspace: str | None = None, name: str) -> HelixJobResponse: ...
 
 
-@post("/apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun")
-@abstractmethod
-def rerun_job(*, workspace: str | None = None, job: str) -> HelixJobResponse: ...
+# NOTE: no ``rerun_job`` — the server's ``/rerun`` route is test-only and not
+# mounted in the release service (see services/core/jobs/.../api/v2/jobs/rerun.py),
+# so exposing it on the client would 404 in production.
 
 
 @patch("/apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control")

@@ -14,32 +14,31 @@ from nhx.core.jobs.controllers.backends.config import (
 )
 from pydantic import BaseModel, Field, model_validator
 
-_SECONDS_PER_DAY = 24 * 3600
-_FAILED_STORAGE_TTL_SECONDS = 4 * 3600
-
 
 class JobsStorageConfig(BaseModel):
     """How long a paused or failed job keeps its storage.
 
-    A job may set its own pause window, up to ``maximum_pause_ttl_seconds``.
-    A failed job always uses ``failed_storage_ttl_seconds``.
+    These are platform settings under ``jobs.storage`` in the platform config, and
+    each deployment can set its own values. The numbers here are only the defaults.
+    A job may set its own pause window, up to ``maximum_pause_ttl_seconds``. A failed
+    job always uses ``failed_storage_ttl_seconds``.
     """
 
     paused_storage_ttl_seconds: int = Field(
-        default=7 * _SECONDS_PER_DAY,
+        default=7 * 24 * 3600,
         ge=0,
         description="How long storage is kept after a job pauses, unless that job sets its own pause window. "
         "Measured from the paused step's stopped_at. 0 reclaims on the next retention pass.",
     )
     maximum_pause_ttl_seconds: int = Field(
-        default=30 * _SECONDS_PER_DAY,
+        default=30 * 24 * 3600,
         ge=0,
         description="Longest pause window a job may set, measured from stopped_at. "
         "A longer pause_ttl_seconds is rejected. The platform paused-storage TTL still applies when a job "
         "does not set its own window, and that default is also capped by this maximum.",
     )
     failed_storage_ttl_seconds: int = Field(
-        default=_FAILED_STORAGE_TTL_SECONDS,
+        default=4 * 3600,
         ge=0,
         description="How long storage is kept after a job fails, measured from the failed step's stopped_at. "
         "0 reclaims on the next retention pass.",

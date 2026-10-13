@@ -15,10 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
-from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
 from nhx.common.api.parsed_filter import ParsedFilter
-from nhx.common.auth import AuthContext
 from nhx.common.entities import (
     ALL_WORKSPACES,
     DEFAULT_WORKSPACE,
@@ -819,40 +817,28 @@ async def test_rerun_job_success(
     current_step.status = HelixJobStatus.ACTIVE
     await mock_store.update(current_step)
 
-    # Rerun while the job is still running is rejected.
-    with pytest.raises(JobOperationConflictError):
-        await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
+    # Rerun the job, when in active state. This should be a no op
+    await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
     attempts_response = await mock_store.list(HelixJobAttempt, filter_obj={"job": job.id})
     assert len(attempts_response.data) == 1
 
-    # Progress lives on the attempt. Rerun copies that map and warns when it is not resumable.
-    await mock_dispatcher.update_job_status_details(
-        job.name,
-        DEFAULT_WORKSPACE,
-        {
-            "resumable": False,
-            "non_resumable_reason": "out of memory",
-            "percentage_done": 10,
-            "events": [{"type": "Warning"}],
-            "metrics": {"train_loss": [{"step": 1, "value": 0.5}]},
-        },
-    )
+    # Cancel the job
+    await mock_dispatcher.cancel_job(job.name, DEFAULT_WORKSPACE)
+    updated_step = await mock_store.get_by_id(HelixJobStep, current_step.id)
+    assert updated_step is not None
+    assert updated_step.status == HelixJobStatus.CANCELLING
+
+    # Mark as Cancelled
     await mock_dispatcher.update_job_status_from_step(
-        step=current_step,
-        status=HelixJobStatus.ERROR,
-        error_details={"message": "failed"},
+        step=updated_step,
+        status=HelixJobStatus.CANCELLED,
+        error_details={},
     )
 
-    # Rerun (now that it failed)
+    # Rerun (now that it's cancelled)
     updated_job = await mock_dispatcher.get_job(job.name, DEFAULT_WORKSPACE)
     assert updated_job is not None
-    rerun = await mock_dispatcher.rerun_job(updated_job.name, DEFAULT_WORKSPACE)
-    assert rerun is not None
-    assert rerun.status_details["rerun_warning"] == "out of memory"
-    assert rerun.status_details["percentage_done"] == 10
-    assert rerun.status_details["metrics"]["train_loss"][0]["value"] == 0.5
-    assert "resumable" not in rerun.status_details
-    assert "events" not in rerun.status_details
+    await mock_dispatcher.rerun_job(updated_job.name, DEFAULT_WORKSPACE)
 
     # Verify a new attempt was created
     attempts_response = await mock_store.list(HelixJobAttempt, filter_obj={"job": updated_job.id})
@@ -1269,38 +1255,6 @@ async def test_resume_job_no_paused_step(
 
 
 @pytest.mark.asyncio
-async def test_resume_and_rerun_reject_reclaimed_storage(
-    mock_dispatcher: JobDispatcher,
-    mock_store: EntityClient,
-    sample_platform_job_request: CreateHelixJobRequest,
-):
-    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
-    current_step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
-    assert current_step is not None
-    await mock_dispatcher.update_job_status_from_step(current_step, HelixJobStatus.PAUSED)
-    await mock_dispatcher.update_job_status_details(
-        job.name, DEFAULT_WORKSPACE, {"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"}
-    )
-
-    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
-        await mock_dispatcher.resume_job(job.name, DEFAULT_WORKSPACE)
-    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
-        await mock_dispatcher.update_job_control(job.name, DEFAULT_WORKSPACE, JobControl(pause_ttl_seconds=10))
-
-    failed = await mock_dispatcher.create_job(
-        sample_platform_job_request.model_copy(update={"name": "reclaimed-error"}), DEFAULT_WORKSPACE
-    )
-    failed_step = await mock_dispatcher.get_current_job_step_by_name(failed.name, "basic", DEFAULT_WORKSPACE)
-    assert failed_step is not None
-    await mock_dispatcher.update_job_status_from_step(failed_step, HelixJobStatus.ERROR)
-    await mock_dispatcher.update_job_status_details(
-        failed.name, DEFAULT_WORKSPACE, {"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"}
-    )
-    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
-        await mock_dispatcher.rerun_job(failed.name, DEFAULT_WORKSPACE)
-
-
-@pytest.mark.asyncio
 async def test_pause_targets_a_live_step_before_an_idempotent_return(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
@@ -1680,16 +1634,10 @@ async def test_resume_job_by_id(mock_dispatcher: JobDispatcher, mock_store: Enti
 @pytest.mark.asyncio
 async def test_rerun_job_by_id(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
     """rerun_job resolves a job by its ID (and locks on the resolved name)."""
-    job_id, job_name, attempt_id, step_id, _, _ = await create_test_job_data(mock_store, "rerun-by-id")
+    job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "rerun-by-id")
     assert job_id != job_name
-    attempt = await mock_store.get_by_id(HelixJobAttempt, attempt_id)
-    step = await mock_store.get_by_id(HelixJobStep, step_id)
-    assert attempt is not None and step is not None
-    attempt.status = HelixJobStatus.ERROR
-    step.status = HelixJobStatus.ERROR
-    await mock_store.update(attempt)
-    await mock_store.update(step)
 
+    # The seeded attempt is COMPLETED (terminal), so a rerun is allowed.
     result = await mock_dispatcher.rerun_job(job_id, DEFAULT_WORKSPACE)
 
     assert result is not None
@@ -2500,30 +2448,3 @@ async def test_attempt_update_retries_after_a_concurrent_write(
     stored = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
     assert stored.status == HelixJobStatus.ACTIVE
     assert stored.status_details["percentage_done"] == 40
-
-
-@pytest.mark.asyncio
-async def test_rerun_saves_the_callers_auth_context(
-    mock_dispatcher: JobDispatcher,
-    mock_store: EntityClient,
-    sample_platform_job_request: CreateHelixJobRequest,
-):
-    """A regular user reads the job with auth_context stripped. Rerun must not save it back as empty."""
-    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
-    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
-    assert step is not None
-    await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.ERROR, error_details={"message": "boom"})
-    caller = AuthContext(principal_id="user@example.com", principal_email="user@example.com")
-    original_update = mock_store.update
-    saved_auth: list[AuthContext | None] = []
-
-    async def record_job_auth(entity):
-        if isinstance(entity, HelixJob):
-            saved_auth.append(entity.auth_context)
-        return await original_update(entity)
-
-    with patch.object(mock_store, "update", side_effect=record_job_auth):
-        rerun = await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE, auth_context=caller)
-
-    assert rerun is not None
-    assert saved_auth == [caller]

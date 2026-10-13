@@ -5767,43 +5767,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
-    post:
-      tags:
-      - Jobs
-      summary: Rerun Job
-      description: Rerun a failed job from its surviving storage as a new attempt.
-      operationId: rerun_job_apis_jobs_v2_workspaces__workspace__jobs__job__rerun_post
-      parameters:
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HelixJobResponse'
-        '404':
-          description: Job not Found
-        '409':
-          description: The job cannot be rerun, or its status changed during the request
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
     post:
       tags:
@@ -6304,8 +6267,7 @@ paths:
         '404':
           description: Job not Found
         '409':
-          description: Storage has been reclaimed, or the job status changed during
-            the request
+          description: The job changed during the request
         '422':
           description: The pause window exceeds the platform maximum
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/logs:
@@ -15858,10 +15820,10 @@ components:
         pause_ttl_seconds:
           title: Pause Ttl Seconds
           description: How long this job keeps storage after it pauses, measured from
-            stopped_at. When unset, the platform paused-storage TTL applies. Send
-            null to clear a value and go back to that default. Cannot exceed the platform
-            maximum. 0 reclaims on the next retention pass. Changing this value does
-            not move the start time.
+            stopped_at. When the job has no value, the platform paused-storage TTL
+            applies. Cannot exceed the platform maximum. 0 reclaims on the next retention
+            pass. In a control update, an omitted or null value keeps the current
+            value. Changing this value does not move the start time.
           nullable: true
           type: integer
           minimum: 0.0
@@ -15873,7 +15835,10 @@ components:
 
         The attempt spec stays the immutable snapshot of what a run executes. Rerun
 
-        copies the job spec into the next attempt and keeps using this object.'
+        copies the job spec into the next attempt and keeps using this object. In
+        a
+
+        control update, an omitted or null value keeps the job''s current value.'
     JobExecutionProfileConfig:
       properties:
         ttl_seconds_before_active:
