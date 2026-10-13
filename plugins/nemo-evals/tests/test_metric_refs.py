@@ -17,59 +17,11 @@ from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nhx.testing.files import InMemoryFilesService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from pydantic import ValidationError
 
 # ---- in-memory fakes (mirror the storage round-trip) -----------------------
-
-
-class _FakeDownloadResponse:
-    def __init__(self, content: bytes) -> None:
-        self._content = content
-
-    async def read(self) -> bytes:
-        return self._content
-
-
-class _FakeFiles(AsyncFilesClient):
-    def __init__(self) -> None:
-        self._store: dict[tuple[str, str], dict[str, bytes]] = {}
-
-    async def create_fileset(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        workspace: str | None = None,
-        body: CreateFilesetRequest,
-        exist_ok: bool = False,
-    ) -> object:
-        del exist_ok
-        self._store.setdefault((workspace or "default", body.name), {})
-        return object()
-
-    async def delete_fileset(self, *, workspace: str | None = None, name: str) -> object:  # ty: ignore[invalid-attribute-override]
-        self._store.pop((workspace or "default", name), None)
-        return object()
-
-    async def upload_file(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        content: bytes,
-        path: str,
-        name: str,
-        workspace: str | None = None,
-    ) -> object:
-        self._store.setdefault((workspace or "default", name), {})[path] = bytes(content)
-        return object()
-
-    async def download_file(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        path: str,
-        name: str,
-        workspace: str | None = None,
-    ) -> "_FakeDownloadResponse":
-        return _FakeDownloadResponse(self._store[(workspace or "default", name)][path])
 
 
 class _FakeEntityClient:
@@ -95,7 +47,9 @@ def _metric_inline() -> MetricInline:
     return MetricInline.model_validate_json(_bundle().model_dump_json())
 
 
-async def _stored(fake_files: _FakeFiles, entity_client: _FakeEntityClient, workspace: str, name: str) -> MetricBundle:
+async def _stored(
+    fake_files: AsyncFilesClient, entity_client: _FakeEntityClient, workspace: str, name: str
+) -> MetricBundle:
     bundle = _bundle()
     ref = await store_bundle(fake_files, workspace, name, bundle)
     entity_client.entities[(workspace, name)] = MetricBundleEntity(
@@ -139,7 +93,8 @@ async def test_resolve_converts_inline_metric_to_runtime_bundle() -> None:
 
 
 async def test_resolve_loads_referenced_bundle() -> None:
-    fake_files = _FakeFiles()
+    files_service = InMemoryFilesService()
+    fake_files = files_service.client()
     entity_client = _FakeEntityClient()
     stored = await _stored(fake_files, entity_client, "default", "exact")
 
@@ -155,7 +110,8 @@ async def test_resolve_loads_referenced_bundle() -> None:
 
 
 async def test_resolve_mixes_refs_and_inline_preserving_order() -> None:
-    fake_files = _FakeFiles()
+    files_service = InMemoryFilesService()
+    fake_files = files_service.client()
     entity_client = _FakeEntityClient()
     await _stored(fake_files, entity_client, "default", "exact")
     inline = _metric_inline()
@@ -187,7 +143,7 @@ async def test_resolve_missing_metric_raises_clear_error() -> None:
             [MetricRef(root="default/no-such-metric")],
             workspace="default",
             entity_client=_FakeEntityClient(),
-            files_client=_FakeFiles(),
+            files_client=InMemoryFilesService().client(),
         )
 
 
@@ -197,7 +153,7 @@ async def test_resolve_ref_without_entity_client_raises() -> None:
             [MetricRef(root="default/exact")],
             workspace="default",
             entity_client=None,
-            files_client=_FakeFiles(),
+            files_client=InMemoryFilesService().client(),
         )
 
 

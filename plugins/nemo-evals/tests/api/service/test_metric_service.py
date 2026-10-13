@@ -20,9 +20,8 @@ from nemo_evals.shared.metric_bundles.cloudpickle import (
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.entities import ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.filter_ops import FilterOperation
+from nhx.testing.files import InMemoryFilesService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
 _LEGACY_REQUIRED_BUNDLE_JSON = (
@@ -35,54 +34,6 @@ _LEGACY_REQUIRED_BUNDLE_JSON = (
 )
 
 # ---- in-memory fakes -------------------------------------------------------
-
-
-class _FakeDownloadResponse:
-    def __init__(self, content: bytes) -> None:
-        self._content = content
-
-    async def read(self) -> bytes:
-        return self._content
-
-
-class _FakeFiles(AsyncFilesClient):
-    def __init__(self) -> None:
-        self._store: dict[tuple[str, str], dict[str, bytes]] = {}
-
-    async def create_fileset(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        workspace: str | None = None,
-        body: CreateFilesetRequest,
-        exist_ok: bool = False,
-    ) -> object:
-        del exist_ok
-        self._store.setdefault((workspace or "default", body.name), {})
-        return object()
-
-    async def delete_fileset(self, *, workspace: str | None = None, name: str) -> object:  # ty: ignore[invalid-attribute-override]
-        self._store.pop((workspace or "default", name), None)
-        return object()
-
-    async def upload_file(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        content: bytes,
-        path: str,
-        name: str,
-        workspace: str | None = None,
-    ) -> object:
-        self._store.setdefault((workspace or "default", name), {})[path] = bytes(content)
-        return object()
-
-    async def download_file(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        path: str,
-        name: str,
-        workspace: str | None = None,
-    ) -> _FakeDownloadResponse:
-        return _FakeDownloadResponse(self._store[(workspace or "default", name)][path])
 
 
 class _FakeEntityClient:
@@ -148,8 +99,8 @@ class _FakeEntityClient:
 
 
 @pytest.fixture
-def fake_files() -> _FakeFiles:
-    return _FakeFiles()
+def fake_files() -> InMemoryFilesService:
+    return InMemoryFilesService()
 
 
 @pytest.fixture
@@ -158,8 +109,8 @@ def fake_entity_client() -> _FakeEntityClient:
 
 
 @pytest.fixture
-def service(fake_files: _FakeFiles, fake_entity_client: _FakeEntityClient) -> MetricService:
-    return MetricService(fake_entity_client, fake_files)
+def service(fake_files: InMemoryFilesService, fake_entity_client: _FakeEntityClient) -> MetricService:
+    return MetricService(fake_entity_client, fake_files.client())
 
 
 def _bundle(metric=None) -> MetricInline:
@@ -196,7 +147,7 @@ async def test_create_stores_bundle_and_indexes_entity(
     assert created.bundle_ref.startswith("default/metric-bundle.")
     assert created.description == bundle.metadata.description
     assert created.labels == bundle.metadata.labels
-    assert _fileset_of(service, created.bundle_ref) in fake_files._store
+    assert _fileset_of(service, created.bundle_ref) in fake_files.filesets
     assert "required" not in entity.model_dump(mode="json")["outputs"][0]
     assert "required" not in created.model_dump(mode="json")["outputs"][0]
 
@@ -220,7 +171,7 @@ async def test_create_rejects_duplicate_without_clobbering_existing(service: Met
     with pytest.raises(ValueError, match="already exists"):
         await service.create_metric("exact", _bundle(), workspace="default")
 
-    assert _fileset_of(service, first.bundle_ref) in fake_files._store
+    assert _fileset_of(service, first.bundle_ref) in fake_files.filesets
 
 
 async def test_get_returns_none_when_missing(service: MetricService) -> None:
@@ -232,7 +183,7 @@ async def test_delete_removes_entity_and_bundle(service: MetricService, fake_fil
 
     assert await service.delete_metric("default", "m") is True
     assert await service.get_metric("default", "m") is None
-    assert _fileset_of(service, created.bundle_ref) not in fake_files._store
+    assert _fileset_of(service, created.bundle_ref) not in fake_files.filesets
 
 
 async def test_delete_returns_false_when_missing(service: MetricService) -> None:
@@ -263,7 +214,7 @@ async def test_list_returns_workspace_metrics(service: MetricService) -> None:
 
 
 async def test_store_derived_metric_names_by_digest_and_marks_derived(
-    service: MetricService, fake_files: _FakeFiles, fake_entity_client: _FakeEntityClient
+    service: MetricService, fake_files: InMemoryFilesService, fake_entity_client: _FakeEntityClient
 ) -> None:
     from nemo_evals.api.service.metric_service import _MAX_ENTITY_NAME_LENGTH
 
@@ -275,7 +226,7 @@ async def test_store_derived_metric_names_by_digest_and_marks_derived(
     assert len(name) <= _MAX_ENTITY_NAME_LENGTH
     entity = fake_entity_client.entities[("default", name)]
     assert entity.derived is True
-    assert _fileset_of(service, entity.bundle_ref) in fake_files._store
+    assert _fileset_of(service, entity.bundle_ref) in fake_files.filesets
 
 
 async def test_store_derived_metric_distinguishes_full_contract(
@@ -293,7 +244,7 @@ async def test_store_derived_metric_distinguishes_full_contract(
 
 
 async def test_store_derived_metric_is_content_addressed_dedup(
-    service: MetricService, fake_files: _FakeFiles, fake_entity_client: _FakeEntityClient
+    service: MetricService, fake_files: InMemoryFilesService, fake_entity_client: _FakeEntityClient
 ) -> None:
     bundle = _bundle()
 
@@ -302,11 +253,11 @@ async def test_store_derived_metric_is_content_addressed_dedup(
 
     assert first.root == second.root
     assert len(fake_entity_client.entities) == 1
-    assert len(fake_files._store) == 1
+    assert len(fake_files.filesets) == 1
 
 
 async def test_store_derived_metric_preserves_legacy_required_identity_and_bytes(
-    service: MetricService, fake_files: _FakeFiles, fake_entity_client: _FakeEntityClient
+    service: MetricService, fake_files: InMemoryFilesService, fake_entity_client: _FakeEntityClient
 ) -> None:
     legacy = _legacy_required_bundle()
     explicit_required = legacy.model_copy(update={"outputs": [legacy.outputs[0].model_copy(update={"required": True})]})
@@ -326,7 +277,7 @@ async def test_store_derived_metric_preserves_legacy_required_identity_and_bytes
     _, _, name = first.root.partition("/")
     entity = fake_entity_client.entities[("default", name)]
     workspace, fileset = _fileset_of(service, entity.bundle_ref)
-    assert fake_files._store[(workspace, fileset)]["bundle.json"] == _LEGACY_REQUIRED_BUNDLE_JSON.encode("utf-8")
+    assert fake_files.filesets[(workspace, fileset)]["bundle.json"] == _LEGACY_REQUIRED_BUNDLE_JSON.encode("utf-8")
 
 
 async def test_list_excludes_derived_by_default(service: MetricService, fake_entity_client: _FakeEntityClient) -> None:
@@ -339,7 +290,7 @@ async def test_list_excludes_derived_by_default(service: MetricService, fake_ent
 
 async def test_create_refuses_cloudpickle_metric_by_default_and_stores_nothing(
     service: MetricService,
-    fake_files: _FakeFiles,
+    fake_files: InMemoryFilesService,
     fake_entity_client: _FakeEntityClient,
     detonating_cloudpickle_metric: dict,
 ) -> None:
@@ -348,7 +299,7 @@ async def test_create_refuses_cloudpickle_metric_by_default_and_stores_nothing(
             "custom", MetricInline.model_validate(detonating_cloudpickle_metric), workspace="default"
         )
 
-    assert not fake_files._store
+    assert not fake_files.filesets
     assert not fake_entity_client.entities
 
 

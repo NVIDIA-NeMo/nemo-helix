@@ -26,60 +26,11 @@ from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.entities import ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.filter_ops import FilterOperation
+from nhx.testing.files import InMemoryFilesService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
 # ---- in-memory fakes -------------------------------------------------------
-
-
-class _FakeDownloadResponse:
-    def __init__(self, content: bytes) -> None:
-        self._content = content
-
-    async def read(self) -> bytes:
-        return self._content
-
-
-class _FakeFiles(AsyncFilesClient):
-    def __init__(self) -> None:
-        self._store: dict[tuple[str, str], dict[str, bytes]] = {}
-
-    async def create_fileset(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        workspace: str | None = None,
-        body: CreateFilesetRequest,
-        exist_ok: bool = False,
-    ) -> object:
-        del exist_ok
-        self._store.setdefault((workspace or "default", body.name), {})
-        return object()
-
-    async def delete_fileset(self, *, workspace: str | None = None, name: str) -> object:  # ty: ignore[invalid-attribute-override]
-        self._store.pop((workspace or "default", name), None)
-        return object()
-
-    async def upload_file(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        content: bytes,
-        path: str,
-        name: str,
-        workspace: str | None = None,
-    ) -> object:
-        self._store.setdefault((workspace or "default", name), {})[path] = bytes(content)
-        return object()
-
-    async def download_file(  # ty: ignore[invalid-attribute-override]
-        self,
-        *,
-        path: str,
-        name: str,
-        workspace: str | None = None,
-    ) -> _FakeDownloadResponse:
-        return _FakeDownloadResponse(self._store[(workspace or "default", name)][path])
 
 
 class _FakeEntityClient:
@@ -165,7 +116,8 @@ class _MetricsRouteHarness:
 def metrics_route_harness() -> Iterator[_MetricsRouteHarness]:
     app = FastAPI()
     app.include_router(metrics_routes.router, prefix="/v2/workspaces/{workspace}")
-    fake_files = _FakeFiles()
+    files_service = InMemoryFilesService()
+    fake_files = files_service.client()
     entity_client = _FakeEntityClient()
     service = MetricService(entity_client, fake_files)
     app.dependency_overrides[get_metric_service] = lambda: service

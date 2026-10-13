@@ -7,14 +7,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
+import respx
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
@@ -51,17 +52,11 @@ from nemo_evals.jobs.publication_spec import (
 )
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
-from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
-from nemo_helix_plugin.intake.types import (
-    AtifCreateRequest,
-    EvaluationPatchRequest,
-    EvaluatorResultCreateRequest,
-    ListTracesQueryParams,
-)
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nhx.testing.intake import INTAKE_TEST_BASE_URL, InMemoryIntakeService
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary, RunMetadata
 from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
@@ -86,7 +81,6 @@ _INLINE_METRIC = MetricInline.model_validate(
 )
 
 #: Aliased because `_FakeTraces` defines a `list` method, which shadows the builtin in class scope.
-_SessionIds = list[str]
 
 
 def _response(status: int) -> httpx.Response:
@@ -97,159 +91,14 @@ def _response(status: int) -> httpx.Response:
 # --- fakes ------------------------------------------------------------------
 
 
-class _FakeTraces:
-    def __init__(self, calls: _SessionIds) -> None:
-        self._calls = calls
-
-    def list(self, *, workspace: str, filter: dict[str, Any]) -> AsyncIterator[object]:  # noqa: A002
-        session_id = filter["session_id"]
-        self._calls.append(session_id)
-
-        async def _gen() -> AsyncIterator[object]:
-            yield SimpleNamespace(session_id=session_id, root_span_id=f"span:{session_id}")
-
-        return _gen()
-
-
-class _FakeEvaluations:
-    def __init__(
-        self,
-        *,
-        missing: bool = False,
-        error: Exception | None = None,
-        patch_error: Exception | None = None,
-    ) -> None:
-        self.missing = missing
-        self.error = error
-        self.patch_error = patch_error
-        self.retrieved: _SessionIds = []
-        self.patched: list[dict[str, Any]] = []
-        self.metadata: dict[str, str] = {"eval_config_fileset": "fs-1"}
-
-    async def retrieve(self, name: str, *, workspace: str | None = None) -> object:
-        self.retrieved.append(name)
-        if self.error is not None:
-            raise self.error
-        if self.missing:
-            raise NotFoundError(_response(404))
-        return SimpleNamespace(name=name, metadata=dict(self.metadata))
-
-    async def patch(self, name: str, *, workspace: str | None = None, **kwargs: Any) -> object:
-        if self.patch_error is not None:
-            raise self.patch_error
-        self.patched.append({"name": name, **kwargs})
-        return SimpleNamespace(name=name)
-
-
-class _FakeIngest:
-    def __init__(self, calls: list[dict[str, Any]], *, error: Exception | None = None, delay_sec: float = 0.0) -> None:
-        self._calls = calls
-        self._error = error
-        self._delay_sec = delay_sec
-        self.loop: asyncio.AbstractEventLoop | None = None
-
-    async def create(self, **kwargs: Any) -> None:
-        self.loop = asyncio.get_running_loop()
-        if self._delay_sec:
-            await asyncio.sleep(self._delay_sec)
-        if self._error is not None:
-            raise self._error
-        self._calls.append(kwargs)
-
-
-class _FakePaginatedResponse:
-    def __init__(self, items: AsyncIterator[object]) -> None:
-        self._items = items
-
-    def items(self) -> AsyncIterator[object]:
-        return self._items
-
-
-class _FakeClient(AsyncIntakeClient):
-    """Minimal stand-in for the typed Intake client publication touches."""
-
-    def __init__(
-        self,
-        *,
-        missing_evaluation: bool = False,
-        ingest_error: Exception | None = None,
-        preflight_error: Exception | None = None,
-        patch_error: Exception | None = None,
-        ingest_delay_sec: float = 0.0,
-    ) -> None:
-        self._workspace = "default"
-        self._http = httpx.AsyncClient()
-        self.atif_calls: list[dict[str, Any]] = []
-        self.eval_result_calls: list[dict[str, Any]] = []
-        self.trace_calls: _SessionIds = []
-        self.with_http_client_calls = 0
-        self.evaluations = _FakeEvaluations(missing=missing_evaluation, error=preflight_error, patch_error=patch_error)
-        self._intake = SimpleNamespace(
-            ingest=SimpleNamespace(atif=_FakeIngest(self.atif_calls, error=ingest_error, delay_sec=ingest_delay_sec)),
-            evaluator_results=_FakeIngest(self.eval_result_calls),
-            traces=_FakeTraces(self.trace_calls),
-        )
-
-    @property
-    def intake(self) -> SimpleNamespace:  # ty: ignore[invalid-property-type-override]
-        return self._intake
-
-    def with_http_client(self, http_client: httpx.AsyncClient) -> _FakeClient:
-        del http_client
-        self.with_http_client_calls += 1
-        return self
-
-    async def get_evaluation(self, *, workspace: str | None = None, name: str) -> object:  # ty: ignore[invalid-attribute-override]
-        result = await self.evaluations.retrieve(name, workspace=workspace)
-        return SimpleNamespace(data=lambda: result)
-
-    async def patch_evaluation(  # ty: ignore[invalid-attribute-override]
-        self, *, workspace: str | None = None, name: str, body: EvaluationPatchRequest
-    ) -> object:
-        result = await self.evaluations.patch(
-            name,
-            workspace=workspace,
-            **body.model_dump(mode="json", exclude_none=True),
-        )
-        return SimpleNamespace(data=lambda: result)
-
-    async def create_atif(self, *, workspace: str | None = None, body: AtifCreateRequest) -> object:  # ty: ignore[invalid-attribute-override]
-        payload = dict(body.root)
-        payload["workspace"] = workspace or self.workspace
-        await self.intake.ingest.atif.create(**payload)
-        return SimpleNamespace(data=lambda: None)
-
-    async def create_evaluator_result(  # ty: ignore[invalid-attribute-override]
-        self, *, workspace: str | None = None, body: EvaluatorResultCreateRequest
-    ) -> object:
-        payload = body.model_dump(mode="json", exclude_none=True)
-        payload["workspace"] = workspace or self.workspace
-        result = await self.intake.evaluator_results.create(**payload)
-        return SimpleNamespace(data=lambda: result)
-
-    async def list_traces(  # ty: ignore[invalid-attribute-override]
-        self, *, workspace: str | None = None, query_params: ListTracesQueryParams | None = None
-    ) -> _FakePaginatedResponse:
-        params = query_params or {}
-        return _FakePaginatedResponse(
-            self.intake.traces.list(
-                workspace=workspace or self.workspace or "", filter=dict(params.get("filter") or {})
-            )
-        )
-
-
-def _client(**kwargs: Any) -> _FakeClient:
-    return _FakeClient(**kwargs)
-
-
-def _fake_intake_from_client(client: _FakeClient) -> _FakeClient:
-    return client
-
-
-@pytest.fixture(autouse=True)
-def _preserve_fake_intake_clients(mocker: MockerFixture) -> None:
-    mocker.patch("nemo_evals.jobs.agent_evaluate.AsyncIntakeClient.from_client", side_effect=_fake_intake_from_client)
-    mocker.patch("nemo_evals.jobs.evaluate.AsyncIntakeClient.from_client", side_effect=_fake_intake_from_client)
+@pytest.fixture
+def intake() -> Iterator[InMemoryIntakeService]:
+    """In-memory Intake, also reachable from the fresh HTTP clients publication opens per event loop."""
+    service = InMemoryIntakeService()
+    service.evaluation_metadata = {"eval_config_fileset": "fs-1"}
+    with respx.mock(assert_all_called=False) as router:
+        router.route(host=urlsplit(INTAKE_TEST_BASE_URL).hostname).mock(side_effect=service)
+        yield service
 
 
 def _result() -> AgentEvalResult:
@@ -280,7 +129,9 @@ def _result() -> AgentEvalResult:
     )
 
 
-def _publish(client: _FakeClient | None, *, required: bool = True, agent_name: str | None = "a") -> PublicationOutcome:
+def _publish(
+    client: AsyncIntakeClient | None, *, required: bool = True, agent_name: str | None = "a"
+) -> PublicationOutcome:
     return publish_agent_eval_result(
         _result(),
         spec=IntakePublicationSpec(evaluation_id="eval-1", agent_name=agent_name, required=required),
@@ -333,7 +184,7 @@ def test_publication_is_optional() -> None:
     assert spec.publication is None
 
 
-def test_publication_defaults_to_required() -> None:
+def test_publication_defaults_to_required(intake: InMemoryIntakeService) -> None:
     spec = _input_spec(
         AgentTarget(agent=NemoAgentToolkitAgent(name="a", url="http://a")),
         PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-1")),
@@ -343,7 +194,7 @@ def test_publication_defaults_to_required() -> None:
     assert spec.publication.intake.required is True
 
 
-def test_agent_name_derived_from_agent_target_needs_no_override() -> None:
+def test_agent_name_derived_from_agent_target_needs_no_override(intake: InMemoryIntakeService) -> None:
     spec = _input_spec(
         AgentTarget(agent=NemoAgentToolkitAgent(name="derived", url="http://a")),
         PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-1")),
@@ -354,7 +205,7 @@ def test_agent_name_derived_from_agent_target_needs_no_override() -> None:
     assert target_agent_identity(spec.target)[0] == "derived"
 
 
-def test_agent_name_derived_from_gym_target_needs_no_override() -> None:
+def test_agent_name_derived_from_gym_target_needs_no_override(intake: InMemoryIntakeService) -> None:
     spec = _input_spec(
         GymRunnerTarget(
             source=GymAgentSource(component="simple_agent", config="conf/agent.yaml"), resources_server="mcqa"
@@ -407,11 +258,13 @@ def test_explicit_agent_name_satisfies_undeducible_targets(target: Target | None
 # --- publishing -------------------------------------------------------------
 
 
-def test_publishes_and_reports_what_landed() -> None:
-    client = _FakeClient()
+def test_publishes_and_reports_what_landed(intake: InMemoryIntakeService, mocker: MockerFixture) -> None:
+    client = intake.client()
+    with_http_client = mocker.spy(AsyncIntakeClient, "with_http_client")
     outcome = _publish(client)
 
-    assert client.with_http_client_calls == 1
+    # Publication runs on a throwaway HTTP client so the injected one never binds to its event loop.
+    assert with_http_client.call_count == 1
     assert outcome.status == HelixJobStatus.COMPLETED
     assert outcome.evaluation_id == "eval-1"
     assert outcome.trial_count == 1
@@ -419,14 +272,14 @@ def test_publishes_and_reports_what_landed() -> None:
     assert outcome.error is None
     # Twice: this path needs the entity to stamp durations onto, and ``publish_to_intake``
     # re-checks for itself because it is public and cannot assume its caller did.
-    assert client.evaluations.retrieved == ["eval-1", "eval-1"]
+    assert [lookup["name"] for lookup in intake.evaluation_lookups] == ["eval-1", "eval-1"]
 
 
-def test_durations_are_stamped_without_dropping_existing_metadata() -> None:
-    client = _FakeClient()
+def test_durations_are_stamped_without_dropping_existing_metadata(intake: InMemoryIntakeService) -> None:
+    client = intake.client()
     _publish(client)
 
-    (patched,) = client.evaluations.patched
+    (patched,) = intake.evaluation_patches
     metadata = patched["metadata"]
     # PATCH replaces the metadata dict wholesale, so stamping the durations has to merge with what
     # the producer already wrote. A blind write would silently drop `eval_config_fileset`.
@@ -435,11 +288,12 @@ def test_durations_are_stamped_without_dropping_existing_metadata() -> None:
     assert float(metadata[PUBLISH_DURATION_KEY]) >= 0
 
 
-def test_a_started_at_only_result_does_not_count_publish_time_as_run_time() -> None:
+def test_a_started_at_only_result_does_not_count_publish_time_as_run_time(intake: InMemoryIntakeService) -> None:
     # A row-eval result carries no `duration_sec`, so the run's length is derived from `started_at`.
     # Deriving it after the publish instead of before would fold the publish into the run.
     publish_sec = 0.3
-    client = _FakeClient(ingest_delay_sec=publish_sec)
+    intake.atif_delay_sec = publish_sec
+    client = intake.client()
     result = _result()
     result.metadata.started_at = datetime.now(UTC)
 
@@ -451,16 +305,15 @@ def test_a_started_at_only_result_does_not_count_publish_time_as_run_time() -> N
         intake=client,
     )
 
-    (patched,) = client.evaluations.patched
+    (patched,) = intake.evaluation_patches
     metadata = patched["metadata"]
     assert float(metadata[PUBLISH_DURATION_KEY]) >= publish_sec
     assert float(metadata[EVAL_DURATION_KEY]) < publish_sec / 2
 
 
-def test_a_failed_duration_stamp_does_not_fail_the_publish() -> None:
-    client = _FakeClient(
-        patch_error=NemoTransportError(httpx.ConnectError("patch failed", request=httpx.Request("PATCH", "http://x")))
-    )
+def test_a_failed_duration_stamp_does_not_fail_the_publish(intake: InMemoryIntakeService) -> None:
+    intake.patch_failure = httpx.ConnectError("patch failed")
+    client = intake.client()
     outcome = _publish(client, required=True)
 
     # The durations are informational and the trials already landed, so losing them must not turn a
@@ -470,34 +323,32 @@ def test_a_failed_duration_stamp_does_not_fail_the_publish() -> None:
     assert outcome.error is None
 
 
-def test_outcome_does_not_leak_experiment_id() -> None:
-    outcome = _publish(_client())
+def test_outcome_does_not_leak_experiment_id(intake: InMemoryIntakeService) -> None:
+    outcome = _publish(intake.client())
     assert "experiment_id" not in outcome.model_dump()
 
 
-def test_stamps_the_run_start_time_so_republish_is_idempotent() -> None:
-    client = _FakeClient()
+def test_stamps_the_run_start_time_so_republish_is_idempotent(intake: InMemoryIntakeService) -> None:
+    client = intake.client()
     _publish(client)
-    assert client.atif_calls[0]["steps"][0]["timestamp"] == STARTED_AT
+    assert datetime.fromisoformat(intake.atif_requests[0]["steps"][0]["timestamp"]) == STARTED_AT
 
 
-def test_missing_evaluation_fails_before_any_ingest() -> None:
-    client = _FakeClient(missing_evaluation=True)
+def test_missing_evaluation_fails_before_any_ingest(intake: InMemoryIntakeService) -> None:
+    intake.evaluation_exists = False
+    client = intake.client()
     with pytest.raises(PublicationFailedError) as excinfo:
         _publish(client)
 
-    assert client.atif_calls == []
+    assert intake.atif_requests == []
     outcome = excinfo.value.outcome
     assert outcome.status == HelixJobStatus.ERROR
     assert "does not exist" in (outcome.error or "")
 
 
-def test_required_failure_raises_with_partial_outcome() -> None:
-    client = _FakeClient(
-        ingest_error=NemoTransportError(
-            httpx.ConnectError("ingest failed", request=httpx.Request("POST", "http://platform/intake"))
-        )
-    )
+def test_required_failure_raises_with_partial_outcome(intake: InMemoryIntakeService) -> None:
+    intake.atif_failure = httpx.ConnectError("ingest failed")
+    client = intake.client()
     with pytest.raises(PublicationFailedError) as excinfo:
         _publish(client)
 
@@ -506,23 +357,21 @@ def test_required_failure_raises_with_partial_outcome() -> None:
     assert outcome.trial_count == 0
 
 
-def test_optional_failure_returns_outcome_instead_of_raising() -> None:
-    client = _FakeClient(
-        ingest_error=NemoTransportError(
-            httpx.ConnectError("ingest failed", request=httpx.Request("POST", "http://platform/intake"))
-        )
-    )
+def test_optional_failure_returns_outcome_instead_of_raising(intake: InMemoryIntakeService) -> None:
+    intake.atif_failure = httpx.ConnectError("ingest failed")
+    client = intake.client()
     outcome = _publish(client, required=False)
 
     assert outcome.status == HelixJobStatus.ERROR
     assert outcome.error
 
 
-def test_unexpected_failure_still_honours_required_false() -> None:
+def test_unexpected_failure_still_honours_required_false(intake: InMemoryIntakeService) -> None:
     # `required=False` promises the evaluation survives a failed publish. An error outside the known
     # taxonomy — a bug, a transport quirk, anything unforeseen — must not be the one case that
     # escapes and fails the job anyway.
-    client = _FakeClient(preflight_error=ValueError("something nobody planned for"))
+    intake.evaluation_failure = ValueError("something nobody planned for")
+    client = intake.client()
     outcome = _publish(client, required=False)
 
     assert outcome.status == HelixJobStatus.ERROR
@@ -530,8 +379,9 @@ def test_unexpected_failure_still_honours_required_false() -> None:
     assert "something nobody planned for" in (outcome.error or "")
 
 
-def test_unexpected_failure_fails_the_job_when_required() -> None:
-    client = _FakeClient(preflight_error=ValueError("something nobody planned for"))
+def test_unexpected_failure_fails_the_job_when_required(intake: InMemoryIntakeService) -> None:
+    intake.evaluation_failure = ValueError("something nobody planned for")
+    client = intake.client()
     with pytest.raises(PublicationFailedError) as excinfo:
         _publish(client)
 
@@ -617,9 +467,11 @@ def _job_spec(*, required: bool = True) -> AgentEvalSpec:
     )
 
 
-def test_job_does_not_publish_without_a_publication_spec(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_job_does_not_publish_without_a_publication_spec(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
-    client = _FakeClient()
+    client = intake.client()
 
     spec = AgentEvalSpec(
         tasks=[ResolvedTask(id="task-1", spec=ResolvedEvaluatorTaskDefinition(kind="evaluator", intent="Answer."))],
@@ -628,13 +480,15 @@ def test_job_does_not_publish_without_a_publication_spec(tmp_path: Path, mocker:
     result = AsyncAgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), async_client=client)
 
     assert "publication" not in result
-    assert client.atif_calls == []
+    assert intake.atif_requests == []
 
 
-def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_job_publishes_through_the_real_sync_bridge(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     evaluator = _FakeEvaluator()
     mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=evaluator)
-    client = _FakeClient()
+    client = intake.client()
     ctx = _job_context(tmp_path)
 
     result = AsyncAgentEvalJob().run(_job_spec().model_dump(), ctx=ctx, async_client=client)
@@ -643,7 +497,7 @@ def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: Mock
     # reusing the same injected SDK. That crossing is what raises "Event loop is closed" when the
     # client is bound to a dead loop (cf. nhx-1hr.2). It does not distinguish `run_sync` from a bare
     # `asyncio.run` — no loop is running at this point, so both behave the same here.
-    ingest_loop = client.intake.ingest.atif.loop
+    ingest_loop = intake.atif_loops[0]
     assert evaluator.loop is not None
     assert evaluator.loop.is_closed()
     assert ingest_loop is not None
@@ -657,14 +511,17 @@ def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: Mock
         "evaluator_result_count": 1,
         "skipped": [],
     }
-    assert len(client.atif_calls) == 1
+    assert len(intake.atif_requests) == 1
 
 
-def test_job_keeps_the_bundle_when_required_publication_fails(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_job_keeps_the_bundle_when_required_publication_fails(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     # Publication is the only step that can fail the job, so it runs last: the bundle and summary
     # artifacts must survive for a later re-publish.
     mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
-    client = _FakeClient(missing_evaluation=True)
+    intake.evaluation_exists = False
+    client = intake.client()
     ctx = _job_context(tmp_path)
 
     with pytest.raises(PublicationFailedError):
@@ -674,9 +531,12 @@ def test_job_keeps_the_bundle_when_required_publication_fails(tmp_path: Path, mo
     assert (ctx.storage.persistent / "results" / "agent-eval-results").exists()
 
 
-def test_job_completes_when_optional_publication_fails(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_job_completes_when_optional_publication_fails(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
-    client = _FakeClient(missing_evaluation=True)
+    intake.evaluation_exists = False
+    client = intake.client()
 
     result = AsyncAgentEvalJob().run(
         _job_spec(required=False).model_dump(),
@@ -689,7 +549,9 @@ def test_job_completes_when_optional_publication_fails(tmp_path: Path, mocker: M
     assert "does not exist" in result["publication"]["error"]
 
 
-def test_job_publication_requires_a_run_start_time(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_job_publication_requires_a_run_start_time(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     # Without `started_at` the trajectory would fall back to Intake's per-request ingest clock, and
     # re-publishing would duplicate spans instead of replacing them. Refuse rather than write rows
     # that can never be collapsed.
@@ -698,7 +560,7 @@ def test_job_publication_requires_a_run_start_time(tmp_path: Path, mocker: Mocke
     result = AsyncAgentEvalJob().run(
         _job_spec(required=False).model_dump(),
         ctx=_job_context(tmp_path),
-        async_client=_FakeClient(),
+        async_client=intake.client(),
     )
 
     assert result["publication"]["status"] == HelixJobStatus.ERROR
@@ -747,23 +609,27 @@ def _evaluate_spec(*, required: bool = True, **intake: Any) -> EvaluateSpec:
     )
 
 
-def test_evaluate_job_does_not_publish_without_a_publication_spec(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_evaluate_job_does_not_publish_without_a_publication_spec(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
-    client = _FakeClient()
+    client = intake.client()
 
     spec = EvaluateSpec(metrics=[_INLINE_METRIC], dataset=[{"question": "2+2?"}])
     result = AsyncEvaluateJob().run(spec.model_dump(), ctx=_job_context(tmp_path, job_id="job-1"), async_client=client)
 
     assert "publication" not in result
-    assert client.atif_calls == []
+    assert intake.atif_requests == []
 
 
-def test_evaluate_job_persists_the_run_identity_it_published_under(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_evaluate_job_persists_the_run_identity_it_published_under(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     # `EvaluationResult` carries no timings, so without this artifact a re-publish would have to mint
     # a new `started_at` — a different span `start_time` for the same session, which writes a second
     # trajectory rather than replacing the first.
     mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
-    client = _FakeClient()
+    client = intake.client()
     ctx = _job_context(tmp_path, job_id="job-1")
 
     AsyncEvaluateJob().run(_evaluate_spec().model_dump(), ctx=ctx, async_client=client)
@@ -775,15 +641,19 @@ def test_evaluate_job_persists_the_run_identity_it_published_under(tmp_path: Pat
 
     persisted = json.loads((ctx.storage.persistent / "artifacts" / "run-metadata.json").read_text())
     assert persisted["run_id"] == "job-1"
-    published_session = client.atif_calls[0]["session_id"]
+    published_session = intake.atif_requests[0]["session_id"]
     assert published_session.startswith(f"{persisted['run_id']}:")
-    assert client.atif_calls[0]["steps"][0]["timestamp"] == datetime.fromisoformat(persisted["started_at"])
+    assert datetime.fromisoformat(intake.atif_requests[0]["steps"][0]["timestamp"]) == datetime.fromisoformat(
+        persisted["started_at"]
+    )
 
 
-def test_evaluate_job_publishes_rows_through_the_real_sync_bridge(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_evaluate_job_publishes_rows_through_the_real_sync_bridge(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     evaluator = _FakeRowEvaluator()
     mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=evaluator)
-    client = _FakeClient()
+    client = intake.client()
 
     result = AsyncEvaluateJob().run(
         _evaluate_spec().model_dump(),
@@ -795,7 +665,7 @@ def test_evaluate_job_publishes_rows_through_the_real_sync_bridge(tmp_path: Path
     # reusing the same injected SDK. That crossing is what raises "Event loop is closed" when the
     # client is bound to a dead loop. It does not distinguish `run_sync` from a bare `asyncio.run` —
     # no loop is running at this point, so both behave the same here.
-    ingest_loop = client.intake.ingest.atif.loop
+    ingest_loop = intake.atif_loops[0]
     assert evaluator.loop is not None
     assert evaluator.loop.is_closed()
     assert ingest_loop is not None
@@ -803,17 +673,19 @@ def test_evaluate_job_publishes_rows_through_the_real_sync_bridge(tmp_path: Path
 
     assert result["publication"]["status"] == HelixJobStatus.COMPLETED
     assert result["publication"]["trial_count"] == 1
-    assert len(client.atif_calls) == 1
+    assert len(intake.atif_requests) == 1
     # The run identity is the job id, so re-publishing the same job replaces rather than duplicates.
     # The trial half is the row content hash, stable across runs and dataset reorderings.
-    session_id = client.atif_calls[0]["session_id"]
+    session_id = intake.atif_requests[0]["session_id"]
     assert session_id.startswith("job-1:")
     assert len(session_id.removeprefix("job-1:")) == 64
 
 
-def test_evaluate_job_uses_the_configured_test_case_id_column(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_evaluate_job_uses_the_configured_test_case_id_column(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
-    client = _FakeClient()
+    client = intake.client()
 
     AsyncEvaluateJob().run(
         _evaluate_spec(test_case_id_field="qid").model_dump(),
@@ -821,15 +693,17 @@ def test_evaluate_job_uses_the_configured_test_case_id_column(tmp_path: Path, mo
         async_client=client,
     )
 
-    assert client.atif_calls[0]["session_id"] == "job-1:q-1"
-    assert client.atif_calls[0]["evaluation_context"]["test_case_name"] == "q-1"
+    assert intake.atif_requests[0]["session_id"] == "job-1:q-1"
+    assert intake.atif_requests[0]["evaluation_context"]["test_case_name"] == "q-1"
 
 
-def test_evaluate_job_without_a_job_id_cannot_publish(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_evaluate_job_without_a_job_id_cannot_publish(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     # A row result carries no run id of its own, so without a job id there is nothing stable to key
     # sessions on.
     mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
-    client = _FakeClient()
+    client = intake.client()
 
     result = AsyncEvaluateJob().run(
         _evaluate_spec(required=False).model_dump(),
@@ -839,12 +713,14 @@ def test_evaluate_job_without_a_job_id_cannot_publish(tmp_path: Path, mocker: Mo
 
     assert result["publication"]["status"] == HelixJobStatus.ERROR
     assert "job id" in result["publication"]["error"]
-    assert client.atif_calls == []
+    assert intake.atif_requests == []
 
 
-def test_evaluate_job_reports_a_bad_test_case_id_column(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_evaluate_job_reports_a_bad_test_case_id_column(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
     mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
-    client = _FakeClient()
+    client = intake.client()
 
     result = AsyncEvaluateJob().run(
         _evaluate_spec(required=False, test_case_id_field="missing").model_dump(),
@@ -854,7 +730,7 @@ def test_evaluate_job_reports_a_bad_test_case_id_column(tmp_path: Path, mocker: 
 
     assert result["publication"]["status"] == HelixJobStatus.ERROR
     assert "missing" in result["publication"]["error"]
-    assert client.atif_calls == []
+    assert intake.atif_requests == []
 
 
 def test_row_target_without_a_derivable_agent_name_is_rejected_at_submit() -> None:

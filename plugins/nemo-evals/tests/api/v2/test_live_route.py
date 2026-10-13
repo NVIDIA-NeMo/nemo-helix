@@ -22,14 +22,16 @@ from nemo_evals.api.schemas import MetricInline
 from nemo_evals.api.v2 import live as live_routes
 from nemo_evals.entities import MetricBundleEntity
 from nemo_evals.jobs import metric_resolution
+from nemo_evals.metric_storage import parse_bundle_ref
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import get_entity_client
-from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nhx.testing.files import InMemoryFilesService
+from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk import inference as sdk_inference
 from nhx_evals_sdk.execution import benchmark_execution
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
@@ -331,14 +333,16 @@ def _judge_metric(secret: str | None) -> dict[str, Any]:
     return MetricInline.model_validate_json(bundle.model_dump_json()).model_dump(mode="json")
 
 
-def _app_with_secrets(make_secrets_client, secrets: dict[tuple[str, str], str]) -> tuple[FastAPI, object]:
+def _app_with_secrets(
+    make_secrets_service: type[InMemorySecretsService], secrets: dict[tuple[str, str], str]
+) -> tuple[FastAPI, InMemorySecretsService]:
     app = _build_app()
-    secrets_client = make_secrets_client(secrets)
-    app.dependency_overrides[get_nemo_client] = lambda: secrets_client
-    return app, secrets_client
+    secrets_service = make_secrets_service(secrets)
+    app.dependency_overrides[get_nemo_client] = secrets_service.client
+    return app, secrets_service
 
 
-def test_judge_secret_reaches_the_judge_model(monkeypatch: pytest.MonkeyPatch, make_secrets_client) -> None:
+def test_judge_secret_reaches_the_judge_model(monkeypatch: pytest.MonkeyPatch, make_secrets_service) -> None:
     """End to end: the route's resolver, not the SDK's env-reading default, supplies the judge key.
 
     The unit tests above exercise the resolver directly; only this one proves it is actually the
@@ -356,7 +360,7 @@ def test_judge_secret_reaches_the_judge_model(monkeypatch: pytest.MonkeyPatch, m
 
     monkeypatch.setattr(sdk_inference, "make_inference_request", fake_judge_inference)
 
-    app, secrets_client = _app_with_secrets(make_secrets_client, {("default", "judge-key"): "sk-judge-secret"})
+    app, secrets_service = _app_with_secrets(make_secrets_service, {("default", "judge-key"): "sk-judge-secret"})
     with TestClient(app) as client:
         resp = client.post(
             _BASE,
@@ -368,11 +372,11 @@ def test_judge_secret_reaches_the_judge_model(monkeypatch: pytest.MonkeyPatch, m
         )
 
     assert resp.status_code == 200, resp.text
-    assert secrets_client.lookups == [("default", "judge-key")]
+    assert secrets_service.lookups == [("default", "judge-key")]
     assert seen_keys and set(seen_keys) == {"sk-judge-secret"}
 
 
-def test_missing_judge_secret_fails_instead_of_scoring(monkeypatch: pytest.MonkeyPatch, make_secrets_client) -> None:
+def test_missing_judge_secret_fails_instead_of_scoring(monkeypatch: pytest.MonkeyPatch, make_secrets_service) -> None:
     """An unresolvable judge key must not come back as a score on a 200."""
 
     async def fake_judge_inference(model, request, max_retries=3, **kwargs) -> dict[str, Any]:
@@ -381,7 +385,7 @@ def test_missing_judge_secret_fails_instead_of_scoring(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(sdk_inference, "make_inference_request", fake_judge_inference)
 
-    app, secrets_client = _app_with_secrets(make_secrets_client, {})
+    app, secrets_service = _app_with_secrets(make_secrets_service, {})
     with TestClient(app) as client:
         resp = client.post(
             _BASE,
@@ -396,7 +400,7 @@ def test_missing_judge_secret_fails_instead_of_scoring(monkeypatch: pytest.Monke
     # partial one, and it must not come back as a 200.
     assert resp.status_code == 502, resp.text
     assert "judge-key" in resp.text
-    assert secrets_client.lookups == [("default", "judge-key")]
+    assert secrets_service.lookups == [("default", "judge-key")]
 
 
 def test_one_failing_metric_does_not_hide_the_others(client: TestClient) -> None:
@@ -447,23 +451,12 @@ def test_too_many_model_backed_metrics_is_rejected(client: TestClient) -> None:
 # ---- stored metric references ----------------------------------------------
 
 
-class _StoredBundleResponse:
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
-
-    async def read(self) -> bytes:
-        return self._payload
-
-
-class _FakeBundleFiles(AsyncFilesClient):
-    """Serves one stored metric bundle, keyed the way `load_bundle` addresses it."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
-
-    async def download_file(self, *, path: str, name: str, workspace: str | None = None) -> _StoredBundleResponse:  # ty: ignore[invalid-attribute-override]
-        del path, name, workspace
-        return _StoredBundleResponse(self._payload)
+def _files_serving(bundle_ref: str, payload: bytes) -> InMemoryFilesService:
+    """An in-memory Files service holding *payload* where *bundle_ref* points."""
+    workspace, fileset, path = parse_bundle_ref(bundle_ref)
+    files = InMemoryFilesService()
+    files.filesets[(workspace, fileset)] = {path: payload}
+    return files
 
 
 class _FakeBundleEntities(EntityClient):
@@ -506,9 +499,8 @@ def test_stored_metric_reference_is_resolved_and_scored(monkeypatch: pytest.Monk
     entities = _FakeBundleEntities(entity)
     # The Files client is built inside metric_resolution, not in the route module; exact-match
     # carries no model refs, so this stands in for the only client that call actually needs.
-    monkeypatch.setattr(
-        metric_resolution, "client_from_platform", lambda *_args, **_kw: _FakeBundleFiles(payload), raising=True
-    )
+    files = _files_serving(entity.bundle_ref, payload)
+    monkeypatch.setattr(metric_resolution, "client_from_platform", lambda *_args, **_kw: files.client(), raising=True)
 
     app = _build_app()
     app.dependency_overrides[get_entity_client] = lambda: entities
@@ -621,7 +613,7 @@ def test_stored_cloudpickle_metric_is_rejected_by_default(
     monkeypatch.setattr(
         metric_resolution,
         "client_from_platform",
-        lambda *_args, **_kw: _FakeBundleFiles(bundle.model_dump_json().encode()),
+        lambda *_args, **_kw: _files_serving(entity.bundle_ref, bundle.model_dump_json().encode()).client(),
         raising=True,
     )
     app = _build_app()
