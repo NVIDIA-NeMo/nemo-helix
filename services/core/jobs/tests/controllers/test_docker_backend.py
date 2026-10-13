@@ -60,12 +60,14 @@ from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
     HelixJobSecretEnvironmentVariableRef,
     HelixJobStepSpec,
+    StepLifecycle,
 )
 from nhx.core.jobs.controllers.backends.base import (
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_PATH,
+    JobUpdate,
 )
 from nhx.core.jobs.controllers.backends.docker import (
     DEFAULT_VOLUME_PERMISSIONS_IMAGE,
@@ -531,13 +533,17 @@ def test_docker_job_sync_active_missing_container_prefers_terminal_task_over_ttl
 
 
 def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_job_step):
-    """Test that the cancel method stops the container."""
+    """A clean exit while pausing becomes paused without stopping the container again."""
 
     test_job_step.status = HelixJobStatus.PAUSING
+    test_job_step.status_details = {
+        "pause_requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
     container_mock = MagicMock()
     container_mock.id = "16-character-uid"
     container_mock.status = "exited"
-    container_mock.attrs = {"State": {"ExitCode": 0}}  # SIGTERM will set exit code 0 if exited gracefully
+    container_mock.attrs = {"State": {"ExitCode": 75}}
     task_id = uuid.uuid4().hex
     container_mock.labels = owned_container_labels(
         {
@@ -556,6 +562,94 @@ def test_docker_job_sync_pausing_sigterm(docker_job, docker_client_mock, test_jo
     assert update.status == "paused"
     docker_client_mock.containers.get.assert_called_with("job-test-job-id-test-step")
     container_mock.remove.assert_not_called()
+    container_mock.stop.assert_not_called()
+    container_mock.kill.assert_not_called()
+
+
+def _docker_pausing_step(step, *, requested_ago_seconds: int = 0, deadline_seconds: int = 3600):
+    step.status = HelixJobStatus.PAUSING
+    requested_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=requested_ago_seconds)
+    step.status_details = {"pause_requested_at": requested_at.isoformat()}
+    step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=deadline_seconds)
+    return step
+
+
+@pytest.mark.parametrize("exit_code,expected", [(0, HelixJobStatus.COMPLETED), (1, HelixJobStatus.ERROR)])
+def test_docker_job_sync_pausing_exit_code(docker_job, docker_client_mock, test_job_step, exit_code, expected):
+    """Exit 0 while pausing means training finished. Any code other than 0 or 75 is an error."""
+    step = _docker_pausing_step(test_job_step)
+    container_mock = MagicMock()
+    container_mock.status = "exited"
+    container_mock.attrs = {"State": {"ExitCode": exit_code}}
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(step)
+
+    assert update.status == expected
+    container_mock.kill.assert_not_called()
+
+
+def test_docker_job_sync_pausing_deadline_kills_container(docker_job, docker_client_mock, test_job_step):
+    step = _docker_pausing_step(test_job_step, requested_ago_seconds=120, deadline_seconds=60)
+    container_mock = MagicMock()
+    container_mock.status = "running"
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+    container_mock.kill.assert_called_once()
+
+
+def test_docker_job_sync_pausing_without_a_container_is_paused(docker_job, docker_client_mock, test_job_step):
+    """A step paused before its container exists has nothing to wait for."""
+    step = _docker_pausing_step(test_job_step)
+    docker_client_mock.containers.get.side_effect = NotFound("Container not found")
+
+    update = docker_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+
+
+def test_docker_job_sync_pausing_leaves_running_container(docker_job, docker_client_mock, test_job_step):
+    test_job_step.status = HelixJobStatus.PAUSING
+    test_job_step.status_details = {
+        "pause_requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
+    container_mock = MagicMock()
+    container_mock.status = "running"
+    container_mock.attrs = {"State": {"ExitCode": 0}}
+    docker_client_mock.containers.get.side_effect = None
+    docker_client_mock.containers.get.return_value = container_mock
+
+    update = docker_job.sync(test_job_step)
+
+    assert update.status == HelixJobStatus.PAUSING
+    container_mock.stop.assert_not_called()
+    container_mock.kill.assert_not_called()
+
+
+def test_docker_schedule_removes_stopped_container_before_creating(docker_job, docker_client_mock, test_job_step):
+    stopped = MagicMock()
+    stopped.status = "exited"
+    stopped.name = "job-test-job-id-test-step"
+    original = docker_client_mock.containers.get.side_effect
+
+    def get_container(name):
+        if name == "docker123":
+            return original(name)
+        return stopped
+
+    docker_client_mock.containers.get.side_effect = get_container
+    docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+    docker_job._container_run_threadpool.shutdown(wait=True)
+    docker_job._container_run_threadpool = MagicMock()
+
+    stopped.remove.assert_called_once_with(force=True)
+    assert docker_client_mock.containers.create.call_count == 2
 
 
 def test_docker_job_sync_cancelling_sigterm(docker_job, docker_client_mock, test_job_step):
@@ -1817,6 +1911,30 @@ def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_
     assert executor.cancel_scheduling(step) is True
     assert executor.gpu_pool.gpu_to_workload_id[0] is None
     executor._jobs.update_job_step_status.assert_called_once()
+
+
+def test_gpu_sync_releases_allocation_when_step_pauses(mock_nemo_client, docker_client_mock):
+    """A paused step has no container, so its GPU allocation has to be released before resume."""
+    step_id = "paused-step-id"
+    with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
+        mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
+        mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
+        executor = GPUDockerJobBackend(
+            nemo_client=mock_nemo_client,
+            execution_profile_config=DockerJobExecutionProfileConfig(
+                storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
+            ),
+            profile_name="default",
+        )
+        executor._client = docker_client_mock
+
+    executor.gpu_pool.allocate_gpu(step_id)
+    assert executor.gpu_pool.gpu_to_workload_id[0] == step_id
+    step = MagicMock()
+    step.id = step_id
+    with patch.object(executor, "_sync", return_value=JobUpdate(status=HelixJobStatus.PAUSED)):
+        executor.sync(step)
+    assert executor.gpu_pool.gpu_to_workload_id[0] is None
 
 
 def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_nemo_client, docker_client_mock):
