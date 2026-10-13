@@ -13,6 +13,7 @@ import pytest
 import yaml
 from nemo_optimization.backends.optuna.early_stop import maybe_stop_if_target_met
 from nemo_optimization.backends.optuna.study_driver import (
+    StudyDriverError,
     SyntheticTrialEvaluator,
     average_metric_vectors,
     create_sampler,
@@ -20,6 +21,7 @@ from nemo_optimization.backends.optuna.study_driver import (
     resolve_n_trials,
     run_numeric_study,
 )
+from nemo_optimization.candidate import CandidateEvaluationResult
 from nemo_optimization.optimizer_config import MetricDirection
 from optuna.samplers import GridSampler, NSGAIISampler, TPESampler
 from optuna.study import StudyDirection
@@ -212,6 +214,24 @@ def test_run_numeric_study_all_trials_failed(tmp_path: Path) -> None:
         run_numeric_study(payload, tmp_path, AlwaysFailEvaluator(), seed=0)
     assert exc_info.value.trial_count == 2
     assert "simulated trial failure" in str(exc_info.value)
+
+
+def test_run_numeric_study_retains_missing_metric_failure(tmp_path: Path) -> None:
+    class MissingMetricEvaluator:
+        def evaluate(
+            self, *, trial_number: int, suggestions: dict, trial_overlay: dict, rep: int
+        ) -> CandidateEvaluationResult:
+            return CandidateEvaluationResult(aggregate_metrics={})
+
+    payload = _payload()
+    payload["optimizer"]["numeric"]["n_trials"] = 2
+    with pytest.raises(StudyDriverError, match="no completed trials") as exc_info:
+        run_numeric_study(payload, tmp_path, MissingMetricEvaluator(), seed=0)
+
+    assert exc_info.value.trial_count == 2
+    assert "Last evaluation failure: trial=1: Trial 1 rep 0 missing metric scores: ['average_score']" in str(
+        exc_info.value
+    )
 
 
 def test_sanitize_config_for_artifact_redacts_secrets() -> None:

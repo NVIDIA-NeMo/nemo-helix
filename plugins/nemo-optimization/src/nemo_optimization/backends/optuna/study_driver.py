@@ -186,14 +186,14 @@ def run_numeric_study(
                 )
                 for rep in range(config.reps_per_param_set)
             ]
+            rep_scores = [evaluation.aggregate_metrics for evaluation in rep_evaluations]
+            for rep_index, rep_score in enumerate(rep_scores):
+                missing = [name for name in metric_names if name not in rep_score]
+                if missing:
+                    raise StudyDriverError(f"Trial {trial.number} rep {rep_index} missing metric scores: {missing}")
         except (StudyDriverError, CandidateEvaluationError) as exc:
             last_failure = f"trial={trial.number}: {exc}"[:3_000]
             raise
-        rep_scores = [evaluation.aggregate_metrics for evaluation in rep_evaluations]
-        for rep_index, rep_score in enumerate(rep_scores):
-            missing = [name for name in metric_names if name not in rep_score]
-            if missing:
-                raise StudyDriverError(f"Trial {trial.number} rep {rep_index} missing metric scores: {missing}")
 
         trial.set_user_attr(
             "rep_scores",
