@@ -4,7 +4,7 @@
 """``harbor_opensandbox`` runtime: Harbor 0.20 trials in OpenSandbox sandboxes.
 
 Harbor runs as a detached child of the evaluation Job, exactly as the ``sandbox_k8s`` process
-path does, but its environment is ``NemoOpenSandboxEnvironment``. That subclass creates one
+path does, but its environment is ``NemoOpenSandboxEnvironment``. That environment creates one
 OpenSandbox sandbox per trial under a default-deny egress policy and verifies the applied
 policy before the trial starts.
 
@@ -98,7 +98,7 @@ SUPPORTED_NETWORK_POLICIES = ("default_deny",)
 # Module the terminator runs, with the Harbor runner's interpreter, to kill an evaluation's sandboxes.
 CLEANUP_MODULE = "scaled_evals.harbor_opensandbox_cleanup"
 
-# Template kwargs that tune Harbor's adapter without touching isolation. Everything else in the
+# Template kwargs that tune NemoOpenSandboxEnvironment without touching isolation. Everything else in the
 # environment block is set by this backend or rejected.
 _TEMPLATE_ENVIRONMENT_KWARGS = frozenset(
     {"use_server_proxy", "request_timeout_sec", "ready_timeout_sec", "health_check_poll_interval_sec"}
