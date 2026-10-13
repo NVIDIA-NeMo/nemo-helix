@@ -5767,6 +5767,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
+    post:
+      tags:
+      - Jobs
+      summary: Rerun Job
+      description: Rerun a failed job from its surviving storage as a new attempt.
+      operationId: rerun_job_apis_jobs_v2_workspaces__workspace__jobs__job__rerun_post
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: The job cannot be rerun, or its status changed during the request
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
     post:
       tags:

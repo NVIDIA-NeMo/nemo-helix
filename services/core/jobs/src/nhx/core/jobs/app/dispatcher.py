@@ -38,7 +38,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     get_model_id,
     job_artifact_base_path,
 )
-from nhx.core.jobs.app.lifecycle import attempt_can_transition, with_lifecycle_timestamps
+from nhx.core.jobs.app.lifecycle import attempt_can_transition, rerun_status_details, with_lifecycle_timestamps
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
@@ -65,7 +65,7 @@ class StateTransitionConflictError(Exception):
 
 
 class JobOperationConflictError(Exception):
-    """Exception raised when a pause or resume cannot proceed."""
+    """Exception raised when a pause, resume, or rerun cannot proceed."""
 
     def __init__(self, detail: str):
         super().__init__(detail)
@@ -1320,16 +1320,24 @@ class JobDispatcher:
         operations_counter.add(1, attributes={"operation": "cancel_job"})
         return create_platform_job_response(job_entity, attempt)
 
-    async def rerun_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
+    async def rerun_job(
+        self, identifier: str, workspace: str, auth_context: AuthContext | None = None
+    ) -> HelixJobResponse | None:
         """Re-run a job (by name or ID)."""
         job_entity = await self._resolve_job(identifier, workspace)
         if job_entity is None:
             return None
         async with _get_job_mutation_lock(job_entity.name, workspace):
-            return await self._rerun_job_locked(job_entity.name, workspace, expected_id=job_entity.id)
+            return await self._rerun_job_locked(
+                job_entity.name, workspace, expected_id=job_entity.id, auth_context=auth_context
+            )
 
     async def _rerun_job_locked(
-        self, job_name: str, workspace: str, expected_id: str | None = None
+        self,
+        job_name: str,
+        workspace: str,
+        expected_id: str | None = None,
+        auth_context: AuthContext | None = None,
     ) -> HelixJobResponse | None:
         """Re-run a terminal job while holding the per-job mutation lock.
 
@@ -1348,40 +1356,48 @@ class JobDispatcher:
         if attempt is None:
             return None
 
-        # Only allow re-run if the attempt is in a terminal state
-        if attempt.status.is_terminal():
-            seq = attempt.seq + 1
-            # Use short ID prefix to stay within 32 char name limit
-            attempt_ref_id = get_model_id("att")
-            next_attempt = await self.store.create(
-                HelixJobAttempt(
-                    name=attempt_ref_id,
-                    workspace=job_entity.workspace,
-                    job=job_entity.id,
-                    seq=seq,
-                    status=HelixJobStatus.CREATED,
-                    spec=job_entity.spec,
-                    platform_spec=job_entity.platform_spec,
+        # Rerun continues a failed attempt from surviving storage. Other statuses
+        # are a different operation: paused jobs resume, and successful or cancelled
+        # jobs are finished.
+        if attempt.status != HelixJobStatus.ERROR:
+            if attempt.status == HelixJobStatus.PAUSED:
+                detail = f"Cannot rerun job '{job_entity.name}': this job is paused, use resume."
+            else:
+                detail = (
+                    f"Cannot rerun job '{job_entity.name}': rerun applies to a job that ended in error "
+                    f"(current status is '{attempt.status.value}')."
                 )
+            raise JobOperationConflictError(detail)
+
+        previous_details = dict(attempt.status_details or {})
+
+        seq = attempt.seq + 1
+        # Use short ID prefix to stay within 32 char name limit
+        attempt_ref_id = get_model_id("att")
+        next_details = rerun_status_details(previous_details)
+        next_attempt = await self.store.create(
+            HelixJobAttempt(
+                name=attempt_ref_id,
+                workspace=job_entity.workspace,
+                job=job_entity.id,
+                seq=seq,
+                status=HelixJobStatus.CREATED,
+                spec=job_entity.spec,
+                platform_spec=job_entity.platform_spec,
+                status_details=next_details,
             )
-            # Update job with new attempt ID
-            job_entity.current_attempt_id = next_attempt.id
-            job_entity = await self.store.update(job_entity)
-            await self._start_attempt(job_entity, next_attempt)
-            operations_counter.add(1, attributes={"operation": "rerun_job"})
-            return create_platform_job_response(job_entity, next_attempt)
-        else:
-            logger.warning(
-                "Attempt to re-run job not in terminal state",
-                extra={
-                    "job": job_entity.name,
-                    "attempt": attempt.id,
-                    "status": attempt.status,
-                    "workspace": job_entity.workspace,
-                },
-            )
-            operations_counter.add(1, attributes={"operation": "rerun_job"})
-            return create_platform_job_response(job_entity, attempt)
+        )
+        # Update job with new attempt ID. Re-apply the caller's auth context the
+        # same way create does, so the rerun runs as the person who requested it.
+        job_entity.current_attempt_id = next_attempt.id
+        if auth_context is not None:
+            job_entity.with_auth_context(auth_context)
+        job_entity = await self.store.update(job_entity)
+        if auth_context is not None:
+            job_entity.with_auth_context(auth_context)
+        await self._start_attempt(job_entity, next_attempt)
+        operations_counter.add(1, attributes={"operation": "rerun_job"})
+        return create_platform_job_response(job_entity, next_attempt)
 
     async def pause_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
         """Pause a job (by name or ID)."""
@@ -1447,7 +1463,7 @@ class JobDispatcher:
     @staticmethod
     def _resume_conflict_detail(job_name: str, status: HelixJobStatus) -> str:
         if status == HelixJobStatus.ERROR:
-            return f"Cannot resume job '{job_name}': this job failed rather than paused."
+            return f"Cannot resume job '{job_name}': this job failed rather than paused, use rerun."
         if status == HelixJobStatus.COMPLETED:
             return f"Cannot resume job '{job_name}': the job succeeded."
         if status == HelixJobStatus.CANCELLED:
