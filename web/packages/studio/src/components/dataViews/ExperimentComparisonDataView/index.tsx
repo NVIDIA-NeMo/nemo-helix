@@ -3,6 +3,7 @@
 
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
+import { EM_DASH } from '@nemo/common/src/constants';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
@@ -28,7 +29,6 @@ import {
   scoreHeader,
 } from '@studio/components/dataViews/ExperimentComparisonDataView/utils';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
-import { EM_DASH } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
 import { getEvaluationDetailRoute } from '@studio/routes/utils';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
@@ -38,6 +38,8 @@ interface ExperimentComparisonDataViewProps {
   preloadedEvaluations?: EvaluationRow[];
   preloadPending?: boolean;
 }
+
+type MakeColumns = ComponentProps<typeof StudioDataView<EvaluationRow>>['makeColumns'];
 
 interface ResourceColumn {
   readonly metric: ParetoMetric;
@@ -137,9 +139,7 @@ export const ExperimentComparisonDataView: FC<ExperimentComparisonDataViewProps>
     [rows, pageIndex, pageSize]
   );
 
-  const makeColumns = useCallback<
-    ComponentProps<typeof StudioDataView<EvaluationRow>>['makeColumns']
-  >(
+  const makeColumns = useCallback<MakeColumns>(
     ({ display }) => [
       display({
         id: 'name',

@@ -648,6 +648,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
       {compareVisible && (
         <div className="mb-4">
           <ExperimentComparisonDataView
+            key={group.id}
             workspace={workspace}
             group={group}
             preloadedEvaluations={completeEvaluationSet}

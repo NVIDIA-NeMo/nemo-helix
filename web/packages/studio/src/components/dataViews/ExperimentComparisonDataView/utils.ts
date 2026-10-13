@@ -69,9 +69,15 @@ export const columnExtremes = (
   const values = rows
     .map((row) => finiteValue(metric, row))
     .filter((value): value is number => value !== undefined);
-  if (new Set(values).size < 2) return undefined;
-  const [high, low] = [Math.max(...values), Math.min(...values)];
-  return metric.direction === 'max' ? { best: high, worst: low } : { best: low, worst: high };
+  if (new Set(values).size < 2) {
+    return undefined;
+  }
+  const high = Math.max(...values);
+  const low = Math.min(...values);
+  if (metric.direction === 'max') {
+    return { best: high, worst: low };
+  }
+  return { best: low, worst: high };
 };
 
 const ACRONYMS: Readonly<Record<string, string>> = { llm: 'LLM' };
@@ -86,7 +92,13 @@ const humanize = (value: string): string => {
 export const scoreHeader = (metricId: string): string => {
   const key = metricId.replace(/^evaluators\./, '');
   const dot = key.indexOf('.');
-  if (dot === -1) return humanize(key);
-  const [metricType, output] = [key.slice(0, dot), key.slice(dot + 1)];
-  return output === metricType ? humanize(output) : `${humanize(output)} (${humanize(metricType)})`;
+  if (dot === -1) {
+    return humanize(key);
+  }
+  const metricType = key.slice(0, dot);
+  const output = key.slice(dot + 1);
+  if (output === metricType) {
+    return humanize(output);
+  }
+  return `${humanize(output)} (${humanize(metricType)})`;
 };
