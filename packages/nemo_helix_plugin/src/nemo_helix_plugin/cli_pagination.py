@@ -19,6 +19,7 @@ from typing import Any, cast
 
 from nemo_helix_plugin.cli_warnings import add_warning
 from nemo_helix_plugin.client.response import NemoPaginatedResponse
+from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 logger = logging.getLogger(__name__)
@@ -276,6 +277,7 @@ class _progress:
         self._progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
+            console=Console(stderr=True),
             transient=True,
             disable=not show_progress,
         )

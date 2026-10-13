@@ -3,12 +3,15 @@
 
 """Tests for pagination utilities."""
 
+import csv
+from io import StringIO
 from typing import Any
 from unittest.mock import Mock
 from urllib.parse import parse_qs
 
 import httpx
 import pytest
+from nemo_helix_plugin.cli_output import Column, format_output
 from nemo_helix_plugin.cli_pagination import (
     AllCursorPagesResponse,
     AllPagesResponse,
@@ -213,6 +216,29 @@ def test_collect_offset_pages_all_pages_merges_every_page():
     assert result.pagination.total_pages == 1
     assert result.pagination.page_size == 2
     assert client.calls == [1, 2, 3]
+
+
+@pytest.mark.parametrize("pagination_type", [PaginationType.PAGE_NUMBER, PaginationType.CURSOR])
+@pytest.mark.parametrize("show_progress", [True, False])
+def test_collect_all_pages_csv_stdout_is_clean(pagination_type, show_progress, capsys):
+    """Progress must not precede the CSV header when stdout is captured."""
+    if pagination_type == PaginationType.CURSOR:
+        client = _cursor_client({None: (["a", "b"], "cur-2"), "cur-2": (["c"], None)})
+        response = client.send(list_logs())
+    else:
+        client = _offset_client({1: ["a", "b"], 2: ["c"]})
+        response = client.send(list_items())
+
+    result = collect_pages(response, all_pages=True, pagination_type=pagination_type, show_progress=show_progress)
+    assert capsys.readouterr().out == ""
+
+    format_output(result, is_list=True, output_format="csv", output_columns=[Column("name")])
+
+    output = capsys.readouterr().out
+    assert output.splitlines()[0] == "name"
+    reader = csv.DictReader(StringIO(output))
+    assert reader.fieldnames == ["name"]
+    assert list(reader) == [{"name": "a"}, {"name": "b"}, {"name": "c"}]
 
 
 ENVELOPE = {"filter": {"role": "Viewer"}, "sort": "-created_at", "grouped_by": ["session_id"]}

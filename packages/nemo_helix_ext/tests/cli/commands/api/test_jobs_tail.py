@@ -6,24 +6,30 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+import typer
 from nemo_helix_ext.cli.commands.jobs import tail_platform_job
+from nemo_helix_plugin.client.client import NemoClient
 
 
-class _HelixClient:
-    _get_workspace_path_param: MagicMock
+def _client(workspace: str | None) -> NemoClient:
+    """A real NemoClient so the production workspace accessor is exercised.
 
-    def __init__(self) -> None:
-        self._get_workspace_path_param = MagicMock(return_value="default")
+    Using a real client (rather than a stub of the private helper) is what lets
+    these tests catch a regression where the command calls an accessor the
+    typed client does not have.
+    """
+    return NemoClient(base_url="http://nemo.test", workspace=workspace)
 
 
-def _ctx(client: _HelixClient) -> SimpleNamespace:
+def _ctx(client: NemoClient) -> SimpleNamespace:
     state = MagicMock()
     state.get_client.return_value = client
     return SimpleNamespace(obj=state)
 
 
 def test_jobs_tail_command_fetches_tail_page() -> None:
-    client = _HelixClient()
+    client = _client(workspace="default")
     logs = [object(), object()]
     response = MagicMock()
     response.page.return_value = SimpleNamespace(items=logs)
@@ -53,7 +59,7 @@ def test_jobs_tail_command_fetches_tail_page() -> None:
 
 
 def test_jobs_tail_command_uses_explicit_workspace() -> None:
-    client = _HelixClient()
+    client = _client(workspace="client-default")
     response = MagicMock()
     response.page.return_value = SimpleNamespace(items=[])
     jobs_client = MagicMock()
@@ -73,9 +79,39 @@ def test_jobs_tail_command_uses_explicit_workspace() -> None:
             task_id=None,
         )
 
-    client._get_workspace_path_param.assert_not_called()
     jobs_client.list_job_logs.assert_called_once_with(
         workspace="custom",
         name="job-a",
         query_params={"tail": 100},
     )
+
+
+def test_jobs_tail_command_raises_when_no_workspace() -> None:
+    """With no explicit and no client-default workspace, the command must surface
+    a clean missing-workspace error (matching the removed generated-SDK helper's
+    raise-on-missing behavior) rather than crash with an AttributeError.
+
+    The accessor's ValueError is translated by the CLI error handler into a
+    typer.Exit, so no job-logs request is made."""
+    client = _client(workspace=None)
+    jobs_client = MagicMock()
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.render_job_logs"),
+        pytest.raises(typer.Exit) as exc_info,
+    ):
+        tail_platform_job(
+            _ctx(client),
+            name="job-a",
+            lines=100,
+            workspace=None,
+            attempt_id=None,
+            step_id=None,
+            task_id=None,
+        )
+
+    # Exit code 2 is the clean missing-workspace path; the original AttributeError
+    # regression would exit 1, so this pins the intended behavior.
+    assert exc_info.value.exit_code == 2
+    jobs_client.list_job_logs.assert_not_called()
