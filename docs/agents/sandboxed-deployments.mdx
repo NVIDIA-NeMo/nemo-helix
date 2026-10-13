@@ -22,13 +22,14 @@ Kubernetes compute driver. Requests still go through the platform's Agents gatew
   the gateway's compute nodes. See [Deploy Agents](/documentation/agents/deploy-agents)
   for packaging guidance.
 
-The examples below register and deploy an agent in `WORKSPACE`. `IMAGE_TAG` is
-the reference to the prepared image:
+The examples below register and deploy an agent in `WORKSPACE`. `AGENT_CONFIG`
+is the path to your existing local `agent.yaml` file, and `IMAGE_TAG` is the
+reference to the prepared image:
 
 ```sh
 export WORKSPACE=default
 export AGENT_NAME=sandbox-hello
-export AGENT_CONFIG="agents/$AGENT_NAME/agent.yaml"
+export AGENT_CONFIG="<path-to-agent.yaml>"
 export IMAGE_TAG="<accessible-agent-image>"
 ```
 
