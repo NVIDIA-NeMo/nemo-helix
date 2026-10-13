@@ -22,7 +22,9 @@ Pausing stops a running job without losing its progress. The training step finis
 nemo jobs pause automodel-a1b2c3d4e5f6 --workspace default
 ```
 
-A job can only be paused while a step that supports pausing is running. Otherwise, for example while the model is still downloading, the request returns `409` and names the running step.
+A job can only be paused while a step that supports pausing is running. Otherwise, for example while the model is still downloading, the request returns `409` and names the running step. Training on the `automodel` backend supports pausing.
+
+If training doesn't save its checkpoint and exit within 30 minutes, the pause fails and the job ends in `error`. You can then rerun it from its newest checkpoint. Operators can change this limit with the `automodel.training_pause_deadline_seconds` platform setting.
 
 If training finishes before it acts on the pause, the job completes as usual.
 

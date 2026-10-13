@@ -134,3 +134,61 @@ def test_result_json_omits_duration_when_training_never_started(
 
     assert result.training_duration_seconds is None
     assert written_duration(tmp_path) is None
+
+
+def test_a_paused_run_skips_publication_and_completion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Training wrote the pause marker, so nothing is selected, published, or reported completed."""
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+    runner = runner_with_duration(tmp_path, 5.0)
+    synced: list[str] = []
+    completed: list[str] = []
+    runner._dist_ctx = SimpleNamespace(is_coordinator=True, sync_point=synced.append)
+    runner._progress.report_completed = completed.append
+    runner._compile_config_phase = lambda: MagicMock()  # type: ignore[method-assign]
+
+    def train(library: object) -> TrainingMetrics:
+        (tmp_path / "PAUSED").write_text("5\n")
+        return TrainingMetrics()
+
+    runner._training_phase = train  # type: ignore[method-assign]
+
+    result = runner.run()
+
+    assert result.paused and not result.success
+    assert synced == []
+    assert completed == []
+    runner._backend.find_checkpoints.assert_not_called()
+    runner._backend.process_checkpoints.assert_not_called()
+
+
+def test_the_coordinator_clears_an_earlier_pause_marker_before_training(tmp_path: Path) -> None:
+    """Otherwise a run that finishes after a resume would read the old marker and exit as paused."""
+    (tmp_path / "PAUSED").write_text("5\n")
+    signals: list[str] = []
+    runner = runner_with_duration(tmp_path, None)
+    runner._dist_ctx = SimpleNamespace(is_coordinator=True, signal=signals.append)
+    runner._backend.compile_config.return_value = {}
+    runner._config = SimpleNamespace(seed=1)
+
+    runner._compile_config_phase()
+
+    assert not (tmp_path / "PAUSED").exists()
+    assert signals == ["config_ready"]
+
+
+def test_a_paused_run_exits_with_the_pause_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.automodel.tasks.training import __main__ as entrypoint
+    from nhx.automodel.tasks.training.schemas import TrainingResult
+
+    class _Runner:
+        def __enter__(self) -> "_Runner":
+            return self
+
+        def __exit__(self, *exc: object) -> None: ...
+
+        def run(self) -> TrainingResult:
+            return TrainingResult(success=False, paused=True)
+
+    monkeypatch.setattr(entrypoint, "TrainingRunner", _Runner)
+
+    assert entrypoint.run() == 75

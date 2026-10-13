@@ -29,6 +29,7 @@ import pytest
 #: `a.b.c` before it ever reaches for the parents.
 _STUBBED_MODULES = (
     "nemo_automodel.components.checkpoint.checkpointing",
+    "nemo_automodel.components.checkpoint.config",
     "nemo_automodel.components.config._arg_parser",
     "nemo_automodel.components.training.step_scheduler",
     "nemo_automodel.recipes.llm.kd",
@@ -462,7 +463,24 @@ def _wrapper(finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, recipe: _Fak
 
     monkeypatch.setattr(finetune, "JobsServiceProgressReporter", _Reporter)
     monkeypatch.setattr(finetune.NHXJobContext, "from_env", classmethod(lambda cls: object()))
+    monkeypatch.setattr(finetune, "PausePoller", _FakePoller)
     return finetune.AutomodelRecipeWrapper(recipe), reports
+
+
+class _FakePoller:
+    """Records how the wrapper uses the pause poller, without polling anything."""
+
+    started: list["_FakePoller"] = []
+
+    def __init__(self, job_ctx: object, service_name: str, *, on_pause: Any = None) -> None:
+        self.service_name, self.on_pause, self.stopped = service_name, on_pause, False
+
+    def start(self) -> "_FakePoller":
+        _FakePoller.started.append(self)
+        return self
+
+    def stop(self) -> None:
+        self.stopped = True
 
 
 def test_the_wrapper_reports_nothing_while_it_builds(finetune: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -618,3 +636,163 @@ def test_the_wrapper_writes_validation_stats_for_each_checkpoint(
             "best_metric_key": "default",
         },
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Pause: the poller, the pause checkpoint, and the marker the runner reads
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def fake_poller() -> Iterator[type[_FakePoller]]:
+    _FakePoller.started = []
+    yield _FakePoller
+    _FakePoller.started = []
+
+
+def test_only_global_rank_zero_watches_for_a_pause(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, fake_poller: type[_FakePoller]
+) -> None:
+    for rank, expected in (("1", 0), ("0", 1)):
+        monkeypatch.setenv("RANK", rank)
+        wrapper, _ = _wrapper(finetune, monkeypatch, _FakeRecipe())
+        wrapper.run_train_validation_loop()
+        assert len(fake_poller.started) == expected
+
+    assert fake_poller.started[0].stopped
+
+
+def test_a_pause_signals_this_process(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, fake_poller: type[_FakePoller]
+) -> None:
+    """Automodel shares the signal with every rank at the next step, so rank 0's own pid is enough."""
+    monkeypatch.setenv("RANK", "0")
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(finetune.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+    wrapper, _ = _wrapper(finetune, monkeypatch, _FakeRecipe())
+    wrapper.run_train_validation_loop()
+
+    fake_poller.started[0].on_pause()
+
+    assert sent == [(finetune.os.getpid(), finetune.PAUSE_SIGNAL)]
+
+
+class _PausingRecipe(_FakeRecipe):
+    """Stops for a pause at step 5, saving a checkpoint on the way out, as Automodel does."""
+
+    def __init__(self, tmp_path: Path, *, stop_at: int = 5) -> None:
+        super().__init__(
+            cfg={"_pause_sentinel": str(tmp_path / "PAUSED")}, checkpoint_dir=str(tmp_path / "checkpoints")
+        )
+        self.checkpointer.config.save_consolidated = "every"
+        self.consolidation_during_save: list[object] = []
+        self._stop_at = stop_at
+
+    def save_checkpoint(self, epoch, step, train_loss, val_loss=None, best_metric_key="default") -> None:
+        self.consolidation_during_save.append(self.checkpointer.config.save_consolidated)
+
+    def run_train_validation_loop(self) -> None:
+        self.step_scheduler.step = self._stop_at
+        self.step_scheduler.sigterm_flag = True
+        self.save_checkpoint(epoch=0, step=self._stop_at, train_loss=0.5)
+
+
+def test_a_pause_checkpoint_skips_the_consolidated_export(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_poller: type[_FakePoller]
+) -> None:
+    """The pause checkpoint is never published, and the export would only lengthen the pause."""
+    recipe = _PausingRecipe(tmp_path)
+    wrapper, _ = _wrapper(finetune, monkeypatch, recipe)
+    monkeypatch.setattr(finetune, "_barrier", lambda: None)
+    wrapper.run_train_validation_loop()
+
+    assert recipe.consolidation_during_save == [finetune.SaveConsolidatedMode.FALSE]
+    assert recipe.checkpointer.config.save_consolidated == "every"
+
+
+def test_rank_zero_marks_the_pause_and_every_rank_waits_for_it(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_poller: type[_FakePoller]
+) -> None:
+    barriers: list[str] = []
+    monkeypatch.setattr(finetune, "_barrier", lambda: barriers.append("barrier"))
+
+    monkeypatch.setenv("RANK", "1")
+    wrapper, _ = _wrapper(finetune, monkeypatch, _PausingRecipe(tmp_path))
+    wrapper.run_train_validation_loop()
+    assert not (tmp_path / "PAUSED").exists()
+
+    monkeypatch.setenv("RANK", "0")
+    wrapper, _ = _wrapper(finetune, monkeypatch, _PausingRecipe(tmp_path))
+    wrapper.run_train_validation_loop()
+
+    assert (tmp_path / "PAUSED").read_text(encoding="utf-8") == "5\n"
+    assert barriers == ["barrier", "barrier"]
+
+
+def test_a_pause_without_a_marker_path_fails_instead_of_publishing(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_poller: type[_FakePoller]
+) -> None:
+    """Exiting 0 here would publish the pause checkpoint as the finished model."""
+    monkeypatch.setattr(finetune, "_barrier", lambda: None)
+    recipe = _PausingRecipe(tmp_path)
+    recipe.cfg = {}
+    wrapper, _ = _wrapper(finetune, monkeypatch, recipe)
+
+    with pytest.raises(RuntimeError, match="no pause marker"):
+        wrapper.run_train_validation_loop()
+
+
+def test_a_pause_that_arrives_at_the_last_step_publishes_instead(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_poller: type[_FakePoller]
+) -> None:
+    """Training finished before it acted on the pause, so the runner publishes as usual."""
+    monkeypatch.setattr(finetune, "_barrier", lambda: None)
+    recipe = _PausingRecipe(tmp_path, stop_at=40)
+    wrapper, _ = _wrapper(finetune, monkeypatch, recipe)
+    wrapper.run_train_validation_loop()
+
+    assert not (tmp_path / "PAUSED").exists()
+
+
+def test_checkpoint_statistics_continue_across_a_resume(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A new process appends to the entries an earlier run wrote, instead of starting the file over."""
+    monkeypatch.setenv("RANK", "0")
+    checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint_dir.mkdir()
+    earlier = {"epoch": 1, "step": 10, "train_loss": 0.9, "val_loss": None, "best_metric_key": "default"}
+    (checkpoint_dir / finetune.CHECKPOINT_STATS_FILENAME).write_text(json.dumps({"checkpoints": [earlier]}))
+
+    wrapper, _ = _wrapper(finetune, monkeypatch, _FakeRecipe(checkpoint_dir=str(checkpoint_dir)))
+    wrapper.recipe.save_checkpoint(epoch=0, step=19, train_loss=0.5)
+
+    stored = json.loads((checkpoint_dir / finetune.CHECKPOINT_STATS_FILENAME).read_text())["checkpoints"]
+    assert [entry["step"] for entry in stored] == [10, 20]
+
+
+def test_points_past_the_restored_step_are_dropped(finetune: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rerun restored step 3, so the seeded points for steps 4 and 5 describe training that is gone."""
+    reports: list[tuple[str, dict]] = []
+    seeded = {"train_loss": [{"step": step, "epoch": 1, "value": 1.0 / step} for step in range(1, 6)]}
+
+    class _Reporter:
+        def __init__(self, *a: object, **k: object) -> None: ...
+        def fetch_current_metrics(self):
+            return seeded
+
+        def configure_progress_tracking(self, max_steps, num_epochs): ...
+        def report_running(self, phase, **details):
+            reports.append((phase, details))
+
+        def close(self): ...
+
+    recipe = _FakeRecipe(cfg={"_progress_reporting": {"min_report_interval_seconds": 0}})
+    recipe.step_scheduler.step = 3
+    monkeypatch.setattr(finetune, "JobsServiceProgressReporter", _Reporter)
+    monkeypatch.setattr(finetune.NHXJobContext, "from_env", classmethod(lambda cls: object()))
+    finetune.AutomodelRecipeWrapper(recipe)
+    recipe.log_train_metrics(_Sample(step=3, epoch=0, metrics={"loss": 0.2}))
+
+    sent = [details for phase, details in reports if "metrics" in details][-1]
+    assert [point["step"] for point in sent["metrics"]["train_loss"]] == [1, 2, 3, 4]
