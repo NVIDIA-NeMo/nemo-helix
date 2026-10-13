@@ -12,10 +12,12 @@ from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.api.service.result_service import ResultService
 from nemo_evals.api.service.task_service import TaskService
 from nemo_evals.api.service.taskset_service import TasksetService
+from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import RequestAuthorizer, get_nemo_client, get_request_authorizer
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
 
 
 def get_metric_service(
@@ -41,6 +43,17 @@ def get_task_service(
     """Provide a TaskService. It uses the MetricService to normalize inline task metrics into
     (derived) stored metrics, so a persisted task holds only references."""
     return TaskService(entity_client, metric_service, AsyncFilesClient.from_client(async_client))
+
+
+def get_image_build_service(
+    workspace: str,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    async_client: AsyncNemoClient = Depends(get_nemo_client),
+) -> ImageBuildService:
+    """Provide an ImageBuildService whose task-builder Jobs are created as the caller."""
+    return ImageBuildService(
+        entity_client, JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace)
+    )
 
 
 def get_taskset_service(

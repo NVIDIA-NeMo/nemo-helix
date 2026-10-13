@@ -21,6 +21,7 @@ from nemo_helix_plugin.evals.types import (
     AgentEvalJob,
     AgentEvalResult,
     CreateMetricRequest,
+    CreateTaskImageBuildRequest,
     CreateTaskRequest,
     CreateTasksetRequest,
     EvalResult,
@@ -33,6 +34,7 @@ from nemo_helix_plugin.evals.types import (
     ListEvalResultsQueryParams,
     ListMetricsQueryParams,
     ListRevisionsQueryParams,
+    ListTaskImageBuildsQueryParams,
     ListTasksetsQueryParams,
     ListTasksQueryParams,
     Metric,
@@ -46,6 +48,7 @@ from nemo_helix_plugin.evals.types import (
     SubmitEvaluateJobRequest,
     SubmitRetrieveEvalJobRequest,
     Task,
+    TaskImageBuild,
     Taskset,
 )
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobResultResponse, HelixJobStatusResponse
@@ -341,6 +344,31 @@ def list_task_revisions(
 @get(f"{_TASKS}/{{name}}/revisions/{{revision}}")
 @abstractmethod
 def get_task_revision(*, workspace: str | None = None, name: str, revision: str) -> Task: ...
+
+
+@post(f"{_TASKS}/{{name}}/revisions/{{revision}}/image-builds")
+@abstractmethod
+def create_task_image_build(
+    *, workspace: str | None = None, name: str, revision: str, body: CreateTaskImageBuildRequest
+) -> TaskImageBuild: ...
+
+
+@get(f"{_TASKS}/{{name}}/revisions/{{revision}}/image-builds")
+@abstractmethod
+def list_task_image_builds(
+    *,
+    workspace: str | None = None,
+    name: str,
+    revision: str,
+    query_params: ListTaskImageBuildsQueryParams | FlatQueryParams | None = None,
+) -> Paginated[TaskImageBuild]: ...
+
+
+@get(f"{_TASKS}/{{name}}/revisions/{{revision}}/image-builds/{{build_id}}")
+@abstractmethod
+def get_task_image_build(
+    *, workspace: str | None = None, name: str, revision: str, build_id: str
+) -> TaskImageBuild: ...
 
 
 @put(f"{_TASKS}/{{name}}/tags/{{tag}}")

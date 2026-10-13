@@ -12,6 +12,7 @@ Local sources are prepared and verified before the resource writes a task entity
 
 from __future__ import annotations
 
+import builtins
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, overload
@@ -19,6 +20,7 @@ from typing import Any, overload
 from nemo_evals.api.fields import TaskRef
 from nemo_evals.api.schemas import Revision, Task, TaskInput
 from nemo_evals.entities import MAX_NAME_LENGTH, NAME_PATTERN
+from nemo_evals.image_builds.models import ImageBuild
 from nemo_evals.sdk.query_params import (
     like_filter,
     list_filter_params,
@@ -29,7 +31,7 @@ from nemo_evals.sdk.query_params import (
 from nemo_evals.sdk.task_preparation import TaskPublicationError, prepare_task, prepare_task_async
 from nemo_evals.shared.metric_bundles.bundles import MetricBundlePackager
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_helix_plugin.evals.types import CreateTaskRequest, ReplaceTaskRequest
+from nemo_helix_plugin.evals.types import CreateTaskImageBuildRequest, CreateTaskRequest, ReplaceTaskRequest
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.filter_ops import ElemMatchScalar
 from nemo_helix_plugin.schema import Page
@@ -261,6 +263,50 @@ class EvaluatorTasksResource:
                 "pagination": page_result.metadata,
             }
         )
+
+    def build_images(
+        self,
+        name: str,
+        *,
+        revision: str = "latest",
+        allowed_registries: builtins.list[str] | None = None,
+        workspace: str | None = None,
+    ) -> ImageBuild:
+        """Build the container images of a task revision, or return the build already running or done.
+
+        ``revision`` is a digest or a tag. After a failed build, this starts the next attempt.
+        """
+        response = self._client.create_task_image_build(
+            name=name,
+            revision=revision,
+            workspace=workspace,
+            body=CreateTaskImageBuildRequest(allowed_registries=allowed_registries or []),
+        )
+        return ImageBuild.model_validate(response.data().model_dump(mode="json"))
+
+    def list_image_builds(
+        self, name: str, *, revision: str = "latest", page: int = 1, page_size: int = 100, workspace: str | None = None
+    ) -> Page[ImageBuild]:
+        """List the image builds of a task revision, newest first."""
+        response = self._client.list_task_image_builds(
+            name=name, revision=revision, workspace=workspace, query_params={"page": page, "page_size": page_size}
+        )
+        page_result = response.page()
+        return Page[ImageBuild].model_validate(
+            {
+                "data": [build.model_dump(mode="json") for build in page_result.items],
+                "pagination": page_result.metadata,
+            }
+        )
+
+    def get_image_build(
+        self, name: str, build_id: str, *, revision: str = "latest", workspace: str | None = None
+    ) -> ImageBuild:
+        """Get one image build of a task revision."""
+        response = self._client.get_task_image_build(
+            name=name, revision=revision, build_id=build_id, workspace=workspace
+        )
+        return ImageBuild.model_validate(response.data().model_dump(mode="json"))
 
     def tag(self, name: str, *, tag: str, revision: str, workspace: str | None = None) -> Task:
         """Point ``tag`` at an existing revision, named by digest or by another tag.
@@ -564,6 +610,50 @@ class AsyncEvaluatorTasksResource:
                 "pagination": page_result.metadata,
             }
         )
+
+    async def build_images(
+        self,
+        name: str,
+        *,
+        revision: str = "latest",
+        allowed_registries: builtins.list[str] | None = None,
+        workspace: str | None = None,
+    ) -> ImageBuild:
+        """Build the container images of a task revision, or return the build already running or done.
+
+        ``revision`` is a digest or a tag. After a failed build, this starts the next attempt.
+        """
+        response = await self._client.create_task_image_build(
+            name=name,
+            revision=revision,
+            workspace=workspace,
+            body=CreateTaskImageBuildRequest(allowed_registries=allowed_registries or []),
+        )
+        return ImageBuild.model_validate(response.data().model_dump(mode="json"))
+
+    async def list_image_builds(
+        self, name: str, *, revision: str = "latest", page: int = 1, page_size: int = 100, workspace: str | None = None
+    ) -> Page[ImageBuild]:
+        """List the image builds of a task revision, newest first."""
+        response = await self._client.list_task_image_builds(
+            name=name, revision=revision, workspace=workspace, query_params={"page": page, "page_size": page_size}
+        )
+        page_result = response.page()
+        return Page[ImageBuild].model_validate(
+            {
+                "data": [build.model_dump(mode="json") for build in page_result.items],
+                "pagination": page_result.metadata,
+            }
+        )
+
+    async def get_image_build(
+        self, name: str, build_id: str, *, revision: str = "latest", workspace: str | None = None
+    ) -> ImageBuild:
+        """Get one image build of a task revision."""
+        response = await self._client.get_task_image_build(
+            name=name, revision=revision, build_id=build_id, workspace=workspace
+        )
+        return ImageBuild.model_validate(response.data().model_dump(mode="json"))
 
     async def tag(self, name: str, *, tag: str, revision: str, workspace: str | None = None) -> Task:
         """Point ``tag`` at an existing revision, named by digest or by another tag.
