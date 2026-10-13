@@ -10,11 +10,13 @@ using the ``method()`` descriptor, following the files/models pattern.
 from __future__ import annotations
 
 from functools import cached_property
+from typing import Self
 
 from nemo_helix_plugin.agents import endpoints
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.method import method
+from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 
 
 class _AgentsMethods:
@@ -126,37 +128,49 @@ class _AsyncExecuteJobsCompat:
         return (await self._client.list_execute_job_results(name=name, workspace=workspace)).data()
 
 
-class _JobsCompat:
-    def __init__(self, client: AgentsClient) -> None:
-        self._client = client
+class _AgentsJobsClient(JobsClient):
+    """Jobs-service client that also exposes the agents job namespace as ``.execute``."""
+
+    _agents_client: AgentsClient
+
+    @classmethod
+    def for_agents(cls, client: AgentsClient) -> Self:
+        jobs = cls.from_client(client)
+        jobs._agents_client = client
+        return jobs
 
     @cached_property
     def execute(self) -> _ExecuteJobsCompat:
-        return _ExecuteJobsCompat(self._client)
+        return _ExecuteJobsCompat(self._agents_client)
 
 
-class _AsyncJobsCompat:
-    def __init__(self, client: AsyncAgentsClient) -> None:
-        self._client = client
+class _AsyncAgentsJobsClient(AsyncJobsClient):
+    """Async Jobs-service client that also exposes the agents job namespace as ``.execute``."""
+
+    _agents_client: AsyncAgentsClient
+
+    @classmethod
+    def for_agents(cls, client: AsyncAgentsClient) -> Self:
+        jobs = cls.from_client(client)
+        jobs._agents_client = client
+        return jobs
 
     @cached_property
     def execute(self) -> _AsyncExecuteJobsCompat:
-        return _AsyncExecuteJobsCompat(self._client)
+        return _AsyncExecuteJobsCompat(self._agents_client)
 
 
 class AgentsClient(_AgentsMethods, NemoClient):
     """Sync client for the Agents service API."""
 
-    # Shadows the base client's Jobs-service accessor with the agents job namespace.
     @property
-    def jobs(self) -> _JobsCompat:  # ty: ignore[invalid-property-type-override]
-        return _JobsCompat(self)
+    def jobs(self) -> _AgentsJobsClient:
+        return _AgentsJobsClient.for_agents(self)
 
 
 class AsyncAgentsClient(_AgentsMethods, AsyncNemoClient):
     """Async client for the Agents service API."""
 
-    # Shadows the base client's Jobs-service accessor with the agents job namespace.
     @property
-    def jobs(self) -> _AsyncJobsCompat:  # ty: ignore[invalid-property-type-override]
-        return _AsyncJobsCompat(self)
+    def jobs(self) -> _AsyncAgentsJobsClient:
+        return _AsyncAgentsJobsClient.for_agents(self)

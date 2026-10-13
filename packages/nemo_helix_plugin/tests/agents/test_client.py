@@ -19,6 +19,7 @@ from nemo_helix_plugin.agents.types import (
     InvokeAgentRequest,
 )
 from nemo_helix_plugin.client.errors import BadRequestError, ConflictError, NotFoundError, UnprocessableEntityError
+from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.schemas import FileStorageType
 from pydantic import JsonValue
 
@@ -272,6 +273,43 @@ def test_execute_job_compat_methods_return_json_maps() -> None:
     assert retrieved["name"] == "job-1"
     assert results["data"] == [{"name": "result"}]
     assert [request.method for request in seen] == ["POST", "GET", "GET"]
+
+
+def test_jobs_is_the_jobs_service_client_with_the_execute_namespace() -> None:
+    # ``AgentsClient`` must still be usable wherever a ``NemoClient`` is: its ``jobs``
+    # is the Jobs-service client, extended with the agents ``execute`` namespace.
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == f"{BASE}/apis/jobs/v2/workspaces/default/jobs/job-1"
+        return httpx.Response(
+            200,
+            json={
+                "id": "job-1",
+                "attempt_id": "att-1",
+                "name": "job-1",
+                "workspace": "default",
+                "source": "nemo-agents-plugin-execute",
+                "spec": {},
+                "platform_spec": {
+                    "steps": [{"name": "run", "executor": {"provider": "cpu", "container": {"image": "x"}}}]
+                },
+                "fileset": "fs-1",
+                "status": "created",
+            },
+        )
+
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = AgentsClient(base_url=BASE, workspace="default", http_client=http_client)
+
+    assert isinstance(client.jobs, JobsClient)
+    assert client.jobs.get_job(name="job-1").data().name == "job-1"
+    assert callable(client.jobs.execute.create)
+
+
+def test_async_jobs_is_the_jobs_service_client_with_the_execute_namespace() -> None:
+    client = AsyncAgentsClient(base_url=BASE, workspace="default")
+
+    assert isinstance(client.jobs, AsyncJobsClient)
+    assert callable(client.jobs.execute.create)
 
 
 def test_execute_job_compat_uses_cloned_client_after_preclone_access() -> None:
