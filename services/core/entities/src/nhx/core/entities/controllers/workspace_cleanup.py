@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import threading
+from datetime import datetime, timezone
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -28,6 +29,7 @@ _TERMINAL_JOB_STATUSES: frozenset[HelixJobStatus] = frozenset(
 )
 _JOB_TERMINAL_WAIT_TIMEOUT_SECONDS = 300.0
 _JOB_TERMINAL_WAIT_POLL_SECONDS = 2.0
+_FAILED_CLEANUP_RETRY_BACKOFF_SECONDS = 60.0
 
 
 class WorkspaceJobCleanupError(RuntimeError):
@@ -44,6 +46,26 @@ def _job_status_value(status: object) -> HelixJobStatus | str:
 
 def _job_status_is_terminal(status: object) -> bool:
     return _job_status_value(status) in _TERMINAL_JOB_STATUSES
+
+
+def _as_naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _failed_retry_backoff_elapsed(updated_at: datetime) -> bool:
+    """Return whether a failed deletion is old enough to claim again."""
+    age = _as_naive_utc(datetime.now(timezone.utc)) - _as_naive_utc(updated_at)
+    return age.total_seconds() >= _FAILED_CLEANUP_RETRY_BACKOFF_SECONDS
+
+
+def _deletion_stage_filter(stage: WorkspaceDeletionStage) -> ComparisonOperation:
+    return ComparisonOperation(
+        operator=FilterOperator.EQ,
+        field="deletion_stage",
+        value=stage,
+    )
 
 
 class WorkspaceCleanup(HeartbeatMixin, Controller):
@@ -87,20 +109,10 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
 
     async def _async_step(self):
         with tracer.start_as_current_span("workspace_cleanup/fetch_pending"):
-            cleanup_filter = ComparisonOperation(
-                operator=FilterOperator.EQ,
-                field="deletion_stage",
-                value=WorkspaceDeletionStage.PENDING,
-            )
-            workspaces, _ = await self._workspace_repository.list_workspaces(
-                filter_op=cleanup_filter,
-                page_size=1,
-            )
-            if not workspaces:
-                logger.debug("No workspaces pending deletion")
+            workspace = await self._next_workspace_for_cleanup()
+            if workspace is None:
                 return
 
-        workspace = workspaces[0]
         self._cleanup_total.add(1)
 
         with start_span_with_ctx(
@@ -147,6 +159,35 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                     name=workspace.name,
                     deletion_stage=WorkspaceDeletionStage.FAILED,
                 )
+
+    async def _next_workspace_for_cleanup(self) -> Workspace | None:
+        """Return the next pending deletion, or the oldest failed deletion past the backoff."""
+        pending, _ = await self._workspace_repository.list_workspaces(
+            filter_op=_deletion_stage_filter(WorkspaceDeletionStage.PENDING),
+            page_size=1,
+        )
+        if pending:
+            return pending[0]
+
+        failed, _ = await self._workspace_repository.list_workspaces(
+            filter_op=_deletion_stage_filter(WorkspaceDeletionStage.FAILED),
+            page_size=1,
+            sort="updated_at",
+        )
+        if not failed:
+            logger.debug("No workspaces pending deletion")
+            return None
+
+        workspace = failed[0]
+        if not _failed_retry_backoff_elapsed(workspace.updated_at):
+            logger.debug(
+                "Skipping failed workspace deletion still inside backoff",
+                extra={"workspace": workspace.name},
+            )
+            return None
+
+        logger.info("Retrying failed workspace deletion", extra={"workspace": workspace.name})
+        return workspace
 
     @tracer.start_as_current_span("workspace_cleanup/cleanup_jobs")
     async def _cleanup_jobs(self, workspace: Workspace) -> None:
