@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from nemo_helix_plugin.client.errors import NemoTransportError
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
 from nhx.core.jobs.controllers.backends import JobUpdate
@@ -35,6 +35,29 @@ def test_job_reconciler_retries_terminal_child_cleanup_without_backend_sync(
     assert request["job"] == step.job
     assert request["workspace"] == step.workspace
     assert request["name"] == step.name
+
+
+@pytest.mark.parametrize("status_code", [0, 422, 503])
+def test_terminal_cleanup_query_failure_does_not_block_active_reconciliation(
+    backend_registry, mock_nemo_client, mock_jobs_client, test_step_active, caplog, status_code
+):
+    """A failed ancillary cleanup fetch must not discard already-fetched active steps."""
+    request = httpx.Request("GET", "http://localhost/apis/jobs/v2/workspaces/-/jobs/-/steps")
+    if status_code:
+        error = NemoHTTPError(httpx.Response(status_code, request=request))
+    else:
+        error = NemoTransportError(httpx.ConnectError("cleanup query unavailable", request=request))
+    mock_jobs_client.list_steps.side_effect = [paginated_response([test_step_active]), error]
+    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+
+    reconciler.step()
+
+    assert reconciler.is_healthy
+    assert len(backend.mock.sync_calls) == 1
+    mock_jobs_client.update_job_step_status.assert_called_once()
+    assert mock_jobs_client.update_job_step_status.call_args.kwargs["body"].status == HelixJobStatus.COMPLETED
+    assert "Could not fetch terminal steps pending task cleanup" in caplog.text
 
 
 def test_job_reconciler_syncs_active_job(

@@ -271,6 +271,10 @@ class JobReconciler(HeartbeatMixin, Controller):
                 "sort": "updated_at",
             },
         )
-        for step in self._jobs.list_steps(name="-", workspace="-", query_params=cleanup_query).items():
-            steps.append(step)
+        try:
+            for step in self._jobs.list_steps(name="-", workspace="-", query_params=cleanup_query).items():
+                steps.append(step)
+        except NemoClientError:
+            logger.exception("Could not fetch terminal steps pending task cleanup")
+            self._step_reconciliation_errors.add(1, attributes={"error_type": "task_cleanup_fetch"})
         return steps
