@@ -1138,3 +1138,34 @@ def test_prepare_invocation_forwards_rounds(tmp_path: Path, monkeypatch: pytest.
 
     single, _ = execution._prepare_invocation(str(manifest), None, cfg, None, None, None, 1)
     assert "--rounds" not in single  # agent-hardener's own default; only emitted when asked for
+
+
+# ── user --env-file reaches the victim's materialized .env ─────────────────────
+
+
+def _manifest_with_secret(tmp_path: Path) -> Path:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n  secrets: [REMOTE_TOKEN]\n", encoding="utf-8")
+    return manifest
+
+
+def test_env_file_values_are_written_to_the_victim_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest = _manifest_with_secret(tmp_path)
+    user_env = tmp_path / "user.env"
+    user_env.write_text("REMOTE_TOKEN=from-user\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    seen: dict[str, Any] = {}
+
+    def fake_one_shot(_manifest: str, env_file: str | None, *_a: Any, **_k: Any) -> execution.RunOutcome:
+        seen["env_file"] = env_file
+        return execution.RunOutcome("completed", 0)
+
+    monkeypatch.setattr(run_module, "_run_one_shot", fake_one_shot)
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"config": str(manifest), "env_file": str(user_env)}, ctx=_ctx(tmp_path), sdk=None)
+
+    victim_env = tmp_path / ".env"
+    assert seen["env_file"] == str(user_env)
+    assert "REMOTE_TOKEN=from-user" in victim_env.read_text(encoding="utf-8")

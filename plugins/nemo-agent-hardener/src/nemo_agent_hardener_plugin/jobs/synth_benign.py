@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import Any, ClassVar
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
@@ -124,12 +123,11 @@ class AgentHardenerSynthBenignJob(NemoJob):
 
         manifest_id = str(config["manifest_id"])
         manifest = _materialize_manifest(sdk, manifest_id, ctx)
-        env = _build_native_subprocess_env(plugin_config)
-        # Synthesis probes the live victim, so it needs the manifest's declared secrets. When no --env-file is
-        # supplied (Studio never sends one), synthesize one from the operator env (as the war-game does).
-        env_file = config.get("env_file")
-        if not env_file:
-            env_file = _common.materialize_victim_env_file(manifest, env, Path(manifest).parent)
+        # Synthesis probes the live victim, so it needs the manifest's declared secrets. Studio sends no
+        # --env-file, so they come from the operator env; either way the victim's .env gets written.
+        env, env_file = _common.prepare_victim_env(
+            manifest, _build_native_subprocess_env(plugin_config), config.get("env_file")
+        )
         _reject_platform_auth_sources(manifest, env_file)
         _common.check_victim_secrets(manifest, env, env_file)
 

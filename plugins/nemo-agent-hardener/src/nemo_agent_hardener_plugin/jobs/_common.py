@@ -181,6 +181,20 @@ def materialize_victim_env_file(manifest: str, env: dict[str, str], dest_dir: Pa
     return str(dest)
 
 
+def prepare_victim_env(
+    manifest: str, env: dict[str, str], user_env_file: str | None
+) -> tuple[dict[str, str], str | None]:
+    """Write the victim ``.env`` from *env* plus the user's ``--env-file``; return ``(env, env_file)``.
+
+    The manifest's ``agent.secrets_file`` points at ``<manifest_dir>/.env``, so it must be written even
+    when the user supplies their own file. The user's values win over the operator env, and their file
+    is still what is passed on as ``--env-file``.
+    """
+    merged = {**env, **read_env_file(Path(user_env_file))} if user_env_file else env
+    materialized = materialize_victim_env_file(manifest, merged, Path(manifest).parent)
+    return merged, user_env_file or materialized
+
+
 def check_victim_secrets(manifest: str, env: dict[str, str], env_file: str | None) -> None:
     """Fail fast if the manifest declares victim secrets no available source provides."""
     extra_env_files = [Path(env_file)] if env_file else []

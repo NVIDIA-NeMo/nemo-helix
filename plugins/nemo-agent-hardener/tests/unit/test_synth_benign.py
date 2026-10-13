@@ -614,3 +614,37 @@ def test_cli_init_rejects_a_malformed_env_pair(tmp_path: Path, monkeypatch: pyte
 
     assert result.exit_code == 1
     assert "KEY=VALUE" in result.output
+
+
+def test_synth_benign_writes_the_victim_dotenv_when_env_file_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The manifest's secrets_file is <manifest_dir>/.env; --env-file must not leave it unwritten."""
+    from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
+
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: a\n  secrets: [REMOTE_TOKEN]\n", encoding="utf-8")
+    user_env = tmp_path / "user.env"
+    user_env.write_text("REMOTE_TOKEN=from-user\n", encoding="utf-8")
+    monkeypatch.setattr(job_mod._common, "require_provisioned", lambda _c: None)
+    monkeypatch.setattr(job_mod._common, "build_subprocess_env", lambda _c: {})
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
+    monkeypatch.setattr(
+        job_mod.AgentHardenerConfig, "get", classmethod(lambda _cls: SimpleNamespace(agent_hardener_bin="bin"))
+    )
+    seen: dict[str, Any] = {}
+
+    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview):
+        seen["env_file"] = env_file
+        return tmp_path / "requests.csv"
+
+    monkeypatch.setattr(job_mod, "run_synth_benign", _fake_run_synth)
+    monkeypatch.setattr(job_mod, "read_and_persist_suite", lambda sdk, ctx, mid, csv: [])
+
+    job = job_mod.AgentHardenerSynthBenignJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+    out = job.run({"manifest_id": "m1", "env_file": str(user_env)}, ctx=_ctx(tmp_path), sdk=object())
+
+    assert out["status"] == "completed"
+    assert seen["env_file"] == str(user_env)
+    assert "REMOTE_TOKEN=from-user" in (tmp_path / ".env").read_text(encoding="utf-8")

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import Any, ClassVar, cast
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
@@ -37,7 +36,11 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     RunFailure,
     classify_exception,
 )
-from nemo_agent_hardener_plugin.jobs.execution import _build_native_subprocess_env, _run_one_shot, _run_service_driven
+from nemo_agent_hardener_plugin.jobs.execution import (
+    _build_native_subprocess_env,
+    _run_one_shot,
+    _run_service_driven,
+)
 from nemo_agent_hardener_plugin.jobs.manifest import _manifest_facts, _materialize_manifest, _seed_validation_manifest
 from nemo_agent_hardener_plugin.jobs.records import (
     _cached_benign_suite,
@@ -337,13 +340,11 @@ class AgentHardenerRunJob(NemoJob):
         if validate_only:
             _seed_validation_manifest(manifest, config.get("defense_guardrails"), config.get("defense_policy"), ctx)
             rounds = 1
-        # Studio submits no env_file; agent-hardener reads victim creds from a project dotenv, so synthesize
-        # one from the operator env (which carries the provisioned INFERENCE_API_KEY) for the manifest's secrets.
-        env_file = config.get("env_file")
-        if not env_file:
-            env_file = _common.materialize_victim_env_file(
-                manifest, _build_native_subprocess_env(plugin_config), Path(manifest).parent
-            )
+        # agent-hardener reads victim creds from the project dotenv, so write one from the operator env (which
+        # carries the provisioned INFERENCE_API_KEY) plus any --env-file; Studio submits none.
+        _, env_file = _common.prepare_victim_env(
+            manifest, _build_native_subprocess_env(plugin_config), config.get("env_file")
+        )
         agent_name, port = _manifest_facts(manifest)
 
         # Replay mode: skip the live garak attack and replay a recorded hitlog (uploaded, or a prior run's
