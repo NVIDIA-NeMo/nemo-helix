@@ -26,7 +26,7 @@ NOW = datetime.now(timezone.utc)
 PREFIX = "/apis/agent-hardener/v2/workspaces/{workspace}"
 
 
-def _resolved(egress: list[str] | None = None) -> ResolvedManifest:
+def _resolved(egress: list[str] | None = None, agent_updated_at: str = "") -> ResolvedManifest:
     """The real resolver returns the *effective* egress — the flag plus what the config declares."""
     return ResolvedManifest(
         manifest={"agent": {"name": "clockbot", "port": 8000}, "backends": []},
@@ -38,6 +38,7 @@ def _resolved(egress: list[str] | None = None) -> ResolvedManifest:
         secrets=["INFERENCE_API_KEY"],
         egress=list(egress or []),
         warnings=["no running deployment; defaulting port to 8000."],
+        agent_updated_at=agent_updated_at,
     )
 
 
@@ -446,3 +447,45 @@ def test_create_project_manifest_stores_backends(client, mock_entity_client, mon
 
     assert resp.status_code == 201, resp.text
     assert yaml.safe_load(resp.json()["manifest_yaml"])["backends"] == [REMOTE_MCP]
+
+
+# ── agent staleness marker ───────────────────────────────────────────────────
+
+
+def test_create_records_the_agents_timestamp(client, mock_entity_client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        manifests_module,
+        "resolve_agent_to_manifest",
+        lambda *_a, **kw: _resolved(kw.get("egress"), agent_updated_at="2026-10-01T10:00:00Z"),
+    )
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot"},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["agent_updated_at"] == "2026-10-01T10:00:00Z"
+
+
+def test_refresh_advances_the_recorded_agent_timestamp(client, mock_entity_client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        manifests_module,
+        "resolve_agent_to_manifest",
+        lambda *_a, **kw: _resolved(kw.get("egress"), agent_updated_at="2026-10-05T10:00:00Z"),
+    )
+    existing = AgentHardenerManifest(
+        name="m1",
+        workspace="default",
+        agent="default/clockbot",
+        agent_fileset="default/old",
+        agent_updated_at="2026-10-01T10:00:00Z",
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/m1/refresh")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["agent_updated_at"] == "2026-10-05T10:00:00Z"

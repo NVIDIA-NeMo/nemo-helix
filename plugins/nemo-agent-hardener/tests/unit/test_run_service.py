@@ -1224,3 +1224,85 @@ def test_hitlog_is_saved_before_mitigations(tmp_path: Path, monkeypatch: pytest.
     job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=None)
 
     assert order == ["hitlog", "mitigations"]
+
+
+# ── stale agent warning ────────────────────────────────────────────────────────
+
+
+def _agent_manifest_sdk(**data: Any) -> Any:
+    record = SimpleNamespace(
+        data={
+            "agent": "default/clockbot",
+            "agent_fileset": "default/fs",
+            "agent_updated_at": "2026-10-01T10:00:00Z",
+            **data,
+        }
+    )
+    return SimpleNamespace(entities=SimpleNamespace(get_entity_by_name=lambda **_k: record))
+
+
+def test_stale_agent_warning_fires_when_the_agent_is_newer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", lambda *_a: "2026-10-03T08:00:00Z")
+
+    with caplog.at_level("WARNING"):
+        message = manifest_mod._agent_staleness_warning(_agent_manifest_sdk(), "m1", make_job_context(tmp_path))
+
+    assert message is not None
+    assert "m1" in message
+    assert "default/clockbot" in message
+    assert "Refresh" in message
+    assert message in caplog.text
+
+
+@pytest.mark.parametrize("current", ["2026-10-01T10:00:00Z", "2026-09-30T10:00:00Z", "2026-10-01T10:00:00+00:00"])
+def test_no_stale_warning_when_the_agent_is_unchanged_or_older(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, current: str
+) -> None:
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", lambda *_a: current)
+    assert manifest_mod._agent_staleness_warning(_agent_manifest_sdk(), "m1", make_job_context(tmp_path)) is None
+
+
+def test_stale_check_never_fails_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(*_a: Any) -> str:
+        raise ConnectionError("agents service down")
+
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", _boom)
+    assert manifest_mod._agent_staleness_warning(_agent_manifest_sdk(), "m1", make_job_context(tmp_path)) is None
+
+
+def test_stale_check_is_skipped_without_a_stored_timestamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", lambda *_a: pytest.fail("must not fetch the agent"))
+    sdk = _agent_manifest_sdk(agent_updated_at="")
+    assert manifest_mod._agent_staleness_warning(sdk, "m1", make_job_context(tmp_path)) is None
+
+
+def test_stale_check_ignores_project_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", lambda *_a: pytest.fail("must not fetch the agent"))
+    sdk = _agent_manifest_sdk(source_type="project", agent="")
+    assert manifest_mod._agent_staleness_warning(sdk, "m1", make_job_context(tmp_path)) is None
+
+
+def test_war_game_reports_the_stale_agent_warning_in_its_final_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setattr(run_module, "_effective_models", lambda *_a: None)
+    monkeypatch.setattr(run_module._common, "resolve_model_key", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_module, "_materialize_manifest", lambda *_a: str(manifest))
+    monkeypatch.setattr(run_module, "_agent_staleness_warning", lambda *_a: "agent changed; refresh it")
+    monkeypatch.setattr(run_module, "_cached_benign_suite", lambda *_a: [])
+    monkeypatch.setattr(run_module, "_manifest_rounds", lambda *_a: 1)
+    monkeypatch.setattr(run_module, "_run_one_shot", lambda *_a, **_k: execution.RunOutcome("completed", 0))
+    sdk, _ = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    progress: list[dict[str, Any]] = []
+    monkeypatch.setattr(job, "report_progress", lambda _ctx, **k: progress.append(k))
+
+    result = job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=sdk)
+
+    assert result["status"] == "completed"
+    assert progress[-1]["details"]["warning"] == "agent changed; refresh it"

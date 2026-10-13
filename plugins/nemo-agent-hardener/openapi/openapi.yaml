@@ -1537,6 +1537,13 @@ components:
             \ created before targets were frozen; those re-resolve once, then store\
             \ a ref."
           default: ''
+        agent_updated_at:
+          type: string
+          title: Agent Updated At
+          description: The agent's own timestamp when this manifest froze it. A run
+            compares it with the agent's current one to warn that the frozen copy
+            is stale. Empty on manifests created before it was recorded.
+          default: ''
         dockerfile:
           type: string
           title: Dockerfile

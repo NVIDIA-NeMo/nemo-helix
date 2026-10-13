@@ -84,6 +84,11 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         "Dockerfile that serves it. Empty on manifests created before targets were frozen; those "
         "re-resolve once, then store a ref.",
     )
+    agent_updated_at: str = Field(
+        default="",
+        description="The agent's own timestamp when this manifest froze it. A run compares it with the agent's "
+        "current one to warn that the frozen copy is stale. Empty on manifests created before it was recorded.",
+    )
     dockerfile: str = Field(
         default="",
         description="Path within the package to the Dockerfile the victim image is built from, so a manifest "
@@ -157,6 +162,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         env: dict[str, str] | None = None,
         models: WarGameModels | None = None,
         agent_fileset: str = "",
+        agent_updated_at: str = "",
     ) -> AgentHardenerManifest:
         """Build an ``agent``-source manifest entity from a resolved agent scaffold.
 
@@ -170,6 +176,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
             agent=agent_ref,
             manifest_yaml=manifest_yaml,
             agent_fileset=agent_fileset,
+            agent_updated_at=agent_updated_at,
             port=port,
             secrets=secrets,
             egress=egress or [],

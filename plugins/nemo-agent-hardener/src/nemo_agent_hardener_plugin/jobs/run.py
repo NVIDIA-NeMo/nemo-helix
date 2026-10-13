@@ -41,7 +41,12 @@ from nemo_agent_hardener_plugin.jobs.execution import (
     _run_one_shot,
     _run_service_driven,
 )
-from nemo_agent_hardener_plugin.jobs.manifest import _manifest_facts, _materialize_manifest, _seed_validation_manifest
+from nemo_agent_hardener_plugin.jobs.manifest import (
+    _agent_staleness_warning,
+    _manifest_facts,
+    _materialize_manifest,
+    _seed_validation_manifest,
+)
 from nemo_agent_hardener_plugin.jobs.records import (
     _cached_benign_suite,
     _create_run,
@@ -327,9 +332,11 @@ class AgentHardenerRunJob(NemoJob):
             default_key=_common.resolve_model_key(sdk, None, workspace=ctx.workspace),
         )
         validate_only = bool(config.get("validate_only"))
+        stale_warning: str | None = None
         if config.get("manifest_id"):
             manifest_id = str(config["manifest_id"])
             manifest = _materialize_manifest(sdk, manifest_id, ctx, config_overrides)
+            stale_warning = _agent_staleness_warning(sdk, manifest_id, ctx)
             cached_suite = _cached_benign_suite(sdk, manifest_id, ctx)
             rounds = int(config["rounds"]) if config.get("rounds") else _manifest_rounds(sdk, manifest_id, ctx)
         elif config.get("config"):
@@ -448,6 +455,8 @@ class AgentHardenerRunJob(NemoJob):
             record_name = _create_run(sdk, workspace=ctx.workspace, data=data)
 
         details = {"returncode": str(outcome.returncode)}
+        if stale_warning:
+            details["warning"] = stale_warning
         if outcome.failure is not None:
             details.update(outcome.failure.as_error_details())
         self.report_progress(ctx, work_done=1, work_total=1, status=outcome.status, details=details)

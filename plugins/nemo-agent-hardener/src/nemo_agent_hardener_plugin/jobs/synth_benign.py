@@ -31,7 +31,7 @@ from nemo_agent_hardener_plugin.jobs.execution import (
     _run_service_driven,
     run_synth_benign,
 )
-from nemo_agent_hardener_plugin.jobs.manifest import _manifest_facts, _materialize_manifest
+from nemo_agent_hardener_plugin.jobs.manifest import _agent_staleness_warning, _manifest_facts, _materialize_manifest
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, _update_run, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.run import _effective_models
 from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec
@@ -123,6 +123,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
 
         manifest_id = str(config["manifest_id"])
         manifest = _materialize_manifest(sdk, manifest_id, ctx)
+        stale_warning = _agent_staleness_warning(sdk, manifest_id, ctx)
         # Synthesis probes the live victim, so it needs the manifest's declared secrets. Studio sends no
         # --env-file, so they come from the operator env; either way the victim's .env gets written.
         env, env_file = _common.prepare_victim_env(
@@ -132,7 +133,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
         _common.check_victim_secrets(manifest, env, env_file)
 
         if config.get("driver") == "service":
-            return self._run_service(config, ctx, sdk, plugin_config, manifest, manifest_id, env_file)
+            return self._run_service(config, ctx, sdk, plugin_config, manifest, manifest_id, env_file, stale_warning)
 
         csv_path = run_synth_benign(
             plugin_config.agent_hardener_bin,
@@ -143,9 +144,10 @@ class AgentHardenerSynthBenignJob(NemoJob):
             interview=str(config.get("interview") or "interactive"),
         )
         suite = read_and_persist_suite(sdk, ctx, manifest_id, csv_path)
-        self.report_progress(
-            ctx, work_done=1, work_total=1, status="completed", details={"suite_size": str(len(suite))}
-        )
+        details = {"suite_size": str(len(suite))}
+        if stale_warning:
+            details["warning"] = stale_warning
+        self.report_progress(ctx, work_done=1, work_total=1, status="completed", details=details)
         return {"status": "completed", "returncode": 0, "manifest_id": manifest_id, "suite_size": len(suite)}
 
     def _run_service(
@@ -157,6 +159,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
         manifest: str,
         manifest_id: str,
         env_file: str | None,
+        stale_warning: str | None = None,
     ) -> dict:
         """Studio path: drive the serve interview/review HITL, persist the suite, finalize the run record."""
         models = _effective_models(sdk, config, ctx)
@@ -176,7 +179,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
             source_run=str(config.get("source_run") or ""),
             model_env=model_env,
         )
-        self._finalize_run(sdk, ctx, config, manifest, agent, port, manifest_id, outcome)
+        self._finalize_run(sdk, ctx, config, manifest, agent, port, manifest_id, outcome, stale_warning)
         return {
             "status": outcome.status,
             "returncode": outcome.returncode,
@@ -194,6 +197,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
         port: int,
         manifest_id: str,
         outcome: RunOutcome,
+        stale_warning: str | None = None,
     ) -> None:
         """Finalize the run record ``_run_service_driven`` left as ``running`` (synth-only: no hitlog)."""
         events_fileset = _save_events_fileset(sdk, workspace=ctx.workspace, run_name=outcome.record_name or "")
@@ -214,6 +218,8 @@ class AgentHardenerSynthBenignJob(NemoJob):
         else:
             _create_run(sdk, workspace=ctx.workspace, data=data)
         details = {"returncode": str(outcome.returncode)}
+        if stale_warning:
+            details["warning"] = stale_warning
         if outcome.failure is not None:
             details.update(outcome.failure.as_error_details())
         self.report_progress(ctx, work_done=1, work_total=1, status=outcome.status, details=details)

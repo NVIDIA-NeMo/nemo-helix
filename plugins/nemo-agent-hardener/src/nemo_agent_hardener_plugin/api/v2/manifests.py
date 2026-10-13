@@ -384,6 +384,7 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         env=body.env or {},
         warnings=resolved.warnings,
         models=body.models or WarGameModels(),
+        agent_updated_at=resolved.agent_updated_at,
     )
     # resolve_agent_to_manifest has no `env` parameter, so it is absent from the YAML it produced.
     manifest.manifest_yaml = _yaml_with_agent_settings(manifest.manifest_yaml, manifest)
@@ -544,6 +545,7 @@ async def refresh_manifest(
     existing.port = resolved.port
     existing.secrets = resolved.secrets
     existing.warnings = resolved.warnings
+    existing.agent_updated_at = resolved.agent_updated_at
     existing.manifest_yaml = _yaml_with_agent_settings(yaml.safe_dump(resolved.manifest, sort_keys=False), existing)
     updated = await entity_client.update(existing)
 

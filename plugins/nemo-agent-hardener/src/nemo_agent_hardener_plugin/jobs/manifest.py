@@ -10,11 +10,18 @@ selection, port), and seeds the frozen validate-only baseline.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
-from nemo_agent_hardener_plugin.agent_resolver import fabric_start_command, gateway_backend, resolve_agent_to_manifest
+from nemo_agent_hardener_plugin.agent_resolver import (
+    current_agent_timestamp,
+    fabric_start_command,
+    gateway_backend,
+    parse_agent_ref,
+    resolve_agent_to_manifest,
+)
 from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_MANIFEST_TYPE
 from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
@@ -178,6 +185,39 @@ def _materialize_manifest(
     manifest_path = manifest_dir / "agent-hardener.yaml"
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
     return str(manifest_path)
+
+
+def _agent_staleness_warning(sdk: Any, manifest_id: str, ctx: JobContext) -> str | None:
+    """Warn when the agent changed after an agent-source manifest froze it; ``None`` when current or unknown.
+
+    A frozen copy keeps running the old files until the manifest is refreshed, with nothing to show
+    the results no longer describe the registered agent. Best-effort: a lookup failure must not fail
+    a run, and a manifest saved before the timestamp was recorded has nothing to compare against.
+    """
+    try:
+        record = (
+            client_from_platform(sdk, EntitiesClient)
+            .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
+            .data()
+        )
+        data = getattr(record, "data", {}) or {}
+        stored, agent_ref = data.get("agent_updated_at"), data.get("agent")
+        if (data.get("source_type") or "agent") != "agent" or not (stored and agent_ref and data.get("agent_fileset")):
+            return None
+        workspace, name = parse_agent_ref(agent_ref, ctx.workspace)
+        current = current_agent_timestamp(sdk, workspace, name)
+        if not current or datetime.fromisoformat(current) <= datetime.fromisoformat(stored):
+            return None
+    except Exception:  # advisory only
+        logger.debug("could not check manifest %s for a stale agent", manifest_id, exc_info=True)
+        return None
+    message = (
+        f"agent {agent_ref} changed after manifest {manifest_id!r} was saved, so this run uses the older "
+        f"copy. Refresh the manifest (Refresh Target in Studio, or POST .../manifests/{manifest_id}/refresh) "
+        "to test the current agent."
+    )
+    logger.warning(message)
+    return message
 
 
 def _materialize_from_bundle(

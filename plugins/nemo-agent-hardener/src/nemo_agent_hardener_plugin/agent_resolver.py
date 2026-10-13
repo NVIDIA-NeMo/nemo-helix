@@ -89,6 +89,8 @@ class ResolvedManifest:
     #: recomputed, so the summary cannot claim "no egress" while the manifest allow-lists a host.
     egress: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: The agent entity's timestamp when it was resolved; a later one means the frozen copy is stale.
+    agent_updated_at: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -513,18 +515,32 @@ def _agents_resource(client: NemoClient) -> AgentsResource:
     return AgentsResource(client)
 
 
-def _fetch_agent_config(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:
-    """Fetch the agent's stored NAT workflow config, raising a clean error if unusable."""
+def _fetch_agent(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:
+    """Fetch the stored agent, raising a clean error if it is missing or has no config."""
     try:
         agent = agents.get(name, workspace=workspace)
     except Exception as exc:  # any client/transport failure → one clean, actionable error
         raise AgentResolutionError(
             f"agent {workspace}/{name!r} not found. Deploy it first (nemo agents create + nemo agents deploy)."
         ) from exc
-    agent_config = agent.get("config") or {}
-    if not agent_config:
+    if not agent.get("config"):
         raise AgentResolutionError(f"agent {workspace}/{name!r} has an empty config; nothing to build a victim from.")
-    return agent_config
+    return agent
+
+
+def _fetch_agent_config(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:
+    """Fetch the agent's stored NAT workflow config, raising a clean error if unusable."""
+    return _fetch_agent(agents, workspace, name)["config"]
+
+
+def _agent_timestamp(agent: dict[str, Any]) -> str:
+    """When the stored agent last changed. Re-registering recreates the entity, so this moves."""
+    return str(agent.get("updated_at") or agent.get("created_at") or "")
+
+
+def current_agent_timestamp(client: NemoClient, workspace: str, name: str) -> str:
+    """The agent's present timestamp (``""`` when the platform reports none); raises if it cannot be read."""
+    return _agent_timestamp(_fetch_agent(_agents_resource(client), workspace, name))
 
 
 def _resolve_victim_port(agents: AgentsResource, workspace: str, name: str) -> tuple[int, list[str]]:
@@ -605,7 +621,8 @@ def resolve_agent_to_manifest(
     """
     workspace, name = parse_agent_ref(ref, default_workspace)
     agents = _agents_resource(client)
-    agent_config = _fetch_agent_config(agents, workspace, name)
+    agent = _fetch_agent(agents, workspace, name)
+    agent_config = agent["config"]
     harness = require_guardable_harness(agent_config, f"{workspace}/{name}")
     resolved_port, warnings = _resolve_victim_port(agents, workspace, name)
     port = port or resolved_port
@@ -668,4 +685,5 @@ def resolve_agent_to_manifest(
         secrets=secrets,
         egress=egress,
         warnings=warnings,
+        agent_updated_at=_agent_timestamp(agent),
     )
