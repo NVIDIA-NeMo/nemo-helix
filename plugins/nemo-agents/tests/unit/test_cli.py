@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
@@ -269,22 +268,16 @@ def test_list_404_prints_request_context_and_hint() -> None:
 
 def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     import click
-    from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchJob
     from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
-    from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
     from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
-    from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
     from nemo_agents_plugin.jobs.package_agent import PackageAgentJob
     from nemo_helix_plugin.commands import add_job_commands
     from nemo_helix_plugin.job import NemoJob
     from typer.main import get_command
 
     jobs: dict[str, type[NemoJob]] = {
-        "agents.analyze": AnalyzeBatchJob,
         "agents.evaluate": EvaluateAgentJob,
-        "agents.evaluate-suite": EvaluateSuiteJob,
         "agents.execute": ExecuteAgentJob,
-        "agents.optimize-skills": OptimizeSkillsJob,
         "agents.package-agent": PackageAgentJob,
     }
 
@@ -303,34 +296,6 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
             legacy_result = CliRunner().invoke(app, [job_name, legacy_verb])
             assert legacy_result.exit_code == 2
             assert f"No such command '{legacy_verb}'" in legacy_result.output
-
-
-def test_improvement_jobs_hidden_from_help_but_invocable() -> None:
-    from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchJob
-    from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
-    from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
-    from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
-    from nemo_helix_plugin.commands import add_job_commands
-
-    agents_cli = AgentsCLI()
-    app = agents_cli.get_cli()
-    add_job_commands(
-        app,
-        {
-            "agents.analyze": AnalyzeBatchJob,
-            "agents.evaluate": EvaluateAgentJob,
-            "agents.evaluate-suite": EvaluateSuiteJob,
-            "agents.optimize-skills": OptimizeSkillsJob,
-        },
-        cli=agents_cli,
-    )
-    hidden = ("evaluate-suite", "analyze", "optimize-skills")
-
-    listed = set(re.findall(r"^ +(\S+) {2,}", CliRunner().invoke(app, ["--help"]).output, re.M))
-    assert "evaluate" in listed
-    assert listed.isdisjoint(hidden)
-    for name in hidden:
-        assert CliRunner().invoke(app, [name, "explain", "--help"]).exit_code == 0
 
 
 @pytest.mark.parametrize("placeholder", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL"])

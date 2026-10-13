@@ -5,13 +5,13 @@
 name: agents-optimize
 description: >-
   Optimizes and accelerates a deployed NeMo agent by suggesting switchyard
-  routing splits, skill optimization, prompt/hyperparameter tuning, and
+  routing splits, prompt/hyperparameter tuning, and
   evaluations against newly available models. Persists snapshots and structured
   suggestions to the NeMo files service for diffing and UI rendering. Use when
   the user asks to optimize, accelerate, tune, route, or reduce the cost of an
   agent or its underlying model. Trigger keywords - agent optimization,
   optimize agent, accelerate agent, smaller model, switchyard router,
-  routing split, agents optimize-skills, agents optimize, agents evaluate,
+  routing split, agents optimize, agents evaluate,
   new model scan, nemotron, frontier model.
 allowed-tools: Bash
 metadata:
@@ -20,9 +20,8 @@ metadata:
 
 # NeMo Agent Optimization
 
-Optimize and accelerate a deployed agent by suggesting routing splits, skill
-optimization, prompt/hyperparameter tuning, and evaluations against newly
-available models. Always anchor proposed changes against an evaluation baseline
+Optimize and accelerate a deployed agent by suggesting routing splits,
+prompt/hyperparameter tuning, and evaluations against newly available models. Always anchor proposed changes against an evaluation baseline
 so quality regressions are caught before promotion.
 
 ## Workflow
@@ -80,23 +79,7 @@ model is in use, suggest creating a `random_routing` virtual model with an
 
 This is pure config inspection — no telemetry download required.
 
-### 2. Skill optimization
-
-If the agent uses skills (its repo has a `--skills-path`, or
-`.agent-improver.yml` is present, or its config references skill files) **and**
-`nemo agents optimize-skills` has not been run since the last optimizer
-snapshot, suggest running it.
-
-Suggested actions:
-
-- `nemo agents optimize-skills --spec-file .agent-improver.yml`
-  (or pass an inline JSON spec via `--spec '{...}'` if no config file exists)
-- After it returns, apply the resulting skill diff to the agent and redeploy.
-
-See **the `nemo-agent-skills-optimization` skill** for the full optimize-skills loop
-(variance, repeats, branch handling, `--open-pr`).
-
-### 3. Prompt + hyperparameter tuning
+### 2. Prompt + hyperparameter tuning
 
 If `nemo agents optimize run-strategy` has not been run for this agent since the last
 snapshot, suggest running it. The job sweeps prompts and hyperparameters via
@@ -109,7 +92,7 @@ Suggested actions:
 - After it completes, apply the new prompt + hyperparameters to a sibling
   agent, deploy it, and run `nemo agents evaluate` to compare.
 
-### 4. New model scan
+### 3. New model scan
 
 Diff `nemo models list --all-pages` against `prevSnapshot.modelNames`. **Never
 emit on first run** — there is no prior snapshot to diff against. Emit one
@@ -214,7 +197,6 @@ survives across reads.
 | `type` value | Meaning |
 |--------------|---------|
 | `model_optimization` | Switchyard routing split or smaller-model fit |
-| `skill_optimization` | `nemo agents optimize-skills` is recommended |
 | `prompt_optimization` | `nemo agents optimize run-strategy` is recommended |
 | `new_model_scan` | New model appeared since last snapshot |
 
@@ -317,13 +299,11 @@ nemo agents list
 nemo models list --all-pages              # always --all-pages; default paginates
 nemo models list --filter.name nemotron   # find Nemotron candidates
 
-# Optimization commands (see also: nemo-agent-skills-optimization skill).
+# Optimization commands.
 # The optimize command's --optimize-config value must be relative to the staged fileset root.
 nemo agents evaluate --agent <name> --eval-config <yaml>
 nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>
 nemo agents optimize run-strategy --strategy legacy --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
-nemo agents optimize-skills --spec-file .agent-improver.yml
-nemo agents evaluate-suite --spec '{"evals": "<dir>", "agent": "<name>"}'
 
 # Files service
 nemo files list <fileset>
@@ -346,9 +326,9 @@ nemo garak audit --spec '{"config": "default/<config>", "target": "default/<targ
   (`8b` < `30b` < `70b`). Prefer Nemotron candidates.
 - **New model diff**: set subtraction between current model list and prior
   snapshot model list. Pure computation.
-- **Skill / prompt optimization gating**: check whether
-  `iterations[].timestamp` from a prior `nemo agents optimize-skills` /
-  `nemo agents optimize run-strategy` run is newer than the last snapshot.
+- **Prompt optimization gating**: check whether `iterations[].timestamp`
+  from a prior `nemo agents optimize run-strategy` run is newer than the last
+  snapshot.
 
 **Requires execution:**
 
@@ -369,8 +349,8 @@ nemo garak audit --spec '{"config": "default/<config>", "target": "default/<targ
   available; otherwise suggest the user create one.
 - Fetch agents and models in parallel
   (`nemo agents list`, `nemo models list --all-pages`).
-- Reason about routing/smaller-model fit, skill-optimization, prompt-
-  optimization, and new-model candidates from this data — no telemetry
+- Reason about routing/smaller-model fit, prompt optimization, and
+  new-model candidates from this data — no telemetry
   download required.
 - Create `nemo-agent-optimizer` fileset if it doesn't exist
   (`nemo files filesets create nemo-agent-optimizer`).
@@ -389,7 +369,5 @@ nemo garak audit --spec '{"config": "default/<config>", "target": "default/<targ
   alongside this skill when the user wants both a perf-and-safety pass.
 - `inference` — exact `nemo virtual-models create … --request-middleware …`
   syntax for switchyard routing/passthrough/translate.
-- `nemo-agent-skills-optimization` — full reference for `nemo agents
-  optimize-skills` / `evaluate-suite` / `analyze`.
 - `nemo-agents-optimize-sync-web` — keeps the web-side optimizer hook in
   parity with this skill's JSONL/apply spec.
