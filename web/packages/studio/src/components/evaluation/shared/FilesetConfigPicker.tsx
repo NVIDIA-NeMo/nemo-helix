@@ -6,6 +6,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { Stack } from '@nvidia/foundations-react-core';
 import { isEvalConfigCandidate } from '@studio/components/evaluation/consts';
+import { filesetNameOption } from '@studio/components/evaluation/utils';
 import { type ReactElement } from 'react';
 import {
   type Control,
@@ -68,7 +69,7 @@ export function FilesetConfigPicker<T extends FieldValues>({
         workspace={workspace}
         useControllerProps={{ control, name: filesetName }}
         formFieldProps={{ slotLabel: 'Config Fileset' }}
-        renderOption={({ name }) => ({ value: name, label: name })}
+        renderOption={filesetNameOption}
         onChange={clearFile}
         disabled={disabled}
       />
