@@ -115,7 +115,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
   const [viewMode, setViewMode] = useState<BuilderViewMode>('list');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isPreviewVisible, setIsPreviewVisible] = useState(false);
 
   const validateAndCollectErrors = useCallback(() => {
     const { columns, models, name, rows } = builder.getBuilderValues();
@@ -152,7 +152,6 @@ export const DataDesignerJobBuildRoute: FC = () => {
     previewRecords,
     previewColumnOrder,
     previewError,
-    hasPreviewRun,
     isPreviewing,
     runPreview,
     stopPreview,
@@ -164,7 +163,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
 
   const handlePreview = useCallback(() => {
     if (validateAndCollectErrors().length > 0) return;
-    setIsPreviewOpen(true);
+    setIsPreviewVisible(true);
     void runPreview();
   }, [validateAndCollectErrors, runPreview]);
 
@@ -198,7 +197,10 @@ export const DataDesignerJobBuildRoute: FC = () => {
   }, [validateAndCollectErrors, builder, createJob, workspace, servedModelNames, navigate]);
 
   const toggleDetails = useCallback(() => setIsDetailsOpen((open) => !open), []);
-  const togglePreview = useCallback(() => setIsPreviewOpen((open) => !open), []);
+  const closePreview = useCallback(() => {
+    stopPreview();
+    setIsPreviewVisible(false);
+  }, [stopPreview]);
   const onColumnRemove = useCallback(() => {
     if (builder.selectedColumnId) builder.removeColumn(builder.selectedColumnId);
   }, [builder]);
@@ -229,7 +231,6 @@ export const DataDesignerJobBuildRoute: FC = () => {
           <BuilderDetailsPanel
             validationErrors={validationErrors}
             submitError={submitError}
-            previewLogs={previewLogs}
             isOpen={isDetailsOpen}
             onToggle={toggleDetails}
           />
@@ -272,14 +273,14 @@ export const DataDesignerJobBuildRoute: FC = () => {
             />
           </Flex>
 
-          {hasPreviewRun ? (
+          {isPreviewVisible ? (
             <BuilderPreviewPanel
               records={previewRecords}
               columnOrder={previewColumnOrder}
+              logs={previewLogs}
               isPreviewing={isPreviewing}
               error={previewError}
-              isOpen={isPreviewOpen}
-              onToggle={togglePreview}
+              onClose={closePreview}
             />
           ) : null}
         </Stack>

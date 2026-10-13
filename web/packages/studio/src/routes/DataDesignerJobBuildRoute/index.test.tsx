@@ -9,7 +9,7 @@ import { DataDesignerJobBuildRoute } from '@studio/routes/DataDesignerJobBuildRo
 import type { DataDesignerGeneratedState } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import { getDataDesignerJobBuildRoute } from '@studio/routes/utils';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
@@ -52,6 +52,27 @@ const respondToPreview = (...frames: unknown[]) =>
         })
     )
   );
+
+const holdPreviewStreamOpen = (logMessage: string, onAbort?: () => void) => {
+  const encoder = new TextEncoder();
+  server.use(
+    http.post(PREVIEW_URL, ({ request }) => {
+      if (onAbort) request.signal.addEventListener('abort', onAbort);
+      return new HttpResponse(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `${JSON.stringify({ kind: 'log', level: 'info', message: logMessage })}\n`
+              )
+            );
+          },
+        }),
+        { headers: { 'Content-Type': 'application/x-ndjson' } }
+      );
+    })
+  );
+};
 
 const renderBuildRoute = (state?: DataDesignerGeneratedState, search = '') => {
   const router = createMemoryRouter(
@@ -104,8 +125,7 @@ describe('DataDesignerJobBuildRoute', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
 
-    expect(await screen.findByText('Preview · 2 rows')).toBeInTheDocument();
-    const table = screen.getByRole('table');
+    const table = await screen.findByRole('table');
     expect(
       within(table)
         .getAllByRole('columnheader')
@@ -113,8 +133,54 @@ describe('DataDesignerJobBuildRoute', () => {
     ).toEqual(['#', 'topic', 'email_body']);
     expect(within(table).getByText('Reset your password now.')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Preview logs' }));
-    expect(await screen.findByText(/Preview generation complete/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Preview Run Logs' }));
+    expect(
+      await screen.findByText(/Preview generation complete/, {}, { timeout: 5_000 })
+    ).toBeInTheDocument();
+  });
+
+  it('shows the preview tabs and live logs while the stream is still open', async () => {
+    holdPreviewStreamOpen('Sampling topics');
+    renderBuildRoute({ generatedJobRequest });
+    await screen.findByText('email_body');
+
+    fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
+
+    expect(await screen.findByText('Generating preview rows…')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Preview Rows' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Preview Run Logs' }));
+    await screen.findByText(/Sampling topics/, {}, { timeout: 5_000 });
+  });
+
+  it('stops a running preview when the panel is closed', async () => {
+    const onAbort = vi.fn();
+    holdPreviewStreamOpen('Sampling topics', onAbort);
+    renderBuildRoute({ generatedJobRequest });
+    await screen.findByText('email_body');
+
+    fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
+    expect(await screen.findByRole('button', { name: 'Stop preview' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+
+    await waitFor(() => expect(onAbort).toHaveBeenCalled());
+    expect(screen.queryByRole('tab', { name: 'Preview Rows' })).not.toBeInTheDocument();
+  });
+
+  it('has no preview panel until a preview runs, closes it with the X, and reopens it on the next run', async () => {
+    respondToPreview({ kind: 'dataset', records: [{ topic: 'invoice' }] }, { kind: 'done' });
+    renderBuildRoute({ generatedJobRequest });
+    await screen.findByText('email_body');
+    expect(screen.queryByRole('tab', { name: 'Preview Rows' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
+    expect(await screen.findByRole('tab', { name: 'Preview Rows' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+    expect(screen.queryByRole('tab', { name: 'Preview Rows' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
+    expect(await screen.findByRole('tab', { name: 'Preview Rows' })).toBeInTheDocument();
   });
 
   it('shows the preview error when the stream fails', async () => {
@@ -128,6 +194,5 @@ describe('DataDesignerJobBuildRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
 
     expect(await screen.findByText(/The preview failed: model unavailable/)).toBeInTheDocument();
-    expect(screen.getByText('Preview · failed')).toBeInTheDocument();
   });
 });
