@@ -12,7 +12,7 @@ const importFreshBrowserAuthentication = async () => {
 };
 
 describe('parseOidcBrowserAuthentication', () => {
-  it('prefers the confidential client when discovery advertises multiple clients', () => {
+  it('uses the default public client when discovery also advertises a confidential client', () => {
     expect(
       parseOidcBrowserAuthentication({
         auth_enabled: true,
@@ -20,13 +20,48 @@ describe('parseOidcBrowserAuthentication', () => {
           clients: [
             {
               name: 'public',
+              client_id: 'studio-public',
               client_authentication: 'public',
-              server_side_sessions: true,
+              default: true,
+              server_side_sessions: false,
             },
-            { name: 'confidential', client_authentication: 'client_secret_basic' },
+            {
+              name: 'confidential',
+              client_id: 'cli-confidential',
+              client_authentication: 'client_secret_basic',
+              default: false,
+            },
           ],
         },
       })
+    ).toEqual({ authEnabled: true });
+  });
+
+  it('uses the configured Studio client when it is advertised', () => {
+    expect(
+      parseOidcBrowserAuthentication(
+        {
+          auth_enabled: true,
+          oidc: {
+            clients: [
+              {
+                name: 'public',
+                client_id: 'studio-public',
+                client_authentication: 'public',
+                default: true,
+                server_side_sessions: false,
+              },
+              {
+                name: 'confidential',
+                client_id: 'studio-confidential',
+                client_authentication: 'client_secret_basic',
+                default: false,
+              },
+            ],
+          },
+        },
+        'studio-confidential'
+      )
     ).toEqual({ authEnabled: true, serverSessionClient: 'confidential' });
   });
 
@@ -38,7 +73,9 @@ describe('parseOidcBrowserAuthentication', () => {
           clients: [
             {
               name: 'public',
+              client_id: 'studio-public',
               client_authentication: 'public',
+              default: true,
               server_side_sessions: true,
             },
           ],
@@ -55,7 +92,9 @@ describe('parseOidcBrowserAuthentication', () => {
           clients: [
             {
               name: 'public',
+              client_id: 'studio-public',
               client_authentication: 'public',
+              default: true,
               server_side_sessions: false,
             },
           ],
@@ -108,6 +147,7 @@ describe('withOidcServerSessionRequest', () => {
 
 describe('getOidcBrowserAuthentication', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
@@ -127,7 +167,31 @@ describe('getOidcBrowserAuthentication', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('https://platform.example.test/apis/auth/discovery', {
       credentials: 'omit',
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it('aborts stalled discovery without marking the timeout as retryable', async () => {
+    vi.stubEnv('VITE_PLATFORM_BASE_URL', 'https://platform.example.test');
+    const timeoutError = new DOMException('The operation timed out', 'TimeoutError');
+    const fetchMock = vi.fn().mockRejectedValue(timeoutError);
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    vi.stubGlobal('fetch', fetchMock);
+    const { getOidcBrowserAuthentication, isRetryableOidcBrowserAuthenticationError: isRetryable } =
+      await importFreshBrowserAuthentication();
+
+    const discovery = getOidcBrowserAuthentication();
+
+    const error = await discovery.catch((discoveryError: unknown) => discoveryError);
+
+    expect(error).toMatchObject({
+      name: 'OidcBrowserAuthenticationTimeoutError',
+      message: 'Auth discovery timed out after 5000ms',
+      cause: timeoutError,
+    });
+    expect(isRetryable(error)).toBe(false);
+    expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('treats a missing discovery endpoint as disabled authentication', async () => {
@@ -137,6 +201,39 @@ describe('getOidcBrowserAuthentication', () => {
     const { getOidcBrowserAuthentication } = await importFreshBrowserAuthentication();
 
     await expect(getOidcBrowserAuthentication()).resolves.toEqual({ authEnabled: false });
+  });
+
+  it('uses the configured Studio client id when selecting from discovery', async () => {
+    vi.stubEnv('VITE_AUTH_CLIENT_ID', 'studio-confidential');
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        auth_enabled: true,
+        oidc: {
+          clients: [
+            {
+              name: 'public',
+              client_id: 'studio-public',
+              client_authentication: 'public',
+              default: true,
+              server_side_sessions: false,
+            },
+            {
+              name: 'confidential',
+              client_id: 'studio-confidential',
+              client_authentication: 'client_secret_basic',
+              default: false,
+            },
+          ],
+        },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { getOidcBrowserAuthentication } = await importFreshBrowserAuthentication();
+
+    await expect(getOidcBrowserAuthentication()).resolves.toEqual({
+      authEnabled: true,
+      serverSessionClient: 'confidential',
+    });
   });
 
   it('retries discovery after a failed request', async () => {

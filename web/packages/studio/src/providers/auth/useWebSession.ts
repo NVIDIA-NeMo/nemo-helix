@@ -4,11 +4,12 @@
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getOidcBrowserAuthentication,
+  isRetryableOidcBrowserAuthenticationError,
   type OidcBrowserAuthentication,
   type OidcServerSessionClient,
   withOidcServerSessionRequest,
 } from '@nemo/sdk/src/utils/oidcBrowserAuthentication';
-import { BASE_URL, PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { AUTH_CLIENT_ID, BASE_URL, PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useAuth } from 'react-oidc-context';
@@ -35,6 +36,10 @@ export const AUTH_DISCOVERY_QUERY_KEY = ['auth', 'discovery'] as const;
 export const WEB_SESSION_QUERY_KEY = ['auth', 'web-session'] as const;
 export const AUTH_EXPLICIT_LOGOUT_STORAGE_KEY = 'nemo.studio.auth.explicitLogout';
 const AUTH_QUERY_RETRY_COUNT = 2;
+const AUTH_DISABLED: OidcBrowserAuthentication = { authEnabled: false };
+
+const retryAuthDiscovery = (failureCount: number, error: Error): boolean =>
+  failureCount < AUTH_QUERY_RETRY_COUNT && isRetryableOidcBrowserAuthenticationError(error);
 
 export const markExplicitLogoutAutoLoginSuppressed = (): void => {
   window.sessionStorage.setItem(AUTH_EXPLICIT_LOGOUT_STORAGE_KEY, 'true');
@@ -99,13 +104,15 @@ const useBrowserAuthentication = () =>
   useQuery({
     queryKey: AUTH_DISCOVERY_QUERY_KEY,
     queryFn: getOidcBrowserAuthentication,
+    enabled: Boolean(AUTH_CLIENT_ID),
     staleTime: Infinity,
-    retry: AUTH_QUERY_RETRY_COUNT,
+    retry: retryAuthDiscovery,
   });
 
 export const useWebSession = (): WebSessionState => {
   const discoveryQuery = useBrowserAuthentication();
-  const authentication = discoveryQuery.data;
+  const isAuthDisabledByBuildConfig = !AUTH_CLIENT_ID;
+  const authentication = isAuthDisabledByBuildConfig ? AUTH_DISABLED : discoveryQuery.data;
   const serverSessionClient = authentication?.serverSessionClient;
   const isServerSession = serverSessionClient !== undefined;
   const sessionQuery = useQuery({
@@ -125,8 +132,12 @@ export const useWebSession = (): WebSessionState => {
     serverSessionClient,
     isServerSession,
     isAuthenticated: session !== undefined,
-    isLoading: discoveryQuery.isPending || (isServerSession && sessionQuery.isPending),
-    isError: discoveryQuery.isError || (isServerSession && sessionQuery.isError),
+    isLoading:
+      !isAuthDisabledByBuildConfig &&
+      (discoveryQuery.isPending || (isServerSession && sessionQuery.isPending)),
+    isError:
+      !isAuthDisabledByBuildConfig &&
+      (discoveryQuery.isError || (isServerSession && sessionQuery.isError)),
     authEnabled: authentication?.authEnabled ?? false,
   };
 };

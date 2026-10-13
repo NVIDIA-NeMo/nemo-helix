@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useAuthAutoLogin } from '@studio/providers/auth/useAuthLogin';
+import {
+  AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY,
+  useAuthAutoLogin,
+} from '@studio/providers/auth/useAuthLogin';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { useAuthTokenStatus } from '@studio/providers/auth/useAuthTokenStatus';
 import {
@@ -10,12 +13,19 @@ import {
   useWebSession,
   WEB_SESSION_QUERY_KEY,
 } from '@studio/providers/auth/useWebSession';
-import { mockSignoutRedirect } from '@studio/tests/mocks/react-oidc-context';
+import {
+  mockAuthState,
+  mockSigninRedirect,
+  mockSignoutRedirect,
+} from '@studio/tests/mocks/react-oidc-context';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 
 const mocks = vi.hoisted(() => ({
+  authAuthority: 'https://idp.example.com' as string | undefined,
+  authClientId: 'nemo-helix-user' as string | undefined,
+  isRetryableDiscoveryError: vi.fn(),
   removeQueries: vi.fn(),
   toastError: vi.fn(),
   useQuery: vi.fn(),
@@ -30,13 +40,18 @@ vi.mock('@nemo/common/src/providers/toast/useToast', () => ({
 
 vi.mock('@studio/constants/environment', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/constants/environment')>()),
-  AUTH_AUTHORITY: 'https://idp.example.com',
-  AUTH_CLIENT_ID: 'nemo-helix-user',
+  get AUTH_AUTHORITY() {
+    return mocks.authAuthority;
+  },
+  get AUTH_CLIENT_ID() {
+    return mocks.authClientId;
+  },
   BASE_URL: '/studio/',
 }));
 
 vi.mock('@nemo/sdk/src/utils/oidcBrowserAuthentication', () => ({
   getOidcBrowserAuthentication: vi.fn(),
+  isRetryableOidcBrowserAuthenticationError: mocks.isRetryableDiscoveryError,
   withOidcServerSessionRequest: mocks.withOidcServerSessionRequest,
 }));
 
@@ -75,6 +90,12 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 
 describe('server-side browser sessions', () => {
   beforeEach(() => {
+    mocks.authAuthority = 'https://idp.example.com';
+    mocks.authClientId = 'nemo-helix-user';
+    mocks.isRetryableDiscoveryError.mockReset();
+    mocks.isRetryableDiscoveryError.mockImplementation(
+      (error: unknown) => error instanceof TypeError
+    );
     discoveryResult = {
       data: confidentialAuthentication,
       isPending: false,
@@ -94,6 +115,9 @@ describe('server-side browser sessions', () => {
       return { ...init, credentials: 'include', headers };
     });
     window.sessionStorage.removeItem(AUTH_EXPLICIT_LOGOUT_STORAGE_KEY);
+    window.sessionStorage.removeItem(AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY);
+    mockAuthState.isAuthenticated = true;
+    mockSigninRedirect.mockReset();
     mockSignoutRedirect.mockReset();
     vi.mocked(window.location.assign).mockReset();
   });
@@ -140,6 +164,39 @@ describe('server-side browser sessions', () => {
         `http://localhost:8080/apis/auth/v2/login?client=${auth.serverSessionClient}&return_to=%2Fstudio%2Fworkspaces%2Fexample%3Ftab%3Dmodels%23details`
       )
     );
+    expect(
+      Number(window.sessionStorage.getItem(AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY))
+    ).toBeGreaterThan(0);
+  });
+
+  it('shows an auth error instead of repeating a recent server-session login redirect', () => {
+    sessionResult = { data: undefined, isPending: false, isError: false };
+    window.sessionStorage.setItem(
+      AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY,
+      String(Date.now())
+    );
+
+    const login = renderHook(() => useAuthAutoLogin(), { wrapper }).result;
+
+    expect(login.current.isAuthError).toBe(true);
+    expect(login.current.isAuthPending).toBe(false);
+    expect(window.location.assign).not.toHaveBeenCalled();
+  });
+
+  it('retries server-session login after the stored redirect guard expires', async () => {
+    sessionResult = { data: undefined, isPending: false, isError: false };
+    window.sessionStorage.setItem(
+      AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY,
+      String(Date.now() - 120_000)
+    );
+
+    renderHook(() => useAuthAutoLogin(), { wrapper });
+
+    await waitFor(() =>
+      expect(window.location.assign).toHaveBeenCalledWith(
+        'http://localhost:8080/apis/auth/v2/login?client=confidential&return_to=%2Fstudio%2Fworkspaces%2Fexample%3Ftab%3Dmodels%23details'
+      )
+    );
   });
 
   it('offers sign-in after an explicit server-session logout', () => {
@@ -172,6 +229,21 @@ describe('server-side browser sessions', () => {
     );
   });
 
+  it('clears the server-session redirect guard once a server session exists', async () => {
+    window.sessionStorage.setItem(
+      AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY,
+      String(Date.now())
+    );
+
+    renderHook(() => useAuthAutoLogin(), { wrapper });
+
+    await waitFor(() =>
+      expect(
+        window.sessionStorage.getItem(AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY)
+      ).toBeNull()
+    );
+  });
+
   it('represents an unauthenticated session as valid empty query data', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -184,17 +256,19 @@ describe('server-side browser sessions', () => {
     await expect(sessionQuery?.queryFn()).resolves.toBeNull();
   });
 
-  it('uses bounded retries for transient discovery and session lookup failures', () => {
+  it('uses bounded retries for retryable discovery and session lookup failures', () => {
     renderHook(() => useWebSession());
 
     const discoveryQuery = mocks.useQuery.mock.calls.find(
       ([options]) => options.queryKey[1] === 'discovery'
-    )?.[0] as { retry: unknown } | undefined;
+    )?.[0] as { retry: (failureCount: number, error: Error) => boolean } | undefined;
     const sessionQuery = mocks.useQuery.mock.calls.find(
       ([options]) => options.queryKey[1] === 'web-session'
     )?.[0] as { retry: unknown } | undefined;
 
-    expect(discoveryQuery?.retry).toBe(2);
+    expect(discoveryQuery?.retry(0, new TypeError('network unavailable'))).toBe(true);
+    expect(discoveryQuery?.retry(2, new TypeError('network unavailable'))).toBe(false);
+    expect(discoveryQuery?.retry(0, new Error('discovery timed out'))).toBe(false);
     expect(sessionQuery?.retry).toBe(2);
   });
 
@@ -218,6 +292,49 @@ describe('server-side browser sessions', () => {
 
     expect(login.current.isAuthPending).toBe(false);
     expect(login.current.isAuthError).toBe(true);
+    expect(window.location.assign).not.toHaveBeenCalled();
+  });
+
+  it('skips auth discovery when no browser auth client id is configured', () => {
+    mocks.authClientId = undefined;
+    discoveryResult = { data: undefined, isPending: false, isError: true };
+    sessionResult = { data: undefined, isPending: false, isError: false };
+
+    const webSession = renderHook(() => useWebSession()).result;
+    const login = renderHook(() => useAuthAutoLogin(), { wrapper }).result;
+
+    expect(webSession.current).toMatchObject({
+      authEnabled: false,
+      isAuthenticated: false,
+      isLoading: false,
+      isError: false,
+      isServerSession: false,
+    });
+    expect(login.current.isAuthPending).toBe(false);
+    expect(login.current.isAuthError).toBe(false);
+    expect(window.location.assign).not.toHaveBeenCalled();
+
+    const discoveryQuery = mocks.useQuery.mock.calls.find(
+      ([options]) => options.queryKey[1] === 'discovery'
+    )?.[0] as { enabled: unknown } | undefined;
+    expect(discoveryQuery?.enabled).toBe(false);
+  });
+
+  it('keeps env-configured direct OIDC login when discovery reports auth disabled', async () => {
+    mockAuthState.isAuthenticated = false;
+    discoveryResult = { data: { authEnabled: false }, isPending: false, isError: false };
+    sessionResult = { data: undefined, isPending: false, isError: false };
+
+    renderHook(() => useAuthAutoLogin(), { wrapper });
+
+    await waitFor(() =>
+      expect(mockSigninRedirect).toHaveBeenCalledWith({
+        state: {
+          path: '/workspaces/example',
+          search: '?tab=models',
+        },
+      })
+    );
     expect(window.location.assign).not.toHaveBeenCalled();
   });
 

@@ -7,6 +7,7 @@ export type OidcServerSessionClient = 'public' | 'confidential';
 
 export const STUDIO_SOURCE_HEADER = 'X-Source';
 export const STUDIO_SOURCE_VALUE = 'NeMo Studio';
+const AUTH_DISCOVERY_TIMEOUT_MS = 5_000;
 
 export interface OidcBrowserAuthentication {
   authEnabled: boolean;
@@ -23,8 +24,29 @@ export class OidcBrowserAuthenticationError extends Error {
   }
 }
 
+export class OidcBrowserAuthenticationTimeoutError extends OidcBrowserAuthenticationError {
+  constructor(timeoutMs: number, cause: unknown) {
+    super(`Auth discovery timed out after ${timeoutMs}ms`);
+    this.cause = cause;
+    this.name = 'OidcBrowserAuthenticationTimeoutError';
+  }
+}
+
+export const isRetryableOidcBrowserAuthenticationError = (error: unknown): boolean => {
+  if (error instanceof OidcBrowserAuthenticationTimeoutError) return false;
+  if (error instanceof OidcBrowserAuthenticationError) {
+    return error.status === undefined || error.status >= 500;
+  }
+  return error instanceof TypeError;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
+
+const hasClientId = (value: unknown, clientId: string | undefined): boolean =>
+  clientId !== undefined && clientId !== '' && isRecord(value) && value.client_id === clientId;
+
+const isDefaultClient = (value: unknown): boolean => isRecord(value) && value.default === true;
 
 const isConfidentialClient = (value: unknown): boolean =>
   isRecord(value) &&
@@ -37,7 +59,22 @@ const isServerSessionPublicClient = (value: unknown): boolean =>
   value.client_authentication === 'public' &&
   value.server_side_sessions === true;
 
-export const parseOidcBrowserAuthentication = (value: unknown): OidcBrowserAuthentication => {
+const serverSessionAuthenticationForClient = (
+  client: unknown
+): OidcBrowserAuthentication | undefined => {
+  if (isConfidentialClient(client)) {
+    return { authEnabled: true, serverSessionClient: 'confidential' };
+  }
+  if (isServerSessionPublicClient(client)) {
+    return { authEnabled: true, serverSessionClient: 'public' };
+  }
+  return undefined;
+};
+
+export const parseOidcBrowserAuthentication = (
+  value: unknown,
+  preferredClientId?: string
+): OidcBrowserAuthentication => {
   if (!isRecord(value) || typeof value.auth_enabled !== 'boolean') {
     throw new Error('Auth discovery response was invalid');
   }
@@ -49,18 +86,33 @@ export const parseOidcBrowserAuthentication = (value: unknown): OidcBrowserAuthe
   }
 
   const clients = value.oidc.clients;
-  if (clients.some(isConfidentialClient)) {
-    return { authEnabled: true, serverSessionClient: 'confidential' };
-  }
-  if (clients.some(isServerSessionPublicClient)) {
-    return { authEnabled: true, serverSessionClient: 'public' };
-  }
+  const selectedClient =
+    clients.find((client) => hasClientId(client, preferredClientId)) ??
+    clients.find(isDefaultClient) ??
+    (clients.length === 1 ? clients[0] : undefined);
+  const serverSessionAuthentication = serverSessionAuthenticationForClient(selectedClient);
+  if (serverSessionAuthentication) return serverSessionAuthentication;
+
   return { authEnabled: true };
+};
+
+const fetchDiscovery = async (url: string): Promise<Response> => {
+  try {
+    return await fetch(url, {
+      credentials: 'omit',
+      signal: AbortSignal.timeout(AUTH_DISCOVERY_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new OidcBrowserAuthenticationTimeoutError(AUTH_DISCOVERY_TIMEOUT_MS, error);
+    }
+    throw error;
+  }
 };
 
 const discoverOidcBrowserAuthentication = async (): Promise<OidcBrowserAuthentication> => {
   const baseUrl = resolveBrowserBaseUrl(import.meta.env.VITE_PLATFORM_BASE_URL);
-  const response = await fetch(`${baseUrl}/apis/auth/discovery`, { credentials: 'omit' });
+  const response = await fetchDiscovery(`${baseUrl}/apis/auth/discovery`);
   if (response.status === 404) {
     return { authEnabled: false };
   }
@@ -70,7 +122,7 @@ const discoverOidcBrowserAuthentication = async (): Promise<OidcBrowserAuthentic
       response.status
     );
   }
-  return parseOidcBrowserAuthentication(await response.json());
+  return parseOidcBrowserAuthentication(await response.json(), import.meta.env.VITE_AUTH_CLIENT_ID);
 };
 
 let discoveryRequest: Promise<OidcBrowserAuthentication> | undefined;

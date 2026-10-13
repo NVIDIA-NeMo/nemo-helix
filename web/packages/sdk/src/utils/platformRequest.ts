@@ -6,7 +6,7 @@ import type { AxiosRequestConfig } from 'axios';
 import { getStoredOidcBearerToken } from './oidcBearerToken';
 import {
   getOidcBrowserAuthentication,
-  OidcBrowserAuthenticationError,
+  isRetryableOidcBrowserAuthenticationError,
   type OidcBrowserAuthentication,
   STUDIO_SOURCE_HEADER,
   STUDIO_SOURCE_VALUE,
@@ -25,6 +25,7 @@ export interface HelixBrowserAuthOptions {
 }
 
 const AUTH_DISCOVERY_RETRY_COUNT = 2;
+const AUTH_DISCOVERY_RETRY_DELAY_MS = 100;
 
 const defaultMalformedStorageWarning = (): void => {
   console.warn('Malformed OIDC storage entry detected. Clearing storage and re-authenticating.');
@@ -35,29 +36,36 @@ const getBrowserStorage = (storage: OidcUserStorage | undefined): OidcUserStorag
   return typeof localStorage === 'undefined' ? undefined : localStorage;
 };
 
-const isTransientDiscoveryError = (error: unknown): boolean => {
-  if (error instanceof OidcBrowserAuthenticationError) {
-    return error.status === undefined || error.status >= 500;
-  }
-  return error instanceof TypeError;
-};
+const hasBrowserAuthClientId = (): boolean => Boolean(import.meta.env.VITE_AUTH_CLIENT_ID);
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 const getBrowserAuthentication = async (
   authentication: OidcBrowserAuthentication | undefined
-): Promise<OidcBrowserAuthentication | undefined> => {
+): Promise<OidcBrowserAuthentication> => {
   if (authentication) return authentication;
+  if (!hasBrowserAuthClientId()) return { authEnabled: false };
 
+  let discoveryError: unknown;
   for (let attempt = 0; attempt <= AUTH_DISCOVERY_RETRY_COUNT; attempt += 1) {
     try {
       return await getOidcBrowserAuthentication();
     } catch (error) {
-      if (!isTransientDiscoveryError(error) || attempt === AUTH_DISCOVERY_RETRY_COUNT) {
-        return undefined;
+      discoveryError = error;
+      if (
+        !isRetryableOidcBrowserAuthenticationError(error) ||
+        attempt === AUTH_DISCOVERY_RETRY_COUNT
+      ) {
+        break;
       }
+      await delay(AUTH_DISCOVERY_RETRY_DELAY_MS * (attempt + 1));
     }
   }
 
-  return undefined;
+  throw discoveryError ?? new Error('Auth discovery failed');
 };
 
 const getBrowserBearerToken = ({

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { Button, Flex, Text } from '@nvidia/foundations-react-core';
+import { Button, Flex, Spinner, Text } from '@nvidia/foundations-react-core';
 import { GlobalNav } from '@studio/components/Layouts/GlobalNav';
 import { ASSISTANT_STUDIO_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
@@ -49,6 +49,15 @@ const AuthErrorView = () => (
   </main>
 );
 
+const AuthPendingView = () => (
+  <main
+    aria-busy="true"
+    className="flex min-h-screen items-center justify-center bg-surface-sunken text-primary"
+  >
+    <Spinner size="large" description="Checking sign-in status..." />
+  </main>
+);
+
 export const PageLayout = ({ sideNav }: { sideNav?: (collapsed: boolean) => ReactNode }) => {
   const { isAuthError, isAuthPending, isSignedOut, signIn } = useAuthAutoLogin();
   const { isTokenActive } = useAuthTokenStatus();
@@ -64,7 +73,7 @@ export const PageLayout = ({ sideNav }: { sideNav?: (collapsed: boolean) => Reac
   }
 
   if (isAuthPending) {
-    return null;
+    return <AuthPendingView />;
   }
 
   const workspaceCheckActive = isTokenActive && !!selectedWorkspace;

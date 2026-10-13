@@ -30,6 +30,10 @@ export interface AuthAutoLoginState {
   signIn: () => void;
 }
 
+export const AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY =
+  'nemo.studio.auth.serverSessionLoginAttempt';
+const SERVER_SESSION_LOGIN_RETRY_SUPPRESSION_MS = 60_000;
+
 const getServerSessionReturnTo = (pathname: string, search: string, hash: string): string => {
   const studioBasePath = BASE_URL.replace(/\/+$/, '');
   return `${studioBasePath}${pathname}${search}${hash}`;
@@ -48,9 +52,34 @@ const getServerSessionLoginUrl = (
   return `${PLATFORM_BASE_URL}/apis/auth/v2/login?${params.toString()}`;
 };
 
+const clearServerSessionLoginAttempt = (): void => {
+  window.sessionStorage.removeItem(AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY);
+};
+
+const markServerSessionLoginAttempt = (): void => {
+  window.sessionStorage.setItem(AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY, String(Date.now()));
+};
+
+const hasRecentServerSessionLoginAttempt = (): boolean => {
+  const attemptedAt = Number(
+    window.sessionStorage.getItem(AUTH_SERVER_SESSION_LOGIN_ATTEMPT_STORAGE_KEY)
+  );
+  if (!Number.isFinite(attemptedAt) || attemptedAt <= 0) {
+    clearServerSessionLoginAttempt();
+    return false;
+  }
+  if (Date.now() - attemptedAt > SERVER_SESSION_LOGIN_RETRY_SUPPRESSION_MS) {
+    clearServerSessionLoginAttempt();
+    return false;
+  }
+  return true;
+};
+
 export const useAuthAutoLogin = (): AuthAutoLoginState => {
   const auth = useAuth();
   const [hasAttemptedLogin, setHasAttemptedLogin] = useState(false);
+  const [hasRecentServerSessionLoginAttemptState, setHasRecentServerSessionLoginAttemptState] =
+    useState(hasRecentServerSessionLoginAttempt);
   const [isExplicitLogoutSuppressed, setIsExplicitLogoutSuppressed] = useState(
     isExplicitLogoutAutoLoginSuppressed
   );
@@ -58,8 +87,7 @@ export const useAuthAutoLogin = (): AuthAutoLoginState => {
   const webSession = useWebSession();
   const hasOidcAuthParams = hasAuthParams();
   const isE2E = typeof window !== 'undefined' && window.localStorage.getItem('e2e_test') === 'true';
-  const isDirectPublicAuthEnabled =
-    webSession.authEnabled && Boolean(AUTH_CLIENT_ID && AUTH_AUTHORITY);
+  const isDirectPublicAuthEnabled = Boolean(AUTH_CLIENT_ID && AUTH_AUTHORITY);
   const isAuthEnabled = webSession.isServerSession
     ? webSession.authEnabled
     : isDirectPublicAuthEnabled;
@@ -69,9 +97,16 @@ export const useAuthAutoLogin = (): AuthAutoLoginState => {
   const isAuthenticationLoading =
     webSession.isLoading || (!webSession.isServerSession && auth.isLoading);
   const shouldSuppressServerSessionLogin = webSession.isServerSession && isExplicitLogoutSuppressed;
+  const shouldBlockServerSessionLoginRetry =
+    webSession.isServerSession &&
+    hasRecentServerSessionLoginAttemptState &&
+    !isAuthenticated &&
+    !isAuthenticationLoading &&
+    !webSession.isError;
   const shouldAttemptLogin =
     isAuthEnabled &&
     !shouldSuppressServerSessionLogin &&
+    !shouldBlockServerSessionLoginRetry &&
     !hasAttemptedLogin &&
     !hasOidcAuthParams &&
     !isAuthenticated &&
@@ -80,42 +115,50 @@ export const useAuthAutoLogin = (): AuthAutoLoginState => {
     !webSession.isError &&
     !isE2E;
 
-  const signIn = useCallback(() => {
-    clearExplicitLogoutAutoLoginSuppression();
-    setIsExplicitLogoutSuppressed(false);
-    setHasAttemptedLogin(true);
-
-    if (webSession.serverSessionClient) {
+  const redirectToServerSessionLogin = useCallback(
+    (serverSessionClient: string) => {
+      markServerSessionLoginAttempt();
+      setHasRecentServerSessionLoginAttemptState(true);
+      setHasAttemptedLogin(true);
       window.location.assign(
         getServerSessionLoginUrl(
-          webSession.serverSessionClient,
+          serverSessionClient,
           location.pathname,
           location.search,
           location.hash
         )
       );
+    },
+    [location.hash, location.pathname, location.search]
+  );
+
+  const signIn = useCallback(() => {
+    clearExplicitLogoutAutoLoginSuppression();
+    setIsExplicitLogoutSuppressed(false);
+
+    if (webSession.serverSessionClient) {
+      redirectToServerSessionLogin(webSession.serverSessionClient);
       return;
     }
 
+    setHasAttemptedLogin(true);
     void auth.signinRedirect({
       state: {
         path: location.pathname,
         search: location.search,
       },
     });
-  }, [auth, location.hash, location.pathname, location.search, webSession.serverSessionClient]);
+  }, [
+    auth,
+    location.pathname,
+    location.search,
+    redirectToServerSessionLogin,
+    webSession.serverSessionClient,
+  ]);
 
   useEffect(() => {
     if (webSession.serverSessionClient && shouldAttemptLogin) {
-      window.location.assign(
-        getServerSessionLoginUrl(
-          webSession.serverSessionClient,
-          location.pathname,
-          location.search,
-          location.hash
-        )
-      );
-      setHasAttemptedLogin(true);
+      redirectToServerSessionLogin(webSession.serverSessionClient);
       return;
     }
     if (shouldAttemptLogin) {
@@ -127,7 +170,32 @@ export const useAuthAutoLogin = (): AuthAutoLoginState => {
       });
       setHasAttemptedLogin(true);
     }
-  }, [auth, location, shouldAttemptLogin, webSession.serverSessionClient]);
+  }, [
+    auth,
+    location.pathname,
+    location.search,
+    redirectToServerSessionLogin,
+    shouldAttemptLogin,
+    webSession.serverSessionClient,
+  ]);
+
+  useEffect(() => {
+    if (
+      hasRecentServerSessionLoginAttemptState &&
+      (hasOidcAuthParams ||
+        isAuthenticated ||
+        (!webSession.isLoading && !webSession.isServerSession))
+    ) {
+      clearServerSessionLoginAttempt();
+      setHasRecentServerSessionLoginAttemptState(false);
+    }
+  }, [
+    hasOidcAuthParams,
+    hasRecentServerSessionLoginAttemptState,
+    isAuthenticated,
+    webSession.isLoading,
+    webSession.isServerSession,
+  ]);
 
   useEffect(() => {
     if (
@@ -148,7 +216,8 @@ export const useAuthAutoLogin = (): AuthAutoLoginState => {
   ]);
 
   const shouldBlockForAuth = !isE2E && !hasOidcAuthParams && !shouldSuppressServerSessionLogin;
-  const isAuthError = shouldBlockForAuth && webSession.isError;
+  const isAuthError =
+    shouldBlockForAuth && (webSession.isError || shouldBlockServerSessionLoginRetry);
 
   // Hide the UI when auth is enabled but the user is not authenticated and we're not handling a callback
   const isAuthPending =

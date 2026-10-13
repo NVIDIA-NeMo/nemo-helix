@@ -182,6 +182,10 @@ export const handlers = [
       });
     }
   ),
+  http.get(
+    `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/:workspace/evaluate/jobs/:name/results`,
+    () => HttpResponse.json({ data: [], pagination: {} })
+  ),
 
   // Projects V2 (Platform) — fixtures loaded on first use
   http.get(

@@ -4,6 +4,7 @@
 from urllib.parse import urljoin, urlparse
 
 import pytest
+from nhx.common.auth.discovery import AuthDiscoveryResponse, ConfidentialOidcAdvertisedClient
 from nhx.testing import grant_workspace_role
 from playwright.sync_api import expect
 
@@ -16,6 +17,30 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.xdist_group("idp-live"),
 ]
+
+
+def _configure_confidential_studio_client(auth_browser: AuthBrowser, gateway_base_url: str) -> None:
+    discovery_response = auth_browser.context.request.get(f"{gateway_base_url}/apis/auth/discovery")
+    assert discovery_response.status == 200, discovery_response.text()
+
+    discovery = AuthDiscoveryResponse.model_validate(discovery_response.json())
+    assert discovery.oidc is not None
+    configured_client = next((client for client in discovery.oidc.clients if client.default), None)
+    confidential_client = next(
+        (client for client in discovery.oidc.clients if isinstance(client, ConfidentialOidcAdvertisedClient)),
+        None,
+    )
+    assert configured_client is not None
+    assert confidential_client is not None
+
+    selected_client = confidential_client.model_copy(update={"client_id": configured_client.client_id, "default": True})
+    browser_discovery = discovery.model_copy(
+        update={"oidc": discovery.oidc.model_copy(update={"clients": [selected_client]})}
+    )
+    auth_browser.page.route(
+        "**/apis/auth/discovery",
+        lambda route: route.fulfill(json=browser_discovery.model_dump(mode="json")),
+    )
 
 
 def test_studio_confidential_browser_session_enforces_browser_security_contract(
@@ -34,6 +59,10 @@ def test_studio_confidential_browser_session_enforces_browser_security_contract(
     studio_url = f"{gateway_base_url}{studio_path}"
     login_path = "/apis/auth/v2/login"
     page = auth_browser.page
+
+    # The shared runtime uses its public client by default; model Studio configured for the
+    # confidential client so this contract exercises the broker-backed browser session.
+    _configure_confidential_studio_client(auth_browser, gateway_base_url)
 
     grant_workspace_role(
         auth_idp_runtime.e2e_setup_client(),

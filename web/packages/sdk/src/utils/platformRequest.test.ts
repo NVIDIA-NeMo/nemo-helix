@@ -24,6 +24,11 @@ const storedUser = (token: string): string =>
     token_type: 'Bearer',
   });
 
+const importFreshRequestModule = async () => {
+  vi.resetModules();
+  return import('./platformRequest');
+};
+
 describe('withHelixBrowserAuthRequest', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -140,6 +145,7 @@ describe('platformFetch', () => {
   });
 
   it('retries transient discovery failures before using server-session credentials', async () => {
+    vi.stubEnv('VITE_AUTH_CLIENT_ID', 'studio-confidential');
     vi.stubEnv('VITE_PLATFORM_BASE_URL', 'https://platform.example.test/');
     const fetchMock = vi
       .fn()
@@ -154,6 +160,7 @@ describe('platformFetch', () => {
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
+    const { platformFetch } = await importFreshRequestModule();
 
     await platformFetch('/apis/example', { headers: { Authorization: 'Bearer stale-token' } });
 
@@ -161,6 +168,57 @@ describe('platformFetch', () => {
     const request = fetchMock.mock.calls[2]?.[1] as RequestInit | undefined;
     const headers = new Headers(request?.headers);
     expect(request?.credentials).toBe('include');
+    expect(headers.get('X-Source')).toBe('NeMo Studio');
+    expect(headers.has('Authorization')).toBe(false);
+  });
+
+  it('fails auth-configured platform requests when discovery is unavailable', async () => {
+    vi.stubEnv('VITE_AUTH_AUTHORITY', 'https://auth.example.test');
+    vi.stubEnv('VITE_AUTH_CLIENT_ID', 'studio-client');
+    vi.stubEnv('VITE_PLATFORM_BASE_URL', 'https://platform.example.test/');
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('network unavailable'));
+    vi.stubGlobal('fetch', fetchMock);
+    const { platformFetch } = await importFreshRequestModule();
+
+    await expect(platformFetch('/apis/example')).rejects.toThrow('network unavailable');
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'https://platform.example.test/apis/example',
+      expect.anything()
+    );
+  });
+
+  it('does not retry a timed-out discovery request', async () => {
+    vi.stubEnv('VITE_AUTH_CLIENT_ID', 'studio-client');
+    vi.stubEnv('VITE_PLATFORM_BASE_URL', 'https://platform.example.test/');
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValue(new DOMException('The operation timed out', 'TimeoutError'));
+    vi.stubGlobal('fetch', fetchMock);
+    const { platformFetch } = await importFreshRequestModule();
+
+    await expect(platformFetch('/apis/example')).rejects.toThrow(
+      'Auth discovery timed out after 5000ms'
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('skips discovery and sends unauthenticated platform requests when no client id is configured', async () => {
+    vi.stubEnv('VITE_PLATFORM_BASE_URL', 'https://platform.example.test/');
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { platformFetch } = await importFreshRequestModule();
+
+    await platformFetch('/apis/example', { headers: { Accept: 'application/json' } });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const headers = new Headers(request?.headers);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://platform.example.test/apis/example');
+    expect(request?.credentials).toBeUndefined();
+    expect(headers.get('Accept')).toBe('application/json');
     expect(headers.get('X-Source')).toBe('NeMo Studio');
     expect(headers.has('Authorization')).toBe(false);
   });
@@ -214,7 +272,7 @@ describe('platformFetch', () => {
 
     await platformFetch('https://platform.example.test/apis/results.json');
 
-    const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const request = fetchMock.mock.calls.at(-1)?.[1] as RequestInit | undefined;
     expect(new Headers(request?.headers).get('X-Source')).toBe('NeMo Studio');
   });
 
