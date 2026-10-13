@@ -150,3 +150,23 @@ def test_service_transport_ignores_tls_material_on_a_plaintext_channel() -> None
 def test_service_router_endpoint_must_be_a_url() -> None:
     with pytest.raises(ValidationError, match="service_router_endpoint must be a URL"):
         OpenShellExecutorConfig(service_router_endpoint="openshell:8080")
+
+
+@pytest.mark.parametrize(
+    ("gateway", "router", "insecure", "expect_tls"),
+    [
+        ("http://gw:8080", "https://router:8443", None, True),
+        ("https://gw:8443", "http://router:8080", None, False),
+        ("http://gw:8080", "https://router:8443", True, False),
+        ("https://gw:8443", "http://router:8080", False, False),
+    ],
+)
+def test_service_transport_uses_router_scheme_for_tls(
+    gateway: str, router: str, insecure: bool | None, expect_tls: bool
+) -> None:
+    transport = OpenShellExecutorConfig(
+        gateway_endpoint=gateway, service_router_endpoint=router, insecure=insecure, tls=_TLS
+    ).service_transport()
+    assert transport.connect_base == router
+    assert transport.ca_cert == ("/tls/ca.crt" if expect_tls else None)
+    assert transport.client_cert == (("/tls/tls.crt", "/tls/tls.key") if expect_tls else None)

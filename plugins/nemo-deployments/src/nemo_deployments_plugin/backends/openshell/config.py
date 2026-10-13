@@ -189,7 +189,7 @@ class OpenShellExecutorConfig(BaseModel):
         parsed = urlparse(self.service_router_endpoint or self.gateway_endpoint)
         ca_cert: str | None = None
         client_cert: tuple[str, str] | None = None
-        if not self.use_insecure() and self.tls is not None:
+        if parsed.scheme == "https" and self.insecure is not True and self.tls is not None:
             ca_cert = self.tls.ca_cert_path or None
             if self.tls.client_cert_path and self.tls.client_key_path:
                 client_cert = (self.tls.client_cert_path, self.tls.client_key_path)

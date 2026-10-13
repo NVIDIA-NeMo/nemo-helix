@@ -993,3 +993,16 @@ async def test_recovery_finished_after_a_controller_restart_clears_the_error() -
 
     assert dep.status == "running"
     assert dep.error == ""
+
+
+@pytest.mark.asyncio
+async def test_read_runtime_instance_tolerates_transport_resolution_failure() -> None:
+    ctrl, _ = _make_controller()
+    deployment = _make_fabric_deployment()
+    with patch(
+        "nemo_agents_plugin.deployment_routing.get_deployment_transport",
+        side_effect=ValueError("invalid executor configuration"),
+    ):
+        assert await ctrl._read_runtime_instance(deployment) is None
+
+    assert ctrl._runtime_health_clients == {}

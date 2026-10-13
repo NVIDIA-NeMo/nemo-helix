@@ -80,9 +80,11 @@ async def cleanup_fabric_runtime(
         _log_cleanup_failure(session, "deployment has no routable endpoint")
         return
 
-    transport = get_deployment_transport(deployment)
-    cleanup_url, routing_headers = transport.target(f"{endpoint.rstrip('/')}/v1/sessions/{quote(session.id, safe='')}")
     try:
+        transport = get_deployment_transport(deployment)
+        cleanup_url, routing_headers = transport.target(
+            f"{endpoint.rstrip('/')}/v1/sessions/{quote(session.id, safe='')}"
+        )
         async with httpx.AsyncClient(
             timeout=_FABRIC_CLEANUP_TIMEOUT_SECONDS,
             follow_redirects=False,

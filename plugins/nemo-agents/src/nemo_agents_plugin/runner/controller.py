@@ -464,9 +464,9 @@ class AgentDeploymentController(NemoController):
         endpoint = get_deployment_endpoint(dep)
         if endpoint is None:
             return None
-        transport = get_deployment_transport(dep)
-        health_url, routing_headers = transport.target(f"{endpoint.rstrip('/')}/health")
         try:
+            transport = get_deployment_transport(dep)
+            health_url, routing_headers = transport.target(f"{endpoint.rstrip('/')}/health")
             response = await self._runtime_health_client(transport).get(health_url, headers=routing_headers)
             response.raise_for_status()
             health = response.json()

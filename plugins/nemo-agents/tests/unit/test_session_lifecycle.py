@@ -76,3 +76,20 @@ async def test_cleanup_dials_a_gateway_routed_deployment_through_its_gateway() -
         "https://openshell.openshell.svc.cluster.local:8080/v1/sessions/sess%2F1",
         headers={"Host": "default--dep--http.openshell.localhost:8080"},
     )
+
+
+@pytest.mark.asyncio
+async def test_cleanup_logs_transport_resolution_failure_without_raising(caplog: pytest.LogCaptureFixture) -> None:
+    deployment = _gateway_routed_deployment()
+    session = AgentSession(name="s", workspace="default", deployment_id=deployment.id, status=SessionStatus.CLOSED)
+    entity_client = AsyncMock()
+    entity_client.find_one.return_value = deployment
+    with patch(
+        "nemo_agents_plugin.session_lifecycle.get_deployment_transport",
+        side_effect=ValueError("invalid executor configuration"),
+    ):
+        await cleanup_fabric_runtime(entity_client, session)
+
+    assert session.status == SessionStatus.CLOSED
+    assert "invalid executor configuration" in caplog.text
+    assert "Fabric runtime cleanup failed" in caplog.text
