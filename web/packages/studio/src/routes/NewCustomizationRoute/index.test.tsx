@@ -82,7 +82,10 @@ describe('NewCustomizationRoute', () => {
     const router = createMemoryRouter(
       [
         { path: ROUTES.workspace.newCustomizationJob, element: <NewCustomizationRoute /> },
-        { path: ROUTES.workspace.newCustomizationJobScratch, element: <NewCustomizationFormRoute /> },
+        {
+          path: ROUTES.workspace.newCustomizationJobScratch,
+          element: <NewCustomizationFormRoute />,
+        },
       ],
       { initialEntries: ['/workspaces/default/fine-tune/new'] }
     );

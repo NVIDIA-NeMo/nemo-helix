@@ -772,7 +772,10 @@ describe('NewCustomizationForm', () => {
       expect(await screen.findByText('Delete my-sft-recipe?')).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Delete' }));
 
-      expect(mockDeleteTemplate).toHaveBeenCalledWith({ workspace: 'default', name: 'my-sft-recipe' });
+      expect(mockDeleteTemplate).toHaveBeenCalledWith({
+        workspace: 'default',
+        name: 'my-sft-recipe',
+      });
       expect(await screen.findByText('Start page')).toBeInTheDocument();
     });
   });
