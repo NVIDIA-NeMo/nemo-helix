@@ -96,6 +96,7 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
 )
 from nhx.core.jobs.app.ctx import JobContext
+from nhx.core.jobs.app.lifecycle import describe_paused_exit, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import (
     ComputeResources,
     CPUExecutionProvider,
@@ -1461,6 +1462,20 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 "duration_seconds": time.monotonic() - get_container_started_at,
             },
         )
+        if container is not None and container.status in ("exited", "dead"):
+            logger.info(
+                "Removing stopped container before scheduling the step again",
+                extra={"container_name": container.name},
+            )
+            try:
+                container.remove(force=True)
+            except (APIError, NotFound):
+                logger.warning(
+                    "Failed to remove stopped container before rescheduling",
+                    extra={"container_name": container.name},
+                    exc_info=True,
+                )
+            container = None
         if container is not None:
             logger.info("Container already exists, not creating a new one", extra={"container_name": container.name})
         else:
@@ -1643,12 +1658,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 )
             return self.sync_stop_container(step, container)
         elif step.status == HelixJobStatus.PAUSING:
-            # Handle cases where container is already gone, or was never created in the first place
-            if container is None:
-                return JobUpdate(
-                    status=HelixJobStatus.PAUSED, status_details={"message": "Container not found, job paused"}
-                )
-            return self.sync_stop_container(step, container)
+            return self.sync_pausing(step, container)
         else:
             raise ValueError(f"Unhandled job status during sync: {step.status}")
 
@@ -1898,6 +1908,36 @@ chmod -R 777 {job_vol}/{storage_subpath}
             "cleanup_ttl_due": cleanup_after_finished_at <= now if cleanup_after_finished_at else None,
             "now_utc": now.isoformat(),
         }
+
+    def sync_pausing(self, step: HelixJobStepWithContext, container: Container | None) -> JobUpdate:
+        """Leave a pausing container running until it exits or the pause deadline passes."""
+        if pause_deadline_exceeded(step):
+            if container is not None:
+                try:
+                    container.kill()
+                except (APIError, NotFound):
+                    logger.warning("Failed to kill container after pause deadline", extra={"container": container.name})
+            message = "Pause deadline exceeded"
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={"message": message},
+                error_details={"message": message},
+            )
+        if container is None:
+            return JobUpdate(
+                status=HelixJobStatus.PAUSED, status_details={"message": "Container not found, job paused"}
+            )
+        if container.status not in ("exited", "dead"):
+            return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
+        raw_exit_code = (container.attrs or {}).get("State", {}).get("ExitCode")
+        exit_code = raw_exit_code if isinstance(raw_exit_code, int) else 1
+        status, message, error_details = describe_paused_exit(
+            exit_code, paused_message=f"Job paused successfully with exit code {exit_code}"
+        )
+        status_details: dict = {"message": message}
+        if status != HelixJobStatus.PAUSED:
+            status_details["exit_code"] = exit_code
+        return JobUpdate(status=status, status_details=status_details, error_details=error_details or None)
 
     def create_step_update(self, step: HelixJobStepWithContext, container: Container) -> JobUpdate:
         status, status_details, error_stack = self.map_docker_container_status_to_platform_status(step, container)
@@ -2264,9 +2304,11 @@ class GPUDockerJobBackend(DockerJobBackend[GPUExecutionProvider]):
         # Release GPU on any terminal state. Do not wait for cleanup_steps - that method
         # is called on the base class and has no visibility into the GPU pool!
         # Note: job_update.status may be a string or enum depending on code path
-        terminal_states = {s.value for s in HelixJobStatus.terminals()}
+        # Paused is not terminal, but the container has exited. Leaving the
+        # allocation in place would reserve those GPUs again when the step resumes.
+        release_states = {s.value for s in HelixJobStatus.terminals()} | {HelixJobStatus.PAUSED.value}
         status_value = job_update.status.value if isinstance(job_update.status, HelixJobStatus) else job_update.status
-        if self.gpu_pool is not None and status_value in terminal_states:
+        if self.gpu_pool is not None and status_value in release_states:
             self._release_gpu_for_step_id(step.id, reason="terminal_sync")
         return job_update
 

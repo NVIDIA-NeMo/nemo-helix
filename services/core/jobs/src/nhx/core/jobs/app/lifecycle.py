@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared pause and resume decisions for the jobs service."""
+"""Shared pause, resume, and rerun decisions for the jobs service."""
 
 from __future__ import annotations
 
@@ -11,7 +11,16 @@ from typing import Any, Protocol
 
 from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nhx.core.jobs.app.constants import PAUSE_REQUESTED_AT, RESUMED_AT, STOPPED_AT
+from nhx.core.jobs.app.constants import (
+    NON_RESUMABLE_REASON,
+    PAUSE_REQUESTED_AT,
+    POD_PHASES,
+    RERUN_EXCLUDED_STATUS_DETAILS,
+    RERUN_WARNING,
+    RESUMABLE,
+    RESUMED_AT,
+    STOPPED_AT,
+)
 
 
 class _PauseDeadline(Protocol):
@@ -172,3 +181,29 @@ def active_ttl_anchor(step: TimedStep) -> datetime.datetime | None:
     if resumed_at is None:
         return created_at
     return max(created_at, resumed_at)
+
+
+def rerun_status_details(previous: dict[str, Any] | None) -> dict[str, Any]:
+    """Copy progress scalars and the metrics series onto a new attempt.
+
+    ``resumable`` and pod details stay behind. A non-resumable failure is reported
+    as ``rerun_warning`` without copying the flag.
+    """
+    source = previous or {}
+    copied: dict[str, Any] = {}
+    metrics = source.get("metrics")
+    if isinstance(metrics, dict):
+        copied["metrics"] = metrics
+    for key, value in source.items():
+        if key in RERUN_EXCLUDED_STATUS_DETAILS or key == "metrics":
+            continue
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            copied[key] = value
+        elif key == "phase" and isinstance(value, str) and value not in POD_PHASES:
+            copied[key] = value
+    if source.get(RESUMABLE) is False:
+        reason = source.get(NON_RESUMABLE_REASON) or "the previous attempt failed in a way a rerun would repeat"
+        copied[RERUN_WARNING] = str(reason)
+    return copied
