@@ -3,6 +3,9 @@
 
 """Database engine and session management for Entities service."""
 
+import asyncio
+
+import aiosqlite
 from nhx.core.entities.config import EntitiesConfig
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -58,5 +61,28 @@ def create_async_engine_for_entities(
             cursor.execute(f"PRAGMA busy_timeout={timeout_ms}")
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
+            _stop_aiosqlite_worker_once(dbapi_conn.driver_connection)
 
     return engine
+
+
+def _stop_aiosqlite_worker_once(connection: aiosqlite.Connection) -> None:
+    """Make repeat ``stop()`` calls on an aiosqlite connection no-ops.
+
+    aiosqlite's worker thread exits after the first stop request it handles, so a second
+    ``stop()`` returns a future that never resolves. SQLAlchemy can trigger exactly that when a
+    connection is invalidated during shutdown: its shielded graceful ``close()`` and its
+    force-close fallback each call ``stop()``, and if the force-close lands first the close task
+    waits forever. ``close()`` treats a ``None`` future as already stopped.
+    """
+    stop = connection.stop
+    stopped = False
+
+    def stop_once() -> asyncio.Future | None:
+        nonlocal stopped
+        if stopped:
+            return None
+        stopped = True
+        return stop()
+
+    connection.stop = stop_once  # ty: ignore[invalid-assignment]
