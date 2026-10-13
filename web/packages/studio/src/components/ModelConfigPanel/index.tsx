@@ -32,14 +32,32 @@ export interface ModelConfigPanelProps {
 }
 
 /** Right-hand config panel for a model, with subscriptions scoped to its individual fields. */
-export const ModelConfigPanel: FC<ModelConfigPanelProps> = ({
-  modelId,
+export const ModelConfigPanel: FC<ModelConfigPanelProps> = (props) => {
+  const { control, getValues } = useFormContext<JobBuilderFormValues>();
+  const modelIds = useWatch({
+    control,
+    name: Array.from(
+      { length: getValues('models').length },
+      (_, index) => `models.${index}.id` as const
+    ),
+  });
+  const modelIndex = modelIds.indexOf(props.modelId);
+  return modelIndex < 0 ? null : (
+    <ModelConfigFields key={props.modelId} {...props} modelIndex={modelIndex} />
+  );
+};
+
+interface ModelConfigFieldsProps extends ModelConfigPanelProps {
+  modelIndex: number;
+}
+
+const ModelConfigFields: FC<ModelConfigFieldsProps> = ({
+  modelIndex,
   workspace,
   onRemove,
   onClose,
 }) => {
   const { control, getValues, setValue } = useFormContext<JobBuilderFormValues>();
-  const modelIndex = getValues('models').findIndex((model) => model.id === modelId);
   const aliasPath = `models.${modelIndex}.alias` as const;
   const { field: modelField } = useController({ control, name: `models.${modelIndex}.model` });
   const { field: providerField } = useController({
