@@ -2,16 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
+import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
-import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
+import { Stack } from '@nvidia/foundations-react-core';
 import { isEvalConfigCandidate } from '@studio/components/evaluation/consts';
-import { filesetNameOption } from '@studio/components/evaluation/shared/filesetNameOption';
 import { type ReactElement } from 'react';
 import {
   type Control,
   type FieldValues,
   type Path,
-  useController,
+  type PathValue,
+  useFormContext,
   useWatch,
 } from 'react-hook-form';
 
@@ -41,10 +42,10 @@ export function FilesetConfigPicker<T extends FieldValues>({
   error,
 }: FilesetConfigPickerProps<T>): ReactElement {
   const fileset: string = useWatch({ control, name: filesetName });
-  const { field: fileField } = useController({ control, name: fileName });
+  const { setValue } = useFormContext<T>();
 
-  const pickFile = (path: string) => {
-    fileField.onChange(path);
+  const clearFile = () => {
+    setValue(fileName, '' as PathValue<T, Path<T>>);
     onPick?.();
   };
 
@@ -67,26 +68,25 @@ export function FilesetConfigPicker<T extends FieldValues>({
         workspace={workspace}
         useControllerProps={{ control, name: filesetName }}
         formFieldProps={{ slotLabel: 'Config Fileset' }}
-        renderOption={filesetNameOption}
-        onChange={() => pickFile('')}
+        renderOption={({ name }) => ({ value: name, label: name })}
+        onChange={clearFile}
         disabled={disabled}
       />
-      <FormField
-        slotLabel="Config File"
-        slotHelp={
-          noConfigFiles ? 'This fileset has no JSON or YAML files.' : 'A JSON or YAML config.'
-        }
-        slotError={error}
-        status={error ? 'error' : undefined}
-      >
-        <Select
-          disabled={disabled || !fileset}
-          items={fileItems}
-          value={fileField.value}
-          onValueChange={pickFile}
-          placeholder={placeholder}
-        />
-      </FormField>
+      <ControlledSelect
+        useControllerProps={{ control, name: fileName }}
+        formFieldProps={{
+          slotLabel: 'Config File',
+          slotHelp: noConfigFiles
+            ? 'This fileset has no JSON or YAML files.'
+            : 'A JSON or YAML config.',
+          slotError: error,
+          status: error ? 'error' : undefined,
+        }}
+        disabled={disabled || !fileset}
+        items={fileItems}
+        onChange={() => onPick?.()}
+        placeholder={placeholder}
+      />
     </Stack>
   );
 }
