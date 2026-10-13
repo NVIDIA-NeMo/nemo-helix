@@ -359,6 +359,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
         return self._create_step_update(step, metadata)
 
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
+        job_dir = self._root_dir / workspace / job
+        shutil.rmtree(job_dir, ignore_errors=True)
+
     def cleanup_steps(self) -> None:
         for key, metadata in self._process_registry.items():
             if metadata.process.poll() is None:

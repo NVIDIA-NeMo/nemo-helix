@@ -18,13 +18,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from nemo_helix_plugin.entity_naming import NAME_PATTERN
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
+from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.auth import AuthContext
 from nhx.common.entities import (
     ALL_WORKSPACES,
     DEFAULT_WORKSPACE,
+    SYSTEM_WORKSPACE,
     EntityClient,
     EntityConflictError,
     EntityNotFoundError,
@@ -38,15 +41,22 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobStepsListFilter,
     HelixJobTaskUpdate,
 )
-from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
+from nhx.core.jobs.app.constants import (
+    IMAGE_DIGEST,
+    IMAGE_DIGEST_AT_SAVE,
+    IMAGE_DIGEST_STEP,
+    JOB_TASK_CLEANUP_PENDING_KEY,
+)
 from nhx.core.jobs.app.dispatcher import (
     JobDeletionConflictError,
     JobDispatcher,
     JobOperationConflictError,
     JobStatusUpdateSkippedError,
+    JobStorageReclaimPendingError,
     generate_job_name,
 )
 from nhx.core.jobs.app.schemas import (
+    HelixJobEnvironmentVariable,
     HelixJobStepSpec,
     StepLifecycle,
 )
@@ -56,6 +66,7 @@ from nhx.core.jobs.entities import (
     HelixJobAttempt,
     HelixJobResult,
     HelixJobStep,
+    HelixJobStorageReclaim,
     HelixJobTask,
 )
 
@@ -3326,3 +3337,127 @@ async def test_rerun_without_a_caller_keeps_the_jobs_auth_context(
 
     assert rerun is not None
     assert saved_auth == [owner]
+
+
+def _download_and_train_request(request: CreateHelixJobRequest, name: str) -> CreateHelixJobRequest:
+    spec = request.platform_spec.model_copy(deep=True)
+    executor = spec.steps[0].executor
+    storage = [HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/storage")]
+    spec.steps = [
+        HelixJobStepSpec(name="download", executor=executor, config={}, environment=storage),
+        HelixJobStepSpec(name="train", executor=executor, config={}, environment=storage),
+    ]
+    return request.model_copy(update={"name": name, "platform_spec": spec})
+
+
+@pytest.mark.asyncio
+async def test_rerun_compares_the_image_on_the_step_that_saved_it(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The failed training step's digest seeds the next training step, not the download step."""
+    job = await mock_dispatcher.create_job(
+        _download_and_train_request(sample_platform_job_request, "digest-rerun"), DEFAULT_WORKSPACE
+    )
+    download = await mock_dispatcher.get_current_job_step_by_name(job.name, "download", DEFAULT_WORKSPACE)
+    assert download is not None
+    download, _ = await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.ACTIVE)
+    await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.COMPLETED)
+    train = await mock_dispatcher.get_current_job_step_by_name(job.name, "train", DEFAULT_WORKSPACE)
+    assert train is not None
+    train, _ = await mock_dispatcher.update_job_status_from_step(train, HelixJobStatus.ACTIVE)
+    _, attempt = await mock_dispatcher.update_job_status_from_step(
+        train, HelixJobStatus.ERROR, status_details={IMAGE_DIGEST: "sha256:train"}
+    )
+    assert attempt.status_details[IMAGE_DIGEST_AT_SAVE] == "sha256:train"
+    assert attempt.status_details[IMAGE_DIGEST_STEP] == "train"
+
+    rerun = await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
+    assert rerun is not None
+    download = await mock_dispatcher.get_current_job_step_by_name(job.name, "download", DEFAULT_WORKSPACE)
+    assert download is not None
+    assert IMAGE_DIGEST_AT_SAVE not in (download.status_details or {})
+    download, _ = await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.ACTIVE)
+    await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.COMPLETED)
+    train = await mock_dispatcher.get_current_job_step_by_name(job.name, "train", DEFAULT_WORKSPACE)
+    assert train is not None
+    assert train.status_details[IMAGE_DIGEST_AT_SAVE] == "sha256:train"
+
+
+@pytest.mark.asyncio
+async def test_delete_queues_storage_reclaim_and_holds_the_name(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """Storage is keyed by name, so the name is free again only after the controller reclaimed it."""
+    request = _download_and_train_request(sample_platform_job_request, "delete-reclaim")
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+    download = await mock_dispatcher.get_current_job_step_by_name(job.name, "download", DEFAULT_WORKSPACE)
+    assert download is not None
+    await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.ERROR)
+
+    assert await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
+
+    reclaims = await mock_store.list(HelixJobStorageReclaim, filter_obj={}, workspace=SYSTEM_WORKSPACE)
+    assert [(r.job_id, r.job_workspace, r.job_name) for r in reclaims.data] == [(job.id, DEFAULT_WORKSPACE, job.name)]
+    assert [t.model_dump() for t in reclaims.data[0].targets] == [
+        {"provider": request.platform_spec.steps[0].executor.provider, "profile": "default"}
+    ]
+    with pytest.raises(JobStorageReclaimPendingError):
+        await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    await mock_store.delete_by_id(HelixJobStorageReclaim, reclaims.data[0].id)
+    recreated = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+    assert recreated.name == job.name
+
+
+@pytest.mark.asyncio
+async def test_delete_without_storage_queues_nothing(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    step, _ = await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.ACTIVE)
+    await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.COMPLETED)
+
+    assert await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
+
+    reclaims = await mock_store.list(HelixJobStorageReclaim, filter_obj={}, workspace=SYSTEM_WORKSPACE)
+    assert reclaims.data == []
+
+
+@pytest.mark.asyncio
+async def test_resume_and_rerun_reject_reclaimed_storage(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    current_step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert current_step is not None
+    await mock_dispatcher.update_job_status_from_step(current_step, HelixJobStatus.PAUSED)
+    await mock_dispatcher.update_job_status_details(
+        job.name, DEFAULT_WORKSPACE, {"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"}
+    )
+
+    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
+        await mock_dispatcher.resume_job(job.name, DEFAULT_WORKSPACE)
+    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
+        await mock_dispatcher.update_job_control(job.name, DEFAULT_WORKSPACE, JobControl(pause_ttl_seconds=10))
+
+    failed = await mock_dispatcher.create_job(
+        sample_platform_job_request.model_copy(update={"name": "reclaimed-error"}), DEFAULT_WORKSPACE
+    )
+    failed_step = await mock_dispatcher.get_current_job_step_by_name(failed.name, "basic", DEFAULT_WORKSPACE)
+    assert failed_step is not None
+    await mock_dispatcher.update_job_status_from_step(failed_step, HelixJobStatus.ERROR)
+    await mock_dispatcher.update_job_status_details(
+        failed.name, DEFAULT_WORKSPACE, {"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"}
+    )
+    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
+        await mock_dispatcher.rerun_job(failed.name, DEFAULT_WORKSPACE)

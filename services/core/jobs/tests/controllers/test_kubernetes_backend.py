@@ -85,6 +85,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     create_step_network_policy,
     delete_configmap,
     delete_step_network_policy,
+    first_task_image_id,
     last_task_exit_time,
     name_for_step,
 )
@@ -1581,7 +1582,9 @@ def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, tes
 
 def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None) -> client.V1Pod:
     pod = _task_pod("uid-1", exit_code)
-    pod.status.container_statuses[0].state.terminated.finished_at = finished_at
+    task = pod.status.container_statuses[0]
+    task.state.terminated.finished_at = finished_at
+    task.image_id = "sha256:training"
     return pod
 
 
@@ -3778,3 +3781,11 @@ def test_delete_step_network_policy_raises_other_errors():
 
     with pytest.raises(ApiException):
         delete_step_network_policy(networking_v1, "test-namespace", "step")
+
+
+def test_image_digest_comes_from_the_task_container():
+    sidecar = SimpleNamespace(name="istio-proxy", image_id="sha256:proxy")
+    task = SimpleNamespace(name="nemo-job-task", image_id="sha256:training")
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task]))
+
+    assert first_task_image_id([pod]) == "sha256:training"

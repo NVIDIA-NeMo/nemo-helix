@@ -6400,7 +6400,7 @@ paths:
         '404':
           description: Job not Found
         '409':
-          description: The job changed during the request
+          description: Storage has been reclaimed, or the job changed during the request
         '422':
           description: The pause window exceeds the platform maximum
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/logs:

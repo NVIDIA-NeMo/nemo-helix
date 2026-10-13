@@ -6,7 +6,7 @@ import json
 import uuid
 from types import SimpleNamespace
 from typing import Iterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import httpx
 import pytest
@@ -690,13 +690,16 @@ def test_docker_job_sync_pausing_leaves_running_container(docker_job, docker_cli
     test_job_step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
     container_mock = MagicMock()
     container_mock.status = "running"
-    container_mock.attrs = {"State": {"ExitCode": 0}}
+    container_mock.attrs = {"State": {"ExitCode": 0}, "Image": "sha256:running"}
+    # Reading the image through the container would look it up again and fail once it is pruned.
+    type(container_mock).image = PropertyMock(side_effect=AssertionError("image lookup"))
     docker_client_mock.containers.get.side_effect = None
     docker_client_mock.containers.get.return_value = container_mock
 
     update = docker_job.sync(test_job_step)
 
     assert update.status == HelixJobStatus.PAUSING
+    assert update.status_details["image_digest"] == "sha256:running"
     container_mock.stop.assert_not_called()
     container_mock.kill.assert_not_called()
 

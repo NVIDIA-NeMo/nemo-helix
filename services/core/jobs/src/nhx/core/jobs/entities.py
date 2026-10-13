@@ -7,6 +7,7 @@ These entities use EntityBase and are stored via EntityClient.
 Jobs are identified by ID rather than by a unique name within a namespace.
 """
 
+import hashlib
 from collections.abc import Mapping
 from typing import Any, ClassVar, Dict, Optional, Self
 
@@ -15,7 +16,7 @@ from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityBase
 from nhx.common.jobs.schemas import FileStorageType, HelixJobResultResponse, HelixJobStatus
 from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
-from pydantic import Field, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 STEP_SPEC_NAME_CONFIG_KEY = "_step_spec_name"
 
@@ -203,3 +204,32 @@ class HelixJobResult(EntityBase):
             artifact_url=self.artifact_url,
             artifact_storage_type=self.artifact_storage_type,
         )
+
+
+class JobStorageTarget(BaseModel):
+    """A backend that holds a job's persistent storage."""
+
+    provider: str = Field(..., description="Execution provider of a step that mounts job storage")
+    profile: str = Field(..., description="Execution profile of a step that mounts job storage")
+
+
+class HelixJobStorageReclaim(EntityBase):
+    """Storage a deleted job left behind, waiting for the jobs controller to reclaim it.
+
+    Job storage is keyed by the job name, and deleting the job removes the entities the
+    storage sweep reads. This record outlives the job, so the controller can still reach
+    the backends that hold the storage. It lives in the system workspace, so deleting the
+    job's workspace does not drop it.
+    """
+
+    __entity_type__: ClassVar[str] = "platform_job_storage_reclaim"
+
+    job_id: str = Field(..., description="ID of the deleted job")
+    job_workspace: str = Field(..., description="Workspace the deleted job belonged to")
+    job_name: str = Field(..., description="Name of the deleted job. Job storage is keyed by it.")
+    targets: list[JobStorageTarget] = Field(default_factory=list, description="Backends that hold the storage")
+
+    @staticmethod
+    def name_for_job(job_id: str) -> str:
+        """Return a stable record name for a job. Job IDs have upper case, which entity names do not allow."""
+        return f"reclaim-{hashlib.sha256(job_id.encode()).hexdigest()[:40]}"

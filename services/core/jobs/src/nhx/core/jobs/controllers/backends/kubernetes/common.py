@@ -562,6 +562,21 @@ def last_task_exit_time(pods: list[V1Pod]) -> datetime.datetime | None:
     return max(exit_times, default=None)
 
 
+def first_task_image_id(pods: list[V1Pod]) -> str | None:
+    """Return the image id of the first started task container.
+
+    The task container is matched by name. ``container_statuses`` excludes init
+    containers, but it can still hold injected sidecars, and its order is not
+    guaranteed to follow the pod spec.
+    """
+    for pod in pods:
+        statuses = pod.status.container_statuses if pod.status is not None else None
+        for container in statuses or []:
+            if container.name == NEMO_JOB_TASK_CONTAINER_NAME and container.image_id:
+                return container.image_id
+    return None
+
+
 def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, str], str]:
     """Get details for pods associated with the step's k8s job."""
     try:
@@ -598,7 +613,10 @@ def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tup
                         "name": container_status.name,
                         "ready": container_status.ready,
                         "restart_count": container_status.restart_count,
+                        "image_id": container_status.image_id,
                     }
+                    if container_status.name == NEMO_JOB_TASK_CONTAINER_NAME and container_status.image_id:
+                        pod_info["image_digest"] = container_status.image_id
                     if container_status.state and container_status.state.terminated:
                         container_info["terminated"] = {
                             "exit_code": container_status.state.terminated.exit_code,

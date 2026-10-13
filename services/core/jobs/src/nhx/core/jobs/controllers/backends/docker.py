@@ -96,7 +96,7 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
 )
 from nhx.core.jobs.app.ctx import JobContext
-from nhx.core.jobs.app.lifecycle import describe_paused_exit, pause_deadline_exceeded
+from nhx.core.jobs.app.lifecycle import describe_paused_exit, image_digest_updates, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import (
     ComputeResources,
     CPUExecutionProvider,
@@ -515,6 +515,9 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
                 )
             except DockerException:
                 logger.exception("Failed to clean up task storage volume", extra={"volume_name": volume_name})
+
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> None:
+        self.cleanup_job_persistent_storage(workspace, job)
 
     def cleanup_job_persistent_storage(self, workspace: str, job: str) -> None:
         """Remove persistent job storage from the shared volume after successful job completion."""
@@ -1940,7 +1943,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 status, message, error_details = describe_paused_exit(
                     exit_code, paused_message=f"Job paused successfully with exit code {exit_code}"
                 )
-                status_details: dict = {"message": message}
+                status_details: dict = {"message": message, **self._image_digest_updates(step, container)}
                 if status != HelixJobStatus.PAUSED:
                     status_details["exit_code"] = exit_code
                 error_stack = self._error_log_tail(container) if status == HelixJobStatus.ERROR else ""
@@ -1948,10 +1951,22 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 return JobUpdate(status=status, status_details=status_details, error_details=error_details or None)
         if pause_deadline_exceeded(step):
             return self._kill_container_with_error(step, container, "Pause deadline exceeded")
+        if container.status == "running":
+            return JobUpdate(
+                status=HelixJobStatus.PAUSING,
+                status_details={"message": "Job is being paused", **self._image_digest_updates(step, container)},
+            )
         return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
+
+    def _image_digest_updates(self, step: HelixJobStepWithContext, container: Container) -> dict:
+        # attrs["Image"] is the id of the image the container was created from. Container.image
+        # would look the image up again and raise once the image has been removed.
+        observed = (container.attrs or {}).get("Image")
+        return image_digest_updates(step.status_details, observed if isinstance(observed, str) and observed else None)
 
     def create_step_update(self, step: HelixJobStepWithContext, container: Container) -> JobUpdate:
         status, status_details, error_stack = self.map_docker_container_status_to_platform_status(step, container)
+        status_details.update(self._image_digest_updates(step, container))
         error_details = {}
         if status == HelixJobStatus.ERROR:
             error_details["message"] = status_details.get("message", "Job encountered an error")
@@ -2216,9 +2231,6 @@ chmod -R 777 {job_vol}/{storage_subpath}
         workspace = self.get_label_from_container(container, JOB_WORKSPACE_ID_LABEL)
         job = self.get_label_from_container(container, JOB_ID_LABEL)
         task = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
-        attrs: dict[str, Any] = container.attrs or {}
-        state = attrs.get("State", {})
-        exit_code = state.get("ExitCode", 0) if isinstance(state, dict) else 0
         delegation_name = self._workload_delegation_name_from_container(container)
 
         self._try_revoke_workload_delegation(
@@ -2243,7 +2255,9 @@ chmod -R 777 {job_vol}/{storage_subpath}
             uses_persistent_storage = (
                 self.get_label_from_container(container, JOB_USES_PERSISTENT_STORAGE_LABEL) == "true"
             )
-            if uses_persistent_storage and exit_code == 0:
+            # check_job_persistent_storage_cleanup_allowed keeps failed jobs' storage for the
+            # retention pass and lets completed and cancelled jobs reclaim here.
+            if uses_persistent_storage:
                 step_name = self.get_label_from_container(container, JOB_STEP_NAME_LABEL)
                 if self.check_job_persistent_storage_cleanup_allowed(job=job, step_name=step_name, workspace=workspace):
                     logger.debug(
