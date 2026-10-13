@@ -18,18 +18,21 @@ from typing import Any
 import httpx
 import pytest
 
-pytest.importorskip("harbor.environments.opensandbox")
+pytest.importorskip("harbor.environments.base")
 pytest.importorskip("nhx_sandbox")
 pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 
-import harbor.environments.opensandbox as harbor_opensandbox
-from harbor.environments.base import ExecResult, ServiceOperationsUnsupportedError
+from harbor.environments import base as harbor_base
+from harbor.environments.base import ExecResult
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
+from opensandbox_mocks import Commands, Files, Server
+from scaled_evals import harbor_opensandbox_driver as driver_module
 from scaled_evals import harbor_opensandbox_environment as environment_module
 from scaled_evals.harbor_opensandbox_environment import NemoOpenSandboxEnvironment
 from scaled_evals.harbor_opensandbox_services import EXTENSION_KEY, ComposeServices, parse_compose_services
-from tenacity import wait_none
+
+ServiceOperationsUnsupportedError = getattr(harbor_base, "ServiceOperationsUnsupportedError", RuntimeError)
 
 API_KEY = "test-key"
 COMPOSE_SERVICES: dict[str, Any] = {
@@ -104,6 +107,9 @@ class _Sandbox:
     def __init__(self, sandbox_id: str, policy: dict[str, Any]) -> None:
         self.id = sandbox_id
         self._policy = policy
+        self.files = Files()
+        self.commands = Commands(Server(), self.files)
+        self.killed = False
 
     async def get_egress_policy(self) -> SimpleNamespace:
         rules = [SimpleNamespace(**rule) for rule in self._policy["egress"]]
@@ -116,7 +122,7 @@ class _Sandbox:
         return True
 
     async def kill(self) -> None:
-        pass
+        self.killed = True
 
     async def close(self) -> None:
         pass
@@ -127,6 +133,7 @@ class _Server:
 
     def __init__(self) -> None:
         self.creates: list[dict[str, Any]] = []
+        self.handles: list[_Sandbox] = []
         self.create_failures: list[BaseException] = []
         self._ids = (f"sbx-{n}" for n in itertools.count(1))
 
@@ -158,7 +165,9 @@ def _fake_sdk(server: _Server) -> dict[str, Any]:
             server.creates.append(kwargs)
             if server.create_failures:
                 raise server.create_failures.pop(0)
-            return _Sandbox(next(server._ids), kwargs["network_policy"].payload)
+            sandbox = _Sandbox(next(server._ids), kwargs["network_policy"].payload)
+            server.handles.append(sandbox)
+            return sandbox
 
     class _Manager:
         async def list_sandbox_infos(self, selector: Any) -> SimpleNamespace:
@@ -178,20 +187,17 @@ def _fake_sdk(server: _Server) -> dict[str, Any]:
         "NetworkPolicy": SimpleNamespace(model_validate=lambda payload: SimpleNamespace(payload=payload)),
         "SandboxManager": SandboxManager,
         "SandboxFilter": lambda metadata, page: SimpleNamespace(metadata=metadata, page=page),
+        "RunCommandOpts": lambda **kwargs: SimpleNamespace(**kwargs),
+        "WriteEntry": lambda **kwargs: SimpleNamespace(**kwargs),
     }
 
 
 @pytest.fixture
 def server(monkeypatch: pytest.MonkeyPatch) -> _Server:
-    """Point the environment at the fake SDK, with Harbor's create retries not waiting."""
+    """Point the driver at the fake SDK, with create retries not waiting."""
     server = _Server()
-    monkeypatch.setattr(harbor_opensandbox, "_HAS_OPENSANDBOX", True)
-    monkeypatch.setattr(
-        harbor_opensandbox.OpenSandboxEnvironment._create_sandbox.retry,  # ty: ignore[unresolved-attribute]  # tenacity
-        "wait",
-        wait_none(),
-    )
-    monkeypatch.setattr(NemoOpenSandboxEnvironment, "_load_opensandbox", lambda self: _fake_sdk(server))
+    monkeypatch.setattr(driver_module, "load_sdk", lambda: _fake_sdk(server))
+    monkeypatch.setattr(driver_module, "harbor_backoff_sec", lambda attempt: 0)
     monkeypatch.setattr(environment_module, "COMPOSE_READY_POLL_SEC", 0)
     monkeypatch.setattr(environment_module, "SERVER_RETRY_BASE_SEC", 0)
     return server
@@ -242,7 +248,7 @@ def _environment(environment_dir: Path, **kwargs: Any) -> NemoOpenSandboxEnviron
 async def test_create_sends_services_and_main_settings(tmp_path: Path, server: _Server, extension: _Extension) -> None:
     environment = _environment(_task(tmp_path))
 
-    await environment._create_sandbox(environment._load_opensandbox())
+    await environment._create_sandbox()
 
     create = server.creates[-1]
     assert ComposeServices.model_validate_json(create["extensions"][EXTENSION_KEY]) == parse_compose_services(
@@ -263,7 +269,7 @@ async def test_verifier_environment_without_compose_file_gets_a_plain_sandbox(
 ) -> None:
     environment = _environment(_task(tmp_path, compose=False))
 
-    await environment._create_sandbox(environment._load_opensandbox())
+    await environment._create_sandbox()
 
     assert EXTENSION_KEY not in server.creates[-1]["extensions"]
     assert server.creates[-1]["entrypoint"] is None
@@ -295,7 +301,7 @@ async def test_server_without_the_extension_fails_before_creating(
     environment = _environment(_task(tmp_path))
 
     with pytest.raises(RuntimeError, match="does not run the NeMo compose services extension"):
-        await environment._create_sandbox(environment._load_opensandbox())
+        await environment._create_sandbox()
 
     assert server.creates == []
 
@@ -306,7 +312,7 @@ async def test_transient_create_errors_are_still_retried(
     server.create_failures = [SandboxApiException("HTTP 503")]
     environment = _environment(_task(tmp_path))
 
-    await environment._create_sandbox(environment._load_opensandbox())
+    await environment._create_sandbox()
 
     assert len(server.creates) == 2
 
@@ -326,6 +332,20 @@ async def test_failed_service_ends_the_readiness_wait(tmp_path: Path, server: _S
     assert extension.requests[-1].url.path == "/v1/nemo-ext/sandboxes/sbx-1/services"
 
 
+async def test_failed_service_during_create_kills_the_sandbox(
+    tmp_path: Path, server: _Server, extension: _Extension
+) -> None:
+    """The driver's readiness wait uses the service check and cleans up a failed create."""
+    environment = _environment(_task(tmp_path))
+    extension.statuses = [{"failure": "service 'db' exited with code 1", "not_ready": ["db"]}]
+
+    with pytest.raises(RuntimeError, match="service 'db' exited with code 1"):
+        await environment._create_sandbox()
+
+    assert len(server.handles) == 1
+    assert server.handles[0].killed
+
+
 async def test_unreadable_service_status_keeps_waiting(
     tmp_path: Path, server: _Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -341,7 +361,7 @@ async def test_unreadable_service_status_keeps_waiting(
 
 async def _started(environment: NemoOpenSandboxEnvironment) -> NemoOpenSandboxEnvironment:
     """``environment`` with a created sandbox, skipping Harbor's start waits."""
-    environment._sandbox = await environment._create_sandbox(environment._load_opensandbox())
+    environment._sandbox = await environment._create_sandbox()
     return environment
 
 
@@ -353,15 +373,22 @@ async def test_start_waits_for_main_then_the_services(
     commands: list[str] = []
 
     async def exec_(command: str, **kwargs: Any) -> ExecResult:
+        if command.startswith("chmod "):
+            return ExecResult(return_code=0)
         commands.append(command)
         assert kwargs["user"] == "root"
         assert kwargs["cwd"] == "/"
         return results.pop(0)
 
-    async def harbor_start(self: Any, force_build: bool) -> None:
+    async def create_sandbox() -> Any:
+        return environment._sandbox
+
+    async def prepare(*args: Any) -> None:
         pass
 
-    monkeypatch.setattr(harbor_opensandbox.OpenSandboxEnvironment, "start", harbor_start)
+    monkeypatch.setattr(environment, "_create_sandbox", create_sandbox)
+    monkeypatch.setattr(environment._driver, "create_directories", prepare)
+    monkeypatch.setattr(environment, "_upload_environment_dir_after_start", prepare)
     monkeypatch.setattr(environment, "exec", exec_)
     extension.statuses = [{"failure": None, "not_ready": ["db"]}, {"failure": None, "not_ready": []}]
 

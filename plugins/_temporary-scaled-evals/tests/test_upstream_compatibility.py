@@ -42,12 +42,14 @@ def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
     harbor_target = dockerfile.split("AS harbor\n", 1)[1].split("\nFROM ", 1)[0]
     assert 'uv pip install -r "/opt/harbor/requirements/${version}.txt"' in harbor_target
     assert "ARG SANDBOX_K8S=true" in harbor_target
-    assert "import harbor.environments.opensandbox, opensandbox" in harbor_target
+    assert "-c 'import opensandbox'" in harbor_target
+    assert "harbor.environments.opensandbox" not in harbor_target
     assert "0.20.0" not in harbor_target
     assert "COPY packages/nhx_sandbox /tmp/nhx_sandbox" in harbor_target
     assert "uv pip install /tmp/nhx_sandbox" in harbor_target
     assert "sandboxed_gym" not in harbor_target
     assert "src/scaled_evals/harbor_opensandbox_environment.py" in harbor_target
+    assert "src/scaled_evals/harbor_opensandbox_driver.py" in harbor_target
     assert "src/scaled_evals/harbor_opensandbox_cleanup.py" in harbor_target
     assert "src/scaled_evals/harbor_opensandbox_services.py" in harbor_target
     assert 'nemo-extensions" > "${site}/nemo-extensions.pth"' in harbor_target

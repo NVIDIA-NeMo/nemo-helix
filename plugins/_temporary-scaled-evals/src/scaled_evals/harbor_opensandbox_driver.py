@@ -124,6 +124,7 @@ class CreateRequest:
     sandbox_timeout_sec: float
     ready_timeout_sec: float
     health_check_poll_interval_sec: float
+    entrypoint: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -248,6 +249,7 @@ class OpenSandboxDriver:
             resource=dict(request.resource),
             network_policy=network_policy,
             extensions=dict(request.extensions),
+            entrypoint=request.entrypoint,
             connection_config=self.connection_config(),
             skip_health_check=True,
         )

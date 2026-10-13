@@ -288,13 +288,14 @@ def test_trusted_hosts_put_model_endpoint_first_without_duplicates() -> None:
     assert backend.trusted_allowed_hosts() == ["igw.example.internal", "pypi.org"]
 
 
-def test_sandbox_lifetime_default_matches_harbor() -> None:
-    harbor_opensandbox = pytest.importorskip("harbor.environments.opensandbox")
-    harbor_default = (
-        inspect.signature(harbor_opensandbox.OpenSandboxEnvironment.__init__).parameters["sandbox_timeout_sec"].default
+def test_sandbox_lifetime_default_matches_the_environment() -> None:
+    environment = pytest.importorskip("scaled_evals.harbor_opensandbox_environment")
+    environment_default = (
+        inspect.signature(environment.NemoOpenSandboxEnvironment.__init__).parameters["sandbox_timeout_sec"].default
     )
 
-    assert Settings.model_fields["harbor_opensandbox_sandbox_timeout_seconds"].default == harbor_default
+    assert environment_default == environment.DEFAULT_SANDBOX_TIMEOUT_SEC
+    assert Settings.model_fields["harbor_opensandbox_sandbox_timeout_seconds"].default == environment_default
 
 
 def test_render_owns_environment_block(tmp_path: Path) -> None:
