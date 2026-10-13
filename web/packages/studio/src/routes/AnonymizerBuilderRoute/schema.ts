@@ -52,7 +52,7 @@ import {
 import { trimToUndefined } from '@studio/util/strings';
 import { z } from 'zod';
 
-const roleModelSchema = z.object({
+export const roleModelSchema = z.object({
   modelId: z.string(),
   model: z.string(),
   provider: z.string(),

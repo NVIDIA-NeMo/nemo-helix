@@ -202,9 +202,7 @@ describe('buildAnonymizerJobRequest', () => {
 
     // The service runs its in-process GLiNER2 precisely when the request names no entity_detector.
     expect(req.spec.selected_models?.detection).not.toHaveProperty('entity_detector');
-    // The other detection roles are still mapped as usual.
     expect(req.spec.selected_models?.detection?.entity_validator).toBeTruthy();
-    // No ModelConfig is synthesized for the built-in detector (its model/provider are empty).
     expect(req.spec.model_configs?.some((config) => config.model === '')).toBe(false);
   });
 
