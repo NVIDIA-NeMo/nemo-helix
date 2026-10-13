@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
+import type {
+  OptimizationStrategyList,
+  RunStrategyJob,
+} from '@nemo/sdk/generated/agent-optimization/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
+const STRATEGIES_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/strategies`;
 const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
 
 /**
@@ -113,7 +117,20 @@ const applyFilter = (jobs: RunStrategyJob[], filter: FilterQuery): RunStrategyJo
   });
 };
 
+/** What a platform with the Switchyard plugin installed reports, beside the built-in strategy. */
+export const mockOptimizationStrategies: OptimizationStrategyList = {
+  data: [
+    { name: 'legacy', description: 'Run an optimize config against the agent.' },
+    {
+      name: 'switchyard',
+      description:
+        'Route the agent across pairs of acceptable models with Switchyard VirtualModels.',
+    },
+  ],
+};
+
 export const agentOptimizeJobsHandlers = [
+  http.get(STRATEGIES_URL, () => HttpResponse.json(mockOptimizationStrategies)),
   http.get(OPTIMIZE_JOBS_URL, ({ request, params }) => {
     const url = new URL(request.url);
     const workspace = String(params.workspace);

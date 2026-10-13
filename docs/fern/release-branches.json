@@ -11,7 +11,14 @@
     "source": "branch"
   },
   "release/0.7": {
-    "tag": "0.7.0",
+    "tag": [
+      "0.7.0",
+      "0.7.1"
+    ],
+    "source": "branch"
+  },
+  "release/0.8": {
+    "tag": "0.8.0",
     "source": "branch"
   }
 }

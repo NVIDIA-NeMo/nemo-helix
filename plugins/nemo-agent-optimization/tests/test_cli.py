@@ -58,7 +58,6 @@ def test_the_group_carries_the_router_job_and_list_strategies(monkeypatch: pytes
 def test_run_strategy_submits_without_a_legacy_verb(monkeypatch: pytest.MonkeyPatch) -> None:
     """``run-strategy`` submits on its own; there is no legacy ``run`` / ``submit`` beneath it.
 
-    ``generate_legacy_verbs = False`` hangs submission off the command's own
     callback, so the command may still carry ``explain``.  What must not come
     back is a nested ``submit`` the caller has to type.
     """

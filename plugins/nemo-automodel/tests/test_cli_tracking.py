@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""End-to-end tests for what ``submit`` reports after creating a job.
+"""End-to-end tests for what ``--job-json`` reports after creating a job.
 
 These drive the real Typer command, so they cover the shared override in
 ``nhx.customization_common.cli.overrides`` as the three backends use it.
@@ -61,7 +61,7 @@ def stub_submit(monkeypatch: pytest.MonkeyPatch) -> None:
 def _run(*args: str) -> Any:
     return CliRunner().invoke(
         AutomodelContributor().get_cli(),
-        ["submit", str(JOB_JSON), *args],
+        ["--job-json", str(JOB_JSON), *args],
         obj=_platform("https://nhx.test"),
     )
 
@@ -236,7 +236,7 @@ def _write_job(tmp_path: Path, **fields: Any) -> Path:
 def _run_job(job: Path, *args: str) -> Any:
     return CliRunner().invoke(
         AutomodelContributor().get_cli(),
-        ["submit", str(job), *args],
+        ["--job-json", str(job), *args],
         obj=_platform("https://nhx.test"),
     )
 
@@ -332,7 +332,7 @@ class TestJobJsonMayOmitUploadedFields:
     def _run_minimal(self, job: Path, *args: str) -> Any:
         return CliRunner().invoke(
             AutomodelContributor().get_cli(),
-            ["submit", str(job), *args],
+            ["--job-json", str(job), *args],
             obj=_platform("https://nhx.test"),
         )
 
@@ -389,7 +389,7 @@ class TestConflictingReferences:
     def _run_with(self, job: Path, *args: str) -> Any:
         return CliRunner().invoke(
             AutomodelContributor().get_cli(),
-            ["submit", str(job), *args],
+            ["--job-json", str(job), *args],
             obj=_platform("https://nhx.test"),
         )
 

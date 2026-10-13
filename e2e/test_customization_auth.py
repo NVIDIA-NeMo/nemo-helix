@@ -25,6 +25,7 @@ from nhx.customization_common.sdk.types import CustomizationJobCreateRequest
 
 pytestmark = [
     pytest.mark.customization_auth_e2e,
+    pytest.mark.feature("auth"),
     pytest.mark.container_only,
     pytest.mark.timeout(300),
     pytest.mark.e2e_config("e2e/configs/local-subprocess.yaml", {"auth": {"enabled": True}}),

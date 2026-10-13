@@ -45,7 +45,6 @@ class TaskImageBuildJob(NemoJob):
 
     name: ClassVar[str] = "task-image-build"
     description: ClassVar[str] = "Build or resolve a scaled-evals task image."
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = TaskImageBuildSpec
 
     @classmethod

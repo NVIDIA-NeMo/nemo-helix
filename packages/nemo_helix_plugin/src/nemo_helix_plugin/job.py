@@ -150,14 +150,6 @@ class NemoJob(_NamedPlugin):
         when ``name = "train"``; ``"/metric-jobs"`` for a legacy flat
         collection path.
 
-    .. attribute:: generate_legacy_verbs
-        :type: bool
-
-        Temporary CLI compatibility knob. ``True`` keeps the generated
-        ``<job> submit|explain`` command group. ``False`` registers
-        ``<job>`` itself as the remote submit command and keeps
-        ``<job> explain`` for schema introspection.
-
     Plugin-owned options:
 
     .. attribute:: backend_options_schemas
@@ -194,12 +186,6 @@ class NemoJob(_NamedPlugin):
     # Plugin-defined list filter passed to ``job_route_factory``. When set,
     # replaces the generated ``{job_type}JobsListFilter``.
     jobs_list_filter: ClassVar[type | None] = None
-
-    # ------------------------------------------------------------------ #
-    # Temporary CLI compatibility                                        #
-    # ------------------------------------------------------------------ #
-
-    generate_legacy_verbs: ClassVar[bool] = True
 
     # ------------------------------------------------------------------ #
     # Plugin-owned options (inert; see class docstring)                  #

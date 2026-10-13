@@ -39,7 +39,7 @@ class UnslothJobsListFilter(BaseJobsListFilter):
 
 
 class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
-    """GPU Unsloth fine-tuning job under the customization router (submit-only)."""
+    """GPU Unsloth fine-tuning job under the customization router (Jobs-service-only)."""
 
     name: ClassVar[str] = "unsloth.jobs"
     description: ClassVar[str] = "Unsloth SFT (LoRA / full / merged) training jobs on the platform GPU cluster."

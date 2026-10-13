@@ -14,7 +14,7 @@
 #   ./apply.sh && ./eval-smoke.sh            # happy path, the default
 #   ./eval-smoke.sh artifacts                # downloads after a healthy run
 #   ./eval-smoke.sh cancel                   # cancel queued, then cancel running
-#   ./eval-smoke.sh retry                    # fail an execution, then retry it
+#   ./eval-smoke.sh retry                    # fail an execution; it retries automatically
 #   ./eval-smoke.sh restart                  # restart the controller mid-run
 #   ./eval-smoke.sh fanout                   # benchmark fan-out: ramp and caps
 #   ./eval-smoke.sh all                      # every scenario, one task build
@@ -69,7 +69,9 @@ print("" if value is None else value)
 
 port_forward() {
   step "port-forwarding to the API"
-  kubectl port-forward -n "$NS" deploy/scaled-evals-api "$PORT:8080" >"$WORK/pf.log" 2>&1 &
+  # The Service, not the Deployment: after a rollout the Deployment can still
+  # resolve to the terminating pod, and the tunnel dies with it.
+  kubectl port-forward -n "$NS" svc/scaled-evals-api "$PORT:8080" >"$WORK/pf.log" 2>&1 &
   PF_PID=$!
   trap 'kill $PF_PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
   for i in $(seq 1 30); do
@@ -98,6 +100,17 @@ build_pack() {
   tar -czf "$WORK/pack.tar.gz" -C "$WORK/pack" .
 }
 
+# upload_pack <revision.json>
+#
+# The revision names a Files fileset path rather than a presigned URL, so the
+# pack goes to the Files service over the same port-forward.
+upload_pack() {
+  local files="http://127.0.0.1:$PORT/apis/files/v2/workspaces"
+  curl -sf -X PUT --upload-file "$WORK/pack.tar.gz" -H 'Content-Type: application/gzip' \
+    "$files/$(json "$1" upload.workspace)/filesets/$(json "$1" upload.fileset)/-/$(json "$1" upload.path)" \
+    -o /dev/null
+}
+
 # build_task <label> <sleep_seconds>  ->  sets TASK_ID and REVISION
 build_task() {
   local label="$1" sleep_seconds="$2"
@@ -113,12 +126,18 @@ build_task() {
 
   curl -sf -X POST "$BASE/v1/tasks/$TASK_ID/revisions" -o "$WORK/rev.json" || fail "revision create"
   REVISION="$(json "$WORK/rev.json" "revision")"
-  curl -sf -X PUT --upload-file "$WORK/pack.tar.gz" \
-    -H 'Content-Type: application/gzip' "$(json "$WORK/rev.json" "upload.url")" \
-    -o /dev/null || fail "pack upload"
-  curl -sf -X POST "$BASE/v1/tasks/$TASK_ID/finalize" -o /dev/null || fail "finalize"
+  upload_pack "$WORK/rev.json" || fail "pack upload"
+  # REUSE_HELLO_WORLD / REUSE_SLOW_WORLD=<image_ref>@<digest> finalize against an
+  # already-built image, for deployments whose finalize cannot build (Cloud Build
+  # cannot read packs stored in the Files service).
+  local reuse_var="REUSE_$(printf '%s' "$label" | tr 'a-z-' 'A-Z_')" body='{}'
+  if [ -n "${!reuse_var:-}" ]; then
+    body="{\"image_ref\":\"${!reuse_var%@*}\",\"image_digest\":\"${!reuse_var##*@}\"}"
+  fi
+  curl -sf -X POST "$BASE/v1/tasks/$TASK_ID/finalize" -H 'content-type: application/json' \
+    -d "$body" -o /dev/null || fail "finalize"
 
-  step "waiting for Cloud Build"
+  step "waiting for the task image"
   local status
   for i in $(seq 1 120); do
     curl -sf "$BASE/v1/tasks/$TASK_ID" -o "$WORK/task_now.json" || fail "task get"
@@ -150,9 +169,7 @@ clone_task() {
     -d "{\"name\":\"$NAME-$label\",\"description\":\"fan-out member $label\"}" \
     -o "$out" || fail "clone $label: task create"
   tid="$(json "$out" id)"
-  curl -sf -X PUT --upload-file "$WORK/pack.tar.gz" \
-    -H 'Content-Type: application/gzip' "$(json "$out" upload.url)" \
-    -o /dev/null || fail "clone $label: pack upload"
+  upload_pack "$out" || fail "clone $label: pack upload"
   curl -sf -X POST "$BASE/v1/tasks/$tid/finalize" -H 'content-type: application/json' \
     -d "{\"image_ref\":\"$IMAGE_REF\",\"image_digest\":\"$IMAGE_DIGEST\"}" \
     -o /dev/null \
@@ -334,7 +351,8 @@ scenario_cancel() {
 
 # A failing verifier is not enough: that yields `succeeded` with reward 0. A
 # retryable failure needs an infrastructure fault, so delete the Platform Job
-# out from under a live run and let the controller notice.
+# out from under a live run and let the controller notice. This is also the
+# path that drives execution cleanup from the controller.
 scenario_retry() {
   step "failing an execution by deleting its Platform Job"
   create_eval retry
@@ -350,20 +368,27 @@ scenario_retry() {
     fail "could not delete the Platform Job"
   note "execution before the fault: $before (deleted $(printf '%s\n' "$victims" | grep -c .) job)"
 
-  wait_until "$EV_ID" 'failed|succeeded|cancelled' 60 5 || fail "evaluation never settled after the fault"
-  [ "$STATUS" = failed ] || fail "expected the deleted job to fail the evaluation, got $STATUS"
-  pass "the controller failed the evaluation after its job vanished"
-
-  step "retrying it"
-  curl -sf -X POST "$BASE/v1/evaluations/$EV_ID/retry" -o /dev/null || fail "retry"
-  wait_until "$EV_ID" 'queued|provisioning|running' 24 5 || fail "retry did not restart the evaluation"
-  local after
-  after="$(field "$EV_ID" current_execution)"
-  [ "$after" -gt "$before" ] || fail "retry did not advance current_execution ($before -> $after)"
+  # A vanished Job is an infrastructure failure, which spends one of the
+  # evaluation's automatic retries (max_infrastructure_retries, default 2)
+  # rather than failing it. The retry only starts once cleanup has run.
+  step "waiting for the automatic infrastructure retry"
+  local after="$before"
+  for _ in $(seq 1 60); do
+    after="$(field "$EV_ID" current_execution)"
+    [ "$after" -gt "$before" ] && break
+    sleep 5
+  done
+  [ "$after" -gt "$before" ] || fail "no automatic retry after the job vanished ($(field "$EV_ID" status_detail))"
+  [ "$(field "$EV_ID" last_failure_category)" = infrastructure ] \
+    || fail "the vanished job was not recorded as an infrastructure failure"
   # Exactly one: a revived old job or a duplicate submission would both show up
   # as a second job carrying this evaluation's id.
   wait_for_count "job_count_for $EV_ID" 1 24 || fail "retry did not leave exactly one Platform Job"
   pass "retry advanced execution $before -> $after with exactly one Platform Job"
+
+  wait_until "$EV_ID" 'succeeded|failed|cancelled' 150 10 || fail "the retried execution never settled"
+  [ "$STATUS" = succeeded ] || fail "the retried execution did not succeed: $(json "$WORK/ev_now.json" status_detail)"
+  pass "the retried execution succeeded"
 }
 
 # Deterministic job naming should make resubmission idempotent, but the window

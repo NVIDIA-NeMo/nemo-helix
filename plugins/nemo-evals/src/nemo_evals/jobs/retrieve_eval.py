@@ -154,7 +154,6 @@ class _RetrieveEvalJobBase(NemoJob):
     input_spec_schema: ClassVar[type[BaseModel] | None] = RetrieveEvalInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = RetrieveEvalSpec
     job_collection_path: ClassVar[str | None] = "/retrieve-eval/jobs"
-    generate_legacy_verbs: ClassVar[bool] = False
 
     @classmethod
     async def to_spec(

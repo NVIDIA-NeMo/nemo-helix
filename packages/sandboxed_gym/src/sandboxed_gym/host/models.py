@@ -227,6 +227,7 @@ class NemoGymSandboxedConfig(BaseModel):
     host_provider: str = "opensandbox"
     environment_path: str | None = None
     environment_offline: bool = False
+    reuse_image_gym_install: bool = False
     sandbox: SandboxConfig | None = None
     job_id: str = DEFAULT_JOB_ID
     episode_broker: dict[str, Any] = Field(default_factory=dict)

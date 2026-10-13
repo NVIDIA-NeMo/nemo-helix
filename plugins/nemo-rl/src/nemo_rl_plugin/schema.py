@@ -54,7 +54,7 @@ class OutputRequest(RlSchema):
 
 
 class RlJobInput(RlSchema):
-    """POST body / CLI JSON for ``nemo customization rl submit``."""
+    """POST body / CLI JSON for ``nemo customization rl --job-json``."""
 
     # extra="forbid" inherited from RlSchema; protected_namespaces=() kept for the
     # ``model`` field.

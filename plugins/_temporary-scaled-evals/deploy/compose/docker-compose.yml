@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Phase-1 compose stack: the NeMo Helix API serving the scaled-evals plugin,
-# plus the two scaled-evals workers and the substrate they need.
+# and the substrate it needs. Builds and evaluations run as subprocess Platform Jobs.
 #
 # Run it from this directory (`docker compose up -d`); the build context is the
 # repo root, resolved relative to this file.
@@ -22,8 +22,7 @@
 
 name: nemo-scaled-evals
 
-# Every scaled-evals process reads the same configuration, so the API and both
-# workers share one block.
+# Every scaled-evals process, including Platform Job subprocesses, reads this block.
 x-scaled-evals-env: &scaled-evals-env
   # scaled-evals' own database, named explicitly. The API reads this rather than
   # the platform's DATABASE_* variables, so the two never share a database even
@@ -46,7 +45,6 @@ x-scaled-evals-env: &scaled-evals-env
   S3_BUCKET: ${S3_BUCKET:-scaled-evals}
 
   BUILDKIT_ADDR: unix:///run/buildkit/buildkitd.sock
-  BUILD_WORKER_REQUIRED: "false"
 
   IMAGE_REGISTRY: ${IMAGE_REGISTRY:-registry:5000}
   REGISTRY_INSECURE: ${REGISTRY_INSECURE:-true}
@@ -58,8 +56,6 @@ x-scaled-evals-env: &scaled-evals-env
   # for cluster parity, which on an arm64 laptop makes every sample build go
   # through QEMU. Set it explicitly when the image must run on amd64 nodes.
   IMAGE_BUILD_PLATFORM: ${IMAGE_BUILD_PLATFORM-}
-  SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED: "true"
-  SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED: "true"
   SCALED_EVALS_PLATFORM_JOBS_PROVIDER: subprocess
   SCALED_EVALS_PLATFORM_JOBS_WORKSPACE: default
 
@@ -132,8 +128,8 @@ services:
       start_period: 20s
 
   buildkit:
-    # Builder for task Dockerfiles. Publishes no host port; the API and build
-    # worker reach it only over the shared socket volume.
+    # Builder for task Dockerfiles. Publishes no host port; the API and its build
+    # Jobs reach it only over the shared socket volume.
     #
     # Privileged, not the rootless variant the standalone stack uses. Rootless
     # buildkitd needs to create an unprivileged user namespace, which the host
@@ -226,17 +222,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-
-  dispatch-worker:
-    image: ${APP_IMAGE:-nemo-scaled-evals:dev}
-    build: *app-build
-    command: ["scaled-evals-dispatch-worker"]
-    environment: *scaled-evals-env
-    depends_on:
-      api:
-        condition: service_healthy
-      registry:
-        condition: service_started
 
 volumes:
   postgres-data:

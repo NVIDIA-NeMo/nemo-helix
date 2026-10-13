@@ -2,142 +2,78 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "v0.7.0 - 2026-10-06"
+title: "v0.8.0 - 2026-10-08"
 description: ""
 ---
-NeMo Helix v0.7.0 completes the NeMo Platform to NeMo Helix rebrand across the
-repository, packages, containers, and Helm chart, and builds on the 0.6 agent,
-evaluator, and Studio workflows with strategy-based agent optimization,
-one-step agent redeploys, hardened access-key and identity provider support,
-and deeper Studio agent-onboarding and Customizer workflows.
+NeMo Helix v0.8.0 builds on the 0.7 release line with broader agent optimization and deployment workflows, richer agent-evaluation runners and task discovery, Studio support for optimization and deployment journeys, and platform hardening for setup, SDK clients, deployments, and release operations.
 
 ## Highlights
 
-- **NeMo Helix rebrand.** The repository, Python packages, container images,
-  and Helm chart complete their rename from NeMo Platform to NeMo Helix,
-  including the remaining `nmp-*` container images and the `nemo-platform`
-  Helm chart.
-- **Strategy-based agent optimization.** `nemo agents optimize` now exposes
-  `list-strategies`, `run-strategy`, and `prepare-fileset` subcommands so an
-  installed optimization strategy can be resolved, validated, and submitted as
-  a Fabric-backed job, alongside a new `nemo agents redeploy` command for
-  updating a deployed agent from a new config in one step.
-- **Hardened access and identity.** Scoped access keys can be rotated with a
-  dual-active grace period, created with explicit scopes, and resolved to a
-  stable account identity. Auth adds a ZITADEL Kubernetes identity provider
-  reference and configurable CLI device-flow and Studio bearer-token behavior.
-- **Deeper Studio agent and Customizer workflows.** Studio can create Fabric
-  agents from a GitHub repository, from an agent seen in imported traces, or
-  from uploaded loose files, package an agent image directly from Studio, and
-  launch agent HPO studies from the Optimize button. Deployments and the
-  Inference Provider feature flags are enabled by default, and Customizer gets
-  a landing page and combined fileset/model/dataset creation.
-- **Broader Fabric evaluation coverage.** Evaluator can run Fabric harnesses,
-  including deepagents on Nemotron, against Harbor tasks that ship no Python,
-  submit Gym runners with secret references and placement, and submit agent
-  evaluations from the async plugin SDK.
+- **Expanded agent optimization.** Agents can use new prompt-master and Switchyard optimization strategies, run Pi and remote-agent Fabric harnesses, and carry strategy options through Studio and CLI-backed optimization submissions.
+- **Broader evaluation execution.** Evaluator adds richer filtering for stored tasks and tasksets, registered-agent execution through Fabric, Gym, and Harbor runners, Files-backed artifact storage for scaled evaluations, and live metric evaluation endpoints.
+- **Studio optimization and deployment workflows.** Studio can submit optimization jobs, show strategy options and in-progress details, build an agent image before deploying to Docker or Kubernetes, deploy HPO-tuned agent instructions, and guide users when the Helix backend is unreachable or membership is denied.
+- **Setup, CLI, and SDK hardening.** Setup can create a sample workspace and demo agent, the setup model picker is searchable, CLI startup and HTTP transport reuse are faster, remote-cluster context handling is safer, and product code has moved off the legacy generated `nemo_helix` SDK surface.
+- **Deployment and builder foundations.** The platform adds container-image builder entities, build/fetch/push/sign steps, deployment HTTP clients, OpenShell-compatible task images and deployment mode support, and model-management paths backed by the deployments API.
 
 ## What's included
 
 ### Agents and Fabric
 
-- `nemo agents optimize` adds `list-strategies` (list installed optimization
-  strategies), `run-strategy --strategy <name>` (submit a Fabric-backed
-  optimization job for the named strategy, for example `legacy`), and
-  `prepare-fileset` (validate an optimize bundle and stage it as a fileset,
-  with an optional `--check-models` model resolution check).
-- `nemo agents redeploy --agent-config <file>` redeploys an agent from a new
-  config in one command instead of separate update and restart steps.
-- Agent deployments record which GitHub commit they are running.
-- Execute-agent job configuration accepts an explicit image field alongside
-  other agent config fields.
+- Agent optimization gains prompt-master and Switchyard strategy support, plus orchestration between numeric and prompt optimizations. The `nemo agents optimize list-strategies` output includes strategy descriptions, and `nemo agents optimize run-strategy --strategy <name>` can submit plugin-provided strategies. See [Optimize Agents](/documentation/agents/optimize-agents).
+- Fabric-backed agents can use the `nvidia.fabric.pi` harness and a remote-agent Fabric adapter. These expand the harnesses available when registering, evaluating, and deploying agents through Fabric-backed workflows. (documentation not yet available)
+- Agent deployments support the OpenShell deployment mode and expose the set of enabled deployment methods, making deployment choices align with the platform backends available in the current environment. See [Deploy Agents](/documentation/agents/deploy-agents).
+- Agent execution and analysis jobs can attach extensions that save analysis reports and related artifacts as job results. See [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs).
 
 ### Agent Evaluation
 
-- Evaluator can run a NeMo Fabric deepagents harness on Nemotron inside
-  Harbor, and can run Fabric harnesses on Harbor tasks that ship no Python.
-- Gym runner submissions can include secret references and a placement
-  target, and agent evaluations can be submitted from the async plugin SDK.
-- Fabric sandbox and Relay evaluation trials now capture their own OTLP trace,
-  so runs using those Harbor targets show up alongside other traced trials.
-- Harbor agent evaluation credentials are supplied through env-secrets instead
-  of inline configuration, keeping credentials out of evaluation config files.
-- Intake can import Gym rollout trajectories.
-- The sandboxed Gym runtime now vendors its Hugging Face cache into its
-  writable work directory, so sandboxed Gym tasks no longer need external
-  Hugging Face access to run.
+- Stored evaluator tasks and tasksets are now easier to discover: task lists can filter by kind, metric, metadata, tags, and text, and taskset lists can filter by member task and description. See [Filter tasks and tasksets](/documentation/evaluate-models/manage-tasks-tasksets#filter-tasks-and-tasksets).
+- Agent evaluations can run a registered agent through the Fabric runner, Gym runner, or Harbor runner, so evaluation configs can reference the registered agent instead of embedding a separate config. See [Evaluate Fabric Agents](/documentation/evaluate-models/agent-eval/fabric-runner).
+- Scaled evaluation artifact storage now routes through the Files service, and Harbor runners install from per-version requirements with OpenSandbox support. This makes evaluation artifacts and runner dependencies align with the platform files and sandboxing model.
+- Evaluator adds a live metric evaluation endpoint, failed-result representation for intake, better Gym host survivability on cold node image pulls, and shared propagation of Fabric and Gym environment secrets.
+- `FieldMapping` can match array elements, and evaluator task submission rejects whitespace-only task identifiers earlier.
 
 ### Studio
 
-- Studio can create a Fabric agent from a GitHub repository (recording its
-  commit), from an agent seen in imported traces, or by uploading loose files
-  instead of only a whole directory, and can package an agent image directly
-  from Studio.
-- The Deployments and Inference Provider feature flags are enabled by default,
-  the Create Deployment wizard moved to its own page, and Studio offers deploy
-  CTAs for custom models, adapters, and runs that emit their own model when a
-  model isn't already being served.
-- Agent details pages add an Insights analysis config panel driven by
-  trace-intel, an Import Traces modal, and contextual CTAs.
-- The Optimize button can launch agent HPO studies, and the Traces list can be
-  filtered by agent.
-- Customizer gets a landing page, combined fileset upload with model and
-  dataset creation, deploy-the-base-model support for adapter fine-tuning
-  jobs, and clearer chart series on customization detail pages.
-- The Run Evaluation form gains explicit steps and a control for how many rows
-  run in parallel.
-- Navigation, header state, and chevron behavior are more consistent across
-  Studio surfaces.
+- Studio can submit agent optimization jobs from the UI, show optimization strategy options, display additional details while optimization jobs run, and deploy HPO trials that tune an agent's system instructions.
+- Studio can build an agent image before deploying to Docker or Kubernetes and can deploy newly registered agents using a method the platform can run.
+- The Run Evaluation flow can select a dataset from a fileset and accepts Parquet and CSV datasets.
+- Agent analysis flows can send the agent's ETHOS context with analysis runs and expose a **Run analysis now** action. (documentation not yet available)
+- Studio adds clearer states for unreachable Helix backends, workspace membership authorization failures, and sample workspaces, while preserving recovery actions on unauthorized screens.
+- Studio improves agent, Customizer, and Data Designer navigation with a trimmed agent details tab, agent registration terminology, a Customizer/Data Designer start-page redesign, saved customization templates, and an Anonymizer entity-mode auto-detect default.
 
 ### Customizer and Data Designer
 
-- Automodel training jobs can auto-deploy after completion, and RL training
-  jobs can auto-deploy the resulting model once a job finishes.
-- Data Designer adds a `check-models` command that validates a configuration's
-  models against the platform before use.
+- Customizer can serve saved job templates from the customization router, and Studio can start customization jobs from templates. See [Studio customization templates](/documentation/studio/customization#start-from-a-template).
+- GRPO and DPO training paths are hardened with GRPO offline fixes, rebased NeMo-RL pinning, DTensor checkpoint configuration for DPO, and transformer updates for Unsloth and RL jobs. See [GRPO training](/documentation/customizer-reference/grpo-and-reward-environments).
 
 ### Platform, CLI, and Deployment
 
-- Auth adds `nemo auth access-keys rotate`, which mints a successor key and
-  keeps the prior key active for a configurable grace period, scopes on
-  access-key creation, stable account identity resolution, a ZITADEL
-  Kubernetes identity provider reference, and configurable CLI device-flow and
-  Studio bearer-token behavior.
 - OIDC configuration now separates public, confidential, and workload client
   profiles. The CLI supports brokered confidential login without receiving the
   client secret or provider refresh token. Public CLI clients can opt into the
   same encrypted server-side session store without becoming confidential, and
   `platform.advertised_base_url` lets discovery publish the gateway origin when
   services connect internally.
-- `nemo chat` uses the default model chosen during `nemo setup` (or
-  `NEMO_DEFAULT_MODEL`) when no `--model` is given, and `nemo setup` creates a
-  sample workspace and agent as part of the setup flow.
-- The CLI inference providers list shows provider status, and completed CLI
-  customization submissions link to their Studio job details page.
-- Models reject a provider URL with an unsupported scheme at create time, and
-  the inference gateway routes LoRA adapters through their base model's
-  virtual model instead of a separate route.
-- Jobs across agents, evaluator, anonymizer, data designer, and safe
-  synthesizer now report token usage as part of their job record.
+- `nemo setup` can create a sample workspace and demo Fabric agent, and the setup model picker is searchable. See [Setup](/documentation/get-started/setup).
+- CLI and plugin commands are more remote-cluster aware: skills and config views avoid clobbering configured remote base URLs, denied binds report as permission errors, generated submit commands use the global context, and shared HTTP transports reduce repeated client setup.
+- Product services, plugins, and tests have moved off the legacy generated `nemo_helix` SDK surface toward typed clients; documentation examples now instantiate clients from the active CLI context. See [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+- Jobs can be resolved by ID as well as by name across get and mutation operations.
+- Model and deployment integration continues moving through the deployments API, with model create/delete and managed-deployment reads using deployment-backed flows.
+- The image builder adds image identity records, build requests, backend execution, fetch/build/push/sign steps, image-set filtering, returned image references, prefixed job names, and minikube end-to-end coverage. These are foundational platform capabilities and may not yet have user-facing documentation.
 
 ## Maintenance
 
-- The CLI's typed-client plumbing no longer depends on Stainless-generated
-  code.
-- Fabric-backed agent workflows upgrade to Fabric 0.3.0.
+- Release operations preserve version series for pinned nightlies, validate NGC metadata before publishing, and include release-note and release-test-scope skills for local release planning.
+- Docs now enforce CLI-context connection patterns instead of direct `NHX_BASE_URL` use in examples.
+- Internal code and tests received reliability improvements for TestClient teardown, free-port usage, sidecar DB access, Alembic percent escaping, and plugin client retry behavior.
 
 ## Install
 
-For fresh local installs, see [Setup](/documentation/get-started/setup).
-It covers the recommended PyPI install, source-checkout prerequisites, Flox
-activation, the system-toolchain fallback, and provider configuration.
+For fresh local installs, see [Setup](/documentation/get-started/setup). It covers the recommended PyPI install, source-checkout prerequisites, Flox activation, the system-toolchain fallback, provider configuration, and optional sample workspace creation.
 
-For self-managed Kubernetes, start with
-[Install NeMo Helix Helm Chart](/documentation/kubernetes-deployment/setup/helm/install).
-If you are updating pinned chart or image references from an earlier release,
-see the upgrade steps below.
+For self-managed Kubernetes, start with [Install NeMo Helix Helm Chart](/documentation/kubernetes-deployment/setup/helm/install).
 
-## Upgrade from v0.6.x
+## Upgrade from v0.7.x
 
 OIDC client configuration and auth discovery are intentionally breaking in
 this release. Move flat interactive fields under `auth.oidc.public_client` or
@@ -156,9 +92,7 @@ make bootstrap
 flox -q activate
 ```
 
-Without Flox, install the system toolchain versions printed by
-`make toolchain-versions`, plus a C compiler, then run
-`make TOOLCHAIN=system bootstrap` followed by `source .venv/bin/activate`.
+Without Flox, install the system toolchain versions printed by `make toolchain-versions`, plus a C compiler, then run `make TOOLCHAIN=system bootstrap` followed by `source .venv/bin/activate`.
 
 Run setup after updating the checkout:
 
@@ -166,21 +100,9 @@ Run setup after updating the checkout:
 nemo setup
 ```
 
-After setup, restart local services before using CLI, SDK, Studio, or plugin
-workflows against the upgraded checkout.
+After setup, restart local services before using CLI, SDK, Studio, or plugin workflows against the upgraded checkout.
 
-If you deploy through Helm or reference container images directly, update
-chart and image references from `nemo-platform`/`nmp-*` to `nemo-helix`/
-`nhx-*` before redeploying.
-
-If you use `nemo agents optimize`, move existing automation from the prior
-single-path optimize flow to `nemo agents optimize run-strategy --strategy
-legacy` (or another installed strategy), staging remote bundles first with
-`nemo agents optimize prepare-fileset`.
-
-If you have platform-owned agent intent packages, use the `nemo-ethos`
-coding-agent skill to write `ETHOS.md`. After the user approves `ETHOS.md`,
-remove the legacy spec package before using newer optimization workflows.
+If your automation imported the legacy generated `nemo_helix` SDK package directly, migrate to the typed clients exposed through `nemo_helix_plugin` and the active CLI context before relying on v0.8 workflows.
 
 ## Compatibility
 
@@ -189,66 +111,23 @@ remove the legacy spec package before using newer optimization workflows.
 - Linux x86_64 for local NVIDIA GPU workloads
 - CUDA 13-capable NVIDIA drivers for local GPU workloads
 - Self-managed Kubernetes clusters deployed with Helm
-- Docker for local services, Docker-backed platform jobs, local ClickHouse,
-  Docker Sandboxes, local model-serving workflows, and Gym task images
+- Docker for local services, Docker-backed platform jobs, local ClickHouse, Docker Sandboxes, local model-serving workflows, and Gym task images
 - Kubernetes/Ray runtime for NeMo-RL DPO and GRPO customization jobs
-- OpenSandbox and a job-storage PVC for sandboxed Gym and GRPO reward
-  environments
+- OpenSandbox and a job-storage PVC for sandboxed Gym and GRPO reward environments
 - ClickHouse for Intake trace storage and Experiments rollups
-- NVIDIA GPU access for local training, model serving, RL training, and
-  GPU-backed synthetic data workflows
+- NVIDIA GPU access for local training, model serving, RL training, and GPU-backed synthetic data workflows
 - Node 22.18.0+ for Studio assets
-- Platform API and `nemo-helix` Python SDK `0.7.0`
+- Platform API and `nemo-helix` Python SDK `0.8.0`
 
 ## Current constraints
 
-- **Self-managed scope.** v0.7.0 documents local setup and user-managed
-  Kubernetes deployment. It is not a managed hosted-service release.
-- **Research-preview optimizer.** Analyst and Experimentalist are early agentic
-  workflows. They are useful for guided optimization, but quality and autonomy
-  are still research-preview and require developer review.
-- **Sandboxed Gym runtime.** Sandboxed Gym evaluation requires Kubernetes or a
-  configured sandbox-capable environment, OpenSandbox setup for cluster runs,
-  and task images that include the environment dependencies.
-- **Retrieval evaluation.** Retrieval evaluation requires the relevant BEIR data
-  or retrieval corpus inputs and configured embedding or ranking model access.
-- **GRPO runtime.** GRPO jobs require Kubernetes/Ray execution and sandboxed
-  Gym configuration. They do not have a local Docker fallback.
-- **GRPO environment packaging.** Converter-built `adapter-wheels-v1` packages
-  include a complete wheel closure and do not require network access at job
-  start. Conversion still requires an internet-connected host. Offline
-  `wheels-v1` jobs likewise need a complete closure for the training image's
-  Python and node architecture.
-- **DPO runtime.** Customizer `rl` DPO jobs run on Kubernetes/Ray and do not
-  have a local Docker fallback. DPO remains full-weight only.
-- **Agent intent migration.** `AGENT-SPEC.md` is legacy. Use `ETHOS.md` for
-  new work, and migrate a platform-owned legacy `AGENT-SPEC.md` package to
-  `ETHOS.md` before relying on optimizer workflows.
-- **Optuna HPO runtime.** Optuna-based hyperparameter optimization runs locally
-  from a developer workstation. It is not available as a horizontally scaled
-  cluster service in this release.
-- **Access keys and workload delegation.** Scoped access keys and workload
-  credential delegation require administrator configuration before workloads can
-  rely on them in shared deployments.
-- **Embedded ClickHouse scope.** Helm's embedded ClickHouse is intended for
-  development, evaluation, and non-critical single-node deployments. Use an
-  externally managed ClickHouse for production deployments that require high
-  availability, backups, or larger scale.
-
-## Known issues
-
-- **Hermes trials can omit the `relay_atif` evidence descriptor.** Use the
-  `trace:atif` descriptor instead; it points at the same ATIF file.
+- **Self-managed scope.** v0.8.0 documents local setup and user-managed Kubernetes deployment. It is not a managed hosted-service release.
+- **Research-preview optimizer.** Analyst, Experimentalist, prompt-master, and Switchyard optimization strategies are early agentic workflows. They are useful for guided optimization, but quality and autonomy still require developer review.
+- **Sandboxed Gym runtime.** Sandboxed Gym evaluation requires Kubernetes or a configured sandbox-capable environment, OpenSandbox setup for cluster runs, and task images that include the environment dependencies.
+- **GRPO runtime.** GRPO jobs require Kubernetes/Ray execution and sandboxed Gym configuration. They do not have a local Docker fallback.
+- **OpenShell and image builder scope.** OpenShell deployment support and image-builder capabilities are foundational platform paths and may require environment-specific administrator configuration.
 
 ## Links
 
 - Repository: [https://github.com/NVIDIA-NeMo/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix)
 - Issues: [https://github.com/NVIDIA-NeMo/nemo-helix/issues](https://github.com/NVIDIA-NeMo/nemo-helix/issues)
-- Run the Agent Optimizer: [/documentation/agents/optimize-agents/run-the-agent-optimizer](/documentation/agents/optimize-agents/run-the-agent-optimizer)
-- Execute Agents as Jobs: [/documentation/agents/execute-agents-as-jobs](/documentation/agents/execute-agents-as-jobs)
-- Evaluate with a NeMo Fabric Harness: [/documentation/evaluate-models/agent-eval/fabric-runner](/documentation/evaluate-models/agent-eval/fabric-runner)
-- Using Authentication: [/documentation/access-control/authentication/using-authentication](/documentation/access-control/authentication/using-authentication)
-- Configure Sandboxed Gym for Evaluator: [/documentation/evaluate-models/agent-eval/gym-sandbox-configuration](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration)
-- Install NeMo Helix Helm Chart: [/documentation/kubernetes-deployment/setup/helm/install](/documentation/kubernetes-deployment/setup/helm/install)
-- NeMo Fabric: [https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/](https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/)
-- NeMo Agent Toolkit: [https://docs.nvidia.com/nemo/agent-toolkit/latest/](https://docs.nvidia.com/nemo/agent-toolkit/latest/)

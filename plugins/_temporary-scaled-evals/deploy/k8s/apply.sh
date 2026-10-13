@@ -31,7 +31,7 @@ fi
 # keep running with the old settings until something restarted them.
 #
 # Only the keys local.env defines are replaced, so neither the ${HOME} in
-# workers.yaml nor the kubelet's own $(VAR) references are touched.
+# ${HOME} in the manifests nor the kubelet's own $(VAR) references are touched.
 render() {
   local tmp
   tmp="$(mktemp -d)"
@@ -82,6 +82,13 @@ if ! kubectl get secret scaled-evals-credential-encryption -n "$NS" >/dev/null 2
       'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
 fi
 
+if ! kubectl get secret scaled-evals-platform-secrets-key -n "$NS" >/dev/null 2>&1; then
+  echo "==> generating platform secrets encryption key"
+  kubectl create secret generic scaled-evals-platform-secrets-key -n "$NS" \
+    --from-literal=key="$(python3 -c \
+      'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')"
+fi
+
 if ! kubectl get secret scaled-evals-postgres -n "$NS" >/dev/null 2>&1; then
   echo "==> generating postgres password"
   kubectl create secret generic scaled-evals-postgres -n "$NS" \
@@ -91,7 +98,7 @@ fi
 
 echo "==> applying"
 render | kubectl apply -f -
-kubectl delete deployment -n "$NS" scaled-evals-build-worker --ignore-not-found
+kubectl delete deployment -n "$NS" scaled-evals-build-worker scaled-evals-dispatch-worker --ignore-not-found
 
 # Create the auth Secret before waiting for workloads; the recurring CronJob
 # updates it in place without putting an empty credential into the manifests.

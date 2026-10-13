@@ -23,8 +23,6 @@ from scaled_evals.api.repositories import (
     ExecutionTelemetryRepository,
     OperationsRepository,
     ResourceUsageRepository,
-    RuntimeResourceRepository,
-    SwitchyardCampaignRepository,
     TaskRepository,
     UserRepository,
 )
@@ -126,16 +124,8 @@ class Database:
         return OperationsRepository(self.conn)
 
     @property
-    def runtime_resources(self) -> RuntimeResourceRepository:
-        return RuntimeResourceRepository(self.conn)
-
-    @property
     def resource_usage(self) -> ResourceUsageRepository:
         return ResourceUsageRepository(self.conn)
-
-    @property
-    def switchyard_campaigns(self) -> SwitchyardCampaignRepository:
-        return SwitchyardCampaignRepository(self.conn)
 
     @property
     def users(self) -> UserRepository:
