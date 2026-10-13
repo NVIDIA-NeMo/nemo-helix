@@ -878,6 +878,7 @@ class JobDispatcher:
             enriched_step = HelixJobStepWithContext(
                 id=step.id,
                 job=job.name,
+                job_id=job.id,
                 attempt_id=step.attempt_id,
                 workspace=step.workspace,
                 fileset=job.fileset,

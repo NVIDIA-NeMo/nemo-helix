@@ -100,6 +100,7 @@ class _Jobs:
         #: describes honestly, because that is what a corrupted read returns.
         self.stored: Any = {}
         self.fetches = 0
+        self.fetch_kwargs: dict[str, Any] = {}
         #: Raised by the read instead of answering, for the failure cases.
         self.fetch_error: Exception | None = None
         #: Raised by the *write* instead of accepting, likewise.
@@ -114,8 +115,9 @@ class _Jobs:
                     raise harness.send_error
                 harness.sent.append(kwargs)
 
-            def get_job_step_task(self, **kwargs: Any) -> _Task:
+            def get_job(self, **kwargs: Any) -> _Task:
                 harness.fetches += 1
+                harness.fetch_kwargs = kwargs
                 if harness.fetch_error is not None:
                     raise harness.fetch_error
                 return _Task(harness.stored)
@@ -207,6 +209,13 @@ def test_fetch_current_metrics_returns_every_series(jobs: _Jobs) -> None:
     assert _reporter(jobs, STORED).fetch_current_metrics() == SERIES
 
 
+def test_fetch_current_metrics_reads_the_job_not_the_task(jobs: _Jobs) -> None:
+    """A resumed pod is a new, empty task. The job holds the current attempt's series."""
+    _reporter(jobs, STORED).fetch_current_metrics()
+
+    assert jobs.fetch_kwargs == {"name": "job-1", "workspace": "default"}
+
+
 def test_fetch_current_metrics_drops_non_list_values(jobs: _Jobs) -> None:
     """A malformed blob must not poison the accumulator."""
     stored = {"metrics": {"train_loss": [{"step": 1, "epoch": 1, "value": 1.0}], "junk": 3}}
@@ -226,8 +235,8 @@ def test_fetch_current_metrics_copies_the_point_lists(jobs: _Jobs) -> None:
     assert len(SERIES["train_loss"]) == 1
 
 
-def test_fetch_current_metrics_survives_an_unseeded_task(jobs: _Jobs) -> None:
-    """First run: the task has no stored details, which is not an error."""
+def test_fetch_current_metrics_survives_an_unseeded_job(jobs: _Jobs) -> None:
+    """First run: the job has no stored details, which is not an error."""
     assert _reporter(jobs, {}).fetch_current_metrics() == {}
 
 
@@ -240,7 +249,7 @@ def _response(status: int) -> httpx.Response:
     return httpx.Response(status, request=httpx.Request("GET", "http://jobs/task"))
 
 
-def test_a_missing_task_seeds_from_nothing(jobs: _Jobs) -> None:
+def test_a_missing_job_seeds_from_nothing(jobs: _Jobs) -> None:
     """A 404 is the one failure that genuinely means "nothing stored"."""
     jobs.fetch_error = NotFoundError(_response(404))
 

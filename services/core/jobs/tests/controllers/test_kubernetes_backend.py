@@ -971,6 +971,7 @@ def test_schedule_job_success(kubernetes_job, cpu_execution_provider, test_step_
     assert "ENV_VAR" in env_vars
     assert env_vars["ENV_VAR"] == "test_value"
     assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
+    assert env_vars["NEMO_JOB_UID"] == "platform-job-test-uid"
     assert env_vars[PERSISTENT_JOB_STORAGE_PATH_ENVVAR] == "/var/test"
     assert env_vars[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
     assert "NHX_BASE_URL" in env_vars

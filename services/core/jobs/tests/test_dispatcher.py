@@ -2050,6 +2050,7 @@ async def test_list_steps_across_multiple_workspaces(
 
         # Verify the steps belong to jobs in default workspace
         job_names_default = {step.job for step in steps_default}
+        assert {step.job_id for step in steps_default} == {job1.id, job2.id}
         assert job1.name in job_names_default
         assert job2.name in job_names_default
         assert job3.name not in job_names_default

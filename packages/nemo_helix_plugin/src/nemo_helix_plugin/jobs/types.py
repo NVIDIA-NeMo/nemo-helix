@@ -294,6 +294,10 @@ class HelixJobStepWithContext(BaseModel):
 
     id: str
     job: str
+    job_id: str | None = Field(
+        default=None,
+        description="ID of the platform job. Unlike the job name, it is never reused by a later job.",
+    )
     attempt_id: str
     fileset: str
     artifact_base_path: str | None = Field(

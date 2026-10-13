@@ -57,6 +57,7 @@ from nhx.common.jobs.constants import (
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     TERMINAL_EXIT_CODES,
@@ -1484,6 +1485,7 @@ def create_pod_template_spec(
                 value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.uid")),
             ),
             client.V1EnvVar(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value=DEFAULT_TASK_STORAGE_PATH),
+            *([client.V1EnvVar(name=NEMO_JOB_UID_ENVVAR, value=step.job_id)] if step.job_id else []),
             client.V1EnvVar(
                 name=NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
                 value=get_logs_endpoint_from_fileset(

@@ -8,12 +8,17 @@ from nhx.customization_common.integrations.compiler import (
     warn_incomplete_integrations,
 )
 from nhx.customization_common.integrations.context import IntegrationRuntimeContext
-from nhx.customization_common.integrations.runtime import build_mlflow_config, build_wandb_config
+from nhx.customization_common.integrations.runtime import (
+    build_mlflow_config,
+    build_wandb_config,
+    find_mlflow_run_id,
+)
 
 __all__ = [
     "IntegrationRuntimeContext",
     "build_mlflow_config",
     "build_wandb_config",
     "collect_integration_secret_envs",
+    "find_mlflow_run_id",
     "warn_incomplete_integrations",
 ]
