@@ -168,6 +168,13 @@ def _preflight_message(label: str, choice: ModelChoice, verdict: Any) -> str:
     )
 
 
+def _live_hitlog_fileset(config: dict, sdk: Any, ctx: JobContext) -> str:
+    """Save the hitlog a live attack produced; empty for generation-only and replay runs, which have none."""
+    if config.get("stop_after_synth") or config.get("replay_hitlog_fileset"):
+        return ""
+    return _save_hitlog_fileset(sdk, ctx, ctx.workspace)
+
+
 class AgentHardenerRunJob(NemoJob):
     """Run the attack/defend/validate war-game against the configured agent."""
 
@@ -276,6 +283,7 @@ class AgentHardenerRunJob(NemoJob):
             "failed",
             1,
             ctx.job_id or "",
+            _live_hitlog_fileset(config, sdk, ctx),
             manifest_id=str(config.get("manifest_id") or ""),
             source_run=str(config.get("source_run") or ""),
             failure=failure,
@@ -395,6 +403,16 @@ class AgentHardenerRunJob(NemoJob):
                 rounds=rounds,
             )
 
+        # Record the run's garak hitlog so a later run (e.g. the Harden-tab sanity check) can replay it;
+        # per-job storage doesn't survive across runs. A replay produces no new hits but carries forward the
+        # hitlog it replayed. Saved first so a failure in the artifact saves below cannot skip it.
+        if config.get("stop_after_synth"):
+            hitlog_fileset = ""
+        elif replay_args:
+            hitlog_fileset = replay_fileset or ""
+        else:
+            hitlog_fileset = _live_hitlog_fileset(config, sdk, ctx)
+
         # A validate-only run generates no mitigations (defenders: []); it produces the sanity-check
         # validation.json instead. A normal hardening run produces the mitigations artifact.
         if validate_only:
@@ -404,18 +422,6 @@ class AgentHardenerRunJob(NemoJob):
             _save_composed_guardrails(ctx, config.get("defense_guardrails"))
         elif not config.get("stop_after_synth"):
             _save_mitigations(ctx)
-
-        # Record the run's garak hitlog so a later run (e.g. the Harden-tab sanity check) can replay it;
-        # per-job storage doesn't survive across runs. A live attack produces a new hitlog we persist to a
-        # fileset; a replay produces no new hits but carries forward the hitlog it replayed, so replay runs
-        # stay sanity-checkable too. Generation-only runs (`--stop-after-synth`) have no attack hits.
-        hitlog_fileset = ""
-        if config.get("stop_after_synth"):
-            pass
-        elif replay_args:
-            hitlog_fileset = replay_fileset or ""
-        else:
-            hitlog_fileset = _save_hitlog_fileset(sdk, ctx, ctx.workspace)
 
         events_fileset = _save_events_fileset(sdk, workspace=ctx.workspace, run_name=outcome.record_name or "")
 

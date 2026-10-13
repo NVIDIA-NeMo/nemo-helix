@@ -1169,3 +1169,58 @@ def test_env_file_values_are_written_to_the_victim_dotenv(tmp_path: Path, monkey
     victim_env = tmp_path / ".env"
     assert seen["env_file"] == str(user_env)
     assert "REMOTE_TOKEN=from-user" in victim_env.read_text(encoding="utf-8")
+
+
+# ── hitlog is saved on failure and cannot be skipped by a mitigations failure ──
+
+
+def _failing_one_shot(*_a: Any, **_k: Any) -> Any:
+    raise AgentHardenerRunError("sandbox", "victim did not start")
+
+
+def _failed_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any], saved: list[str]
+) -> dict[str, Any]:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setattr(run_module, "_run_one_shot", _failing_one_shot)
+    monkeypatch.setattr(run_module, "_save_hitlog_fileset", lambda *_a: saved.append("hitlog") or "hl-ref")
+    sdk, captured = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+    job.run({"config": str(manifest), **config}, ctx=_ctx(tmp_path), sdk=sdk)
+    return captured[-1]
+
+
+def test_failed_run_records_the_hitlog_it_produced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: list[str] = []
+    record = _failed_record(tmp_path, monkeypatch, {}, saved)
+    assert record["status"] == "failed"
+    assert record["hitlog_fileset"] == "hl-ref"
+
+
+@pytest.mark.parametrize("config", [{"stop_after_synth": True}, {"replay_hitlog_fileset": "ws/prior"}])
+def test_failed_run_saves_no_hitlog_without_a_live_attack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any]
+) -> None:
+    saved: list[str] = []
+    record = _failed_record(tmp_path, monkeypatch, config, saved)
+    assert record["hitlog_fileset"] == ""
+    assert saved == []
+
+
+def test_hitlog_is_saved_before_mitigations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setattr(run_module, "_run_one_shot", lambda *_a, **_k: execution.RunOutcome("completed", 0))
+    order: list[str] = []
+    monkeypatch.setattr(run_module, "_save_hitlog_fileset", lambda *_a: order.append("hitlog") or "hl-ref")
+    monkeypatch.setattr(run_module, "_save_mitigations", lambda _ctx: order.append("mitigations"))
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=None)
+
+    assert order == ["hitlog", "mitigations"]
