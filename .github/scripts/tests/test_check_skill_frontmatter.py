@@ -4,6 +4,9 @@
 #   "pytest>=9.0.3,<10",
 #   "pyyaml>=6.0.2",
 # ]
+#
+# [tool.ty.environment]
+# extra-paths = [".."]
 # ///
 
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -17,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from check_skill_frontmatter import (  # noqa: E402  # ty: ignore[unresolved-import]  # resolved via the sys.path insert above
+from check_skill_frontmatter import (  # noqa: E402
     MalformedFrontmatterError,
     check_file,
     is_canonical_skill,

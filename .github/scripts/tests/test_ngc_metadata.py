@@ -6,6 +6,9 @@
 #   "pyyaml>=6.0.2",
 #   "typer>=0.24.1,<0.25",
 # ]
+#
+# [tool.ty.environment]
+# extra-paths = [".."]
 # ///
 
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -25,7 +28,7 @@ from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from ngc_metadata import (  # noqa: E402  # ty: ignore[unresolved-import]  # resolved via the sys.path insert above
+from ngc_metadata import (  # noqa: E402
     DEFAULT_LABELS,
     DEFAULT_LOGO,
     PUBLISHER,

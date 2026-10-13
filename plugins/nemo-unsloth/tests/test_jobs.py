@@ -18,6 +18,7 @@ exercise ``train_sft`` from these tests — that lives in the
 from __future__ import annotations
 
 import asyncio
+import inspect
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -230,5 +231,5 @@ class TestNoRun:
         Unsloth migrated to container submit in 2026. ``run`` lives in
         the ``nhx-unsloth-training`` container's ``__main__`` now.
         """
-        with pytest.raises(TypeError, match="abstract"):
-            UnslothJob()  # ty: ignore[call-non-callable]
+        assert inspect.isabstract(UnslothJob)
+        assert "run" in UnslothJob.__abstractmethods__
