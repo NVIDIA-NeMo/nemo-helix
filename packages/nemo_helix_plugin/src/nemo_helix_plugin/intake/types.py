@@ -296,10 +296,6 @@ class EvaluationContext(BaseModel):
     evaluation_id: str | None = None
     test_case_id: str | None = None
 
-    def to_dict(self) -> dict[str, str | None]:
-        """Return the historical SDK dictionary shape."""
-        return self.model_dump()
-
 
 class Trace(BaseModel):
     """Trace summary returned by Intake trace listing."""
