@@ -436,6 +436,9 @@ class NemoPaginatedResponse(Generic[PaginatedModelT, PaginatedStrategyT_co]):
     def http_response(self) -> httpx.Response:
         return self._first_response
 
+    def __iter__(self) -> Iterator[PaginatedModelT]:
+        return self.items()
+
     def _parse_page(self, raw: httpx.Response) -> tuple[list[PaginatedModelT], dict, Any]:
         """Parse a page response into items, its raw body, and typed metadata."""
         raise_for_status(raw)
@@ -514,6 +517,9 @@ class AsyncNemoPaginatedResponse(Generic[PaginatedModelT, PaginatedStrategyT_co]
     @property
     def http_response(self) -> httpx.Response:
         return self._first_response
+
+    def __aiter__(self) -> AsyncIterator[PaginatedModelT]:
+        return self.items()
 
     def _parse_page(self, raw: httpx.Response) -> tuple[list[PaginatedModelT], dict, Any]:
         """Parse a page response into items, its raw body, and typed metadata."""
