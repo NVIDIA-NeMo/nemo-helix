@@ -28,8 +28,11 @@ from nhx.common.jobs.schemas import FileStorageType, HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
     HelixJobResponse,
+    HelixJobSortField,
+    HelixJobStepsListFilter,
     HelixJobTaskUpdate,
 )
+from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
 from nhx.core.jobs.app.dispatcher import JobDeletionConflictError, JobDispatcher, JobStatusUpdateSkippedError
 from nhx.core.jobs.app.schemas import (
     HelixJobStepSpec,
@@ -246,8 +249,10 @@ async def test_late_task_reports_use_fresh_cancelled_parent(mock_dispatcher, moc
         stale_step,
     )
 
-    assert updated_task.status == HelixJobStatus.CANCELLED
-    assert updated_task.status_details.get("percentage_done") != 90
+    expected_status = report_status if report_status.is_terminal() else HelixJobStatus.CANCELLED
+    assert updated_task.status == expected_status
+    if not report_status.is_terminal():
+        assert updated_task.status_details.get("percentage_done") != 90
     attempt = await mock_store.get_by_id(HelixJobAttempt, stale_step.attempt_id)
     assert attempt.status_details.get("percentage_done") != 90
 
@@ -271,7 +276,8 @@ async def test_cancelled_parent_preserves_terminal_task_and_metadata(mock_dispat
 
 
 @pytest.mark.asyncio
-async def test_teardown_error_waits_for_cancellation_completion(mock_dispatcher, mock_store):
+@pytest.mark.parametrize("final_status", [HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+async def test_teardown_error_preserves_error_when_cancellation_finishes(mock_dispatcher, mock_store, final_status):
     job_name, step, task = await cancellation_test_data(mock_store)
 
     updated_task = await mock_dispatcher.create_or_update_task(
@@ -281,10 +287,17 @@ async def test_teardown_error_waits_for_cancellation_completion(mock_dispatcher,
         HelixJobTaskUpdate(status=HelixJobStatus.ERROR, error_details={"message": "terminated pod"}),
         step,
     )
-    assert updated_task.status == HelixJobStatus.CANCELLING
+    assert updated_task.status == HelixJobStatus.ERROR
+    assert updated_task.error_details == {"message": "terminated pod"}
     assert (await mock_store.get_by_id(HelixJobStep, step.id)).status == HelixJobStatus.CANCELLING
-    await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.CANCELLED)
-    assert (await mock_store.get_by_id(HelixJobTask, task.id)).status == HelixJobStatus.CANCELLED
+    other_task = await mock_store.create(
+        HelixJobTask(name="other-pod", workspace=step.workspace, step_id=step.id, status=HelixJobStatus.ACTIVE)
+    )
+    await mock_dispatcher.update_job_status_from_step(step, final_status)
+    stored_task = await mock_store.get_by_id(HelixJobTask, task.id)
+    assert stored_task.status == HelixJobStatus.ERROR
+    assert stored_task.error_details == {"message": "terminated pod"}
+    assert (await mock_store.get_by_id(HelixJobTask, other_task.id)).status == final_status
 
 
 @pytest.mark.asyncio
@@ -298,7 +311,8 @@ async def test_cancel_request_does_not_finalize_running_task(mock_dispatcher, mo
 
 
 @pytest.mark.asyncio
-async def test_repeat_cancel_repairs_only_current_attempt_tasks(mock_dispatcher, mock_store):
+@pytest.mark.parametrize("final_status", [HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+async def test_repeat_cancel_repairs_only_current_attempt_tasks(mock_dispatcher, mock_store, final_status):
     job_name, step, task = await cancellation_test_data(mock_store)
     _, other_job_name, _, other_step_id, _, _ = await create_test_job_data(mock_store, "unrelated-job")
     other_step = await mock_store.get_by_id(HelixJobStep, other_step_id)
@@ -323,17 +337,17 @@ async def test_repeat_cancel_repairs_only_current_attempt_tasks(mock_dispatcher,
     archived_task = await mock_store.create(
         HelixJobTask(name="orphan", workspace=DEFAULT_WORKSPACE, step_id=archived_step.id, status=HelixJobStatus.ACTIVE)
     )
-    step.status = HelixJobStatus.CANCELLED
+    step.status = final_status
     await mock_store.update(step)
     attempt = await mock_store.get_by_id(HelixJobAttempt, step.attempt_id)
-    attempt.status = HelixJobStatus.CANCELLED
+    attempt.status = final_status
     await mock_store.update(attempt)
 
     for _ in range(2):
         response = await mock_dispatcher.cancel_job(job_name, DEFAULT_WORKSPACE)
-        assert response.status == HelixJobStatus.CANCELLED
+        assert response.status == final_status
 
-    assert (await mock_store.get_by_id(HelixJobTask, task.id)).status == HelixJobStatus.CANCELLED
+    assert (await mock_store.get_by_id(HelixJobTask, task.id)).status == final_status
     assert (await mock_store.get_by_id(HelixJobTask, other_task.id)).status == HelixJobStatus.ACTIVE
     assert (await mock_store.get_by_id(HelixJobTask, archived_task.id)).status == HelixJobStatus.ACTIVE
     assert (await mock_dispatcher.get_job(other_job_name, DEFAULT_WORKSPACE)).status == HelixJobStatus.COMPLETED
@@ -435,6 +449,176 @@ async def test_cancellation_serializes_with_late_task_creation(mock_dispatcher, 
             await asyncio.gather(
                 cancellation, *([late_report] if late_report is not None else []), return_exceptions=True
             )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("final_status", [HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+async def test_terminal_post_save_sweep_catches_other_replica_task(
+    mock_dispatcher, mock_store, mock_files_client, final_status
+):
+    """Bypass the process-local lock to simulate an independently running API worker."""
+    job_name, step, _ = await cancellation_test_data(mock_store)
+    replica = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
+    original_update = mock_store.update
+    late_task = None
+
+    async def interleave_task_before_step_save(entity, *args, **kwargs):
+        nonlocal late_task
+        if isinstance(entity, HelixJobStep) and entity.status == final_status and late_task is None:
+            late_task = await replica._create_or_update_task_locked(
+                job_name, "other-replica", step.workspace, HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE), step
+            )
+            assert late_task.status == HelixJobStatus.ACTIVE
+        return await original_update(entity, *args, **kwargs)
+
+    with patch.object(mock_store, "update", side_effect=interleave_task_before_step_save):
+        await mock_dispatcher.update_job_status_from_step(step, final_status)
+
+    assert late_task is not None
+    assert (await mock_store.get_by_id(HelixJobTask, late_task.id)).status == final_status
+    stored_step = await mock_store.get_by_id(HelixJobStep, step.id)
+    assert stored_step.status == final_status
+    assert stored_step.status_details[JOB_TASK_CLEANUP_PENDING_KEY] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("final_status", [HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+async def test_post_save_cleanup_failure_is_durable_and_queryable(mock_dispatcher, mock_store, final_status):
+    job_name, step, _ = await cancellation_test_data(mock_store)
+    attempt = await mock_store.get_by_id(HelixJobAttempt, step.attempt_id)
+    attempt.platform_spec = attempt.platform_spec.model_copy(
+        update={"steps": [attempt.platform_spec.steps[0].model_copy(update={"name": step.name})]}
+    )
+    await mock_store.update(attempt)
+    original_update = mock_store.update
+    late_task = None
+
+    async def fail_post_save_cleanup(entity, *args, **kwargs):
+        nonlocal late_task
+        if isinstance(entity, HelixJobStep) and entity.status == final_status and late_task is None:
+            saved_step = await original_update(entity, *args, **kwargs)
+            late_task = await mock_store.create(
+                HelixJobTask(
+                    name="racing-task", workspace=step.workspace, step_id=step.id, status=HelixJobStatus.ACTIVE
+                )
+            )
+            return saved_step
+        if isinstance(entity, HelixJobTask) and late_task is not None and entity.id == late_task.id:
+            raise RuntimeError("post-save cleanup unavailable")
+        return await original_update(entity, *args, **kwargs)
+
+    with (
+        patch.object(mock_store, "update", side_effect=fail_post_save_cleanup),
+        pytest.raises(RuntimeError, match="post-save cleanup unavailable"),
+    ):
+        await mock_dispatcher.update_job_status_from_step(step, final_status)
+
+    stored_step = await mock_store.get_by_id(HelixJobStep, step.id)
+    assert stored_step.status == final_status
+    assert stored_step.status_details[JOB_TASK_CLEANUP_PENDING_KEY] is True
+    pending, count = await mock_dispatcher.list_steps(
+        HelixJobStepsListFilter(status=[final_status], task_cleanup_pending=True),
+        HelixJobSortField.UPDATED_AT_ASC,
+        100,
+        0,
+        step.workspace,
+    )
+    assert count == 1
+    assert [candidate.id for candidate in pending] == [step.id]
+
+    response = await mock_dispatcher.cancel_job(job_name, step.workspace)
+    assert response.status == final_status
+
+    assert (await mock_store.get_by_id(HelixJobTask, late_task.id)).status == final_status
+    assert (await mock_store.get_by_id(HelixJobStep, step.id)).status_details[JOB_TASK_CLEANUP_PENDING_KEY] is False
+    pending, count = await mock_dispatcher.list_steps(
+        HelixJobStepsListFilter(status=[final_status], task_cleanup_pending=True),
+        HelixJobSortField.UPDATED_AT_ASC,
+        100,
+        0,
+        step.workspace,
+    )
+    assert pending == []
+    assert count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("final_status", [HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+async def test_other_replica_task_write_after_final_sweep_rechecks_parent(
+    mock_dispatcher, mock_store, mock_files_client, final_status
+):
+    """A worker with a stale parent read must not commit an orphan after the last sweep."""
+    job_name, step, _ = await cancellation_test_data(mock_store)
+    replica = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
+    creation_started = asyncio.Event()
+    allow_creation = asyncio.Event()
+    original_create = mock_store.create
+
+    async def delay_task_write(entity, *args, **kwargs):
+        if isinstance(entity, HelixJobTask) and entity.name == "delayed-task":
+            creation_started.set()
+            await allow_creation.wait()
+        return await original_create(entity, *args, **kwargs)
+
+    with patch.object(mock_store, "create", side_effect=delay_task_write):
+        late_report = asyncio.create_task(
+            replica._create_or_update_task_locked(
+                job_name, "delayed-task", step.workspace, HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE), step
+            )
+        )
+        try:
+            await asyncio.wait_for(creation_started.wait(), timeout=1)
+            await mock_dispatcher.update_job_status_from_step(step, final_status)
+            allow_creation.set()
+            assert (await late_report).status == final_status
+        finally:
+            allow_creation.set()
+            await asyncio.gather(late_report, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_error_parent_does_not_accept_active_task_reports(mock_dispatcher, mock_store):
+    job_name, step, _ = await cancellation_test_data(mock_store)
+    await mock_dispatcher.update_job_status_from_step(
+        step, HelixJobStatus.ERROR, error_details={"message": "Job failed"}
+    )
+    task = await mock_dispatcher.create_or_update_task(
+        job_name, "late-task", step.workspace, HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE), step
+    )
+    assert task.status == HelixJobStatus.ERROR
+    assert task.error_details == {"message": "Job failed"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("final_status", [HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+async def test_rerun_completes_pending_child_cleanup_before_archiving(mock_dispatcher, mock_store, final_status):
+    job_name, step, task = await cancellation_test_data(mock_store)
+    step.status = final_status
+    step.status_details[JOB_TASK_CLEANUP_PENDING_KEY] = True
+    await mock_store.update(step)
+    attempt = await mock_store.get_by_id(HelixJobAttempt, step.attempt_id)
+    attempt.status = final_status
+    await mock_store.update(attempt)
+    original_update = mock_store.update
+
+    async def fail_cleanup(entity, *args, **kwargs):
+        if isinstance(entity, HelixJobTask):
+            raise RuntimeError("cleanup unavailable during rerun")
+        return await original_update(entity, *args, **kwargs)
+
+    with (
+        patch.object(mock_store, "update", side_effect=fail_cleanup),
+        pytest.raises(RuntimeError, match="cleanup unavailable during rerun"),
+    ):
+        await mock_dispatcher.rerun_job(job_name, step.workspace)
+
+    current_attempt = await mock_dispatcher.get_current_attempt(job_name, step.workspace)
+    assert current_attempt.id == step.attempt_id
+    rerun = await mock_dispatcher.rerun_job(job_name, step.workspace)
+    assert rerun.attempt_id != step.attempt_id
+    assert rerun.status == HelixJobStatus.CREATED
+    assert (await mock_store.get_by_id(HelixJobTask, task.id)).status == final_status
+    assert (await mock_store.get_by_id(HelixJobStep, step.id)).status_details[JOB_TASK_CLEANUP_PENDING_KEY] is False
 
 
 async def verify_job_data_exists(store: EntityClient, job_id: str, should_exist: bool = True) -> None:

@@ -4,6 +4,7 @@
 from unittest.mock import patch
 
 import httpx
+import pytest
 from nemo_helix_plugin.client.errors import NemoTransportError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
@@ -13,6 +14,27 @@ from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
 from nhx.core.jobs.controllers.reconciler import JobReconciler
 
 from services.core.jobs.tests.controllers.client_mocks import paginated_response
+
+
+@pytest.mark.parametrize("status", [HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+def test_job_reconciler_retries_terminal_child_cleanup_without_backend_sync(
+    backend_registry, mock_nemo_client, mock_jobs_client, test_step_active, status
+):
+    step = test_step_active.model_copy(update={"status": status, "status_details": {"task_cleanup_pending": True}})
+    mock_jobs_client.list_steps.side_effect = [paginated_response([]), paginated_response([step])]
+    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+
+    reconciler.step()
+
+    assert backend.mock.sync_calls == []
+    mock_jobs_client.update_job_step_status.assert_called_once()
+    request = mock_jobs_client.update_job_step_status.call_args.kwargs
+    assert request["body"].status == status
+    assert request["body"].expected_step_id == step.id
+    assert request["job"] == step.job
+    assert request["workspace"] == step.workspace
+    assert request["name"] == step.name
 
 
 def test_job_reconciler_syncs_active_job(
@@ -35,11 +57,21 @@ def test_job_reconciler_syncs_active_job(
 
     # Verify the typed Jobs client was called with the correct deepObject filter for
     # active/pending steps. The status list is encoded as a comma-joined filter value.
-    mock_jobs_client.list_steps.assert_called_once_with(
+    mock_jobs_client.list_steps.assert_any_call(
         workspace="-",
         name="-",
         query_params={
             "filter[status]": "pending,active,cancelling,pausing",
+            "sort": "updated_at",
+        },
+    )
+    assert mock_jobs_client.list_steps.call_count == 2
+    mock_jobs_client.list_steps.assert_any_call(
+        workspace="-",
+        name="-",
+        query_params={
+            "filter[status]": "cancelled,error",
+            "filter[task_cleanup_pending]": "true",
             "sort": "updated_at",
         },
     )

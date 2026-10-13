@@ -107,6 +107,37 @@ async def test_job_cancel_functionality(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["cancelled", "error"])
+async def test_terminal_cleanup_from_old_attempt_cannot_stop_rerun(test_client: AsyncClient, terminal_status):
+    request = CreateHelixJobRequest(
+        name="stale-terminal-cleanup",
+        source="test-source",
+        spec={},
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="training", executor=TestConstants.TEST_EXECUTOR, config={})]
+        ),
+    )
+    base = f"/apis/jobs/v2/workspaces/default/jobs/{request.name}"
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=request.model_dump())
+    assert response.status_code == 201
+    response = await test_client.patch(f"{base}/steps/training/status", json={"status": terminal_status})
+    assert response.status_code == 200
+    old_step_id = response.json()["id"]
+    response = await test_client.post(f"{base}/rerun")
+    assert response.status_code == 200
+    assert response.json()["status"] == "created"
+
+    response = await test_client.patch(
+        f"{base}/steps/training/status",
+        json={"status": terminal_status, "expected_step_id": old_step_id},
+    )
+    assert response.status_code == 409
+    response = await test_client.get(base)
+    assert response.status_code == 200
+    assert response.json()["status"] == "created"
+
+
+@pytest.mark.asyncio
 async def test_job_rerun_functionality(test_client: AsyncClient):
     """Test rerunning a job that has completed."""
     req = CreateHelixJobRequest(
