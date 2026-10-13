@@ -37,6 +37,16 @@ from pydantic import ValidationError
 
 
 def make_run(acceptance, *, phase=TasksetRunPhase.ACCEPTED) -> TasksetRunEntity:
+    """Build an unsaved record from acceptance inputs without uploading a real plan.
+
+    Args:
+        acceptance: Plan identity, request digest/key, and fixed timestamps to reuse.
+        phase: Lifecycle phase for seeded lookup, replay, and pagination scenarios.
+
+    Returns:
+        A run with a placeholder plan binding, ready to seed Entity Store; callers
+        needing readable plan bytes must use the real acceptance path instead.
+    """
     return TasksetRunEntity(
         name=acceptance.plan.run_id,
         workspace=acceptance.plan.workspace,
@@ -53,6 +63,11 @@ def make_run(acceptance, *, phase=TasksetRunPhase.ACCEPTED) -> TasksetRunEntity:
 
 
 async def test_find_absent_and_workspace_isolation(store, entity_store, files_client, acceptance) -> None:
+    """Verify workspace-scoped reads return a seeded record or None without Files work.
+
+    The store, entity/Files fakes, and acceptance fixture supply an initially empty
+    namespace; assertions distinguish missing records from the same name elsewhere.
+    """
     assert await store.find("default", acceptance.plan.run_id) is None
     run = await entity_store.create(make_run(acceptance))
     assert await store.find("default", run.name) == run
@@ -61,6 +76,12 @@ async def test_find_absent_and_workspace_isolation(store, entity_store, files_cl
 
 
 async def test_find_propagates_other_errors(store, entity_store, monkeypatch) -> None:
+    """Inject an entity lookup outage and require find to propagate it instead of None.
+
+    The store/entity fixtures and monkeypatch isolate this failure so storage
+    unavailability cannot be mistaken for permission to accept a fresh run.
+    """
+
     async def fail(*args, **kwargs):
         raise RuntimeError("store unavailable")
 
@@ -71,6 +92,12 @@ async def test_find_propagates_other_errors(store, entity_store, monkeypatch) ->
 
 @pytest.mark.parametrize("phase", list(TasksetRunPhase))
 async def test_replay_in_every_phase(store, entity_store, files_client, acceptance, phase) -> None:
+    """Verify each parametrized phase replays only the original logical request.
+
+    Store and fake-client fixtures seed the acceptance record in ``phase``;
+    assertions require equal-digest reuse, mismatched-digest conflict, workspace
+    isolation, and zero Files calls so retries do not restart or re-resolve runs.
+    """
     run = await entity_store.create(make_run(acceptance, phase=phase))
     assert await store.replay(run.workspace, run.name, run.request_digest) == run
     with pytest.raises(RunRequestConflict) as exc:
@@ -80,10 +107,16 @@ async def test_replay_in_every_phase(store, entity_store, files_client, acceptan
     assert not files_client.calls
 
 
-def test_from_clients_owns_retry_policy(files_client) -> None:
+def test_constructor_owns_retry_policy(files_client) -> None:
+    """Verify the Files fixture and mocked raw client produce the production adapter.
+
+    Assertions require a retry clone that suppresses ordinary 409 retries while
+    preserving transient retries and the original platform policy, ensuring
+    acceptance owns conflict settlement without changing other client behavior.
+    """
     entities_client = Mock(spec=AsyncEntitiesClient)
     clone = entities_client.with_retry.return_value
-    store = TasksetRunStore.from_clients(entities_client, files_client)
+    store = TasksetRunStore(entities_client, files_client)
     entities_client.with_retry.assert_called_once_with(_ACCEPT_RETRY_POLICY)
     assert isinstance(store.entity_client, EntityClient)
     assert store.entity_client._client is clone
@@ -94,6 +127,12 @@ def test_from_clients_owns_retry_policy(files_client) -> None:
 
 
 async def test_first_accept(store, entity_store, files_client, acceptance) -> None:
+    """Verify fresh acceptance binds the fixture's resolved inputs to exact stored bytes.
+
+    Store and fake clients begin empty. Assertions require one accepted/pending
+    entity and a uniquely named plan fileset whose ref, digest, JSON, and original
+    deadlines match, establishing the normal acceptance contract for failure tests.
+    """
     accepted = await store.accept(acceptance)
     assert accepted.created is True
     run = accepted.run
@@ -120,6 +159,12 @@ async def test_first_accept(store, entity_store, files_client, acceptance) -> No
 
 @pytest.mark.parametrize("operation", ["create", "upload"])
 async def test_plan_write_failure(store, entity_store, files_client, acceptance, operation) -> None:
+    """Inject the parametrized create/upload failure and prevent run creation.
+
+    Store, client fakes, and acceptance supply the request; assertions require
+    PlanStorageError to retain the injected cause and cleanup only after a
+    successful fileset create, preserving the storage-ownership boundary.
+    """
     failure = ConflictError(httpx.Response(409, request=httpx.Request("POST", "http://files.invalid")))
     files_client.errors[operation] = failure
     with pytest.raises(PlanStorageError) as exc:
@@ -133,6 +178,12 @@ async def test_plan_write_failure(store, entity_store, files_client, acceptance,
 
 
 async def test_upload_cleanup_failure_preserves_cause(store, entity_store, files_client, acceptance, caplog) -> None:
+    """Inject upload and rollback failures without replacing the original write error.
+
+    Store/client/acceptance fixtures perform the failing write, and caplog captures
+    cleanup diagnostics. Assertions require no run, the original chained cause,
+    and a logged leaked fileset so cleanup cannot hide the acceptance failure.
+    """
     failure = RuntimeError("upload failed")
     files_client.errors.update(upload=failure, delete=RuntimeError("cleanup failed"))
     with pytest.raises(PlanStorageError) as exc:
@@ -144,9 +195,20 @@ async def test_upload_cleanup_failure_preserves_cause(store, entity_store, files
 
 
 async def test_accept_plan_fileset_lost_reply(entity_store, files_client, acceptance) -> None:
+    """Model a committed fileset create with a lost reply through the real Files client.
+
+    Entity/Files fakes and acceptance provide backing state and input. HTTP retries
+    must yield PlanStorageError on conflict while retaining the ambiguous fileset
+    and creating no run, because a failed create reply does not prove ownership.
+    """
     post_count = 0
 
     async def handle(request: httpx.Request) -> httpx.Response:
+        """Commit the first POST then time out; return nonretryable 409 on its retry.
+
+        The input is the real client's HTTP request; responses and the injected
+        timeout reproduce an ambiguous Files create without network access.
+        """
         nonlocal post_count
         assert request.method == "POST"
         post_count += 1
@@ -162,7 +224,7 @@ async def test_accept_plan_fileset_lost_reply(entity_store, files_client, accept
             http_client=http_client,
             retry=replace(PLATFORM_DEFAULT_RETRY_POLICY, backoff_base=0),
         )
-        store = TasksetRunStore(entity_store, real_files_client)
+        store = TasksetRunStore._with_entity_adapter(entity_store, real_files_client)
         with pytest.raises(PlanStorageError) as exc:
             await store.accept(acceptance)
     assert isinstance(exc.value.__cause__, ConflictError)
@@ -173,6 +235,12 @@ async def test_accept_plan_fileset_lost_reply(entity_store, files_client, accept
 
 
 async def test_load_plan_downloads_and_validates_every_call(store, files_client, acceptance, monkeypatch) -> None:
+    """Verify repeated reads return fresh nested models rather than cached mutable state.
+
+    Store/Files/acceptance fixtures create a plan and monkeypatch counts validation.
+    Mutating the first result must leave the second equal to the accepted input,
+    with two downloads and validations, preserving byte checks on every read.
+    """
     accepted = await store.accept(acceptance)
     validation = Mock(wraps=TasksetRunPlan.model_validate_json)
     monkeypatch.setattr(TasksetRunPlan, "model_validate_json", validation)
@@ -190,6 +258,13 @@ async def test_load_plan_downloads_and_validates_every_call(store, files_client,
 async def test_plan_tampering_detected_before_validation(
     store, files_client, acceptance, loaded_before, valid_json
 ) -> None:
+    """Require digest rejection for tampered bytes even after a prior successful read.
+
+    Store/Files/acceptance fixtures supply a stored plan; ``loaded_before`` controls
+    a prior read and ``valid_json`` selects valid or corrupt replacement bytes.
+    Assertions require the mismatch diagnostics and successful recovery after
+    restoring bytes, proving neither valid JSON nor earlier reads bypass integrity.
+    """
     run = (await store.accept(acceptance)).run
     if loaded_before:
         await store.load_plan(run)
@@ -209,6 +284,12 @@ async def test_plan_tampering_detected_before_validation(
 
 
 async def test_plan_corrupt_but_matching_digest_fails_validation(store, files_client, acceptance) -> None:
+    """Verify matching hashes cannot make corrupt plan JSON a valid resolved model.
+
+    Store/Files/acceptance fixtures supply a run, then both bytes and digest are
+    replaced with a corrupt payload. Repeated reads must raise ValidationError,
+    demonstrating that integrity checks and schema validation are both necessary.
+    """
     run = (await store.accept(acceptance)).run
     next(iter(files_client.filesets.values()))["plan.json"] = b"not json"
     run.plan_digest = sha256(b"not json").hexdigest()
@@ -218,6 +299,12 @@ async def test_plan_corrupt_but_matching_digest_fails_validation(store, files_cl
 
 
 async def test_plan_download_error_after_successful_load(store, files_client, acceptance) -> None:
+    """Require a later Files error to propagate despite an earlier successful read.
+
+    Store/Files/acceptance fixtures first load a valid plan, then inject not-found.
+    The exact injected error must escape, preventing cached data from hiding loss
+    of the authoritative file.
+    """
     run = (await store.accept(acceptance)).run
     await store.load_plan(run)
     failure = NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://files.invalid")))
@@ -229,6 +316,12 @@ async def test_plan_download_error_after_successful_load(store, files_client, ac
 
 @pytest.mark.parametrize("ref", ["unqualified#plan.json", "default/plan", "default/plan#", "default/#plan.json"])
 async def test_plan_malformed_reference(store, files_client, acceptance, ref) -> None:
+    """Reject each parametrized malformed plan ref before making any Files request.
+
+    Store/Files/acceptance fixtures supply a record with ``ref`` substituted;
+    assertions require ValueError and an empty call history so incomplete or
+    unqualified references cannot resolve to unintended storage.
+    """
     run = make_run(acceptance)
     run.plan_ref = ref
     with pytest.raises(ValueError):
@@ -237,6 +330,17 @@ async def test_plan_malformed_reference(store, files_client, acceptance, ref) ->
 
 
 def with_snapshot(acceptance, files_client, name):
+    """Create an owned snapshot and return acceptance inputs that reference it.
+
+    Args:
+        acceptance: Request whose nested spec is copied to avoid fixture mutation.
+        files_client: Fake Files state in which to seed the snapshot payload.
+        name: Unique fileset name owned exclusively by this request.
+
+    Returns:
+        Replacement acceptance with the snapshot ref in its spec labels and
+        discard list, making winner/loser ownership visible in cleanup assertions.
+    """
     files_client.filesets[(acceptance.plan.workspace, name)] = {"agent.yaml": b"config"}
     spec = acceptance.plan.spec.model_copy(deep=True)
     # Keep request ownership visible in the plan without inventing a new producer.
@@ -249,10 +353,18 @@ def with_snapshot(acceptance, files_client, name):
 
 
 def plan_filesets(files_client):
+    """Select the Files fake's plan filesets so assertions exclude request snapshots."""
     return {key: value for key, value in files_client.filesets.items() if "-plan-" in key[1]}
 
 
 async def test_accept_overlapping_submits(store, entity_store, files_client, acceptance) -> None:
+    """Race identical keyed requests and retain only the winning plan and snapshot.
+
+    Store/client/acceptance fixtures supply two owned snapshots and distinct times;
+    a Files barrier overlaps their uploads. Assertions require one committed run,
+    identical returned records, winner deadlines/bytes, and loser cleanup, proving
+    named creation makes the acceptance decision without a process-local lock.
+    """
     a = with_snapshot(acceptance, files_client, "snapshot-a")
     b = with_snapshot(
         replace(
@@ -279,6 +391,12 @@ async def test_accept_overlapping_submits(store, entity_store, files_client, acc
 
 
 async def test_accept_same_key_different_digest(store, entity_store, files_client, acceptance) -> None:
+    """Reject a different logical request reusing a key without altering its winner.
+
+    Store/client/acceptance fixtures create the winner and an independently owned
+    loser snapshot. Assertions require RunRequestConflict, unchanged winner data
+    and readable plan, and cleanup confined to the losing request's storage.
+    """
     winner = with_snapshot(acceptance, files_client, "snapshot-winner")
     run = (await store.accept(winner)).run
     original = entity_store.entities.copy()
@@ -297,6 +415,13 @@ async def test_accept_same_key_different_digest(store, entity_store, files_clien
     "phase", [TasksetRunPhase.COMPLETED, TasksetRunPhase.FAILED, TasksetRunPhase.CANCELLED, TasksetRunPhase.EXPIRED]
 )
 async def test_accept_finished_run_keeps_key(store, entity_store, files_client, acceptance, phase) -> None:
+    """Verify a key remains bound when the seeded run reaches each terminal phase.
+
+    Store/client/acceptance fixtures and ``phase`` supply a finished run followed
+    by a retry with later times and new storage. Assertions require created=False,
+    the original record/plan, and discarded retry storage so completion cannot
+    restart execution or renew the original acceptance timestamps.
+    """
     run = (await store.accept(acceptance)).run
     run.phase = phase
     run = await entity_store.update(run)
@@ -312,6 +437,12 @@ async def test_accept_finished_run_keeps_key(store, entity_store, files_client, 
 
 
 async def test_accept_same_key_different_scope(store, entity_store, files_client, acceptance) -> None:
+    """Accept the same key independently for different caller/workspace scope inputs.
+
+    Store/client/acceptance fixtures vary authenticated creator and workspace;
+    assertions require three distinct names, records, plans, and correct creator
+    metadata so unrelated callers do not share an idempotency binding.
+    """
     runs = []
     for workspace, caller in [("default", "user:alice"), ("default", "user:bob"), ("other", "user:alice")]:
         entity_store.caller = caller
@@ -327,6 +458,13 @@ async def test_accept_same_key_different_scope(store, entity_store, files_client
 
 @pytest.mark.parametrize("key", ["key", None])
 async def test_accept_lost_reply(store, entity_store, files_client, acceptance, monkeypatch, key) -> None:
+    """Recover this attempt's committed create for keyed and keyless inputs.
+
+    Store/client/acceptance fixtures own a snapshot, ``key`` selects retry mode,
+    and monkeypatch makes create commit before reporting conflict. Assertions
+    require created=True and no deletion, proving own-plan equality recovers the
+    lost reply before keyless collision handling or loser cleanup can run.
+    """
     acceptance = with_snapshot(replace(acceptance, idempotency_key=key), files_client, "snapshot")
     original_create = entity_store.create
 
@@ -344,6 +482,12 @@ async def test_accept_lost_reply(store, entity_store, files_client, acceptance, 
 
 
 async def test_accept_keyless_collision(store, entity_store, files_client, acceptance, monkeypatch) -> None:
+    """Retry one keyless name collision with a fresh plan binding and preserved snapshot.
+
+    Store/client/acceptance fixtures seed the colliding record; monkeypatch fixes
+    the next random ID. Assertions require the new run/plan ID, an untouched
+    existing record, retained snapshot, and deletion of only the first plan.
+    """
     existing = await entity_store.create(make_run(acceptance))
     acceptance = with_snapshot(replace(acceptance, idempotency_key=None), files_client, "snapshot")
     monkeypatch.setattr("nemo_evals.taskset_runs.store.random_run_id", lambda: "run-1111111111111111")
@@ -361,6 +505,13 @@ async def test_accept_keyless_collision(store, entity_store, files_client, accep
 
 
 async def test_accept_two_keyless_collisions(store, entity_store, files_client, acceptance, monkeypatch) -> None:
+    """Bound keyless collision handling to two attempts and discard exhausted inputs.
+
+    Store/client/acceptance fixtures seed both names and monkeypatch forces the
+    second collision. Assertions require RunIdExhausted, exactly two creates,
+    cleaned request storage, and unchanged existing records, preventing an
+    unbounded retry loop or deletion of another run's resources.
+    """
     existing = await entity_store.create(make_run(acceptance))
     second = make_run(acceptance)
     second.name = "run-1111111111111111"
@@ -380,6 +531,13 @@ async def test_accept_two_keyless_collisions(store, entity_store, files_client, 
 
 @pytest.mark.parametrize("different_digest", [False, True])
 async def test_accept_cleanup_failure(store, files_client, acceptance, caplog, different_digest) -> None:
+    """Keep conflict/replay outcomes authoritative when multiple cleanup steps fail.
+
+    Store/Files/acceptance fixtures supply a winner and loser-owned resources;
+    ``different_digest`` selects conflict or replay and caplog captures failures.
+    Assertions require the correct outcome and deletion of a later snapshot even
+    after plan/earlier-snapshot failures, with leaked resources reported in logs.
+    """
     existing = (await store.accept(acceptance)).run
     loser = with_snapshot(
         replace(acceptance, request_digest="different" if different_digest else acceptance.request_digest),
@@ -392,6 +550,12 @@ async def test_accept_cleanup_failure(store, files_client, acceptance, caplog, d
     original_delete = files_client.delete_fileset
 
     async def fail_plan_delete(**kwargs):
+        """Reject plan deletes but delegate snapshot deletes using the client's kwargs.
+
+        Matching plan names record an attempted call and raise RuntimeError;
+        other names return the original fake's response, testing cleanup progress
+        across independently failing resources.
+        """
         if "-plan-" in kwargs["name"]:
             files_client.calls.append(("delete", kwargs["workspace"], kwargs["name"]))
             raise RuntimeError("plan cleanup failed")
@@ -412,6 +576,12 @@ async def test_accept_cleanup_failure(store, files_client, acceptance, caplog, d
 
 
 async def test_accept_unknown_create_outcome(store, entity_store, files_client, acceptance, monkeypatch) -> None:
+    """Preserve potentially referenced storage when create reports an unknown outcome.
+
+    Store/client/acceptance fixtures own a plan and snapshot; monkeypatch commits
+    the entity then raises a transport error. Assertions require the exact error
+    and zero cleanup, protecting a committed run whose reply was never observed.
+    """
     original_create = entity_store.create
     failure = NemoTransportError(httpx.ReadTimeout("unknown outcome"))
 
@@ -433,6 +603,13 @@ async def test_accept_unknown_create_outcome(store, entity_store, files_client, 
 async def test_accept_conflict_lookup_failure(
     store, entity_store, files_client, acceptance, monkeypatch, error_type: type[Exception]
 ) -> None:
+    """Preserve request resources when a conflict lookup cannot identify the winner.
+
+    Store/client/acceptance fixtures seed a collision; monkeypatch injects the
+    parametrized outage or not-found ``error_type`` during lookup. Assertions
+    require that exact failure and zero deletion because even not-found cannot
+    distinguish a deleted winner from ambiguous create/lookup observations.
+    """
     await entity_store.create(make_run(acceptance))
     failure = error_type("lookup failed")
 
@@ -451,6 +628,13 @@ async def test_accept_conflict_lookup_failure(
 
 @pytest.mark.parametrize("outcome", ["conflict", "timeout", "503"])
 async def test_accept_real_entity_client_retries(entity_store, files_client, acceptance, monkeypatch, outcome) -> None:
+    """Exercise production retries for conflict and lost timeout/503 replies over HTTP.
+
+    Entity/Files/acceptance fixtures back the mock transport; ``outcome`` selects
+    the response sequence and monkeypatch removes backoff. Assertions require
+    immediate 409 settlement, transient retries, authoritative creator metadata,
+    and cleanup only for a different winning plan, testing the real client policy.
+    """
     monkeypatch.setattr(
         "nemo_evals.taskset_runs.store._ACCEPT_RETRY_POLICY", replace(_ACCEPT_RETRY_POLICY, backoff_base=0)
     )
@@ -459,6 +643,13 @@ async def test_accept_real_entity_client_retries(entity_store, files_client, acc
     calls = []
 
     async def handle(request: httpx.Request) -> httpx.Response:
+        """Translate real client requests into fake persistence and controlled replies.
+
+        POST parses entity-create input, commits it, then returns a conflict/503
+        or raises a timeout according to the scenario. GET returns an Entity DTO
+        with response metadata, letting retry and deserialization behavior run
+        through the production client without an external service.
+        """
         calls.append(request.method)
         if request.method == "POST":
             body = EntityCreateInput.model_validate_json(request.content)
@@ -491,7 +682,7 @@ async def test_accept_real_entity_client_retries(entity_store, files_client, acc
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
         raw_client = AsyncEntitiesClient(base_url="http://entities.invalid", http_client=http_client)
-        store = TasksetRunStore.from_clients(raw_client, files_client)
+        store = TasksetRunStore(raw_client, files_client)
         acceptance = with_snapshot(acceptance, files_client, "snapshot")
         accepted = await store.accept(acceptance)
     assert calls == (["POST", "GET"] if outcome == "conflict" else ["POST", "POST", "GET"])
@@ -512,6 +703,13 @@ async def test_accept_real_entity_client_retries(entity_store, files_client, acc
 async def test_list_active_filters_and_paginates(
     store, entity_store, files_client, acceptance, monkeypatch, taskset_ref
 ) -> None:
+    """Verify active-run filtering remains scoped and sorted across multiple pages.
+
+    Store/client/acceptance fixtures seed mixed workspaces, callers, phases, and
+    revisions; ``taskset_ref`` selects one revision or all, while monkeypatch
+    records queries. Assertions require every matching name, consistent filters
+    on each page, and no Files access, protecting overlap detection beyond page one.
+    """
     expected = []
     for workspace in ("default", "other"):
         for caller in ("user:alice", "user:bob"):
@@ -560,6 +758,11 @@ async def test_list_active_filters_and_paginates(
 
 
 async def test_list_active_empty_and_errors(store, entity_store, monkeypatch) -> None:
+    """Distinguish an empty active-run result from a failed Entity Store list request.
+
+    Empty store/entity fixtures must yield [], then monkeypatch injects an outage
+    that must propagate, preventing a false claim that no active runs exist.
+    """
     assert await store.list_active("default", "user:alice") == []
 
     async def fail(*args, **kwargs):

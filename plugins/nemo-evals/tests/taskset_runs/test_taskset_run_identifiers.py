@@ -10,6 +10,12 @@ from nemo_evals.taskset_runs.identifiers import derive_run_id, member_name, rand
 
 
 def test_identifiers_and_scope() -> None:
+    """Pin deterministic names and ensure distinct scope inputs produce distinct IDs.
+
+    Fixed workspace/caller/key tuples must match the null-separated hash contract;
+    member and Job names must retain their formats and the exercised length bound.
+    These assertions protect stable retries and avoid ambiguous component joins.
+    """
     expected = "run-" + sha256(b"default\0user:alice\0sort-suite-ci-2026-10-05").hexdigest()[:16]
     assert derive_run_id("default", "user:alice", "sort-suite-ci-2026-10-05") == expected
     assert len(expected) == 20
@@ -28,6 +34,11 @@ def test_identifiers_and_scope() -> None:
 
 
 def test_random_identifiers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use monkeypatch to make entropy deterministic and verify keyless name generation.
+
+    Both random entry points must return the supplied token with a run prefix and
+    request eight bytes, protecting the random-name format and entropy budget.
+    """
     requests = []
 
     def token_hex(size: int) -> str:

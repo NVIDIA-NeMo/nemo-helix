@@ -5,14 +5,14 @@
 
 from typing import Annotated, Literal
 
+from nemo_evals.taskset_runs.specs import MissingPrebuiltImagePolicy
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class HarborTaskJobsExecutionInput(BaseModel):
     """Settings that run a Harbor taskset as many independent task Jobs instead of one Job.
 
-    Without this input, an agent evaluation runs the whole taskset inside one Job on one
-    Docker host. Passing it as ``execution`` switches to the Kubernetes path: submit pins the
+    Passing it as ``execution`` switches to the Kubernetes path: submit pins the
     taskset revision, registers one Jobs Service Job per task, and returns a single taskset
     run that tracks progress and combines the per-task results.
 
@@ -32,10 +32,11 @@ class HarborTaskJobsExecutionInput(BaseModel):
         default="harbor-task-jobs",
         description="Execution strategy: one Kubernetes Job per Harbor task. Future strategies add new kinds.",
     )
-    sandbox_profile: str = Field(
+    sandbox_policy: str = Field(
         description=(
-            "Name of an operator-approved sandbox profile: the sandbox provider and policy each task's "
-            "agent and environment run under. Operators define the available profiles."
+            "Name of an operator-approved sandbox policy: which sandbox provider and isolation policy "
+            "each task's agent and environment run under, meaning the security and isolation boundary. "
+            "It does not control compute resources; see dispatcher_profile. Operators define the available policies."
         ),
         examples=["harbor-standard"],
     )
@@ -47,7 +48,7 @@ class HarborTaskJobsExecutionInput(BaseModel):
         ),
         examples=["local-k8s"],
     )
-    missing_prebuilt_image: Literal["fail", "build"] = Field(
+    missing_prebuilt_image: MissingPrebuiltImagePolicy = Field(
         default="fail",
         description=(
             "What to do when a task pins a prebuilt image (its docker_image) and that image is no longer "
@@ -64,11 +65,11 @@ class HarborTaskJobsExecutionInput(BaseModel):
         ge=1,
         description=(
             "Maximum number of this run's task Jobs running at once. "
-            "Omit to rely only on Jobs Service admission limits."
+            "Omit to rely only on the job controller's admission limits."
         ),
         examples=[5],
     )
-    max_failed_tasks: Annotated[int, Field(ge=0)] | Annotated[str, Field(pattern=r"^\d{1,3}%$")] | None = Field(
+    max_failed_tasks: Annotated[int, Field(ge=0)] | Annotated[str, Field(pattern=r"^(100|[1-9]?\d)%$")] | None = Field(
         default=None,
         description=(
             "Failed tasks the run tolerates, as a count or a percent of the taskset's tasks. "

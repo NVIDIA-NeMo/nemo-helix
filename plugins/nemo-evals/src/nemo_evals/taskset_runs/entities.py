@@ -12,14 +12,21 @@ from pydantic import Field
 
 
 class TasksetRunPhase(StrEnum):
-    """Run execution lifecycle; finalization is tracked separately by ResultState."""
+    """Encode execution progress as stable string values for persisted run records.
 
-    ACCEPTED = "accepted"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    EXPIRED = "expired"
+    Controllers move from accepted to running or a terminal phase; result
+    finalization is tracked separately by ``ResultState`` so execution completion
+    does not imply that combined results are already available.
+    """
+
+    ACCEPTED = "accepted"  # Created by submit with its plan; no task Job started yet. There is no earlier phase.
+    RUNNING = "running"  # The controller has started work on the run's tasks.
+    COMPLETED = "completed"  # Every task settled and at least one succeeded, within the failure tolerance.
+    FAILED = (
+        "failed"  # The run could not proceed, e.g. too many failed tasks, no task succeeded, or a plan digest mismatch.
+    )
+    CANCELLED = "cancelled"  # A caller cancelled the run; remaining task Jobs are cancelled.
+    EXPIRED = "expired"  # execution_deadline_at passed before every task settled.
 
 
 TERMINAL_RUN_PHASES = frozenset(
@@ -33,43 +40,99 @@ TERMINAL_RUN_PHASES = frozenset(
 
 
 class ResultState(StrEnum):
-    """Availability of the finalized run result."""
+    """Encode result availability independently of the run's execution phase.
 
-    PENDING = "pending"
-    READY = "ready"
-    FAILED = "failed"
-    NONE = "none"
+    Persisted values distinguish pending finalization, ready results, failed
+    finalization, and no result, allowing readers to interpret terminal runs.
+    """
+
+    PENDING = "pending"  # Combined results are not finalized yet.
+    READY = "ready"  # Combined results are saved and readable.
+    FAILED = "failed"  # The finalization deadline passed before the result was saved.
+    NONE = "none"  # Nothing to combine, e.g. no task succeeded.
 
 
 class TasksetRunEntity(EntityBase):
-    """Run accepted by a named create that permanently binds its plan and pinned taskset."""
+    """Persist mutable run progress separately from its accepted execution plan.
+
+    Construction takes the inherited name/workspace, a plan ref and byte digest,
+    a pinned taskset ref, the logical request digest, and precomputed acceptance
+    and deadline timestamps. An optional idempotency key identifies keyed submits.
+    Named creation makes these bindings authoritative for later retries.
+
+    The record starts accepted with a pending result. Controllers can update
+    execution phase, result state, cancellation time, and error independently,
+    while readers retrieve the original plan through its integrity-checked ref.
+    Entity Store supplies inherited creator, parent, and version metadata.
+    """
 
     __entity_type__: ClassVar[str] = "taskset_run"
 
-    plan_ref: str
-    plan_digest: str
-    idempotency_key: str | None = None
-    request_digest: str
-    taskset_ref: str
-    phase: TasksetRunPhase = TasksetRunPhase.ACCEPTED
-    result_state: ResultState = ResultState.PENDING
-    accepted_at: datetime
-    execution_deadline_at: datetime
-    finalization_deadline_at: datetime
-    cancel_requested_at: datetime | None = None
-    error: str | None = None
+    plan_ref: str = Field(
+        description=(
+            "Files ref (workspace/fileset#plan.json) of the frozen execution plan. "
+            "Set by the run's create and never updated."
+        )
+    )
+    plan_digest: str = Field(
+        description=(
+            "sha256 of the stored plan bytes, set with plan_ref. "
+            "Every plan load re-hashes the bytes and rejects a mismatch."
+        )
+    )
+    idempotency_key: str | None = Field(
+        default=None,
+        description=(
+            "Optional caller-supplied key that, with workspace and caller, derives the run name, "
+            "so retries of the same submit return this run. None for keyless submits."
+        ),
+    )
+    request_digest: str = Field(
+        description=(
+            "Digest of the logical submit request. A retry with the same idempotency key "
+            "but a different digest is rejected as a conflict."
+        )
+    )
+    taskset_ref: str = Field(
+        description="Pinned taskset revision this run evaluates (for example default/sort-suite#3); filterable."
+    )
+    # A run record only comes into existence at the moment it's accepted, so it always starts as accepted / pending
+    phase: TasksetRunPhase = Field(
+        default=TasksetRunPhase.ACCEPTED,
+        description="Execution progress. Starts accepted; terminal phases never change.",
+    )
+    result_state: ResultState = Field(
+        default=ResultState.PENDING,
+        description="Availability of the combined results, tracked independently of phase.",
+    )
+    accepted_at: datetime = Field(description="When submit accepted the run.")
+    execution_deadline_at: datetime = Field(
+        description="accepted_at plus the effective timeout; unfinished tasks expire then. Retries do not reset it."
+    )
+    finalization_deadline_at: datetime = Field(
+        description="execution_deadline_at plus operator grace; the final result must be saved by then."
+    )
+    cancel_requested_at: datetime | None = Field(
+        default=None,
+        description="When a caller requested cancellation; None if never requested.",
+    )
+    error: str | None = Field(default=None, description="Why the run failed or expired; None otherwise.")
 
 
 class MemberPhase(StrEnum):
-    """Task preparation and execution lifecycle within one run."""
+    """Encode preparation and execution progress for an individual run member.
 
-    IMAGE_PREPARING = "image_preparing"
-    IMAGE_READY = "image_ready"
-    REGISTERED = "registered"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    EXPIRED = "expired"
+    String values persist image preparation, Job registration, and settled task
+    outcomes so controllers can track each task without changing the run's plan.
+    """
+
+    IMAGE_PREPARING = "image_preparing"  # The task's environment image is being located or built.
+    IMAGE_READY = "image_ready"  # The image exists; the task Job is not registered yet.
+    REGISTERED = "registered"  # The task Job is registered with the Jobs Service (see task_job).
+    SUCCEEDED = "succeeded"  # The task Job finished and its outputs were collected.
+    FAILED = "failed"  # The task could not run or its Job failed; see error.
+    CANCELLED = "cancelled"  # The task was cancelled with its run.
+    EXPIRED = "expired"  # The run's execution deadline passed before this task settled.
 
 
 SETTLED_MEMBER_PHASES = frozenset(
@@ -83,14 +146,23 @@ SETTLED_MEMBER_PHASES = frozenset(
 
 
 class TasksetRunMemberEntity(EntityBase):
-    """Task record named task-N beneath its run's inherited parent entity ID."""
+    """Persist one task's progress beneath its run's inherited parent entity ID.
+
+    Inputs are the inherited name/workspace, a nonnegative resolved task index,
+    and its current phase; task Job ref and error are optional until known.
+    The controller uses the resulting ``task-N`` record to track preparation and
+    execution independently of other members (tasks) and the frozen run plan.
+    """
 
     __entity_type__: ClassVar[str] = "taskset_run_member"
 
-    task_index: int = Field(ge=0)
-    phase: MemberPhase
-    task_job: str | None = None
-    error: str | None = None
+    task_index: int = Field(ge=0, description="Zero-based index of the task in the run's resolved task list.")
+    phase: MemberPhase = Field(description="Image preparation and execution progress of this task.")
+    task_job: str | None = Field(
+        default=None,
+        description="Name of this task's Jobs Service Job (<run_id>-task-<index>); None until registered.",
+    )
+    error: str | None = Field(default=None, description="Why this task failed or expired; None otherwise.")
 
 
 _ALLOWED_RUN_TRANSITIONS = {
@@ -107,11 +179,17 @@ _ALLOWED_RUN_TRANSITIONS = {
 
 
 def assert_run_transition(old: TasksetRunPhase, new: TasksetRunPhase) -> None:
-    """Raise ValueError for an illegal phase change, including unchanged or terminal phases.
+    """Guard controller writes against reversing or reopening the run lifecycle.
 
     Args:
         old: Current persisted phase.
         new: Phase to persist; callers skip this guard when unchanged.
+
+    Returns:
+        None for a legal transition; the guard does not mutate a run record.
+
+    Raises:
+        ValueError: The transition is illegal, unchanged, or starts at a terminal phase.
     """
     if new not in _ALLOWED_RUN_TRANSITIONS.get(old, frozenset()):
         raise ValueError(f"illegal taskset run transition: {old} -> {new}")

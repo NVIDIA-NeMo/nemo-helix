@@ -12,6 +12,15 @@ def derive_run_id(workspace: str, caller: str, idempotency_key: str | None) -> s
 
     A missing key creates a random name; a supplied key, including an empty one,
     retains its deterministic name until the run record is deleted.
+
+    Args:
+        workspace: Namespace that isolates runs belonging to different workspaces.
+        caller: Authenticated identity that isolates callers reusing the same key.
+        idempotency_key: Logical retry key, or None for a new keyless submission.
+
+    Returns:
+        ``run-`` plus 16 hex characters. Keyed names hash null-separated scope
+        components so retries find the same named-create acceptance point.
     """
     if idempotency_key is None:
         return random_run_id()

@@ -27,6 +27,11 @@ NOW = datetime(2026, 10, 5, tzinfo=timezone.utc)
 
 
 def test_enum_contracts() -> None:
+    """Pin lifecycle strings and terminal sets so persisted wire values stay stable.
+
+    With no fixture inputs, assertions compare the public enums and phase sets
+    against the contract expected by run readers and future controllers.
+    """
     assert [p.value for p in TasksetRunPhase] == ["accepted", "running", "completed", "failed", "cancelled", "expired"]
     assert [p.value for p in ResultState] == ["pending", "ready", "failed", "none"]
     assert [p.value for p in MemberPhase] == [
@@ -46,6 +51,11 @@ def test_enum_contracts() -> None:
 
 @pytest.mark.parametrize(("old", "new"), list(product(TasksetRunPhase, repeat=2)))
 def test_transition_matrix(old: TasksetRunPhase, new: TasksetRunPhase) -> None:
+    """Check each parametrized old/new pair against the complete lifecycle contract.
+
+    The guard must return None for the eight allowed changes and raise ValueError
+    for every other pair, preventing self-transitions and reopening terminal runs.
+    """
     allowed = {
         ("accepted", "running"),
         ("accepted", "failed"),
@@ -64,6 +74,12 @@ def test_transition_matrix(old: TasksetRunPhase, new: TasksetRunPhase) -> None:
 
 
 def test_record_defaults_and_json_roundtrip() -> None:
+    """Prove run/member data and response metadata survive the persisted JSON boundary.
+
+    Locally constructed records supply timestamps and optional fields; assertions
+    check defaults, restored data, and Entity Store metadata after JSON encoding
+    and response-context validation, rather than relying on an in-memory copy.
+    """
     run = TasksetRunEntity(
         name="run-123",
         workspace="default",
@@ -122,11 +138,13 @@ def test_record_defaults_and_json_roundtrip() -> None:
 
 @pytest.mark.parametrize("entity_type", [TasksetRunEntity, TasksetRunMemberEntity])
 def test_record_required_fields(entity_type) -> None:
+    """Require validation failure when the parametrized record lacks its domain fields."""
     with pytest.raises(ValidationError):
         entity_type.model_validate({"name": "x", "workspace": "default"})
 
 
 def test_member_defaults_and_index() -> None:
+    """Assert absent Job/error defaults and reject a negative task index in local records."""
     member = TasksetRunMemberEntity(name="task-0", workspace="default", task_index=0, phase=MemberPhase.IMAGE_READY)
     assert member.task_job is member.error is None
     with pytest.raises(ValidationError):
@@ -134,6 +152,12 @@ def test_member_defaults_and_index() -> None:
 
 
 def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
+    """Verify the plan fixture round-trips while retaining its strict frozen schema.
+
+    Assertions pin the seven stored fields and expect validation errors for
+    rebinding, extras, unresolved percentages, invalid caps, and missing nullable
+    cap fields, protecting the resolved-input contract of stored plans.
+    """
     assert TasksetRunPlan.model_validate_json(plan.model_dump_json()) == plan
     assert set(TasksetRunPlan.model_fields) == {
         "run_id",
@@ -162,15 +186,22 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
 
 
 def test_execution_input() -> None:
-    input_model = HarborTaskJobsExecutionInput(sandbox_profile="sandbox")
+    """Verify caller configuration defaults and reject unsupported execution inputs.
+
+    Locally built sandbox settings must accept a supported percentage and apply
+    documented defaults; invalid limits, unknown fields/kinds, and a missing
+    sandbox policy must raise ValidationError before submit resolution.
+    """
+    input_model = HarborTaskJobsExecutionInput(sandbox_policy="sandbox")
     assert input_model.kind == "harbor-task-jobs"
     assert input_model.dispatcher_profile == "local-k8s"
     assert input_model.missing_prebuilt_image == "fail"
     assert input_model.max_concurrent_task_jobs is input_model.max_failed_tasks is None
-    assert HarborTaskJobsExecutionInput(sandbox_profile="sandbox", max_failed_tasks="10%").max_failed_tasks == "10%"
+    assert HarborTaskJobsExecutionInput(sandbox_policy="sandbox", max_failed_tasks="10%").max_failed_tasks == "10%"
     for changes in (
         {"max_failed_tasks": -1},
         {"max_failed_tasks": "1.5%"},
+        {"max_failed_tasks": "101%"},
         {"max_failed_tasks": "1000%"},
         {"max_concurrent_task_jobs": 0},
         {"unexpected": True},
@@ -179,6 +210,6 @@ def test_execution_input() -> None:
         with pytest.raises(ValidationError):
             HarborTaskJobsExecutionInput.model_validate({**input_model.model_dump(), **changes})
     data = input_model.model_dump()
-    del data["sandbox_profile"]
+    del data["sandbox_policy"]
     with pytest.raises(ValidationError):
         HarborTaskJobsExecutionInput.model_validate(data)
