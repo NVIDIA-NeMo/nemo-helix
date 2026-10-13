@@ -11,16 +11,8 @@ For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentatio
 ## Ingress and Gateway API routing
 
 The default `ingress.hosts[0].paths` and `httpRoute.pathRules` route
-`/openapi.json` and `/health/ready` with exact matches, alongside the existing
-platform paths. `ingress.defaultHost` uses the paths from the first ingress host.
-These routes use the same backend as the other platform paths: Envoy when auth
-and the Envoy proxy are enabled, otherwise the API service.
-
-If you override `ingress.hosts` or `httpRoute.pathRules`, Helm replaces the
-default lists rather than merging them. Include `/openapi.json` and
-`/health/ready` explicitly in your custom paths if these endpoints should be
-reachable externally. The chart does not append routes to custom lists or
-expose other health endpoints by default.
+`/openapi.json` and `/health/ready` with exact matches. Custom route lists replace
+the defaults, so include these paths explicitly when overriding them.
 
 ## Upgrading installations from before the rename
 
