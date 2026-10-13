@@ -14,7 +14,7 @@ import { z } from 'zod';
  *  what reaches submit — so a cosmetic deviation is a preview concern, not a validation error.
  *  Only input `sanitizeEntityName` cannot salvage becomes an issue, or a name too long for the
  *  study's job, whose output fileset is named after it. */
-const nameSchema = z
+export const nameSchema = z
   .string()
   .superRefine((value, ctx) => {
     const sanitized = sanitizeEntityName(value);

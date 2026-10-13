@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
 from scaled_evals.api import crypto
@@ -24,14 +23,7 @@ _PROVIDER_ENV_KEYS = {
     "openai": ("OPENAI_API_KEY",),
     # Recipe 12 maps the same inference key to OPENAI_API_KEY for OpenAI-wire agents.
     "nvidia": ("NGC_INFERENCE_API_KEY", "POLICY_API_KEY", "OPENAI_API_KEY"),
-    "switchyard": ("SWITCHYARD_API_KEY",),
 }
-
-
-@dataclass(frozen=True)
-class MaterializedCredentialEnvs:
-    runner: dict[str, str]
-    switchyard: dict[str, str]
 
 
 def _env_file_value(value: str) -> str:
@@ -123,72 +115,12 @@ def materialize_credential_env(  # noqa: ANN001
             wanted = str(expectation.get(field) or "")
             if not wanted or actual != wanted:
                 raise ValueError(f"credential {credential_id} {field} changed after evaluation submission")
+    providers = [str(rows_by_id[cred_id]["provider"]) for cred_id in cred_ids]
+    duplicate = next((provider for provider in providers if providers.count(provider) > 1), None)
+    if duplicate:
+        # Each provider fills fixed env keys, so a second credential would silently replace the first.
+        raise ValueError(f"multiple {duplicate} credentials are not supported")
     return credential_env_from_rows([rows_by_id[cred_id] for cred_id in cred_ids])
-
-
-def materialize_credential_envs(  # noqa: ANN001
-    conn,
-    credentials: Mapping[str, str],
-    *,
-    switchyard_bindings: Mapping[str, list[str]] | None = None,
-    expected: Mapping[str, Mapping[str, str]] | None = None,
-) -> MaterializedCredentialEnvs:
-    """Materialize provider defaults plus explicit role-to-Switchyard bindings.
-
-    Explicit target names are upstream-only and never enter the runner map.
-    Each unique credential is decrypted once even when several roles reference it.
-    """
-    cred_ids = sorted(set(credentials.values()))
-    if not cred_ids:
-        if switchyard_bindings:
-            raise ValueError("Switchyard credential bindings require evaluation credentials")
-        return MaterializedCredentialEnvs(runner={}, switchyard={})
-    rows = CredentialRepository(conn).load_for_dispatch(cred_ids)
-    rows_by_id = {str(row["id"]): row for row in rows}
-    missing = [credential_id for credential_id in cred_ids if credential_id not in rows_by_id]
-    if missing:
-        raise ValueError(f"credential not found: {missing[0]}")
-    for credential_id, expectation in (expected or {}).items():
-        row = rows_by_id.get(credential_id)
-        if row is None:
-            raise ValueError(f"snapshotted credential not found: {credential_id}")
-        for field in ("fingerprint", "provider", "payload_kind"):
-            if str(row.get(field) or "") != str(expectation.get(field) or ""):
-                raise ValueError(f"credential {credential_id} {field} changed after evaluation submission")
-
-    plaintext_by_id = {
-        credential_id: crypto.decrypt(row["encrypted_payload"]) for credential_id, row in rows_by_id.items()
-    }
-    bound_roles = set(switchyard_bindings or {})
-    unknown_roles = bound_roles - set(credentials)
-    if unknown_roles:
-        raise ValueError(f"Switchyard credential binding role not supplied: {min(unknown_roles)}")
-
-    unbound_ids = [credential_id for role, credential_id in credentials.items() if role not in bound_roles]
-    if len(unbound_ids) != len(set(unbound_ids)):
-        unbound_ids = list(dict.fromkeys(unbound_ids))
-    unbound_rows = [rows_by_id[credential_id] for credential_id in sorted(unbound_ids)]
-    provider_counts: dict[str, int] = {}
-    for row in unbound_rows:
-        provider = str(row["provider"])
-        provider_counts[provider] = provider_counts.get(provider, 0) + 1
-    duplicate_provider = next(
-        (provider for provider, count in provider_counts.items() if count > 1),
-        None,
-    )
-    if duplicate_provider:
-        raise ValueError(f"multiple {duplicate_provider} credentials require explicit Switchyard bindings")
-
-    runner = _credential_env_from_plaintext_rows(unbound_rows, plaintext_by_id)
-    upstream = dict(runner)
-    for role, targets in (switchyard_bindings or {}).items():
-        credential_id = credentials[role]
-        plaintext = plaintext_by_id[credential_id]
-        for target in targets:
-            if target in upstream:
-                raise ValueError(f"Switchyard credential target collision: {target}")
-            upstream[target] = plaintext
-    return MaterializedCredentialEnvs(runner=runner, switchyard=upstream)
 
 
 def merged_env_file(

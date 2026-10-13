@@ -36,7 +36,7 @@ EVALUATION_COLUMNS = (
     "task_id, task_revision, "
     "benchmark_run_id, "
     "framework_profile_id, "
-    "harbor_profile_id, switchyard_profile_id, intake_profile_id, "
+    "harbor_profile_id, intake_profile_id, "
     "credentials, runtime, network_policy, network_policy_config, n_attempts, parallelism, "
     "visibility, status, status_detail, "
     "cancel_teardown_status, cancel_teardown_error, cancel_teardown_updated_at, "
@@ -55,7 +55,7 @@ EVALUATION_DETAIL_COLUMNS = (
     "e.task_id, e.task_revision, "
     "e.benchmark_run_id, "
     "e.framework_profile_id, "
-    "e.harbor_profile_id, e.switchyard_profile_id, e.intake_profile_id, "
+    "e.harbor_profile_id, e.intake_profile_id, "
     "e.credentials, e.extra_skill_object_keys, e.instruction_prefix, "
     "e.instruction_postfix, e.initial_user_turns, "
     "e.runtime, e.network_policy, e.network_policy_config, e.n_attempts, "
@@ -75,17 +75,35 @@ EVALUATION_DETAIL_COLUMNS = (
 _CANCELLABLE_SQL = "('blocked', 'queued', 'provisioning', 'running')"
 RetryBlockReason = Literal["terminal_artifacts_finalizing", "benchmark_unavailable"]
 
-_DISPATCH_CLAIM_LOCK_ID = 1936024438
-_CLAIM_LOCK_SQL = "SELECT pg_advisory_xact_lock(%s)"
+_CLAIMABLE_SQL = """
+    e.deleted_at IS NULL
+    AND e.status IN ('queued', 'provisioning', 'running')
+    AND e.dispatch_job_name IS NULL
+    AND (e.next_retry_at IS NULL OR e.next_retry_at <= statement_timestamp())
+    AND (
+        e.dispatch_claimed_at IS NULL
+        OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
+    )
+"""
 
-_CLAIM_SQL = """
+# Concurrent claimants may pick the same candidate. The UPDATE re-checks the
+# claim predicates against the committed row, so exactly one wins and the rest
+# get no row.
+# ponytail: a losing claimant returns None and ends its drain pass early, so
+# replicas contend rather than cooperate. Upgrade path: return several
+# candidates and try each until one update lands.
+# ponytail: admission counts active slots without a lock, so claimants running
+# at the same time (the controller and concurrent API create or retry calls)
+# can each admit one queued evaluation past a cap. Upgrade path: a platform
+# core quota on sandboxes, then delete these caps.
+_CLAIM_SQL = f"""
     WITH active_usage AS MATERIALIZED (
         SELECT COALESCE(SUM(parallelism), 0)::BIGINT AS cluster_slots
         FROM evaluations
         WHERE deleted_at IS NULL
           AND status IN ('provisioning', 'running')
     ),
-    ranked_candidate AS MATERIALIZED (
+    candidate AS (
         SELECT e.id, e.status
         FROM evaluations e
         CROSS JOIN active_usage usage
@@ -105,14 +123,8 @@ _CLAIM_SQL = """
               AND member.status IN ('provisioning', 'running')
               AND member.benchmark_run_id = e.benchmark_run_id
         ) benchmark_usage ON e.benchmark_run_id IS NOT NULL
-        WHERE e.deleted_at IS NULL
-          AND e.status IN ('queued', 'provisioning', 'running')
-          AND e.dispatch_job_name IS NULL
-          AND (e.next_retry_at IS NULL OR e.next_retry_at <= statement_timestamp())
-          AND (
-              e.dispatch_claimed_at IS NULL
-              OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
-          )
+        WHERE {_CLAIMABLE_SQL}
+          AND (%s::text IS NULL OR e.id = %s::text)
           AND (
               e.status <> 'queued'
               OR (
@@ -135,21 +147,10 @@ _CLAIM_SQL = """
             END,
             -- Once recovery work is exhausted, admit the owner currently
             -- consuming the fewest sandbox slots. This prevents one older
-            -- benchmark from monopolizing a smaller dispatch-worker pool.
+            -- benchmark from monopolizing the cluster's sandbox slots.
             CASE WHEN e.status = 'queued' THEN owner_usage.owner_slots ELSE 0 END,
             e.created_at
         LIMIT 1
-    ),
-    candidate AS (
-        -- Keep row locking in a separate, non-aggregate SELECT. PostgreSQL
-        -- rejects FOR UPDATE anywhere in the ranked query because it contains
-        -- aggregate capacity subqueries, even when the lock is qualified.
-        SELECT e.id, e.status
-        FROM evaluations e
-        JOIN ranked_candidate ranked
-          ON ranked.id = e.id
-         AND ranked.status = e.status
-        FOR UPDATE OF e SKIP LOCKED
     )
     UPDATE evaluations e
     SET status = CASE WHEN e.status = 'queued' THEN 'provisioning' ELSE e.status END,
@@ -164,16 +165,39 @@ _CLAIM_SQL = """
         updated_at = statement_timestamp()
     FROM candidate
     WHERE e.id = candidate.id
-      AND (
-          e.dispatch_claimed_at IS NULL
-          OR e.dispatch_claimed_at < statement_timestamp() - (%s * INTERVAL '1 second')
-      )
+      AND e.status = candidate.status
+      AND {_CLAIMABLE_SQL}
     RETURNING e.id, candidate.status AS previous_status, e.status
 """
 
 # Every evaluation targets a task revision; a member evaluation of a benchmark
 # run additionally carries benchmark_run_id (so the worker can finalize the run
 # once its members finish).
+# The `_LOAD_FOR_DISPATCH_SQL` columns a run changes. Everything else in that
+# row is fixed once the evaluation is inserted.
+DISPATCH_STATE_COLUMNS = (
+    "status",
+    "backend_handle",
+    "dispatch_job_name",
+    "dispatch_job_uid",
+    "current_execution",
+    "infrastructure_retries",
+    "next_retry_at",
+    "last_failure_code",
+    "last_failure_category",
+    "status_detail",
+    "result",
+    "reward_value",
+    "reward",
+    "n_trials",
+    "n_completed",
+    "n_errored",
+    "n_failed_solve",
+    "exception_counts",
+    "updated_at",
+    "finished_at",
+)
+
 _LOAD_FOR_DISPATCH_SQL = """
     SELECT
         e.id,
@@ -189,7 +213,6 @@ _LOAD_FOR_DISPATCH_SQL = """
         e.task_id,
         e.task_revision,
         e.benchmark_run_id,
-        br.max_concurrent_members,
         e.runtime,
         e.network_policy,
         e.network_policy_config,
@@ -248,18 +271,6 @@ _LOAD_FOR_DISPATCH_SQL = """
     WHERE e.id = %s AND e.deleted_at IS NULL
 """
 
-_HEARTBEAT_SQL = """
-    UPDATE evaluations
-    SET dispatch_claimed_at = NOW(),
-        updated_at = NOW()
-    WHERE id = %s
-      AND dispatch_claimed_by = %s
-      AND deleted_at IS NULL
-      AND status IN ('queued', 'provisioning', 'running')
-      AND (%s::integer IS NULL OR current_execution = %s::integer)
-    RETURNING 1
-"""
-
 _ARCHIVE_CLAIM_SQL = """
     WITH candidate AS (
         SELECT id
@@ -269,9 +280,13 @@ _ARCHIVE_CLAIM_SQL = """
           AND archive_status = 'building'
           AND (evidence_status IN ('ready', 'missing') OR execution_snapshot IS NULL)
           AND (
-              archive_claimed_at IS NULL
-              OR archive_claimed_at < NOW() - (%s * INTERVAL '1 second')
+              archive_claimed_at < NOW() - (%s * INTERVAL '1 second')
+              OR (
+                  archive_claimed_at IS NULL
+                  AND COALESCE(archive_requested_at, updated_at) <= NOW() - (%s * INTERVAL '1 second')
+              )
           )
+          AND (%s::text IS NULL OR id = %s)
         ORDER BY COALESCE(archive_requested_at, updated_at), id
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -286,6 +301,12 @@ _ARCHIVE_CLAIM_SQL = """
     RETURNING e.id
 """
 
+# A running Job finalizes a cancelled evaluation only after its teardown, so the
+# backstop's grace window restarts when the teardown outcome is recorded.
+_EVIDENCE_GRACE_RESTART = """
+    evidence_requested_at = CASE WHEN evidence_status = 'building' THEN NOW() ELSE evidence_requested_at END,
+"""
+
 _EVIDENCE_CLAIM_SQL = """
     WITH candidate AS (
         SELECT id
@@ -295,17 +316,13 @@ _EVIDENCE_CLAIM_SQL = """
           AND evidence_status = 'building'
           AND evidence_build_attempts < 5
           AND (
-              benchmark_run_id IS NULL
-              OR NOT EXISTS (
-                  SELECT 1 FROM benchmark_switchyard_campaigns c
-                  WHERE c.benchmark_run_id = evaluations.benchmark_run_id
-                    AND c.evidence_status NOT IN ('ready', 'unavailable')
+              evidence_claimed_at < NOW() - (%s * INTERVAL '1 second')
+              OR (
+                  evidence_claimed_at IS NULL
+                  AND COALESCE(evidence_requested_at, updated_at) <= NOW() - (%s * INTERVAL '1 second')
               )
           )
-          AND (
-              evidence_claimed_at IS NULL
-              OR evidence_claimed_at < NOW() - (%s * INTERVAL '1 second')
-          )
+          AND (%s::text IS NULL OR id = %s)
         ORDER BY COALESCE(evidence_requested_at, updated_at), id
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -515,7 +532,6 @@ class EvaluationRepository:
         benchmark_run_id: str | None,
         framework_profile_id: str | None,
         harbor_profile_id: str | None,
-        switchyard_profile_id: str | None,
         intake_profile_id: str | None,
         credentials: dict[str, str],
         extra_skill_object_keys: builtins.list[str],
@@ -565,7 +581,6 @@ class EvaluationRepository:
             profile_ids={
                 "framework": framework_profile_id,
                 "harbor": harbor_profile_id,
-                "switchyard": switchyard_profile_id,
                 "intake": intake_profile_id,
             },
             credentials=credentials,
@@ -579,7 +594,7 @@ class EvaluationRepository:
                 framework_adapter_version, sandbox_k8s_version, runner_metadata,
                 task_id, task_revision,
                 benchmark_run_id,
-                framework_profile_id, harbor_profile_id, switchyard_profile_id,
+                framework_profile_id, harbor_profile_id,
                 intake_profile_id, credentials, extra_skill_object_keys,
                 instruction_prefix, instruction_postfix, initial_user_turns,
                 runtime, network_policy, network_policy_config, n_attempts,
@@ -588,7 +603,7 @@ class EvaluationRepository:
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s
             )
             RETURNING {EVALUATION_COLUMNS}
             """,
@@ -609,7 +624,6 @@ class EvaluationRepository:
                 benchmark_run_id,
                 framework_profile_id,
                 harbor_profile_id,
-                switchyard_profile_id,
                 intake_profile_id,
                 Json(credentials),
                 extra_skill_object_keys,
@@ -647,7 +661,6 @@ class EvaluationRepository:
         task_revision: int,
         framework_profile_id: str | None,
         harbor_profile_id: str | None,
-        switchyard_profile_id: str | None,
         intake_profile_id: str | None,
         credentials: dict[str, str],
         extra_skill_object_keys: builtins.list[str],
@@ -688,7 +701,6 @@ class EvaluationRepository:
                 benchmark_run_id=benchmark_run_id,
                 framework_profile_id=framework_profile_id,
                 harbor_profile_id=harbor_profile_id,
-                switchyard_profile_id=switchyard_profile_id,
                 intake_profile_id=intake_profile_id,
                 credentials=credentials,
                 extra_skill_object_keys=extra_skill_object_keys,
@@ -1047,6 +1059,7 @@ class EvaluationRepository:
                     cancel_teardown_status = 'failed',
                     cancel_teardown_error = %s,
                     cancel_teardown_updated_at = NOW(),
+                    {_EVIDENCE_GRACE_RESTART}
                     updated_at = NOW()
                 WHERE id = %s AND deleted_at IS NULL AND status = 'cancelled'
                 RETURNING {EVALUATION_COLUMNS}
@@ -1066,6 +1079,7 @@ class EvaluationRepository:
                 SET cancel_teardown_status = 'succeeded',
                     cancel_teardown_error = NULL,
                     cancel_teardown_updated_at = NOW(),
+                    {_EVIDENCE_GRACE_RESTART}
                     updated_at = NOW()
                 WHERE id = %s AND deleted_at IS NULL AND status = 'cancelled'
                   AND cancel_teardown_status = 'pending'
@@ -1246,19 +1260,15 @@ class EvaluationRepository:
         worker_id: str,
         cluster_slot_limit: int = 500,
         per_user_slot_limit: int = 50,
+        evaluation_id: str | None = None,
     ) -> dict | None:
         with self.conn.transaction(), self.conn.cursor() as cur:
-            # Take the admission lock in its own statement. PostgreSQL establishes
-            # a READ COMMITTED snapshot at statement start, so putting the lock in
-            # the claim query lets waiters retain a snapshot from before the prior
-            # worker committed. Those waiters can then all select and launch the
-            # same evaluation. Acquiring first makes the claim query start with a
-            # fresh snapshot after the previous claimant commits.
-            cur.execute(_CLAIM_LOCK_SQL, (_DISPATCH_CLAIM_LOCK_ID,))
             cur.execute(
                 _CLAIM_SQL,
                 (
                     claim_timeout,
+                    evaluation_id,
+                    evaluation_id,
                     per_user_slot_limit,
                     cluster_slot_limit,
                     per_user_slot_limit,
@@ -1293,14 +1303,30 @@ class EvaluationRepository:
                 )
             return row
 
-    def claim_next_archive(self, *, claim_timeout: float, worker_id: str) -> dict | None:
+    def claim_next_archive(
+        self,
+        *,
+        claim_timeout: float,
+        worker_id: str,
+        evaluation_id: str | None = None,
+        min_age: float = 0.0,
+    ) -> dict | None:
+        """Claim an archive build; unclaimed rows must have waited ``min_age`` seconds."""
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(_ARCHIVE_CLAIM_SQL, (claim_timeout, worker_id))
+            cur.execute(_ARCHIVE_CLAIM_SQL, (claim_timeout, min_age, evaluation_id, evaluation_id, worker_id))
             return cur.fetchone()
 
-    def claim_next_evidence(self, *, claim_timeout: float, worker_id: str) -> dict | None:
+    def claim_next_evidence(
+        self,
+        *,
+        claim_timeout: float,
+        worker_id: str,
+        evaluation_id: str | None = None,
+        min_age: float = 0.0,
+    ) -> dict | None:
+        """Claim an evidence build; unclaimed rows must have waited ``min_age`` seconds."""
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(_EVIDENCE_CLAIM_SQL, (claim_timeout, worker_id))
+            cur.execute(_EVIDENCE_CLAIM_SQL, (claim_timeout, min_age, evaluation_id, evaluation_id, worker_id))
             return cur.fetchone()
 
     def mark_evidence_ready(
@@ -1362,25 +1388,6 @@ class EvaluationRepository:
                 ),
             )
 
-    def heartbeat_claim(
-        self,
-        evaluation_id: str,
-        *,
-        worker_id: str,
-        expected_execution_number: int | None = None,
-    ) -> bool:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                _HEARTBEAT_SQL,
-                (
-                    evaluation_id,
-                    worker_id,
-                    expected_execution_number,
-                    expected_execution_number,
-                ),
-            )
-            return cur.fetchone() is not None
-
     def record_dispatch_job(
         self,
         evaluation_id: str,
@@ -1417,7 +1424,7 @@ class EvaluationRepository:
             cur.execute(
                 """
                 WITH candidate AS (
-                    SELECT e.id
+                    SELECT e.id, e.current_execution, e.dispatch_job_name, e.dispatch_job_uid
                     FROM evaluations e
                     WHERE e.deleted_at IS NULL
                       AND e.status IN ('provisioning', 'running')
@@ -1440,7 +1447,6 @@ class EvaluationRepository:
                       )
                     ORDER BY e.dispatch_claimed_at NULLS FIRST, e.created_at, e.id
                     LIMIT 1
-                    FOR UPDATE OF e SKIP LOCKED
                 )
                 UPDATE evaluations e
                 SET dispatch_reconcile_claimed_at = NOW(),
@@ -1448,10 +1454,22 @@ class EvaluationRepository:
                     updated_at = NOW()
                 FROM candidate
                 WHERE e.id = candidate.id
+                  AND e.status IN ('provisioning', 'running')
+                  AND e.current_execution = candidate.current_execution
+                  AND e.dispatch_job_name = candidate.dispatch_job_name
+                  AND e.dispatch_job_uid IS NOT DISTINCT FROM candidate.dispatch_job_uid
+                  AND (
+                      e.dispatch_claimed_at IS NULL
+                      OR e.dispatch_claimed_at < NOW() - (%s * INTERVAL '1 second')
+                  )
+                  AND (
+                      e.dispatch_reconcile_claimed_at IS NULL
+                      OR e.dispatch_reconcile_claimed_at < NOW() - (%s * INTERVAL '1 second')
+                  )
                 RETURNING e.id, e.status, e.current_execution, e.dispatch_job_name,
                           e.dispatch_job_uid
                 """,
-                (stale_seconds, claim_timeout, worker_id),
+                (stale_seconds, claim_timeout, worker_id, stale_seconds, claim_timeout),
             )
             return cur.fetchone()
 
@@ -1532,7 +1550,6 @@ class EvaluationRepository:
                 row.get("max_infrastructure_retries") or 0
             )
             backend_handle = row.get("backend_handle")
-            self._mark_failed_execution_resources(cur, evaluation_id)
             if backend_handle:
                 cur.execute(
                     """
@@ -1699,32 +1716,6 @@ class EvaluationRepository:
             )
             return {"action": "failed", "retry": False}
 
-    @staticmethod
-    def _mark_failed_execution_resources(cur: psycopg.Cursor, evaluation_id: str) -> None:
-        cur.execute(
-            """
-            UPDATE evaluation_runtime_resources AS resource
-            SET status = 'draining', drain_until = NOW(),
-                teardown_claimed_at = NULL, teardown_claimed_by = NULL,
-                updated_at = NOW()
-            FROM evaluations AS evaluation
-            WHERE resource.evaluation_id = %s
-              AND evaluation.id = resource.evaluation_id
-              AND resource.execution_number = evaluation.current_execution
-              AND resource.kind = 'switchyard'
-              AND resource.status IN ('provisioned', 'draining', 'delete_failed')
-            """,
-            (evaluation_id,),
-        )
-        cur.execute(
-            """
-            UPDATE benchmark_switchyard_launches
-            SET status = 'cleanup_pending', permit_expires_at = NOW(), updated_at = NOW()
-            WHERE evaluation_id = %s AND status IN ('launching', 'running')
-            """,
-            (evaluation_id,),
-        )
-
     def _queue_infrastructure_retry(
         self,
         cur: psycopg.Cursor,
@@ -1873,39 +1864,21 @@ class EvaluationRepository:
             updated = cur.rowcount != 0
             if updated:
                 self.insert_status_event(cur, evaluation_id, "failed", detail)
-                cur.execute(
-                    """
-                    UPDATE evaluation_runtime_resources AS resource
-                    SET status = 'draining',
-                        drain_until = NOW(),
-                        teardown_claimed_at = NULL,
-                        teardown_claimed_by = NULL,
-                        updated_at = NOW()
-                    FROM evaluations AS evaluation
-                    WHERE resource.evaluation_id = %s
-                      AND evaluation.id = resource.evaluation_id
-                      AND resource.execution_number = evaluation.current_execution
-                      AND resource.kind = 'switchyard'
-                      AND resource.status IN ('provisioned', 'draining', 'delete_failed')
-                    """,
-                    (evaluation_id,),
-                )
-                cur.execute(
-                    """
-                    UPDATE benchmark_switchyard_launches
-                    SET status = 'cleanup_pending',
-                        permit_expires_at = NOW(),
-                        updated_at = NOW()
-                    WHERE evaluation_id = %s
-                      AND status IN ('launching', 'running')
-                    """,
-                    (evaluation_id,),
-                )
             return updated
 
     def load_for_dispatch(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:
             cur.execute(_LOAD_FOR_DISPATCH_SQL, (evaluation_id,))
+            return cur.fetchone()
+
+    def load_dispatch_state(self, evaluation_id: str) -> dict | None:
+        """Return only the columns of the dispatch row that change during a run."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {', '.join(f'e.{column}' for column in DISPATCH_STATE_COLUMNS)} "
+                "FROM evaluations e WHERE e.id = %s AND e.deleted_at IS NULL",
+                (evaluation_id,),
+            )
             return cur.fetchone()
 
     def schedule_retry(
@@ -2037,18 +2010,6 @@ class EvaluationRepository:
             )
             return cur.fetchone()
 
-    def load_switchyard_profile(self, profile_id: str) -> dict | None:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT config
-                FROM config_profiles
-                WHERE id = %s AND type = 'switchyard' AND deleted_at IS NULL
-                """,
-                (profile_id,),
-            )
-            return cur.fetchone()
-
     def set_status(
         self,
         evaluation_id: str,
@@ -2139,6 +2100,8 @@ class EvaluationRepository:
                       status NOT IN ('succeeded', 'failed', 'cancelled')
                       OR %s IN ('succeeded', 'failed', 'cancelled')
                   )
+                  -- A run finishing after its cancel must not replace it.
+                  AND (status <> 'cancelled' OR %s = 'cancelled')
                 """,
                 (
                     status,
@@ -2165,6 +2128,7 @@ class EvaluationRepository:
                     expected_dispatch_owner,
                     expected_execution_number,
                     expected_execution_number,
+                    status,
                     status,
                 ),
             )
@@ -2230,6 +2194,7 @@ class EvaluationRepository:
                 WHERE id = %s
                   AND (%s::text IS NULL OR dispatch_claimed_by = %s::text)
                   AND (%s::integer IS NULL OR current_execution = %s::integer)
+                  AND status <> 'cancelled'
                 """,
                 (
                     terminal_status,

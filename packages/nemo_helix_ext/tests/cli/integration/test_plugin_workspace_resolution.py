@@ -17,10 +17,10 @@ bug -- wrong workspace, no error, no failing unit test. These tests drive the
 commands with a real :class:`CLIContext` over a real config file on disk so
 that regression surfaces.
 
-Both command surfaces are covered: the generated verbs and the hand-written
-plugin commands. They are built differently -- programmatic signatures versus
-an ``Annotated`` option alias -- so exercising only one would leave the
-other's real-config path untested.
+Both command surfaces are covered: the generated flat function/job commands
+and the hand-written plugin commands. They are built differently --
+programmatic signatures versus an ``Annotated`` option alias -- so exercising
+only one would leave the other's real-config path untested.
 """
 
 import json
@@ -164,16 +164,9 @@ def captured_submit_workspace(monkeypatch: pytest.MonkeyPatch) -> list[str | Non
     return captured
 
 
-def test_config_file_workspace_reaches_function_run(config_file: Path) -> None:
-    del config_file
-    result = runner.invoke(_function_app(), ["echo-workspace", "run", "--spec", "{}"])
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {"workspace": CONTEXT_WORKSPACE}
-
-
 def test_config_file_workspace_reaches_function_submit_url(config_file: Path, captured_submit_url: list[str]) -> None:
     del config_file
-    result = runner.invoke(_function_app(), ["echo-workspace", "submit", "--spec", "{}"])
+    result = runner.invoke(_function_app(), ["echo-workspace", "--spec", "{}"])
     assert result.exit_code == 0, result.output
     assert captured_submit_url[0].endswith(f"/v2/workspaces/{CONTEXT_WORKSPACE}/echo-workspace")
 
@@ -182,39 +175,41 @@ def test_config_file_workspace_reaches_job_submit(
     config_file: Path, captured_submit_workspace: list[str | None]
 ) -> None:
     del config_file
-    result = runner.invoke(_job_app(), ["echo-job", "submit", "--spec", "{}"])
+    result = runner.invoke(_job_app(), ["echo-job", "--spec", "{}"])
     assert result.exit_code == 0, result.output
     assert captured_submit_workspace[0] == CONTEXT_WORKSPACE
 
 
-def test_switching_current_context_switches_the_workspace(config_file: Path) -> None:
-    """The verb follows ``current_context``, not a baked-in name."""
+def test_switching_current_context_switches_the_workspace(config_file: Path, captured_submit_url: list[str]) -> None:
+    """The command follows ``current_context``, not a baked-in name."""
     _write_config(config_file, current_context="other-team")
-    result = runner.invoke(_function_app(), ["echo-workspace", "run", "--spec", "{}"])
+    result = runner.invoke(_function_app(), ["echo-workspace", "--spec", "{}"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {"workspace": OTHER_WORKSPACE}
+    assert captured_submit_url[0].endswith(f"/v2/workspaces/{OTHER_WORKSPACE}/echo-workspace")
 
 
-def test_env_var_overrides_config_file_workspace(config_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_var_overrides_config_file_workspace(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch, captured_submit_url: list[str]
+) -> None:
     del config_file
     monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
-    result = runner.invoke(_function_app(), ["echo-workspace", "run", "--spec", "{}"])
+    result = runner.invoke(_function_app(), ["echo-workspace", "--spec", "{}"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {"workspace": "env-ws"}
+    assert captured_submit_url[0].endswith("/v2/workspaces/env-ws/echo-workspace")
 
 
-def test_explicit_flag_overrides_config_file_workspace(config_file: Path) -> None:
+def test_explicit_flag_overrides_config_file_workspace(config_file: Path, captured_submit_url: list[str]) -> None:
     del config_file
     result = runner.invoke(
         _function_app(),
-        ["echo-workspace", "run", "--spec", "{}", "--workspace", "flag-ws"],
+        ["echo-workspace", "--spec", "{}", "--workspace", "flag-ws"],
     )
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {"workspace": "flag-ws"}
+    assert captured_submit_url[0].endswith("/v2/workspaces/flag-ws/echo-workspace")
 
 
 def test_falls_back_to_default_when_config_has_no_workspace(
-    isolated_config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_submit_url: list[str]
 ) -> None:
     """A context with no ``workspace:`` key still yields the platform default."""
     del isolated_config
@@ -231,9 +226,9 @@ def test_falls_back_to_default_when_config_has_no_workspace(
     )
     monkeypatch.setenv("NHX_CONFIG_FILE", str(path))
 
-    result = runner.invoke(_function_app(), ["echo-workspace", "run", "--spec", "{}"])
+    result = runner.invoke(_function_app(), ["echo-workspace", "--spec", "{}"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {"workspace": "default"}
+    assert captured_submit_url[0].endswith("/v2/workspaces/default/echo-workspace")
 
 
 # ---------------------------------------------------------------------------

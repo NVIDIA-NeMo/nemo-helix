@@ -104,8 +104,9 @@ NOTEBOOK_REQUIRED_ENV: dict[str, set[str]] = {
     "docs/data-designer/quickstart.md": {"NVIDIA_API_KEY"},
     "docs/data-designer/tutorials/basics.md": {"NVIDIA_API_KEY"},
     "docs/data-designer/tutorials/seeding.md": {"NVIDIA_API_KEY"},
-    # Audit
+    # Audit / Garak
     "docs/audit/tutorials/docker-local-nim.md": {"NGC_API_KEY"},
+    "docs/garak/tutorials/run-audit-locally.md": {"NGC_API_KEY"},
     # Safe-synthesizer
     "docs/safe-synthesizer/tutorials/pii-replacement.md": {"NIM_API_KEY"},
     "docs/safe-synthesizer/tutorials/safe-synthesizer-101.md": {
@@ -133,8 +134,9 @@ GPU_NOTEBOOKS: set[str] = {
     # Run-inference: need a deployed NIM
     "docs/run-inference/tutorials/deploy-models.md",
     "docs/run-inference/tutorials/run-inference.md",
-    # Audit: local NIM required
+    # Audit / Garak: local NIM required
     "docs/audit/tutorials/docker-local-nim.md",
+    "docs/garak/tutorials/run-audit-locally.md",
     # Safe-synthesizer tutorials: run GPU jobs
     "docs/safe-synthesizer/tutorials/differential-privacy.md",
     "docs/safe-synthesizer/tutorials/pii-replacement.md",
@@ -142,6 +144,27 @@ GPU_NOTEBOOKS: set[str] = {
 }
 
 CELL_TIMEOUT_SECONDS = 1800
+
+
+def _rel_path_keys(rel: str) -> set[str]:
+    """Return repo-relative path aliases used by older docs test metadata.
+
+    Fern migrated many source pages from ``.md`` to ``.mdx`` while the notebook
+    requirement maps still carry some pre-Fern ``.md`` paths. Treat ``.md`` and
+    ``.mdx`` as equivalent so CPU/GPU selection does not silently drift when the
+    docs source extension changes.
+    """
+    keys = {rel}
+    path = Path(rel)
+    if path.suffix == ".mdx":
+        keys.add(str(path.with_suffix(".md")))
+    elif path.suffix == ".md":
+        keys.add(str(path.with_suffix(".mdx")))
+    return keys
+
+
+def _matches(rel: str, configured: set[str] | dict[str, object]) -> bool:
+    return bool(_rel_path_keys(rel) & set(configured))
 
 
 def _discover_notebooks() -> list:
@@ -173,9 +196,9 @@ def _discover_notebooks() -> list:
         if is_skip_test:
             marks.append(pytest.mark.skip(reason="@nemo-nb: skip-test"))
 
-        if rel in GPU_NOTEBOOKS:
+        if _matches(rel, GPU_NOTEBOOKS):
             marks.append(pytest.mark.feature("gpu"))
-        if rel in BIFURCATED_NOTEBOOKS:
+        if _matches(rel, BIFURCATED_NOTEBOOKS):
             for lang in ("shell", "python"):
                 params.append(pytest.param(nb_path, lang, id=f"{rel}[{lang}]", marks=marks))
         else:
@@ -186,7 +209,7 @@ def _discover_notebooks() -> list:
 def _check_required_env_vars(notebook_path: Path) -> None:
     """Skip the test early if any required env vars are missing."""
     rel = str(notebook_path.relative_to(REPO_ROOT))
-    required = NOTEBOOK_REQUIRED_ENV.get(rel)
+    required = next((NOTEBOOK_REQUIRED_ENV[key] for key in _rel_path_keys(rel) if key in NOTEBOOK_REQUIRED_ENV), None)
     if not required:
         return
     missing = sorted(v for v in required if not os.environ.get(v))

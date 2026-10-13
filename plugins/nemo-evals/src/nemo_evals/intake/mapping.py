@@ -282,7 +282,7 @@ def trial_to_atif_ingest(
 
 @dataclass(frozen=True)
 class SkippedOutput:
-    """A metric output omitted from publish, with the reason it was dropped (see cross-team ask X6)."""
+    """A metric output omitted from publish, with the reason it was dropped."""
 
     name: str
     reason: str
@@ -293,30 +293,46 @@ def score_to_evaluator_results(
     *,
     session_id: str,
     span_id: str,
+    output_names: Sequence[str] = (),
 ) -> tuple[list[EvaluatorResultCreateParams], list[SkippedOutput]]:
     """Map one ``AgentEvalTaskScore`` to ``(rows, skipped)`` for Intake.
 
-    ``rows`` is one evaluator-result param per publishable output: ``name`` is
-    ``"{metric_type}.{output}"`` (matching the SDK summary's aggregate naming) and the
-    value is coerced into the matching ``data_type``, populating exactly one of ``value``
-    / ``string_value``. ``session_id``/``span_id`` are supplied by the caller — the
-    trajectory span id is resolved at publish time, not derivable from the pure score.
+    ``rows`` is one evaluator-result param per output: ``name`` is ``"{metric_type}.{output}"``
+    (matching the SDK summary's aggregate naming). A scored output's value is coerced into the
+    matching ``data_type``, populating exactly one of ``value`` / ``string_value``. An output the
+    metric could not score — the whole score is FAILED, or the output is non-finite (NaN/inf) —
+    becomes a FAILED row with no value and the diagnostic as its ``comment``, so Intake counts it
+    as a failed attempt rather than inferring that from a missing row.
 
-    ``skipped`` carries the outputs that can't be published, with the reason — so the
-    publishable/omitted split has a single source of truth and callers can report the
-    omissions instead of silently losing them. A FAILED score yields no rows (every output
-    skipped); a completed score's non-finite (NaN/inf) outputs are dropped (NaN isn't
-    JSON-representable — the platform client's encoder rejects it — so it can't be sent).
+    A FAILED score usually carries no outputs, so ``output_names`` (the metric's declared outputs)
+    names the rows to write; any outputs it does carry are added to that set, and when neither
+    names anything the metric itself gets one FAILED row.
+    ``session_id``/``span_id`` are supplied by the caller — the trajectory span id is resolved
+    at publish time, not derivable from the pure score.
 
-    TODO(X6): once Intake can represent a failed metric result, publish these as failures
-    instead of dropping them.
+    ``skipped`` is kept for callers that report omissions; nothing is omitted today.
     """
     if score.status == AgentEvalScoreStatus.FAILED:
-        skipped = [
-            SkippedOutput(name=f"{score.metric_type}.{output.name}", reason="scoring failed")
-            for output in score.outputs
+        # Observed outputs first, then declared ones not among them: a partial FAILED score must
+        # still produce a row for every output the metric promised.
+        names = list(dict.fromkeys([*(output.name for output in score.outputs), *output_names]))
+        rows = [
+            _failed_row(
+                session_id=session_id,
+                span_id=span_id,
+                name=f"{score.metric_type}.{name}",
+                comment=_comment_for_output(score, name),
+            )
+            for name in names
+        ] or [
+            _failed_row(
+                session_id=session_id,
+                span_id=span_id,
+                name=score.metric_type,
+                comment=_comment_for_output(score, None),
+            )
         ]
-        return [], skipped
+        return rows, []
 
     rows: list[EvaluatorResultCreateParams] = []
     skipped: list[SkippedOutput] = []
@@ -324,7 +340,14 @@ def score_to_evaluator_results(
         name = f"{score.metric_type}.{output.name}"
         data_type, value, string_value = _coerce_metric_value(output.value)
         if value is not None and not math.isfinite(value):
-            skipped.append(SkippedOutput(name=name, reason="non-finite value"))
+            rows.append(
+                _failed_row(
+                    session_id=session_id,
+                    span_id=span_id,
+                    name=name,
+                    comment=_comment_for_output(score, output.name) or "non-finite value",
+                )
+            )
             continue
         row: EvaluatorResultCreateParams = {
             "session_id": session_id,
@@ -343,17 +366,31 @@ def score_to_evaluator_results(
     return rows, skipped
 
 
-def _comment_for_output(score: AgentEvalTaskScore, output_name: str) -> str | None:
+def _failed_row(*, session_id: str, span_id: str, name: str, comment: str | None) -> EvaluatorResultCreateParams:
+    # A failed attempt has no value type of its own; NUMERIC keeps it on the score axis Intake rolls up.
+    row: EvaluatorResultCreateParams = {
+        "session_id": session_id,
+        "span_id": span_id,
+        "name": name,
+        "data_type": "NUMERIC",
+        "status": "FAILED",
+    }
+    if comment is not None:
+        row["comment"] = comment
+    return row
+
+
+def _comment_for_output(score: AgentEvalTaskScore, output_name: str | None) -> str | None:
     """Select the diagnostic comment that describes one emitted output.
 
-    A diagnostic naming this output wins; otherwise the first that names no output at all, which
-    is the one describing the score as a whole.
+    A diagnostic naming this output wins; otherwise the first that names no output (the key absent
+    or ``None``), which is the one describing the score as a whole.
     """
     for diagnostic in score.diagnostics:
-        if diagnostic.details.get(OUTPUT_DETAIL) == output_name:
+        if output_name is not None and diagnostic.details.get(OUTPUT_DETAIL) == output_name:
             return diagnostic.message
     for diagnostic in score.diagnostics:
-        if OUTPUT_DETAIL not in diagnostic.details:
+        if diagnostic.details.get(OUTPUT_DETAIL) is None:
             return diagnostic.message
     return None
 

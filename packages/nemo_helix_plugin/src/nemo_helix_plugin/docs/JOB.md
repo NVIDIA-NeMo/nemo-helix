@@ -3,7 +3,7 @@
 
 # Job Surface (NemoJob)
 
-A `NemoJob` is a unit of work you can submit to a cluster, run in a task container, or introspect. When a job sets `generate_legacy_verbs = False`, the generated CLI exposes submission as the job command itself:
+A `NemoJob` is a unit of work you can submit to a cluster, run in a task container, or introspect. The generated CLI exposes submission as the job command itself:
 
 ```
 nemo <plugin> <job>          [--profile <p>] \
@@ -14,8 +14,6 @@ nemo <plugin> <job> explain  [--profile <p>]
 
 - flat `<job>` command — POSTs the job to the plugin service, which compiles it into a `HelixJobSpec` and hands it off to the Jobs service for cluster execution.
 - `explain` — prints the job's schemas and submit route. Reads locally, no network.
-
-Leaving `NemoJob.generate_legacy_verbs` at its default `True` preserves the generated nested `<job> submit` / `<job> explain` command group for compatibility. This is per-job generated CLI behavior, not a global plugin naming convention.
 
 Submission targets the platform selected by the global `nemo --base-url` / `nemo --context` flags and
 the active CLI context, like every other `nemo` command.

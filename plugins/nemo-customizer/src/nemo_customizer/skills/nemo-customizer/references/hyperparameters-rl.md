@@ -5,7 +5,7 @@
 
 # NeMo-RL job JSON (DPO + GRPO)
 
-The `rl` backend (`nemo customization rl submit`) runs on a Ray cluster — **Kubernetes runtime only**, full-weight (no LoRA). Schema: `RlJobInput` in `plugins/nemo-rl/src/nemo_rl_plugin/schema.py`. Run `nemo customization rl explain` for the live schema.
+The `rl` backend (`nemo customization rl --job-json`) runs on a Ray cluster — **Kubernetes runtime only**, full-weight (no LoRA). Schema: `RlJobInput` in `plugins/nemo-rl/src/nemo_rl_plugin/schema.py`. Run `nemo customization rl explain` for the live schema.
 
 Discriminated by `training.type`: `"dpo"` or `"grpo"`. **`training.type` is required** — it is the union discriminator, so a payload that omits it is rejected with `union_tag_not_found` rather than defaulting to DPO.
 

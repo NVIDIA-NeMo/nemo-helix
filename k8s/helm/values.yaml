@@ -693,6 +693,14 @@ ingress:
           pathType: Exact
           service: '{{ include "nemo-helix.ingressBackendService" . }}'
           port: '{{ include "nemo-helix.ingressBackendPort" . }}'
+        - path: /openapi.json
+          pathType: Exact
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
+        - path: /health/ready
+          pathType: Exact
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
 
 httpRoute:
   # -- Specifies whether to enable a Gateway API HTTP Route for the service.
@@ -717,6 +725,10 @@ httpRoute:
         - path: /cluster-info
           type: Exact
         - path: /status
+          type: Exact
+        - path: /openapi.json
+          type: Exact
+        - path: /health/ready
           type: Exact
       backends:
         - service: '{{ include "nemo-helix.ingressBackendService" . }}'

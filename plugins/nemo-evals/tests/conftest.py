@@ -39,6 +39,7 @@ def matches_filter(entity, operation) -> bool:
         "workspace": entity.workspace,
         "project": entity.project,
         "parent": entity.parent,
+        "created_by": entity.created_by,
         "data": entity.model_dump(mode="json", exclude=set(entity.__base_fields__)),
     }
     return operation.apply(InMemoryFilterRepository(row))
@@ -69,6 +70,8 @@ class FakeEntityStore(EntityClient):
         # The job transformer now accepts only the concrete typed-client boundary. This fake
         # implements that boundary directly while keeping all storage in memory.
         self.entities: dict[tuple[str, str, str, str | None], EntityBase] = {}
+        #: Principal stamped as ``created_by``, as the real store does from the request identity.
+        self.caller = "user:alice"
         #: Monotonic tick for creation timestamps. Wall-clock ``now()`` can repeat within a test,
         #: which would make ``-created_at`` ordering non-deterministic — the real store's inserts
         #: are genuinely ordered, so the fake must be too.
@@ -88,6 +91,7 @@ class FakeEntityStore(EntityClient):
         now = self._now()
         entity._id = f"{entity.__entity_type__}-{self._tick}"
         entity._created_at = now
+        entity._created_by = self.caller
         entity._updated_at = now
         entity._db_version = 0
         self.entities[key] = entity.model_copy(deep=True)

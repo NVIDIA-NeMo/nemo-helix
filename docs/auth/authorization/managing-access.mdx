@@ -48,7 +48,10 @@ workspace = client.workspaces.create_workspace(
 </Tabs>
 ## Managing Workspace Members
 
-Members are users who have been granted access to a workspace. Each member has one of three roles:
+Members are principals that have been granted access to a workspace. A principal
+can be a human user, an IdP group, the wildcard principal `*`, or a NeMo service
+account such as `service-account:intake-otel-writer`. Each member has one of
+three roles:
 
 - **Viewer** — Read-only access to all resources
 - **Editor** — Can create, modify, and delete resources
@@ -63,7 +66,9 @@ When you add or change a member, the CLI and SDK wait for the change to propagat
 </Note>
 ### Add a Member
 
-Grant someone access to a workspace by adding them as a member with a specific role. The principal is typically an email address that identifies the user in your identity provider.
+Grant a principal access to a workspace by adding it as a member with a specific
+role. Human principals are often email addresses from your identity provider,
+but the principal value does not have to be an email address.
 
 <Tabs>
 
@@ -115,6 +120,56 @@ client.workspaces.create_workspace_member(
 </Tab>
 
 </Tabs>
+### Add a Service Account
+
+Service-account Scoped Access Keys authenticate as `service-account:<id>`.
+Create the role binding for that full principal value, not for the unprefixed
+service account ID:
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo workspaces members create \
+  --principal service-account:intake-reader \
+  --roles Viewer \
+  --workspace ml-team
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest
+
+client = NemoClient.from_config()
+
+client.workspaces.create_workspace_member(
+    workspace="ml-team",
+    body=CreateWorkspaceMemberRequest(principal="service-account:intake-reader", roles=["Viewer"]),
+)
+```
+
+</Tab>
+
+</Tabs>
+
+A human HelixAdmin must create the key. Service-account callers are
+rejected, and any other caller receives `403 Forbidden`. Use the unprefixed ID
+only in that command:
+
+`nemo auth access-keys create --service-account intake-reader`. NeMo stamps the
+token subject as `service-account:intake-reader`.
+
+<Warning>
+
+Do not grant customer automation access with the `service:<name>` principal
+form. The `service:` prefix is reserved for internal platform service
+principals.
+
+</Warning>
 ### List Members
 
 View all members of a workspace to audit access or verify permissions. The response includes each member's principal, roles, and when access was granted.

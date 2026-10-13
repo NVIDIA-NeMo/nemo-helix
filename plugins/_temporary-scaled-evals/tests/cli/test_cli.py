@@ -730,15 +730,6 @@ def test_benchmark_run_create_preflights_exact_body_before_creation(monkeypatch)
     assert "bmr_1" in result.output
 
 
-def test_benchmark_run_create_help_documents_member_cap() -> None:
-    result = CliRunner().invoke(cli, ["benchmark-run", "create", "--help"])
-    assert result.exit_code == 0, result.output
-    output = " ".join(result.output.split())
-    assert "Maximum active benchmark member evaluations" in output
-    assert "one managed Switchyard gateway" in output
-    assert "requires parallelism=1" not in output
-
-
 def test_benchmark_run_get_shows_per_task_breakdown(monkeypatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/benchmark-runs/bmr_1"
@@ -1562,10 +1553,10 @@ def test_config_profile_list_and_get(monkeypatch) -> None:
 
 
 def test_config_profile_create_accepts_yaml_file(monkeypatch, tmp_path) -> None:
-    config = tmp_path / "switchyard.yaml"
+    config = tmp_path / "intake.yaml"
     config.write_text(
         """
-switchyard_routing_profiles_yaml: |
+metadata:
   profiles:
     default:
       model: strong
@@ -1576,7 +1567,7 @@ model: nemotron
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["body"] = json.loads(request.content)
-        return httpx.Response(201, json={"id": "cfg_sw", "name": "sw", "type": "switchyard"})
+        return httpx.Response(201, json={"id": "cfg_in", "name": "in", "type": "intake"})
 
     result = runner_with(monkeypatch, handler).invoke(
         cli,
@@ -1584,16 +1575,16 @@ model: nemotron
             "config-profile",
             "create",
             "--name",
-            "sw",
+            "in",
             "--type",
-            "switchyard",
+            "intake",
             "--config-yaml",
             f"@{config}",
         ],
     )
     assert result.exit_code == 0, result.output
     assert seen["body"]["config"]["model"] == "nemotron"
-    assert "profiles:" in seen["body"]["config"]["switchyard_routing_profiles_yaml"]
+    assert seen["body"]["config"]["metadata"]["profiles"]["default"]["model"] == "strong"
 
 
 def test_config_profile_update_delete(monkeypatch) -> None:
@@ -1665,7 +1656,7 @@ def test_config_profile_create_rejects_invalid_yaml(monkeypatch) -> None:
             "--name",
             "bad",
             "--type",
-            "switchyard",
+            "intake",
             "--config-yaml",
             "items:\n  - [",
         ],
@@ -1741,7 +1732,7 @@ def test_evaluation_create_help_documents_api_defaults() -> None:
     assert "--framework [harbor|nemo_gym]" in result.output
 
 
-def test_evaluation_create_includes_switchyard_and_intake_profiles(monkeypatch) -> None:
+def test_evaluation_create_includes_framework_and_intake_profiles(monkeypatch) -> None:
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1761,8 +1752,6 @@ def test_evaluation_create_includes_switchyard_and_intake_profiles(monkeypatch) 
             "1",
             "--framework-profile-id",
             "cfg_h",
-            "--switchyard-profile-id",
-            "cfg_sw",
             "--intake-profile-id",
             "cfg_intake",
             "--runtime",
@@ -1777,7 +1766,6 @@ def test_evaluation_create_includes_switchyard_and_intake_profiles(monkeypatch) 
         "task_id": "task_1",
         "task_revision": 1,
         "framework_profile_id": "cfg_h",
-        "switchyard_profile_id": "cfg_sw",
         "intake_profile_id": "cfg_intake",
         "runtime": "sandbox_k8s",
         "visibility": "team",
@@ -1922,7 +1910,6 @@ def test_evaluation_reproduce_prints_command_and_request(monkeypatch) -> None:
                     "framework": "harbor",
                     "framework_profile_id": "cfg_h",
                     "harbor_profile_id": "cfg_h",
-                    "switchyard_profile_id": None,
                     "intake_profile_id": None,
                     "credentials": {"openai": "cred_openai"},
                     "extra_skill_object_keys": [],

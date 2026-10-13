@@ -66,7 +66,6 @@ class GenerateJob(NemoJob):
     name: ClassVar[str] = "generate"
     description: ClassVar[str] = "Generate synthetic data using Safe Synthesizer."
     spec_schema: ClassVar[type[BaseModel] | None] = SafeSynthesizerJobConfig
-    generate_legacy_verbs: ClassVar[bool] = False
     # Preserve the existing /jobs URL instead of /jobs/generate.
     job_collection_path: ClassVar[str | None] = "/jobs"
 

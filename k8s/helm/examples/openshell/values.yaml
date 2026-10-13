@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Opt-in deployment integration with an independently installed OpenShell gateway.
+# Apply after your platform values. Merge any additional executors into this list:
+# Helm replaces lists rather than appending to them.
+# This plaintext endpoint is for an isolated evaluation gateway only. See
+# docs/set-up/helm/openshell.mdx for TLS and authentication limitations.
+platformConfig:
+  agents:
+    deployments:
+      openshell_executor: openshell
+  deployments:
+    default_executor: local-k8s
+    executors:
+      - name: local-k8s
+        backend: k8s
+        config:
+          default_namespace: "{{ .Release.Namespace }}"
+      - name: openshell
+        backend: openshell
+        config:
+          gateway_endpoint: http://openshell.openshell.svc.cluster.local:8080
+          platform_egress:
+            host: '{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local'
+            port: 8080
+          serve_workdir: /tmp

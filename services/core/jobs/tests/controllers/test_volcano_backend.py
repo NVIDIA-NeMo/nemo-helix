@@ -17,7 +17,7 @@ from nhx.common.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
 from nhx.common.jobs.schemas import HelixJobStatus
-from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext, HelixJobTaskUpdate
 from nhx.core.jobs.app.constants import (
     JOB_EXECUTION_BACKEND_LABEL,
     JOB_EXECUTION_PROFILE_LABEL,
@@ -1661,3 +1661,41 @@ def test_volcano_job_not_backing_off_keeps_its_scheduling_ttl(volcano_job, test_
 
     assert update.status == HelixJobStatus.PENDING
     remove.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job_exists", [False, True])
+async def test_volcano_cancellation_public_task_lifecycle(
+    volcano_job, mock_dispatcher, sample_platform_job_request, test_step_cancelling, job_exists
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, "default")
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", "default")
+    await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.ACTIVE)
+    task = await mock_dispatcher.create_or_update_task(
+        job.name, "training-task", "default", HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE), step
+    )
+    await mock_dispatcher.cancel_job(job.name, "default")
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", "default")
+    context = test_step_cancelling.model_copy(
+        update={"id": step.id, "name": step.name, "job": job.name, "attempt_id": step.attempt_id}
+    )
+    resource = {"metadata": {"name": "volcano-job"}} if job_exists else None
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=resource),
+        patch.object(volcano_job, "terminate_job"),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+        patch.object(volcano_job._workload_delegations, "revoke_by_key"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"),
+    ):
+        update = volcano_job.sync(context)
+    await mock_dispatcher.update_job_status_from_step(step, update.status)
+
+    status = await mock_dispatcher.get_job_status(job.name, "default")
+    expected_task_status = HelixJobStatus.ACTIVE if job_exists else HelixJobStatus.CANCELLED
+    expected_step_status = HelixJobStatus.CANCELLING if job_exists else HelixJobStatus.CANCELLED
+    assert status.status == expected_step_status
+    assert status.steps[0].status == expected_step_status
+    assert status.steps[0].tasks[0].id == task.id
+    assert status.steps[0].tasks[0].status == expected_task_status

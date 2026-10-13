@@ -536,6 +536,14 @@ endif
 	@echo "Running tests for package: $(PACKAGE)..."
 	$(UV) run --frozen pytest -v packages/$(PACKAGE)/tests/
 
+.PHONY: test-agents-mini-swe-agent
+test-agents-mini-swe-agent: ## Run Mini-SWE-Agent adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra mini-swe-agent --extra test \
+		python -c 'import minisweagent'
+	$(UV) run --frozen --package nemo-agents-plugin --extra mini-swe-agent --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_mini_swe_agent.py
+
 .PHONY: test-agents-nooa
 test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
 	# Fail on missing harnesses instead of passing with every test skipped.

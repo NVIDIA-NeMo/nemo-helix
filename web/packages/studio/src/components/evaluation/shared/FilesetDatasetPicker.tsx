@@ -5,6 +5,7 @@ import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSear
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
 import { parquetBatchGroups } from '@studio/components/evaluation/shared/parquetBatchGroups';
+import { filesetNameOption } from '@studio/components/evaluation/utils';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
 import { type ReactElement } from 'react';
 import {
@@ -16,11 +17,6 @@ import {
 } from 'react-hook-form';
 
 const DATASET_FORMATS = ['json', 'jsonl', 'csv', 'parquet'];
-
-const filesetOption = (fileset: { name: string }) => ({
-  value: fileset.name,
-  label: fileset.name,
-});
 
 interface FilesetDatasetPickerProps<T extends FieldValues> {
   workspace: string;
@@ -93,7 +89,7 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         workspace={workspace}
         useControllerProps={{ control, name: filesetName }}
         formFieldProps={{ slotLabel: 'Fileset' }}
-        renderOption={filesetOption}
+        renderOption={filesetNameOption}
         onChange={() => pickFile('')}
         disabled={disabled}
       />

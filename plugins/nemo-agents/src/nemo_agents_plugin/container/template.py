@@ -181,6 +181,8 @@ _FABRIC_HARNESS_INSTALLS = {
     "codex": "nemo-agents-plugin-codex",
     "nvidia.fabric.codex": "nemo-agents-plugin-codex",
     "deepagents": "nemo-agents-plugin-deepagents",
+    "mini-swe-agent": "nemo-agents-plugin-mini-swe-agent",
+    "nvidia.fabric.mini-swe-agent": "nemo-agents-plugin-mini-swe-agent",
     "nooa-bench-agent": "nemo-agents-plugin-nooa",
     "nvidia.fabric.nooa.bench-agent": "nemo-agents-plugin-nooa",
     "nvidia.fabric.langchain.deepagents": "nemo-agents-plugin-deepagents",

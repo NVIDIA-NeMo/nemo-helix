@@ -15,16 +15,19 @@ from typer.testing import CliRunner
 
 pytest.importorskip("nemo_scaled_evals_plugin")
 
+import nemo_scaled_evals_plugin.jobs.benchmark_archive_build as benchmark_archive_job_module
 import nemo_scaled_evals_plugin.jobs.evaluation_execution as evaluation_job_module
 import nemo_scaled_evals_plugin.jobs.task_image_build as build_job_module
 import nemo_scaled_evals_plugin.tasks.evaluation_execution as evaluation_task_module
 from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
+from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
+    benchmark_archive_job_name,
     evaluation_execution_job_name,
     task_image_build_job_name,
 )
-from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec, TaskImageBuildSpec
+from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, EvaluationExecutionSpec, TaskImageBuildSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 from pydantic import ValidationError
 from scaled_evals.api.settings import settings
@@ -153,8 +156,9 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
     assert evaluation_step.executor.resources.requests.cpu == "50m"
     assert evaluation_step.executor.resources.limits.memory == "1Gi"
     assert evaluation_step.config["deadline_seconds"] == 7200
-    # The platform reaps a hung dispatcher only when this is non-zero.
-    assert evaluation_step.lifecycle.staleness_timeout_seconds == 7200
+    # The platform reaps a hung dispatcher only when this is non-zero, and it
+    # must outlast the run so finalize can build evidence and the archive.
+    assert evaluation_step.lifecycle.staleness_timeout_seconds == 7200 + 900
 
     local_build = await TaskImageBuildJob.compile(
         workspace="default",
@@ -194,7 +198,51 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
         "evaluation_id": "eval_1",
         "execution_number": 4,
     }
-    dispatcher.run.assert_called_once_with("eval_1", maintain_claim=False, expected_execution_number=4)
+    # A spec without a workspace predates the inputs entity and loads from Postgres.
+    dispatcher.run.assert_called_once_with("eval_1", expected_execution_number=4, inputs=None)
+    dispatcher.finalize.assert_called_once_with("eval_1")
+
+    # Otherwise the Job launches from the entity named after it.
+    dispatcher = MagicMock()
+    monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
+    entities = MagicMock()
+    entities.get.return_value.inputs = {"name": "eval"}
+    monkeypatch.setattr(evaluation_job_module, "platform_entities", lambda: entities)
+    spec = _evaluation_spec().model_copy(update={"inputs_workspace": "ws"})
+    EvaluationExecutionJob().run(spec.model_dump())
+    assert entities.get.call_args.args[1] == evaluation_execution_job_name("eval_1", 4)
+    assert entities.get.call_args.kwargs == {"workspace": "ws"}
+    dispatcher.run.assert_called_once_with("eval_1", expected_execution_number=4, inputs={"name": "eval"})
+
+
+@pytest.mark.asyncio
+async def test_benchmark_archive_job_claims_only_its_own_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = BenchmarkArchiveBuildSpec(benchmark_run_id="run_1")
+    compiled = await BenchmarkArchiveBuildJob.compile(
+        workspace="default",
+        spec=spec,
+        entity_client=object(),
+        job_name=None,
+        async_sdk=object(),
+        options={"scaled_evals": {"application_image": "registry.example/scaled-evals:test"}},
+    )
+    assert compiled.steps[0].executor.container.command == ["nemo_scaled_evals_plugin.tasks.benchmark_archive_build"]
+    assert compiled.steps[0].config == {"benchmark_run_id": "run_1"}
+    # Each rebuild request and each lease attempt gets its own Job.
+    name = benchmark_archive_job_name("run_1", "0123456789abcdef", 1)
+    assert name == "scaled-evals-benchmark-archive-run_1-01234567-a1"
+    assert name != benchmark_archive_job_name("run_1", "fedcba9876543210", 1)
+
+    repo = MagicMock()
+    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    dispatcher = MagicMock(claim_timeout=30.0)
+    monkeypatch.setattr(benchmark_archive_job_module, "Dispatcher", lambda: dispatcher)
+    claimed = {"benchmark_run_id": "run_1", "status": "building", "claim_token": "t"}
+    for row, built in ((claimed, True), (None, False), ({**claimed, "status": "failed"}, False)):
+        repo.claim.return_value = row
+        assert BenchmarkArchiveBuildJob().run(spec.model_dump())["built"] is built
+    repo.claim.assert_called_with(claim_timeout=30.0, run_id="run_1")
+    dispatcher.build_benchmark_archive.assert_called_once_with(claimed)
 
 
 def test_jobs_are_discovered_from_plugin_entry_points() -> None:
@@ -205,6 +253,7 @@ def test_jobs_are_discovered_from_plugin_entry_points() -> None:
     jobs = discover_jobs()
     assert jobs["scaled-evals.task-image-build"] is TaskImageBuildJob
     assert jobs["scaled-evals.evaluation-execution"] is EvaluationExecutionJob
+    assert jobs["scaled-evals.benchmark-archive-build"] is BenchmarkArchiveBuildJob
     assert discover_controllers()["scaled-evals-jobs"] is ScaledEvalsJobsController
 
 
@@ -246,27 +295,3 @@ def test_evaluation_task_creates_in_cluster_kubeconfig(monkeypatch, tmp_path) ->
     assert config["clusters"][0]["cluster"]["server"] == "https://10.0.0.1:6443"
     assert config["contexts"][0]["context"]["namespace"] == "test-namespace"
     assert config["users"][0]["user"]["tokenFile"].endswith("/serviceaccount/token")
-
-
-def test_platform_jobs_default_on_and_legacy_workers_stand_down() -> None:
-    """Both flags ship enabled, and the legacy workers refuse to claim under them.
-
-    The GKE acceptance matrix passed end to end, so Platform Jobs is the
-    default execution path. The legacy in-process workers must not race it:
-    the build queue worker returns without claiming, and the dispatcher skips
-    evaluation claims while still draining cleanup rows.
-    """
-    from scaled_evals.api.settings import Settings
-
-    # The declared defaults, not the live instance, which env vars may override.
-    declared = Settings.model_fields
-    assert declared["platform_build_jobs_enabled"].default is True
-    assert declared["platform_evaluation_jobs_enabled"].default is True
-
-    # Legacy build worker stands down without touching the queue.
-    from scaled_evals.api.build.queue_worker import TaskBuildWorker
-
-    worker = MagicMock(spec=TaskBuildWorker)
-    worker.claim_next.side_effect = AssertionError("legacy build worker must not claim")
-    assert TaskBuildWorker.work_once(worker) is False
-    worker.claim_next.assert_not_called()

@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { Breadcrumbs } from '@studio/components/Breadcrumbs';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentOptimizationDetailRoute } from '@studio/routes/agents/AgentOptimizationDetailRoute';
-import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
+import {
+  getAgentDetailRoute,
+  getAgentOptimizationDetailRoute,
+  getAgentOptimizationsTabRoute,
+} from '@studio/routes/utils';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 import { http, HttpResponse } from 'msw';
 
@@ -60,12 +65,33 @@ const renderStudy = (status: HelixJobStatus) => {
   return renderRoute(undefined, {
     history: getAgentOptimizationDetailRoute(workspace, jobName),
     routes: [
-      { path: ROUTES.workspace.agentOptimizationDetail, element: <AgentOptimizationDetailRoute /> },
+      {
+        path: ROUTES.workspace.agentOptimizationDetail,
+        element: (
+          <>
+            <Breadcrumbs />
+            <AgentOptimizationDetailRoute />
+          </>
+        ),
+      },
     ],
   });
 };
 
 describe('AgentOptimizationDetailRoute', () => {
+  it('links the agent and its optimizations tab in the breadcrumbs', async () => {
+    renderStudy('completed');
+
+    expect(await screen.findByRole('link', { name: 'hermes' })).toHaveAttribute(
+      'href',
+      getAgentDetailRoute(workspace, 'hermes')
+    );
+    expect(screen.getByRole('link', { name: 'Optimizations' })).toHaveAttribute(
+      'href',
+      getAgentOptimizationsTabRoute(workspace, 'hermes')
+    );
+  });
+
   it.each<[HelixJobStatus, string, string]>([
     ['created', 'Study queued', 'Waiting for the study to start. Trials appear once it finishes.'],
     ['pending', 'Study queued', 'Waiting for the study to start. Trials appear once it finishes.'],

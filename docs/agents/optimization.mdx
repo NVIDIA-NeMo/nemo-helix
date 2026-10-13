@@ -23,7 +23,6 @@ evaluation result before promotion.
 | Suggestion type     | Signal                                                                                                        | Result                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Model optimization  | An agent uses a single frontier model where a smaller model or route split may preserve quality at lower cost | Suggests a model swap or Switchyard random-routing virtual model                                            |
-| Skill optimization  | The agent uses skills and has an evaluation suite                                                             | Suggests running `nemo agents optimize-skills` to improve skill files and keep changes that pass evaluation |
 | Prompt optimization | The agent has an optimization config and baseline dataset                                                     | Suggests staging with `nemo agents optimize prepare-fileset`, then running `nemo agents optimize run-strategy` for Fabric-backed tuning |
 | New model scan      | Difference between the current model list and the previous optimizer snapshot                                 | Suggests evaluating or auditing newly available models                                                      |
 
@@ -215,74 +214,6 @@ VirtualModelsClient.from_client(client).create_virtual_model(
 
 <Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
-## Optimize Skills
-
-Skill optimization applies when the agent depends on local skill files and has
-an evaluation suite. The loop runs evaluations, analyzes failures, lets the
-coding agent edit only the configured skills directory, reruns verification,
-and keeps the change only when the evaluation result improves.
-
-<Tabs>
-
-<Tab title="CLI">
-
-```bash
-nemo agents optimize-skills --spec-file .agent-improver.yml
-```
-
-Set `open_pr: true` in the YAML when you want the loop to prepare a
-reviewable branch.
-
-A sample `.agent-improver.yml` is in
-`plugins/nemo-agents/examples/agent-improver.example.yml`.
-
-</Tab>
-<Tab title="Skill">
-
-Ask your coding agent:
-
-> Optimize the skills used by my agent and keep the changes that improve evaluation scores.
-
-The `agents-optimize` skill drives the skill-optimization loop when the
-selected agent has skills and an evaluation suite. Verify it is installed:
-
-```bash
-nemo skills show agents-optimize
-```
-
-What it does under the hood:
-
-- Confirms the agent uses skills (a `--skills-path`, a `.agent-improver.yml`,
-  or skill files referenced from the config).
-- Runs `nemo agents optimize-skills` against the configured skills directory.
-- Re-runs evaluation and keeps the change only when scores improve.
-- Persists outcomes to the `nemo-agent-optimizer` fileset.
-
-</Tab>
-<Tab title="Python SDK">
-
-```python
-import yaml
-from pathlib import Path
-
-from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
-from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.scheduler import NemoJobScheduler
-
-client = NemoClient.from_config()
-spec = yaml.safe_load(Path(".agent-improver.yml").read_text())
-result = NemoJobScheduler().submit_remote(
-    OptimizeSkillsJob,
-    spec,
-    base_url=client.base_url,
-    workspace=client.resolve_workspace(),
-)
-print(result)
-```
-
-</Tab>
-
-</Tabs>
 ## Inspect Saved Results
 
 Use the Files service to inspect what the optimizer saved:

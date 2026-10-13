@@ -38,6 +38,7 @@ from nemo_helix_plugin.intake.types import (
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.scores import AgentEvalTaskScore
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, TrialMeasurements
+from nhx_evals_sdk.metrics.utils import metric_type_name
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,11 @@ async def publish_to_intake(
             f"workspace {resolved_workspace!r}, or has been deleted."
         ) from error
 
+    output_names_by_metric: dict[tuple[str, str], list[str]] = {
+        (task.id, metric_type_name(metric)): [spec.name for spec in metric.output_spec()]
+        for task in result.tasks
+        for metric in task.metrics
+    }
     scores_by_trial: dict[str, list[AgentEvalTaskScore]] = defaultdict(list)
     for score in result.scores:
         scores_by_trial[score.trial_id].append(score)
@@ -295,7 +301,12 @@ async def publish_to_intake(
     async def _publish_scores(trial: AgentEvalTrial, *, session_id: str, span_id: str) -> PublishedTrial:
         written = 0
         for score in scores_by_trial.get(trial.id, []):
-            rows, omitted = mapping.score_to_evaluator_results(score, session_id=session_id, span_id=span_id)
+            rows, omitted = mapping.score_to_evaluator_results(
+                score,
+                session_id=session_id,
+                span_id=span_id,
+                output_names=output_names_by_metric.get((score.task_id, score.metric_type), ()),
+            )
             for row in rows:
                 row["workspace"] = resolved_workspace
                 await intake.create_evaluator_result(

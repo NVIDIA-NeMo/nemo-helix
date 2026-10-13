@@ -312,7 +312,7 @@ def test_skill_manifest_has_discovery_metadata() -> None:
     assert manifest["license"] == "Apache-2.0"
     assert manifest["metadata"] == {
         "owner": "nemo-helix",
-        "author": "nemo-helix",
+        "author": "NeMo Helix Team <nemo-helix@nvidia.com>",
         "maturity": "active",
         "tags": ["evaluation", "metrics", "agent-eval", "nemo-helix"],
     }
