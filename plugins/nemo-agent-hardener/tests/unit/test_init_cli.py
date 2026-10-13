@@ -130,3 +130,42 @@ def test_project_init_uses_typed_client_without_sdk_namespace(tmp_path: Path, mo
     assert len(requests) == 1
     assert requests[0].method == "POST"
     assert requests[0].url.path == "/apis/agent-hardener/v2/workspaces/default/manifests/inspect-project"
+
+
+def test_init_passes_repeated_backends_to_the_create_body(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from typer.testing import CliRunner
+
+    created: dict[str, Any] = {}
+    app = _patch_cli(cli_main, monkeypatch, [], created, _project(tmp_path))
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "init",
+            "--agent",
+            "clockbot",
+            "--backend",
+            "remote-mcp:9100,9101",
+            "--backend",
+            "db:5432",
+            "--output",
+            str(tmp_path / "agent-hardener.yaml"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert created["backends"] == ["remote-mcp:9100,9101", "db:5432"]
+
+
+def test_init_omits_backends_when_none_given(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from typer.testing import CliRunner
+
+    created: dict[str, Any] = {}
+    app = _patch_cli(cli_main, monkeypatch, [], created, _project(tmp_path))
+
+    result = CliRunner().invoke(app, ["init", "--agent", "clockbot", "--output", str(tmp_path / "out.yaml")])
+
+    assert result.exit_code == 0, result.output
+    assert "backends" not in created

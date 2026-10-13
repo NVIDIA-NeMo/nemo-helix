@@ -28,6 +28,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     inject_gateway_url,
     materialize_agent_package,
     parse_agent_ref,
+    parse_backends,
     require_guardable_harness,
     resolve_agent_to_manifest,
     shipped_dockerfile,
@@ -420,3 +421,58 @@ def test_a_stdio_server_contributes_no_egress() -> None:
     config = {"mcp": {"servers": {"local": {"transport": "stdio", "url": "/usr/bin/python"}}}}
 
     assert derive_egress(config) == []
+
+
+# --------------------------------------------------------------------------- parse_backends
+def test_parse_backends_reads_name_and_ports():
+    assert parse_backends(["remote-mcp:9100,9101", "db:5432"]) == [
+        {"name": "remote-mcp", "ports": [9100, 9101]},
+        {"name": "db", "ports": [5432]},
+    ]
+
+
+def test_parse_backends_empty_input():
+    assert parse_backends(None) == []
+    assert parse_backends([]) == []
+
+
+@pytest.mark.parametrize(
+    "spec", ["no-port", ":9100", "name:", "name:abc", "name:0", "name:70000", "name:9100,", "a b:9100"]
+)
+def test_parse_backends_rejects_malformed_specs(spec: str):
+    with pytest.raises(ValueError, match="backend"):
+        parse_backends([spec])
+
+
+def test_parse_backends_rejects_the_gateway_backend_name():
+    with pytest.raises(ValueError, match="nemo-inference-gateway"):
+        parse_backends(["nemo-inference-gateway:9000"])
+
+
+def test_resolve_appends_user_backends_after_the_gateway(tmp_path):
+    client = _client(_agent(), deployments=[{"agent": "calc", "status": "running", "port": 9123}])
+    resolved = resolve_agent_to_manifest(
+        "calc",
+        client=client,
+        base_url="http://localhost:8080",
+        default_workspace="default",
+        manifest_dir=tmp_path,
+        backends=[{"name": "remote-mcp", "ports": [9100]}],
+    )
+    assert resolved.manifest["backends"] == [
+        {"name": "nemo-inference-gateway", "ports": [8080]},
+        {"name": "remote-mcp", "ports": [9100]},
+    ]
+
+
+def test_resolve_keeps_user_backends_for_a_remote_platform(tmp_path):
+    client = _client(_agent(), deployments=[])
+    resolved = resolve_agent_to_manifest(
+        "calc",
+        client=client,
+        base_url="https://gw.example.com",
+        default_workspace="default",
+        manifest_dir=tmp_path,
+        backends=[{"name": "remote-mcp", "ports": [9100]}],
+    )
+    assert resolved.manifest["backends"] == [{"name": "remote-mcp", "ports": [9100]}]

@@ -199,6 +199,12 @@ def register(app: typer.Typer) -> None:
             help="Host[:port] the victim may reach, repeatable. A bare host opens 443 only — add "
             "'host:80' for plain HTTP. Config-only agents need this; their tool hosts can't be discovered.",
         ),
+        backend: list[str] = typer.Option(
+            None,
+            "--backend",
+            help="Host service the victim calls, as NAME:PORT[,PORT], repeatable (e.g. a remote MCP server "
+            "running on the host). Opens the sandbox-to-host route for those ports.",
+        ),
         secrets: list[str] = typer.Option(None, "--secrets", help="Override the derived secret names (repeatable)."),
         env: list[str] = typer.Option(
             None,
@@ -262,6 +268,8 @@ def register(app: typer.Typer) -> None:
             body["port"] = port
         if egress:
             body["egress"] = list(egress)
+        if backend:
+            body["backends"] = list(backend)
         if secrets:
             body["secrets"] = list(secrets)
         if env:

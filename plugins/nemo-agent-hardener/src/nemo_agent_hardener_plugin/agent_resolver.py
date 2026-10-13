@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -56,6 +57,10 @@ SANDBOX_RUNTIME = "openshell"
 #: command cannot rely on ``PATH`` or ``AGENT_CONFIG_PATH``.
 IMAGE_VENV = "/workspace/.venv"
 IMAGE_AGENT_CONFIG = f"/workspace/{AGENT_CONFIG_FILENAME}"
+
+#: Route-only backend naming the host-side Inference Gateway; reserved so a user backend cannot shadow it.
+GATEWAY_BACKEND_NAME = "nemo-inference-gateway"
+_BACKEND_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 #: Processes allowed to egress. Scoped to the image's venv rather than left open, because the
 #: sandbox policy uses these globs to decide which binaries may reach the network at all.
@@ -101,6 +106,20 @@ def parse_agent_ref(ref: str, default_workspace: str) -> tuple[str, str]:
         workspace, name = ref.split("/", 1)
         return workspace or default_workspace, name
     return default_workspace, ref
+
+
+def parse_backends(specs: list[str] | None) -> list[dict[str, Any]]:
+    """Parse ``NAME:PORT[,PORT...]`` specs into manifest backend entries; ``ValueError`` on a bad spec."""
+    backends: list[dict[str, Any]] = []
+    for spec in specs or []:
+        name, _, port_list = spec.partition(":")
+        ports = port_list.split(",")
+        if not _BACKEND_NAME.fullmatch(name) or not all(p.isdigit() and 0 < int(p) < 65536 for p in ports):
+            raise ValueError(f"invalid backend {spec!r}: expected NAME:PORT[,PORT...] with ports 1-65535")
+        if name == GATEWAY_BACKEND_NAME:
+            raise ValueError(f"invalid backend {spec!r}: {GATEWAY_BACKEND_NAME!r} is reserved for the gateway")
+        backends.append({"name": name, "ports": [int(p) for p in ports]})
+    return backends
 
 
 def inject_gateway_url(config: dict[str, Any], workspace: str, base_url: str) -> dict[str, Any]:
@@ -297,7 +316,7 @@ def gateway_backend(base_url: str) -> dict[str, Any] | None:
     if parts.hostname not in ("localhost", "127.0.0.1"):
         return None
     port = parts.port or (443 if parts.scheme == "https" else 80)
-    return {"name": "nemo-inference-gateway", "ports": [port]}
+    return {"name": GATEWAY_BACKEND_NAME, "ports": [port]}
 
 
 def fabric_start_command(port: int) -> str:
@@ -553,6 +572,7 @@ def resolve_agent_to_manifest(
     egress: list[str] | None = None,
     port: int | None = None,
     secrets: list[str] | None = None,
+    backends: list[dict[str, Any]] | None = None,
 ) -> ResolvedManifest:
     """Resolve a deployed-agent reference into a ready Agent Hardener manifest.
 
@@ -568,6 +588,8 @@ def resolve_agent_to_manifest(
     ``egress`` allow-lists external hosts the victim may reach (needed for config-only agents,
     whose tool hosts live in packaged code and so aren't found by egress discovery). ``port`` and
     ``secrets`` override the auto-derived victim port / secret names; leave them unset to derive.
+    ``backends`` are host services the victim calls (see :func:`parse_backends`); the gateway's own
+    route is added for a local platform.
     """
     workspace, name = parse_agent_ref(ref, default_workspace)
     agents = _agents_resource(client)
@@ -618,7 +640,7 @@ def resolve_agent_to_manifest(
         port=port,
         secrets=secrets,
         egress=egress,
-        backends=[gw_backend] if gw_backend else [],
+        backends=[*([gw_backend] if gw_backend else []), *(backends or [])],
         harness=harness,
         env=derive_agent_env(agent_config),
     )

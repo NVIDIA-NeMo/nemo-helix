@@ -25,9 +25,11 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_agent_hardener_plugin._perms import AgentHardenerManifestPerms
 from nemo_agent_hardener_plugin.agent_resolver import (
+    GATEWAY_BACKEND_NAME,
     AgentResolutionError,
     ResolvedManifest,
     inspect_agent,
+    parse_backends,
     resolve_agent_to_manifest,
 )
 from nemo_agent_hardener_plugin.api.v2._filters import make_filter_dep
@@ -257,6 +259,26 @@ def _yaml_with_agent_settings(manifest_yaml: str, manifest: AgentHardenerManifes
     return yaml.safe_dump(data, sort_keys=False)
 
 
+def _backends_or_422(specs: list[str] | None) -> list[dict[str, Any]]:
+    try:
+        return parse_backends(specs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _stored_user_backends(manifest_yaml: str) -> list[dict[str, Any]]:
+    """The non-gateway backends in a saved manifest, which refresh must not drop.
+
+    The gateway entry is left out because resolution derives it from the platform URL again.
+    """
+    try:
+        data = yaml.safe_load(manifest_yaml) or {}
+    except yaml.YAMLError:
+        return []
+    entries = data.get("backends") if isinstance(data, dict) else None
+    return [b for b in entries or [] if isinstance(b, dict) and b.get("name") != GATEWAY_BACKEND_NAME]
+
+
 @router.post("/manifests", response_model=AgentHardenerManifest, status_code=201, tags=["Agent Hardener Manifests"])
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerManifestPerms.WRITE])
@@ -299,6 +321,7 @@ async def _resolve_and_store_scaffold(
     egress: list[str] | None,
     port: int | None,
     secrets: list[str] | None,
+    backends: list[dict[str, Any]],
 ) -> tuple[ResolvedManifest, str]:
     """Resolve *agent_ref* and persist its scaffold as a fileset; return the resolution and the ref.
 
@@ -322,6 +345,7 @@ async def _resolve_and_store_scaffold(
                 egress=egress,
                 port=port,
                 secrets=secrets,
+                backends=backends,
             )
             return resolved, upload_project_dir(client, resolved.project_dir, workspace=workspace)
 
@@ -340,7 +364,12 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
     # because the project source has no agent, and the type system cannot see the validator.
     agent_ref = body.agent or ""
     resolved, fileset = await _resolve_and_store_scaffold(
-        workspace, agent_ref, egress=body.egress, port=body.port, secrets=body.secrets
+        workspace,
+        agent_ref,
+        egress=body.egress,
+        port=body.port,
+        secrets=body.secrets,
+        backends=_backends_or_422(body.backends),
     )
 
     manifest = AgentHardenerManifest.from_agent_resolution(
@@ -368,6 +397,7 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
     nothing to freeze — the upload *is* the frozen target. Caller-supplied values win over derived
     ones: they were asked for precisely because the project could not state them.
     """
+    backends = _backends_or_422(body.backends)
     client = get_nemo_client(as_service="agent-hardener", internal=True)
 
     def _inspect() -> dict[str, Any]:
@@ -411,6 +441,7 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         port=body.port or derived.get("port", 8000),
         secrets=body.secrets if body.secrets is not None else derived.get("secrets", []),
         egress=body.egress if body.egress is not None else derived.get("egress", []),
+        backends=backends,
         harness=body.harness,
         relay_integration_confirmed=body.relay_integration_confirmed,
         env=body.env or derived.get("env", {}),
@@ -505,6 +536,7 @@ async def refresh_manifest(
         egress=existing.egress or None,
         port=existing.port or None,
         secrets=existing.secrets or None,
+        backends=_stored_user_backends(existing.manifest_yaml),
     )
     stale = existing.agent_fileset
 
