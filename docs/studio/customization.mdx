@@ -22,11 +22,11 @@ Select **Customize a Model** from the fine-tuned models list to open **Fine-tune
 
 | Option | What it does |
 | ------ | ------------ |
-| Describe with AI | You pick a base model and a training dataset and describe your goal; a model drafts the training settings, then the form opens filled in. See [Describe with AI](#describe-with-ai). |
+| Describe with AI | You pick a base model and a training dataset and describe your goal; a model drafts the training settings for you to review, then the form opens with the draft filled in. See [Describe with AI](#describe-with-ai). |
 | Start from a template | Opens the form filled in from a recipe. NVIDIA recipes first register their base model and load their dataset into the workspace. See [Start from a Template](#start-from-a-template). |
 | Build from scratch | Opens the form with default values, for you to choose your own base model and dataset. |
 
-Whichever you pick, the form is where the job is created: nothing is submitted until you select **Start Fine-Tuning**.
+Whichever you pick, the form is where the job is created: no job starts until you select **Start Fine-Tuning**.
 
 To start from a model or job you already have, use one of these instead. Both open the form directly, with your choice applied:
 
@@ -65,14 +65,14 @@ Describe with AI drafts a complete job config from your goal, so you can start f
 | What's the goal of this fine-tune? | Your goal in plain language, such as teaching a new task, changing tone, or distilling a larger model. Mention constraints that matter, like a single GPU, low serving cost, or a quick test run. |
 | Drafting model | The model that writes the draft. It must support tool calling. It is not the model being fine-tuned. |
 
-Select **Draft settings**, or press ⌘/Ctrl + Enter in the goal field. The drafting model receives your inputs, the dataset's format and size, and Customizer's own guidance on choosing backends and hyperparameters, and returns a full job config: training backend, training method, hyperparameters, and compute. A status next to the button shows what is running.
+Select **Draft settings**, or press ⌘/Ctrl + Enter in the goal field. The drafting model receives your inputs, the dataset's format and size, and Customizer's own guidance on choosing backends and hyperparameters. It returns a complete job config for the training backend it chooses, including the training method and hyperparameters. A status next to the button shows what is running.
 
-Every draft is checked against the same job schema and form rules the form applies when you submit. When a draft fails, Studio sends the errors back to the drafting model and retries automatically, up to two times. If it still fails, the remaining errors are listed: adjust your goal and select **Draft again**.
+Every draft is checked against the backend's job schema and the form's own rules. When a draft fails these checks, Studio sends the errors back to the drafting model and retries automatically, up to two times. If it still fails, the remaining errors are listed: adjust your goal and select **Draft again**. If the drafting model returns no draft at all, or runs out of output before finishing one, Studio reports that right away without retrying.
 
 A draft that passes the checks shows:
 
-- **Training setup**: the base model and the main settings the draft chose, with a count of any other values it set.
-- **Why these settings**: the model's reasoning for its choices, and a **Before you submit** list of anything you still need to provide.
+- **Training setup**: the base model, the dataset, and the main settings the draft chose, with a count of any other values it set.
+- **Why these settings**: the model's reasoning for its choices and, when there is anything left for you to provide, a **Before you submit** list.
 - **View config**: the full request the form will submit for this draft, defaults included.
 - **Edit**: returns to the inputs so you can change them and draft again.
 
@@ -80,7 +80,7 @@ Select **Continue** to open the form filled in with the draft. Every value can s
 
 <Note>
 
-The drafting model never picks a teacher model or a reward environment for you. If your goal needs one that you haven't provided, such as a teacher for distillation, the draft leaves it for you to select in the form, and **Training setup** shows it as **Pick in the form**.
+Choosing a teacher model or a reward environment is left to you. A distillation draft leaves the teacher model for you to select in the form, and a GRPO draft does the same for the reward environment unless you picked one here. **Training setup** shows these as **Pick in the form**.
 
 </Note>
 
@@ -98,7 +98,7 @@ Studio ships these templates, all LoRA fine-tunes of Nemotron models on a text-t
 
 Lightning is the smallest and the quickest way to see the whole flow end to end. Ultra needs a multi-node allocation.
 
-Pick a template. Before the form opens, Studio prepares the workspace:
+When you start from a template, Studio prepares the workspace before the form opens:
 
 1. Registers the template's base model — a fileset backed by the Hugging Face repository, and a model entity pointing at it.
 2. Downloads the template's Hugging Face dataset, converts each row to the shape the training backend expects, and uploads it as a dataset fileset with both a training and a validation split.
