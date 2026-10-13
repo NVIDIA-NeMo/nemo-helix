@@ -8,6 +8,12 @@
 Documentation can be found at: https://docs.nvidia.com/nemo-helix.
 For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup.
 
+## Ingress and Gateway API routing
+
+The default `ingress.hosts[0].paths` and `httpRoute.pathRules` route
+`/openapi.json` and `/health/ready` with exact matches. Custom route lists replace
+the defaults, so include these paths explicitly when overriding them.
+
 ## Upgrading installations from before the rename
 
 Kubernetes Deployment selectors are immutable. If your existing component labels
