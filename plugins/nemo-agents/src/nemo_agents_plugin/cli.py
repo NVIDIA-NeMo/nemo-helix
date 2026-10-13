@@ -45,13 +45,13 @@ import re
 import shlex
 import sys
 import tempfile
-import time
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from pkgutil import resolve_name
+from time import monotonic, sleep
 from typing import Any, ClassVar, Optional, TypeVar, cast
 
 import click
@@ -2158,18 +2158,18 @@ def _wait_for_deployment(
         ``True`` if the deployment reached ``running``, ``False`` if it
         reached ``failed`` or the timeout expired.
     """
-    start = time.monotonic()
+    start = monotonic()
     last_status = ""
 
     typer.echo(f"Waiting for deployment '{name}' (timeout={timeout}s)...")
 
-    while time.monotonic() - start < timeout:
+    while monotonic() - start < timeout:
         dep = _run_sdk(
             "GET agent API",
             lambda: _json_from_response(client.get_deployment(workspace=workspace, name=name)),
         )
         status = dep.get("status", "")
-        elapsed = int(time.monotonic() - start)
+        elapsed = int(monotonic() - start)
 
         if status != last_status:
             line = f"  [{elapsed:>4}s] status: {status}"
@@ -2186,9 +2186,9 @@ def _wait_for_deployment(
             typer.echo(f"Deployment '{name}' failed.", err=True)
             return False
 
-        time.sleep(interval)
+        sleep(interval)
 
-    elapsed = int(time.monotonic() - start)
+    elapsed = int(monotonic() - start)
     typer.echo(f"Timeout after {elapsed}s. Last status: {last_status}", err=True)
     return False
 
@@ -2265,7 +2265,7 @@ def _print_log(log_path: Path, *, tail: Optional[int] = None, follow: bool = Fal
                     if chunk:
                         typer.echo(chunk, nl=False)
                     else:
-                        time.sleep(0.5)
+                        sleep(0.5)
             except KeyboardInterrupt:
                 return
     except BrokenPipeError:

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -84,18 +83,12 @@ def test_wait_for_platform_job_timeout_still_does_not_emit_client_job_run_event(
     jobs = MagicMock()
     jobs.get_job_status.return_value = _status_response("active")
 
-    # ``time.monotonic`` is one global attribute, so script it per caller: the
-    # waiter's own elapsed reads stay at 0 while the watch loop sees the clock
-    # advance to 4s and then 5s of its 5s deadline.
-    watch_clock = iter([0.0, 0.0, 4.0, 5.0])
-
-    def monotonic() -> float:
-        caller = sys._getframe(1).f_globals["__name__"]
-        return next(watch_clock) if caller == WATCH_MODULE else 0.0
-
+    # The waiter's own elapsed reads stay at 0 while the watch loop sees the clock advance to
+    # 4s and then 5s of its 5s deadline.
     with (
-        patch("time.monotonic", monotonic),
-        patch(f"{WATCH_MODULE}.time.sleep"),
+        patch(f"{WAITERS_MODULE}.monotonic", return_value=0.0),
+        patch(f"{WATCH_MODULE}.monotonic", side_effect=[0.0, 0.0, 4.0, 5.0]),
+        patch(f"{WATCH_MODULE}.sleep"),
         patch(EMIT_TARGET) as emit_event,
     ):
         assert waiters.wait_for_platform_job(jobs, "job-a", workspace="default", timeout=5, poll_interval=10) is False

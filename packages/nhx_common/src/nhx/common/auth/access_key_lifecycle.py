@@ -5,7 +5,7 @@
 
 import logging
 import math
-import time
+from time import monotonic
 
 import httpx
 import jwt
@@ -72,7 +72,7 @@ class AccessKeyLifecycleAuthenticator:
         )
 
     def _retry_after(self) -> int:
-        return max(1, math.ceil(self._circuit_open_until - time.monotonic()))
+        return max(1, math.ceil(self._circuit_open_until - monotonic()))
 
     def _record_success(self) -> None:
         self._failure_count = 0
@@ -81,7 +81,7 @@ class AccessKeyLifecycleAuthenticator:
     def _record_failure(self) -> int | None:
         self._failure_count += 1
         if self._failure_count >= ACCESS_KEY_LIFECYCLE_CIRCUIT_FAILURE_THRESHOLD:
-            self._circuit_open_until = time.monotonic() + ACCESS_KEY_LIFECYCLE_CIRCUIT_OPEN_SECONDS
+            self._circuit_open_until = monotonic() + ACCESS_KEY_LIFECYCLE_CIRCUIT_OPEN_SECONDS
             return self._retry_after()
         return None
 
@@ -94,7 +94,7 @@ class AccessKeyLifecycleAuthenticator:
 
     async def authenticate(self, token: str) -> ResolvedBearerToken | None:
         """Return trusted access-key claims, or None when auth rejects the token."""
-        now = time.monotonic()
+        now = monotonic()
         if now < self._circuit_open_until:
             retry_after = self._retry_after()
             logger.warning("Access-key lifecycle validation circuit is open for %s more seconds", retry_after)

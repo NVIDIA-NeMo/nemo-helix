@@ -551,7 +551,7 @@ async def test_async_run_resolves_names_and_calls_job_in_thread() -> None:
 
     with (
         patch("nemo_garak.sdk.AuditJob", return_value=job) as audit_job_cls,
-        patch("nemo_garak.sdk.asyncio.to_thread", new=AsyncMock(return_value=job.run.return_value)) as to_thread,
+        patch("nemo_garak.sdk.to_thread", new=AsyncMock(return_value=job.run.return_value)) as to_thread,
     ):
         resource = AsyncGarakPluginResource(platform)
         result = await resource.run(config="my-cfg", target="my-tgt", workspace="default")

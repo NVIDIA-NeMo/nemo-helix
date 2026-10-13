@@ -1701,7 +1701,7 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     entities.delete = AsyncMock()
     backend._entities = entities
 
-    with patch("nemo_agents_plugin.runner.deployments_backend.asyncio.sleep", new_callable=AsyncMock):
+    with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
         cleaned = await backend.delete_deployment("default", "hello-dep")
 
     assert cleaned
@@ -1729,8 +1729,8 @@ async def test_delete_returns_false_when_deployment_still_present() -> None:
     entities.delete = AsyncMock()
     backend._entities = entities
 
-    with patch("nemo_agents_plugin.runner.deployments_backend.asyncio.sleep", new_callable=AsyncMock):
-        with patch("nemo_agents_plugin.runner.deployments_backend.time.monotonic", side_effect=[0.0, 0.0, 6.0]):
+    with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
+        with patch("nemo_agents_plugin.runner.deployments_backend.monotonic", side_effect=[0.0, 0.0, 6.0]):
             cleaned = await backend.delete_deployment("default", "hello-dep")
 
     assert not cleaned

@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import AsyncIterator, Iterable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
+from time import monotonic, sleep
 from typing import ClassVar, Literal, TypeAlias
 
 import httpx
@@ -166,7 +166,7 @@ class _WatchDeadline:
 
     @classmethod
     def from_timeout(cls, job_name: str, timeout: float | None) -> _WatchDeadline:
-        expires_at = None if timeout is None else time.monotonic() + timeout
+        expires_at = None if timeout is None else monotonic() + timeout
         return cls(job_name=job_name, expires_at=expires_at)
 
     def raise_if_expired(self) -> None:
@@ -177,7 +177,7 @@ class _WatchDeadline:
     def remaining(self) -> float | None:
         if self.expires_at is None:
             return None
-        return self.expires_at - time.monotonic()
+        return self.expires_at - monotonic()
 
     def sleep_seconds(self, poll_interval: float) -> float:
         remaining = self.remaining()
@@ -412,7 +412,7 @@ async def _async_watch_job(
 def _sleep(poll_interval: float, deadline: _WatchDeadline) -> None:
     sleep_for = deadline.sleep_seconds(poll_interval)
     if sleep_for > 0:
-        time.sleep(sleep_for)
+        sleep(sleep_for)
 
 
 async def _async_sleep(poll_interval: float, deadline: _WatchDeadline) -> None:
