@@ -14,6 +14,7 @@ from kubernetes.client.models import V1Pod
 from kubernetes.client.rest import ApiException
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nemo_helix_plugin.jobs.constants import job_storage_subpath as build_job_storage_subpath
 from nemo_helix_plugin.jobs.execution_profiles import (
     BaseKubernetesExecutionProfileConfig as PluginBaseKubernetesExecutionProfileConfig,
@@ -484,6 +485,53 @@ def list_pods_by_labels(core_v1: client.CoreV1Api, namespace: str, labels: dict[
 
 def list_pod_status(core_v1: client.CoreV1Api, namespace: str, labels: dict[str, str]) -> list[PodStatus]:
     return [map_pod_to_pod_status(pod) for pod in list_pods_by_labels(core_v1, namespace, labels)]
+
+
+def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
+    """Classify task containers while a step is pausing.
+
+    Returns ``(still_running, exit_code)``. ``still_running`` is true when a
+    task container has not exited. ``exit_code`` is ``75`` when a container
+    stopped for a pause and no other container failed, ``0`` when every task
+    container exited 0, and the first other code otherwise. It is ``None`` when
+    no task container has terminated.
+
+    Only the task container is read, by name. Injected sidecars can keep running
+    after the task exits, and their exit codes say nothing about the pause.
+    """
+    if not pods:
+        return False, None
+    saw_exit = False
+    saw_pause = False
+    other: int | None = None
+    for pod in pods:
+        statuses: list[client.V1ContainerStatus] = []
+        if pod.status is not None and pod.status.container_statuses:
+            statuses = [
+                status for status in pod.status.container_statuses if status.name == NEMO_JOB_TASK_CONTAINER_NAME
+            ]
+        if not statuses:
+            phase = pod.status.phase if pod.status is not None else None
+            if phase in ("Succeeded", "Failed"):
+                continue
+            return True, None
+        for container in statuses:
+            terminated = container.state.terminated if container.state is not None else None
+            if terminated is None:
+                return True, None
+            saw_exit = True
+            code = terminated.exit_code if isinstance(terminated.exit_code, int) else 1
+            if code == PAUSE_EXIT_CODE:
+                saw_pause = True
+            elif code != 0 and other is None:
+                other = code
+    if not saw_exit:
+        return False, None
+    if other is not None:
+        return False, other
+    if saw_pause:
+        return False, PAUSE_EXIT_CODE
+    return False, 0
 
 
 def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, str], str]:
