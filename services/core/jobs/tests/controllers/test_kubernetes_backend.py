@@ -81,6 +81,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     common_labels_for_step,
     create_configmap,
     delete_configmap,
+    first_task_image_id,
     name_for_step,
 )
 from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
@@ -1565,7 +1566,7 @@ def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, tes
 def _terminated_task_pod(exit_code: int):
     terminated = SimpleNamespace(exit_code=exit_code)
     state = SimpleNamespace(terminated=terminated)
-    container = SimpleNamespace(name="nemo-job-task", state=state)
+    container = SimpleNamespace(name="nemo-job-task", image_id="sha256:training", state=state)
     return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Succeeded"))
 
 
@@ -3330,3 +3331,11 @@ def test_classify_task_containers_reads_only_the_task_container():
     pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task], phase="Running"))
 
     assert classify_task_containers([pod]) == (False, 75)
+
+
+def test_image_digest_comes_from_the_task_container():
+    sidecar = SimpleNamespace(name="istio-proxy", image_id="sha256:proxy")
+    task = SimpleNamespace(name="nemo-job-task", image_id="sha256:training")
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task]))
+
+    assert first_task_image_id([pod]) == "sha256:training"

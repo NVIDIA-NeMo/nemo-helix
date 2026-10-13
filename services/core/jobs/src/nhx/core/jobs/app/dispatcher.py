@@ -19,6 +19,7 @@ from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOp
 from nhx.common.api.in_memory_filter import InMemoryFilterRepository
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.auth import AuthContext
+from nhx.common.entities import SYSTEM_WORKSPACE
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.common.jobs.schemas import (
     HelixJobStatus,
@@ -38,7 +39,18 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     get_model_id,
     job_artifact_base_path,
 )
-from nhx.core.jobs.app.lifecycle import attempt_can_transition, rerun_status_details, with_lifecycle_timestamps
+from nhx.core.jobs.app.constants import (
+    IMAGE_DIGEST_AT_SAVE,
+    IMAGE_DIGEST_STEP,
+    STORAGE_RECLAIMED_AT,
+)
+from nhx.core.jobs.app.lifecycle import (
+    attempt_can_transition,
+    rerun_status_details,
+    saved_image_digest_for_step,
+    storage_targets,
+    with_lifecycle_timestamps,
+)
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
@@ -49,6 +61,7 @@ from nhx.core.jobs.entities import (
     HelixJobAttempt,
     HelixJobResult,
     HelixJobStep,
+    HelixJobStorageReclaim,
     HelixJobTask,
     get_step_spec_name,
 )
@@ -65,7 +78,7 @@ class StateTransitionConflictError(Exception):
 
 
 class JobOperationConflictError(Exception):
-    """Exception raised when a pause, resume, or rerun cannot proceed."""
+    """Exception raised when pause, resume, rerun, or a control update cannot proceed."""
 
     def __init__(self, detail: str):
         super().__init__(detail)
@@ -82,6 +95,10 @@ class PauseTTLLimitError(Exception):
 
 class JobAlreadyExistsError(ValueError):
     """Exception raised when creating a job whose name is already in use."""
+
+
+class JobStorageReclaimPendingError(ValueError):
+    """Exception raised when a deleted job with the same name still has storage to reclaim."""
 
 
 class JobDeletionConflictError(ValueError):
@@ -308,8 +325,12 @@ class JobDispatcher:
         store: EntityClient,
         files: AsyncFilesClient,
         secrets: AsyncSecretsClient,
+        system_store: EntityClient | None = None,
     ):
         self.store = store
+        # Storage reclaim records live in the system workspace, which callers can only read.
+        # Write them as the jobs service. Tests pass a single store for both.
+        self.system_store = system_store if system_store is not None else store
         self.files = files
         self.secrets = secrets
 
@@ -389,6 +410,7 @@ class JobDispatcher:
                 short_id = job_ref_id[-8:].lower()
                 source_prefix = job_req.source[:20]
                 job_name = f"{source_prefix}-{short_id}"
+            await self._reject_pending_storage_reclaim(job_name, workspace)
 
             # Resolve the fileset for job artifacts (caller-supplied output_location or auto-created).
             if job_req.output_location is not None:
@@ -609,6 +631,8 @@ class JobDispatcher:
                             "terminal state before deleting."
                         )
 
+            await self._queue_storage_reclaim(job_entity, attempts)
+
             # Get all results
             results = await self._list_all_entities(
                 HelixJobResult,
@@ -666,6 +690,64 @@ class JobDispatcher:
             logger.exception("Error deleting job", extra=extras)
             raise e
 
+    async def _queue_storage_reclaim(self, job: HelixJob, attempts: list[HelixJobAttempt]) -> None:
+        """Record the job's storage for the controller to reclaim once the job is gone.
+
+        Skipped when the job never mounted storage or the storage sweep already
+        reclaimed it. Written before any entity is deleted. A failure to write it
+        is logged and does not block the delete.
+        """
+        targets = storage_targets(job.platform_spec)
+        if not targets:
+            return
+        current = next((attempt for attempt in attempts if attempt.id == job.current_attempt_id), None)
+        if current is not None and (current.status_details or {}).get(STORAGE_RECLAIMED_AT):
+            return
+        extras = {"job": job.name, "workspace": job.workspace}
+        try:
+            await self.system_store.create(
+                HelixJobStorageReclaim(
+                    name=HelixJobStorageReclaim.name_for_job(job.id),
+                    workspace=SYSTEM_WORKSPACE,
+                    job_id=job.id,
+                    job_workspace=job.workspace,
+                    job_name=job.name,
+                    targets=targets,
+                )
+            )
+        except EntityConflictError:
+            # A previous delete of this job failed after queueing the reclaim.
+            pass
+        except Exception:
+            logger.exception("Could not queue storage reclaim for deleted job; its storage stays", extra=extras)
+            return
+        logger.info("Queued storage reclaim for deleted job", extra=extras)
+
+    async def _reject_pending_storage_reclaim(self, job_name: str, workspace: str) -> None:
+        """Refuse a job name whose deleted predecessor's storage is not reclaimed yet.
+
+        Job storage is keyed by name, so the pending reclaim would delete the new
+        job's storage. The controller clears the record within a reconcile tick.
+        """
+        try:
+            pending = await self.system_store.list(
+                HelixJobStorageReclaim,
+                filter_obj={"job_workspace": workspace, "job_name": job_name},
+                workspace=SYSTEM_WORKSPACE,
+            )
+        except Exception:
+            logger.warning(
+                "Could not check for a pending storage reclaim",
+                extra={"job": job_name, "workspace": workspace},
+                exc_info=True,
+            )
+            return
+        if pending.data:
+            raise JobStorageReclaimPendingError(
+                f"Storage of a deleted job named '{job_name}' in workspace '{workspace}' is still being reclaimed. "
+                "Retry in a few seconds."
+            )
+
     async def _list_all_entities(
         self,
         entity_type: type[EntityT],
@@ -707,6 +789,7 @@ class JobDispatcher:
                 attempt_id=attempt.id,
                 config=step_config,
                 status=HelixJobStatus.CREATED,
+                status_details=saved_image_digest_for_step(attempt.status_details, first_step.name),
             )
         )
 
@@ -1140,6 +1223,7 @@ class JobDispatcher:
                             workspace=attempt.workspace,
                             attempt_id=attempt.id,
                             config=next_step_config,
+                            status_details=saved_image_digest_for_step(attempt.status_details, next_step.name),
                         )
                     )
                     logger.info(
@@ -1184,7 +1268,7 @@ class JobDispatcher:
         # Update attempt if status changed, respecting state machine transitions to prevent
         # backward transitions from concurrent reconciler/scheduler updates
         if new_attempt_status != attempt.status:
-            attempt, changed = await self._save_attempt_status(attempt, new_attempt_status, saved_step)
+            attempt, changed = await self._save_attempt_status(attempt, new_attempt_status, saved_step, step_spec_name)
             if changed:
                 if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
                     try:
@@ -1221,6 +1305,7 @@ class JobDispatcher:
         attempt: HelixJobAttempt,
         status: HelixJobStatus,
         step: HelixJobStep,
+        step_spec_name: str,
     ) -> tuple[HelixJobAttempt, bool]:
         """Move the attempt to ``status`` after ``step`` changed. Return the attempt and whether it moved.
 
@@ -1241,6 +1326,14 @@ class JobDispatcher:
             attempt.status = status
             if status == HelixJobStatus.ERROR:
                 attempt.error_details = step.error_details
+            if status in (HelixJobStatus.PAUSED, HelixJobStatus.ERROR):
+                # A rerun compares images against this, on the step that saved it.
+                saved_digest = (step.status_details or {}).get(IMAGE_DIGEST_AT_SAVE)
+                if isinstance(saved_digest, str) and saved_digest:
+                    attempt.status_details = self._update_status_details_object(
+                        attempt.status_details,
+                        {IMAGE_DIGEST_AT_SAVE: saved_digest, IMAGE_DIGEST_STEP: step_spec_name},
+                    )
             try:
                 return await self.store.update(attempt), True
             except EntityConflictError as e:
@@ -1370,6 +1463,10 @@ class JobDispatcher:
             raise JobOperationConflictError(detail)
 
         previous_details = dict(attempt.status_details or {})
+        if previous_details.get(STORAGE_RECLAIMED_AT):
+            raise JobOperationConflictError(
+                f"Cannot rerun job '{job_entity.name}': storage has been reclaimed. Create a new job."
+            )
 
         seq = attempt.seq + 1
         # Use short ID prefix to stay within 32 char name limit
@@ -1451,6 +1548,10 @@ class JobDispatcher:
             return create_platform_job_response(job, attempt)
 
         if attempt.status == HelixJobStatus.PAUSED:
+            if (attempt.status_details or {}).get(STORAGE_RECLAIMED_AT):
+                raise JobOperationConflictError(
+                    f"Cannot resume job '{job.name}': storage has been reclaimed. Create a new job."
+                )
             paused_step = await self._get_step_by_status(job, workspace, [HelixJobStatus.PAUSED])
             if paused_step is None:
                 raise JobOperationConflictError(f"Cannot resume job '{job.name}': no paused step was found.")
@@ -1497,6 +1598,10 @@ class JobDispatcher:
         attempt = await self.get_current_attempt(job.name, workspace=job.workspace)
         if attempt is None:
             raise Exception(f"Job Attempt with Job ID {job.id} does not exist.")
+        if (attempt.status_details or {}).get(STORAGE_RECLAIMED_AT):
+            raise JobOperationConflictError(
+                f"Cannot update control for job '{job.name}': storage has been reclaimed. Create a new job."
+            )
 
         job.control = job.control.model_copy(update=changes)
         # Restore auth context around the write. The store can sanitize it for
