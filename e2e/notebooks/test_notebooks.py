@@ -131,6 +131,14 @@ BIFURCATED_NOTEBOOKS: set[str] = {
 }
 
 GPU_NOTEBOOKS: set[str] = {
+    # Customizer tutorials launch training jobs and require GPU-enabled quickstart.
+    "docs/customizer/tutorials/distillation-customization-job.ipynb",
+    "docs/customizer/tutorials/dpo-customization-job.ipynb",
+    "docs/customizer/tutorials/embedding-customization-job.ipynb",
+    "docs/customizer/tutorials/embedding-triplet-dataset.ipynb",
+    "docs/customizer/tutorials/lora-customization-job.ipynb",
+    "docs/customizer/tutorials/optimize-throughput.ipynb",
+    "docs/customizer/tutorials/sft-customization-job.ipynb",
     # Run-inference: need a deployed NIM
     "docs/run-inference/tutorials/deploy-models.md",
     "docs/run-inference/tutorials/run-inference.md",
@@ -144,6 +152,10 @@ GPU_NOTEBOOKS: set[str] = {
 }
 
 CELL_TIMEOUT_SECONDS = 1800
+
+# Customizer/GPU notebook tests can legitimately run longer than the global
+# 600s pytest timeout while waiting for backend training jobs to complete.
+pytestmark = pytest.mark.timeout(3600)
 
 
 def _rel_path_keys(rel: str) -> set[str]:
