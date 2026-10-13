@@ -212,6 +212,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         accessor((row) => row.evaluation?.aggregate_scores, {
           id: 'aggregate_scores',
           header: 'Scores',
+          size: 220,
           enableSorting: false,
           cell: ({ row }) => {
             const { evaluation } = row.original;
@@ -224,7 +225,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
                     key={score.key}
                     gap="density-xxs"
                     align="baseline"
-                    className="rounded bg-surface-raised px-1.5 py-0.5"
+                    className="whitespace-nowrap rounded bg-surface-raised px-1.5 py-0.5"
                   >
                     <Text className="text-secondary" kind="body/regular/sm">
                       {score.label}
