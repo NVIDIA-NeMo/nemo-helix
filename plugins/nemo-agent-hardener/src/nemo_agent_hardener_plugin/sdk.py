@@ -30,8 +30,10 @@ from nemo_helix_plugin.agent_hardener.types import (
     JsonValue,
     ManifestInit,
     ManifestUpdate,
+    SynthBenignSpec,
     ValidateModelRequest,
     WarGameModels,
+    WarGameSpec,
 )
 from nemo_helix_plugin.client.adapter import HelixClient, SyncHelixClient, client_from_platform
 from nemo_helix_plugin.entities.client import EntitiesClient
@@ -114,8 +116,8 @@ def _run_war_game(
     alongside ``config`` rather than silently dropped; ``rounds`` is an ``agent-hardener run`` argument and
     applies to both paths.
     """
-    if not (config or manifest_id):
-        raise ValueError("agent-hardener run requires a 'config' manifest path or a 'manifest_id'.")
+    if bool(config) == bool(manifest_id):
+        raise ValueError("agent-hardener run requires exactly one of 'config' or 'manifest_id'.")
     overlay = {"port": port, "defenders": defenders, "attack_intensity": attack_intensity}
     unsupported = sorted(key for key, value in overlay.items() if value is not None)
     if config and unsupported:
@@ -131,6 +133,7 @@ def _run_war_game(
         spec["replay_hitlog_fileset"] = replay_hitlog_fileset
     if models:
         spec["models"] = models
+    WarGameSpec.model_validate(spec)
     if benign_suite:
         spec["benign_suite_fileset"] = upload_file_to_fileset(
             sync_sdk, Path(benign_suite), workspace=workspace, prefix="benign-suite"
@@ -153,6 +156,7 @@ def _run_synth_benign(
     reviewed suite on the manifest entity through the sync ``sdk``.
     """
     spec: dict[str, JsonValue] = {"manifest_id": manifest_id, "env_file": env_file, "interview": interview}
+    SynthBenignSpec.model_validate(spec)
     return _to_json_map(
         AgentHardenerSynthBenignJob().run(
             spec,
@@ -355,6 +359,7 @@ class AgentHardenerPluginResource:
             "env_file": env_file,
             "driver": driver,
         }
+        WarGameSpec.model_validate(spec)
         return _to_json_map(
             NemoJobScheduler().submit_remote(
                 AgentHardenerRunJob, spec, base_url=base_url(), workspace=workspace or "default", profile=profile
@@ -389,6 +394,7 @@ class AgentHardenerPluginResource:
             "defense_guardrails": guardrails_toml,
             "defense_policy": policy_yaml,
         }
+        WarGameSpec.model_validate(spec)
         return _to_json_map(
             NemoJobScheduler().submit_remote(
                 AgentHardenerRunJob, spec, base_url=base_url(), workspace=workspace or "default", profile=profile
