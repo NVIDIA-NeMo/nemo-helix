@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
 import httpx
@@ -104,7 +104,7 @@ def build_auth_proxy_app(
     client = httpx.AsyncClient(base_url=base_url, timeout=timeout, follow_redirects=False, auth=auth)
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         try:
             yield
         finally:

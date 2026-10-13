@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
@@ -75,7 +75,7 @@ def test_create_cli_override_delegates_to_generated_callback(monkeypatch: pytest
     group.callback(invoke_without_command=True)(original)
 
     @contextlib.contextmanager
-    def fake_spec_from_builder(config_source: str, num_records: int) -> Iterator[str]:
+    def fake_spec_from_builder(config_source: str, num_records: int) -> Generator[str, None, None]:
         captured["config_source"] = config_source
         captured["num_records"] = num_records
         yield '{"spec": true}'
@@ -151,7 +151,7 @@ def test_create_cli_override_accepts_config_before_options(monkeypatch: pytest.M
         captured.update({"explain_profile": profile})
 
     @contextlib.contextmanager
-    def fake_spec_from_builder(config_source: str, num_records: int) -> Iterator[str]:
+    def fake_spec_from_builder(config_source: str, num_records: int) -> Generator[str, None, None]:
         captured["config_source"] = config_source
         captured["num_records"] = num_records
         yield '{"spec": true}'

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
@@ -236,7 +236,7 @@ def _validate_and_get_num_records(requested_num_records: int | None) -> int:
 async def _prepare_input(
     anon_ctx: AnonymizerContext,
     data: AnonymizerInputSpec,
-) -> AsyncIterator[PreparedAnonymizerInput]:
+) -> AsyncGenerator[PreparedAnonymizerInput, None]:
     prepared_input = await anon_ctx.prepare_input(data)
     try:
         yield prepared_input

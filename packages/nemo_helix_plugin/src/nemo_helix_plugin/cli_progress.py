@@ -13,7 +13,7 @@ stdout to ``jq`` or redirecting in CI stays clean.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from rich.console import Console
@@ -75,7 +75,7 @@ def request_progress(
     *,
     disabled: bool = False,
     console: Console | None = None,
-) -> Iterator[_ProgressHandle]:
+) -> Generator[_ProgressHandle, None, None]:
     """Render a stderr spinner with elapsed-time while the block runs.
 
     Args:

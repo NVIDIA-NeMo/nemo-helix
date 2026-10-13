@@ -14,7 +14,7 @@ translation, CLI/API wiring, deploy semantics, or durable session management.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -230,7 +230,7 @@ async def stream_fabric_agent_once(
     request: FabricOneShotRequest,
     *,
     fabric: Any | None = None,
-) -> AsyncIterator[FabricRuntimeStream]:
+) -> AsyncGenerator[FabricRuntimeStream, None]:
     """Start an ephemeral Fabric runtime and keep it alive for one stream."""
     fabric_client = fabric or Fabric()
     async with _one_shot_runtime(request, fabric=fabric_client, streaming=True) as runtime:
@@ -251,7 +251,7 @@ async def _one_shot_runtime(
     *,
     fabric: Any,
     streaming: bool = False,
-) -> AsyncIterator[Runtime]:
+) -> AsyncGenerator[Runtime, None]:
     try:
         async with AsyncExitStack() as stack:
             try:

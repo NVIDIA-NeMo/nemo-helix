@@ -17,7 +17,7 @@ import logging
 import os
 import re
 import shutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 
@@ -239,7 +239,7 @@ def _staged_bundle(
     *,
     ctx: JobContext,
     sdk: NemoClient | None,
-) -> Iterator[tuple[Path, Path | None]]:
+) -> Generator[tuple[Path, Path | None], None, None]:
     """Yield ``(optimize config path, bundle root)`` for the run.
 
     In fileset mode the whole bundle is downloaded and the root is the download dir, so the
@@ -278,7 +278,7 @@ def _bundle_root_of(config_path: Path, config_rel_path: str) -> Path:
 
 
 @contextlib.contextmanager
-def _bundle_workdir(bundle_root: Path | None) -> Iterator[None]:
+def _bundle_workdir(bundle_root: Path | None) -> Generator[None, None, None]:
     """Run the study with *bundle_root* as the working directory (no-op when ``None``).
 
     Relative paths in the optimize config are documented as fileset-root-relative, and they are
@@ -313,7 +313,7 @@ def _staged_dataset(
     workspace: str,
     ctx: JobContext,
     sdk: NemoClient | None,
-) -> Iterator[dict[str, Any]]:
+) -> Generator[dict[str, Any], None, None]:
     """Yield *optimize_config* with a fileset dataset reference replaced by a local path.
 
     ``eval.general.dataset`` may be a plain host path (CLI runs) or a

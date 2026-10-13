@@ -18,7 +18,7 @@ from __future__ import annotations
 import contextlib
 import json
 import shlex
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import Any
 
 import pytest
@@ -146,7 +146,7 @@ def _create_app(captured: dict[str, object], monkeypatch: pytest.MonkeyPatch) ->
     group.callback(invoke_without_command=True)(original)
 
     @contextlib.contextmanager
-    def fake_spec_from_builder(config_source: str, num_records: int) -> Iterator[str]:
+    def fake_spec_from_builder(config_source: str, num_records: int) -> Generator[str, None, None]:
         del config_source, num_records
         yield '{"spec": true}'
 
@@ -210,7 +210,7 @@ def _preview_app(captured: dict[str, object], monkeypatch: pytest.MonkeyPatch) -
         captured.update(kwargs)
 
     @contextlib.contextmanager
-    def fake_spec_from_builder(config_source: str, num_records: int) -> Iterator[str]:
+    def fake_spec_from_builder(config_source: str, num_records: int) -> Generator[str, None, None]:
         del config_source, num_records
         yield '{"spec": true}'
 

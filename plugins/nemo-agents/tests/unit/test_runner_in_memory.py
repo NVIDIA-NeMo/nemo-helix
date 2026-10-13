@@ -26,7 +26,7 @@ import socket
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
 from importlib.util import find_spec
 from pathlib import Path
@@ -972,7 +972,7 @@ async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) 
     process = SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
 
     @contextmanager
-    def track_reservation() -> Iterator[socket.socket]:
+    def track_reservation() -> Generator[socket.socket, None, None]:
         with reserve() as sock:
             sockets.append(sock)
             addresses.append(sock.getsockname())

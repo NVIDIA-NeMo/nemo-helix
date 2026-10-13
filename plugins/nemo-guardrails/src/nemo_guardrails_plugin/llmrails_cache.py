@@ -31,7 +31,7 @@ import hashlib
 import json
 import logging
 from collections import OrderedDict, deque
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -539,7 +539,7 @@ class Pool:
         self.provenance_history.append(provenance)
 
     @asynccontextmanager
-    async def acquire(self, build: Build, prepare: Prepare = lambda _r: None) -> AsyncIterator[LLMRails]:
+    async def acquire(self, build: Build, prepare: Prepare = lambda _r: None) -> AsyncGenerator[LLMRails, None]:
         """Take one instance for exclusive use; return it on context exit.
 
         Failure semantics:
@@ -662,7 +662,7 @@ class LLMRailsCache:
         *,
         main_llm: LLMModel | None = None,
         provenance: Provenance | None = None,
-    ) -> AsyncIterator[LLMRails]:
+    ) -> AsyncGenerator[LLMRails, None]:
         """Lease one :class:`LLMRails` for one logical operation.
 
         Called per request from the InferenceMiddleware handlers: non-streaming
@@ -748,7 +748,7 @@ class LLMRailsCache:
         self,
         stable: StableRailsConfig,
         provenance: Provenance | None,
-    ) -> AsyncIterator[Pool]:
+    ) -> AsyncGenerator[Pool, None]:
         """Resolve to a pool, refcount-pin it, and unpin on exit.
 
         Pin increment and closed-check run under ``self._lock`` so concurrent

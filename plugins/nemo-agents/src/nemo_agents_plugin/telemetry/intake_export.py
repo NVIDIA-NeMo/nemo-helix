@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -69,7 +69,7 @@ def supports_intake_atif_export(config: dict[str, Any], *, base_dir: Path | None
 
 
 @contextmanager
-def _plan_directory(base_dir: Path | None) -> Iterator[Path]:
+def _plan_directory(base_dir: Path | None) -> Generator[Path, None, None]:
     """Planning needs somewhere to resolve against; callers mid-run already have one."""
     if base_dir is not None:
         yield base_dir

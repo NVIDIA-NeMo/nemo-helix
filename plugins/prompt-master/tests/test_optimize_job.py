@@ -8,7 +8,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -48,7 +48,7 @@ STAGED: dict[str, Any] = {
 
 
 @contextlib.contextmanager
-def profiles(*execution_profiles: Any) -> Iterator[None]:
+def profiles(*execution_profiles: Any) -> Generator[None, None, None]:
     """Patch the Jobs client so ``compile`` sees exactly *execution_profiles*."""
 
     async def _get_execution_profiles() -> Any:
@@ -93,7 +93,7 @@ def stage_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[d
         seen: dict[str, Any] = {}
 
         @contextlib.contextmanager
-        def fake_resolve(config_rel_path: str, fileset_ref: str | None, **kwargs: Any) -> Iterator[Path]:
+        def fake_resolve(config_rel_path: str, fileset_ref: str | None, **kwargs: Any) -> Generator[Path, None, None]:
             seen.update(config_rel_path=config_rel_path, fileset_ref=fileset_ref, **kwargs)
             yield staged
 

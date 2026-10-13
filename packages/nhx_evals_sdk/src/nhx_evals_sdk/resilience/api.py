@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import ParamSpec, TypeVar, cast
@@ -35,7 +35,7 @@ async def use_resilience_session(
     *,
     global_limit: int | None = None,
     endpoint_max_limit: int | None = None,
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None, None]:
     """Override active scheduler for the current async context.
 
     This uses a ContextVar-backed session boundary so concurrent requests/jobs can

@@ -29,7 +29,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from types import TracebackType
-from typing import Any, cast
+from typing import Any
 
 import httpx
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -224,10 +224,7 @@ class JobsServiceProgressReporter:
             logger.warning(f"Stored metrics are not an object ({type(metrics).__name__}); seeding nothing")
             return {}
 
-        return cast(
-            dict[str, list[dict[str, float | int]]],
-            {name: list(points) for name, points in metrics.items() if isinstance(points, list)},
-        )
+        return {name: list(points) for name, points in metrics.items() if isinstance(points, list)}
 
     def report_running(self, phase: str, **details: Any) -> None:
         if "step" in details and "percentage_done" not in details and self._max_steps > 0:

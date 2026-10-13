@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -64,7 +64,7 @@ _prewarm_lock = threading.Lock()
 
 
 @contextmanager
-def _hf_hub_offline() -> Iterator[None]:
+def _hf_hub_offline() -> Generator[None, None, None]:
     """Temporarily force ``HF_HUB_OFFLINE=1`` for the duration of the block.
 
     The GLiNER child runtime inherits a snapshot of the parent environment at

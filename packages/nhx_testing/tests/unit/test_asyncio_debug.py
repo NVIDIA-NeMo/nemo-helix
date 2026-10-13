@@ -7,7 +7,7 @@ import asyncio
 import asyncio.runners
 import io
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import pytest
@@ -131,7 +131,7 @@ def test_bounded_teardown_unblocks_starlette_test_client():
     """The CI hang: a lifespan-spawned task survives shutdown and blocks the TestClient portal."""
 
     @asynccontextmanager
-    async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def _lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         asyncio.get_running_loop().create_task(_swallow_cancellation(asyncio.Event()), name="stubborn")
         yield
 

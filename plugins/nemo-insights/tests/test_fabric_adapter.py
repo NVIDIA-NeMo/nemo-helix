@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -295,7 +295,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
         return AnalystResult(summary="done"), object()
 
     @asynccontextmanager
-    async def fake_activate(config: Any) -> AsyncIterator[SimpleNamespace]:
+    async def fake_activate(config: Any) -> AsyncGenerator[SimpleNamespace, None]:
         seen["plugin_config"] = config
         # Relay resolves header_env against the environment while exporting,
         # so the variables have to be set for the duration of the run.
@@ -333,7 +333,7 @@ async def test_relay_refuses_an_ambient_user_plugin_file(
     activated: list[Any] = []
 
     @asynccontextmanager
-    async def fake_activate(config: Any) -> AsyncIterator[SimpleNamespace]:
+    async def fake_activate(config: Any) -> AsyncGenerator[SimpleNamespace, None]:
         activated.append(config)
         yield _clean_activation()
 
@@ -374,7 +374,7 @@ async def test_relay_refuses_plugin_config_inherited_during_activation(
     )
 
     @asynccontextmanager
-    async def fake_activate(config: Any) -> AsyncIterator[SimpleNamespace]:
+    async def fake_activate(config: Any) -> AsyncGenerator[SimpleNamespace, None]:
         yield inherited
 
     async def fail_if_called(**kwargs: Any) -> tuple[AnalystResult, object]:

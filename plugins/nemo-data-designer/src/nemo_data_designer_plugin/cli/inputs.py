@@ -15,7 +15,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import typer
@@ -62,7 +62,7 @@ def get_current_config_builder() -> DataDesignerConfigBuilder | None:
 
 
 @contextlib.contextmanager
-def _spec_from_builder(config_source: str, num_records: int) -> Iterator[str]:
+def _spec_from_builder(config_source: str, num_records: int) -> Generator[str, None, None]:
     try:
         builder = load_config_builder(config_source)
     except ConfigLoadError as e:

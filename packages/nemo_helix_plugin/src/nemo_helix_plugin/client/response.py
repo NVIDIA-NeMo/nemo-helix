@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator, Iterator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, overload
@@ -161,7 +161,7 @@ class NemoBinaryResponse:
             raise NemoTransportError(exc) from exc
 
     @contextmanager
-    def stream(self, chunk_size: int | None = None) -> Iterator[Iterator[bytes]]:
+    def stream(self, chunk_size: int | None = None) -> Generator[Iterator[bytes], None, None]:
         """Yield an iterator of raw byte chunks.
 
         Args:
@@ -211,7 +211,7 @@ class NemoStreamResponse(Generic[ModelT]):
         self.request = request
 
     @contextmanager
-    def stream(self) -> Iterator[Iterator[ModelT]]:
+    def stream(self) -> Generator[Iterator[ModelT], None, None]:
         """Yield an iterator of parsed model objects."""
         try:
             with self._stream_ctx as raw:
@@ -277,7 +277,7 @@ class AsyncNemoBinaryResponse:
             raise NemoTransportError(exc) from exc
 
     @asynccontextmanager
-    async def stream(self, chunk_size: int | None = None) -> AsyncIterator[AsyncIterator[bytes]]:
+    async def stream(self, chunk_size: int | None = None) -> AsyncGenerator[AsyncIterator[bytes], None]:
         """Yield an async iterator of raw byte chunks.
 
         Args:
@@ -325,7 +325,7 @@ class AsyncNemoStreamResponse(Generic[ModelT]):
         self.request = request
 
     @asynccontextmanager
-    async def stream(self) -> AsyncIterator[AsyncIterator[ModelT]]:
+    async def stream(self) -> AsyncGenerator[AsyncIterator[ModelT], None]:
         """Yield an async iterator of parsed model objects."""
         try:
             async with self._stream_ctx as raw:

@@ -3,7 +3,7 @@
 
 """Jobs service testing helpers."""
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
@@ -16,7 +16,7 @@ def subprocess_job_executor_patch(
     executors: Iterable[ExecutionProfileT] = (),
     *,
     profile: str = "default",
-) -> Iterator[list[ExecutionProfileT]]:
+) -> Generator[list[ExecutionProfileT], None, None]:
     """Patch Jobs execution profiles for CPU-step translation tests.
 
     The Jobs API translates ``cpu/<profile>`` container steps to

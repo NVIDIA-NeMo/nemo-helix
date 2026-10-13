@@ -436,7 +436,7 @@ def _copy_table_without_comments(table: tomlkit.items.Table, comments: set[str])
         if isinstance(item, tomlkit.items.Comment) and item.as_string().strip() in comments:
             continue
         if key is None:
-            cleaned.add(item)  # type: ignore
+            cleaned.add(item)
         else:
             cleaned.add(key, item)
     while cleaned._value.body and isinstance(cleaned._value.body[0][1], tomlkit.items.Whitespace):
@@ -484,7 +484,7 @@ def _remove_marked_child_tables(
             if isinstance(item, tomlkit.items.Whitespace):
                 changed = True
                 continue
-            cleaned.add(item)  # type: ignore
+            cleaned.add(item)
             continue
 
         if skip_next_child and key is not None:
@@ -494,7 +494,7 @@ def _remove_marked_child_tables(
                 continue
 
         if key is None:
-            cleaned.add(item)  # type: ignore
+            cleaned.add(item)
         else:
             cleaned.add(key, item)
 
@@ -521,7 +521,7 @@ def _remove_marked_project_table_entries(table: tomlkit.items.Table) -> tuple[to
             continue
 
         if key is None:
-            cleaned.add(item)  # type: ignore
+            cleaned.add(item)
         else:
             cleaned.add(key, item)
 

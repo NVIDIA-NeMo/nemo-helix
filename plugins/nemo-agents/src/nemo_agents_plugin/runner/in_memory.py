@@ -33,7 +33,7 @@ import shutil
 import socket
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -250,7 +250,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         return candidate
 
     @contextmanager
-    def reserve_socket(self) -> Iterator[socket.socket]:
+    def reserve_socket(self) -> Generator[socket.socket, None, None]:
         """Reserve a listening loopback socket until context exit for handoff to a child."""
         for candidate in self._port_candidates():
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
