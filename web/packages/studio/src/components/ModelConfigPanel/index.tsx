@@ -31,23 +31,20 @@ export interface ModelConfigPanelProps {
   onClose: () => void;
 }
 
-/** Right-hand config panel for a model, with subscriptions scoped to its individual fields. */
-export const ModelConfigPanel: FC<ModelConfigPanelProps> = (props) => {
-  const { control, getValues } = useFormContext<JobBuilderFormValues>();
+export const ModelConfigPanel: FC<ModelConfigPanelProps> = ({ modelId, ...props }) => {
+  const { control } = useFormContext<JobBuilderFormValues>();
   const modelIds = useWatch({
     control,
-    name: Array.from(
-      { length: getValues('models').length },
-      (_, index) => `models.${index}.id` as const
-    ),
+    name: 'models',
+    compute: (models) => models.map((model) => model.id),
   });
-  const modelIndex = modelIds.indexOf(props.modelId);
+  const modelIndex = modelIds.indexOf(modelId);
   return modelIndex < 0 ? null : (
-    <ModelConfigFields key={props.modelId} {...props} modelIndex={modelIndex} />
+    <ModelConfigFields key={`${modelId}:${modelIndex}`} {...props} modelIndex={modelIndex} />
   );
 };
 
-interface ModelConfigFieldsProps extends ModelConfigPanelProps {
+interface ModelConfigFieldsProps extends Omit<ModelConfigPanelProps, 'modelId'> {
   modelIndex: number;
 }
 

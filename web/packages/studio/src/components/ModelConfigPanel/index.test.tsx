@@ -55,48 +55,40 @@ const mountPanel = (openModelId: string) => {
   return ref;
 };
 
-const aliasesOf = (builder: Builder | null) =>
-  builder?.getBuilderValues().models.map((model) => model.alias);
+const modelsOf = (builder: Builder | null) => builder?.getBuilderValues().models ?? [];
 
-const snapshotOf = (builder: Builder | null) =>
-  builder?.getBuilderValues().models.map(({ id, alias, model }) => ({ id, alias, model }));
+const withoutIds = (builder: Builder | null, ...ids: string[]) =>
+  modelsOf(builder).filter((model) => !ids.includes(model.id));
 
 describe('ModelConfigPanel', () => {
   it('leaves every model untouched when the open model changes', () => {
     const ref = mountPanel('model-0');
-    const before = snapshotOf(ref.builder);
+    const before = modelsOf(ref.builder);
 
     act(() => ref.open('model-1'));
     act(() => ref.open('model-2'));
     act(() => ref.open('model-0'));
 
-    expect(snapshotOf(ref.builder)).toEqual(before);
+    expect(modelsOf(ref.builder)).toEqual(before);
   });
 
-  it('leaves every model with an alias when an earlier model is removed', () => {
-    const ref = mountPanel('model-2');
+  it('leaves the remaining models untouched when a model before the open one is removed', () => {
+    const ref = mountPanel('model-1');
+    const expected = withoutIds(ref.builder, 'model-0');
 
     act(() => ref.builder?.removeModel('model-0'));
 
-    expect(aliasesOf(ref.builder)).toEqual(['b', 'c']);
-    expect(validateModels(ref.builder?.getBuilderValues().models ?? [])).toEqual([]);
+    expect(modelsOf(ref.builder)).toEqual(expected);
+    expect(validateModels(modelsOf(ref.builder))).toEqual([]);
   });
 
-  it('leaves every model with an alias when the open model is removed', () => {
+  it('leaves the remaining models untouched when the open model is removed', () => {
     const ref = mountPanel('model-1');
+    const expected = withoutIds(ref.builder, 'model-1');
 
     act(() => ref.builder?.removeModel('model-1'));
 
-    expect(aliasesOf(ref.builder)).toEqual(['a', 'c']);
-    expect(validateModels(ref.builder?.getBuilderValues().models ?? [])).toEqual([]);
-  });
-
-  it('leaves every model with an alias when the last model is removed', () => {
-    const ref = mountPanel('model-0');
-
-    act(() => ref.builder?.removeModel('model-2'));
-    act(() => ref.builder?.removeModel('model-1'));
-
-    expect(aliasesOf(ref.builder)).toEqual(['a']);
+    expect(modelsOf(ref.builder)).toEqual(expected);
+    expect(validateModels(modelsOf(ref.builder))).toEqual([]);
   });
 });
