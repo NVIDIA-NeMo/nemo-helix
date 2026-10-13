@@ -7,7 +7,6 @@ import {
   START_OPTIONS,
   TEMPLATE_GROUP_TITLE,
 } from '@studio/components/CreateCustomizationStart/constants';
-import { DeleteSavedTemplate } from '@studio/components/CreateCustomizationStart/DeleteSavedTemplate';
 import { TemplateConflictBanner } from '@studio/components/CreateCustomizationStart/TemplateConflictBanner';
 import type { CreateCustomizationStartProps } from '@studio/components/CreateCustomizationStart/types';
 import { useSavedTemplates } from '@studio/components/CreateCustomizationStart/useSavedTemplates';
@@ -74,11 +73,7 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   } = useTemplateSetup(workspace);
   const isSettingUp = statusLabel !== '';
 
-  const {
-    data: saved,
-    isLoading: savedLoading,
-    refetch: refetchSaved,
-  } = useSavedTemplates(workspace);
+  const { data: saved, isLoading: savedLoading } = useSavedTemplates(workspace);
 
   // Setup runs long enough that leaving the page part-way through is a realistic move, and
   // nothing here blocks it. The promise resolves regardless of whether this is still on
@@ -113,14 +108,6 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
           name: template.name ?? template.id,
           description: template.description || 'Saved from an earlier job.',
           icon: Bookmark,
-          action: (
-            <DeleteSavedTemplate
-              workspace={workspace}
-              template={template}
-              onDeleted={() => void refetchSaved()}
-              disabled={isSettingUp}
-            />
-          ),
         })),
       },
       {
@@ -134,7 +121,7 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
         })),
       },
     ],
-    [savedTemplates, savedLoading, workspace, refetchSaved, isSettingUp]
+    [savedTemplates, savedLoading]
   );
 
   const activeTemplate =
@@ -185,7 +172,13 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
     );
     if (savedTemplate) {
       const initialValues = templateToFormFields(savedTemplate);
-      if (initialValues) onContinue({ optionId: 'template', initialValues });
+      if (initialValues) {
+        onContinue({
+          optionId: 'template',
+          initialValues,
+          savedTemplateName: savedTemplate.name ?? savedTemplate.id,
+        });
+      }
       return;
     }
     const recipe = CUSTOMIZATION_TEMPLATES.find((template) => template.id === templateId);

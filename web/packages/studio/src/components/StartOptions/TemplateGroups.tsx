@@ -63,37 +63,31 @@ export const TemplateGroups: FC<TemplateGroupsProps> = ({
                     />
                   ))
                 : group.templates.map((template) => (
-                    // The action is a sibling laid over the card, not inside it: the card
-                    // is one click target, and may not hold another.
-                    <div key={template.id} className="relative">
-                      <RadioCard
-                        value={template.id}
-                        label={template.name}
-                        description={
-                          template.id === pendingId ? (
-                            <span role="status">{pendingLabel}</span>
-                          ) : (
-                            template.description
-                          )
-                        }
-                        icon={
-                          template.id === pendingId ? (
-                            <Spinner size="small" aria-label={pendingLabel ?? 'Setting up'} />
-                          ) : (
-                            <template.icon size={16} color={group.accent} aria-hidden />
-                          )
-                        }
-                        compact
-                        labelKind={TILE_LABEL_KIND}
-                        descriptionKind={TILE_DESCRIPTION_KIND}
-                        showIndicator={false}
-                        className={`${TILE_RADIUS} ${template.action ? '[&_.nv-card-content]:pr-10!' : ''}`}
-                        disabled={disabled}
-                      />
-                      {template.action ? (
-                        <div className="absolute right-2 top-2">{template.action}</div>
-                      ) : null}
-                    </div>
+                    <RadioCard
+                      key={template.id}
+                      value={template.id}
+                      label={template.name}
+                      description={
+                        template.id === pendingId ? (
+                          <span role="status">{pendingLabel}</span>
+                        ) : (
+                          template.description
+                        )
+                      }
+                      icon={
+                        template.id === pendingId ? (
+                          <Spinner size="small" aria-label={pendingLabel ?? 'Setting up'} />
+                        ) : (
+                          <template.icon size={16} color={group.accent} aria-hidden />
+                        )
+                      }
+                      compact
+                      labelKind={TILE_LABEL_KIND}
+                      descriptionKind={TILE_DESCRIPTION_KIND}
+                      showIndicator={false}
+                      className={TILE_RADIUS}
+                      disabled={disabled}
+                    />
                   ))}
             </div>
           </Stack>

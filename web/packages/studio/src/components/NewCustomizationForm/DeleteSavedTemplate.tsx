@@ -2,35 +2,41 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
-import { useCustomizationDeleteJobTemplate } from '@nemo/sdk/generated/customizer/customization-job-templates';
+import {
+  getCustomizationListJobTemplatesQueryKey,
+  useCustomizationDeleteJobTemplate,
+} from '@nemo/sdk/generated/customizer/customization-job-templates';
 import type { CustomizationJobTemplate } from '@nemo/sdk/generated/customizer/schema';
 import { Banner, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
+import { useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { useState, type FC } from 'react';
 
 interface Props {
   workspace: string;
-  template: CustomizationJobTemplate;
-  /** Called once the delete lands, so the list can refetch. */
+  /** The saved template's name, which is also its key. */
+  name: string;
   onDeleted: () => void;
   disabled?: boolean;
 }
 
-/**
- * Deletes a saved template from a trash icon laid over its card, after a confirmation. The
- * card itself starts a job from the template, so this stays a separate control.
- */
-export const DeleteSavedTemplate: FC<Props> = ({ workspace, template, onDeleted, disabled }) => {
+/** Deletes the saved template the form was started from, after a confirmation. */
+export const DeleteSavedTemplate: FC<Props> = ({ workspace, name, onDeleted, disabled }) => {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const { mutateAsync: deleteTemplate, isPending } = useCustomizationDeleteJobTemplate();
-
-  const name = template.name ?? template.id;
 
   const remove = async () => {
     setError(null);
     try {
       await deleteTemplate({ workspace, name });
+      // Dropped from the cache before the refetch lands, so the start page never shows it.
+      const queryKey = getCustomizationListJobTemplatesQueryKey(workspace);
+      queryClient.setQueryData<CustomizationJobTemplate[]>(queryKey, (templates) =>
+        templates?.filter((template) => (template.name ?? template.id) !== name)
+      );
+      void queryClient.invalidateQueries({ queryKey });
       onDeleted();
       setConfirming(false);
     } catch (e) {
@@ -44,9 +50,6 @@ export const DeleteSavedTemplate: FC<Props> = ({ workspace, template, onDeleted,
       <Button
         kind="tertiary"
         color="danger"
-        size="small"
-        aria-label={`Delete ${name}`}
-        title="Delete template"
         disabled={disabled}
         onClick={() => {
           setError(null);
@@ -54,6 +57,7 @@ export const DeleteSavedTemplate: FC<Props> = ({ workspace, template, onDeleted,
         }}
       >
         <Trash2 size={16} aria-hidden />
+        Delete template
       </Button>
 
       <Modal

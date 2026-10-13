@@ -735,42 +735,8 @@ describe('CreateCustomizationStart', () => {
       );
       const [[selection]] = onContinue.mock.calls;
       expect(selection.initialValues.automodel.model).toBe(`${DEFAULT_WORKSPACE}/base-model`);
-    });
-
-    it('deletes a saved template from its tile, after confirming, without starting from it', async () => {
-      serveSaved([SAVED]);
-      const user = userEvent.setup();
-      const onContinue = vi.fn();
-      renderStart(onContinue);
-
-      await user.click(await screen.findByRole('button', { name: 'Delete my-sft-recipe' }));
-
-      expect(await screen.findByText('Delete my-sft-recipe?')).toBeInTheDocument();
-      expect(onContinue).not.toHaveBeenCalled();
-    });
-
-    it('holds deletes while a recipe is being set up', async () => {
-      serveSaved([SAVED]);
-      serveRows(() => new Promise(() => {}));
-      const user = userEvent.setup();
-      renderStart();
-
-      await screen.findByText('my-sft-recipe');
-      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
-
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'Delete my-sft-recipe' })).toBeDisabled()
-      );
-    });
-
-    it('leaves the curated recipes undeletable', async () => {
-      serveSaved([SAVED]);
-      renderStart();
-
-      await screen.findByText('my-sft-recipe');
-
-      // Curated recipes are code, not entities: the saved one is the only delete control.
-      expect(screen.getAllByRole('button', { name: /^Delete / })).toHaveLength(1);
+      // So the form can offer to delete it.
+      expect(selection.savedTemplateName).toBe('my-sft-recipe');
     });
 
     it('leaves out a template whose backend the form has no arm for', async () => {
@@ -785,7 +751,7 @@ describe('CreateCustomizationStart', () => {
 
     it('reaches templates past the first page', async () => {
       // The endpoint defaults to 20 per page, so a 21st template would otherwise be
-      // unreachable — neither selectable nor deletable.
+      // unreachable.
       const onPage = {
         1: { ...SAVED, name: 'page-one' },
         2: { ...SAVED, id: 'tpl-2', name: 'page-two' },

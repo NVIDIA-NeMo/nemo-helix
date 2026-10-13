@@ -15,7 +15,12 @@ export type StartOption = SharedStartOption<StartOptionId>;
  */
 export type StartSelection =
   | { optionId: 'scratch' }
-  | { optionId: 'template' | 'ai'; initialValues: CustomizationFormFields };
+  | {
+      optionId: 'template' | 'ai';
+      initialValues: CustomizationFormFields;
+      /** Set when the values came from a saved template, so the form can offer to delete it. */
+      savedTemplateName?: string;
+    };
 
 export interface CreateCustomizationStartProps {
   /** Workspace the template option provisions into and the AI option drafts against. */

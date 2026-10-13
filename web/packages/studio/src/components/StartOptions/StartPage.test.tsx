@@ -64,13 +64,7 @@ const GROUPS = [
     title: 'Recipes',
     templates: [
       { id: 'sft', name: 'SFT recipe', description: 'Supervised.', icon: Plus },
-      {
-        id: 'mine',
-        name: 'My recipe',
-        description: 'Saved.',
-        icon: Plus,
-        action: <button type="button">Delete My recipe</button>,
-      },
+      { id: 'mine', name: 'My recipe', description: 'Saved.', icon: Plus },
     ],
   },
 ];
@@ -164,15 +158,6 @@ describe('TemplateGroups', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'SFT recipe' }));
 
     expect(onSelect).toHaveBeenCalledWith('sft');
-  });
-
-  it('keeps a tile action apart from the tile', async () => {
-    const onSelect = vi.fn();
-    renderGroups({ onSelect });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Delete My recipe' }));
-
-    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('says what is running on the template being set up', () => {

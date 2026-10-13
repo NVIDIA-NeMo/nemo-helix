@@ -35,8 +35,6 @@ export interface StartTemplate {
   name: string;
   description: string;
   icon: LucideIcon;
-  /** A control for this template, laid over its card's end rather than inside the card. */
-  action?: ReactNode;
 }
 
 export interface StartTemplateGroup {
