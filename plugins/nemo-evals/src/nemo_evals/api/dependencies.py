@@ -44,7 +44,7 @@ async def get_taskset_run_service(
 
     Yields:
         A service using raw acceptance clients and the existing entity resolver.
-        The delegated client's owned transport closes when the request finishes.
+        The dependency exits the client's context when the request finishes.
     """
     caller = normalize_run_caller(caller)
     async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=caller) as async_client:

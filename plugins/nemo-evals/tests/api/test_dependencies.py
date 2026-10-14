@@ -31,14 +31,18 @@ async def test_taskset_service_adapts_request_authorizer(entity_store) -> None:
     authorize.assert_awaited_once_with("GET", "/apis/evals/v2/workspaces/source%20workspace/tasks/task%2Fname")
 
 
-async def test_taskset_run_dependency_closes_real_factory_transport(monkeypatch):
+async def test_taskset_run_dependency_closes_factory_client(monkeypatch):
     clients = []
+    close_calls = []
     factory = dependencies.get_async_nemo_client
 
     def provide(**kwargs):
         assert kwargs == {"as_service": "evals", "internal": True, "on_behalf_of": "user:alice"}
         client = factory(**kwargs)
         clients.append(client)
+        close = AsyncMock(wraps=client.close)
+        close_calls.append(close)
+        monkeypatch.setattr(client, "close", close)
         return client
 
     monkeypatch.setattr(dependencies, "get_async_nemo_client", provide)
@@ -55,10 +59,14 @@ async def test_taskset_run_dependency_closes_real_factory_transport(monkeypatch)
         assert 409 not in service._store.entity_client._client.retry.retryable_status_codes
         return {"alive": True}
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        assert (await client.get("/probe")).json() == {"alive": True}
-    assert len(clients) == 1
-    assert clients[0]._http.is_closed
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            assert (await client.get("/probe")).json() == {"alive": True}
+        assert len(clients) == 1
+        close_calls[0].assert_awaited_once()
+    finally:
+        for client in clients:
+            await client._http.aclose()
 
 
 @pytest.mark.parametrize("caller", ["user:alice", "service:runner", ""])
@@ -103,4 +111,4 @@ async def test_taskset_run_delegation_matches_stamped_creator(monkeypatch, calle
             assert derive_run_id("default", created.created_by, "key") == derive_run_id("default", expected, "key")
         finally:
             await dependency.aclose()
-        assert service._async_client._http.is_closed
+            await service._async_client._http.aclose()
