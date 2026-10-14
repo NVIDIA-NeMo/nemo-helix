@@ -2,14 +2,44 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from nhx.core.entities.app.repository.sqlalchemy.models import DBWorkspace
 from nhx.core.entities.app.repository.sqlalchemy.workspace import SQLAlchemyWorkspaceRepository
+from nhx.core.entities.controllers.workspace_cleanup import WorkspaceCleanup
 from nhx.core.entities.entities import WorkspaceDeletionStage
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+
+class _EmptyPage:
+    async def items(self):
+        if False:
+            yield None
+
+
+@contextmanager
+def _empty_cleanup_clients():
+    jobs_client = MagicMock()
+    jobs_client.list_jobs = AsyncMock(return_value=_EmptyPage())
+    models_client = MagicMock()
+    models_client.list_deployments = AsyncMock(return_value=_EmptyPage())
+    models_client.list_adapters = AsyncMock(return_value=_EmptyPage())
+    models_client.list_models = AsyncMock(return_value=_EmptyPage())
+    files_client = MagicMock()
+    files_client.list_filesets = AsyncMock(return_value=_EmptyPage())
+    with (
+        patch.object(AsyncJobsClient, "from_client", return_value=jobs_client),
+        patch.object(AsyncModelsClient, "from_client", return_value=models_client),
+        patch.object(AsyncFilesClient, "from_client", return_value=files_client),
+    ):
+        yield
 
 
 async def _seed_deletion_stage(
@@ -183,3 +213,55 @@ async def test_delete_is_fenced_by_current_lease(
         expected_updated_at=renewed.updated_at,
     )
     assert await workspace_repo.get_workspace_by_name(name=workspace.name) is None
+
+
+@pytest.mark.asyncio
+async def test_controller_reclaims_expired_deletion_with_real_repository(
+    workspace_repo: SQLAlchemyWorkspaceRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    await workspace_repo.create_workspace(name="restart-recovery")
+    stale_timestamp = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=2)
+    await _seed_deletion_stage(
+        session_maker,
+        name="restart-recovery",
+        stage=WorkspaceDeletionStage.DELETING,
+        updated_at=stale_timestamp,
+    )
+    controller = WorkspaceCleanup(
+        client=MagicMock(),
+        workspace_repository=workspace_repo,
+    )
+
+    with _empty_cleanup_clients():
+        await controller._async_step()
+
+    assert await workspace_repo.get_workspace_by_name(name="restart-recovery") is None
+    recreated = await workspace_repo.create_workspace(name="restart-recovery")
+    assert recreated.name == "restart-recovery"
+
+
+@pytest.mark.asyncio
+async def test_controller_leaves_recent_deletion_with_real_repository(
+    workspace_repo: SQLAlchemyWorkspaceRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    await workspace_repo.create_workspace(name="active-cleaner")
+    recent_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+    await _seed_deletion_stage(
+        session_maker,
+        name="active-cleaner",
+        stage=WorkspaceDeletionStage.DELETING,
+        updated_at=recent_timestamp,
+    )
+    controller = WorkspaceCleanup(
+        client=MagicMock(),
+        workspace_repository=workspace_repo,
+    )
+
+    with _empty_cleanup_clients():
+        await controller._async_step()
+
+    persisted = await workspace_repo.get_workspace_by_name(name="active-cleaner")
+    assert persisted is not None
+    assert persisted.updated_at == recent_timestamp
