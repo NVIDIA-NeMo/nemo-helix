@@ -65,11 +65,12 @@ The platform generates::
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional, cast
@@ -145,6 +146,10 @@ _JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = (
     | frozenset({"options", "options_file", "profile", "workspace"})
     | _RETIRED_ROUTING_FLAGS
 )
+
+# Set on the Typer context by :func:`programmatic_submit` so the job submit
+# callback skips its no-input help fallback for wrapper-supplied specs.
+_PROGRAMMATIC_SUBMIT_ATTR = "_nemo_programmatic_submit"
 
 
 # ---------------------------------------------------------------------------
@@ -445,8 +450,8 @@ def _add_submit_command(
             typer.echo(f"Error: invalid options — {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        programmatic_submit = bool(getattr(typer_ctx, "_nemo_programmatic_submit", False))
-        if as_callback and not programmatic_submit and not spec_source_provided and not field_flag_provided:
+        is_programmatic = bool(getattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, False))
+        if as_callback and not is_programmatic and not spec_source_provided and not field_flag_provided:
             typer.echo(typer_ctx.get_help())
             raise typer.Exit(code=1)
 
@@ -978,6 +983,27 @@ def resolve_submit_base_url(typer_ctx: typer.Context) -> str:
             return cast(str, resolved)
 
     return os.environ.get(_DEFAULT_BASE_URL_ENV_VAR) or _DEFAULT_BASE_URL
+
+
+@contextlib.contextmanager
+def programmatic_submit(typer_ctx: typer.Context) -> Iterator[None]:
+    """Mark a job submit callback call as carrying a caller-built spec.
+
+    A wrapper that replaces the generated submit flags and passes ``spec``
+    directly must call the original callback inside this block. Without it,
+    the callback inspects the wrapper's Click parameter sources, finds no
+    spec flag, and prints help instead of submitting.
+    """
+    had_marker = hasattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
+    previous = getattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, False)
+    setattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, True)
+    try:
+        yield
+    finally:
+        if had_marker:
+            setattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, previous)
+        else:
+            delattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
 
 
 def _build_function_submit_url(

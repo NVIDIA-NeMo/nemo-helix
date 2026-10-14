@@ -28,7 +28,12 @@ from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.config.models import Cluster, Context, OAuthUser, Preferences
 from nemo_helix_plugin.cli_renderer import CLIRenderer
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.commands import _post_function_submit, add_function_commands, add_job_commands
+from nemo_helix_plugin.commands import (
+    _post_function_submit,
+    add_function_commands,
+    add_job_commands,
+    programmatic_submit,
+)
 from nemo_helix_plugin.discovery import discover, discover_manifests
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
@@ -280,6 +285,24 @@ class TestBareFormBreaks:
         assert "Usage:" in result.output
         assert "No such command" not in result.output
         assert submit_calls == []
+
+
+class TestProgrammaticSubmit:
+    def test_marker_is_set_inside_block_and_removed_after(self) -> None:
+        typer_ctx = cast(typer.Context, SimpleNamespace())
+
+        with programmatic_submit(typer_ctx):
+            assert getattr(typer_ctx, "_nemo_programmatic_submit") is True
+
+        assert not hasattr(typer_ctx, "_nemo_programmatic_submit")
+
+    def test_existing_marker_is_restored_after_error(self) -> None:
+        typer_ctx = cast(typer.Context, SimpleNamespace(_nemo_programmatic_submit=False))
+
+        with pytest.raises(RuntimeError), programmatic_submit(typer_ctx):
+            raise RuntimeError("submit failed")
+
+        assert getattr(typer_ctx, "_nemo_programmatic_submit") is False
 
 
 # ---------------------------------------------------------------------------

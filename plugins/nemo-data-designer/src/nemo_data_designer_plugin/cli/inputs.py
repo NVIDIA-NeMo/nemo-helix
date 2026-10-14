@@ -25,6 +25,7 @@ from data_designer.config.config_builder import DataDesignerConfigBuilder
 from data_designer.config.utils.constants import DEFAULT_NUM_RECORDS
 from nemo_helix_plugin.cli_options import WorkspaceOption
 from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.commands import programmatic_submit
 
 _NON_INTERACTIVE_HELP = (
     "Display all records at once instead of browsing interactively. Ignored when --save-results is used."
@@ -175,7 +176,7 @@ def _replace_job_submit(group: typer.Typer) -> None:
             explain(profile=profile)
             return
 
-        with _spec_from_builder(config_source, num_records) as spec:
+        with _spec_from_builder(config_source, num_records) as spec, programmatic_submit(typer_ctx):
             original(
                 typer_ctx,
                 spec=spec,

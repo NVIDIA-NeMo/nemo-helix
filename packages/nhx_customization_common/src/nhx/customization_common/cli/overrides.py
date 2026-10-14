@@ -36,6 +36,7 @@ from nemo_helix_plugin.cli_state import resolve_cli_workspace
 from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.commands import (
     SubmittedJob,
+    programmatic_submit,
     resolve_submit_auth_headers,
     resolve_submit_base_url,
 )
@@ -223,10 +224,7 @@ def _replace_job_callback(
                 exist_ok=exist_ok,
                 hf_token_secret=hf_token_secret,
             )
-        had_programmatic_marker = hasattr(typer_ctx, "_nemo_programmatic_submit")
-        previous_programmatic_marker = getattr(typer_ctx, "_nemo_programmatic_submit", False)
-        setattr(typer_ctx, "_nemo_programmatic_submit", True)
-        try:
+        with programmatic_submit(typer_ctx):
             submitted = original(
                 typer_ctx,
                 spec=spec_json,
@@ -238,11 +236,6 @@ def _replace_job_callback(
                 config=None,
                 config_file=None,
             )
-        finally:
-            if had_programmatic_marker:
-                setattr(typer_ctx, "_nemo_programmatic_submit", previous_programmatic_marker)
-            else:
-                delattr(typer_ctx, "_nemo_programmatic_submit")
         _report_submitted(submitted, wait=wait, watch=watch, timeout=timeout, poll_interval=poll_interval)
 
 
