@@ -15,6 +15,7 @@ from nemo_evals.taskset_runs.store import RunRequestConflict
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ async def submit_taskset_run(
     except HTTPException:
         raise
     except Exception:
-        logger.exception("Failed to submit taskset run in workspace %s", workspace)
+        logger.exception("Failed to submit taskset run in workspace %s", sanitize_for_log(workspace))
         raise HTTPException(status_code=500, detail="Internal server error") from None
     response.status_code = status.HTTP_201_CREATED if outcome.created else status.HTTP_200_OK
     return outcome.status
