@@ -579,7 +579,7 @@ def test_create_resolves_and_persists_agent_bundle(monkeypatch) -> None:
     }
     monkeypatch.setattr(
         "scaled_evals.api.routers.evaluations.accessible_bundle_for_run",
-        lambda db, principal, bundle_id: resolved,
+        lambda db, principal, bundle_id, **_: resolved,
     )
 
     response = client.post(
