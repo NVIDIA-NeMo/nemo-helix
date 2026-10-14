@@ -21,5 +21,8 @@ credential helpers it ships,
 [docker-credential-gcr](https://github.com/googlecloudplatform/docker-credential-gcr),
 [amazon-ecr-credential-helper](https://github.com/awslabs/amazon-ecr-credential-helper) and
 [docker-credential-acr](https://github.com/osscontainertools/docker-credential-acr), under the Apache
-License 2.0; [tini](https://github.com/krallin/tini), under the MIT License; and
-[BusyBox](https://busybox.net), under the GNU General Public License v2.
+License 2.0; [tini](https://github.com/krallin/tini), under the MIT License, statically linked with
+the [GNU C Library](https://www.gnu.org/software/libc/), under the GNU Lesser General Public License
+v2.1; and [BusyBox](https://busybox.net), under the GNU General Public License v2, statically linked
+with [musl](https://musl.libc.org), under the MIT License. The source code of these components is in
+the image under `/usr/share/nemo-helix/source-distributions/nhx-kaniko`.

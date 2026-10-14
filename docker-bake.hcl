@@ -950,6 +950,12 @@ target "nhx-kaniko-docker" {
   target     = "runtime"
   context    = "."
   dockerfile = "docker/builder/Dockerfile.nhx-kaniko"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
   cache-to   = maybe_registry_cache_to("nhx-kaniko")
   cache-from = maybe_registry_cache_from("nhx-kaniko")
   tags       = sha_and_maybe_latest_tags("nhx-kaniko")
@@ -961,6 +967,12 @@ target "nhx-kaniko-smoke-test" {
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/builder/Dockerfile.nhx-kaniko"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
   cache-from = maybe_registry_cache_from("nhx-kaniko")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()

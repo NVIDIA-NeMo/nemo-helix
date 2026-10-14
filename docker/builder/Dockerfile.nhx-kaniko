@@ -12,8 +12,32 @@
 # version changes.
 
 ARG KANIKO_VERSION=v1.28.5
+ARG NHX_PYTHON_BASE=nhx-python-base
 
-FROM ghcr.io/osscontainertools/kaniko:${KANIKO_VERSION}-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS runtime
+FROM ghcr.io/osscontainertools/kaniko:${KANIKO_VERSION}-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS kaniko
+
+# The image has no Python, so its sources are collected here. docker/sources/nhx-kaniko.json pins the
+# components its Go binaries don't record: kaniko itself, BusyBox and the musl it is linked against,
+# and tini and the Ubuntu glibc it is linked against. Re-check it whenever the digest above moves.
+FROM ${NHX_PYTHON_BASE} AS sources
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+COPY docker/sources/nhx-kaniko.json /tmp/nhx-kaniko.json
+COPY --from=kaniko /kaniko/executor /kaniko/warmer /kaniko/docker-credential-gcr \
+    /kaniko/docker-credential-ecr-login /kaniko/docker-credential-acr-env /tmp/kaniko/
+RUN python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-kaniko.json \
+        --output /source-distributions/nhx-kaniko && \
+    python3 /usr/local/bin/collect-go-module-sources.py \
+        --binary /tmp/kaniko/executor \
+        --binary /tmp/kaniko/warmer \
+        --binary /tmp/kaniko/docker-credential-gcr \
+        --binary /tmp/kaniko/docker-credential-ecr-login \
+        --binary /tmp/kaniko/docker-credential-acr-env \
+        --output /source-distributions/nhx-kaniko
+
+FROM kaniko AS runtime
+COPY --from=sources /source-distributions/nhx-kaniko/ /usr/share/nemo-helix/source-distributions/nhx-kaniko/
 
 # The binary runs on the image's platform, and `supervise`'s shell, /busybox/sh, is there.
 FROM runtime AS smoke-test

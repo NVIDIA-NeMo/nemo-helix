@@ -1,0 +1,55 @@
+{
+  "sources": [
+    {
+      "name": "kaniko",
+      "version": "1.28.5",
+      "license": "Apache-2.0",
+      "url": "https://github.com/osscontainertools/kaniko/archive/refs/tags/v1.28.5.tar.gz",
+      "sha256": "37362cb5fb31c1b1f4de07d4c1150f158864b52aa85a9c9a93f145666fd6eef8",
+      "covers": ["go-module:github.com/osscontainertools/kaniko@v1.28.5"]
+    },
+    {
+      "name": "busybox",
+      "version": "1.38.0",
+      "license": "GPL-2.0-only",
+      "url": "https://busybox.net/downloads/busybox-1.38.0.tar.bz2",
+      "sha256": "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2",
+      "covers": ["binary:busybox@1.38.0"]
+    },
+    {
+      "name": "musl",
+      "version": "1.2.5",
+      "license": "MIT",
+      "url": "https://musl.libc.org/releases/musl-1.2.5.tar.gz",
+      "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4"
+    },
+    {
+      "name": "alpine-musl-getconf",
+      "version": "48b16204aeeda5bc1f87e49c6b8e23d9abb07c73",
+      "license": "BSD-2-Clause",
+      "url": "https://github.com/alpinelinux/aports/raw/48b16204aeeda5bc1f87e49c6b8e23d9abb07c73/main/musl/getconf.c",
+      "sha256": "d87d0cbb3690ae2c5d8cc218349fd8278b93855dd625deaf7ae50e320aad247c"
+    },
+    {
+      "name": "tini",
+      "version": "0.19.0",
+      "license": "MIT",
+      "url": "https://github.com/krallin/tini/archive/refs/tags/v0.19.0.tar.gz",
+      "sha256": "0fd35a7030052acd9f58948d1d900fe1e432ee37103c5561554408bdac6bbf0d"
+    },
+    {
+      "name": "glibc",
+      "version": "2.23",
+      "license": "LGPL-2.1-or-later",
+      "url": "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/glibc/2.23-0ubuntu11/glibc_2.23.orig.tar.xz",
+      "sha256": "bf6c528eeebefcacc295270068b79330c1fb2b22458ff66285b4175d23442c96"
+    },
+    {
+      "name": "glibc-ubuntu-patches",
+      "version": "2.23-0ubuntu11",
+      "license": "LGPL-2.1-or-later",
+      "url": "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/glibc/2.23-0ubuntu11/glibc_2.23-0ubuntu11.debian.tar.xz",
+      "sha256": "fcaea11240f3eb24c28420f0bb7a48409da99939be6e1a5ed1479ed4ad1273db"
+    }
+  ]
+}

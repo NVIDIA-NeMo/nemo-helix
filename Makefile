@@ -67,6 +67,10 @@ docker-build: ## Build Docker bake TARGET without pushing, default docker-cpu
 docker-load: ## Build and load single-platform Docker bake TARGET, default docker-cpu
 	docker buildx bake$(DOCKER_BAKE_ALLOW_FS_READ_FLAG) -f $(DOCKER_BAKE_FILE) $(DOCKER_TARGET) $(DOCKER_PLATFORM_SET) --load
 
+.PHONY: docker-check-sources
+docker-check-sources: ## Check a loaded IMAGE (e.g. nhx-kaniko), built with NHX_COLLECT_SOURCES=1, carries every component's source
+	docker/scripts/check-image-source-coverage.sh "$(or $(IMAGE_REGISTRY),my-registry)/$(IMAGE):$(or $(BAKE_TAG),local)" "$(IMAGE)"
+
 .PHONY: docker-push
 docker-push: ## Build and push Docker bake TARGET, default docker-cpu
 	docker buildx bake$(DOCKER_BAKE_ALLOW_FS_READ_FLAG) -f $(DOCKER_BAKE_FILE) $(DOCKER_TARGET) --push
