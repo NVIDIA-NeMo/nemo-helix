@@ -247,13 +247,20 @@ on — `CurrentPrincipal.owner_id` — and one function that produces it.
 
 Consequences worth knowing before you rely on this:
 
-- **`/v1` is single-tenant.** Every caller resolves to owner `dev`, so all
-  callers share one view of tasks and evaluations. Bridging
-  platform identity means setting `request.state.principal` upstream; no route
-  changes.
-- **`CONTROL_PLANE_AUTH_ENABLED=true` now fails closed with 401** rather than
-  gating on a provider. There is nothing left to consult, and silently falling
-  back to the shared owner would hand one caller another caller's data.
+- **Ownership is the platform principal.** With platform auth enabled, the owner
+  of every row is the authenticated principal, or the user a service acts on
+  behalf of. With platform auth disabled every caller is owner `dev`.
+- **Admin is a platform permission.** `scaled-evals.admin` gates the
+  `/v1/admin/*` routes and image qualification and promotion. The platform
+  grants it, and `HelixAdmin` in the `system` workspace holds it implicitly.
+  Admins also see every owner's agent bundles and can edit any config profile.
+  Non-admins get 403 from the platform. There is no plugin allowlist.
+- **Admin analytics come from Intake.** Each terminal evaluation records one
+  span (source `scaled-evals-executions`) in the platform jobs workspace.
+  `/v1/admin/usage`, `/compute`, and `/failures` aggregate those spans over a
+  window of at most 90 days. Queued and active counts still come from the
+  evaluation store. A span that fails to record is logged and skipped, so
+  analytics can undercount during an Intake outage.
 - **The CLI takes a token, it does not obtain one.** `--token` /
   `SCALED_EVALS_TOKEN` is the only credential source; `scaled-evals auth
   login|status|logout` are gone and `auth whoami` is now top-level

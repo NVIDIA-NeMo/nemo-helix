@@ -6,19 +6,9 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
-
-try:
-    from nemo_scaled_evals_plugin.service import ScaledEvalsService
-    from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
-    from scaled_evals.api.db import get_conn
-    from scaled_evals.api.schemas.common import decode_cursor, encode_cursor
-    from scaled_evals.api.settings import settings
-except ImportError as exc:
-    pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
-
-app = NemoServiceAdapter(ScaledEvalsService()).create_app()
-client = TestClient(app)
+from api_test_fixture import app, client
+from scaled_evals.api.db import get_conn
+from scaled_evals.api.schemas.common import decode_cursor, encode_cursor
 
 NOW = datetime(2026, 6, 6, tzinfo=UTC)
 
@@ -108,13 +98,10 @@ def test_invalid_cursor_returns_400() -> None:
         "/v1/users/me/evaluations",
         "/v1/users/me/tasks",
         "/v1/users/me/activity",
-        "/v1/admin/users",
         "/v1/admin/users/user-1/evaluations",
     ],
 )
-def test_list_endpoints_reject_invalid_cursor(path: str, monkeypatch) -> None:
-    # Exercise pagination behind the admin gate as the local dev principal.
-    monkeypatch.setattr(settings, "control_plane_admin_subjects", "dev")
+def test_list_endpoints_reject_invalid_cursor(path: str) -> None:
     _use_fetchall([])
 
     response = client.get(path, params={"cursor": "bogus"})

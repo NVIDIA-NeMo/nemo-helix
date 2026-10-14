@@ -49,6 +49,7 @@ from psycopg.rows import dict_row
 
 from scaled_evals.api import artifacts
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
+from scaled_evals.api.execution_analytics import emit_execution_span
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
@@ -563,6 +564,7 @@ class Dispatcher:
                     evaluation_id,
                     expected_execution_number=execution_number,
                 )
+            self._record_analytics(row)
         except Exception as exc:  # noqa: BLE001 — durable queue retries up to its limit
             LOG.warning("evidence generation failed for %s: %s", evaluation_id, exc)
             with self.connect() as conn:
@@ -571,6 +573,16 @@ class Dispatcher:
                     str(exc),
                     expected_execution_number=execution_number,
                 )
+
+    def _record_analytics(self, row: dict[str, Any]) -> None:
+        """Record the terminal evaluation in Intake; analytics never block evidence."""
+        try:
+            with self.connect() as conn:
+                usage = ResourceUsageRepository(conn).totals_for_evaluation(str(row["id"]))
+        except Exception:  # noqa: BLE001 — analytics are best-effort
+            LOG.warning("could not read resource usage for %s", row["id"], exc_info=True)
+            return
+        emit_execution_span(row, usage, workspace=settings.platform_jobs_workspace)
 
     def build_archive(self, evaluation_id: str) -> None:
         """Build ``results.tar.gz`` for an evaluation from synced artifacts."""

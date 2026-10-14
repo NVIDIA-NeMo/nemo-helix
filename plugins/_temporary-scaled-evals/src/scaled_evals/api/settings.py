@@ -290,19 +290,7 @@ class Settings(BaseSettings):
     nvidia_inference_base_url: str = "https://inference-api.nvidia.com/v1"
     nvidia_anthropic_base_url: str = "https://inference-api.nvidia.com"
 
-    # --- Control-plane ownership --------------------------------------------
-    # The plugin does not authenticate callers; the platform does that before a
-    # plugin route runs. Leaving this false resolves every caller to the shared
-    # development owner. Setting it true makes scaled_evals.api.auth fail closed
-    # with 401 until platform identity is bridged into the ownership model.
-    control_plane_auth_enabled: bool = False
-    # Comma-separated stable subjects are preferred. Verified email fallback
-    # supports initial onboarding while an administrator discovers a colleague's
-    # subject via /users/me; neither list grants team membership.
-    control_plane_admin_subjects: str = ""
-    control_plane_admin_emails: str = ""
-    control_plane_admin_groups: str = ""
-    control_plane_admin_roles: str = ""
+    # --- Control-plane admission --------------------------------------------
     # Weighted sandbox-slot admission. Submissions may queue beyond these
     # limits; dispatch only claims work when its requested parallelism fits.
     control_plane_cluster_run_limit: int = 500

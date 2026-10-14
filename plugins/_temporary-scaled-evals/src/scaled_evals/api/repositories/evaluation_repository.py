@@ -202,6 +202,7 @@ _LOAD_FOR_DISPATCH_SQL = """
     SELECT
         e.id,
         e.name,
+        e.owner_id,
         e.framework,
         e.requested_framework_version,
         e.framework_version,

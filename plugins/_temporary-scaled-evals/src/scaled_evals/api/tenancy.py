@@ -6,43 +6,27 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends, HTTPException
+from nemo_helix_plugin.dependencies import RequestAuthorizer, get_request_authorizer
 
-from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import Database, get_db
-from scaled_evals.api.settings import settings
-
-
-def record_principal(db: Database, principal: CurrentPrincipal) -> None:
-    """JIT-register normalized identity claims; never persists bearer tokens."""
-    db.users.upsert(
-        principal.owner_id,
-        email=principal.email,
-        username=principal.username,
-        display_name=principal.display_name,
-    )
+# Any route stamped ``@admin_only`` works; the platform decides whether the
+# caller holds ``scaled-evals.admin`` for it.
+_ADMIN_PROBE = ("GET", "/apis/scaled-evals/v1/admin/capacity")
 
 
-def is_admin(principal: CurrentPrincipal) -> bool:
-    subjects = {value.strip() for value in settings.control_plane_admin_subjects.split(",") if value.strip()}
-    emails = {value.strip().lower() for value in settings.control_plane_admin_emails.split(",") if value.strip()}
-    groups = {value.strip() for value in settings.control_plane_admin_groups.split(",") if value.strip()}
-    roles = {value.strip() for value in settings.control_plane_admin_roles.split(",") if value.strip()}
-    return (
-        principal.owner_id in subjects
-        or bool(principal.email and principal.email.lower() in emails)
-        or bool(groups.intersection(principal.groups))
-        or bool(roles.intersection(principal.roles))
-    )
+async def caller_is_admin(authorize: Annotated[RequestAuthorizer, Depends(get_request_authorizer)]) -> bool:
+    """Return whether the platform grants the caller ``scaled-evals.admin``.
+
+    Admin-only routes are enforced by the platform before the handler runs.
+    This answers the same question for handlers that widen what an admin sees.
+    Platform auth disabled authorizes everything, so local callers are admins.
+    """
+    try:
+        await authorize(*_ADMIN_PROBE)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            return False
+        raise
+    return True
 
 
-def require_admin(
-    principal: Annotated[CurrentPrincipal, Depends(current_principal)],
-    db: Annotated[Database, Depends(get_db)],
-) -> CurrentPrincipal:
-    # Deliberately hide the admin surface from non-admin callers.
-    # Auth-disabled development has one server-generated principal and is
-    # already treated as unrestricted by the owner-scoped repositories.
-    if principal.source != "disabled" and not is_admin(principal):
-        raise HTTPException(status_code=404, detail="not found")
-    record_principal(db, principal)
-    return principal
+IsAdmin = Annotated[bool, Depends(caller_is_admin)]

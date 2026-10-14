@@ -48,3 +48,23 @@ def test_scaled_evals_healthz_via_adapter() -> None:
     body = response.json()
     assert body["plugin"] == "scaled-evals"
     assert body["status"] == "ok"
+
+
+def test_admin_routes_require_the_admin_permission() -> None:
+    from nemo_scaled_evals_plugin.authz import ADMIN
+    from scaled_evals.api.tenancy import _ADMIN_PROBE
+
+    gated = []
+    for spec in ScaledEvalsService().get_routers():
+        for route in spec.router.routes:
+            path = getattr(route, "path", "")
+            if not (path.startswith("/admin/") or path.endswith(("/qualification", "/promote"))):
+                continue
+            rules = get_path_rules(route.endpoint)
+            # Any rule without ADMIN would OR-open the route to non-admins.
+            assert rules and all(ADMIN in rule.permissions for rule in rules), path
+            gated.append(f"{spec.prefix}{path}")
+    assert "/v1/admin/capacity" in gated
+    assert _ADMIN_PROBE[1].endswith("/v1/admin/capacity")
+    assert {"/v1/admin/usage", "/v1/admin/compute", "/v1/admin/failures"} <= set(gated)
+    assert len([path for path in gated if path.endswith(("/qualification", "/promote"))]) == 4
