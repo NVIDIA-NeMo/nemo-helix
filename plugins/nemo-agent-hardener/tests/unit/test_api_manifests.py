@@ -552,3 +552,20 @@ def test_refresh_keeps_explicit_refs_and_swaps_the_deployments(client, mock_enti
     body = resp.json()
     assert body["secret_refs"] == {"EXPLICIT": "default/explicit"}
     assert body["deployed_secret_refs"] == {"NEW_DEPLOYED": "default/new"}
+
+
+@pytest.mark.parametrize("manifest_yaml", ["backends: [unclosed", "backends: api", "- just a list"])
+def test_stored_user_backends_ignores_unusable_yaml(manifest_yaml: str) -> None:
+    assert manifests_module._stored_user_backends(manifest_yaml) == []
+
+
+def test_stored_user_backends_drops_the_gateway_entry() -> None:
+    manifest_yaml = yaml.safe_dump(
+        {
+            "backends": [
+                {"name": manifests_module.GATEWAY_BACKEND_NAME, "ports": [8080]},
+                {"name": "api", "ports": [9000]},
+            ]
+        }
+    )
+    assert manifests_module._stored_user_backends(manifest_yaml) == [{"name": "api", "ports": [9000]}]

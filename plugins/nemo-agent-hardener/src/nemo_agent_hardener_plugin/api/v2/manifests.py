@@ -282,9 +282,12 @@ def _stored_user_backends(manifest_yaml: str) -> list[dict[str, Any]]:
     try:
         data = yaml.safe_load(manifest_yaml) or {}
     except yaml.YAMLError:
+        logger.warning("Saved manifest YAML is invalid; its backends are not carried over on refresh", exc_info=True)
         return []
     entries = data.get("backends") if isinstance(data, dict) else None
-    return [b for b in entries or [] if isinstance(b, dict) and b.get("name") != GATEWAY_BACKEND_NAME]
+    if not isinstance(entries, list):
+        return []
+    return [b for b in entries if isinstance(b, dict) and b.get("name") != GATEWAY_BACKEND_NAME]
 
 
 @router.post("/manifests", response_model=AgentHardenerManifest, status_code=201, tags=["Agent Hardener Manifests"])
