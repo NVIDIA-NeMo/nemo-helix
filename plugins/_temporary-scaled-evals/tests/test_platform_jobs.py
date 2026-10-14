@@ -229,7 +229,7 @@ async def test_benchmark_archive_job_claims_only_its_own_run(monkeypatch: pytest
     assert name != benchmark_archive_job_name("run_1", "fedcba9876543210", 1)
 
     repo = MagicMock()
-    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveStore", lambda: repo)
     dispatcher = MagicMock(claim_timeout=30.0)
     monkeypatch.setattr(benchmark_archive_job_module, "Dispatcher", lambda: dispatcher)
     claimed = {"benchmark_run_id": "run_1", "status": "building", "claim_token": "t"}

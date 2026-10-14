@@ -12,12 +12,12 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from scaled_evals.api.agent_bundle_store import AgentBundleStore
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
 from scaled_evals.api.benchmark_import_store import BenchmarkImportStore
 from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
 from scaled_evals.api.benchmark_store import BenchmarkStore
 from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.evaluation_store import EvaluationStore
-from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.repositories.ops_repository import OperationsRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskStore
@@ -85,8 +85,8 @@ class Database:
         return BenchmarkImportStore()
 
     @property
-    def benchmark_archives(self) -> BenchmarkArchiveRepository:
-        return BenchmarkArchiveRepository(self.conn)
+    def benchmark_archives(self) -> BenchmarkArchiveStore:
+        return BenchmarkArchiveStore()
 
     @property
     def benchmark_runs(self) -> BenchmarkRunStore:

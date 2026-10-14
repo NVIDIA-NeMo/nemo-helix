@@ -34,7 +34,7 @@ _MAX_WRITE_ATTEMPTS = 5
 _RUN_FIELDS = tuple(
     field
     for field in ScaledEvalsBenchmarkRun.model_fields
-    if field not in set(NemoEntity.model_fields) | {"display_name"}
+    if field not in set(NemoEntity.model_fields) | {"display_name", "archive"}
 )
 
 
@@ -262,16 +262,22 @@ class BenchmarkRunStore:
     def __init__(self, client: SyncEntityClient | None = None) -> None:
         self._client = client or entity_store.entity_client()
 
-    def _get(self, run_id: str) -> ScaledEvalsBenchmarkRun | None:
+    def _get(self, run_id: str, *, include_deleted: bool = False) -> ScaledEvalsBenchmarkRun | None:
         try:
             entity = self._client.get(ScaledEvalsBenchmarkRun, run_id, workspace=entity_store.private_workspace())
         except EntityNotFoundError:
             return None
-        return entity if entity.deleted_at is None else None
+        return entity if include_deleted or entity.deleted_at is None else None
 
-    def _mutate(self, run_id: str, change: Callable[[ScaledEvalsBenchmarkRun], tuple[T, bool]]) -> T | None:
+    def _mutate(
+        self,
+        run_id: str,
+        change: Callable[[ScaledEvalsBenchmarkRun], tuple[T, bool]],
+        *,
+        include_deleted: bool = False,
+    ) -> T | None:
         for _ in range(_MAX_WRITE_ATTEMPTS):
-            entity = self._get(run_id)
+            entity = self._get(run_id, include_deleted=include_deleted)
             if entity is None:
                 return None
             result, write = change(entity)

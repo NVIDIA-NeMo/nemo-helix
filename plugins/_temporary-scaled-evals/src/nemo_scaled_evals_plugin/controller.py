@@ -25,10 +25,10 @@ from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, TaskI
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 from nemo_scaled_evals_plugin.submitter import EvaluationSubmitter
 from scaled_evals.api import entity_store
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.evaluation_store import EvaluationStore
-from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.repositories.ops_repository import OperationsRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskBuildJob, TaskStore
@@ -314,28 +314,25 @@ class ScaledEvalsJobsController(NemoController):
                     await asyncio.to_thread(self._skip_benchmark_archive_attempt, row)
 
     def _list_claimable_benchmark_archives(self) -> list[dict[str, Any]]:
-        with pooled_connection() as conn:
-            return BenchmarkArchiveRepository(conn).list_claimable(
-                claim_timeout=Dispatcher.claim_timeout,
-                limit=settings.platform_jobs_phase_batch_size,
-            )
+        return BenchmarkArchiveStore().list_claimable(
+            claim_timeout=Dispatcher.claim_timeout,
+            limit=settings.platform_jobs_phase_batch_size,
+        )
 
     def _skip_benchmark_archive_attempt(self, row: dict[str, Any]) -> None:
-        with pooled_connection() as conn:
-            BenchmarkArchiveRepository(conn).skip_attempt(
-                str(row["benchmark_run_id"]),
-                generation=str(row["generation"]),
-                attempts=int(row["attempts"]),
-            )
+        BenchmarkArchiveStore().skip_attempt(
+            str(row["benchmark_run_id"]),
+            generation=str(row["generation"]),
+            attempts=int(row["attempts"]),
+        )
 
     async def _cleanup_one_benchmark_archive(self) -> bool:
         return await asyncio.to_thread(self._cleanup_benchmark_archive)
 
     def _cleanup_benchmark_archive(self) -> bool:
-        with pooled_connection() as conn:
-            run_id = BenchmarkArchiveRepository(conn).claim_cleanup(
-                interval_seconds=settings.benchmark_archive_cleanup_interval_seconds,
-            )
+        run_id = BenchmarkArchiveStore().claim_cleanup(
+            interval_seconds=settings.benchmark_archive_cleanup_interval_seconds,
+        )
         if run_id is None:
             return False
         self._dispatcher.cleanup_benchmark_archives(run_id)
