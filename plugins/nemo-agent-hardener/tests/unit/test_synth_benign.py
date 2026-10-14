@@ -239,6 +239,42 @@ def test_synth_benign_job_execute_happy_path(tmp_path: Path, monkeypatch: pytest
     assert seen["interview"] == "auto"
 
 
+def test_synth_benign_cli_path_uses_the_manifests_models(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
+
+    manifest = _write_manifest(tmp_path)
+    monkeypatch.setattr(job_mod._common, "require_provisioned", lambda _c: None)
+    monkeypatch.setattr(job_mod._common, "build_subprocess_env", lambda _c: {})
+    monkeypatch.setattr(job_mod._common, "check_victim_secrets", lambda *a, **k: None)
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda *_a: str(manifest))
+    monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
+    monkeypatch.setattr(job_mod, "_effective_models", lambda *_a: object())
+    monkeypatch.setattr(
+        job_mod._common, "build_model_env", lambda *_a, **_k: {"AGENT_HARDENER_BASE_URL": "https://models.test/v1"}
+    )
+    monkeypatch.setattr(
+        job_mod.AgentHardenerConfig,
+        "get",
+        classmethod(
+            lambda _cls: SimpleNamespace(agent_hardener_bin="bin", operator_env_file=tmp_path / "operator.env")
+        ),
+    )
+    seen: dict[str, str] = {}
+
+    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview):
+        seen.update(env)
+        return tmp_path / "requests.csv"
+
+    monkeypatch.setattr(job_mod, "run_synth_benign", _fake_run_synth)
+    monkeypatch.setattr(job_mod, "read_and_persist_suite", lambda *_a: [])
+    job = job_mod.AgentHardenerSynthBenignJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=object())
+
+    assert seen["AGENT_HARDENER_BASE_URL"] == "https://models.test/v1"
+
+
 def test_synth_generated_victim_env_cannot_reload_platform_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

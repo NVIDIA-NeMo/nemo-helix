@@ -140,15 +140,19 @@ class AgentHardenerSynthBenignJob(NemoJob):
         )
         _reject_platform_auth_sources(manifest, env_file)
         _common.check_victim_secrets(manifest, env, env_file)
+        # The manifest's model choice applies to both drivers, as it does for the war-game.
+        model_env = _common.build_model_env(_effective_models(sdk, config, ctx), sdk=sdk, workspace=ctx.workspace)
 
         if config.get("driver") == "service":
-            return self._run_service(config, ctx, sdk, plugin_config, manifest, manifest_id, env_file, stale_warning)
+            return self._run_service(
+                config, ctx, sdk, plugin_config, manifest, manifest_id, env_file, model_env, stale_warning
+            )
 
         csv_path = run_synth_benign(
             plugin_config.agent_hardener_bin,
             manifest,
             env_file,
-            env,
+            {**env, **model_env},
             ctx,
             interview=str(config.get("interview") or "interactive"),
         )
@@ -168,11 +172,10 @@ class AgentHardenerSynthBenignJob(NemoJob):
         manifest: str,
         manifest_id: str,
         env_file: str | None,
+        model_env: dict[str, str],
         stale_warning: str | None = None,
     ) -> dict:
         """Studio path: drive the serve interview/review HITL, persist the suite, finalize the run record."""
-        models = _effective_models(sdk, config, ctx)
-        model_env = _common.build_model_env(models, sdk=sdk, workspace=ctx.workspace)
         agent, port = _manifest_facts(manifest)
         outcome = _run_service_driven(
             manifest,
