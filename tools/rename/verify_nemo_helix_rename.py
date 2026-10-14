@@ -30,6 +30,7 @@ UPGRADE_LABEL_PATHS = {
     Path("tests/unit/test_helm_component_labels.py"),
 }
 UPGRADE_LABEL_PATTERN = re.compile(r"(?<![\w.-])nmp-(?:api|core-controller)(?![\w.-])")
+POSTGRES_UPGRADE_LABEL_PATTERN = re.compile(r"(?<![\w.-])nemo-platform(?:-0\.3\.1)?(?![\w.-])")
 
 
 def print_matches(path: Path, predicate: Callable[[str], object]) -> bool:
@@ -46,6 +47,8 @@ def print_matches(path: Path, predicate: Callable[[str], object]) -> bool:
             # context lines are still checked.
             continue
         checked_line = UPGRADE_LABEL_PATTERN.sub("", line) if path in UPGRADE_LABEL_PATHS else line
+        if path == Path("tests/unit/test_helm_component_labels.py"):
+            checked_line = POSTGRES_UPGRADE_LABEL_PATTERN.sub("", checked_line)
         if predicate(checked_line):
             print(f"{path}:{line_number}:{line}")
             found = True
