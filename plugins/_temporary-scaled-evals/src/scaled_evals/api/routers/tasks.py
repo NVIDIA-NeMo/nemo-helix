@@ -267,7 +267,6 @@ def create_task(body: TaskCreate, db: Db, current: Principal) -> TaskCreateRespo
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
 
-    db.commit()
     return TaskCreateResponse(
         **row,
         revision=1,

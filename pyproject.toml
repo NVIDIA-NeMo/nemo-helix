@@ -79,7 +79,7 @@ typecheck = ["transformers>=5.5.0,<5.9.0"]
 # member, so neither `enabled-plugins` nor `uv sync --all-packages` installs it. It needs
 # external config (e.g. `credentials_encryption_key`) and would otherwise fail readiness.
 # CI still has to see it, so the lint and pytest entry points ask for this group by name;
-# without it neither the plugin nor psycopg is importable there.
+# without it the plugin is not importable there.
 scaled-evals = [
   "nemo-scaled-evals-plugin",
 ]

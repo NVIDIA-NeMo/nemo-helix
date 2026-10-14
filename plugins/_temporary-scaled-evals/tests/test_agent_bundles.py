@@ -1,24 +1,18 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from unittest.mock import MagicMock
-
 import pytest
 
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import get_conn
 from scaled_evals.api.tenancy import caller_is_admin
 
 
 @pytest.fixture(autouse=True)
 def _restore_overrides():
-    # Bundles live in the conftest's fake Entity Store; nothing reads Postgres.
-    v1.dependency_overrides[get_conn] = lambda: MagicMock()
     yield
-    v1.dependency_overrides.pop(get_conn, None)
     v1.dependency_overrides.pop(current_principal, None)
     v1.dependency_overrides[caller_is_admin] = lambda: True
 

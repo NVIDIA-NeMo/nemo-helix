@@ -245,7 +245,6 @@ def test_api_queues_and_reports_snapshot_without_private_storage_fields(api_db):
     assert data["members"][0]["current_execution"] == 1
     assert "claim_token" not in data
     assert data["download"] is None
-    api_db.commit.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -260,7 +259,6 @@ def test_api_archive_rejects_unavailable_run(api_db, exception, status):
     client = TestClient(app)
     response = client.post("/v1/benchmark-runs/bmr_1/archive", json={})
     assert response.status_code == status
-    api_db.commit.assert_not_called()
 
 
 def test_api_missing_and_ready_archive(api_db, monkeypatch):

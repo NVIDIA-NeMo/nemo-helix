@@ -123,12 +123,11 @@ def test_metrics_scrape_does_not_probe_dependencies(monkeypatch) -> None:  # noq
         "_evaluation_status_counts",
         lambda: dict.fromkeys(ops._KNOWN_EVALUATION_STATUSES, 0),
     )
-    ops._READINESS_SNAPSHOT.checks = {"postgres": "ok"}
+    ops._READINESS_SNAPSHOT.checks = {"object_store": "ok"}
 
     def fail_probe() -> None:
         raise AssertionError("metrics must not run live dependency probes")
 
-    monkeypatch.setattr(ops, "_postgres_probe", fail_probe)
     monkeypatch.setattr(ops.artifacts, "check_bucket", fail_probe)
     monkeypatch.setattr(ops.buildkit, "check_buildkit", fail_probe)
     monkeypatch.setattr(ops.registry, "check_registry", fail_probe)
@@ -136,16 +135,13 @@ def test_metrics_scrape_does_not_probe_dependencies(monkeypatch) -> None:  # noq
     response = client.get("/v1/metrics")
 
     assert response.status_code == 200
-    assert 'scaled_evals_dependency_ready{dependency="postgres"} 1' in response.text
+    assert 'scaled_evals_dependency_ready{dependency="object_store"} 1' in response.text
 
 
 def test_dependency_checks_skip_disabled_build_services(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(settings, "buildkit_enabled", False)
     monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
-    monkeypatch.setattr(ops, "_schema_probe", lambda: None)
     monkeypatch.setattr(ops.artifacts, "check_bucket", lambda: None)
-    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", lambda: None)
 
     def fail_probe() -> None:
         raise AssertionError("disabled dependencies should not be probed")
@@ -158,42 +154,7 @@ def test_dependency_checks_skip_disabled_build_services(monkeypatch) -> None:  #
     assert required_ok is True
     assert checks["buildkit"] == "skipped: disabled"
     assert checks["registry"] == "skipped: disabled"
-
-
-def test_dependency_checks_require_platform_jobs_controller(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "buildkit_enabled", False)
-    monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
-    monkeypatch.setattr(ops, "_schema_probe", lambda: None)
-    monkeypatch.setattr(ops.artifacts, "check_bucket", lambda: None)
-
-    def stale_controller() -> None:
-        raise RuntimeError("no fresh Platform Jobs controller heartbeat")
-
-    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", stale_controller)
-
-    checks, required_ok = ops._run_dependency_checks()
-
-    assert required_ok is False
-    assert checks["platform_jobs_controller"] == "fail: RuntimeError"
-
-
-def test_dependency_checks_require_compatible_schema(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "buildkit_enabled", False)
-    monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
-    monkeypatch.setattr(ops.artifacts, "check_bucket", lambda: None)
-    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", lambda: None)
-
-    def drifted_schema() -> None:
-        raise RuntimeError('column "current_execution" does not exist')
-
-    monkeypatch.setattr(ops, "_schema_probe", drifted_schema)
-
-    checks, required_ok = ops._run_dependency_checks()
-
-    assert required_ok is False
-    assert checks["schema"] == "fail: RuntimeError"
+    assert checks.keys().isdisjoint({"postgres", "schema", "platform_jobs_controller"})
 
 
 def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
@@ -202,9 +163,7 @@ def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
         "_run_dependency_checks",
         lambda: (
             {
-                "postgres": "ok",
                 "object_store": "ok",
-                "platform_jobs_controller": "ok",
                 "buildkit": "skipped: disabled",
                 "registry": "ok",
                 "gym_dispatch": "skipped: disabled",
@@ -216,9 +175,7 @@ def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
     response = client.get("/v1/readyz")
     body = response.json()
     assert "checks" in body
-    assert "postgres" in body["checks"]
     assert "object_store" in body["checks"]
-    assert "platform_jobs_controller" in body["checks"]
     assert "buildkit" in body["checks"]
     assert "registry" in body["checks"]
     assert "gym_dispatch" in body["checks"]

@@ -542,9 +542,6 @@ def create_evaluation(
         owner_id=current.owner_id,
     )
 
-    # Submission loads this row on its own connection, so commit first —
-    # get_conn otherwise defers COMMIT past the response and the submitter sees nothing.
-    db.commit()
     _submit_now(ev_id)
     return _response(row)
 
@@ -797,7 +794,6 @@ def retry_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
                 "evaluation cannot be retried because its benchmark run is cancelled or unavailable",
             )
         raise _http_error(409, "evaluation_not_retryable", "evaluation cannot be retried right now")
-    db.commit()
     _submit_now(str(row["id"]))
     return _response(row)
 
@@ -815,7 +811,6 @@ def cancel_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
     if row is None:
         raise _http_error(404, "not_found", "evaluation not found")
     if cancelled_now:
-        db.commit()
         row = teardown_cancelled_evaluation(db, row)
     return _response(row)
 
@@ -1061,5 +1056,4 @@ def build_archive(
     updated = db.evaluations.request_archive_build(evaluation_id, force=body.force)
     if updated is None:
         raise _http_error(404, "not_found", "evaluation not found")
-    db.commit()
     return _archive_response(updated)

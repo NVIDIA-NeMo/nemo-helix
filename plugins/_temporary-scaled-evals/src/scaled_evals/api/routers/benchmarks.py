@@ -348,5 +348,4 @@ def delete_benchmark(benchmark_id: str, db: Db) -> DeleteResponse:
     deleted = db.benchmarks.soft_delete(benchmark_id)
     if not deleted:
         raise _http_error(404, "not_found", "benchmark not found")
-    db.commit()
     return DeleteResponse(id=benchmark_id)
