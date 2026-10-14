@@ -144,9 +144,8 @@ async def test_one_failed_image_fails_the_build_with_its_reason(entity_store, st
 
 
 async def test_prebuilt_images_fail_the_build_without_submitting_anything(entity_store, store_task, archive) -> None:
-    spec = await _start(
-        entity_store, store_task, config={"environment": {"docker_image": "ghcr.io/org/sort:1"}}, allowed=["ghcr.io"]
-    )
+    config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}, "verifier": {"environment": {"cpus": 1}}}
+    spec = await _start(entity_store, store_task, config=config, allowed=["ghcr.io"])
     builder = _Builder({})
 
     build = await _run(entity_store, spec, builder)
@@ -154,6 +153,10 @@ async def test_prebuilt_images_fail_the_build_without_submitting_anything(entity
     assert build.status == "failed"
     assert build.error == "prebuilt_import_unsupported: agent"
     assert builder.submits == 0
+    assert [(image.role, image.source, image.status, image.error) for image in build.images] == [
+        ("agent", "prebuilt", "failed", "copying prebuilt images into the platform registry isn't supported yet"),
+        ("verifier", "dockerfile", "failed", "not built: another image of this task can't be built"),
+    ]
 
 
 async def test_an_unbuildable_task_fails_with_the_plan_error(entity_store, store_task, archive) -> None:

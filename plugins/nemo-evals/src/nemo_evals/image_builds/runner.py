@@ -114,9 +114,11 @@ async def _build(
     prebuilt = [image.role for image in images if image.source == "prebuilt"]
     if prebuilt:
         for image in images:
+            image.status = "failed"
             if image.source == "prebuilt":
-                image.status = "failed"
                 image.error = "copying prebuilt images into the platform registry isn't supported yet"
+            else:
+                image.error = "not built: another image of this task can't be built"
         build.images = images
         return await _fail(entities, build, f"prebuilt_import_unsupported: {', '.join(prebuilt)}")
 
