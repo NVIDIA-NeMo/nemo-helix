@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Stale Pull Requests
+
+on:
+  schedule:
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: stale-prs-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  stale-prs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Check inactive pull requests
+        uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          # Enable mutations only after reviewing the dry-run candidates.
+          debug-only: true
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-close: 14
+          stale-pr-label: stale
+          exempt-pr-labels: keep-open
+          stale-pr-message: >-
+            This PR has had no activity for 60 days. It will be closed after
+            another 14 days without activity. Please comment or push an update
+            if you plan to continue. Maintainers can add `keep-open` for work
+            that is intentionally paused or waiting on review.
+          close-pr-message: >-
+            Closing this PR after 14 additional days without activity.
+            Please reopen it when you're ready to continue.
