@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Example claim labels for chart rendering tests.
+postgresql:
+  persistence:
+    claimTemplateLabels:
+      app.kubernetes.io/component: postgres
+      helm.sh/chart: example-chart-1.2.3
+      app.kubernetes.io/name: example-app
+      app.kubernetes.io/instance: example-release
+      app.kubernetes.io/version: "1.2.3"
+      app.kubernetes.io/managed-by: Helm
