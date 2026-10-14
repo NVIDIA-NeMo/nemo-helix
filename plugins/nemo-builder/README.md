@@ -206,7 +206,7 @@ job, and each spec becomes one `ContainerImage` row.
 | `build_specs` | Up to 100 specs. |
 | `build_specs[].name` | The image's name within the set, unique in it: lowercase letters and digits, joined by single `.`, `_` or `-`. It names the image's row, `<name>-<revision>.<spec>`, and an image with no `output` is published under it. One spec in a set may leave it out; its row is `<name>-<revision>`. |
 | `source.fileset` | The fileset holding the build context: `name` in this workspace, or `workspace/name`. |
-| `source.archive` | Optional. A tar archive in the fileset to build from, compressed or not: `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz` or `.txz`. Relative, with no `..`. |
+| `source.archive` | Optional. A tar archive in the fileset to build from, compressed or not, under any file name: the fetch step reads the format from the file, and a file that isn't a tar archive fails the build. Relative, with no `..`. |
 | `source.context_path` | Optional subdirectory to use as the context: of the fileset, or of the archive if `archive` is set. Relative, with no `..`. Omit it to use the whole fileset or archive. |
 | `dockerfile` | Path relative to the context. Absolute paths and `..` are rejected. Defaults to `Dockerfile`. |
 | `platform` | Passed to kaniko. Defaults to `linux/amd64`. |
@@ -249,7 +249,9 @@ job: images in a set finish independently.
 name a submit returned; `build_set` and `revision`, a request's `name` and `revision`; and `status`.
 `GET /container-images/{name}` returns `404` for a name that doesn't exist. With platform auth on, a
 person needs only the permission to read an image; a service, as the push step calls without
-workload token exchange, must also act for the image's submitter, or gets `403`. Each row is a
+workload token exchange, must also act for a person, or gets `403`. That person needn't be the image's
+submitter, so a service such as evals can reuse one user's build for another; the policy admits a
+service on its own permissions, so the service checks its user may read images here. Each row is a
 `ContainerImage`:
 
 | Field | Meaning |
@@ -606,8 +608,9 @@ other and with the manifests:
 - **Platform auth on works only with workload token exchange off.** With exchange on, the jobs
   launcher can't fetch the push step's secrets: it fetches them with the step's delegated identity,
   which Jobs doesn't give a step under exchange, so the step never starts. Without exchange, the
-  push step calls the builder as `service:builder`, acting for the submitter, and the two routes it
-  calls admit a service only when it acts for the image's submitter.
+  push step calls the builder as `service:builder`, acting for the submitter. `complete` admits a
+  service only when it acts for the image's submitter; reading an image admits one acting for any
+  person.
 - **`fetch` unpacks archives the request names.** It runs acting for the submitter and parses an
   archive anyone who can write to the fileset put there. Python's `data` filter keeps every entry
   inside the archive's directory, and refuses links out of it and devices; the caps bound what one

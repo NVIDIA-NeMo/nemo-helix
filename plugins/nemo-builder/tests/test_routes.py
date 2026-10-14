@@ -186,22 +186,37 @@ class TestReadingOneImage:
 
     @pytest.mark.parametrize(
         "caller",
-        [Caller(auth=False), Caller(auth=True, actor="carol"), STEP, SERVICE_STEP],
-        ids=["auth-off", "a-person", "a-step-with-token-exchange", "the-push-step-without"],
+        [
+            Caller(auth=False),
+            Caller(auth=True, actor="carol"),
+            STEP,
+            SERVICE_STEP,
+            Caller(auth=True, actor="service:evals", submitter="bob"),
+        ],
+        ids=[
+            "auth-off",
+            "a-person",
+            "a-step-with-token-exchange",
+            "the-push-step-without",
+            "a-service-for-another-person",
+        ],
     )
     def test_whom_the_policy_admits_reads_it(self, caller: Caller) -> None:
+        """A service acting for someone other than the submitter reads it too, so a build can be reused."""
         response = self._get(caller)
         assert response.status_code == 200
         assert response.json()["name"] == "build-1-0"
 
     @pytest.mark.parametrize(
         "caller",
-        [Caller(auth=True, actor="service:builder"), Caller(auth=True, actor="service:builder", submitter="bob")],
-        ids=["acting-for-no-one", "acting-for-someone-else"],
+        [Caller(auth=True, actor="service:evals"), Caller(auth=True, actor="service:evals", submitter="service:other")],
+        ids=["acting-for-no-one", "acting-for-a-service"],
     )
-    def test_a_service_not_acting_for_the_submitter_is_a_403(self, caller: Caller) -> None:
-        """The policy admits any service on its own permissions, so the handler holds it to the submitter."""
-        assert self._get(caller).status_code == 403
+    def test_a_service_not_acting_for_a_person_is_a_403(self, caller: Caller) -> None:
+        """The policy admits any service on its own permissions, so the handler holds it to acting for a person."""
+        response = self._get(caller)
+        assert response.status_code == 403
+        assert "acting for a person" in response.json()["detail"]
 
     def test_an_image_that_does_not_exist_is_a_404(self) -> None:
         entities = AsyncMock()
@@ -261,5 +276,5 @@ class TestWhoTheRoutesAdmit:
         assert callers[("POST", "/container-images/{name}/complete")] == both
 
     def test_listing_admits_people_only(self) -> None:
-        """A service could see every row, and the handler holds it to the submitter only one row at a time."""
+        """A service could see every row at once; one row at a time, it must act for a person."""
         assert self._callers()[("GET", "/container-images")] == {CallerKind.PRINCIPAL}

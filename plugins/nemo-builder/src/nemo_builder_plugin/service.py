@@ -25,7 +25,7 @@ from nemo_builder_plugin.completion import (
 )
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
-from nemo_builder_plugin.schema import BuildSet
+from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
 from nemo_builder_plugin.submit import BuildConflict, InvalidBuildRequest, MissingSecrets, submit_build_set
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -40,18 +40,8 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import NemoService, RouterSpec
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
-
-
-class SubmitBuildResponse(BaseModel):
-    """The submitted build's job and images."""
-
-    job: str = Field(description="Name of the build job, for logs and debugging.")
-    images: list[ContainerImage] = Field(
-        description="One row per build spec, created `pending`. POLL THESE, not the job."
-    )
 
 
 async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str) -> ContainerImage:
