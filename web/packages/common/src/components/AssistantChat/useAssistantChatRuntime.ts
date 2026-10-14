@@ -126,6 +126,7 @@ export const useAssistantChatRuntime = ({
       let ttftMs = 0;
       let firstTokenMs = 0;
       let chunkCount = 0;
+      let generatedChunkCount = 0;
       let reasoningChars = 0;
       let usageTokens: number | undefined;
 
@@ -165,12 +166,12 @@ export const useAssistantChatRuntime = ({
             const delta = chunk.choices[0]?.delta.content ?? '';
             const reasoningDelta = getReasoningDelta(chunk);
             const images = getCompletionImages(chunk);
-            if (reasoningDelta) {
+            if (reasoningDelta || delta || images.length > 0) {
               if (firstTokenMs === 0) firstTokenMs = Math.round(performance.now() - startMs);
-              reasoningChars += reasoningDelta.length;
+              generatedChunkCount += 1;
             }
+            reasoningChars += reasoningDelta.length;
             if (delta || images.length > 0) {
-              if (firstTokenMs === 0) firstTokenMs = Math.round(performance.now() - startMs);
               if (ttftMs === 0) ttftMs = Math.round(performance.now() - startMs);
               responseText += delta;
               responseImages.push(...images);
@@ -196,7 +197,7 @@ export const useAssistantChatRuntime = ({
               firstTokenMs,
               usageTokens,
               outputChars: responseText.length + reasoningChars,
-              chunkCount,
+              chunkCount: generatedChunkCount,
             });
             onMessageComplete({
               assistantMessageId: assistantMessage.id!,
