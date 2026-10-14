@@ -67,8 +67,9 @@ class OptimizeSpec(BaseModel):
             )
         if not is_fileset_relative(self.optimize_config):
             raise ValueError(
-                "optimize_config must be a path relative to the fileset root (no leading '/', no '..' "
-                f"segments) when optimize_config_fileset is set; got {self.optimize_config!r}."
+                "optimize_config must be a path relative to the fileset root (no leading '/', '\\', "
+                "drive, UNC, or '..' segments) when optimize_config_fileset is set; "
+                f"got {self.optimize_config!r}."
             )
         return self
 
@@ -114,7 +115,9 @@ def is_fileset_relative(config_path: str) -> bool:
     if config_path.startswith("~"):
         return False
     flavours = (PurePosixPath(config_path), PureWindowsPath(config_path))
-    return not any(path.is_absolute() or ".." in path.parts or path.drive for path in flavours)
+    return not any(
+        path.is_absolute() or ".." in path.parts or path.drive or path.root or path.anchor for path in flavours
+    )
 
 
 def _is_local(info: ValidationInfo) -> bool:

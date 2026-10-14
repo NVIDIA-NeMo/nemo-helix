@@ -88,7 +88,7 @@ snapshot, suggest running it. The job sweeps prompts and hyperparameters via
 Suggested actions:
 
 - `nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>`
-- `nemo agents optimize run-strategy --strategy legacy --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>`
+- `nemo agents optimize run-strategy --strategy config-tuning --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>`
 - After it completes, apply the new prompt + hyperparameters to a sibling
   agent, deploy it, and run `nemo agents evaluate` to compare.
 
@@ -303,7 +303,7 @@ nemo models list --filter.name nemotron   # find Nemotron candidates
 # The optimize command's --optimize-config value must be relative to the staged fileset root.
 nemo agents evaluate --agent <name> --eval-config <yaml>
 nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>
-nemo agents optimize run-strategy --strategy legacy --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
+nemo agents optimize run-strategy --strategy config-tuning --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
 
 # Files service
 nemo files list <fileset>

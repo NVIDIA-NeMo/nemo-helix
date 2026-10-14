@@ -20,7 +20,7 @@ const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/f
 const FILE_URL = `${FILESETS_URL}/:name/-/:path`;
 
 const SPEC = {
-  strategy: 'legacy',
+  strategy: 'config-tuning',
   agent: 'hermes',
   optimize_config: 'optimize.yaml',
   optimize_config_fileset: 'hermes-bundle',
@@ -237,7 +237,7 @@ models:
 
   it('blocks deploying when the study has no optimize config fileset', async () => {
     mockHelix();
-    renderModal(TRIAL, { ...JOB, spec: { strategy: 'legacy', agent: 'hermes' } });
+    renderModal(TRIAL, { ...JOB, spec: { strategy: 'config-tuning', agent: 'hermes' } });
 
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(/has no optimize config fileset/)).toBeInTheDocument();
