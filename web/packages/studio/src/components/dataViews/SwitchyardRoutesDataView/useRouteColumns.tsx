@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
+import { EM_DASH } from '@nemo/common/src/constants';
 import { Anchor, Badge, Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { EM_DASH } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
 import { ROUTING_STRATEGIES } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/formValues';
 import {
   routeThreshold,
