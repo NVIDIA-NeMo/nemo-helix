@@ -433,6 +433,8 @@ def build_deployment_config(
     secrets: dict[str, str] | None = None,
     use_image_entrypoint: bool = False,
     workload_identity_enabled: bool = False,
+    readiness_probe_timeout_seconds: int = 1,
+    readiness_probe_failure_threshold: int = 12,
 ) -> DeploymentConfig:
     """Compile an agent into a long-running ``DeploymentConfig`` (Always).
 
@@ -542,7 +544,8 @@ def build_deployment_config(
                 httpGet=HTTPGetAction(path="/health", port=port),
                 initialDelaySeconds=2,
                 periodSeconds=5,
-                failureThreshold=12,
+                timeoutSeconds=readiness_probe_timeout_seconds,
+                failureThreshold=readiness_probe_failure_threshold,
             ),
         }
     )
@@ -736,6 +739,8 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 secrets=secrets,
                 use_image_entrypoint=use_image_entrypoint,
                 workload_identity_enabled=auth_context is not None and is_workload_identity_token_exchange_enabled(),
+                readiness_probe_timeout_seconds=self._config.readiness_probe_timeout_seconds,
+                readiness_probe_failure_threshold=self._config.readiness_probe_failure_threshold,
             )
         except ReservedSecretEnvVarError as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)
