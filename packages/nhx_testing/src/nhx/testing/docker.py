@@ -35,8 +35,12 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
 import tarfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from docker.errors import APIError, BuildError, DockerException, ImageNotFound, NotFound
@@ -387,6 +391,53 @@ def cleanup_model_deployment_containers(
             print(f"Warning: Cleanup error for {container.name}: {e}")
 
     return removed
+
+
+# Subdirectory of NHX_DATA_DIR that Intake bind-mounts into its local ClickHouse.
+INTAKE_CLICKHOUSE_DATA_SUBDIR = "intake-clickhouse"
+INTAKE_CLICKHOUSE_REMOVE_TIMEOUT_SECONDS = 120.0
+
+
+def remove_intake_clickhouse(
+    platform_data_dir: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    timeout: float = INTAKE_CLICKHOUSE_REMOVE_TIMEOUT_SECONDS,
+) -> None:
+    """Remove the local ClickHouse container Intake provisioned for a platform data directory.
+
+    Intake keeps one container per data directory and only stops it on shutdown, so every
+    ``nemo services run`` started with a throwaway ``NHX_DATA_DIR`` leaves a new
+    ``nhx-intake-clickhouse-<hash>`` container behind. Call this from test teardown after the
+    platform process has exited. It also removes a container that is still running (e.g. after the
+    platform was SIGKILLed).
+
+    Best effort: failures are reported as warnings, never raised, so teardown cannot mask a test
+    failure.
+
+    Args:
+        platform_data_dir: The ``NHX_DATA_DIR`` the platform ran with.
+        env: The platform's environment; defaults to this process's environment.
+        timeout: Seconds to wait for the removal command.
+    """
+    command = [
+        sys.executable,
+        "-m",
+        "nhx.intake.local_clickhouse",
+        "--remove",
+        "--data-dir",
+        str(platform_data_dir / INTAKE_CLICKHOUSE_DATA_SUBDIR),
+    ]
+    # The platform's NHX_DATA_DIR puts the data under the user data dir, which makes the removal
+    # hand the ClickHouse files back to the host user so pytest can delete its tmp dirs.
+    removal_env = {**(os.environ if env is None else env), "NHX_DATA_DIR": str(platform_data_dir)}
+    try:
+        result = subprocess.run(command, env=removal_env, capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"Warning: Could not remove Intake ClickHouse for {platform_data_dir}: {e}")
+        return
+    if result.returncode != 0:
+        print(f"Warning: Could not remove Intake ClickHouse for {platform_data_dir}: {result.stderr.strip()}")
 
 
 # =============================================================================

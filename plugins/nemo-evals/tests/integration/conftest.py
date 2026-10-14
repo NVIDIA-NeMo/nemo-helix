@@ -26,6 +26,7 @@ import pytest
 import yaml
 from nemo_evals.shared.metric_bundles.cloudpickle import ALLOW_CLOUDPICKLE_METRICS_ENV_VAR
 from nhx.testing import igw_mock_provider_mode
+from nhx.testing.docker import remove_intake_clickhouse
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -135,10 +136,11 @@ def running_platform(
     if _port_in_use(host, port):
         raise RuntimeError(f"{host}:{port} is already in use; stop other platform instances before running these tests")
 
+    env = {**os.environ, "NHX_BASE_URL": base_url, **(env_vars or {})}
     process = subprocess.Popen(
         ["uv", "run", "nemo", "services", "run", *run_args, "--port", str(port)],
         cwd=REPO_ROOT,
-        env={**os.environ, "NHX_BASE_URL": base_url, **(env_vars or {})},
+        env=env,
     )
     try:
         _wait_for_ready(base_url, timeout=ready_timeout, process=process)
@@ -150,6 +152,10 @@ def running_platform(
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        # Intake keeps its local ClickHouse container across shutdowns, keyed by data dir, so
+        # each per-run data dir would otherwise leave one behind.
+        if data_dir := (env_vars or {}).get(DATA_DIR_ENVVAR):
+            remove_intake_clickhouse(Path(data_dir), env=env)
 
 
 @pytest.fixture(autouse=True)

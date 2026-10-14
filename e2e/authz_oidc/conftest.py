@@ -36,6 +36,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from nhx.testing.docker import remove_intake_clickhouse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -208,6 +209,8 @@ def _spawn_platform(
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=5)
+            # Intake keeps its local ClickHouse container across shutdowns, keyed by data dir.
+            remove_intake_clickhouse(data_dir, env=env)
 
 
 def _wait_healthy(platform: Platform) -> None:
