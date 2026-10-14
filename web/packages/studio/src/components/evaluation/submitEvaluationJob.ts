@@ -42,7 +42,9 @@ export const DEFAULT_MAX_CONCURRENT_TASKS = 1;
  *  (``resilience/classifier.py``), so retries absorb it at the source. Without the extra
  *  attempts, concurrency would convert overload into NaN rows via
  *  ``ignore_request_failure`` and the job would still report success. Raise parallelism
- *  further only alongside retries, and only if the endpoint keeps up. */
+ *  further only alongside retries, and only if the endpoint keeps up.
+ *
+ *  ``request_timeout`` matches the agents gateway's default read timeout; a timed-out row is not retried. */
 const AGENT_RUN_PARAMS = {
   parallelism: 4,
   request_timeout: 300,
@@ -54,10 +56,14 @@ const JOB_FILESET_PREFIX = 'job-fileset-';
 export const JOB_NAME_MAX_LENGTH = FILESET_NAME_MAX_LENGTH - JOB_FILESET_PREFIX.length;
 
 export const DEFAULT_PARALLELISM = AGENT_RUN_PARAMS.parallelism;
+export const DEFAULT_REQUEST_TIMEOUT_SECONDS = AGENT_RUN_PARAMS.request_timeout;
 
-const agentRunParams = (parallelism: number | undefined) => ({
+type AgentRunOverrides = Pick<SubmitSelections, 'parallelism' | 'requestTimeoutSeconds'>;
+
+const agentRunParams = ({ parallelism, requestTimeoutSeconds }: AgentRunOverrides = {}) => ({
   ...AGENT_RUN_PARAMS,
   parallelism: parallelism ?? DEFAULT_PARALLELISM,
+  request_timeout: requestTimeoutSeconds ?? DEFAULT_REQUEST_TIMEOUT_SECONDS,
 });
 
 export const buildEvalJobName = (filesetName: string): string => {
@@ -139,6 +145,8 @@ export interface SubmitSelections {
   evaluationId?: string;
   /** Rows sent to the agent at once. Omitted means {@link DEFAULT_PARALLELISM}. */
   parallelism?: number;
+  /** Seconds to wait for the agent's answer to one row. Omitted means {@link DEFAULT_REQUEST_TIMEOUT_SECONDS}. */
+  requestTimeoutSeconds?: number;
 }
 
 /** ``spec.publication`` for a run that asked to publish, or nothing at all. ``agent_name`` is
@@ -171,10 +179,14 @@ const agentEndpoint = (workspace: string, agent: string, promptVar: string) => (
   stream: false,
 });
 
-export const buildAgentTarget = (workspace: string, agent: string, parallelism?: number) => ({
+export const buildAgentTarget = (
+  workspace: string,
+  agent: string,
+  runOverrides?: AgentRunOverrides
+) => ({
   kind: 'agent' as const,
   agent: agentEndpoint(workspace, agent, 'instruction'),
-  params: agentRunParams(parallelism),
+  params: agentRunParams(runOverrides),
 });
 
 /** Override a metric's judge model with a ``workspace/name`` ModelRef (resolved
@@ -225,7 +237,7 @@ export const buildAgentEvalRequestBody = (
   ...jobName(selections),
   spec: {
     tasks: spec.tasks,
-    target: buildAgentTarget(selections.workspace, selections.agent, selections.parallelism),
+    target: buildAgentTarget(selections.workspace, selections.agent, selections),
     max_concurrent_tasks: spec.max_concurrent_tasks ?? DEFAULT_MAX_CONCURRENT_TASKS,
     ...(selections.filesetName ? { labels: { eval_config_fileset: selections.filesetName } } : {}),
     ...publicationSpec(selections.evaluationId),
@@ -256,7 +268,7 @@ export const buildDatasetEvalRequestBody = (
     target: buildDatasetAgentTarget(selections.workspace, selections.agent),
     prompt_template: spec.prompt_template,
     ...(spec.field_mapping ? { field_mapping: spec.field_mapping } : {}),
-    params: agentRunParams(selections.parallelism),
+    params: agentRunParams(selections),
     ...publicationSpec(selections.evaluationId),
   },
 });

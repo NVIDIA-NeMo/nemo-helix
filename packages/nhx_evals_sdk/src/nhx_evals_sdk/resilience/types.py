@@ -21,6 +21,10 @@ class FailureClass(StrEnum):
     FATAL = "fatal"
 
 
+class AbandonedRequestTimeoutError(TimeoutError):
+    """The caller gave up on a request the server may still be working on, so a retry would stack on it."""
+
+
 class Clock(Protocol):
     """Monotonic clock abstraction for deterministic tests."""
 

@@ -17,6 +17,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.agent_config import AgentConfig, AgentConfigLoadError
+from nemo_agents_plugin.client_disconnect import CLIENT_CLOSED_REQUEST_STATUS
 from nemo_agents_plugin.fabric import server
 from nemo_agents_plugin.fabric.runtime import (
     FabricRuntimeExecutionError,
@@ -1060,3 +1061,73 @@ async def test_idle_cleanup_runs_periodically_until_shutdown() -> None:
     await cleanup
 
     assert cleanup_calls == [30.0]
+
+
+class _UnfinishedWork:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def run(self) -> Any:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_cancels_non_streaming_invocation(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+    post_then_disconnect: Any,
+) -> None:
+    app = create_fabric_serving_app(_write_agent_config(tmp_path))
+    invocation = _UnfinishedWork()
+
+    async def invoke_once(request: Any) -> FabricRuntimeResult:
+        return await invocation.run()
+
+    async with app.router.lifespan_context(app):
+        monkeypatch.setattr(app.state.session_manager, "invoke_once", invoke_once)
+        status = await post_then_disconnect(
+            app,
+            "/v1/chat/completions",
+            {"messages": [{"role": "user", "content": "hello"}]},
+            invocation.started,
+        )
+
+    assert invocation.cancelled.is_set()
+    assert status == CLIENT_CLOSED_REQUEST_STATUS
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_cancels_stream_still_waiting_to_start(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+    post_then_disconnect: Any,
+) -> None:
+    app = create_fabric_serving_app(_write_agent_config(tmp_path))
+    stream_start = _UnfinishedWork()
+
+    class _StartingStream:
+        async def __aenter__(self) -> Any:
+            return await stream_start.run()
+
+        async def __aexit__(self, *exc_info: object) -> None:
+            pytest.fail("a stream that never started must not be exited")
+
+    async with app.router.lifespan_context(app):
+        monkeypatch.setattr(app.state.session_manager, "stream_once", lambda request: _StartingStream())
+        status = await post_then_disconnect(
+            app,
+            "/v1/chat/completions",
+            {"messages": [{"role": "user", "content": "hello"}], "stream": True},
+            stream_start.started,
+        )
+
+    assert stream_start.cancelled.is_set()
+    assert status == CLIENT_CLOSED_REQUEST_STATUS

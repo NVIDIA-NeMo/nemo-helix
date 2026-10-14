@@ -38,6 +38,7 @@ from nhx_evals_sdk.agent_stream_translation import (
 from nhx_evals_sdk.inference import get_logger, requests_log_var
 from nhx_evals_sdk.resilience.api import run_with_resilience
 from nhx_evals_sdk.resilience.classifier import endpoint_identity
+from nhx_evals_sdk.resilience.types import AbandonedRequestTimeoutError
 from nhx_evals_sdk.templates import render_template
 from nhx_evals_sdk.values.agents import (
     Agent,
@@ -46,6 +47,7 @@ from nhx_evals_sdk.values.agents import (
     NemoAgentToolkitAgent,
     StreamAggregation,
 )
+from nhx_evals_sdk.values.params import DEFAULT_AGENT_REQUEST_TIMEOUT_SECONDS
 from nhx_evals_sdk.values.evidence import (
     EVIDENCE_FORMAT_ATIF,
     EVIDENCE_FORMAT_JSON,
@@ -60,9 +62,6 @@ from nhx_evals_sdk.values.evidence import (
     CandidateEvidence,
     EvidenceDescriptor,
 )
-
-# Default timeout for agent requests (seconds).
-_DEFAULT_TIMEOUT = 120.0
 
 
 class AgentInvocationStatus(str, Enum):
@@ -174,7 +173,7 @@ def make_agent_inference_fn(
 
 
 def new_agent_inference_client(timeout: float | None = None) -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=Timeout(timeout or _DEFAULT_TIMEOUT))
+    return httpx.AsyncClient(timeout=Timeout(timeout or DEFAULT_AGENT_REQUEST_TIMEOUT_SECONDS))
 
 
 async def make_agent_inference_request(
@@ -329,7 +328,7 @@ async def _invoke_http_agent(
 ) -> AgentInvocationResult:
     log = get_logger()
     resolved_api_key = api_key or agent.api_key
-    effective_timeout = timeout or _DEFAULT_TIMEOUT
+    effective_timeout = timeout or DEFAULT_AGENT_REQUEST_TIMEOUT_SECONDS
 
     headers: dict[str, str] = {**(default_headers or {}), "Content-Type": "application/json"}
     if resolved_api_key:
@@ -343,13 +342,16 @@ async def _invoke_http_agent(
     if not invocation.stream:
 
         async def _invoke_post() -> dict[str, Any]:
-            response = await inference_client.post(
-                invocation.endpoint,
-                json=invocation.payload,
-                headers=headers,
-                params=invocation.query_params,
-                timeout=effective_timeout,
-            )
+            try:
+                response = await inference_client.post(
+                    invocation.endpoint,
+                    json=invocation.payload,
+                    headers=headers,
+                    params=invocation.query_params,
+                    timeout=effective_timeout,
+                )
+            except httpx.ReadTimeout as error:
+                raise _abandoned_agent_request(effective_timeout) from error
             response.raise_for_status()
             return response.json()
 
@@ -449,6 +451,8 @@ async def _invoke_http_agent(
                     capture.error = capture.error or _stream_error(frame.payload)
         except Exception as exc:
             if capture.event_count == 0:
+                if isinstance(exc, httpx.ReadTimeout):
+                    raise _abandoned_agent_request(effective_timeout) from exc
                 raise
             capture.error = f"{type(exc).__name__}: {exc}"
         if aggregate and value_parts:
@@ -582,6 +586,12 @@ def _nat_endpoint(agent: NemoAgentToolkitAgent, config: NatAgentConfig) -> str:
     if urlparse(config.endpoint).scheme:
         return config.endpoint
     return f"{agent.url.rstrip('/')}/{config.endpoint.lstrip('/')}"
+
+
+def _abandoned_agent_request(timeout: float) -> AbandonedRequestTimeoutError:
+    return AbandonedRequestTimeoutError(
+        f"Agent did not respond within {timeout:g}s. Not retried: the agent may still be running the turn."
+    )
 
 
 def _parse_sse_frame(raw_line: str) -> SseFrame | None:

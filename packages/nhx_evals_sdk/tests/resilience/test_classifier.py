@@ -4,7 +4,7 @@
 import httpx
 import openai
 from nhx_evals_sdk.resilience.classifier import classify_exception
-from nhx_evals_sdk.resilience.types import FailureClass
+from nhx_evals_sdk.resilience.types import AbandonedRequestTimeoutError, FailureClass
 
 
 def test_classify_hard_overload_from_http_status():
@@ -26,6 +26,13 @@ def test_classify_soft_overload_from_read_timeout():
     assert result.failure_class == FailureClass.SOFT_OVERLOAD
     assert result.status_code is None
     assert result.error_type == "ReadTimeout"
+
+
+def test_abandoned_request_timeout_lowers_endpoint_limit_without_retrying():
+    result = classify_exception(AbandonedRequestTimeoutError("agent may still be running"))
+
+    assert result.retryable is False
+    assert result.failure_class == FailureClass.SOFT_OVERLOAD
 
 
 def test_classify_transient_from_connect_timeout():

@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
@@ -19,6 +21,7 @@ from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
+from starlette.types import ASGIApp, Message
 
 PLATFORM_BASE_URL = "http://test"
 ClientT = TypeVar("ClientT", bound=NemoClient)
@@ -125,6 +128,56 @@ def make_cli_state(make_platform_client: HelixClientFactory) -> CLIStateFactory:
         return MockCLIState(make_platform_client(handler, workspace=workspace), output_format=output_format)
 
     return factory
+
+
+PostThenDisconnect = Callable[[ASGIApp, str, dict[str, Any], asyncio.Event], Awaitable[int | None]]
+
+
+async def _post_then_disconnect(
+    app: ASGIApp,
+    path: str,
+    body: dict[str, Any],
+    work_started: asyncio.Event,
+) -> int | None:
+    disconnected = asyncio.Event()
+    pending: list[Message] = [{"type": "http.request", "body": json.dumps(body).encode(), "more_body": False}]
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        if pending:
+            return pending.pop(0)
+        await disconnected.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(b"content-type", b"application/json"), (b"host", b"testserver")],
+        "client": ("127.0.0.1", 1234),
+        "server": ("testserver", 80),
+    }
+    handler = asyncio.ensure_future(app(scope, receive, send))
+    await asyncio.wait_for(work_started.wait(), timeout=5)
+    await asyncio.sleep(0.05)
+    disconnected.set()
+    await asyncio.wait_for(handler, timeout=5)
+    return next((message["status"] for message in sent if message["type"] == "http.response.start"), None)
+
+
+@pytest.fixture
+def post_then_disconnect() -> PostThenDisconnect:
+    """POST *body* to an ASGI app, drop the client once *work_started* is set, and return the response status."""
+    return _post_then_disconnect
 
 
 def _fileset_output(workspace: str, name: str) -> FilesetOutput:
