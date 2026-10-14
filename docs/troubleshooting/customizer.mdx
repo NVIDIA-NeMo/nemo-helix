@@ -33,10 +33,6 @@ Batch and sequence-length fields differ by backend. Use the fully qualified path
   2. Reduce `batch.gradient_accumulation_steps` (or lower `training.lora.rank`)
   3. Reduce `model.max_seq_length` from 2048 to 1024 or 512
 
-**DPO job fails before the first training step with `KeyError: 'checkpoint'`:**
-
-This is a known issue in v0.7.0 and v0.7.1. The DPO training pod exits shortly after it starts, and its logs end with `KeyError: 'checkpoint'` raised from NeMo-RL's `build_checkpoint_config`. The generated DPO configuration omits the `policy.dtensor_cfg.checkpoint` section that the pinned NeMo-RL version requires. There is no workaround in the 0.7 release line. DPO jobs run on v0.6.0. GRPO jobs are not affected.
-
 **Training loss not decreasing:**
 
 - Increase `optimizer.learning_rate` (try 2e-4 or 5e-4), same path for Automodel and Unsloth

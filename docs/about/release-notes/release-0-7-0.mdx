@@ -224,12 +224,6 @@ remove the legacy spec package before using newer optimization workflows.
 
 - **Hermes trials can omit the `relay_atif` evidence descriptor.** Use the
   `trace:atif` descriptor instead; it points at the same ATIF file.
-- **DPO jobs fail before the first training step with `KeyError: 'checkpoint'`.**
-  Customizer `rl` DPO jobs submitted from Studio, the CLI, or the API fail
-  shortly after the training pod starts. The generated DPO configuration omits
-  the `policy.dtensor_cfg.checkpoint` section that the pinned NeMo-RL version
-  requires. There is no workaround in the 0.7 release line. DPO jobs run on
-  v0.6.0. GRPO jobs are not affected.
 
 ## Links
 
