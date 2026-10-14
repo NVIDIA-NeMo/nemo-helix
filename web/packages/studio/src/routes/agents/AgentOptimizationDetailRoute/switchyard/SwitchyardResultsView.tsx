@@ -15,16 +15,12 @@ import { type FC, useCallback, useRef, useState } from 'react';
 
 const SwitchyardStatTiles: FC<{ results: SwitchyardResults }> = ({ results }) => {
   const { routes } = results;
-  const pairs = new Set(routes.map((route) => `${route.capable}\n${route.efficient}`));
   const strategies = new Set(routes.map((route) => route.configType));
-  const models = new Set(routes.flatMap((route) => [route.capable, route.efficient]));
 
   return (
     <Grid cols={{ base: 1, md: 2, xl: 4 }} gap="density-xl" className="shrink-0">
       <StatTile variant="metric" label="Virtual models" value={String(routes.length)} />
-      <StatTile variant="metric" label="Model pairs" value={String(pairs.size)} />
       <StatTile variant="metric" label="Routing strategies" value={String(strategies.size)} />
-      <StatTile variant="metric" label="Models" value={String(models.size)} />
     </Grid>
   );
 };
