@@ -25,4 +25,23 @@ describe('environment', () => {
     const { TELEMETRY_ENABLED } = await import('./environment');
     expect(TELEMETRY_ENABLED).toBe(expected);
   });
+
+  it('leaves REACT_QUERY_DEVTOOLS_ENABLED off when VITE_REACT_QUERY_DEVTOOLS_ENABLED is unset', async () => {
+    vi.stubEnv('VITE_REACT_QUERY_DEVTOOLS_ENABLED', undefined);
+    const { REACT_QUERY_DEVTOOLS_ENABLED } = await import('./environment');
+    expect(REACT_QUERY_DEVTOOLS_ENABLED).toBe(false);
+  });
+
+  it.each([
+    ['true', true],
+    ['True', true],
+    ['false', false],
+  ])(
+    'normalizes VITE_REACT_QUERY_DEVTOOLS_ENABLED=%s to %s regardless of case',
+    async (value, expected) => {
+      vi.stubEnv('VITE_REACT_QUERY_DEVTOOLS_ENABLED', value);
+      const { REACT_QUERY_DEVTOOLS_ENABLED } = await import('./environment');
+      expect(REACT_QUERY_DEVTOOLS_ENABLED).toBe(expected);
+    }
+  );
 });
