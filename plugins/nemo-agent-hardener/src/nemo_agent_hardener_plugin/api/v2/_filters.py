@@ -11,8 +11,7 @@ Wraps :func:`nemo_helix_plugin.api.filters.make_filter_obj_dep` so an unknown
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import cast
+from collections.abc import Callable
 
 from fastapi import HTTPException
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
@@ -26,7 +25,7 @@ def make_filter_dep(filter_model: type[BaseModel]) -> Callable[[Request], object
 
     async def _dep(request: Request) -> object:
         try:
-            return await cast(Awaitable[object], inner(request))
+            return await inner(request)
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
 

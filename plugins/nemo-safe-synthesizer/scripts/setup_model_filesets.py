@@ -20,6 +20,7 @@ import argparse
 import logging
 import os
 import sys
+from typing import TypedDict
 
 from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
 from nemo_helix_plugin.files.client import FilesClient
@@ -29,7 +30,16 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-MODEL_FILESETS = [
+
+class ModelFileset(TypedDict):
+    """A model fileset to register: its name, description, and Hugging Face storage config."""
+
+    name: str
+    description: str
+    storage: dict[str, str]
+
+
+MODEL_FILESETS: list[ModelFileset] = [
     {
         "name": "smollm3-3b",
         "description": "SmolLM3 3B model for synthesis",
@@ -90,7 +100,7 @@ def create_filesets(
     Returns:
         List of created fileset names
     """
-    created = []
+    created: list[str] = []
     for fileset_config in MODEL_FILESETS:
         name = fileset_config["name"]
         full_name = f"{workspace}/{name}"
@@ -115,7 +125,7 @@ def create_filesets(
                 workspace=workspace,
                 body=CreateFilesetRequest(
                     name=name,
-                    description=fileset_config.get("description", ""),
+                    description=fileset_config["description"],
                     purpose="generic",
                     storage=storage,
                 ),

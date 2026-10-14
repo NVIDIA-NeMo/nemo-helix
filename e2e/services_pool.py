@@ -443,7 +443,7 @@ def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any
 def _resolve_e2e_harness_config_from_node(node: Node) -> E2EHarnessConfig:
     marker = node.get_closest_marker("e2e_config")
     if marker is None:
-        return {"backend": os.environ.get("NHX_E2E_HARNESS_BACKEND", "subprocess")}
+        return _normalize_e2e_harness_config({"backend": os.environ.get("NHX_E2E_HARNESS_BACKEND", "subprocess")})
     unknown = set(marker.kwargs) - {"harness"}
     if unknown:
         raise pytest.UsageError(f"pytest.mark.e2e_config only supports the 'harness' keyword, got: {sorted(unknown)}")

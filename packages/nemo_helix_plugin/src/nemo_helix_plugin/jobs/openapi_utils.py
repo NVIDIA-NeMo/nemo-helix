@@ -175,9 +175,9 @@ def install_query_param_schema_openapi_hook(app: FastAPI) -> None:
     app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
-def parse_deep_object(name: str, params: QueryParams) -> Dict:
-    """ "Helper function to parse 'deepObject'-like query parameters."""
-    result = {}
+def parse_deep_object(name: str, params: QueryParams) -> dict[str, Any] | None:
+    """Parse ``name[key][subkey]=value`` query parameters into a nested dict, or None if absent."""
+    result: dict[str, Any] = {}
 
     # Get all unique keys (without duplicates)
     unique_keys = set(params.keys())

@@ -3,8 +3,9 @@
 
 """FastAPI filter utilities for entity endpoints."""
 
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from typing import Callable, Type, TypeVar
+from typing import Any
 
 from fastapi import HTTPException
 from nemo_helix_plugin.jobs.openapi_utils import parse_deep_object
@@ -12,17 +13,15 @@ from pydantic import BaseModel
 from starlette import status
 from starlette.requests import Request
 
-FilterType = TypeVar("FilterType")
 
-
-def _extract_validated_fields(validated: BaseModel, raw: dict) -> dict:
+def _extract_validated_fields(validated: BaseModel, raw: dict[str, Any]) -> dict[str, Any]:
     """Extract fields from validated model that correspond to raw input fields.
 
     This ensures we get type conversions from Pydantic validation (e.g., datetime strings
     to datetime objects) while only including fields that were actually provided in the
     query parameters, avoiding issues with default values.
     """
-    result = {}
+    result: dict[str, Any] = {}
     for key in raw.keys():
         if hasattr(validated, key):
             value = getattr(validated, key)
@@ -35,7 +34,9 @@ def _extract_validated_fields(validated: BaseModel, raw: dict) -> dict:
     return result
 
 
-def make_filter_obj_dep(filter_model: Type[FilterType], param_name: str = "filter") -> Callable[[Request], FilterType]:
+def make_filter_obj_dep(
+    filter_model: type[BaseModel], param_name: str = "filter"
+) -> Callable[[Request], Awaitable[dict[str, Any]]]:
     """Create a FastAPI dependency for parsing deepObject-style filter query parameters.
 
     This function creates a dependency that parses ``filter[field][subfield]=value``
@@ -46,10 +47,11 @@ def make_filter_obj_dep(filter_model: Type[FilterType], param_name: str = "filte
         param_name: The name of the query parameter prefix (default: ``"filter"``).
 
     Returns:
-        A FastAPI dependency function that returns the parsed and validated filter.
+        An async FastAPI dependency returning the filter as a dict: the fields given in the query,
+        converted by ``filter_model``, or the raw parsed query for a wildcard ``filter[*]``.
     """
 
-    async def _dep(request: Request) -> FilterType:
+    async def _dep(request: Request) -> dict[str, Any]:
         try:
             raw = parse_deep_object(name=param_name, params=request.query_params) or {}
         except ValueError as e:
