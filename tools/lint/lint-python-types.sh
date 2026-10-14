@@ -16,7 +16,6 @@ ci_ignored_rules=(
   unresolved-attribute     # 72
   not-subscriptable        # 31
   invalid-assignment       # 30
-  invalid-method-override  # 18
   no-matching-overload     # 2
 )
 

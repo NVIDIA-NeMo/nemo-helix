@@ -31,7 +31,7 @@ from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_nemo_client
-from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.entities import EntityClient, parse_qualified_name
 from nemo_helix_plugin.entity_client import get_entity_client
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.testing.files import InMemoryFilesService
@@ -587,9 +587,9 @@ class _FakeBundleEntities(EntityClient):
         self._entity = entity
         self.lookups: list[tuple[str, str]] = []
 
-    async def get(self, entity_type, *, name: str, workspace: str, parent: str | None = None):
+    async def get(self, entity_type, name: str, *, workspace: str | None = None, parent: str | None = None):
         del entity_type, parent
-        self.lookups.append((workspace, name))
+        self.lookups.append(parse_qualified_name(name, default_workspace=workspace))
         return self._entity
 
 

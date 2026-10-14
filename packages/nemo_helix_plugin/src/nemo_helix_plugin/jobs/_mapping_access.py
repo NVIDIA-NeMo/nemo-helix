@@ -16,30 +16,26 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 
-class MappingAccessMixin:
-    """Support a small mapping-style access surface on Pydantic models."""
+class JobSpecModel(BaseModel):
+    """Base model for job spec request shapes, with a small mapping-style access surface."""
 
-    def __getitem__(self: BaseModel, key: str) -> Any:
+    model_config = ConfigDict(validate_assignment=True)
+
+    def __getitem__(self, key: str) -> Any:
         return getattr(self, key)
 
-    def __setitem__(self: BaseModel, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: Any) -> None:
         setattr(self, key, value)
 
-    def __contains__(self: BaseModel, key: object) -> bool:
+    def __contains__(self, key: object) -> bool:
         return isinstance(key, str) and key in self.model_fields_set
 
-    def get(self: BaseModel, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
 
-    def __eq__(self: BaseModel, other: object) -> bool:
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Mapping):
             full = self.model_dump(mode="json", exclude_none=True)
             compact = self.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
             return other == full or other == compact
-        return BaseModel.__eq__(self, other)
-
-
-class JobSpecModel(MappingAccessMixin, BaseModel):
-    """Base model for job spec request shapes."""
-
-    model_config = ConfigDict(validate_assignment=True)
+        return super().__eq__(other)
