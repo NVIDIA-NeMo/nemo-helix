@@ -289,7 +289,13 @@ class HarborRunnerTarget(BaseModel):
         "CREDENTIAL or AUTH) are rejected; use `env_secrets` for credentials.",
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
-    n_concurrent_trials: int = Field(default=4, ge=1, description="Maximum concurrent Harbor trials.")
+    n_concurrent_trials: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum concurrent Harbor trials. Unset or null: the runner default (4) on Docker. "
+        "Must be unset or null on Kubernetes runs, which run trials one at a time.",
+        json_schema_extra={"nullable": True},
+    )
     max_retries: int = Field(default=0, ge=0, description="Harbor per-trial retry attempts on transient failures.")
     artifacts: list[str] = Field(default_factory=list, description="Harbor artifact sources to collect per trial.")
     trace_dir: str | None = Field(
@@ -798,10 +804,17 @@ class _AgentEvalSpecCommon(BaseModel):
     max_concurrent_tasks: int = Field(
         default=4,
         ge=1,
-        description="Maximum number of tasks evaluated concurrently. Distinct from a target's "
-        "`params.parallelism`, which bounds concurrent inference requests *within* trial generation.",
+        description="Concurrency for this evaluation's SDK work. Harbor and Gym: concurrent scoring calls only "
+        "(trials are bounded by the runner). Other runners: concurrent trials and scoring calls. "
+        "For model and agent targets, target.params.parallelism bounds concurrent inference requests "
+        "during trial generation. "
+        "On Kubernetes runs it applies per task Job; the task-Job cap is execution.max_concurrent_task_jobs.",
     )
-    fail_fast: bool = Field(default=False, description="Stop the run on the first scoring failure when True.")
+    fail_fast: bool = Field(
+        default=False,
+        description="Fail on the first metric error instead of recording an errored score. "
+        "On Kubernetes runs it fails only that task's Job.",
+    )
     labels: dict[str, str] = Field(
         default_factory=dict,
         description="Caller-supplied tags recorded on the run's metadata (e.g. benchmark, mode, backend).",
