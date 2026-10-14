@@ -42,6 +42,7 @@ from nemo_evals.jobs.agent_spec import (
     registered_agent_source,
 )
 from nemo_evals.jobs.fabric_harness_packages import fabric_harness_package
+from nemo_evals.jobs.utils import require_platform_client
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
@@ -99,7 +100,8 @@ async def _load_registered_agent(
     parsed = parse_entity_ref(agent_ref, workspace)
     agent_workspace, agent_name = parsed.workspace, parsed.name
 
-    agents = client_from_platform(async_sdk, AsyncAgentsClient)
+    platform = require_platform_client(async_sdk, "resolving a registered agent")
+    agents = client_from_platform(platform, AsyncAgentsClient)
     try:
         agent = (await agents.get_agent(workspace=agent_workspace, name=agent_name)).data()
     except NotFoundError as exc:
@@ -130,7 +132,7 @@ async def _load_registered_agent(
     config = _template_mcp_secret_env(fabric_config.model_dump(mode="json", exclude_none=True), environment)
     files: FilesetRef | None = None
     if registered_agent_config_needs_files(config):
-        files_client = client_from_platform(async_sdk, AsyncFilesClient)
+        files_client = client_from_platform(platform, AsyncFilesClient)
         try:
             await files_client.get_fileset(workspace=agent_workspace, name=ethos_fileset_name(agent_name))
         except NotFoundError:
@@ -256,7 +258,7 @@ async def resolve_registered_agent(
     except Exception:
         # The load may have snapshotted the agent's files; nothing downstream owns that FileSet until a
         # resolved target exists, so a failure here deletes it rather than leaving one per attempt.
-        if agent.files is not None:
+        if agent.files is not None and async_sdk is not None:
             await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), agent.files)
         raise
 
