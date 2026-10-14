@@ -33,7 +33,6 @@ Restart `nemo services run` after install.
 |---|---|
 | `SCALED_EVALS_DATABASE_URL` | scaled-evals' own Postgres. **Not** `DATABASE_URL` — the platform injects that into the same process, and reusing it would run these migrations and claim queues inside the platform database. |
 | `SCALED_EVALS_DATABASE_SCHEMA` | Default `scaled_evals`. Every table lives here. Redundant in a dedicated database, but it keeps the vendored SQL safe to point at a shared one. |
-| `CREDENTIALS_ENCRYPTION_KEY` | Fernet key for BYOK credentials. |
 | `SCALED_EVALS_RUN_MIGRATIONS` | Default `true`. Set `false` where an external Job owns schema rollout. |
 | `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` | Comma-separated registries allowed as public source images for dataset-only Harbor imports. Defaults to `docker.io,ghcr.io`; this is separate from the managed destination-image allowlist. |
 
@@ -112,6 +111,16 @@ Dataset-only image imports perform unauthenticated registry reads and reject
 registries outside `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` before network
 I/O. Bearer-token challenges must remain on the registry host; Docker Hub may
 also use `auth.docker.io`.
+
+Evaluation and benchmark-run `credentials` map a provider (`openai`,
+`anthropic`, `nvidia`, `nhx`, `openshift`) to a platform Secret reference
+`workspace/name`. Create the Secret with the platform Secrets API; preflight
+and create reject a reference the caller cannot read. The value never touches
+scaled-evals storage: the evaluation Job resolves it from the platform at
+launch.
+
+**Removed:** the `/v1/credentials` store and its encryption key. Credentials
+are platform Secrets referenced by name.
 
 **Removed:** OAuth client discovery (`/v1/auth/config`), which existed only to
 hand the CLI login flow the coordinates of a fixed internal identity provider.
@@ -239,7 +248,7 @@ on — `CurrentPrincipal.owner_id` — and one function that produces it.
 Consequences worth knowing before you rely on this:
 
 - **`/v1` is single-tenant.** Every caller resolves to owner `dev`, so all
-  callers share one view of tasks, evaluations, and credentials. Bridging
+  callers share one view of tasks and evaluations. Bridging
   platform identity means setting `request.state.principal` upstream; no route
   changes.
 - **`CONTROL_PLANE_AUTH_ENABLED=true` now fails closed with 401** rather than
@@ -283,12 +292,10 @@ docker run -d --name scaled-evals-pg \
 ```
 
 **3. Run the platform.** The platform keeps its own default store (SQLite locally);
-only scaled-evals is pointed at Postgres. Generating the key via command substitution
-keeps it out of shell history.
+only scaled-evals is pointed at Postgres.
 
 ```bash
 export SCALED_EVALS_DATABASE_URL="postgresql://scaled_evals:scaled_evals@127.0.0.1:5434/scaled_evals"
-export CREDENTIALS_ENCRYPTION_KEY="$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 
 uv run nemo services run --services scaled-evals --port 8080
 ```

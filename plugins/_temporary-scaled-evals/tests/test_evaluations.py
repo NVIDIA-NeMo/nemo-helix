@@ -16,13 +16,16 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from scaled_evals.api.db import Database, get_conn, get_stream_database_factory
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.routers import evaluations as evaluations_router
+from scaled_evals.api.runnability import caller_secret_readable
 from scaled_evals.api.schemas.common import decode_cursor
 from scaled_evals.api.schemas.evaluations import CreateEvaluationRequest
 from scaled_evals.api.settings import settings
@@ -646,10 +649,10 @@ def test_create_rejects_zero_parallelism() -> None:
 
 def test_create_202_with_valid_profile_and_credential() -> None:
     # fetchone: ready revision, then the inserted row.
-    # fetchall: config_profiles existence, then credentials existence.
+    # fetchall: config_profiles existence.
     conn = _conn(
         fetchone=[{"status": "ready"}, {"config": {}}, _eval_row()],
-        fetchall=[[{"id": "cfg_h", "type": "harbor"}], [{"id": "cred_a"}]],
+        fetchall=[[{"id": "cfg_h", "type": "harbor"}]],
     )
     _override_conn(conn)
 
@@ -660,7 +663,7 @@ def test_create_202_with_valid_profile_and_credential() -> None:
             "task_id": "task_abc",
             "task_revision": 2,
             "harbor_profile_id": "cfg_h",
-            "credentials": {"anthropic": "cred_a"},
+            "credentials": {"anthropic": "team-a/anthropic-key"},
         },
     )
 
@@ -812,23 +815,48 @@ def test_create_422_when_harbor_alias_used_for_nemo_gym() -> None:
     assert response.status_code == 422
 
 
-def test_create_422_when_credential_missing() -> None:
-    # No profiles, so the only existence query is credentials, which misses.
-    conn = _conn(fetchone=[{"status": "ready"}], fetchall=[[]])
-    _override_conn(conn)
+def test_create_422_when_credential_secret_unusable() -> None:
+    _override_conn(_conn(fetchone=[{"status": "ready"}] * 2))
+    body = {"name": "x", "task_id": "task_abc", "task_revision": 1}
 
-    response = client.post(
-        "/v1/evaluations",
-        json={
-            "name": "x",
-            "task_id": "task_abc",
-            "task_revision": 1,
-            "credentials": {"anthropic": "cred_ghost"},
-        },
-    )
+    unqualified = client.post("/v1/evaluations", json={**body, "credentials": {"anthropic": "cred_ghost"}})
+    assert unqualified.status_code == 422
+    assert "workspace/name" in unqualified.text
+
+    checked: list[str] = []
+    previous = v1.dependency_overrides[caller_secret_readable]
+    v1.dependency_overrides[caller_secret_readable] = lambda: lambda ref: checked.append(ref) and False
+    try:
+        response = client.post("/v1/evaluations", json={**body, "credentials": {"anthropic": "team-a/ghost"}})
+    finally:
+        v1.dependency_overrides[caller_secret_readable] = previous
 
     assert response.status_code == 422
     assert response.json()["detail"]["error"]["code"] == "invalid_reference"
+    assert checked == ["team-a/ghost"]
+    assert "team-a/ghost" in response.json()["detail"]["error"]["message"]
+
+
+def test_caller_secret_readable_maps_platform_denials_to_false(monkeypatch) -> None:  # noqa: ANN001
+    request = httpx.Request("GET", "http://platform/secrets")
+    outcomes = {
+        "team-a/ok": None,
+        "team-a/gone": NotFoundError(httpx.Response(404, request=request)),
+        "team-b/theirs": PermissionDeniedError(httpx.Response(403, request=request)),
+    }
+    seen: list[tuple[str, str]] = []
+
+    class _Secrets:
+        def get_secret(self, *, workspace: str, name: str) -> None:
+            seen.append((workspace, name))
+            if error := outcomes[f"{workspace}/{name}"]:
+                raise error
+
+    monkeypatch.setattr("scaled_evals.api.runnability.SecretsClient.from_client", lambda _client: _Secrets())
+    readable = caller_secret_readable(object())
+
+    assert [readable(ref) for ref in outcomes] == [True, False, False]
+    assert seen == [("team-a", "ok"), ("team-a", "gone"), ("team-b", "theirs")]
 
 
 # ---------- list / get ----------------------------------------------------
@@ -1023,7 +1051,7 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
                 framework_profile_id="cfg_h",
                 harbor_profile_id="cfg_h",
                 intake_profile_id="cfg_i",
-                credentials={"openai": "cred_openai"},
+                credentials={"openai": "team-a/openai-key"},
                 n_attempts=3,
                 extra_skill_object_keys=["skills/review/SKILL.md"],
                 instruction_prefix="inspect first",
@@ -1050,7 +1078,7 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
         "framework_profile_id": "cfg_h",
         "harbor_profile_id": "cfg_h",
         "intake_profile_id": "cfg_i",
-        "credentials": {"openai": "cred_openai"},
+        "credentials": {"openai": "team-a/openai-key"},
         "agent_bundle_id": None,
         "extra_skill_object_keys": ["skills/review/SKILL.md"],
         "instruction_prefix": "inspect first",
@@ -1065,7 +1093,7 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
     }
     assert body["cli_command"][:4] == ["scaled-evals", "evaluation", "create", "--name"]
     assert "--credential" in body["cli_command"]
-    assert "openai=cred_openai" in body["cli_command"]
+    assert "openai=team-a/openai-key" in body["cli_command"]
     assert "--extra-skill-object-key" in body["cli_command"]
     assert "--instruction-prefix" in body["cli_command"]
     assert "--instruction-postfix" in body["cli_command"]

@@ -12,7 +12,6 @@ dependencies = [
   "nhx-sandbox",
   "boto3>=1.35.0",
   "click>=8.1.0",
-  "cryptography>=43.0.0",
   "docker>=7.0.0",
   "fastapi>=0.115.0",
   "httpx>=0.28.0",
@@ -27,7 +26,6 @@ dependencies = [
 
 [project.scripts]
 scaled-evals = "scaled_evals.cli.main:cli"
-scaled-evals-rotate-credential-key = "scaled_evals.api.rotate_credential_key:main"
 scaled-evals-migrate = "nemo_scaled_evals_plugin.migrations:main"
 
 [project.entry-points."nemo.services"]

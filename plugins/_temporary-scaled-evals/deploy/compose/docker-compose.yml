@@ -30,12 +30,6 @@ x-scaled-evals-env: &scaled-evals-env
   SCALED_EVALS_DATABASE_URL: postgresql://${POSTGRES_USER:-scaled_evals}:${POSTGRES_PASSWORD:-scaled_evals}@postgres:5432/${POSTGRES_DB:-scaled_evals}
   DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-disable}
 
-  # Required, with no fallback on purpose. A committed default would mean any
-  # stack that forgets to override it encrypts BYOK credentials under a key
-  # published in this repository's history. Generate one with (stdlib only):
-  #   python3 -c 'import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())'
-  CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?generate a Fernet key and set it in .env}
-
   S3_ENDPOINT: http://rustfs:9000
   # `rustfs:9000` does not resolve on the host, and SigV4 signs the Host header,
   # so presigned URLs handed to a client must name the published port instead.

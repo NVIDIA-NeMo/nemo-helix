@@ -370,29 +370,6 @@ class EvaluationRepository:
             if actual_type != expected_type:
                 raise InvalidReference(f"{profile_id} is a '{actual_type}' profile, expected '{expected_type}'")
 
-    def validate_credential_references(
-        self,
-        credential_ids: builtins.list[str],
-        *,
-        owner_id: str,
-        include_unowned: bool = False,
-    ) -> None:
-        if not credential_ids:
-            return
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id FROM credentials
-                WHERE id = ANY(%s) AND deleted_at IS NULL
-                  AND (owner_id = %s OR (%s AND owner_id IS NULL))
-                """,
-                (credential_ids, owner_id, include_unowned),
-            )
-            found = {row["id"] for row in cur.fetchall()}
-        missing = [credential_id for credential_id in credential_ids if credential_id not in found]
-        if missing:
-            raise InvalidReference(f"credential not found: {missing[0]}")
-
     @staticmethod
     def _benchmark_variant_snapshot(cur: psycopg.Cursor, benchmark_run_id: str | None) -> dict[str, Any] | None:
         """Freeze the run's benchmark-variant lineage and operational policy.
@@ -480,25 +457,6 @@ class EvaluationRepository:
                 raise InvalidReference(f"config profile not found: {profile_id}")
             profiles[role] = dict(profiles_by_id[profile_id])
 
-        credential_ids = sorted(set(credentials.values()))
-        credentials_by_id: dict[str, dict[str, Any]] = {}
-        if credential_ids:
-            cur.execute(
-                """
-                SELECT id, provider, payload_kind, fingerprint, updated_at
-                FROM credentials
-                WHERE id = ANY(%s) AND deleted_at IS NULL
-                FOR KEY SHARE
-                """,
-                (credential_ids,),
-            )
-            credentials_by_id = {str(row["id"]): row for row in cur.fetchall()}
-        credential_snapshot: dict[str, dict[str, Any]] = {}
-        for role, credential_id in credentials.items():
-            if credential_id not in credentials_by_id:
-                raise InvalidReference(f"credential not found: {credential_id}")
-            credential_snapshot[role] = dict(credentials_by_id[credential_id])
-
         variant = EvaluationRepository._benchmark_variant_snapshot(cur, evaluation.get("benchmark_run_id"))
         if variant is not None:
             evaluation = {**evaluation, "benchmark_variant": variant}
@@ -508,7 +466,7 @@ class EvaluationRepository:
             evaluation=evaluation,
             task=task,
             profiles=profiles,
-            credentials=credential_snapshot,
+            credentials=credentials,
             submission_identity=current_process_identity(),
         )
 

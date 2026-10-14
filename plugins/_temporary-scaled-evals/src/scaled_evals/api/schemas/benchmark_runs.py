@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from scaled_evals.api.schemas.common import validate_scoped_egress_config
+from scaled_evals.api.schemas.common import CredentialRefs, validate_scoped_egress_config
 from scaled_evals.api.schemas.evaluations import EvaluationStatus, Framework, NetworkPolicyMode
 from scaled_evals.api.schemas.tasks import Visibility
 
@@ -44,7 +44,7 @@ class CreateBenchmarkRunRequest(BaseModel):
         description="Compatibility alias for framework_profile_id on Harbor requests.",
     )
     intake_profile_id: str | None = None
-    credentials: dict[str, str] = Field(default_factory=dict)
+    credentials: CredentialRefs = Field(default_factory=dict)
     agent_bundle_id: str | None = None
     extra_skill_object_keys: list[str] = Field(default_factory=list)
     instruction_prefix: str | None = None

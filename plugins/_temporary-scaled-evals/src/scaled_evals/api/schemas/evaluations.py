@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from scaled_evals.api.schemas.common import validate_scoped_egress_config
+from scaled_evals.api.schemas.common import CredentialRefs, validate_scoped_egress_config
 from scaled_evals.api.schemas.tasks import Visibility
 from scaled_evals.models.evaluations import RewardValue
 
@@ -135,8 +135,7 @@ class CreateEvaluationRequest(BaseModel):
         default=None,
         description="Optional intake config profile id.",
     )
-    # role -> credential id, e.g. {"anthropic": "cred_…", "intake": "cred_…"}.
-    credentials: dict[str, str] = Field(default_factory=dict)
+    credentials: CredentialRefs = Field(default_factory=dict)
     agent_bundle_id: str | None = Field(
         default=None,
         description=(

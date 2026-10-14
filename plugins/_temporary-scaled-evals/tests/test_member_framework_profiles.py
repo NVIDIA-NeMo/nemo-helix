@@ -66,8 +66,8 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
         _append_reference_checks(
             db,
             body,
-            CurrentPrincipal(owner_type="DEV", owner_id="dev"),
             [],
+            lambda _ref: True,
         )
         is None
     )
@@ -94,6 +94,7 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
         CurrentPrincipal(owner_type="DEV", owner_id="dev"),
         object_exists=lambda _key: True,
         resolve_bundle=MagicMock(),
+        secret_readable=lambda _ref: True,
     )
     assert isinstance(result, BlockedPreflight)
     assert result.blocker.status_code == 422
@@ -125,8 +126,8 @@ def test_member_dataset_profiles_receive_image_and_builder_checks(
     blocker = _append_reference_checks(
         db,
         body,
-        CurrentPrincipal(owner_type="DEV", owner_id="dev"),
         [],
+        lambda _ref: True,
     )
     assert blocker is not None
     assert blocker.code == "managed_dataset_images_required"
@@ -138,8 +139,8 @@ def test_member_dataset_profiles_receive_image_and_builder_checks(
     blocker = _append_reference_checks(
         db,
         body,
-        CurrentPrincipal(owner_type="DEV", owner_id="dev"),
         [],
+        lambda _ref: True,
     )
     assert blocker is not None
     assert blocker.code == "managed_dataset_builder_unavailable"
@@ -240,6 +241,7 @@ def test_create_routes_overrides_into_member_dispatch(monkeypatch: pytest.Monkey
         ),
         db,
         CurrentPrincipal(owner_type="DEV", owner_id="dev"),
+        lambda _ref: True,
     )
 
     assert result["runner_metadata"] == {
