@@ -135,6 +135,8 @@ def _compose_images(archive: TaskArchive) -> list[BuildImage]:
             images.append(BuildImage(role=role, source="prebuilt", image=image))
             continue
         context, dockerfile = (build, "Dockerfile") if isinstance(build, str) else _build_options(name, build)
+        if posixpath.isabs(dockerfile) or ".." in dockerfile.split("/"):
+            raise ImagePlanError("invalid_compose_file", f"service {name} names a dockerfile outside its context")
         context_path = posixpath.normpath(posixpath.join("environment", context))
         if context_path == ".." or context_path.startswith("../") or posixpath.isabs(context_path):
             raise ImagePlanError("invalid_compose_file", f"service {name} builds from outside the task: {context}")

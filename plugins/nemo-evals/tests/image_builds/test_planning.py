@@ -99,6 +99,16 @@ services:
         ({}, _archive(compose="services:\n  main:\n    build: ../../elsewhere\n"), "invalid_compose_file"),
         ({}, _archive(compose="services: {}\n"), "invalid_compose_file"),
         ({}, _archive(compose="services:\n  main:\n    build: ./missing\n"), "dockerfile_missing"),
+        (
+            {},
+            _archive("Dockerfile", compose="services:\n  main:\n    build: {context: ., dockerfile: ../Dockerfile}\n"),
+            "invalid_compose_file",
+        ),
+        (
+            {},
+            _archive(compose="services:\n  main:\n    build: {context: ., dockerfile: /etc/Dockerfile}\n"),
+            "invalid_compose_file",
+        ),
         ({"environment": {"cpus": "lots"}}, _archive("environment/Dockerfile"), "invalid_task_config"),
     ],
 )
