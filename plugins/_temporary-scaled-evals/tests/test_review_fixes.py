@@ -12,9 +12,9 @@ import os
 import subprocess
 import tarfile
 from contextlib import nullcontext
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,7 +25,7 @@ try:
     from scaled_evals.api.build import buildkit
     from scaled_evals.api.build.errors import BuildError
     from scaled_evals.api.build.image_builder_service import _post_resolve
-    from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
+    from scaled_evals.api.evaluation_store import EvaluationStore
     from scaled_evals.api.routers import evaluations as evaluations_router
     from scaled_evals.api.task_store import TaskStore
     from scaled_evals.cli.client import download_artifact, make_client, request, upload_file
@@ -34,7 +34,7 @@ try:
     from scaled_evals.dispatch.gym.docker import make_gym_docker_submitter
     from scaled_evals.dispatch.kubectl import execute_kubectl
     from scaled_evals.dispatch.runtime_backend import LaunchSpec
-    from task_fixtures import stored_revision, stored_task
+    from task_fixtures import seed_evaluation, stored_revision, stored_task
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -233,12 +233,7 @@ async def test_buildkit_timeout_terminates_and_reaps_process(tmp_path: Path, mon
     assert process.communicate_calls == 2
 
 
-def test_repair_and_cleanup_sql_preserve_recoverability() -> None:
-    connection = MagicMock()
-    connection.transaction.return_value = nullcontext()
-    cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.rowcount = 1
-
+def test_repair_and_cleanup_preserve_recoverability() -> None:
     store = TaskStore()
     store.create_with_initial_revision(
         "task", name="task", slug="task", description=None, visibility="private", object_key="k1", owner_id="owner"
@@ -254,20 +249,37 @@ def test_repair_and_cleanup_sql_preserve_recoverability() -> None:
     )
     assert stored_revision("task", 2)["status"] == "failed"
     assert stored_task("task")["current_revision"] == 1
-    cursor.fetchone.side_effect = [
+    now = datetime.now(UTC)
+    seed_evaluation(
         {
             "id": "ev",
+            "task_id": "task",
+            "task_revision": 1,
             "status": "running",
-            "runtime": "sandbox_k8s",
-            "backend_handle": {"external_id": "old"},
-            "benchmark_run_id": None,
-            "infrastructure_retries": 0,
+            "current_execution": 2,
+            "backend_handle": '{"external_id": "old"}',
+            "dispatch_job_name": "job",
+            "dispatch_reconcile_claimed_by": "worker",
             "max_infrastructure_retries": 1,
-        },
-        {"benchmark_available": True},
-        {"id": 7},
-    ]
-    result = EvaluationRepository(connection).record_dispatch_job_infrastructure_failure(
+            "cleanups": [
+                {
+                    "execution_number": 2,
+                    "runtime": "sandbox_k8s",
+                    "backend_handle": '{"external_id": "older"}',
+                    "dispatch_job_name": "job",
+                    "failure_code": "JobFailed",
+                    "failure_detail": "earlier",
+                    "retry_after_cleanup": False,
+                    "status": "deleted",
+                    "next_attempt_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            ],
+        }
+    )
+    evaluations = EvaluationStore()
+    result = evaluations.record_dispatch_job_infrastructure_failure(
         "ev",
         execution_number=2,
         dispatch_job_name="job",
@@ -276,14 +288,10 @@ def test_repair_and_cleanup_sql_preserve_recoverability() -> None:
         detail="failed",
         retry_delay_seconds=1,
     )
-    insert_sql = next(
-        call.args[0]
-        for call in cursor.execute.call_args_list
-        if "INSERT INTO evaluation_execution_cleanups" in call.args[0]
-    )
     assert result == {"action": "cleanup", "retry": True}
-    assert "WHERE evaluation_execution_cleanups.status = 'deleted'" in insert_sql
-    assert "status = 'pending'" in insert_sql
+    # A deleted cleanup of the same execution is replaced by a pending one.
+    [cleanup] = evaluations.cleanups_for("ev")
+    assert cleanup["status"] == "pending"
 
 
 def test_detached_spawn_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

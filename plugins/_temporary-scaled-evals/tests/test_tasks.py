@@ -19,7 +19,7 @@ from scaled_evals.api import build
 from scaled_evals.api.db import get_conn
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskStore
-from task_fixtures import stored_revision, stored_task
+from task_fixtures import seed_evaluation, stored_revision, stored_task
 
 
 def _conn_returning(fetchones: list) -> MagicMock:
@@ -152,7 +152,7 @@ def test_delete_returns_404_when_missing() -> None:
 
 def test_delete_returns_409_when_active_evaluation_references_task() -> None:
     store = _seed("task_in_use")
-    _use_conn(_conn_returning([{"id": "ev_active"}]))
+    seed_evaluation({"id": "ev_active", "status": "running", "task_id": "task_in_use"})
 
     response = client.delete("/v1/tasks/task_in_use")
 

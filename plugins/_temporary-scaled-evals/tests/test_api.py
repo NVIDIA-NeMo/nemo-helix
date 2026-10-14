@@ -22,7 +22,7 @@ from scaled_evals.api.settings import Settings, settings
 @pytest.fixture(autouse=True)
 def _user_db_override() -> Iterator[MagicMock]:
     db = MagicMock()
-    db.users.quota_usage.return_value = {
+    db.evaluations.quota_usage.return_value = {
         "evaluations_active": 0,
         "sandbox_slots_active": 0,
         "tasks_owned": 0,
@@ -233,7 +233,7 @@ def test_users_me_reports_owner_backed_capacity(
     _user_db_override: MagicMock,
 ) -> None:
     monkeypatch.setattr(settings, "control_plane_per_user_run_limit", 50)
-    _user_db_override.users.quota_usage.return_value = {
+    _user_db_override.evaluations.quota_usage.return_value = {
         "evaluations_active": 72,
         "sandbox_slots_active": 49,
         "tasks_owned": 11,
@@ -249,7 +249,7 @@ def test_users_me_reports_owner_backed_capacity(
         "sandbox_slots_max": 50,
         "sandbox_slots_active": 49,
     }
-    _user_db_override.users.quota_usage.assert_called_once_with("dev")
+    _user_db_override.evaluations.quota_usage.assert_called_once_with("dev")
 
 
 @pytest.mark.parametrize("query", ["days=0", "days=91"])

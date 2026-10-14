@@ -1,87 +1,41 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""Benchmark runs, stored in Entity Store as one entity per run.
+
+A run stores only its identity, config and the explicit-cancel marker. Its
+members are ordinary evaluations carrying `benchmark_run_id`; status, reward and
+the per-task breakdown are derived on read from them (`derive_run_view`).
+"""
+
 from __future__ import annotations
 
-# The repository below defines a ``list`` method, which shadows the builtin for
-# annotations in the same class body, so those spell the type ``builtins.list``.
+# `BenchmarkRunStore.list` shadows the builtin inside the class body.
 import builtins
-from typing import Any
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any, TypeVar
 
-import psycopg
-from psycopg.types.json import Json
+from nemo_helix_plugin.entities.base import EntityConflictError, EntityNotFoundError, SyncEntityClient
+from nemo_helix_plugin.entity import NemoEntity
+from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkRun
 
-from scaled_evals.api import config_profile_store
+from scaled_evals.api import config_profile_store, entity_store
 from scaled_evals.api.benchmark_store import BenchmarkStore
+from scaled_evals.api.evaluation_store import TERMINAL_STATUSES as _TERMINAL_STATUSES
+from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
-from scaled_evals.api.repositories.base_repository import (
-    created_at_cursor_clause,
-    join_where,
-    normalize_order,
-    order_by_clause,
-    substring_search_pattern,
-)
-from scaled_evals.api.repositories.evaluation_repository import (
-    EVALUATION_COLUMNS,
-    EvaluationRepository,
-)
+from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.task_store import TaskStore
 
-# benchmark_runs stores only identity + run config + the explicit-cancel marker.
-# status / reward / per-task breakdown are derived on read from member
-# evaluations (see derive_run_view), never materialized here.
-BENCHMARK_RUN_COLUMNS = (
-    "id, owner_id, name, framework, requested_framework_version, framework_version, "
-    "runner_image_ref, runner_image_digest, framework_adapter_version, sandbox_k8s_version, "
-    "runner_metadata, "
-    "benchmark_id, benchmark_revision, "
-    "framework_profile_id, harbor_profile_id, intake_profile_id, "
-    "credentials, runtime, network_policy, network_policy_config, parallelism, "
-    "max_concurrent_members, visibility, "
-    "cancelled_at, created_at, updated_at"
-)
-_TERMINAL_STATUSES = ("succeeded", "failed", "cancelled")
-_CANCELLABLE_SQL = "('blocked', 'queued', 'provisioning', 'running')"
-_DERIVED_STATUS_SQL = """
-    CASE
-        WHEN br.cancelled_at IS NOT NULL THEN 'cancelled'
-        WHEN NOT EXISTS (
-            SELECT 1
-            FROM evaluations member
-            WHERE member.benchmark_run_id = br.id AND member.deleted_at IS NULL
-        ) OR EXISTS (
-            SELECT 1
-            FROM evaluations member
-            WHERE member.benchmark_run_id = br.id
-              AND member.deleted_at IS NULL
-              AND member.status NOT IN ('succeeded', 'failed', 'cancelled')
-        ) THEN 'running'
-        WHEN NOT EXISTS (
-            SELECT 1
-            FROM evaluations member
-            WHERE member.benchmark_run_id = br.id
-              AND member.deleted_at IS NULL
-              AND (member.status <> 'succeeded' OR member.reward IS NULL)
-        ) THEN 'succeeded'
-        ELSE 'failed'
-    END
-"""
+T = TypeVar("T")
 
-# Member executions of one or more runs (for derive_run_view). Ordered by
-# task_id for a stable per-task breakdown.
-_MEMBERS_FOR_RUNS_SQL = """
-    SELECT
-        e.id, e.benchmark_run_id, e.status, e.reward, e.n_trials, e.n_completed,
-        e.n_errored, e.n_failed_solve, e.exception_counts, e.status_detail,
-        e.current_execution, e.max_executions, e.infrastructure_retries,
-        e.max_infrastructure_retries, e.next_retry_at,
-        e.last_failure_code, e.last_failure_category,
-        e.cancel_teardown_status, e.cancel_teardown_error,
-        e.finished_at, e.task_id, e.task_revision
-    FROM evaluations e
-    WHERE e.benchmark_run_id = ANY(%s) AND e.deleted_at IS NULL
-    ORDER BY e.task_id, e.id
-"""
+_MAX_WRITE_ATTEMPTS = 5
+_RUN_FIELDS = tuple(
+    field
+    for field in ScaledEvalsBenchmarkRun.model_fields
+    if field not in set(NemoEntity.model_fields) | {"display_name"}
+)
 
 
 def derive_run_view(run: dict, members: list[dict]) -> dict:
@@ -294,32 +248,57 @@ def _isoformat(value: Any) -> Any:
     return value.isoformat() if hasattr(value, "isoformat") else value
 
 
-class BenchmarkRunRepository:
-    """A benchmark run: identity + config; its members are ordinary evaluations.
+def _row(entity: ScaledEvalsBenchmarkRun) -> dict[str, Any]:
+    return {
+        "id": entity.name,
+        "name": entity.display_name,
+        **{field: getattr(entity, field) for field in _RUN_FIELDS},
+        "created_at": entity.created_at,
+        "updated_at": entity.updated_at,
+    }
 
-    Running a benchmark spawns one ``evaluations`` row per member task
-    (``benchmark_run_id`` set); the worker pool runs them independently. The
-    run's status/reward are derived on read from those members (derive_run_view),
-    not stored — so there is no worker-side fan-in.
-    """
 
-    def __init__(self, conn: psycopg.Connection) -> None:
-        self.conn = conn
+class BenchmarkRunStore:
+    def __init__(self, client: SyncEntityClient | None = None) -> None:
+        self._client = client or entity_store.entity_client()
+
+    def _get(self, run_id: str) -> ScaledEvalsBenchmarkRun | None:
+        try:
+            entity = self._client.get(ScaledEvalsBenchmarkRun, run_id, workspace=entity_store.private_workspace())
+        except EntityNotFoundError:
+            return None
+        return entity if entity.deleted_at is None else None
+
+    def _mutate(self, run_id: str, change: Callable[[ScaledEvalsBenchmarkRun], tuple[T, bool]]) -> T | None:
+        for _ in range(_MAX_WRITE_ATTEMPTS):
+            entity = self._get(run_id)
+            if entity is None:
+                return None
+            result, write = change(entity)
+            if not write:
+                return result
+            try:
+                self._client.update(entity)
+            except EntityConflictError:
+                continue
+            return result
+        raise Conflict("benchmark_run_changed", "benchmark run changed concurrently; retry")
 
     def load_experiment_identity(self, benchmark_run_id: str) -> dict | None:
         """Resolve a benchmark run to its intake Experiment identity.
 
-        Returns ``{benchmark_slug, run_name}`` — the benchmark slug groups the
-        Experiment (one group per benchmark) and names its dataset. ``None`` when
-        the run (or its benchmark) is missing.
+        Returns `{benchmark_slug, run_name}`: the benchmark slug groups the
+        Experiment (one group per benchmark) and names its dataset. None when
+        the run or its benchmark is missing.
         """
-        with self.conn.cursor() as cur:
-            cur.execute("SELECT benchmark_id, name AS run_name FROM benchmark_runs WHERE id = %s", (benchmark_run_id,))
-            row = cur.fetchone()
-        if row is None:
+        try:
+            entity = self._client.get(
+                ScaledEvalsBenchmarkRun, benchmark_run_id, workspace=entity_store.private_workspace()
+            )
+        except EntityNotFoundError:
             return None
-        slug = BenchmarkStore().slug(row["benchmark_id"])
-        return {"benchmark_slug": slug, "run_name": row["run_name"]} if slug else None
+        slug = BenchmarkStore().slug(entity.benchmark_id)
+        return {"benchmark_slug": slug, "run_name": entity.display_name} if slug else None
 
     def load_members(self, benchmark_id: str, revision: int) -> builtins.list[dict]:
         """Member tasks of a benchmark revision, each resolved to a task revision.
@@ -377,14 +356,12 @@ class BenchmarkRunRepository:
         instruction_postfix: str | None = None,
         initial_user_turns: builtins.list[str] | None = None,
     ) -> dict:
-        """Insert the run row plus one member evaluation per member task.
+        """Create the run plus one queued member evaluation per member task.
 
-        Each entry in ``members`` is ``{id, task_id, task_revision, task_slug}``.
-        Members are ordinary queued task runs (``benchmark_run_id`` set)
-        inheriting the run's profiles/credentials/runtime/parallelism. Returns the
-        run row.
+        Each entry in `members` is `{id, task_id, task_revision, task_slug}`.
+        Members inherit the run's profiles, credentials, runtime and parallelism.
+        Returns the run row.
         """
-        evaluations = EvaluationRepository(self.conn)
         profiles_by_id = config_profile_store.ConfigProfileStore().get_many(
             profile_id
             for profile_id in (
@@ -395,59 +372,44 @@ class BenchmarkRunRepository:
             )
             if profile_id
         )
-        with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO users (id) VALUES (%s)
-                ON CONFLICT (id) DO UPDATE SET last_seen_at = NOW(), updated_at = NOW()
-                """,
-                (owner_id,),
-            )
-            cur.execute(
-                f"""
-                INSERT INTO benchmark_runs (
-                    id, owner_id, name, framework,
-                    requested_framework_version, framework_version,
-                    runner_image_ref, runner_image_digest,
-                    framework_adapter_version, sandbox_k8s_version, runner_metadata,
-                    benchmark_id, benchmark_revision,
-                    framework_profile_id, harbor_profile_id,
-                    intake_profile_id, credentials, runtime, network_policy,
-                    network_policy_config, parallelism, max_concurrent_members, visibility
+        try:
+            run = self._client.create(
+                ScaledEvalsBenchmarkRun(
+                    name=run_id,
+                    workspace=entity_store.private_workspace(),
+                    owner_id=owner_id,
+                    display_name=name,
+                    framework=framework,
+                    requested_framework_version=requested_framework_version,
+                    framework_version=framework_version,
+                    runner_image_ref=runner_image_ref,
+                    runner_image_digest=runner_image_digest,
+                    framework_adapter_version=framework_adapter_version,
+                    sandbox_k8s_version=sandbox_k8s_version,
+                    runner_metadata=runner_metadata,
+                    benchmark_id=benchmark_id,
+                    benchmark_revision=benchmark_revision,
+                    framework_profile_id=framework_profile_id,
+                    harbor_profile_id=harbor_profile_id,
+                    intake_profile_id=intake_profile_id,
+                    credentials=credentials,
+                    runtime=runtime,
+                    network_policy=network_policy,
+                    network_policy_config=network_policy_config,
+                    parallelism=parallelism,
+                    max_concurrent_members=max_concurrent_members,
+                    visibility=visibility,
                 )
-                VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                )
-                RETURNING {BENCHMARK_RUN_COLUMNS}
-                """,
-                (
-                    run_id,
-                    owner_id,
-                    name,
-                    framework,
-                    requested_framework_version,
-                    framework_version,
-                    runner_image_ref,
-                    runner_image_digest,
-                    framework_adapter_version,
-                    sandbox_k8s_version,
-                    Json(runner_metadata),
-                    benchmark_id,
-                    benchmark_revision,
-                    framework_profile_id,
-                    harbor_profile_id,
-                    intake_profile_id,
-                    Json(credentials),
-                    runtime,
-                    network_policy,
-                    Json(network_policy_config),
-                    parallelism,
-                    max_concurrent_members,
-                    visibility,
-                ),
             )
-            run = cur.fetchone()
+        except EntityConflictError:
+            raise Conflict("benchmark_run_exists", f"benchmark run already exists: {run_id}") from None
+        evaluations = EvaluationStore(self._client)
+        created: builtins.list[str] = []
+        # ponytail: the run and its members are separate writes. A failure part
+        # way deletes the run and the members already created, but a crash in
+        # between leaves a deleted-looking run with some queued members.
+        # Upgrade path: a reconciler that cancels members of a missing run.
+        try:
             for member in members:
                 member_framework_profile_id = member.get("framework_profile_id") or framework_profile_id
                 evaluations.create(
@@ -481,23 +443,20 @@ class BenchmarkRunRepository:
                     owner_id=owner_id,
                     profiles_by_id=profiles_by_id,
                 )
-        return run
+                created.append(member["id"])
+        except BaseException:
+            self.soft_delete(run_id)
+            for evaluation_id in created:
+                evaluations.soft_delete(evaluation_id)
+            raise
+        return _row(run)
 
     def get(self, run_id: str) -> dict | None:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                f"SELECT {BENCHMARK_RUN_COLUMNS} FROM benchmark_runs WHERE id = %s AND deleted_at IS NULL",
-                (run_id,),
-            )
-            return cur.fetchone()
+        entity = self._get(run_id)
+        return None if entity is None else _row(entity)
 
     def exists(self, run_id: str) -> bool:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM benchmark_runs WHERE id = %s AND deleted_at IS NULL",
-                (run_id,),
-            )
-            return cur.fetchone() is not None
+        return self._get(run_id) is not None
 
     def list(
         self,
@@ -509,124 +468,87 @@ class BenchmarkRunRepository:
         shared: bool = False,
         q: str | None = None,
     ) -> builtins.list[dict]:
-        direction = normalize_order(order)
-        ordering = order_by_clause(("created_at", "id"), direction)
-        clauses = ["deleted_at IS NULL"]
-        params: list[Any] = []
-        if benchmark_id is not None:
-            clauses.append("benchmark_id = %s")
-            params.append(benchmark_id)
-        if shared:
-            clauses.append("visibility <> 'private'")
-        if search := substring_search_pattern(q):
-            clauses.append(
-                "(id ILIKE %s ESCAPE '\\' OR name ILIKE %s ESCAPE '\\' "
-                "OR benchmark_id ILIKE %s ESCAPE '\\' "
-                "OR framework ILIKE %s ESCAPE '\\' OR runtime ILIKE %s ESCAPE '\\' "
-                f"OR ({_DERIVED_STATUS_SQL}) ILIKE %s ESCAPE '\\')"
+        """Return up to `limit + 1` runs after `cursor`; `q` also matches the derived status."""
+        # ponytail: lists every live run, and a search derives each run's
+        # status from all of its members. Upgrade path: store a derived status
+        # the members update on terminal transitions.
+        runs = [
+            _row(entity)
+            for entity in entity_store.list_all(
+                self._client,
+                ScaledEvalsBenchmarkRun,
+                {"benchmark_id": [benchmark_id]} if benchmark_id is not None else None,
             )
-            params.extend([search] * 6)
-        cursor_filter, cursor_params = created_at_cursor_clause(cursor, direction)
-        if cursor_filter:
-            clauses.append(cursor_filter)
-            params.extend(cursor_params)
-        params.append(limit + 1)
-        with self.conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT {BENCHMARK_RUN_COLUMNS}
-                FROM benchmark_runs AS br
-                WHERE {join_where(clauses)}
-                ORDER BY {ordering}
-                LIMIT %s
-                """,
-                params,
-            )
-            return cur.fetchall()
+            if entity.deleted_at is None and (not shared or entity.visibility != "private")
+        ]
+        if q:
+            members: dict[str, builtins.list[dict]] = {}
+            for member in self.members_for_runs([run["id"] for run in runs]):
+                members.setdefault(member["benchmark_run_id"], []).append(member)
+            runs = [
+                run
+                for run in runs
+                if entity_store.contains(
+                    q,
+                    run["id"],
+                    run["name"],
+                    run["benchmark_id"],
+                    run["framework"],
+                    run["runtime"],
+                    derive_run_view(run, members.get(run["id"], []))["status"],
+                )
+            ]
+        return entity_store.keyset_page(runs, cursor=cursor, order=order, limit=limit)
+
+    def count(self) -> int:
+        """Return how many runs were ever created, deleted ones included."""
+        return len(entity_store.list_all(self._client, ScaledEvalsBenchmarkRun))
 
     def members_for_runs(self, run_ids: builtins.list[str]) -> builtins.list[dict]:
-        """Member evaluation rows for the given runs (for derive_run_view)."""
-        if not run_ids:
-            return []
-        with self.conn.cursor() as cur:
-            cur.execute(_MEMBERS_FOR_RUNS_SQL, (run_ids,))
-            rows = cur.fetchall()
+        """Return the member evaluations of the given runs with their task slug and name, by task."""
+        rows = EvaluationStore(self._client).list_for_runs(run_ids)
         tasks = TaskStore().tasks(row["task_id"] for row in rows)
-        return [
+        members = [
             {**row, "task_slug": task["slug"], "task_name": task["name"]}
             for row in rows
             if (task := tasks.get(row["task_id"]))
         ]
+        return sorted(members, key=lambda member: (member["task_id"], member["id"]))
 
     def cancel(self, run_id: str) -> tuple[dict | None, bool, builtins.list[dict]]:
-        """Cancel a run (stamp cancelled_at) and its active members (soft cancel).
+        """Cancel a run and its unfinished members.
 
-        Returns ``(run_row, cancelled_now, cancelled_members)``;
-        ``cancelled_now`` is False if the run was already cancelled / not found.
-        Newly cancelled member rows are returned so the API can apply the same
-        runtime teardown contract as single-evaluation cancellation.
+        Returns `(run_row, cancelled_now, cancelled_members)`; `cancelled_now`
+        is False when the run was already cancelled or is missing. The newly
+        cancelled members are returned so the API can tear down their runtimes
+        exactly as it does for a single cancelled evaluation.
         """
-        cancelled_members: list[dict] = []
-        with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(
-                f"""
-                UPDATE benchmark_runs
-                SET cancelled_at = NOW(), updated_at = NOW()
-                WHERE id = %s AND deleted_at IS NULL AND cancelled_at IS NULL
-                RETURNING {BENCHMARK_RUN_COLUMNS}
-                """,
-                (run_id,),
-            )
-            run = cur.fetchone()
-            cancelled_now = run is not None
-            if not cancelled_now:
-                cur.execute(
-                    f"SELECT {BENCHMARK_RUN_COLUMNS} FROM benchmark_runs WHERE id = %s AND deleted_at IS NULL",
-                    (run_id,),
-                )
-                run = cur.fetchone()
-            else:
-                cur.execute(
-                    f"""
-                    UPDATE evaluations
-                    SET status = 'cancelled',
-                        status_detail = 'cancelled (benchmark run cancelled)',
-                        cancel_teardown_status = 'pending',
-                        cancel_teardown_error = NULL,
-                        cancel_teardown_updated_at = NOW(),
-                        finished_at = COALESCE(finished_at, NOW()),
-                        dispatch_claimed_at = NULL,
-                        dispatch_claimed_by = NULL,
-                        evidence_status = 'building',
-                        evidence_requested_at = NOW(),
-                        evidence_error = NULL,
-                        evidence_claimed_at = NULL,
-                        evidence_claimed_by = NULL,
-                        evidence_build_attempts = 0,
-                        archive_status = 'building',
-                        archive_requested_at = NOW(),
-                        updated_at = NOW()
-                    WHERE benchmark_run_id = %s AND deleted_at IS NULL
-                      AND status IN {_CANCELLABLE_SQL}
-                    RETURNING {EVALUATION_COLUMNS}
-                    """,
-                    (run_id,),
-                )
-                cancelled_members = cur.fetchall()
-                for member in cancelled_members:
-                    EvaluationRepository.insert_status_event(
-                        cur,
-                        member["id"],
-                        "cancelled",
-                        member.get("status_detail"),
-                    )
-        return run, cancelled_now, cancelled_members
+
+        def change(entity: ScaledEvalsBenchmarkRun) -> tuple[bool, bool]:
+            if entity.cancelled_at is not None:
+                return False, False
+            entity.cancelled_at = datetime.now(tz=UTC)
+            return True, True
+
+        cancelled_now = bool(self._mutate(run_id, change))
+        cancelled_members: builtins.list[dict] = []
+        if cancelled_now:
+            evaluations = EvaluationStore(self._client)
+            # ponytail: members are cancelled one write each after the run is
+            # marked, so a crash between them leaves some members running. The
+            # dispatch worker refuses to retry members of a cancelled run, so
+            # they still end. Upgrade path: a reconciler cancelling stragglers.
+            for member in evaluations.list_for_runs([run_id]):
+                if member["status"] in _TERMINAL_STATUSES:
+                    continue
+                row, now = evaluations.cancel(member["id"], detail="cancelled (benchmark run cancelled)")
+                if now and row is not None:
+                    cancelled_members.append(row)
+        return self.get(run_id), cancelled_now, cancelled_members
 
     def soft_delete(self, run_id: str) -> bool:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                "UPDATE benchmark_runs SET deleted_at = NOW(), updated_at = NOW() "
-                "WHERE id = %s AND deleted_at IS NULL RETURNING id",
-                (run_id,),
-            )
-            return cur.fetchone() is not None
+        def change(entity: ScaledEvalsBenchmarkRun) -> tuple[bool, bool]:
+            entity.deleted_at = datetime.now(tz=UTC)
+            return True, True
+
+        return bool(self._mutate(run_id, change))

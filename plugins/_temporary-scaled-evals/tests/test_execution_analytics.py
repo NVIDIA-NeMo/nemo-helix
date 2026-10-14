@@ -58,7 +58,7 @@ def test_terminal_spans_round_trip_into_admin_views(monkeypatch: pytest.MonkeyPa
     intake = _FakeIntake()
     monkeypatch.setattr(execution_analytics, "_intake", lambda: intake)
     db = MagicMock()
-    db.users.live_usage.return_value = {
+    db.evaluations.live_usage.return_value = {
         "queued_runs": 1,
         "active_runs": 0,
         "total_parallelism": 3,
