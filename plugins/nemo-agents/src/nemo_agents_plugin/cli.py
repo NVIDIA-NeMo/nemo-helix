@@ -130,7 +130,6 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.job import NemoJob
 from pydantic import BaseModel, ValidationError
 from typer.main import get_command as _typer_get_command
 
@@ -187,9 +186,6 @@ _COMPUTE_SPEC_LIST_COLUMNS = [
 
 
 _AGENT_CLI_PANEL = "Additional commands from plugins"
-# POC agent-improvement jobs stay registered (service routes, job discovery) but
-# are kept out of `nemo agents` help until the workflow is ready for users.
-_HIDDEN_JOBS = frozenset({"evaluate-suite", "analyze", "optimize-skills"})
 
 
 @dataclass(frozen=True)
@@ -301,10 +297,6 @@ class AgentsCLI(NemoCLI):
         _register_platform_commands(app)
         _register_environment_commands(app)
         return app
-
-    def update_job_cli(self, job_cls: type[NemoJob], group: typer.Typer) -> None:
-        if job_cls.name in _HIDDEN_JOBS:
-            group.info.hidden = True
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Task entrypoint for ``agents.package`` (``python -m nemo_agents_plugin.tasks.package``).
-
-See :mod:`nemo_agents_plugin.tasks.evaluate_suite` for the shared pattern.
-"""
+"""Task entrypoint for ``agents.package`` (``python -m nemo_agents_plugin.tasks.package``)."""
 
 from __future__ import annotations
 

@@ -209,14 +209,6 @@ export const SKILL_ACTION_TEMPLATES = {
     icon: <Sparkles size={18} />,
     requiredFeatureFlags: ['safeSynthesizerEnabled'],
   },
-  'skills-optimization': {
-    title: 'Optimize agent skills',
-    description: 'Run skill evaluation and improvement loops.',
-    prompt:
-      'Use the skills-optimization skill to evaluate and improve an agent skill suite, then summarize the recommended changes.',
-    icon: <Gauge size={18} />,
-    requiredFeatureFlags: ['agentsEnabled'],
-  },
 } satisfies Record<string, SkillActionTemplate>;
 
 export type SkillActionTemplateName = keyof typeof SKILL_ACTION_TEMPLATES;

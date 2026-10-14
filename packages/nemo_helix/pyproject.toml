@@ -281,8 +281,6 @@ nemo-agents-plugin = [
   "pyyaml>=6.0",
   "jinja2>=3.1",
   "python-on-whales>=0.60",
-  "anthropic>=0.88.0",
-  "rich>=13.7.1",
   "nemo-fabric[relay,streaming]>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
@@ -745,9 +743,6 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.jobs"]
 "agents.evaluate" = "nemo_agents_plugin.jobs.evaluate_agent:EvaluateAgentJob"
-"agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
-"agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
-"agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
 "anonymizer.run" = "nemo_anonymizer_plugin.jobs.run:RunJob"
 "garak.audit" = "nemo_garak.jobs.audit:AuditJob"
 "data-designer.create" = "nemo_data_designer_plugin.jobs.create:CreateJob"
