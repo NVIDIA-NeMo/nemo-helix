@@ -76,7 +76,7 @@ For full option details (e.g. `filters`, `labels`, `annotations`), see the [NeMo
 
 ## OpenShift Route
 
-On Red Hat OpenShift you can expose the API using an [OpenShift Route](https://docs.openshift.com/container-platform/latest/networking/routes/route-configuration.html) (route.openshift.io/v1) instead of Ingress.
+On Red Hat OpenShift you can expose the API using an [OpenShift Route](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/ingress_and_load_balancing/routes) (route.openshift.io/v1) instead of Ingress.
 
 1. **Enable the OpenShift Route** and set the hostname (optional):
 
@@ -88,7 +88,7 @@ On Red Hat OpenShift you can expose the API using an [OpenShift Route](https://d
 
  The route targets the platform API service; you do not set the service name or port (the chart uses the API service by default).
 
-2. **Optional: TLS.** Configure `openshiftRoute.tls` (termination, certificate, key, etc.) per the [OpenShift Route TLS documentation](https://docs.openshift.com/container-platform/latest/networking/routes/route-configuration.html#nw-ingress-creating-a-route-using-a-reencryption-termination_configuring-routes).
+2. **Optional: TLS.** Configure `openshiftRoute.tls` (termination, certificate, key, etc.) per the [OpenShift Route TLS documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/ingress_and_load_balancing/routes#nw-ingress-creating-a-reencrypt-route-with-a-custom-certificate_securing-routes).
 
 3. Install or upgrade with your values file. After installation, use the URL from the Helm notes (`helm status nemo-helix`) or the host you configured.
 
