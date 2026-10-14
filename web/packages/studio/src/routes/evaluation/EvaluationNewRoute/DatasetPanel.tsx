@@ -114,7 +114,7 @@ export const DatasetPanel: FC = () => {
     <Stack justify="start" gap="density-2xl">
       <Stack gap="density-lg">
         <ControlledDatasetFileSelect
-          label="Input File"
+          label="Dataset File"
           workspace={workspace}
           useControllerProps={{ name: 'dataset', control }}
           setError={(fieldError) => setError('dataset', fieldError)}
@@ -134,7 +134,7 @@ export const DatasetPanel: FC = () => {
 
         {row ? (
           <Stack gap="density-sm" className="rounded-md border border-base p-density-lg">
-            <Text kind="body/bold/lg">File Validation</Text>
+            <Text kind="label/bold/sm">File Validation</Text>
             <Check ok label={`${formatLabel} is valid`} />
             {messagesColumn ? (
               <>
