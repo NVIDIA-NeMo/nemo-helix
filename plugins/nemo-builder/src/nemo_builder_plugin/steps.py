@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ContextSource(BaseModel):
@@ -94,11 +94,37 @@ class FetchStepConfig(BaseModel):
     )
 
 
+class OpenSandboxServer(BaseModel):
+    """An OpenSandbox server whose tenant for the build namespace the build step creates sandboxes as."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    domain: str = Field(
+        min_length=1,
+        description="The server's host, optionally with a port, as the build step reaches it: its Service's DNS name.",
+    )
+    protocol: Literal["http", "https"] = Field(default="http", description="How the build step reaches the server.")
+    api_key_secret: str = Field(
+        default="opensandbox-builder-api-key",
+        min_length=1,
+        description=(
+            "Kubernetes Secret in the build namespace holding the tenant's API key under `api-key`. The build step "
+            "reads it with its ServiceAccount, so it's in neither the step's environment nor the sandbox's."
+        ),
+    )
+
+
+#: What an OpenSandbox sandbox may reach unless the deployment says otherwise: public names under these, which
+#: cover the common registries and package indexes. Nothing in a private range is reachable whatever this says.
+DEFAULT_EGRESS_ALLOW = ["*.com", "*.org", "*.io", "*.dev"]
+
+
 class SandboxSpec(BaseModel):
     """How ``supervise`` runs the sandboxes. All of it comes from operator config."""
 
     image: str = Field(description="The kaniko image.")
-    provider: Literal["kubernetes_pod"] = "kubernetes_pod"
+    provider: Literal["kubernetes_pod", "opensandbox"] = "kubernetes_pod"
+    opensandbox: OpenSandboxServer | None = None
     work_pvc: str
     node_selector: dict[str, str]
     dns_nameservers: list[str]
@@ -108,6 +134,8 @@ class SandboxSpec(BaseModel):
     image_pull_secrets: list[str] = Field(default_factory=list)
     #: Unset in a spec from before it existed: neither requested nor limited.
     ephemeral_storage: str | None = None
+    #: A spec from before it existed gets the default, rather than an unrestricted sandbox.
+    egress_allow: list[str] = Field(default_factory=lambda: list(DEFAULT_EGRESS_ALLOW))
 
 
 class SandboxImage(BaseModel):

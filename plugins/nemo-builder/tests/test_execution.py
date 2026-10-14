@@ -63,6 +63,19 @@ class TestADeploymentThatCannotBuild:
         with pytest.raises(BackendRejectedError, match="builder.registry"):
             ExecutionBackend(_config(registry=None), PROFILES).check(_plan())
 
+    def test_the_opensandbox_provider_without_its_server_is_refused(self) -> None:
+        config = _config(sandbox={"image": "kaniko.example.com/executor:debug", "provider": "opensandbox"})
+        with pytest.raises(BackendRejectedError, match="builder.sandbox.opensandbox"):
+            ExecutionBackend(config, PROFILES).check(_plan())
+
+    def test_the_opensandbox_provider_with_its_server_is_accepted(self) -> None:
+        sandbox = {
+            "image": "kaniko.example.com/executor:debug",
+            "provider": "opensandbox",
+            "opensandbox": {"domain": "opensandbox-server.opensandbox-system.svc.cluster.local"},
+        }
+        ExecutionBackend(_config(sandbox=sandbox), PROFILES).check(_plan())
+
     def test_a_configured_deployment_honors_every_request(self) -> None:
         ExecutionBackend(_config(), PROFILES).check(_plan(_spec("a"), _spec("b", repository=None)))
 

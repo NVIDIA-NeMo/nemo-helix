@@ -7,17 +7,29 @@
 # copy. It has the layout `supervise` relies on: /kaniko/executor, and a shell at /busybox/sh. kaniko
 # replaces the root filesystem as it builds, except /kaniko and volumes, so busybox is a volume. Its
 # credential helpers stay unused: `supervise` turns them off, and the sandbox holds no credential.
+# It adds /kaniko/nhx-dropcaps, which the opensandbox provider runs kaniko through (nhx-dropcaps/).
 #
 # `supervise` pins the fork's feature flags. Check them against the fork's release notes when this
 # version changes.
 
 ARG KANIKO_VERSION=v1.28.5
 
-FROM ghcr.io/osscontainertools/kaniko:${KANIKO_VERSION}-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS runtime
+# A static binary, built for the image's platform on the build's own.
+FROM --platform=$BUILDPLATFORM golang:1.26.7 AS nhx-dropcaps
+ARG TARGETOS
+ARG TARGETARCH
+COPY docker/builder/nhx-dropcaps /src
+WORKDIR /src
+RUN GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-s -w" -o /out/nhx-dropcaps .
 
-# The binary runs on the image's platform, and `supervise`'s shell, /busybox/sh, is there.
+FROM ghcr.io/osscontainertools/kaniko:${KANIKO_VERSION}-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS runtime
+COPY --from=nhx-dropcaps /out/nhx-dropcaps /kaniko/nhx-dropcaps
+
+# The binary runs on the image's platform, and `supervise`'s shell, /busybox/sh, is there, as are
+# OpenSandbox's /bin/sh and nhx-dropcaps.
 FROM runtime AS smoke-test
 ARG KANIKO_VERSION
-RUN ["/bin/sh", "-c", "/kaniko/executor version | grep -qF \"$KANIKO_VERSION\" && test -x /busybox/sh"]
+RUN ["/bin/sh", "-c", "/kaniko/executor version | grep -qF \"$KANIKO_VERSION\" && test -x /busybox/sh && test -x /kaniko/nhx-dropcaps"]
 
 FROM runtime

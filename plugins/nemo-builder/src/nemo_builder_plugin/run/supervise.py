@@ -8,11 +8,13 @@ It mounts no volume itself: the sandboxes read the contexts from the work volume
 
 from __future__ import annotations
 
+import base64
 import logging
 from pathlib import Path
 
 from kubernetes import client as k8s
 from kubernetes import config as k8s_config
+from nemo_builder_plugin.run.opensandbox_sandbox import OpenSandboxProvider
 from nemo_builder_plugin.run.pod_sandbox import KubernetesPodProvider
 from nemo_builder_plugin.run.sandbox import SandboxProvider
 from nemo_builder_plugin.run.utils import job_identity, read_step_config
@@ -62,6 +64,15 @@ def _exit_code(*, failures: int, total: int) -> int:
     return 0
 
 
+def _read_api_key(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
+    """The OpenSandbox tenant's key, from a Secret only this step's ServiceAccount may read."""
+    secret = api.read_namespaced_secret(name=name, namespace=namespace)
+    encoded = (secret.data or {}).get("api-key")
+    if not encoded:
+        raise RuntimeError(f"Secret {name} in {namespace} has no api-key")
+    return base64.b64decode(encoded).decode().strip()
+
+
 def _provider(
     config: SuperviseStepConfig, api: k8s.CoreV1Api, *, namespace: str, workspace: str, job_id: str
 ) -> SandboxProvider:
@@ -71,7 +82,19 @@ def _provider(
         return KubernetesPodProvider(
             api, namespace=namespace, sandbox=sandbox, workspace=workspace, job_id=job_id, job_sub_path=job_sub_path
         )
-    raise RuntimeError(f"unknown sandbox provider {sanitize_for_log(sandbox.provider)}")
+    if sandbox.opensandbox is None:
+        raise RuntimeError("the opensandbox provider needs its server's settings, and the compiler wrote none")
+    # Imported here: the SDK is the plugin's `opensandbox` extra, needed only by this provider.
+    from nemo_builder_plugin.run.opensandbox_sdk import SdkApi
+
+    key = _read_api_key(api, name=sandbox.opensandbox.api_key_secret, namespace=namespace)
+    return OpenSandboxProvider(
+        SdkApi(sandbox.opensandbox, key),
+        sandbox=sandbox,
+        workspace=workspace,
+        job_id=job_id,
+        job_sub_path=job_sub_path,
+    )
 
 
 def main() -> int:
