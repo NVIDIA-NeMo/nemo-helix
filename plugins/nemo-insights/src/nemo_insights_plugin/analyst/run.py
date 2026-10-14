@@ -128,11 +128,8 @@ async def run_analyst_change_set(
         if exc.name not in {"insight_agent", "trace_ingest"}:
             raise
         raise RuntimeError(
-            "The Insights analyst requires the separately installed insight-agent and trace-ingest packages. "
-            "Install the pinned dependencies in the environment running the analyst. "
-            "For uv tool and virtual-environment installation commands, see "
-            "https://github.com/NVIDIA-NeMo/nemo-helix/blob/release/0.7/plugins/nemo-insights/README.md"
-            "#install-analyst-dependencies-for-pypi-installations"
+            "The Insights analyst requires Compass (insight-agent==0.1.0rc1) on Python 3.12 or 3.13. "
+            "Reinstall nemo-helix[all] in the environment running the analyst to restore its dependencies."
         ) from exc
 
     observability = None

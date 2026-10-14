@@ -68,12 +68,7 @@ dependencies = [
 version = "0.0.0"
 
 [dependency-groups]
-# Keep Git-only analyst dependencies out of published wheel metadata.
-insights = [
-  "nemo-insights-plugin",
-  "insight-agent @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42",
-  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42#subdirectory=packages/trace-ingest",
-]
+insights = ["nemo-insights-plugin"]
 typecheck = ["transformers>=5.5.0,<5.9.0"]
 # The scaled-evals plugin is opt-in: it is a path dependency rather than a workspace
 # member, so neither `enabled-plugins` nor `uv sync --all-packages` installs it. It needs
@@ -414,6 +409,8 @@ url = "https://nvidia-nemo.github.io/DataDesignerPlugins/simple/"
 explicit = true
 
 [tool.uv.sources]
+# Remove after the combined Compass wheel is published and validated from the registry.
+insight-agent = { git = "https://github.com/NVIDIA-NeMo/nemo-compass.git", rev = "ac6170678755f4dd134635e699f0f970b35fe4bb" }
 data-designer-retrieval-sdg = { index = "data-designer-plugins" }
 nhx-auth = { workspace = true }
 nemo-anonymizer-plugin = { workspace = true }

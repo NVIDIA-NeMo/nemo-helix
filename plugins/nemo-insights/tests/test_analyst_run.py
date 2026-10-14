@@ -128,8 +128,7 @@ async def check():
         else:
             assert error.__cause__.name == missing
             message = str(error)
-            for text in ("insight-agent", "trace-ingest", "uv tool", "virtual-environment",
-                         "#install-analyst-dependencies-for-pypi-installations"):
+            for text in ("insight-agent==0.1.0rc1", "Python 3.12 or 3.13", "nemo-helix[all]"):
                 assert text in message
     else:
         raise AssertionError("Missing dependency did not fail analyst execution")

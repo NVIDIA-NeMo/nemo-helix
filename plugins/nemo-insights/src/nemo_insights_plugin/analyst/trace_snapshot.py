@@ -27,7 +27,7 @@ async def load_trace_snapshot(
 ) -> TraceSnapshot:
     """Select complete traces, retaining SDK authentication and token refresh.
 
-    The Git-pinned trace-ingest normalizer owns the conversion to canonical
+    The Compass trace_ingest normalizer owns the conversion to canonical
     traces. Platform owns HTTP access because its clients refresh credentials
     and support evaluation IDs in addition to the package's name-based query.
     Time bounds select traces; child spans are loaded in full.

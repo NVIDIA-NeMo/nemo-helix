@@ -23,30 +23,20 @@ uv sync
 
 The plugin is installed by default through the root workspace's `enabled-plugins` group.
 
-## Install analyst dependencies for PyPI installations
-
-PyPI does not accept Git dependencies in wheel metadata, so `nemo-helix[all]`
-does not install `insight-agent` and `trace-ingest`. For a `uv tool install`
-installation, include both when installing Helix before running Insights analysis:
+## Install from a package index
 
 ```bash
-uv tool install --force \
-  --with "insight-agent @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42" \
-  --with "trace-ingest @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42#subdirectory=packages/trace-ingest" \
-  "nemo-helix[all]"
+uv tool install --python 3.13 "nemo-helix[all]"
 ```
 
-For a virtual environment, install both pinned requirements in the environment
-that runs the analyst:
+The Insights extra includes `insight-agent==0.1.0rc1`, which bundles Compass's
+analysis code and `trace_ingest` loaders. Analyst execution requires Python
+3.12 or 3.13; Compass does not yet support Python 3.14.
 
-```bash
-uv pip install \
-  "insight-agent @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42" \
-  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42#subdirectory=packages/trace-ingest"
-```
-
-Source checkouts and the platform images install these pinned dependencies through
-the workspace's `insights` group.
+For contributors validating the combined wheel before publication, the workspace
+pins its source in `tool.uv.sources`. Remove that override and refresh `uv.lock`
+after the release is available on the target package index. Package-index
+installation must be validated before merging this dependency change.
 
 ## CLI
 
