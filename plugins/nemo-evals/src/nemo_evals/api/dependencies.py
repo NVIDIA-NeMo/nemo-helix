@@ -5,19 +5,58 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from urllib.parse import quote
 
 from fastapi import Depends, HTTPException, status
 from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.api.service.result_service import ResultService
 from nemo_evals.api.service.task_service import TaskService
+from nemo_evals.api.service.taskset_run_service import TasksetRunService, normalize_run_caller
 from nemo_evals.api.service.taskset_service import TasksetService
+from nemo_evals.config import get_config
 from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildService, JobsServiceBuildJobs
+from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.dependencies import RequestAuthorizer, get_nemo_client, get_request_authorizer
+from nemo_helix_plugin.client_provider import get_async_nemo_client
+from nemo_helix_plugin.dependencies import (
+    RequestAuthorizer,
+    get_effective_principal_id,
+    get_nemo_client,
+    get_request_authorizer,
+)
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+
+
+async def get_taskset_run_service(
+    caller: str = Depends(get_effective_principal_id),
+    authorize: RequestAuthorizer = Depends(get_request_authorizer),
+) -> AsyncGenerator[TasksetRunService, None]:
+    """Bind run acceptance to one caller-delegated platform client per request.
+
+    Args:
+        caller: Effective principal ID, normalized when empty in development mode.
+        authorize: Request-scoped caller source-read authorizer.
+
+    Yields:
+        A service using raw acceptance clients and the existing entity resolver.
+        The delegated client's owned transport closes when the request finishes.
+    """
+    caller = normalize_run_caller(caller)
+    async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=caller) as async_client:
+        entities_client = AsyncEntitiesClient.from_client(async_client)
+        files_client = AsyncFilesClient.from_client(async_client)
+        yield TasksetRunService(
+            TasksetRunStore(entities_client, files_client),
+            EntityClient(entities_client),
+            async_client,
+            authorize,
+            get_config(),
+        )
 
 
 def get_metric_service(

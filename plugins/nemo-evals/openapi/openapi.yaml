@@ -561,6 +561,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs:
+    post:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Submit Taskset Run
+      description: "Freeze and accept a Harbor run, returning its original status\
+        \ on a keyed retry.\n\nArgs:\n    workspace: Workspace that owns the run.\n\
+        \    req: Validated stored Harbor taskset and execution inputs.\n    response:\
+        \ HTTP response whose status distinguishes acceptance from replay.\n    caller:\
+        \ Effective authenticated principal, supplied by the platform dependency.\n\
+        \    service: Caller-delegated request-scoped acceptance service.\n\nReturns:\n\
+        \    Public run status with advisory overlap warnings; 201 for acceptance\
+        \ or 200\n    for replay. Submission creates no Jobs or member records.\n\n\
+        Raises:\n    RequestValidationError: The execution budget exceeds the operator\
+        \ maximum.\n    HTTPException: Source denial (403), conflicting key (409),\
+        \ resolution rejection\n        (422), or a sanitized unexpected failure (500)."
+      operationId: submit_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TasksetRunInput'
+      responses:
+        '201':
+          description: Accept a new run with frozen taskset and agent inputs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunSubmitResponse'
+        '200':
+          description: Replay an identical existing run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunSubmitResponse'
+        '409':
+          description: The idempotency key already belongs to a different request.
+        '422':
+          description: Invalid request, excessive timeout, or missing or incompatible
+            source.
   /apis/evals/v2/workspaces/{workspace}/eval-results:
     get:
       tags:
@@ -5128,6 +5176,110 @@ components:
       title: HarborTaskHash
       description: Producer fingerprint for future use; never an integrity or execution
         gate.
+    HarborTaskJobsExecutionInput:
+      properties:
+        kind:
+          type: string
+          const: harbor-task-jobs
+          title: Kind
+          description: 'Execution strategy: one Kubernetes Job per Harbor task. Future
+            strategies add new kinds.'
+          default: harbor-task-jobs
+        sandbox_policy:
+          type: string
+          title: Sandbox Policy
+          description: 'Name of an operator-approved sandbox policy: which sandbox
+            provider and isolation policy each task''s agent and environment run under,
+            meaning the security and isolation boundary. It does not control compute
+            resources; see dispatcher_profile. Operators define the available policies.'
+          examples:
+          - harbor-standard
+        dispatcher_profile:
+          type: string
+          title: Dispatcher Profile
+          description: Name of a Jobs Service profile that decides where task Jobs
+            run and what resources they get. Operators define the available profiles;
+            defaults to local-k8s, the profile the Helm chart ships.
+          default: local-k8s
+          examples:
+          - local-k8s
+        missing_prebuilt_image:
+          type: string
+          enum:
+          - fail
+          - build
+          title: Missing Prebuilt Image
+          description: What to do when a task pins a prebuilt image (its docker_image)
+            and that image is no longer in the registry. 'fail' (default) fails that
+            task with image_unavailable. 'build' builds the image from the task's
+            Dockerfile instead and records the substitution; the result may differ
+            from the image the task author benchmarked, and a task without a Dockerfile
+            still fails. Does not apply to tasks without a pinned image, which are
+            always built from their Dockerfile, or to an image this run built that
+            disappears mid-run, which is always rebuilt.
+          default: fail
+          examples:
+          - fail
+          - build
+        max_concurrent_task_jobs:
+          title: Max Concurrent Task Jobs
+          description: Maximum number of this run's task Jobs running at once. Omit
+            to rely only on the job controller's admission limits.
+          examples:
+          - 5
+          type: integer
+          minimum: 1.0
+        max_failed_tasks:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: string
+            pattern: ^(100|[1-9]?\d)%$
+          title: Max Failed Tasks
+          description: Failed tasks the run tolerates, as a count or a percent of
+            the taskset's tasks. Once exceeded, the run fails and its remaining task
+            Jobs are cancelled. Submit resolves a percent into a count. Omit for no
+            limit.
+          examples:
+          - 3
+          - 10%
+      additionalProperties: false
+      type: object
+      required:
+      - sandbox_policy
+      title: HarborTaskJobsExecutionInput
+      description: 'Settings that run a Harbor taskset as many independent task Jobs
+        instead of one Job.
+
+
+        Passing it as ``execution`` switches to the Kubernetes path: submit pins the
+
+        taskset revision, registers one Jobs Service Job per task, and returns a single
+        taskset
+
+        run that tracks progress and combines the per-task results.
+
+
+        It exists because these settings mean nothing on the Docker path: where task
+        Jobs are
+
+        placed, which sandbox they may use, and when to give up on a run. Keeping
+        them in their
+
+        own model, selected by ``kind``, lets future execution strategies add new
+        models rather
+
+        than new ``submit`` methods. It never changes benchmark content or which agent
+        runs.
+
+
+        Submit validates this input, resolves the percent form of ``max_failed_tasks``
+        into a
+
+        count, and freezes the result into the run''s stored plan; later changes to
+        operator
+
+        profiles or defaults do not affect an accepted run.'
     HelixJobListResultResponse:
       properties:
         data:
@@ -6614,6 +6766,21 @@ components:
       - -updated_at
       title: ResultSort
       description: Sort fields for result queries (``-`` prefix sorts descending).
+    ResultState:
+      type: string
+      enum:
+      - pending
+      - ready
+      - failed
+      - none
+      title: ResultState
+      description: 'Encode result availability independently of the run''s execution
+        phase.
+
+
+        Persisted values distinguish pending finalization, ready results, failed
+
+        finalization, and no result, allowing readers to interpret terminal runs.'
     Retrieval:
       properties:
         embeddings:
@@ -7742,6 +7909,144 @@ components:
         \ resolve to, even if the\nsubmitted member names were identical. A **pinned**\
         \ ref is fixed against that too, and is what an\nevaluation needs to stay\
         \ comparable across a ``replace``."
+    TasksetRunInput:
+      properties:
+        spec:
+          allOf:
+          - $ref: '#/components/schemas/AgentEvalInputSpec'
+          description: 'Evaluation inputs: a stored taskset reference and Harbor runner
+            target. Inline tasks and precomputed trials are not supported for Kubernetes
+            runs.'
+        execution:
+          allOf:
+          - $ref: '#/components/schemas/HarborTaskJobsExecutionInput'
+          description: 'Kubernetes task Job settings: sandbox policy, dispatcher profile,
+            run-wide task Job concurrency and failure tolerance.'
+        idempotency_key:
+          title: Idempotency Key
+          description: Optional caller-supplied key, scoped to workspace and caller,
+            so retries of the same request return the accepted run. Omit for a new
+            keyless run.
+          type: string
+          maxLength: 256
+          minLength: 1
+        timeout_seconds:
+          title: Timeout Seconds
+          description: Execution budget in seconds from acceptance. Omit to use evals.runs.default_timeout_seconds.
+            Must not exceed evals.runs.max_timeout_seconds.
+          type: integer
+          exclusiveMinimum: 0.0
+      additionalProperties: false
+      type: object
+      required:
+      - spec
+      - execution
+      title: TasksetRunInput
+      description: "Validate a stored Harbor taskset request for independent Kubernetes\
+        \ task Jobs.\n\nConstruction produces a validated request without resolving\
+        \ references or doing\nservice I/O. Submit uses it to derive request identity\
+        \ and acceptance budgets.\n\nRaises:\n    ValidationError: Fields are invalid\
+        \ or the spec violates Kubernetes run rules."
+    TasksetRunPhase:
+      type: string
+      enum:
+      - accepted
+      - running
+      - completed
+      - failed
+      - cancelled
+      - expired
+      title: TasksetRunPhase
+      description: 'Encode execution progress as stable string values for persisted
+        run records.
+
+
+        Controllers move from accepted to running or a terminal phase; result
+
+        finalization is tracked separately by ``ResultState`` so execution completion
+
+        does not imply that combined results are already available.'
+    TasksetRunSubmitResponse:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+          description: Run name used to address the accepted run in API routes.
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace containing the run.
+        taskset_ref:
+          type: string
+          title: Taskset Ref
+          description: Pinned taskset revision this run evaluates, for example default/sort-suite#<64-hex
+            digest>.
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunPhase'
+          description: Execution progress. Starts accepted; terminal phases never
+            change.
+        result_state:
+          allOf:
+          - $ref: '#/components/schemas/ResultState'
+          description: Availability of the combined results, tracked independently
+            of phase.
+        accepted_at:
+          type: string
+          format: date-time
+          title: Accepted At
+          description: When submit accepted the run.
+        execution_deadline_at:
+          type: string
+          format: date-time
+          title: Execution Deadline At
+          description: accepted_at plus the effective timeout; unfinished tasks expire
+            then. Retries do not reset it.
+        finalization_deadline_at:
+          type: string
+          format: date-time
+          title: Finalization Deadline At
+          description: execution_deadline_at plus operator grace; the final result
+            must be saved by then.
+        cancel_requested_at:
+          title: Cancel Requested At
+          description: When a caller requested cancellation; None if never requested.
+          type: string
+          format: date-time
+        error:
+          title: Error
+          description: Why the run failed or expired; None otherwise.
+          type: string
+        created_by:
+          title: Created By
+          description: Principal ID of the caller who created the run; None when creator
+            metadata is unavailable.
+          type: string
+        idempotency_key:
+          title: Idempotency Key
+          description: Caller-supplied submit key; None for a keyless run.
+          type: string
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: Advisory notices about this caller's overlapping active runs
+            on the same taskset revision.
+      additionalProperties: false
+      type: object
+      required:
+      - run_id
+      - workspace
+      - taskset_ref
+      - phase
+      - result_state
+      - accepted_at
+      - execution_deadline_at
+      - finalization_deadline_at
+      title: TasksetRunSubmitResponse
+      description: Return the accepted run with advisory warnings for this submission
+        only.
     TasksetSort:
       type: string
       enum:

@@ -162,6 +162,7 @@ def get_nemo_client(
             context, http_client, base_url, limits=limits, follow_redirects=follow_redirects
         ),
         client_runtime=_nemo_client_runtime(context, base_url),
+        owns_http_client=http_client is None,
     )
 
 
@@ -203,6 +204,7 @@ def get_async_nemo_client(
             context, http_client, base_url, limits=limits, follow_redirects=follow_redirects
         ),
         client_runtime=_nemo_client_runtime(context, base_url),
+        owns_http_client=http_client is None,
     )
 
 

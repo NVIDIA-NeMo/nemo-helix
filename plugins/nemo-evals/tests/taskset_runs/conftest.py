@@ -15,20 +15,7 @@ from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_evals.taskset_runs.store import RunAcceptance, TasksetRunStore
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nhx.testing.files import InMemoryFilesService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
-
-
-@pytest.fixture
-def files_service() -> InMemoryFilesService:
-    """Return fresh isolated Files storage for each test's resource assertions."""
-    return InMemoryFilesService()
-
-
-@pytest.fixture
-def files_client(files_service: InMemoryFilesService) -> AsyncFilesClient:
-    """Return a real Files client backed by the test's in-memory Files service."""
-    return files_service.client()
 
 
 @pytest.fixture

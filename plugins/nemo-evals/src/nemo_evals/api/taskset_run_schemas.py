@@ -236,6 +236,15 @@ class TasksetRunStatus(BaseModel):
 _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
 
 
+class TasksetRunSubmitResponse(TasksetRunStatus):
+    """Return the accepted run with advisory warnings for this submission only."""
+
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Advisory notices about this caller's overlapping active runs on the same taskset revision.",
+    )
+
+
 def to_status(run: TasksetRunEntity) -> TasksetRunStatus:
     """Project stored domain fields into the public run status.
 
