@@ -16,7 +16,7 @@ import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
-from nemo_agent_hardener_plugin.jobs import artifacts, benign_suite, execution
+from nemo_agent_hardener_plugin.jobs import _common, artifacts, benign_suite, execution
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_mod
 from nemo_agent_hardener_plugin.jobs import run as run_module
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
@@ -1138,3 +1138,331 @@ def test_prepare_invocation_forwards_rounds(tmp_path: Path, monkeypatch: pytest.
 
     single, _ = execution._prepare_invocation(str(manifest), None, cfg, None, None, None, 1)
     assert "--rounds" not in single  # agent-hardener's own default; only emitted when asked for
+
+
+# ── user --env-file reaches the victim's materialized .env ─────────────────────
+
+
+def _manifest_with_secret(tmp_path: Path) -> Path:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n  secrets: [REMOTE_TOKEN]\n", encoding="utf-8")
+    return manifest
+
+
+def test_env_file_values_are_written_to_the_victim_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest = _manifest_with_secret(tmp_path)
+    user_env = tmp_path / "user.env"
+    user_env.write_text("REMOTE_TOKEN=from-user\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    seen: dict[str, Any] = {}
+
+    def fake_one_shot(_manifest: str, env_file: str | None, *_a: Any, **_k: Any) -> execution.RunOutcome:
+        seen["env_file"] = env_file
+        return execution.RunOutcome("completed", 0)
+
+    monkeypatch.setattr(run_module, "_run_one_shot", fake_one_shot)
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"config": str(manifest), "env_file": str(user_env)}, ctx=_ctx(tmp_path), sdk=None)
+
+    victim_env = tmp_path / ".env"
+    assert seen["env_file"] == str(user_env)
+    assert "REMOTE_TOKEN=from-user" in victim_env.read_text(encoding="utf-8")
+
+
+# ── hitlog is saved on failure and cannot be skipped by a mitigations failure ──
+
+
+def _failing_one_shot(*_a: Any, **_k: Any) -> Any:
+    raise AgentHardenerRunError("sandbox", "victim did not start")
+
+
+def _failed_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any], saved: list[str]
+) -> dict[str, Any]:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setattr(run_module, "_run_one_shot", _failing_one_shot)
+    monkeypatch.setattr(run_module, "_save_hitlog_fileset", lambda *_a: saved.append("hitlog") or "hl-ref")
+    sdk, captured = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+    job.run({"config": str(manifest), **config}, ctx=_ctx(tmp_path), sdk=sdk)
+    return captured[-1]
+
+
+def test_failed_run_records_the_hitlog_it_produced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: list[str] = []
+    record = _failed_record(tmp_path, monkeypatch, {}, saved)
+    assert record["status"] == "failed"
+    assert record["hitlog_fileset"] == "hl-ref"
+
+
+@pytest.mark.parametrize("config", [{"stop_after_synth": True}, {"replay_hitlog_fileset": "ws/prior"}])
+def test_failed_run_saves_no_hitlog_without_a_live_attack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any]
+) -> None:
+    saved: list[str] = []
+    record = _failed_record(tmp_path, monkeypatch, config, saved)
+    assert record["hitlog_fileset"] == ""
+    assert saved == []
+
+
+def test_hitlog_is_saved_before_mitigations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setattr(run_module, "_run_one_shot", lambda *_a, **_k: execution.RunOutcome("completed", 0))
+    order: list[str] = []
+    monkeypatch.setattr(run_module, "_save_hitlog_fileset", lambda *_a: order.append("hitlog") or "hl-ref")
+    monkeypatch.setattr(run_module, "_save_mitigations", lambda _ctx: order.append("mitigations"))
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=None)
+
+    assert order == ["hitlog", "mitigations"]
+
+
+# ── stale agent warning ────────────────────────────────────────────────────────
+
+
+def _agent_manifest_sdk(**data: Any) -> Any:
+    record = SimpleNamespace(
+        data={
+            "agent": "default/clockbot",
+            "agent_fileset": "default/fs",
+            "agent_updated_at": "2026-10-01T10:00:00Z",
+            **data,
+        }
+    )
+    return SimpleNamespace(entities=SimpleNamespace(get_entity_by_name=lambda **_k: record))
+
+
+def test_stale_agent_warning_fires_when_the_agent_is_newer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", lambda *_a: "2026-10-03T08:00:00Z")
+
+    with caplog.at_level("WARNING"):
+        message = manifest_mod._agent_staleness_warning(_agent_manifest_sdk(), "m1", make_job_context(tmp_path))
+
+    assert message is not None
+    assert "m1" in message
+    assert "default/clockbot" in message
+    assert "Refresh" in message
+    assert message in caplog.text
+
+
+@pytest.mark.parametrize("current", ["2026-10-01T10:00:00Z", "2026-09-30T10:00:00Z", "2026-10-01T10:00:00+00:00"])
+def test_no_stale_warning_when_the_agent_is_unchanged_or_older(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, current: str
+) -> None:
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", lambda *_a: current)
+    assert manifest_mod._agent_staleness_warning(_agent_manifest_sdk(), "m1", make_job_context(tmp_path)) is None
+
+
+def test_stale_check_never_fails_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(*_a: Any) -> str:
+        raise ConnectionError("agents service down")
+
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", _boom)
+    assert manifest_mod._agent_staleness_warning(_agent_manifest_sdk(), "m1", make_job_context(tmp_path)) is None
+
+
+def test_stale_check_is_skipped_without_a_stored_timestamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", lambda *_a: pytest.fail("must not fetch the agent"))
+    sdk = _agent_manifest_sdk(agent_updated_at="")
+    assert manifest_mod._agent_staleness_warning(sdk, "m1", make_job_context(tmp_path)) is None
+
+
+def test_stale_check_ignores_project_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(manifest_mod, "current_agent_timestamp", lambda *_a: pytest.fail("must not fetch the agent"))
+    sdk = _agent_manifest_sdk(source_type="project", agent="")
+    assert manifest_mod._agent_staleness_warning(sdk, "m1", make_job_context(tmp_path)) is None
+
+
+def test_war_game_reports_the_stale_agent_warning_in_its_final_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setattr(run_module, "_effective_models", lambda *_a: None)
+    monkeypatch.setattr(run_module._common, "resolve_model_key", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_module, "_materialize_manifest", lambda *_a: str(manifest))
+    monkeypatch.setattr(run_module, "_agent_staleness_warning", lambda *_a: "agent changed; refresh it")
+    monkeypatch.setattr(run_module, "_manifest_secret_values", lambda *_a: {})
+    monkeypatch.setattr(run_module, "_cached_benign_suite", lambda *_a: [])
+    monkeypatch.setattr(run_module, "_manifest_rounds", lambda *_a: 1)
+    monkeypatch.setattr(run_module, "_run_one_shot", lambda *_a, **_k: execution.RunOutcome("completed", 0))
+    sdk, _ = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    progress: list[dict[str, Any]] = []
+    monkeypatch.setattr(job, "report_progress", lambda _ctx, **k: progress.append(k))
+
+    result = job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=sdk)
+
+    assert result["status"] == "completed"
+    assert progress[-1]["details"]["warning"] == "agent changed; refresh it"
+
+
+# ── Secrets-store refs ─────────────────────────────────────────────────────────
+
+_SECRET_VALUE = "dummy-secret-value"  # pragma: allowlist secret
+
+
+def _fake_secret_store(monkeypatch: pytest.MonkeyPatch, values: dict[str, str | Exception]) -> list[tuple[str, str]]:
+    """Back ``_resolve_secret`` with *values* keyed ``workspace/name``; returns the lookups made."""
+    lookups: list[tuple[str, str]] = []
+
+    def fake(_sdk: Any, name: str, workspace: str) -> str | None:
+        lookups.append((workspace, name))
+        result = values.get(f"{workspace}/{name}")
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(_common, "_resolve_secret", fake)
+    return lookups
+
+
+def test_secret_refs_resolve_through_the_secrets_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    lookups = _fake_secret_store(monkeypatch, {"default/a-secret": "va", "ws2/b-secret": "vb"})
+
+    values = _common.resolve_secret_refs(None, {"A": "a-secret", "B": "ws2/b-secret"}, "default")
+
+    assert values == {"A": "va", "B": "vb"}
+    assert lookups == [("default", "a-secret"), ("ws2", "b-secret")]
+
+
+@pytest.mark.parametrize("stored", ["", RuntimeError(f"backend said {_SECRET_VALUE}")])
+def test_unreadable_secret_fails_naming_the_ref_not_the_value(
+    monkeypatch: pytest.MonkeyPatch, stored: str | Exception
+) -> None:
+    _fake_secret_store(monkeypatch, {"default/a-secret": stored})
+
+    with pytest.raises(AgentHardenerRunError) as exc_info:
+        _common.resolve_secret_refs(None, {"A_KEY": "a-secret"}, "default")
+
+    assert exc_info.value.category == "missing_credential"
+    message = str(exc_info.value)
+    assert "A_KEY" in message
+    assert "default/a-secret" in message
+    assert _SECRET_VALUE not in message
+
+
+def test_missing_victim_secret_points_at_a_secrets_store_ref(tmp_path: Path) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n  secrets:\n    - NVIDIA_API_KEY\n", encoding="utf-8")
+
+    with pytest.raises(AgentHardenerRunError) as raised:
+        _common.check_victim_secrets(str(manifest), {}, None)
+
+    assert raised.value.category == "missing_credential"
+    assert "--secrets NVIDIA_API_KEY=<workspace>/nvidia-api-key" in raised.value.remediation
+    assert "--env-file" in raised.value.remediation
+
+
+def test_victim_env_precedence_is_operator_then_secrets_then_env_file(tmp_path: Path) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: c\n  secrets: [A, B, C]\n", encoding="utf-8")
+    user_env = tmp_path / "user.env"
+    user_env.write_text("C=from-file\n", encoding="utf-8")
+    operator = {"A": "from-operator", "B": "from-operator", "C": "from-operator"}
+
+    merged, env_file = _common.prepare_victim_env(
+        str(manifest), operator, str(user_env), {"B": _SECRET_VALUE, "C": "from-secret"}
+    )
+
+    assert (merged["A"], merged["B"], merged["C"]) == ("from-operator", _SECRET_VALUE, "from-file")
+    assert env_file == str(user_env)
+    assert f"B={_SECRET_VALUE}" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_shadowed_operator_env_names_differing_values_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _provisioned_config(tmp_path)
+    cfg.operator_env_file.write_text("SAME=1\nDIFFERENT=file-value\nUNSET=3\n", encoding="utf-8")
+    monkeypatch.setenv("SAME", "1")
+    monkeypatch.setenv("DIFFERENT", _SECRET_VALUE)
+    monkeypatch.delenv("UNSET", raising=False)
+
+    with caplog.at_level("WARNING"):
+        shadowed = _common.warn_shadowed_operator_env(cfg)
+
+    assert shadowed == ["DIFFERENT"]
+    assert "DIFFERENT" in caplog.text
+    assert _SECRET_VALUE not in caplog.text
+    assert "file-value" not in caplog.text
+
+
+def test_no_shadowing_warning_when_the_environment_agrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _provisioned_config(tmp_path)
+    cfg.operator_env_file.write_text("SAME=1\n", encoding="utf-8")
+    monkeypatch.setenv("SAME", "1")
+
+    with caplog.at_level("WARNING"):
+        assert _common.warn_shadowed_operator_env(cfg) == []
+
+    assert not caplog.records
+
+
+def test_stored_env_may_not_carry_a_declared_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """env is plaintext in the victim image; a secret set there would leak its value."""
+    sdk = SimpleNamespace(
+        entities=SimpleNamespace(
+            get_entity_by_name=lambda **_k: _frozen_agent_record(secrets=["API_KEY"], env={"API_KEY": _SECRET_VALUE})
+        )
+    )
+    monkeypatch.setattr(manifest_mod, "download_and_extract_project", lambda *_a, **_k: tmp_path / "restored")
+
+    with pytest.raises(AgentHardenerRunError, match="API_KEY") as exc_info:
+        manifest_mod._materialize_manifest(sdk, "m1", make_job_context(tmp_path))
+
+    assert exc_info.value.category == "manifest"
+    assert _SECRET_VALUE not in str(exc_info.value)
+
+
+def test_manifest_secret_values_let_explicit_refs_win_over_the_deployments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sdk = _agent_manifest_sdk(
+        deployed_secret_refs={"SHARED": "default/deployed", "ONLY_DEPLOYED": "default/d2"},
+        secret_refs={"SHARED": "ws2/explicit"},
+    )
+    lookups = _fake_secret_store(monkeypatch, {"default/deployed": "wrong", "default/d2": "vd", "ws2/explicit": "vx"})
+
+    values = manifest_mod._manifest_secret_values(sdk, "m1", make_job_context(tmp_path))
+
+    assert values == {"SHARED": "vx", "ONLY_DEPLOYED": "vd"}
+    assert ("default", "deployed") not in lookups
+
+
+def test_manifest_secret_values_are_empty_without_refs(tmp_path: Path) -> None:
+    assert manifest_mod._manifest_secret_values(_agent_manifest_sdk(), "m1", make_job_context(tmp_path)) == {}
+
+
+def test_manifest_secrets_land_in_the_victim_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest = _manifest_with_secret(tmp_path)
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setattr(run_module, "_effective_models", lambda *_a: None)
+    monkeypatch.setattr(run_module._common, "resolve_model_key", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_module, "_materialize_manifest", lambda *_a: str(manifest))
+    monkeypatch.setattr(run_module, "_agent_staleness_warning", lambda *_a: None)
+    monkeypatch.setattr(run_module, "_manifest_secret_values", lambda *_a: {"REMOTE_TOKEN": _SECRET_VALUE})
+    monkeypatch.setattr(run_module, "_cached_benign_suite", lambda *_a: [])
+    monkeypatch.setattr(run_module, "_manifest_rounds", lambda *_a: 1)
+    monkeypatch.setattr(run_module, "_run_one_shot", lambda *_a, **_k: execution.RunOutcome("completed", 0))
+    sdk, _ = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=sdk)
+
+    assert f"REMOTE_TOKEN={_SECRET_VALUE}" in (tmp_path / ".env").read_text(encoding="utf-8")

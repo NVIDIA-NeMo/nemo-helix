@@ -381,8 +381,10 @@ class ManifestInit(BaseModel):
     port: int | None = Field(default=None, description="Victim port (defaults to 8000).")
     secrets: list[str] | None = Field(
         default=None,
-        description="Env-var names the victim requires. Derived from the agent's own declarations "
-        "(``models.*.api_key_env``, MCP server env) when omitted.",
+        description="Secrets the victim requires, each `NAME` or `NAME=[workspace/]secret`. A `NAME` takes its "
+        "value from the operator env or `--env-file`; a ref is read from the Secrets store at run time. Derived "
+        "from the agent's own declarations (``models.*.api_key_env``, MCP server env) and its running deployment "
+        "when omitted.",
     )
     egress: list[str] | None = Field(
         default=None,
@@ -393,8 +395,8 @@ class ManifestInit(BaseModel):
     env: StringMap | None = Field(
         default=None,
         description="Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in "
-        "plaintext on the manifest — credentials belong in `secrets`, which names them and "
-        "resolves the values from the Secrets store at run time.",
+        "plaintext on the manifest — credentials belong in `secrets` as `NAME=workspace/secret`, read from "
+        "the Secrets store at run time.",
     )
     backends: list[str] | None = Field(
         default=None,
@@ -448,8 +450,8 @@ class ManifestUpdate(BaseModel):
     env: StringMap | None = Field(
         default=None,
         description="Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in "
-        "plaintext on the manifest — credentials belong in `secrets`, which names them and "
-        "resolves the values from the Secrets store at run time.",
+        "plaintext on the manifest — credentials belong in `secrets` as `NAME=workspace/secret`, read from "
+        "the Secrets store at run time.",
     )
     defenders: list[str] | None = Field(
         default=None,

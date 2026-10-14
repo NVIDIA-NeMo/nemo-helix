@@ -47,7 +47,8 @@ CATEGORY_UNEXPECTED = "unexpected"
 # Default operator-facing next step per category; a call site may override with a more specific one.
 CATEGORY_REMEDIATION: dict[str, str] = {
     CATEGORY_PROVISIONING: "Run `nemo agent-hardener setup` on the host that executes this job, then retry.",
-    CATEGORY_MISSING_CREDENTIAL: "Provide the required secret (e.g. `nemo secrets create`) or set it in the environment.",
+    CATEGORY_MISSING_CREDENTIAL: "Check the credential the message names: its Secrets-store entry, --env-file or the "
+    "environment.",
     CATEGORY_MANIFEST: "Re-create the manifest or fix the target agent reference, then retry.",
     CATEGORY_FILESET: "Re-upload the file and verify the Files service is reachable, then retry.",
     CATEGORY_SANDBOX: "Check the Docker daemon and the OpenShell gateway on the host, then retry.",

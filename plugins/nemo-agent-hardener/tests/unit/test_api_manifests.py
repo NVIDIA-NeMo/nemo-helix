@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.agent_resolver import ResolvedManifest
@@ -25,7 +26,9 @@ NOW = datetime.now(timezone.utc)
 PREFIX = "/apis/agent-hardener/v2/workspaces/{workspace}"
 
 
-def _resolved(egress: list[str] | None = None) -> ResolvedManifest:
+def _resolved(
+    egress: list[str] | None = None, agent_updated_at: str = "", deployed_secret_refs: dict[str, str] | None = None
+) -> ResolvedManifest:
     """The real resolver returns the *effective* egress — the flag plus what the config declares."""
     return ResolvedManifest(
         manifest={"agent": {"name": "clockbot", "port": 8000}, "backends": []},
@@ -37,6 +40,8 @@ def _resolved(egress: list[str] | None = None) -> ResolvedManifest:
         secrets=["INFERENCE_API_KEY"],
         egress=list(egress or []),
         warnings=["no running deployment; defaulting port to 8000."],
+        agent_updated_at=agent_updated_at,
+        deployed_secret_refs=deployed_secret_refs or {},
     )
 
 
@@ -341,3 +346,229 @@ def test_validate_model_passes_a_named_secret_through(client, monkeypatch: pytes
 
     assert response.status_code == 200
     assert seen["secret"] == "my-key"
+
+
+# ── backends ─────────────────────────────────────────────────────────────────
+
+GATEWAY = {"name": "nemo-inference-gateway", "ports": [8080]}
+REMOTE_MCP = {"name": "remote-mcp", "ports": [9100, 9101]}
+
+
+@pytest.fixture
+def resolver_backends(monkeypatch: pytest.MonkeyPatch) -> list[list[dict] | None]:
+    """Backends each resolver call received."""
+    seen: list[list[dict] | None] = []
+
+    def _resolve(*_a, **kw):
+        seen.append(kw.get("backends"))
+        return _resolved(kw.get("egress"))
+
+    monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", _resolve)
+    return seen
+
+
+def test_create_agent_manifest_passes_backends_to_the_resolver(client, mock_entity_client, resolver_backends) -> None:
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot", "backends": ["remote-mcp:9100,9101"]},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resolver_backends == [[REMOTE_MCP]]
+
+
+@pytest.mark.parametrize("spec", ["remote-mcp", "remote-mcp:abc", "nemo-inference-gateway:8080"])
+def test_create_manifest_rejects_a_bad_backend_with_422(client, resolver_backends, spec: str) -> None:
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot", "backends": [spec]},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "backend" in resp.text
+    assert resolver_backends == []
+
+
+def test_refresh_carries_stored_backends_forward_without_the_gateway(
+    client, mock_entity_client, resolver_backends
+) -> None:
+    stored_yaml = yaml.safe_dump({"agent": {"name": "clockbot"}, "backends": [GATEWAY, REMOTE_MCP]})
+    existing = AgentHardenerManifest(
+        name="m1", workspace="default", agent="default/clockbot", agent_fileset="default/old", manifest_yaml=stored_yaml
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/m1/refresh")
+
+    assert resp.status_code == 200, resp.text
+    assert resolver_backends == [[REMOTE_MCP]]
+
+
+def test_refresh_tolerates_a_manifest_without_backends(client, mock_entity_client, resolver_backends) -> None:
+    existing = AgentHardenerManifest(
+        name="m1", workspace="default", agent="default/clockbot", agent_fileset="default/old", manifest_yaml=""
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/m1/refresh")
+
+    assert resp.status_code == 200, resp.text
+    assert resolver_backends == [[]]
+
+
+def test_create_project_manifest_stores_backends(client, mock_entity_client, monkeypatch) -> None:
+    monkeypatch.setattr(manifests_module, "download_and_extract_project", lambda *_a, **_k: Path("/tmp/p"))
+    monkeypatch.setattr(
+        manifests_module,
+        "inspect_project",
+        lambda *_a, **_k: {
+            "dockerfile": "Dockerfile",
+            "start_command": "run",
+            "binaries": ["/app/**"],
+            "port": 8000,
+            "secrets": [],
+            "egress": [],
+            "env": {},
+            "warnings": [],
+        },
+    )
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={
+            "name": "p1",
+            "source_type": "project",
+            "project_fileset": "default/proj",
+            "backends": ["remote-mcp:9100,9101"],
+        },
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert yaml.safe_load(resp.json()["manifest_yaml"])["backends"] == [REMOTE_MCP]
+
+
+# ── agent staleness marker ───────────────────────────────────────────────────
+
+
+def test_create_records_the_agents_timestamp(client, mock_entity_client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        manifests_module,
+        "resolve_agent_to_manifest",
+        lambda *_a, **kw: _resolved(kw.get("egress"), agent_updated_at="2026-10-01T10:00:00Z"),
+    )
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot"},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["agent_updated_at"] == "2026-10-01T10:00:00Z"
+
+
+def test_refresh_advances_the_recorded_agent_timestamp(client, mock_entity_client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        manifests_module,
+        "resolve_agent_to_manifest",
+        lambda *_a, **kw: _resolved(kw.get("egress"), agent_updated_at="2026-10-05T10:00:00Z"),
+    )
+    existing = AgentHardenerManifest(
+        name="m1",
+        workspace="default",
+        agent="default/clockbot",
+        agent_fileset="default/old",
+        agent_updated_at="2026-10-01T10:00:00Z",
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/m1/refresh")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["agent_updated_at"] == "2026-10-05T10:00:00Z"
+
+
+def test_create_splits_secret_specs_into_names_and_refs(client, mock_entity_client, monkeypatch) -> None:
+    seen: list[list[str] | None] = []
+
+    def _resolve(*_a, **kw):
+        seen.append(kw.get("secrets"))
+        return _resolved(kw.get("egress"))
+
+    monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", _resolve)
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot", "secrets": ["A", "B=default/b-secret"]},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert seen == [["A", "B"]]
+    assert resp.json()["secret_refs"] == {"B": "default/b-secret"}
+    assert resp.json()["declared_secrets"] == ["A", "B"]
+
+
+def test_create_rejects_a_bad_secret_spec_with_422(client, mock_entity_client) -> None:
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot", "secrets": ["B=Bad_Name"]},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "invalid secret" in resp.text
+    mock_entity_client.create.assert_not_called()
+
+
+def test_refresh_keeps_explicit_refs_and_swaps_the_deployments(client, mock_entity_client, monkeypatch) -> None:
+    seen: list[list[str] | None] = []
+
+    def _resolve(*_a, **kw):
+        seen.append(kw.get("secrets"))
+        return _resolved(kw.get("egress"), deployed_secret_refs={"NEW_DEPLOYED": "default/new"})
+
+    monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", _resolve)
+    existing = AgentHardenerManifest(
+        name="m1",
+        workspace="default",
+        agent="default/clockbot",
+        agent_fileset="default/old",
+        secrets=["PLAIN", "EXPLICIT", "BARE", "OLD_DEPLOYED"],
+        secret_refs={"EXPLICIT": "default/explicit"},
+        declared_secrets=["EXPLICIT", "BARE"],
+        deployed_secret_refs={"OLD_DEPLOYED": "default/old", "EXPLICIT": "default/other", "BARE": "default/bare"},
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/m1/refresh")
+
+    assert resp.status_code == 200, resp.text
+    # A name only the old deployment supplied is dropped; one the operator also passed is kept.
+    assert seen == [["PLAIN", "EXPLICIT", "BARE"]]
+    body = resp.json()
+    assert body["secret_refs"] == {"EXPLICIT": "default/explicit"}
+    assert body["deployed_secret_refs"] == {"NEW_DEPLOYED": "default/new"}
+
+
+@pytest.mark.parametrize("manifest_yaml", ["backends: [unclosed", "backends: api", "- just a list"])
+def test_stored_user_backends_ignores_unusable_yaml(manifest_yaml: str) -> None:
+    assert manifests_module._stored_user_backends(manifest_yaml) == []
+
+
+def test_stored_user_backends_drops_the_gateway_entry() -> None:
+    manifest_yaml = yaml.safe_dump(
+        {
+            "backends": [
+                {"name": manifests_module.GATEWAY_BACKEND_NAME, "ports": [8080]},
+                {"name": "api", "ports": [9000]},
+            ]
+        }
+    )
+    assert manifests_module._stored_user_backends(manifest_yaml) == [{"name": "api", "ports": [9000]}]
