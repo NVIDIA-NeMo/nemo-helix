@@ -214,6 +214,14 @@ def test_output_yaml_is_unchanged_when_the_bundle_cannot_be_downloaded(
     assert rendered == manifest["manifest_yaml"]
 
 
+def test_output_yaml_is_unchanged_when_the_stored_yaml_is_malformed(tmp_path: Path) -> None:
+    manifest = {"agent_fileset": "default/fs-1", "manifest_yaml": "agent: [unclosed"}
+
+    rendered = lifecycle._with_local_project(SimpleNamespace(sdk=object()), manifest, tmp_path / "hardener.yaml")
+
+    assert rendered == "agent: [unclosed"
+
+
 def test_an_unrelated_directory_with_the_victim_name_is_never_deleted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

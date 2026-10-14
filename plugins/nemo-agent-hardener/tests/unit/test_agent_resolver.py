@@ -441,7 +441,8 @@ def test_parse_backends_empty_input():
 
 
 @pytest.mark.parametrize(
-    "spec", ["no-port", ":9100", "name:", "name:abc", "name:0", "name:70000", "name:9100,", "a b:9100"]
+    "spec",
+    ["no-port", ":9100", "name:", "name:abc", "name:0", "name:70000", "name:9100,", "a b:9100", "api:٨٠٨٠", "api:²"],
 )
 def test_parse_backends_rejects_malformed_specs(spec: str):
     with pytest.raises(ValueError, match="backend"):
@@ -521,7 +522,7 @@ def test_parse_secret_specs_splits_names_and_refs():
     assert refs == {"B": "ws/sec", "C": "sec"}
 
 
-@pytest.mark.parametrize("spec", ["1A", "B=Bad_Name", "B=", "B=a/b/c", "=sec", "A B"])
+@pytest.mark.parametrize("spec", ["1A", "B=Bad_Name", "B=", "B=a/b/c", "B=/sec", "B=ws/", "=sec", "A B"])
 def test_parse_secret_specs_rejects_malformed_specs(spec: str):
     with pytest.raises(ValueError, match="invalid secret"):
         parse_secret_specs([spec])

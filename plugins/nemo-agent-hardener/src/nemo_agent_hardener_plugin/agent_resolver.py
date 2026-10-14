@@ -65,7 +65,7 @@ _LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
 SANDBOX_HOST_ALIAS = "host.docker.internal"
 _BACKEND_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 _ENV_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_SECRET_REF = re.compile(r"([a-z0-9][a-z0-9-]*/)?[a-z0-9][a-z0-9-]*")
+_SECRET_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 #: Processes allowed to egress. Scoped to the image's venv rather than left open, because the
 #: sandbox policy uses these globs to decide which binaries may reach the network at all.
@@ -123,12 +123,20 @@ def parse_backends(specs: list[str] | None) -> list[dict[str, Any]]:
     for spec in specs or []:
         name, _, port_list = spec.partition(":")
         ports = port_list.split(",")
-        if not _BACKEND_NAME.fullmatch(name) or not all(p.isdigit() and 0 < int(p) < 65536 for p in ports):
+        if not _BACKEND_NAME.fullmatch(name) or not all(
+            p.isascii() and p.isdigit() and 0 < int(p) < 65536 for p in ports
+        ):
             raise ValueError(f"invalid backend {spec!r}: expected NAME:PORT[,PORT...] with ports 1-65535")
         if name == GATEWAY_BACKEND_NAME:
             raise ValueError(f"invalid backend {spec!r}: {GATEWAY_BACKEND_NAME!r} is reserved for the gateway")
         backends.append({"name": name, "ports": [int(p) for p in ports]})
     return backends
+
+
+def _is_secret_ref(ref: str) -> bool:
+    """``secret`` or ``workspace/secret``, each part lowercase kebab-case."""
+    parts = ref.split("/")
+    return len(parts) <= 2 and all(_SECRET_NAME.fullmatch(part) for part in parts)
 
 
 def parse_secret_specs(specs: list[str] | None) -> tuple[list[str] | None, dict[str, str]]:
@@ -142,7 +150,7 @@ def parse_secret_specs(specs: list[str] | None) -> tuple[list[str] | None, dict[
     refs: dict[str, str] = {}
     for spec in specs:
         name, sep, ref = spec.partition("=")
-        if not _ENV_VAR_NAME.fullmatch(name) or (sep and not _SECRET_REF.fullmatch(ref)):
+        if not _ENV_VAR_NAME.fullmatch(name) or (sep and not _is_secret_ref(ref)):
             raise ValueError(f"invalid secret {spec!r}: expected NAME or NAME=[workspace/]secret-name")
         names.append(name)
         if sep:

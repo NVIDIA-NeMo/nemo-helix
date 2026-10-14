@@ -37,7 +37,10 @@ def _with_local_project(ctx: Any, manifest: dict[str, Any], out_path: Path) -> s
     manifest_yaml = str(manifest["manifest_yaml"])
     is_project = manifest.get("source_type") == "project"
     bundle = manifest.get("project_fileset") if is_project else manifest.get("agent_fileset")
-    data = yaml.safe_load(manifest_yaml)
+    try:
+        data = yaml.safe_load(manifest_yaml)
+    except yaml.YAMLError:
+        return manifest_yaml
     if not (bundle and isinstance(data, dict) and isinstance(data.get("agent"), dict)):
         return manifest_yaml
     workdir = out_path.parent / f"{out_path.stem}-victim"
