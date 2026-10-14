@@ -29,7 +29,7 @@ def sample_config(*, restart_policy: RestartPolicy = "Always") -> DeploymentConf
                 args=["hello"],
             )
         ],
-        restart_policy=restart_policy,  # ty: ignore[unknown-argument]
+        restart_policy=restart_policy,
     )
 
 
@@ -56,8 +56,8 @@ def config_files_config(
                 args=[path],
             )
         ],
-        config_files=[ConfigFile(path=path, content=content, mode=mode)],  # ty: ignore[unknown-argument]
-        restart_policy=restart_policy,  # ty: ignore[unknown-argument]
+        config_files=[ConfigFile(path=path, content=content, mode=mode)],
+        restart_policy=restart_policy,
     )
 
 
@@ -73,7 +73,7 @@ def published_port_config(*, restart_policy: RestartPolicy = "Always") -> Deploy
                 ports=[ContainerPort(name="http", containerPort=8000)],
             )
         ],
-        restart_policy=restart_policy,  # ty: ignore[unknown-argument]
+        restart_policy=restart_policy,
     )
 
 
@@ -116,7 +116,7 @@ def lora_config(*, restart_policy: RestartPolicy = "Always") -> DeploymentConfig
                 ],
             ),
         ],
-        restart_policy=restart_policy,  # ty: ignore[unknown-argument]
+        restart_policy=restart_policy,
     )
 
 

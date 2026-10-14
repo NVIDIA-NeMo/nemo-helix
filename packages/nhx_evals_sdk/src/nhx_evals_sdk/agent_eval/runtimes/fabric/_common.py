@@ -346,7 +346,7 @@ def relay_observability(
     module is reachable from the evals plugin's job imports, so an eager import would charge every
     consumer for trajectory capture they may never use.
     """
-    from nemo_fabric import (  # ty: ignore[unresolved-import]
+    from nemo_fabric import (
         RelayAtifConfig,
         RelayAtofConfig,
         RelayAtofFileSinkConfig,
@@ -399,7 +399,7 @@ def relay_telemetry_fragment(
     a config Fabric does not recognize is ignored rather than rejected, so a drifted envelope
     produces a run with no trajectory at all and no error.
     """
-    from nemo_fabric import FabricConfig  # ty: ignore[unresolved-import]
+    from nemo_fabric import FabricConfig
 
     probe = FabricConfig.from_mapping(config)
     probe.enable_relay(

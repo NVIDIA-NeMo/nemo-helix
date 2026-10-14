@@ -89,7 +89,7 @@ def _never_config() -> DeploymentConfig:
     return DeploymentConfig(
         name="echo-cfg",
         workspace="itest",
-        restart_policy="Never",  # ty: ignore[unknown-argument]
+        restart_policy="Never",
         containers=[Container(name="main", image=ALPINE_IMAGE, command=["echo"], args=["hello"])],
     )
 
@@ -98,7 +98,7 @@ def _never_sleep_config(*, sleep_seconds: int) -> DeploymentConfig:
     return DeploymentConfig(
         name="sleep-cfg",
         workspace="itest",
-        restart_policy="Never",  # ty: ignore[unknown-argument]
+        restart_policy="Never",
         containers=[
             Container(
                 name="main",
@@ -129,7 +129,7 @@ def _always_http_config() -> DeploymentConfig:
     return DeploymentConfig(
         name="http-cfg",
         workspace="itest",
-        restart_policy="Always",  # ty: ignore[unknown-argument]
+        restart_policy="Always",
         containers=[
             Container(
                 name="main",

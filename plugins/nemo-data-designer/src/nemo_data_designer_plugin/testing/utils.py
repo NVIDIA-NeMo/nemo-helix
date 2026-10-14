@@ -428,7 +428,7 @@ async def task_context(
                     # downstream Data Designer routes (e.g. ``GET /jobs/create/{name}``,
                     # which deserializes the stored spec back through the schema) succeed.
                     spec=step_config if isinstance(step_config, dict) else step_config.model_dump(),
-                    platform_spec=job_config_dict,  # ty:ignore[invalid-argument-type]
+                    platform_spec=job_config_dict,
                 ),
             ).data()
             job_ctx = JobContext(

@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Optional
 from uuid import uuid4
 
 from fastapi import Body, Request
-from nemo_fabric import Fabric, FabricConfig, RunRequest  # ty: ignore[unresolved-import]
+from nemo_fabric import Fabric, FabricConfig, RunRequest
 from nemo_gym.base_resources_server import (  # ty: ignore[unresolved-import]
     NEMO_GYM_MCP_METADATA_KEY,
     BaseRunRequest,
@@ -52,7 +52,7 @@ from pydantic import ConfigDict, Field, PositiveInt
 
 try:  # Gym renamed this item type after 0.5.0.
     from nemo_gym.openai_utils import (  # ty: ignore[unresolved-import]
-        NeMoGymResponseFunctionCallOutput as FunctionCallOutput,  # ty: ignore[unresolved-import]
+        NeMoGymResponseFunctionCallOutput as FunctionCallOutput,
     )
 except ImportError:  # pragma: no cover - depends on the Gym version in the host image
     from nemo_gym.openai_utils import NeMoGymFunctionCallOutput as FunctionCallOutput  # ty: ignore[unresolved-import]
