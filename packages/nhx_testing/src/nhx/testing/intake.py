@@ -92,18 +92,19 @@ class InMemoryIntakeService:
 
     async def __call__(self, request: httpx.Request) -> httpx.Response:
         await request.aread()
-        path = unquote(request.url.path)
+        # Match the still-encoded path and decode each captured segment once.
+        path = request.url.raw_path.partition(b"?")[0].decode("ascii")
         if match := _ATIF.match(path):
-            return await self._atif(request, match["workspace"])
+            return await self._atif(request, unquote(match["workspace"]))
         if match := _OTLP.match(path):
-            self.otlp_requests.append({"workspace": match["workspace"], "body": request.content})
+            self.otlp_requests.append({"workspace": unquote(match["workspace"]), "body": request.content})
             return httpx.Response(200, json=IngestResponse(errors=list(self.otlp_errors)).model_dump(mode="json"))
         if match := _EVALUATOR_RESULTS.match(path):
-            return self._evaluator_result(request, match["workspace"])
+            return self._evaluator_result(request, unquote(match["workspace"]))
         if match := _TRACES.match(path):
-            return self._traces(request, match["workspace"])
+            return self._traces(request, unquote(match["workspace"]))
         if match := _EVALUATION.match(path):
-            return self._evaluation(request, match["workspace"], match["name"])
+            return self._evaluation(request, unquote(match["workspace"]), unquote(match["name"]))
         return httpx.Response(404, json={"detail": f"no in-memory Intake route for {request.method} {path}"})
 
     async def _atif(self, request: httpx.Request, workspace: str) -> httpx.Response:

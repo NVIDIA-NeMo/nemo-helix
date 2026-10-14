@@ -64,11 +64,15 @@ class InMemoryFilesService:
 
     async def __call__(self, request: httpx.Request) -> httpx.Response:
         await request.aread()
-        path = unquote(request.url.path)
+        # Match the still-encoded path and decode each captured segment once, so a literal "%2F"
+        # in a file name isn't decoded a second time into a "/".
+        path = request.url.raw_path.partition(b"?")[0].decode("ascii")
         if match := _FILE.match(path):
-            return await self._file(request, match["workspace"], match["name"], match["path"])
+            workspace, name, file_path = (unquote(match[group]) for group in ("workspace", "name", "path"))
+            return await self._file(request, workspace, name, file_path)
         if match := _FILESETS.match(path):
-            return self._fileset(request, match["workspace"], match["name"])
+            name = match["name"]
+            return self._fileset(request, unquote(match["workspace"]), unquote(name) if name else None)
         return httpx.Response(404, json={"detail": f"no in-memory Files route for {request.method} {path}"})
 
     def _failure(self, operation: str, workspace: str, name: str) -> httpx.Response | None:

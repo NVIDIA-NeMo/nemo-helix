@@ -73,3 +73,15 @@ async def test_after_upload_runs_once_the_content_is_stored() -> None:
     service.after_upload = after_upload
     await files.upload_file(name="bundle", path="bundle.json", content=b"{}")
     assert seen == [{"bundle.json": b"{}"}]
+
+
+@pytest.mark.asyncio
+async def test_percent_escapes_in_file_paths_are_decoded_once() -> None:
+    service = InMemoryFilesService()
+    files = service.client()
+    await files.create_fileset(body=CreateFilesetRequest(name="bundle"))
+
+    await files.upload_file(name="bundle", path="dir/a%2Fb.json", content=b"{}")
+
+    assert service.filesets == {("default", "bundle"): {"dir/a%2Fb.json": b"{}"}}
+    assert await (await files.download_file(name="bundle", path="dir/a%2Fb.json")).read() == b"{}"

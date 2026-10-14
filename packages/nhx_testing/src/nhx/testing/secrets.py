@@ -35,12 +35,13 @@ class InMemorySecretsService:
         return mock_async_nemo_client(self, AsyncSecretsClient, workspace=workspace)
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        match = _ACCESS.match(unquote(request.url.path))
+        # Match the still-encoded path and decode each captured segment once.
+        match = _ACCESS.match(request.url.raw_path.partition(b"?")[0].decode("ascii"))
         if match is None or request.method != "GET":
             return httpx.Response(
                 404, json={"detail": f"no in-memory Secrets route for {request.method} {request.url.path}"}
             )
-        key = (match["workspace"], match["name"])
+        key = (unquote(match["workspace"]), unquote(match["name"]))
         self.lookups.append(key)
         if key not in self.secrets:
             return httpx.Response(404, json={"detail": f"secret {key[0]}/{key[1]} not found"})
