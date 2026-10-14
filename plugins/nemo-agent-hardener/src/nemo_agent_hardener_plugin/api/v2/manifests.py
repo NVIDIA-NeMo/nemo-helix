@@ -398,6 +398,7 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         models=body.models or WarGameModels(),
         agent_updated_at=resolved.agent_updated_at,
         secret_refs=secret_refs,
+        declared_secrets=secret_names or [],
         deployed_secret_refs=resolved.deployed_secret_refs,
     )
     # resolve_agent_to_manifest has no `env` parameter, so it is absent from the YAML it produced.
@@ -548,7 +549,9 @@ async def refresh_manifest(
         )
 
     # Names that only came from the old deployment are re-derived, so a secret it dropped is not still required.
-    kept_secrets = [n for n in existing.secrets if n not in existing.deployed_secret_refs or n in existing.secret_refs]
+    kept_secrets = [
+        n for n in existing.secrets if n in existing.declared_secrets or n not in existing.deployed_secret_refs
+    ]
     resolved, fileset = await _resolve_and_store_scaffold(
         workspace,
         existing.agent,

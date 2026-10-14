@@ -512,6 +512,7 @@ def test_create_splits_secret_specs_into_names_and_refs(client, mock_entity_clie
     assert resp.status_code == 201, resp.text
     assert seen == [["A", "B"]]
     assert resp.json()["secret_refs"] == {"B": "default/b-secret"}
+    assert resp.json()["declared_secrets"] == ["A", "B"]
 
 
 def test_create_rejects_a_bad_secret_spec_with_422(client, mock_entity_client) -> None:
@@ -538,9 +539,10 @@ def test_refresh_keeps_explicit_refs_and_swaps_the_deployments(client, mock_enti
         workspace="default",
         agent="default/clockbot",
         agent_fileset="default/old",
-        secrets=["PLAIN", "EXPLICIT", "OLD_DEPLOYED"],
+        secrets=["PLAIN", "EXPLICIT", "BARE", "OLD_DEPLOYED"],
         secret_refs={"EXPLICIT": "default/explicit"},
-        deployed_secret_refs={"OLD_DEPLOYED": "default/old", "EXPLICIT": "default/other"},
+        declared_secrets=["EXPLICIT", "BARE"],
+        deployed_secret_refs={"OLD_DEPLOYED": "default/old", "EXPLICIT": "default/other", "BARE": "default/bare"},
     )
     mock_entity_client.get = AsyncMock(return_value=existing)
     mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
@@ -548,7 +550,8 @@ def test_refresh_keeps_explicit_refs_and_swaps_the_deployments(client, mock_enti
     resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/m1/refresh")
 
     assert resp.status_code == 200, resp.text
-    assert seen == [["PLAIN", "EXPLICIT"]]  # a name only the old deployment supplied is not carried over
+    # A name only the old deployment supplied is dropped; one the operator also passed is kept.
+    assert seen == [["PLAIN", "EXPLICIT", "BARE"]]
     body = resp.json()
     assert body["secret_refs"] == {"EXPLICIT": "default/explicit"}
     assert body["deployed_secret_refs"] == {"NEW_DEPLOYED": "default/new"}

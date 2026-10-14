@@ -108,6 +108,11 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         "``ENV_VAR -> workspace/secret``, set with ``--secrets NAME=workspace/secret``. Win over "
         "``deployed_secret_refs``. Names without a ref take their value from the operator env or ``--env-file``.",
     )
+    declared_secrets: list[str] = Field(
+        default_factory=list,
+        description="Secret names the operator passed with ``--secrets``. Refresh keeps them even when the "
+        "deployment they also came from drops them.",
+    )
     deployed_secret_refs: dict[str, str] = Field(
         default_factory=dict,
         description="The agent's running-deployment secret refs (``ENV_VAR -> workspace/secret``) when the "
@@ -174,6 +179,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         agent_fileset: str = "",
         agent_updated_at: str = "",
         secret_refs: dict[str, str] | None = None,
+        declared_secrets: list[str] | None = None,
         deployed_secret_refs: dict[str, str] | None = None,
     ) -> AgentHardenerManifest:
         """Build an ``agent``-source manifest entity from a resolved agent scaffold.
@@ -192,6 +198,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
             port=port,
             secrets=secrets,
             secret_refs=secret_refs or {},
+            declared_secrets=declared_secrets or [],
             deployed_secret_refs=deployed_secret_refs or {},
             egress=egress or [],
             env=env or {},
