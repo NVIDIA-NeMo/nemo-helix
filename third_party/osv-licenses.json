@@ -5014,6 +5014,16 @@
         },
         {
           "package": {
+            "name": "nemo-fabric-adapters-mini-swe-agent",
+            "version": "0.4.0",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
             "name": "nemo-fabric-adapters-nooa",
             "version": "0.4.0",
             "ecosystem": "PyPI"
@@ -20056,7 +20066,7 @@
     },
     {
       "name": "Apache-2.0",
-      "count": 157
+      "count": 158
     },
     {
       "name": "BSD-3-Clause",

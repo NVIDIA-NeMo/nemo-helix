@@ -29,6 +29,7 @@ def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
     from nemo_helix_plugin.garak.client import GarakClient
     from nemo_helix_plugin.guardrail.client import GuardrailClient
     from nemo_helix_plugin.iam.client import IAMClient
+    from nemo_helix_plugin.intake.client import IntakeClient
     from nemo_helix_plugin.jobs.client import JobsClient
     from nemo_helix_plugin.models.client import ModelsClient
     from nemo_helix_plugin.projects.client import ProjectsClient
@@ -50,6 +51,7 @@ def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
         ("guardrail", GuardrailClient),
         ("evals", EvaluatorClient),
         ("projects", ProjectsClient),
+        ("intake", IntakeClient),
         ("data_designer", DataDesignerClient),
         ("agent_hardener", AgentHardenerClient),
     ]
@@ -71,6 +73,7 @@ def test_convenience_properties_return_async_clients_for_async_client() -> None:
     from nemo_helix_plugin.garak.client import AsyncGarakClient
     from nemo_helix_plugin.guardrail.client import AsyncGuardrailClient
     from nemo_helix_plugin.iam.client import AsyncIAMClient
+    from nemo_helix_plugin.intake.client import AsyncIntakeClient
     from nemo_helix_plugin.jobs.client import AsyncJobsClient
     from nemo_helix_plugin.models.client import AsyncModelsClient
     from nemo_helix_plugin.projects.client import AsyncProjectsClient
@@ -92,6 +95,7 @@ def test_convenience_properties_return_async_clients_for_async_client() -> None:
         ("guardrail", AsyncGuardrailClient),
         ("evals", AsyncEvaluatorClient),
         ("projects", AsyncProjectsClient),
+        ("intake", AsyncIntakeClient),
         ("data_designer", AsyncDataDesignerClient),
         ("agent_hardener", AsyncAgentHardenerClient),
     ]
@@ -100,6 +104,33 @@ def test_convenience_properties_return_async_clients_for_async_client() -> None:
         resource = getattr(client, attr)
         assert isinstance(resource, expected_type)
         assert isinstance(resource._http, httpx.AsyncClient)
+
+
+def test_sync_intake_shares_transport_and_workspace() -> None:
+    from nemo_helix_plugin.intake.client import IntakeClient
+
+    with httpx.Client() as http_client:
+        client = NemoClient(base_url=BASE, workspace="team", http_client=http_client)
+
+        intake = client.intake
+
+        assert isinstance(intake, IntakeClient)
+        assert intake._http is http_client
+        assert intake.workspace == "team"
+
+
+@pytest.mark.asyncio
+async def test_async_intake_shares_transport_and_workspace() -> None:
+    from nemo_helix_plugin.intake.client import AsyncIntakeClient
+
+    async with httpx.AsyncClient() as http_client:
+        client = AsyncNemoClient(base_url=BASE, workspace="team", http_client=http_client)
+
+        intake = client.intake
+
+        assert isinstance(intake, AsyncIntakeClient)
+        assert intake._http is http_client
+        assert intake.workspace == "team"
 
 
 @pytest.mark.parametrize("client_factory", [NemoClient, AsyncNemoClient])

@@ -24,7 +24,6 @@ try:
     )
     from scaled_evals.intake.config import (
         resolve_intake_target,
-        resolve_routing_task,
         validate_intake_profile_config,
     )
     from scaled_evals.intake.experiments import ExperimentRequest, build_experiment_name
@@ -103,7 +102,7 @@ def test_resolve_intake_target_accepts_prefixed_aliases() -> None:
         {
             "intake_base_url": "https://intake.example/apis/intake/v2/",
             "intake_workspace": "team-ws",
-            "intake_app": "switchyard-app",
+            "intake_app": "prefixed-app",
         },
         task_slug="ignored-slug",
         base_url="https://platform.example/",
@@ -111,33 +110,13 @@ def test_resolve_intake_target_accepts_prefixed_aliases() -> None:
 
     assert target.base_url == "https://intake.example/apis/intake/v2"
     assert target.workspace == "team-ws"
-    assert target.app == "switchyard-app"
+    assert target.app == "prefixed-app"
 
 
 @pytest.mark.parametrize("config", [{}, {"workspace": " "}, {"workspace": 42}])
 def test_intake_profile_validation_requires_typed_workspace(config: dict) -> None:
     with pytest.raises(ValueError):
         validate_intake_profile_config(config)
-
-
-def test_resolve_intake_target_accepts_inert_switchyard_capture_keys() -> None:
-    target = resolve_intake_target(
-        {
-            "capture_content": True,
-            "switchyard_intake_capture_content": True,
-        },
-        task_slug="my-bench",
-        base_url="https://platform.example/",
-    )
-
-    assert target.workspace == "default"
-    assert target.app == "my-bench"
-
-
-def test_resolve_routing_task_supports_switchyard_header_keys() -> None:
-    assert resolve_routing_task({"task": "custom-task"}, task_slug="fallback") == "custom-task"
-    assert resolve_routing_task({"intake_task": "prefixed-task"}, task_slug="fallback") == "prefixed-task"
-    assert resolve_routing_task({}, task_slug="fallback") == "fallback"
 
 
 def test_broken_python_smoke_uses_gym_smoke_task_slug() -> None:
@@ -170,16 +149,6 @@ def test_trial_payloads_keep_run_metadata_without_context_by_default(tmp_path: P
     assert payload["extra"]["app"] == "team-ws/hello-task"
 
 
-def _write_switchyard_session(job_dir: Path, session: dict) -> None:
-    _write_json(
-        job_dir / "switchyard" / "routing_stats_final.json",
-        {
-            "requested_session_ids": [session["session_id"]],
-            "sessions": {session["session_id"]: session},
-        },
-    )
-
-
 def _write_native_atif_metrics(
     job_dir: Path,
     *,
@@ -199,366 +168,6 @@ def _write_native_atif_metrics(
         "total_cost_usd": cost_usd,
     }
     _write_json(trajectory_path, trajectory)
-
-
-def test_trial_payloads_preserve_matching_native_single_model_metrics(tmp_path: Path) -> None:
-    job_dir = _sample_job(tmp_path)
-    _write_native_atif_metrics(
-        job_dir,
-        model="claude-opus-4-8",
-        prompt_tokens=155199,
-        cached_tokens=81834,
-        completion_tokens=7648,
-        cost_usd=0.6036695,
-    )
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_abc",
-            "total_calls": 6,
-            "total_prompt_tokens": 155199,
-            "total_cached_tokens": 81834,
-            "total_cache_creation_tokens": 3782,
-            "total_completion_tokens": 7648,
-            "models": {
-                "azure/anthropic/claude-opus-4-8": {
-                    "calls": 6,
-                    "prompt_tokens": 155199,
-                    "cached_tokens": 81834,
-                    "cache_creation_tokens": 3782,
-                    "completion_tokens": 7648,
-                }
-            },
-        },
-    )
-
-    payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-
-    assert payload["agent"]["model_name"] == "claude-opus-4-8"
-    assert payload["extra"]["experiment"]["model"] == "claude-opus-4-8"
-    assert payload["final_metrics"] == {
-        "total_prompt_tokens": 155199,
-        "total_cached_tokens": 81834,
-        "total_completion_tokens": 7648,
-        "total_cost_usd": 0.6036695,
-        "total_steps": 2,
-    }
-    assert "switchyard_routing" not in payload["extra"]
-
-
-def test_trial_payloads_replace_gateway_model_name_during_hydration(tmp_path: Path) -> None:
-    job_dir = _sample_job(tmp_path)
-    _write_native_atif_metrics(
-        job_dir,
-        model="openai/switchyard",
-        prompt_tokens=1,
-        cached_tokens=0,
-        completion_tokens=1,
-        cost_usd=0.01,
-    )
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_abc",
-            "total_calls": 1,
-            "total_prompt_tokens": 100,
-            "total_cached_tokens": 0,
-            "total_cache_creation_tokens": 0,
-            "total_completion_tokens": 10,
-            "models": {
-                "nvidia/nvidia/nemotron-3-super-v3": {
-                    "calls": 1,
-                    "prompt_tokens": 100,
-                    "cached_tokens": 0,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 10,
-                }
-            },
-        },
-    )
-
-    payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-
-    assert payload["agent"]["model_name"] == "nvidia/nvidia/nemotron-3-super-v3"
-    assert payload["extra"]["experiment"]["model"] == "nvidia/nvidia/nemotron-3-super-v3"
-    assert payload["final_metrics"]["total_prompt_tokens"] == 100
-
-
-def test_trial_payloads_hydrate_single_model_root_totals_and_cache_cost(tmp_path: Path) -> None:
-    job_dir = _sample_job(tmp_path)
-    trajectory_path = job_dir / "task-a__trial1" / "agent" / "trajectory.json"
-    native_trajectory = json.loads(trajectory_path.read_text())
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_abc",
-            "total_calls": 2,
-            "total_prompt_tokens": 1000,
-            "total_cached_tokens": 600,
-            "total_cache_creation_tokens": 100,
-            "total_completion_tokens": 20,
-            "models": {
-                "nvidia/switchyard/gpt-5.4": {
-                    "calls": 2,
-                    "prompt_tokens": 1000,
-                    "cached_tokens": 600,
-                    "cache_creation_tokens": 100,
-                    "completion_tokens": 20,
-                }
-            },
-        },
-    )
-
-    payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-
-    assert payload["agent"]["model_name"] == "nvidia/switchyard/gpt-5.4"
-    assert payload["final_metrics"]["total_prompt_tokens"] == 1000
-    assert payload["final_metrics"]["total_cached_tokens"] == 600
-    assert payload["final_metrics"]["total_completion_tokens"] == 20
-    assert payload["final_metrics"]["total_cost_usd"] == pytest.approx(0.00145)
-    assert all("metrics" not in step for step in payload["steps"])
-    routing = payload["extra"]["switchyard_routing"]
-    assert routing["total_cache_creation_tokens"] == 100
-    assert routing["cost_status"] == "complete"
-    assert routing["models"]["nvidia/switchyard/gpt-5.4"]["calls"] == 2
-    assert json.loads(trajectory_path.read_text()) == payload
-    assert json.loads(trajectory_path.with_name("trajectory.json.bak").read_text()) == (native_trajectory)
-    retry_payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-    assert json.loads(trajectory_path.read_text()) == retry_payload
-    assert json.loads(trajectory_path.with_name("trajectory.json.bak").read_text()) == (native_trajectory)
-
-
-def test_trial_payloads_price_switchyard_gpt_5_4_from_pinned_catalog(tmp_path: Path) -> None:
-    job_dir = _sample_job(tmp_path)
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_abc",
-            "total_calls": 2,
-            "total_prompt_tokens": 1000,
-            "total_cached_tokens": 600,
-            "total_cache_creation_tokens": 0,
-            "total_completion_tokens": 20,
-            "models": {
-                "nvidia/switchyard/gpt-5.4": {
-                    "calls": 2,
-                    "prompt_tokens": 1000,
-                    "cached_tokens": 600,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 20,
-                }
-            },
-        },
-    )
-
-    payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-
-    assert payload["agent"]["model_name"] == "nvidia/switchyard/gpt-5.4"
-    assert payload["final_metrics"]["total_cost_usd"] == pytest.approx(0.00145)
-    routing = payload["extra"]["switchyard_routing"]
-    assert routing["cost_status"] == "complete"
-    assert routing["models"]["nvidia/switchyard/gpt-5.4"]["pricing"]["matched_model"] == ("gpt-5.4")
-
-
-def test_trial_payloads_price_claude_opus_4_8_with_cache_creation(tmp_path: Path) -> None:
-    job_dir = _sample_job(tmp_path)
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_abc",
-            "total_calls": 1,
-            "total_prompt_tokens": 155199,
-            "total_cached_tokens": 81834,
-            "total_cache_creation_tokens": 3782,
-            "total_completion_tokens": 7648,
-            "models": {
-                "claude-opus-4-8": {
-                    "calls": 1,
-                    "prompt_tokens": 155199,
-                    "cached_tokens": 81834,
-                    "cache_creation_tokens": 3782,
-                    "completion_tokens": 7648,
-                }
-            },
-        },
-    )
-
-    payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-
-    assert payload["agent"]["model_name"] == "claude-opus-4-8"
-    assert payload["final_metrics"]["total_cost_usd"] == pytest.approx(0.6036695)
-    pricing = payload["extra"]["switchyard_routing"]["models"]["claude-opus-4-8"]["pricing"]
-    assert pricing["matched_model"] == "claude-opus-4-8"
-    assert pricing["cache_creation_cost_usd"] == pytest.approx(0.0236375)
-
-
-def test_trial_payloads_preserve_native_model_for_mixed_routing_and_sum_model_costs(
-    tmp_path: Path,
-) -> None:
-    job_dir = _sample_job(tmp_path)
-    _write_native_atif_metrics(
-        job_dir,
-        model="nvidia/switchyard/gpt-5.4",
-        prompt_tokens=100,
-        cached_tokens=50,
-        completion_tokens=10,
-        cost_usd=0.00001,
-    )
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_abc",
-            "total_calls": 2,
-            "total_prompt_tokens": 300,
-            "total_cached_tokens": 50,
-            "total_cache_creation_tokens": 0,
-            "total_completion_tokens": 30,
-            "models": {
-                "nvidia/switchyard/gpt-5.4": {
-                    "calls": 1,
-                    "prompt_tokens": 100,
-                    "cached_tokens": 50,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 10,
-                },
-                "claude-opus-4-8": {
-                    "calls": 1,
-                    "prompt_tokens": 200,
-                    "cached_tokens": 0,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 20,
-                },
-            },
-        },
-    )
-
-    payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-
-    assert payload["agent"]["model_name"] == "nvidia/switchyard/gpt-5.4"
-    assert payload["extra"]["experiment"]["model"] == "nvidia/switchyard/gpt-5.4"
-    assert payload["final_metrics"]["total_cost_usd"] == pytest.approx(0.0017875)
-    assert set(payload["extra"]["switchyard_routing"]["models"]) == {
-        "nvidia/switchyard/gpt-5.4",
-        "claude-opus-4-8",
-    }
-
-
-def test_trial_payloads_keep_tokens_but_omit_cost_for_unknown_pricing(tmp_path: Path) -> None:
-    job_dir = _sample_job(tmp_path)
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_abc",
-            "total_calls": 1,
-            "total_prompt_tokens": 100,
-            "total_cached_tokens": 0,
-            "total_cache_creation_tokens": 0,
-            "total_completion_tokens": 10,
-            "models": {
-                "nvidia/not-in-pinned-catalog": {
-                    "calls": 1,
-                    "prompt_tokens": 100,
-                    "cached_tokens": 0,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 10,
-                }
-            },
-        },
-    )
-
-    payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-
-    assert payload["agent"]["model_name"] == "nvidia/not-in-pinned-catalog"
-    assert payload["final_metrics"]["total_prompt_tokens"] == 100
-    assert "total_cost_usd" not in payload["final_metrics"]
-    assert payload["extra"]["switchyard_routing"]["cost_status"] == "unknown_pricing"
-
-
-@pytest.mark.parametrize("stats_kind", ["missing", "mismatched"])
-def test_trial_payloads_do_not_hydrate_missing_or_mismatched_session_stats(tmp_path: Path, stats_kind: str) -> None:
-    job_dir = _sample_job(tmp_path)
-    if stats_kind == "mismatched":
-        _write_switchyard_session(
-            job_dir,
-            {
-                "session_id": "ev_abc",
-                "total_calls": 2,
-                "total_prompt_tokens": 999,
-                "total_cached_tokens": 0,
-                "total_cache_creation_tokens": 0,
-                "total_completion_tokens": 1,
-                "models": {
-                    "nvidia/nvidia/nemotron-3-super-v3": {
-                        "calls": 1,
-                        "prompt_tokens": 1,
-                        "cached_tokens": 0,
-                        "cache_creation_tokens": 0,
-                        "completion_tokens": 1,
-                    }
-                },
-            },
-        )
-
-    payload = trial_payloads(
-        job_dir,
-        "team-ws",
-        "auto",
-        "scaled-evals",
-        evaluation_run_id="ev_abc",
-    )[0].payload
-
-    assert payload["agent"]["model_name"] == "noop"
-    assert "switchyard_routing" not in payload["extra"]
-    assert payload["final_metrics"]["total_prompt_tokens"] == 0
-    assert "total_cost_usd" not in payload["final_metrics"]
 
 
 def test_trial_payloads_emit_canonical_evaluation_context(tmp_path: Path) -> None:
@@ -625,7 +234,7 @@ def test_build_experiment_name_is_slugged_and_short() -> None:
 
 def test_build_experiment_name_fits_intake_limit_for_long_benchmark_name() -> None:
     name = build_experiment_name(
-        "freetona-shared-switchyard-smoke-20260722224341",
+        "freetona-shared-gateway-smoke-20260722224341",
         "bmr_3697264bf4904850a24637c120",
     )
 
@@ -827,112 +436,6 @@ def test_upload_job_atif_creates_experiment_then_logs_trials(tmp_path: Path) -> 
     # The trial is tagged with the created experiment's stable run identity.
     assert atif_calls[0][1]["evaluation_context"]["evaluation_id"] == "hello-task-ev-test123"
     assert atif_calls[0][1]["evaluation_context"]["test_case_id"] == "task-a"
-
-
-def test_upload_job_atif_records_switchyard_per_model_metrics_in_evaluation_metadata(
-    tmp_path: Path,
-) -> None:
-    job_dir = _sample_job(tmp_path)
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_test123",
-            "total_calls": 2,
-            "total_prompt_tokens": 300,
-            "total_cached_tokens": 50,
-            "total_cache_creation_tokens": 0,
-            "total_completion_tokens": 30,
-            "models": {
-                "model-a": {
-                    "calls": 1,
-                    "prompt_tokens": 100,
-                    "cached_tokens": 50,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 10,
-                },
-                "model-b": {
-                    "calls": 1,
-                    "prompt_tokens": 200,
-                    "cached_tokens": 0,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 20,
-                },
-            },
-        },
-    )
-    target = resolve_intake_target({"workspace": "default"}, task_slug=None, base_url="https://platform.example")
-
-    def fake_request_json(method, url, payload, timeout):  # noqa: ANN001
-        if url.endswith("/experiments"):
-            return 201, {"id": "eg-1"}
-        if url.endswith("/evaluations"):
-            assert payload is not None
-            metadata = payload["metadata"]
-            assert json.loads(metadata["input_tokens_by_model"]) == {"model-a": 100, "model-b": 200}
-            assert json.loads(metadata["output_tokens_by_model"]) == {"model-a": 10, "model-b": 20}
-            assert json.loads(metadata["cache_hit_rate_by_model"]) == {
-                "model-a": 0.5,
-                "model-b": 0.0,
-            }
-        return 201, None
-
-    with patch("scaled_evals.intake.client.request_json", fake_request_json):
-        upload_job_atif(
-            job_dir,
-            target,
-            evaluation_run_id="ev_test123",
-            experiment=ExperimentRequest(benchmark="hello-task", run_key="ev_test123"),
-        )
-
-
-def test_upload_job_atif_omits_partial_switchyard_per_model_metadata(tmp_path: Path) -> None:
-    job_dir = _sample_job(tmp_path)
-    _write_switchyard_session(
-        job_dir,
-        {
-            "session_id": "ev_test123",
-            "total_calls": 2,
-            "total_prompt_tokens": 300,
-            "total_cached_tokens": 50,
-            "total_cache_creation_tokens": 0,
-            "total_completion_tokens": 30,
-            "models": {
-                "model-a": {
-                    "calls": 1,
-                    "prompt_tokens": 100,
-                    "cached_tokens": 50,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 10,
-                },
-                "model-b": {
-                    "calls": 1,
-                    "prompt_tokens": 200,
-                    "cached_tokens": -1,
-                    "cache_creation_tokens": 0,
-                    "completion_tokens": 20,
-                },
-            },
-        },
-    )
-    target = resolve_intake_target({"workspace": "default"}, task_slug=None, base_url="https://platform.example")
-
-    def fake_request_json(method, url, payload, timeout):  # noqa: ANN001
-        if url.endswith("/experiments"):
-            return 201, {"id": "eg-1"}
-        if url.endswith("/evaluations"):
-            assert payload is not None
-            assert "input_tokens_by_model" not in payload["metadata"]
-            assert "output_tokens_by_model" not in payload["metadata"]
-            assert "cache_hit_rate_by_model" not in payload["metadata"]
-        return 201, None
-
-    with patch("scaled_evals.intake.client.request_json", fake_request_json):
-        upload_job_atif(
-            job_dir,
-            target,
-            evaluation_run_id="ev_test123",
-            experiment=ExperimentRequest(benchmark="hello-task", run_key="ev_test123"),
-        )
 
 
 def test_upload_job_atif_groups_different_member_models_by_full_run_id(

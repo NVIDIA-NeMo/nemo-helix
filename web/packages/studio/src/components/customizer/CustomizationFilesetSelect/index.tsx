@@ -226,7 +226,7 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
             }
           />
           <SelectContent>
-            <SelectListbox>
+            <SelectListbox className="scroll-pb-11">
               {filesets.map((f) => {
                 const ref = getEntityReference(f);
                 return (
@@ -235,9 +235,9 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
                   </SelectItem>
                 );
               })}
-              <SelectItem className="border-t border-base" value={NEW_DATASET_VALUE}>
-                New Dataset
-              </SelectItem>
+              <div className="sticky bottom-0 self-stretch border-t border-base bg-surface-raised">
+                <SelectItem value={NEW_DATASET_VALUE}>New Dataset</SelectItem>
+              </div>
             </SelectListbox>
           </SelectContent>
         </SelectRoot>

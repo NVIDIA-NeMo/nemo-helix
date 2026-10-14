@@ -37,11 +37,12 @@ export const ACTION_SEARCH_PARAM = 'action';
  */
 export const VIEW_SEARCH_PARAM = 'view';
 
-/** Table, then how to set the study up, then — for the guided path — the form itself. */
+/** Table, then how to set the study up, then — for a guided path — that strategy's form. */
 export enum OptimizationView {
   Table = 'table',
   Strategy = 'strategy',
   Form = 'form',
+  Routing = 'routing',
 }
 
 export const isOptimizationView = (value: string | null): value is OptimizationView =>

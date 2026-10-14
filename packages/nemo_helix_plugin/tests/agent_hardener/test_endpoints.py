@@ -45,7 +45,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobResultResponse,
     HelixJobStatusResponse,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 ResponseType = type[BaseModel] | type[BinaryContent] | GenericAlias | None
 
@@ -60,6 +60,33 @@ def _war_game_body() -> WarGameJobRequest:
 
 def _synth_body() -> SynthBenignJobRequest:
     return SynthBenignJobRequest(name="synth-1", spec=SynthBenignSpec(manifest_id="manifest-1"))
+
+
+@pytest.mark.parametrize("manifest_id", ["", " ", "\n\t"])
+def test_synth_spec_rejects_blank_manifest_id(manifest_id: str) -> None:
+    with pytest.raises(ValidationError):
+        SynthBenignSpec(manifest_id=manifest_id)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {},
+        {"config": "manifest.yaml", "manifest_id": "m1"},
+        {"manifest_id": ""},
+        {"config": " "},
+        {"manifest_id": "m1", "validate_only": True},
+        {"manifest_id": "m1", "validate_only": True, "replay_hitlog_fileset": " "},
+    ],
+)
+def test_war_game_spec_rejects_ambiguous_target_or_missing_replay(spec: dict) -> None:
+    with pytest.raises(ValidationError):
+        WarGameSpec.model_validate(spec)
+
+
+def test_validate_only_accepts_replay() -> None:
+    spec = WarGameSpec(manifest_id="m1", validate_only=True, replay_hitlog_fileset="default/hits")
+    assert spec.validate_only
 
 
 @pytest.mark.parametrize(

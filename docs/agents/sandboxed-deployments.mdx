@@ -1,0 +1,97 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Sandboxed Deployments"
+description: "Deploy a prepared Fabric agent through OpenShell and verify inference and network policy."
+---
+
+Deploy a registered Fabric agent with `--mode openshell` to run it under the
+OpenShell executor's policy. This mode is independent of the gateway's Docker or
+Kubernetes compute driver. Requests still go through the platform's Agents gateway.
+
+## Prerequisites
+
+- A CLI context connected to your platform.
+- An OpenShell deployment executor configured as described in the
+  [OpenShell operator guide](/documentation/kubernetes-deployment/setup/helm/openshell).
+- A Fabric `agent.yaml` with a model available through the
+  platform's Inference Gateway. See [Agents](/documentation/agents).
+- An agent image built with the OpenShell runtime profile, compatible with
+  your platform version and compute-node architecture, and already accessible to
+  the gateway's compute nodes. See [Deploy Agents](/documentation/agents/deploy-agents)
+  for packaging guidance.
+
+The examples below register and deploy an agent in `WORKSPACE`. `AGENT_CONFIG`
+is the path to your existing local `agent.yaml` file, and `IMAGE_TAG` is the
+reference to the prepared image:
+
+```sh
+export WORKSPACE=default
+export AGENT_NAME=sandbox-hello
+export AGENT_CONFIG="<path-to-agent.yaml>"
+export IMAGE_TAG="<accessible-agent-image>"
+```
+
+## Register and deploy
+
+```sh
+nemo agents create --name "$AGENT_NAME" \
+  --agent-config "$AGENT_CONFIG" --workspace "$WORKSPACE"
+
+nemo agents deploy --agent "$AGENT_NAME" \
+  --name "$AGENT_NAME-sandbox" --mode openshell \
+  --image "$IMAGE_TAG" --workspace "$WORKSPACE" --timeout 600
+```
+
+`agents.deployments.openshell_executor` selects the backend for `--mode openshell`.
+The deployment reaches `running` when the agent service is ready.
+
+## Invoke and verify policy
+
+```sh
+nemo agents invoke --agent-deployment "$AGENT_NAME-sandbox" \
+  --workspace "$WORKSPACE" --input "Reply with a short greeting."
+```
+
+The invocation returns the agent's response through the platform's Agents gateway.
+A deployment can be ready while invocation fails because of model access or
+platform-to-gateway routing; see the operator guide's
+[troubleshooting section](/documentation/kubernetes-deployment/setup/helm/openshell#troubleshooting).
+
+### Network policy
+
+The default policy allows sandbox access to the platform and denies other network
+destinations. OpenShell associates each sandbox with deployment-name and
+deployment-workspace labels. With the OpenShell CLI connected to the deployment's
+gateway and gateway workspace, those labels identify the sandbox:
+
+```sh
+openshell sandbox list --selector \
+  "nemo.nvidia.com/deployment-name=$AGENT_NAME-sandbox,nemo.nvidia.com/deployment-workspace=$WORKSPACE"
+```
+
+In the following examples, `SANDBOX_NAME` is the name from that listing and
+`PLATFORM_API_URL` is the endpoint configured by `platform_egress`:
+
+```sh
+openshell sandbox exec --name "$SANDBOX_NAME" -- \
+  curl --fail --show-error --max-time 10 "$PLATFORM_API_URL/health/ready"
+openshell sandbox exec --name "$SANDBOX_NAME" -- \
+  curl --fail --show-error --max-time 10 https://example.com
+```
+
+With the default policy, the health request succeeds and the external request is
+denied. The gateway's audit logs record policy denials; connection failures alone
+can also result from DNS or network problems. Custom policies may allow additional
+destinations, including the external host in this example.
+
+## Clean up
+
+```sh
+nemo agents undeploy "$AGENT_NAME-sandbox" --workspace "$WORKSPACE" --yes
+nemo agents delete "$AGENT_NAME" --workspace "$WORKSPACE" --yes
+```
+
+Undeploying removes the deployment and its sandbox. Deleting the agent removes
+the registration. The agent image is retained.

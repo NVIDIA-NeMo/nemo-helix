@@ -65,7 +65,16 @@ def provision_venv(config: AgentHardenerConfig, *, force: bool) -> None:
     run_subprocess(["uv", "venv", "--python", "3.12", str(config.venv_path)], "create venv")
 
     typer.echo(f"Installing {config.spec} into the venv ...")
-    install_cmd = ["uv", "pip", "install", "--python", str(config.venv_path / "bin" / "python")]
+    # Remove prerelease allowance once agent-hardener pins a final nemo-relay release.
+    install_cmd = [
+        "uv",
+        "pip",
+        "install",
+        "--prerelease",
+        "allow",
+        "--python",
+        str(config.venv_path / "bin" / "python"),
+    ]
     # Both flags are passed on this command only, so the platform's own environment is never resolved
     # against the extra index. Credentials are deliberately not handled here — uv picks them up from
     # ~/.netrc or UV_INDEX_<NAME>_* in the inherited environment.

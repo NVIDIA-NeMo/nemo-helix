@@ -112,7 +112,7 @@ export const useJobBuilder = (
       models: initialModels.current,
     },
   });
-  const { getValues, setValue } = form;
+  const { getValues } = form;
   const {
     fields: columnFields,
     append: appendColumn,
@@ -120,6 +120,15 @@ export const useJobBuilder = (
   } = useFieldArray({
     control: form.control,
     name: 'columns',
+    keyName: 'fieldId',
+  });
+  const {
+    append: appendModel,
+    remove: removeModelField,
+    replace: replaceModels,
+  } = useFieldArray({
+    control: form.control,
+    name: 'models',
     keyName: 'fieldId',
   });
 
@@ -174,8 +183,7 @@ export const useJobBuilder = (
             : [];
         })
       );
-      setValue(
-        'models',
+      replaceModels(
         getValues('models').map((model) => {
           const resolved = byId.get(model.id)?.resolved;
           return resolved
@@ -184,7 +192,7 @@ export const useJobBuilder = (
         })
       );
     })();
-  }, [getValues, setValue, workspace]);
+  }, [getValues, replaceModels, workspace]);
 
   useEffect(() => {
     if (autoFilled.current) return;
@@ -233,29 +241,26 @@ export const useJobBuilder = (
     (selection: ModelSelection, provider: string) => {
       const id = `model-${nextModelId.current++}`;
       const models = getValues('models');
-      setValue('models', [
-        ...models,
+      appendModel(
         builderModelFromSelection(
           id,
           selection,
           provider,
           new Set(models.map((model) => model.alias.trim()))
-        ),
-      ]);
+        )
+      );
       selectModel(id);
     },
-    [getValues, selectModel, setValue]
+    [appendModel, getValues, selectModel]
   );
 
   const removeModel = useCallback(
     (id: string) => {
-      setValue(
-        'models',
-        getValues('models').filter((model) => model.id !== id)
-      );
+      const index = getValues('models').findIndex((model) => model.id === id);
+      if (index >= 0) removeModelField(index);
       setSelectedModelId((current) => (current === id ? null : current));
     },
-    [getValues, setValue]
+    [getValues, removeModelField]
   );
 
   const getBuilderValues = useCallback((): JobBuilderValues => {

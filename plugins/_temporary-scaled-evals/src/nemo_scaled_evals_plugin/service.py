@@ -36,7 +36,6 @@ from scaled_evals.api.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Switchyard lease/publish router intentionally omitted from the plugin mount.
 _V1_ROUTERS = (
     ops.router,
     tasks.router,

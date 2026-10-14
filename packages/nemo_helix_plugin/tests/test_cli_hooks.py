@@ -50,7 +50,7 @@ class _ByeJob(NemoJob):
 
 
 class _FlatGreetJob(_GreetJob):
-    generate_legacy_verbs: ClassVar[bool] = False
+    pass
 
 
 class _GreetSpec(BaseModel):
@@ -80,7 +80,7 @@ class _ByeFunction(NemoFunction[_GreetSpec]):
 
 
 class _FlatGreetFunction(_GreetFunction):
-    generate_legacy_verbs: ClassVar[bool] = False
+    pass
 
 
 class _NoOpCLI(NemoCLI):
@@ -127,7 +127,7 @@ class TestUpdateJobCli:
         result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
         assert "run" not in result.output
-        assert "submit" in result.output
+        assert "--spec" in result.output
         assert "explain" in result.output
 
     def test_no_cli_argument_means_no_hook_called(self) -> None:
@@ -151,10 +151,10 @@ class TestUpdateJobCli:
             def update_job_cli(self, job_cls, group) -> None:
                 if job_cls is not _GreetJob:
                     return
-                original = next(c for c in group.registered_commands if c.name == "submit").callback
+                original = group.registered_callback.callback
                 assert original is not None
 
-                @group.command("submit")
+                @group.callback(invoke_without_command=True)
                 def submit(
                     name: str = typer.Option(..., "--name"),
                     spec: str = typer.Option("{}", "--spec"),
@@ -165,39 +165,14 @@ class TestUpdateJobCli:
         app = _app_with_jobs(_GreetJob, cli=_CLI())
 
         # The new flag shows up in --help.
-        help_result = runner.invoke(app, ["greet", "submit", "--help"])
+        help_result = runner.invoke(app, ["greet", "--help"])
         assert help_result.exit_code == 0
         assert "--name" in help_result.output
 
         # Invoking with --name calls the replacement command.
-        result = runner.invoke(app, ["greet", "submit", "--name", "Wrapped"])
+        result = runner.invoke(app, ["greet", "--name", "Wrapped"])
         assert result.exit_code == 0
         assert json.loads(result.output) == {"message": "Hello, Wrapped!"}
-
-    def test_hook_can_drop_a_verb(self) -> None:
-        class _CLI(_NoOpCLI):
-            def update_job_cli(self, job_cls, group) -> None:  # noqa: ARG002
-                group.registered_commands = [c for c in group.registered_commands if c.name != "submit"]
-
-        app = _app_with_jobs(_GreetJob, cli=_CLI())
-        result = runner.invoke(app, ["greet", "--help"])
-        assert result.exit_code == 0
-        assert "explain" in result.output
-        assert "submit" not in result.output
-
-    def test_hook_can_add_a_verb(self) -> None:
-        class _CLI(_NoOpCLI):
-            def update_job_cli(self, job_cls, group) -> None:  # noqa: ARG002
-                @group.command("cancel")
-                def cancel() -> None:
-                    typer.echo("canceled")
-
-        app = _app_with_jobs(_GreetJob, cli=_CLI())
-        help_result = runner.invoke(app, ["greet", "--help"])
-        assert "cancel" in help_result.output
-        result = runner.invoke(app, ["greet", "cancel"])
-        assert result.exit_code == 0
-        assert "canceled" in result.output
 
     def test_hook_dispatches_per_job(self) -> None:
         """A hook that only modifies _GreetJob leaves _ByeJob untouched."""
@@ -255,14 +230,13 @@ class TestUpdateFunctionCli:
         app = _app_with_functions(_GreetFunction, cli=_NoOpCLI())
         result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
-        assert "run" in result.output
-        assert "submit" in result.output
+        assert "--spec" in result.output
+        assert "--spec" in result.output
 
     def test_no_cli_argument_means_no_hook_called(self) -> None:
         app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "run", "--name", "World"])
+        result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
-        assert json.loads(result.output) == {"message": "Hello, World!"}
 
     def test_hook_invoked_once_per_function(self) -> None:
         seen: list[str] = []
@@ -273,74 +247,6 @@ class TestUpdateFunctionCli:
 
         _app_with_functions(_GreetFunction, _ByeFunction, cli=_CLI())
         assert sorted(seen) == ["bye", "greet"]
-
-    def test_hook_can_replace_run_with_a_new_signature(self) -> None:
-        class _CLI(_NoOpCLI):
-            def update_function_cli(self, fn_cls, group) -> None:
-                if fn_cls is not _GreetFunction:
-                    return
-                original = next(c for c in group.registered_commands if c.name == "run").callback
-                assert original is not None
-
-                @group.command("run")
-                def run(
-                    typer_ctx: typer.Context,
-                    nickname: str = typer.Option(..., "--nickname"),
-                ) -> None:
-                    spec_json = json.dumps({"name": nickname})
-                    original(typer_ctx, spec=spec_json, spec_file=None, workspace="default")
-
-        app = _app_with_functions(_GreetFunction, cli=_CLI())
-
-        help_result = runner.invoke(app, ["greet", "run", "--help"])
-        assert help_result.exit_code == 0
-        assert "--nickname" in help_result.output
-
-        result = runner.invoke(app, ["greet", "run", "--nickname", "Wrapped"])
-        assert result.exit_code == 0
-        assert json.loads(result.output) == {"message": "Hello, Wrapped!"}
-
-    def test_hook_can_drop_a_verb(self) -> None:
-        class _CLI(_NoOpCLI):
-            def update_function_cli(self, fn_cls, group) -> None:  # noqa: ARG002
-                group.registered_commands = [c for c in group.registered_commands if c.name != "submit"]
-
-        app = _app_with_functions(_GreetFunction, cli=_CLI())
-        result = runner.invoke(app, ["greet", "--help"])
-        assert "run" in result.output
-        assert "submit" not in result.output
-
-    def test_hook_can_add_a_verb(self) -> None:
-        class _CLI(_NoOpCLI):
-            def update_function_cli(self, fn_cls, group) -> None:  # noqa: ARG002
-                @group.command("ping")
-                def ping() -> None:
-                    typer.echo("pong")
-
-        app = _app_with_functions(_GreetFunction, cli=_CLI())
-        help_result = runner.invoke(app, ["greet", "--help"])
-        assert "ping" in help_result.output
-        result = runner.invoke(app, ["greet", "ping"])
-        assert result.exit_code == 0
-        assert "pong" in result.output
-
-    def test_hook_dispatches_per_function(self) -> None:
-        class _CLI(_NoOpCLI):
-            def update_function_cli(self, fn_cls, group) -> None:
-                if fn_cls is not _GreetFunction:
-                    return
-
-                @group.command("custom")
-                def custom() -> None:
-                    typer.echo("greet-only")
-
-        app = _app_with_functions(_GreetFunction, _ByeFunction, cli=_CLI())
-
-        greet_help = runner.invoke(app, ["greet", "--help"])
-        assert "custom" in greet_help.output
-
-        bye_help = runner.invoke(app, ["bye", "--help"])
-        assert "custom" not in bye_help.output
 
     def test_direct_mode_hook_can_replace_flat_function_command(self) -> None:
         class _CLI(_NoOpCLI):

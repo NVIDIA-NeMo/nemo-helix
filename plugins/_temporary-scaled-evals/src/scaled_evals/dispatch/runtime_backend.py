@@ -171,15 +171,6 @@ class RuntimeBackendCapabilities:
         if dispatch_log := self.dispatch_log_path(evaluation_id):
             paths.append(dispatch_log)
 
-        artifact_root = self.artifact_root(evaluation_id)
-        paths.extend(
-            [
-                artifact_root / "switchyard" / "switchyard.log",
-                artifact_root / "switchyard" / "switchyard.previous.log",
-                artifact_root / "switchyard" / "status.json",
-            ]
-        )
-
         if work_dir := self.dispatch_work_dir(evaluation_id):
             paths.extend(work_dir / name for name in self.extra_dispatch_log_names)
 

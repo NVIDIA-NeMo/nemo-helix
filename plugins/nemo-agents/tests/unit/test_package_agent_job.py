@@ -448,7 +448,14 @@ class TestPublishedPackagingContract:
         assert any(spec.startswith(dependency) for spec in declared)
 
     @pytest.mark.parametrize(
-        "dependency", ["python-on-whales", "jinja2", "nemo-fabric-adapters-remote-agent", "nemo-fabric-adapters-nooa"]
+        "dependency",
+        [
+            "python-on-whales",
+            "jinja2",
+            "nemo-fabric-adapters-remote-agent",
+            "nemo-fabric-adapters-nooa",
+            "nemo-fabric-adapters-mini-swe-agent",
+        ],
     )
     def test_published_platform_extra_includes_packaging_dependency(self, dependency: str) -> None:
         import tomllib
@@ -477,10 +484,12 @@ class TestPublishedPackagingContract:
             "nemo-fabric-adapters-deepagents",
             "nemo-fabric-adapters-hermes",
             "nemo-fabric-adapters-nooa",
+            "nemo-fabric-adapters-mini-swe-agent",
             "nemo-fabric-adapters-remote-agent",
         }
         assert not any(
-            spec.startswith(("claude-agent-sdk", "deepagents", "hermes-agent", "openai-codex")) for spec in declared
+            spec.startswith(("claude-agent-sdk", "deepagents", "hermes-agent", "openai-codex", "mini-swe-agent"))
+            for spec in declared
         )
 
     def test_harness_extras(self) -> None:
@@ -492,8 +501,21 @@ class TestPublishedPackagingContract:
         assert extras["claude"] == ["nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0"]
         assert extras["codex"] == ["nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0"]
         assert extras["deepagents"] == ["nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0"]
+        assert extras["mini-swe-agent"] == ["nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0"]
         assert extras["nooa"] == [
             "nemo-fabric-adapters-nooa[harness]>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'"
+        ]
+
+    def test_published_mini_swe_agent_extra(self) -> None:
+        import tomllib
+
+        root = Path(__file__).resolve().parents[4]
+        extras = tomllib.loads((root / "packages/nemo_helix/pyproject.toml").read_text())["project"][
+            "optional-dependencies"
+        ]
+        assert extras["nemo-agents-plugin-mini-swe-agent"] == [
+            "nemo-helix[nemo-agents-plugin]",
+            "nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0",
         ]
 
     @pytest.mark.parametrize(

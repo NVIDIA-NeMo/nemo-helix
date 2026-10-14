@@ -228,6 +228,66 @@ class TestTranslateAgentConfig:
         )
         assert "base_url" not in fabric_config.models["default"].settings
 
+    def test_flattens_model_extensions_to_top_level_metadata(self) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["models"]["default"]["extensions"] = {
+            "api": "openai-completions",
+            "context_window": 200000,
+            "cost": {"input": 1.0, "output": 2.0},
+            "input": ["text", "image"],
+        }
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # The Fabric northbound ModelConfig collects unknown top-level keys into
+        # its serde(flatten) extensions map, so the metadata must serialize as
+        # siblings of provider/model -- never under a nested "extensions" key,
+        # which would arrive double-nested and unreadable at the adapter.
+        dumped = fabric_config.models["default"].model_dump(exclude_none=True)
+        assert "extensions" not in dumped
+        assert dumped["api"] == "openai-completions"
+        assert dumped["context_window"] == 200000
+        assert dumped["cost"] == {"input": 1.0, "output": 2.0}
+        assert dumped["input"] == ["text", "image"]
+
+    def test_empty_model_extensions_adds_no_metadata(self) -> None:
+        config = AgentConfig.model_validate(_example_yaml_config())
+
+        fabric_config = translate_agent_config(config)
+
+        dumped = fabric_config.models["default"].model_dump(exclude_none=True)
+        assert "extensions" not in dumped
+        assert "api" not in dumped
+
+    def test_model_extensions_may_not_override_declared_fields(self) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["models"]["default"]["extensions"] = {"max_tokens": 4096}
+        config = AgentConfig.model_validate(payload)
+
+        with pytest.raises(FabricTranslationError, match="max_tokens"):
+            translate_agent_config(config)
+
+    def test_model_extensions_collision_lists_every_shadowed_field(self) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["models"]["default"]["extensions"] = {"max_tokens": 4096, "base_url": "http://x"}
+        config = AgentConfig.model_validate(payload)
+
+        with pytest.raises(FabricTranslationError, match="base_url, max_tokens"):
+            translate_agent_config(config)
+
+    def test_model_extensions_may_not_renest_an_extensions_key(self) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["models"]["default"]["extensions"] = {"extensions": {"api": "openai-completions"}}
+        config = AgentConfig.model_validate(payload)
+
+        with pytest.raises(FabricTranslationError, match="extensions"):
+            translate_agent_config(config)
+
     def test_translates_shared_capability_sections(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())
         payload["skills"] = {"paths": ["skills/review"]}
@@ -810,3 +870,19 @@ def test_nooa_bench_harness_selection(kind: str) -> None:
     assert translated.harness is not None
     assert translated.harness.adapter_id == "nvidia.fabric.nooa.bench-agent"
     assert translated.harness.resolution == "preinstalled"
+
+
+@pytest.mark.parametrize("kind", ["mini-swe-agent", "nvidia.fabric.mini-swe-agent"])
+def test_mini_swe_agent_example(kind: str) -> None:
+    config = load_agent_config(Path(__file__).parents[2] / "examples/nemo-agent-config/agent-mini-swe-agent.yaml")
+    config.harnesses["mini-swe-agent"].kind = kind
+    translated = translate_agent_config(config)
+
+    assert translated.workflow is None
+    assert translated.harness is not None
+    assert translated.harness.adapter_id == "nvidia.fabric.mini-swe-agent"
+    assert translated.harness.settings == {"timeout": 30}
+    assert translated.harness.resolution == "preinstalled"
+    assert translated.runtime is not None
+    assert translated.runtime.max_turns == 50
+    assert translated.runtime.timeout_seconds == 1800

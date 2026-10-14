@@ -341,6 +341,7 @@ class HelixJobStatusUpdateRequest(BaseModel):
     """Request model for updating job status."""
 
     status: HelixJobStatus = Field(..., description="The new status to set for the job.")
+    expected_step_id: str | None = Field(None, description="Reject the update if the step's entity ID has changed.")
     status_details: dict[str, Any] | None = Field(
         default_factory=dict, description="Optional status details related to the status update."
     )

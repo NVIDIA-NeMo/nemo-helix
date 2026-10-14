@@ -22,7 +22,6 @@ class RetrievalRunJob(NemoJob):
     name: ClassVar[str] = "retrieval-run"
     description: ClassVar[str] = "Chain retrieval generate then prepare as a multi-step jobs-service workflow."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
 
     input_spec_schema = RetrievalRunJobConfig
     spec_schema = RetrievalRunJobConfig

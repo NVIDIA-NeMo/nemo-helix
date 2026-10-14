@@ -56,24 +56,24 @@ def test_archive_context_directory_is_deterministic_and_normalized(tmp_path: Pat
 
 
 def test_archive_context_directory_can_normalize_source_dockerfile_path(tmp_path: Path) -> None:
-    context = tmp_path / "switchyard"
+    context = tmp_path / "server"
     context.mkdir()
     (context / ".git").write_text("gitdir: /private/tmp/not-source\n", encoding="utf-8")
     benchmark = context / "benchmark"
     benchmark.mkdir()
-    source = benchmark / "switchyard-server.Dockerfile"
+    source = benchmark / "server.Dockerfile"
     source.write_text("FROM python:3.13-slim-bookworm\n", encoding="utf-8")
 
     archive = image_builder_service.archive_context_directory(
         context,
-        dockerfile_path="benchmark/switchyard-server.Dockerfile",
+        dockerfile_path="benchmark/server.Dockerfile",
     )
 
     names: set[str]
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
         names = set(tar.getnames())
         root_dockerfile = tar.extractfile("Dockerfile")
-        source_dockerfile = tar.extractfile("benchmark/switchyard-server.Dockerfile")
+        source_dockerfile = tar.extractfile("benchmark/server.Dockerfile")
         assert root_dockerfile is not None
         assert source_dockerfile is not None
         assert root_dockerfile.read() == source_dockerfile.read() == source.read_bytes()
@@ -84,10 +84,10 @@ def test_archive_context_directory_can_normalize_source_dockerfile_path(tmp_path
         archive_path.write_bytes(archive)
         metadata = image_builder_service.inspect_uploaded_archive_file(
             archive_path,
-            dockerfile_path="benchmark/switchyard-server.Dockerfile",
+            dockerfile_path="benchmark/server.Dockerfile",
         )
 
-    assert metadata.dockerfile_path == "benchmark/switchyard-server.Dockerfile"
+    assert metadata.dockerfile_path == "benchmark/server.Dockerfile"
     assert metadata.dockerfile_sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
 
 

@@ -115,7 +115,6 @@ class EvaluateSuiteJob(NemoJob):
     name: ClassVar[str] = "evaluate-suite"
     description: ClassVar[str] = "Run a directory of containerized eval tasks (Harbor or NAT) against an agent."
     container: ClassVar[str] = "cpu-tasks"
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = EvaluateSuiteConfig
     input_spec_schema: ClassVar[type[BaseModel]] = EvaluateSuiteSubmitConfig
 

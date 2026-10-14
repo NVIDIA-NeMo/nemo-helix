@@ -336,8 +336,8 @@ async def test_publish_to_intake_round_trip(intake: AsyncIntakeClient) -> None:
     assert trace.root_span_id == t1.span_id
     assert trace.evaluation_context is not None
     evaluation_context = trace.evaluation_context
-    assert evaluation_context["evaluation_name"] == EXPERIMENT_NAME
-    assert evaluation_context["test_case_name"] == "task-1"
+    assert evaluation_context.evaluation_name == EXPERIMENT_NAME
+    assert evaluation_context.test_case_name == "task-1"
 
     # --- trial-1 scores: every field, every data_type coercion.
     rows = await intake.spans.evaluator_results.list(t1.span_id, workspace=WORKSPACE)
@@ -404,9 +404,9 @@ def _nan_result() -> AgentEvalResult:
     )
 
 
-async def test_publish_skips_nan_and_failed_scores(intake: AsyncIntakeClient) -> None:
-    # A NaN value is not representable in JSON and a FAILED score is not a real measurement; neither
-    # should reach Intake. Only the finite, completed output should be stored.
+async def test_publish_records_nan_and_failed_scores_as_failed_rows(intake: AsyncIntakeClient) -> None:
+    # A NaN value is not representable in JSON and a FAILED score is not a real measurement. Neither
+    # carries a value to Intake, but both are recorded as FAILED rows so the gap is visible there.
     await _ensure_evaluation(intake, name=NAN_EXPERIMENT_NAME, dataset_name="intake-it-nan-dataset")
 
     report = await publish_to_intake(
@@ -419,14 +419,14 @@ async def test_publish_skips_nan_and_failed_scores(intake: AsyncIntakeClient) ->
 
     published = report.published_trials[0]
     rows = await intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
-    assert {row.name for row in rows} == {"accuracy.score"}
-    assert report.evaluator_result_count == 1
-
-    # The dropped outputs are surfaced (not silently lost) until Intake can model failure.
-    assert {(skip.name, skip.reason) for skip in report.skipped} == {
-        ("accuracy.broken", "non-finite value"),
-        ("judge.verdict", "scoring failed"),
+    # The NaN output and the FAILED score land as FAILED rows with no value, not as omissions.
+    assert {(row.name, row.status, row.value) for row in rows} == {
+        ("accuracy.score", "SCORED", 0.5),
+        ("accuracy.broken", "FAILED", None),
+        ("judge.verdict", "FAILED", None),
     }
+    assert report.evaluator_result_count == 3
+    assert report.skipped == []
 
 
 def _idempotency_result() -> AgentEvalResult:
@@ -540,7 +540,7 @@ async def test_row_result_publishes_and_is_idempotent(intake: AsyncIntakeClient)
     traces = await _list_traces(intake, trace_filter)
     assert len(traces) == 1, "re-publish duplicated the row instead of replacing it"
     assert traces[0].evaluation_context is not None
-    assert traces[0].evaluation_context["test_case_id"] == "q-1"
+    assert traces[0].evaluation_context.test_case_id == "q-1"
 
     rows = await intake.spans.evaluator_results.list(second.published_trials[0].span_id, workspace=WORKSPACE)
     assert [row.name for row in rows] == ["exact_match.score"]

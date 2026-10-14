@@ -264,12 +264,13 @@ def evaluation_reader() -> EvaluationProjectionReader:
     global _reader
     with _reader_lock:
         if _reader is None:
-            entities = EntitiesClient.from_client(get_nemo_client(as_service="scaled-evals", internal=True))
-            _reader = EvaluationProjectionReader(
-                SyncEntityClient(entities),
-                workspace=settings.entity_store_workspace,
-            )
+            _reader = EvaluationProjectionReader(platform_entities(), workspace=settings.entity_store_workspace)
         return _reader
+
+
+def platform_entities() -> SyncEntityClient:
+    """Return an Entity Store client acting as the scaled-evals service."""
+    return SyncEntityClient(EntitiesClient.from_client(get_nemo_client(as_service="scaled-evals", internal=True)))
 
 
 def parity_report(row: dict[str, Any], projected: dict[str, Any]) -> list[str]:

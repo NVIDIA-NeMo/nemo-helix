@@ -177,8 +177,8 @@ def _is_ignored_context_path(relative: Path) -> bool:
     """Return True for entries pruned from build context packaging.
 
     Prunes version-control and virtualenv artifacts (`.git`, `.venv*`) so a
-    local Switchyard checkout with a `.venv` can be published without
-    hand-cleaning it first. Symlinks outside these directories are still
+    local checkout with a `.venv` can be packaged without hand-cleaning it
+    first. Symlinks outside these directories are still
     rejected by `_reject_context_path` rather than silently dropped.
     """
     return any(part == ".git" or part.startswith(".venv") for part in relative.parts)

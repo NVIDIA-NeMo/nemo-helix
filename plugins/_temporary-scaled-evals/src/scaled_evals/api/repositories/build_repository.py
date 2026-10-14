@@ -24,18 +24,6 @@ class TaskBuildRepository:
     def __init__(self, conn: psycopg.Connection) -> None:
         self.conn = conn
 
-    def heartbeat_worker(self, worker_id: str) -> None:
-        with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO service_heartbeats (service, instance_id, heartbeat_at)
-                VALUES ('build_worker', %s, NOW())
-                ON CONFLICT (service, instance_id) DO UPDATE
-                SET heartbeat_at = EXCLUDED.heartbeat_at
-                """,
-                (worker_id,),
-            )
-
     def record_success(
         self,
         task_id: str,
@@ -124,7 +112,6 @@ class TaskBuildRepository:
                       )
                     ORDER BY build_started_at, task_id, revision
                     LIMIT 1
-                    FOR UPDATE SKIP LOCKED
                 )
                 UPDATE task_revisions r
                 SET build_claimed_at = NOW(),
@@ -134,11 +121,17 @@ class TaskBuildRepository:
                 FROM candidate
                 WHERE r.task_id = candidate.task_id
                   AND r.revision = candidate.revision
+                  AND r.status = 'building'
+                  AND r.build_attempts < %s
+                  AND (
+                      r.build_claimed_at IS NULL
+                      OR r.build_claimed_at < NOW() - (%s * INTERVAL '1 second')
+                  )
                 RETURNING r.task_id, r.revision, r.build_backend,
                           r.build_payload, r.build_credentials,
                           r.tarball_object_key, r.build_attempts
                 """,
-                (max_attempts, claim_timeout, worker_id),
+                (max_attempts, claim_timeout, worker_id, max_attempts, claim_timeout),
             )
             row = cur.fetchone()
         if row is None:

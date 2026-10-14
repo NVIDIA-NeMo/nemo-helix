@@ -25,7 +25,7 @@ ENV ANNOY_COMPILER_ARGS="-D_CRT_SECURE_NO_WARNINGS,-DANNOYLIB_MULTITHREADED_BUIL
 # locked pip, so exactly one pip remains. Without it, uv copies the locked pip
 # over the seed pip without removing stale files, leaving two pip-*.dist-info
 # dirs and a mixed file tree whose `pip` import is broken.
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable \
     --reinstall-package pip
 

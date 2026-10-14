@@ -32,7 +32,6 @@ class IntakeProfileConfig(BaseModel):
     task: StrictStr | None = Field(default=None, min_length=1)
     intake_task: StrictStr | None = Field(default=None, min_length=1)
     capture_content: bool | None = None
-    switchyard_intake_capture_content: bool | None = None
     experiment_context: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
@@ -108,11 +107,6 @@ def resolve_intake_target(
         app=app or task_slug or "harbor-eval",
         source=source,
     )
-
-
-def resolve_routing_task(profile_config: dict[str, Any], *, task_slug: str | None) -> str:
-    """Resolve the task label written to Switchyard routing records."""
-    return _string(profile_config.get("task"), profile_config.get("intake_task")) or task_slug or "harbor-eval"
 
 
 def _string(*values: Any) -> str | None:

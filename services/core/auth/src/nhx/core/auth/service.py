@@ -4,6 +4,7 @@
 """Auth service implementation."""
 
 import asyncio
+import contextlib
 import logging
 from typing import ClassVar, List, Optional
 
@@ -23,6 +24,10 @@ from nhx.core.auth.oidc_broker import routes as oidc_broker
 logger = logging.getLogger(__name__)
 
 
+# How long shutdown waits for an in-flight policy refresh before cancelling it.
+_REFRESH_STOP_TIMEOUT_SECONDS = 10.0
+
+
 class AuthService(Service[AuthServiceConfig]):
     """Authentication and Authorization service for NeMo Helix."""
 
@@ -32,6 +37,7 @@ class AuthService(Service[AuthServiceConfig]):
         """Initialize the auth service."""
         super().__init__(name="auth", module_name="nhx.core.auth")
         self._refresh_task: Optional[asyncio.Task[None]] = None
+        self._refresh_stop = asyncio.Event()
         self._policy_refresh_healthy: bool = False
 
     def get_routers(self) -> List[RouterConfig]:
@@ -83,8 +89,12 @@ class AuthService(Service[AuthServiceConfig]):
 
         logger.info("Starting auth policy data refresh loop")
 
+        async def wait_for_next_refresh() -> None:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._refresh_stop.wait(), timeout=float(refresh_interval))
+
         async def refresh_loop():
-            while True:
+            while not self._refresh_stop.is_set():
                 try:
                     logger.debug("Refreshing auth policy data")
                     # Bootstrap static YAML only when we do not yet have a successful full
@@ -99,7 +109,7 @@ class AuthService(Service[AuthServiceConfig]):
                     self._policy_refresh_healthy = True
                     principals_count = len(data.get("authz", {}).get("principals", {}))
                     logger.debug("Policy data refreshed (principals: %d)", principals_count)
-                    await asyncio.sleep(float(refresh_interval))
+                    await wait_for_next_refresh()
                 except asyncio.CancelledError:
                     break
                 except Exception:
@@ -108,8 +118,9 @@ class AuthService(Service[AuthServiceConfig]):
                         refresh_interval,
                     )
                     self._policy_refresh_healthy = False
-                    await asyncio.sleep(float(refresh_interval))
+                    await wait_for_next_refresh()
 
+        self._refresh_stop.clear()
         refresh_task = asyncio.create_task(refresh_loop())
         logger.info("Policy data refresh loop started (interval=%ds)", refresh_interval)
         return refresh_task
@@ -141,11 +152,16 @@ class AuthService(Service[AuthServiceConfig]):
         config = get_service_config(AuthServiceConfig)
         if config.enabled and config.policy_decision_point_provider == "embedded":
             if self._refresh_task and not self._refresh_task.done():
-                self._refresh_task.cancel()
+                # Let an in-flight refresh finish: cancelling it mid-request cancels the entity
+                # store query it is waiting on, and SQLAlchemy cannot reliably return a connection
+                # whose cleanup is itself cancelled.
+                self._refresh_stop.set()
                 try:
-                    await self._refresh_task
-                except asyncio.CancelledError:
-                    pass
+                    await asyncio.wait_for(asyncio.shield(self._refresh_task), timeout=_REFRESH_STOP_TIMEOUT_SECONDS)
+                except TimeoutError:
+                    self._refresh_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await self._refresh_task
             self._refresh_task = None
             logger.info("Policy data refresh loop stopped")
         await super().on_shutdown()
