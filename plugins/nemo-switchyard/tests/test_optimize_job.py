@@ -88,7 +88,8 @@ async def compile_spec(profile: str | None = None) -> Any:
 def test_declares_the_strategy() -> None:
     strategy = declared_strategy(SwitchyardOptimizeJob)
     assert strategy is not None
-    assert strategy.name == "switchyard"
+    assert (strategy.name, strategy.requires_config) == ("switchyard", True)
+    assert strategy.title
 
 
 async def test_compile_prefers_the_subprocess_executor_and_stamps_the_workspace() -> None:
