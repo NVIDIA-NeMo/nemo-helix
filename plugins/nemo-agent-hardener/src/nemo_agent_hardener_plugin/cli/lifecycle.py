@@ -8,10 +8,13 @@ agent-hardener is never imported: it runs in its own venv, invoked by subprocess
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
 import typer
+import yaml
 from nemo_agent_hardener_plugin.cli import checks, credentials, provisioning
 from nemo_agent_hardener_plugin.cli._shared import (
     command_context,
@@ -21,7 +24,35 @@ from nemo_agent_hardener_plugin.cli._shared import (
     preflight_models,
 )
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
-from nemo_agent_hardener_plugin.filesets import upload_project_dir
+from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
+
+
+def _with_local_project(ctx: Any, manifest: dict[str, Any], out_path: Path) -> str:
+    """The manifest YAML with ``project_dir`` pointing at a local copy of its stored victim bundle.
+
+    The stored ``project_dir`` names where the service built the bundle, which does not exist on this
+    machine, so ``run --config`` would fail on it. The bundle is downloaded next to *out_path*; on any
+    failure the YAML is returned unchanged with a warning, since ``run --manifest-id`` still works.
+    """
+    manifest_yaml = str(manifest["manifest_yaml"])
+    is_project = manifest.get("source_type") == "project"
+    bundle = manifest.get("project_fileset") if is_project else manifest.get("agent_fileset")
+    data = yaml.safe_load(manifest_yaml)
+    if not (bundle and isinstance(data, dict) and isinstance(data.get("agent"), dict)):
+        return manifest_yaml
+    workdir = out_path.parent / f"{out_path.stem}-victim"
+    # Replace only a copy an earlier `init` wrote, never a directory of the user's that shares the name.
+    if workdir.exists() and not {p.name for p in workdir.iterdir()} <= {"bundle", "project"}:
+        typer.secho(f"  ! {workdir} exists and is not a victim bundle; leaving project_dir as stored.", fg="yellow")
+        return manifest_yaml
+    try:
+        shutil.rmtree(workdir, ignore_errors=True)
+        project = download_and_extract_project(ctx.sdk, str(bundle), workdir)
+    except Exception as exc:
+        typer.secho(f"  ! could not download the victim bundle for --config runs: {exc}", fg="yellow")
+        return manifest_yaml
+    data["agent"]["project_dir"] = os.path.relpath(project, out_path.parent)
+    return yaml.safe_dump(data, sort_keys=False)
 
 
 def _project_init_body(
@@ -326,7 +357,7 @@ def register(app: typer.Typer) -> None:
                 f"# Rendered from manifest '{manifest_name}'.\n"
                 f"# Runnable with `run --config {output}`; `run --manifest-id {manifest_name}` "
                 f"uses the stored manifest instead.\n"
-                f"{manifest['manifest_yaml']}",
+                f"{_with_local_project(ctx, manifest, out_path)}",
                 encoding="utf-8",
             )
             typer.echo(f"  rendered  {out_path}")

@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 import pytest
+import yaml
 from nemo_agent_hardener_plugin import sdk as sdk_module
 from nemo_agent_hardener_plugin.cli import _shared, lifecycle
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
@@ -169,3 +170,63 @@ def test_init_omits_backends_when_none_given(tmp_path: Path, monkeypatch: pytest
 
     assert result.exit_code == 0, result.output
     assert "backends" not in created
+
+
+# --------------------------------------------------------------------------- init -o
+def _stored_manifest(project_dir: str = ".agent-hardener-agents/x") -> dict[str, Any]:
+    manifest_yaml = yaml.safe_dump({"agent": {"name": "x", "project_dir": project_dir, "port": 8000}})
+    return {"agent_fileset": "default/fs-1", "manifest_yaml": manifest_yaml}
+
+
+def _project_dir_of(manifest_yaml: str) -> str:
+    return yaml.safe_load(manifest_yaml)["agent"]["project_dir"]
+
+
+def test_output_yaml_points_project_dir_at_the_downloaded_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out_path = tmp_path / "out" / "hardener.yaml"
+    out_path.parent.mkdir()
+
+    def fake_download(_sdk: Any, fileset: str, dest: Path) -> Path:
+        assert fileset == "default/fs-1"
+        (dest / "project").mkdir(parents=True)
+        return dest / "project"
+
+    monkeypatch.setattr(lifecycle, "download_and_extract_project", fake_download)
+
+    rendered = lifecycle._with_local_project(SimpleNamespace(sdk=object()), _stored_manifest(), out_path)
+
+    assert _project_dir_of(rendered) == "hardener-victim/project"
+
+
+def test_output_yaml_is_unchanged_when_the_bundle_cannot_be_downloaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failing_download(*_a: Any, **_k: Any) -> Path:
+        raise RuntimeError("fileset gone")
+
+    monkeypatch.setattr(lifecycle, "download_and_extract_project", failing_download)
+    manifest = _stored_manifest()
+
+    rendered = lifecycle._with_local_project(SimpleNamespace(sdk=object()), manifest, tmp_path / "hardener.yaml")
+
+    assert rendered == manifest["manifest_yaml"]
+
+
+def test_an_unrelated_directory_with_the_victim_name_is_never_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workdir = tmp_path / "hardener-victim"
+    workdir.mkdir()
+    precious = workdir / "notes.txt"
+    precious.write_text("keep me", encoding="utf-8")
+    monkeypatch.setattr(
+        lifecycle, "download_and_extract_project", lambda *_a, **_k: pytest.fail("must not download over it")
+    )
+    manifest = _stored_manifest()
+
+    rendered = lifecycle._with_local_project(SimpleNamespace(sdk=object()), manifest, tmp_path / "hardener.yaml")
+
+    assert rendered == manifest["manifest_yaml"]
+    assert precious.read_text(encoding="utf-8") == "keep me"
