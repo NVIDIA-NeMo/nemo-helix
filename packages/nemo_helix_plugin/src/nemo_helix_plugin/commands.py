@@ -70,7 +70,7 @@ import inspect
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Generator, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional, Protocol, cast
@@ -986,7 +986,7 @@ def resolve_submit_base_url(typer_ctx: typer.Context) -> str:
 
 
 @contextlib.contextmanager
-def _programmatic_submit(typer_ctx: typer.Context) -> Iterator[None]:
+def _programmatic_submit(typer_ctx: typer.Context) -> Generator[None, None, None]:
     """Mark a job submit callback call as carrying a caller-built spec.
 
     Without it, a callback called from a replacement command inspects the

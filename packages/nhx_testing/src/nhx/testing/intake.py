@@ -22,6 +22,7 @@ import json
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import unquote
 
 import httpx
@@ -49,19 +50,19 @@ class InMemoryIntakeService:
 
     def __init__(self) -> None:
         #: ATIF ingest bodies, each with the request's ``workspace`` added.
-        self.atif_requests: list[dict[str, object]] = []
+        self.atif_requests: list[dict[str, Any]] = []
         #: The event loop each ATIF ingest request ran on.
         self.atif_loops: list[asyncio.AbstractEventLoop] = []
         #: OTLP ingest requests as ``{"workspace": ..., "body": <protobuf bytes>}``.
         self.otlp_requests: list[dict[str, object]] = []
         #: Evaluator-result bodies, each with the request's ``workspace`` added.
-        self.evaluator_result_requests: list[dict[str, object]] = []
+        self.evaluator_result_requests: list[dict[str, Any]] = []
         #: Session ids whose traces were looked up, in order.
         self.trace_lookups: list[str] = []
         #: Evaluations fetched, as ``{"name": ..., "workspace": ...}``.
         self.evaluation_lookups: list[dict[str, str]] = []
         #: Evaluation patches, as ``{"name": ..., **patch_body}``.
-        self.evaluation_patches: list[dict[str, object]] = []
+        self.evaluation_patches: list[dict[str, Any]] = []
 
         #: Root span id prefix for trace lookups; each session resolves to ``"<prefix>:<session id>"``.
         #: ``None`` makes every trace lookup come back empty.
@@ -70,7 +71,7 @@ class InMemoryIntakeService:
         #: HTTP status, an exception is raised from the transport (e.g. ``httpx.ConnectError``).
         self.atif_failure: Failure | None = None
         #: When this returns True for an ATIF body, ingest answers 422 instead of recording it.
-        self.atif_rejects: Callable[[dict[str, object]], bool] | None = None
+        self.atif_rejects: Callable[[dict[str, Any]], bool] | None = None
         #: Seconds each ATIF ingest takes before answering.
         self.atif_delay_sec: float = 0.0
         #: Ingest errors reported back for every OTLP request.
