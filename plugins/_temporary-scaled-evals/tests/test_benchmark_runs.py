@@ -24,13 +24,19 @@ from scaled_evals.api.db import get_conn
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.settings import settings
-from task_fixtures import seed_task_revision
+from task_fixtures import seed_benchmark, seed_task_revision
 
 NOW = datetime(2026, 6, 29, tzinfo=UTC)
 
 
-def _conn(*, fetchone=None, fetchall=None) -> MagicMock:
-    """Mock connection. fetchone/fetchall accept a list used as side_effect."""
+def _conn(*, members=None, fetchone=None, fetchall=None, **benchmark_fields) -> MagicMock:
+    """Mock connection. fetchone/fetchall accept a list used as side_effect.
+
+    `members` (load_members shape) are stored as revision 1 of benchmark `bm_suite`.
+    """
+    if members is not None:
+        refs = tuple((member["task_id"], member["task_revision"]) for member in members)
+        seed_benchmark("bm_suite", refs, **benchmark_fields)
     conn = MagicMock()
     cur = conn.cursor.return_value.__enter__.return_value
     if fetchone is not None:
@@ -370,10 +376,11 @@ def test_benchmark_request_supports_full_member_execution_contract() -> None:
 
 def test_create_run_spawns_run_and_members() -> None:
     conn = _conn(
-        # fetchone: current_revision, run RETURNING, member0 RETURNING, member1 RETURNING.
-        fetchone=[{"current_revision": 1}, _run_row(), _member_eval(0), _member_eval(1)],
-        # fetchall: load_members (benchmark tasks), then members_for_runs (derive on response).
-        fetchall=[[_member(0), _member(1)], [_member_eval(0, status="queued", reward=None)]],
+        # fetchone: run RETURNING, member0 RETURNING, member1 RETURNING.
+        fetchone=[_run_row(), _member_eval(0), _member_eval(1)],
+        # fetchall: members_for_runs (derive on response).
+        members=[_member(0), _member(1)],
+        fetchall=[[_member_eval(0, status="queued", reward=None)]],
     )
     _use_conn(conn)
 
@@ -398,7 +405,6 @@ def test_create_run_applies_member_framework_profile_overrides() -> None:
         ConfigProfileStore().create(profile_id, name=profile_id, type="harbor", config={})
     conn = _conn(
         fetchone=[
-            {"current_revision": 1},
             _run_row(
                 framework_profile_id="cfg_default",
                 harbor_profile_id="cfg_default",
@@ -407,10 +413,8 @@ def test_create_run_applies_member_framework_profile_overrides() -> None:
             _member_eval(0),
             _member_eval(1),
         ],
-        fetchall=[
-            [_member(0), _member(1)],
-            [_member_eval(0, status="queued", reward=None)],
-        ],
+        members=[_member(0), _member(1)],
+        fetchall=[[_member_eval(0, status="queued", reward=None)]],
     )
     _use_conn(conn)
 
@@ -437,15 +441,10 @@ def test_create_run_applies_member_framework_profile_overrides() -> None:
 
 def test_preflight_run_reports_members_without_creating_run() -> None:
     conn = _conn(
-        fetchone=[
-            {
-                "current_revision": 1,
-                "qualification_status": "qualified",
-                "qualification_evidence": {"receipt": "qe_1"},
-                "qualified_at": NOW,
-            }
-        ],
-        fetchall=[[_member(0), _member(1)]],
+        members=[_member(0), _member(1)],
+        qualification_status="qualified",
+        qualification_evidence={"receipt": "qe_1"},
+        qualified_at=NOW,
     )
     _use_conn(conn)
 
@@ -476,8 +475,7 @@ def test_preflight_run_reports_members_without_creating_run() -> None:
 
 def test_preflight_run_reports_bounded_member_failure() -> None:
     conn = _conn(
-        fetchone=[{"current_revision": 1}],
-        fetchall=[[_member(0, revision_status="building"), _member(1)]],
+        members=[_member(0, revision_status="building"), _member(1)],
     )
     _use_conn(conn)
 
@@ -495,7 +493,7 @@ def test_preflight_run_reports_bounded_member_failure() -> None:
 
 def test_preflight_run_truncates_large_member_failure_details() -> None:
     members = [_member(i, revision_status="building") for i in range(52)]
-    conn = _conn(fetchone=[{"current_revision": 1}], fetchall=[members])
+    conn = _conn(members=members)
     _use_conn(conn)
 
     response = client.post(
@@ -516,8 +514,7 @@ def test_create_run_rejects_member_with_missing_task_pack(
 ) -> None:
     member = _member(0, tarball_object_key="task_0/rev/1/tarball.tar.gz")
     conn = _conn(
-        fetchone=[{"current_revision": 1}],
-        fetchall=[[member]],
+        members=[member],
     )
     _use_conn(conn)
     monkeypatch.setattr("scaled_evals.api.routers.benchmark_runs.artifacts.object_exists", lambda _key: False)
@@ -532,8 +529,9 @@ def test_create_run_rejects_member_with_missing_task_pack(
 
 def test_create_run_fans_out_full_member_execution_contract() -> None:
     conn = _conn(
-        fetchone=[{"current_revision": 1}, _run_row(), _member_eval(0)],
-        fetchall=[[_member(0)], [_member_eval(0, status="queued", reward=None)]],
+        fetchone=[_run_row(), _member_eval(0)],
+        members=[_member(0)],
+        fetchall=[[_member_eval(0, status="queued", reward=None)]],
     )
     _use_conn(conn)
 
@@ -565,8 +563,9 @@ def test_create_run_fans_out_full_member_execution_contract() -> None:
 
 def test_create_run_persists_member_cap() -> None:
     conn = _conn(
-        fetchone=[{"current_revision": 1}, _run_row(max_concurrent_members=50), _member_eval(0)],
-        fetchall=[[_member(0)], [_member_eval(0, status="queued", reward=None)]],
+        fetchone=[_run_row(max_concurrent_members=50), _member_eval(0)],
+        members=[_member(0)],
+        fetchall=[[_member_eval(0, status="queued", reward=None)]],
     )
     _use_conn(conn)
 
@@ -584,15 +583,12 @@ def test_create_run_persists_member_cap() -> None:
 def test_create_run_fans_out_network_policy() -> None:
     conn = _conn(
         fetchone=[
-            {"current_revision": 1},
             _run_row(network_policy="default_deny"),
             _member_eval(0),
             _member_eval(1),
         ],
-        fetchall=[
-            [_member(0), _member(1)],
-            [_member_eval(0, status="queued", reward=None)],
-        ],
+        members=[_member(0), _member(1)],
+        fetchall=[[_member_eval(0, status="queued", reward=None)]],
     )
     _use_conn(conn)
 
@@ -617,11 +613,11 @@ def test_create_run_fans_out_network_policy() -> None:
 def test_create_run_resolves_version_once_for_run_and_members() -> None:
     conn = _conn(
         fetchone=[
-            {"current_revision": 1},
             _run_row(requested_framework_version="stable", framework_version="0.13.2"),
             _member_eval(0),
         ],
-        fetchall=[[_member(0)], [_member_eval(0, status="queued", reward=None)]],
+        members=[_member(0)],
+        fetchall=[[_member_eval(0, status="queued", reward=None)]],
     )
     _use_conn(conn)
 
@@ -659,8 +655,7 @@ def test_create_run_404_when_benchmark_unknown() -> None:
 
 def test_create_run_409_when_member_not_ready() -> None:
     conn = _conn(
-        fetchone=[{"current_revision": 1}],
-        fetchall=[[_member(0, revision_status="building")]],
+        members=[_member(0, revision_status="building")],
     )
     _use_conn(conn)
     resp = client.post("/v1/benchmark-runs", json={"name": "x", "benchmark_id": "bm_suite"})
@@ -673,15 +668,12 @@ def test_create_run_rejects_member_image_from_unapproved_registry(
     monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
     conn = _conn(
-        fetchone=[{"current_revision": 1}],
-        fetchall=[
-            [
-                _member(
-                    0,
-                    image_ref="artifactory.nvidia.com/team/task:rev1",
-                    image_digest="sha256:" + "a" * 64,
-                )
-            ]
+        members=[
+            _member(
+                0,
+                image_ref="artifactory.nvidia.com/team/task:rev1",
+                image_digest="sha256:" + "a" * 64,
+            )
         ],
     )
     _use_conn(conn)
@@ -705,7 +697,7 @@ def test_create_run_rejects_member_image_from_unapproved_registry(
 
 
 def test_create_run_422_when_empty_benchmark() -> None:
-    conn = _conn(fetchone=[{"current_revision": 1}], fetchall=[[]])
+    conn = _conn(members=[])
     _use_conn(conn)
     resp = client.post("/v1/benchmark-runs", json={"name": "x", "benchmark_id": "bm_suite"})
     assert resp.status_code == 422, resp.text
