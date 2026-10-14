@@ -87,6 +87,12 @@ def staged_spec(**overrides: Any) -> OptimizeSpec:
     )
 
 
+def test_declares_the_config_tuning_strategy() -> None:
+    strategy = OptimizeJob.nemo_agent_optimization_strategy
+    assert (strategy.name, strategy.requires_config) == ("config-tuning", True)
+    assert strategy.title
+
+
 # ---------------------------------------------------------------------------
 # compile — fileset requirement
 # ---------------------------------------------------------------------------

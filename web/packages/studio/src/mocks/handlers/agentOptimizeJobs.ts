@@ -20,7 +20,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     status: 'completed',
     created_at: '2026-08-14T09:00:00Z',
     updated_at: '2026-08-14T11:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-brevity.yaml',
+      agent: 'react-agent',
+    },
   },
   {
     id: 'opt-9a03',
@@ -31,7 +35,7 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     updated_at: '2026-08-13T09:30:00Z',
     // Workspace-qualified reference for the same agent — must still match.
     spec: {
-      strategy: 'legacy',
+      strategy: 'config-tuning',
       optimize_config: 'optimize-accuracy.yaml',
       agent: 'default/react-agent',
     },
@@ -42,7 +46,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     workspace: 'default',
     status: 'error',
     created_at: '2026-08-12T09:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-other.yaml', agent: 'other-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-other.yaml',
+      agent: 'other-agent',
+    },
   },
   {
     id: 'opt-7c15',
@@ -50,7 +58,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     workspace: 'staging',
     status: 'completed',
     created_at: '2026-08-11T09:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-brevity.yaml',
+      agent: 'react-agent',
+    },
   },
 ];
 

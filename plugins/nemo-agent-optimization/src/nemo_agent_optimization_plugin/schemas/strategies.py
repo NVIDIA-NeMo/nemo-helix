@@ -32,10 +32,12 @@ class OptimizationStrategy(BaseModel):
     """
 
     name: str = Field(description="Value to pass as 'strategy' when submitting a run.")
+    title: str = Field(description="Friendly title for the strategy to display in user interfaces.")
     description: str = Field(
         default="",
         description="What this strategy optimizes, in the words of the plugin that ships it.",
     )
+    requires_config: bool = Field(default=False, description="Whether a configuration is mandatory for this strategy.")
 
 
 class OptimizationStrategyList(BaseModel):

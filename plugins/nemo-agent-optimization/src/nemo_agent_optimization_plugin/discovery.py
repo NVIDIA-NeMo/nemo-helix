@@ -8,8 +8,10 @@ variable::
 
     class OptimizeJob(NemoJob):
         nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
-            name="legacy",
+            name="config-tuning",
+            title="Hyper-parameter and prompt optimization",
             description="Numeric hyperparameter search over a Fabric agent workflow.",
+            requires_config=True,
         )
 
 That is the whole contract.  There is no base class to inherit and no
