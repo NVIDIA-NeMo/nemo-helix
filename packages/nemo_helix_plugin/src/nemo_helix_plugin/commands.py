@@ -1006,6 +1006,27 @@ def _programmatic_submit(typer_ctx: typer.Context) -> Iterator[None]:
             delattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
 
 
+def _generated_param_names(callback: Callable[..., object]) -> frozenset[str]:
+    """Names a generated submit callback binds itself: ``typer_ctx``, static flags, and spec leaves."""
+    variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    return frozenset(
+        name for name, param in inspect.signature(callback).parameters.items() if param.kind not in variadic
+    )
+
+
+def _checked_renderer_kwargs(
+    renderer_kwargs: Mapping[str, object] | None,
+    generated_names: frozenset[str],
+    label: str,
+) -> dict[str, object]:
+    """Return *renderer_kwargs* as a dict, rejecting names the generated callback would treat as its own."""
+    extra = dict(renderer_kwargs or {})
+    collisions = sorted(generated_names.intersection(extra))
+    if collisions:
+        raise ValueError(f"renderer_kwargs collide with generated {label} flags: {', '.join(collisions)}")
+    return extra
+
+
 class JobSubmit(Protocol):
     """A generated job submit callback detached by :func:`take_job_submit`."""
 
@@ -1018,6 +1039,7 @@ class JobSubmit(Protocol):
         profile: str | None = None,
         options: list[str] | None = None,
         options_file: Path | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
     ) -> SubmittedJob | None: ...
 
 
@@ -1027,13 +1049,16 @@ def take_job_submit(group: typer.Typer) -> JobSubmit:
     Call this from a CLI override before registering the replacement
     callback on *group*. The returned callable submits *spec* (JSON) as
     ``--spec`` would, inside :func:`_programmatic_submit`, so the generated
-    callback never mistakes the call for one without input.
+    callback never mistakes the call for one without input. *renderer_kwargs*
+    reach the job renderer as ``RendererContext.cli_kwargs`` and never the
+    spec, so their names must not collide with a generated flag.
     """
     callback_info = group.registered_callback
     original = callback_info.callback if callback_info is not None else None
     if original is None:
         raise RuntimeError("missing generated job submit callback to override")
     group.registered_callback = None
+    generated_names = _generated_param_names(original)
 
     def submit(
         typer_ctx: typer.Context,
@@ -1043,7 +1068,9 @@ def take_job_submit(group: typer.Typer) -> JobSubmit:
         profile: str | None = None,
         options: list[str] | None = None,
         options_file: Path | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
     ) -> SubmittedJob | None:
+        extra = _checked_renderer_kwargs(renderer_kwargs, generated_names, "job submit")
         with _programmatic_submit(typer_ctx):
             return original(
                 typer_ctx,
@@ -1055,6 +1082,7 @@ def take_job_submit(group: typer.Typer) -> JobSubmit:
                 workspace=workspace,
                 config=None,
                 config_file=None,
+                **extra,
             )
 
     return submit
@@ -1088,8 +1116,7 @@ def take_function_submit(app: typer.Typer, fn_cls: type[NemoFunction]) -> Functi
     if original is None:
         raise RuntimeError(f"missing generated submit command for function {fn_cls.name!r} to override")
     app.registered_commands = [c for c in app.registered_commands if c is not command]
-    leaves = walk_spec_leaves(fn_cls.spec_schema, reserved=_FN_SUBMIT_RESERVED_FLAGS)
-    generated_names = {leaf.param_name for leaf in leaves} | _FN_SUBMIT_RESERVED_FLAGS
+    generated_names = _generated_param_names(original)
 
     def submit(
         typer_ctx: typer.Context,
@@ -1099,10 +1126,7 @@ def take_function_submit(app: typer.Typer, fn_cls: type[NemoFunction]) -> Functi
         request_id: str | None = None,
         renderer_kwargs: Mapping[str, object] | None = None,
     ) -> None:
-        extra = dict(renderer_kwargs or {})
-        collisions = sorted(generated_names.intersection(extra))
-        if collisions:
-            raise ValueError(f"renderer_kwargs collide with generated {fn_cls.name!r} flags: {', '.join(collisions)}")
+        extra = _checked_renderer_kwargs(renderer_kwargs, generated_names, repr(fn_cls.name))
         original(typer_ctx, spec=spec, spec_file=None, workspace=workspace, request_id=request_id, **extra)
 
     return submit
