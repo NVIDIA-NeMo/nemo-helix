@@ -11,6 +11,7 @@ import { Button, CodeSnippet, Flex, Panel, Stack, Text } from '@nvidia/foundatio
 import { JobBasics } from '@studio/components/NewDataDesignerJobForm/JobBasics';
 import { JobRequestGenerator } from '@studio/components/NewDataDesignerJobForm/JobRequestGenerator';
 import { formatPreviewLogsForDisplay } from '@studio/components/NewDataDesignerJobForm/previewApi';
+import { PreviewResults } from '@studio/components/NewDataDesignerJobForm/PreviewResults';
 import { usePreview } from '@studio/components/NewDataDesignerJobForm/usePreview';
 import {
   type DataDesignerModelOption,
@@ -137,7 +138,17 @@ export const NewDataDesignerJobForm: FC = () => {
     () => parseJsonContentToJobRequest(getValues('jsonContent')).jobRequest?.spec?.config,
     [getValues]
   );
-  const { previewLogs, isPreviewing, runPreview } = usePreview({
+  const {
+    previewLogs,
+    previewStatus,
+    previewRecords,
+    previewColumnOrder,
+    previewError,
+    hasPreviewRun,
+    isPreviewing,
+    runPreview,
+    stopPreview,
+  } = usePreview({
     workspace,
     accessToken: bearerToken,
     getCurrentConfig,
@@ -284,6 +295,17 @@ export const NewDataDesignerJobForm: FC = () => {
             {submitError}
           </Text>
         )}
+
+        {hasPreviewRun ? (
+          <PreviewResults
+            records={previewRecords}
+            columnOrder={previewColumnOrder}
+            isPreviewing={isPreviewing}
+            status={previewStatus}
+            error={previewError}
+            onStop={stopPreview}
+          />
+        ) : null}
 
         <CodeSnippet
           value={

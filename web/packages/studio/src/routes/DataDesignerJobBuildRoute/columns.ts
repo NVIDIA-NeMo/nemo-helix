@@ -138,8 +138,11 @@ const PROMPT_FIELD: ColumnField = {
   helperText: 'Jinja2 template — reference other columns with {{ column_name }}.',
 };
 
+/** Values key holding an LLM column's `model_alias`. */
+export const MODEL_ALIAS_KEY = 'model_alias';
+
 const MODEL_ALIAS_FIELD: ColumnField = {
-  key: 'model_alias',
+  key: MODEL_ALIAS_KEY,
   label: 'Model alias',
   kind: 'text',
   required: true,
