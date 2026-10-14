@@ -82,6 +82,9 @@ typecheck = ["transformers>=5.5.0,<5.9.0"]
 # without it neither the plugin nor psycopg is importable there.
 scaled-evals = [
   "nemo-scaled-evals-plugin",
+  # The OpenSandbox server the plugin's server extension is tested against; match the
+  # server image in k8s/helm/examples/opensandbox.
+  "opensandbox-server==0.2.1",
 ]
 dev = [
   "pre-commit>=3.8.0",
@@ -641,6 +644,8 @@ extra-paths = [
   # temporary scaled-evals plugin is opt-in; add its src so ty can resolve
   # nemo_scaled_evals_plugin and scaled_evals imports when checking plugin tests.
   "plugins/_temporary-scaled-evals/src",
+  # The plugin's OpenSandbox server extension is loaded from PYTHONPATH, not installed.
+  "plugins/_temporary-scaled-evals/opensandbox_ext",
   # Source path for the Insights analyst plugin.
   "plugins/nemo-insights/src",
   # prompt-master plugin is not a workspace member; add its src so ty can
