@@ -145,3 +145,26 @@ def test_release_archives_are_named_after_the_component() -> None:
     )
 
     assert source.filename == "kaniko-1.28.5.tar.gz"
+
+
+def test_a_manifest_can_name_the_saved_file(tmp_path: Path) -> None:
+    module = load_module()
+    manifest = tmp_path / "m.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "name": "busybox-no-cbq-patch",
+                        "version": "1.37.0",
+                        "license": "GPL-2.0-only",
+                        "url": "https://web.archive.org/web/2024id_/https://bugs.busybox.net/attachment.cgi?id=9751",
+                        "sha256": "0" * 64,
+                        "filename": "busybox-1.37.0-no-cbq.patch",
+                    }
+                ]
+            }
+        )
+    )
+
+    assert [source.filename for source in module.load_manifest(manifest)] == ["busybox-1.37.0-no-cbq.patch"]

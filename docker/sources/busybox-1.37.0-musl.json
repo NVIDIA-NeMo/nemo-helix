@@ -1,0 +1,36 @@
+{
+  "sources": [
+    {
+      "name": "busybox",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://busybox.net/downloads/busybox-1.37.0.tar.bz2",
+      "sha256": "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4",
+      "covers": [
+        "binary:busybox@1.37.0"
+      ]
+    },
+    {
+      "name": "busybox-no-cbq-patch",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://web.archive.org/web/2024id_/https://bugs.busybox.net/attachment.cgi?id=9751",
+      "sha256": "6671a12c48dbcefb653fc8403d1f103a1e2eba4a49b1ee9a9c27da8aa2db80d4",
+      "filename": "busybox-1.37.0-no-cbq.patch"
+    },
+    {
+      "name": "musl",
+      "version": "1.2.5",
+      "license": "MIT",
+      "url": "https://musl.libc.org/releases/musl-1.2.5.tar.gz",
+      "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4"
+    },
+    {
+      "name": "alpine-musl-getconf",
+      "version": "48b16204aeeda5bc1f87e49c6b8e23d9abb07c73",
+      "license": "BSD-2-Clause",
+      "url": "https://github.com/alpinelinux/aports/raw/48b16204aeeda5bc1f87e49c6b8e23d9abb07c73/main/musl/getconf.c",
+      "sha256": "d87d0cbb3690ae2c5d8cc218349fd8278b93855dd625deaf7ae50e320aad247c"
+    }
+  ]
+}

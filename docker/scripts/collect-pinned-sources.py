@@ -37,10 +37,13 @@ class PinnedSource:
     url: str
     sha256: str
     covers: tuple[str, ...]
+    saved_as: str | None = None
 
     @property
     def filename(self) -> str:
         """``<name>-<version>`` plus the URL's archive suffix, so release archives named ``v1.0.tar.gz`` don't collide."""
+        if self.saved_as:
+            return self.saved_as
         path = urllib.parse.urlparse(self.url).path
         suffix = next((s for s in ARCHIVE_SUFFIXES if path.endswith(s)), PurePosixPath(path).suffix)
         return f"{self.name}-{self.version}{suffix}"
@@ -57,6 +60,7 @@ def load_manifest(path: Path) -> list[PinnedSource]:
             url=entry["url"],
             sha256=entry["sha256"].lower(),
             covers=tuple(entry.get("covers", ())),
+            saved_as=entry.get("filename"),
         )
         if not SHA256_PATTERN.fullmatch(source.sha256):
             raise ValueError(f"{path}: {source.name} has an invalid sha256: {entry['sha256']!r}")

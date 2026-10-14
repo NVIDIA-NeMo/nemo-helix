@@ -117,8 +117,11 @@ ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /bin/uv
 COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-cargo-crate-sources.py \
     docker/scripts/collect-cpython-source.py \
+    docker/scripts/collect-pinned-sources.py \
     /usr/local/bin/
+COPY docker/sources/ /tmp/nhx-sources/
 RUN apt-get update && apt-get upgrade -y && \
     list_installed_perl_cve_packages() { \
     dpkg-query -W -f='${binary:Package} ${db:Status-Abbrev}\n' \
@@ -141,6 +144,14 @@ RUN mkdir -p /source-distributions/nhx-garak-tasks && \
     uv run --no-project --python /usr/local/bin/python \
         /usr/local/bin/collect-cpython-source.py \
         --python /usr/local/bin/python \
+        --output /source-distributions/nhx-garak-tasks && \
+    python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-sources/busybox-1.37.0-musl.json \
+        --manifest /tmp/nhx-sources/uv.json \
+        --output /source-distributions/nhx-garak-tasks && \
+    python3 /usr/local/bin/collect-cargo-crate-sources.py \
+        --binary /bin/uv \
+        --cargo-lock /source-distributions/nhx-garak-tasks/pinned/uv-0.11.26.tar.gz \
         --output /source-distributions/nhx-garak-tasks
 
 # Copying handful commands into the destination image
