@@ -3,11 +3,11 @@
 
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 
-/** Which direction on an axis counts as "better": cost/latency minimize, evaluator scores maximize. */
+/** Which direction on an axis counts as "better": cost/latency/tokens minimize, evaluator scores maximize. */
 export type MetricDirection = 'min' | 'max';
 
 export interface ParetoMetric {
-  /** Stable id in the API's metric vocabulary: `cost_usd`, `latency_ms`, or `evaluators.<name>`. */
+  /** Stable id in the API's metric vocabulary: `cost_usd`, `latency_ms`, `tokens`, or `evaluators.<name>`. */
   readonly id: string;
   readonly label: string;
   readonly direction: MetricDirection;
@@ -18,10 +18,11 @@ const capitalize = (value: string): string =>
   value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 
 /** Display label for a metric id, resolved from the id alone: `cost_usd` -> "Cost (USD)",
- * `latency_ms` -> "Latency (ms)", `evaluators.<name>` -> the capitalized name. */
+ * `latency_ms` -> "Latency (ms)", `tokens` -> "Tokens", `evaluators.<name>` -> the capitalized name. */
 export function metricLabel(id: string): string {
   if (id === 'cost_usd') return 'Cost (USD)';
   if (id === 'latency_ms') return 'Latency (ms)';
+  if (id === 'tokens') return 'Tokens';
   return capitalize(id.startsWith('evaluators.') ? id.slice('evaluators.'.length) : id);
 }
 
@@ -39,8 +40,15 @@ const LATENCY_METRIC: ParetoMetric = {
   accessor: (row) => row.latency_ms?.mean,
 };
 
-/** Metrics selectable on either axis: cost and latency (minimized) plus one per evaluator seen in the
- * data (maximized). Evaluator names are dynamic, so they're derived from the rows. */
+const TOKENS_METRIC: ParetoMetric = {
+  id: 'tokens',
+  label: metricLabel('tokens'),
+  direction: 'min',
+  accessor: (row) => row.tokens?.mean,
+};
+
+/** Metrics selectable on either axis: cost, latency and tokens (minimized) plus one per evaluator seen
+ * in the data (maximized). Evaluator names are dynamic, so they're derived from the rows. */
 export function deriveParetoMetrics(rows: readonly EvaluationRow[]): ParetoMetric[] {
   const evaluatorNames = [
     ...new Set(rows.flatMap((row) => Object.keys(row.aggregate_scores ?? {}))),
@@ -51,7 +59,7 @@ export function deriveParetoMetrics(rows: readonly EvaluationRow[]): ParetoMetri
     direction: 'max',
     accessor: (row) => row.aggregate_scores?.[name]?.mean,
   }));
-  return [COST_METRIC, LATENCY_METRIC, ...evaluatorMetrics];
+  return [COST_METRIC, LATENCY_METRIC, TOKENS_METRIC, ...evaluatorMetrics];
 }
 
 export interface ParetoPlotPoint {
@@ -104,4 +112,37 @@ export function buildParetoPoints(
       (other) => other !== point && dominates(point, other, xMetric.direction, yMetric.direction)
     ),
   }));
+}
+
+export interface ParetoAxes {
+  readonly x: ParetoMetric;
+  readonly y: ParetoMetric;
+}
+
+const hasPlottableValue = (rows: readonly EvaluationRow[], metric: ParetoMetric): boolean =>
+  rows.some((row) => Number.isFinite(metric.accessor(row)));
+
+/** Resource metrics in the order they're tried for the fallback Y axis. Latency comes last because
+ * agent evals record it as 0 today, which plots but separates nothing. */
+const FALLBACK_Y_METRICS: readonly ParetoMetric[] = [COST_METRIC, TOKENS_METRIC, LATENCY_METRIC];
+
+/** The preferred (saved) axes when they plot at least one evaluation, otherwise the first evaluator
+ * score against the first resource metric that has values. */
+export function resolveParetoAxes(
+  rows: readonly EvaluationRow[],
+  metrics: readonly ParetoMetric[],
+  preferredX: string,
+  preferredY: string
+): ParetoAxes | undefined {
+  const x = metrics.find((m) => m.id === preferredX) ?? metrics[0];
+  const y = metrics.find((m) => m.id === preferredY) ?? metrics[1] ?? metrics[0];
+  if (!x || !y) return undefined;
+  if (rows.length === 0 || buildParetoPoints(rows, x, y).length > 0) return { x, y };
+
+  const plottable = metrics.filter((m) => hasPlottableValue(rows, m));
+  const fallbackX = plottable.find((m) => m.direction === 'max') ?? plottable[0];
+  const fallbackY =
+    FALLBACK_Y_METRICS.find((m) => m !== fallbackX && plottable.includes(m)) ??
+    plottable.find((m) => m !== fallbackX);
+  return fallbackX && fallbackY ? { x: fallbackX, y: fallbackY } : { x, y };
 }
