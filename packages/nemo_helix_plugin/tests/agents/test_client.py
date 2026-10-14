@@ -14,6 +14,7 @@ from nemo_helix_plugin.agents.types import (
     AgentJobRequest,
     CreateAgentRequest,
     CreateDeploymentRequest,
+    CreateExecuteJobRequest,
     CreateSampleAgentRequest,
     CreateSessionRequest,
     InvokeAgentRequest,
@@ -246,7 +247,7 @@ def test_agent_job_methods() -> None:
     assert [request.method for request in seen] == ["POST", "GET", "GET"]
 
 
-def test_execute_job_compat_methods_return_json_maps() -> None:
+def test_execute_job_methods_return_json_maps() -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -265,9 +266,11 @@ def test_execute_job_compat_methods_return_json_maps() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
     client = AgentsClient(base_url=BASE, workspace="default", http_client=http_client)
 
-    job = client.jobs.execute.create(name="job-1", spec={"agent": "calc", "input": "2+2"})
-    retrieved = client.jobs.execute.get("job-1")
-    results = client.jobs.execute.list_results("job-1")
+    job = client.create_execute_job(
+        body=CreateExecuteJobRequest(name="job-1", spec={"agent": "calc", "input": "2+2"})
+    ).data()
+    retrieved = client.get_execute_job(name="job-1").data()
+    results = client.list_execute_job_results(name="job-1").data()
 
     assert job["name"] == "job-1"
     assert retrieved["name"] == "job-1"
@@ -275,9 +278,9 @@ def test_execute_job_compat_methods_return_json_maps() -> None:
     assert [request.method for request in seen] == ["POST", "GET", "GET"]
 
 
-def test_jobs_is_the_jobs_service_client_with_the_execute_namespace() -> None:
-    # ``AgentsClient`` must still be usable wherever a ``NemoClient`` is: its ``jobs``
-    # is the Jobs-service client, extended with the agents ``execute`` namespace.
+def test_jobs_is_the_jobs_service_client() -> None:
+    # ``AgentsClient`` must be usable wherever a ``NemoClient`` is, so ``jobs`` is the inherited
+    # Jobs-service client rather than an agents-specific namespace.
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == f"{BASE}/apis/jobs/v2/workspaces/default/jobs/job-1"
         return httpx.Response(
@@ -302,47 +305,12 @@ def test_jobs_is_the_jobs_service_client_with_the_execute_namespace() -> None:
 
     assert isinstance(client.jobs, JobsClient)
     assert client.jobs.get_job(name="job-1").data().name == "job-1"
-    assert callable(client.jobs.execute.create)
 
 
-def test_async_jobs_is_the_jobs_service_client_with_the_execute_namespace() -> None:
+def test_async_jobs_is_the_jobs_service_client() -> None:
     client = AsyncAgentsClient(base_url=BASE, workspace="default")
 
     assert isinstance(client.jobs, AsyncJobsClient)
-    assert callable(client.jobs.execute.create)
-
-
-def test_execute_job_compat_uses_cloned_client_after_preclone_access() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url == f"{BASE}/apis/agents/v2/workspaces/cloned/jobs/execute/job-1"
-        assert request.headers["X-Clone"] == "yes"
-        return httpx.Response(200, json={"name": "job-1", "workspace": "cloned", "spec": {}})
-
-    http_client = httpx.Client(transport=httpx.MockTransport(handler))
-    client = AgentsClient(base_url=BASE, workspace="default", http_client=http_client)
-    _ = client.jobs
-
-    cloned = client.with_workspace("cloned").with_headers({"X-Clone": "yes"})
-    retrieved = cloned.jobs.execute.get("job-1")
-
-    assert retrieved["workspace"] == "cloned"
-
-
-@pytest.mark.asyncio
-async def test_async_execute_job_compat_uses_cloned_client_after_preclone_access() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url == f"{BASE}/apis/agents/v2/workspaces/cloned/jobs/execute/job-1"
-        return httpx.Response(200, json={"name": "job-1", "workspace": "cloned", "spec": {}})
-
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    client = AsyncAgentsClient(base_url=BASE, workspace="default", http_client=http_client)
-    _ = client.jobs
-
-    cloned = client.with_workspace("cloned")
-    retrieved = await cloned.jobs.execute.get("job-1")
-
-    assert retrieved["workspace"] == "cloned"
-    await http_client.aclose()
 
 
 @pytest.mark.parametrize(
