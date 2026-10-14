@@ -10,6 +10,7 @@ import io
 import itertools
 import json
 import tarfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -68,10 +69,17 @@ class _Extension:
         self.requests: list[httpx.Request] = []
         self.exec_results: list[httpx.Response] = []
         self.statuses: list[dict[str, Any]] = []
+        # Answers (or errors to raise) that come before the routes, for any request, one per request.
+        self.preempt: list[httpx.Response | Exception] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         """The ``httpx.MockTransport`` handler: route by path to health, services status, or exec."""
         self.requests.append(request)
+        if self.preempt:
+            answer = self.preempt.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
         path = request.url.path
         if path == "/v1/nemo-ext/health":
             if not self.healthy:
@@ -183,6 +191,7 @@ def server(monkeypatch: pytest.MonkeyPatch) -> _Server:
     )
     monkeypatch.setattr(NemoOpenSandboxEnvironment, "_load_opensandbox", lambda self: _fake_sdk(server))
     monkeypatch.setattr(environment_module, "COMPOSE_READY_POLL_SEC", 0)
+    monkeypatch.setattr(environment_module, "SERVER_RETRY_BASE_SEC", 0)
     return server
 
 
@@ -406,9 +415,10 @@ async def test_service_exec_goes_through_the_exec_route(tmp_path: Path, server: 
 
 async def test_service_exec_timeout_and_errors(tmp_path: Path, server: _Server, extension: _Extension) -> None:
     environment = await _started(_environment(_task(tmp_path)))
+    busy = httpx.Response(429, json={"detail": {"code": "NEMO::EXEC_BUSY", "message": "busy"}})
     extension.exec_results = [
         httpx.Response(504, json={"detail": {"code": "NEMO::EXEC_TIMEOUT", "message": "t"}}),
-        httpx.Response(429, json={"detail": {"code": "NEMO::EXEC_BUSY", "message": "busy"}}),
+        *[busy] * environment_module.SERVER_RETRY_ATTEMPTS,
     ]
 
     timed_out = await environment.service_exec("sleep 99", service="db", timeout_sec=5000)
@@ -416,6 +426,66 @@ async def test_service_exec_timeout_and_errors(tmp_path: Path, server: _Server, 
     assert extension.exec_bodies()[-1]["timeout"] == 3600
     with pytest.raises(RuntimeError, match="NEMO::EXEC_BUSY: busy"):
         await environment.service_exec("true", service="db")
+    # The busy answer was retried until the attempts ran out.
+    assert len(extension.exec_bodies()) == 1 + environment_module.SERVER_RETRY_ATTEMPTS
+
+
+async def test_service_exec_retries_a_busy_server(tmp_path: Path, server: _Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path)))
+    busy = httpx.Response(429, json={"detail": {"code": "NEMO::EXEC_BUSY", "message": "busy"}})
+    extension.exec_results = [busy, busy, _exec_ok("PONG\n")]
+
+    result = await environment.service_exec("redis-cli ping", service="db")
+
+    assert result.stdout == "PONG\n"
+    assert len(extension.exec_bodies()) == 3
+
+
+async def test_gateway_504_is_not_a_command_timeout(tmp_path: Path, server: _Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path)))
+    extension.exec_results = [httpx.Response(504, text="upstream timed out")]
+
+    with pytest.raises(RuntimeError, match=r"failed \(504\)"):
+        await environment.service_exec("sleep 99", service="db")
+    # The command may have run, so a POST that got a 504 isn't sent again.
+    assert len(extension.exec_bodies()) == 1
+
+
+async def test_service_exec_retries_only_connections_that_never_opened(
+    tmp_path: Path, server: _Server, extension: _Extension
+) -> None:
+    environment = await _started(_environment(_task(tmp_path)))
+    started = len(extension.requests)
+    extension.preempt = [httpx.ConnectError("refused")]
+    extension.exec_results = [_exec_ok("ok")]
+
+    assert (await environment.service_exec("true", service="db")).stdout == "ok"
+
+    # A read timeout means the command may be running, so it isn't repeated.
+    extension.preempt = [httpx.ReadTimeout("slow")]
+    with pytest.raises(RuntimeError, match="exec in compose service 'db' failed"):
+        await environment.service_exec("true", service="db")
+    assert len(extension.requests) - started == 3  # the refused exec, its retry, the one that timed out
+
+
+async def test_status_reads_retry_transient_errors(tmp_path: Path, server: _Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path)))
+    started = len(extension.requests)
+    extension.preempt = [httpx.Response(503), httpx.ConnectError("reset")]
+    extension.statuses = [{"failure": None, "not_ready": []}]
+
+    await environment._wait_for_services(time.monotonic() + 30)
+
+    # Two transient failures, then the answer.
+    assert [r.url.path for r in extension.requests[started:]] == ["/v1/nemo-ext/sandboxes/sbx-1/services"] * 3
+
+
+async def test_status_reads_give_up_after_the_attempts(tmp_path: Path, server: _Server, extension: _Extension) -> None:
+    environment = await _started(_environment(_task(tmp_path)))
+    extension.preempt = [httpx.Response(503)] * environment_module.SERVER_RETRY_ATTEMPTS
+
+    with pytest.raises(RuntimeError, match=r"reading compose services failed \(503\)"):
+        await environment._wait_for_services(time.monotonic() + 30)
 
 
 async def test_unknown_service_and_stop_are_unsupported(tmp_path: Path, server: _Server, extension: _Extension) -> None:

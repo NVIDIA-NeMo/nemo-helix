@@ -36,6 +36,7 @@ import contextlib
 import hashlib
 import json
 import math
+import random
 import shlex
 import tarfile
 import tempfile
@@ -86,6 +87,13 @@ SERVICE_EXEC_DEFAULT_TIMEOUT_SEC = 600
 # The exec route caps output at 16 MiB; an 8 MiB chunk is about 11 MiB once base64-encoded.
 SERVICE_DOWNLOAD_BLOCK_BYTES = 1024 * 1024
 SERVICE_DOWNLOAD_CHUNK_BLOCKS = 8
+# The server's own routes retry transient failures: the extension's 429 (every exec slot busy) and
+# the gateway errors a restarting or overloaded server answers with. Delays double from the base
+# up to the max, each scaled by a random factor so a burst of trials doesn't retry in step.
+SERVER_RETRY_STATUSES = frozenset({429, 502, 503, 504})
+SERVER_RETRY_ATTEMPTS = 5
+SERVER_RETRY_BASE_SEC = 0.5
+SERVER_RETRY_MAX_SEC = 8.0
 
 
 class NemoOpenSandboxEnvironment(ComposeServiceOpsMixin, OpenSandboxEnvironment):
@@ -531,15 +539,59 @@ class _ServerClient:
             headers["OPEN-SANDBOX-API-KEY"] = api_key
         return cls(config.get_base_url(), headers)
 
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        timeout: float,
+        retry_statuses: frozenset[int],
+        retry_errors: tuple[type[httpx.HTTPError], ...],
+        body: dict[str, Any] | None = None,
+    ) -> httpx.Response:
+        """Send one request, retrying a ``retry_statuses`` answer or a ``retry_errors`` failure with backoff.
+
+        After the last attempt the response is returned as is, or the error raised, so callers
+        map failures exactly as they would without retries.
+        """
+        for attempt in range(1, SERVER_RETRY_ATTEMPTS + 1):
+            last = attempt == SERVER_RETRY_ATTEMPTS
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.request(method, f"{self.base_url}{path}", json=body, headers=self.headers)
+            except retry_errors:
+                if last:
+                    raise
+            else:
+                if last or response.status_code not in retry_statuses:
+                    return response
+            delay = min(SERVER_RETRY_MAX_SEC, SERVER_RETRY_BASE_SEC * 2 ** (attempt - 1))
+            await asyncio.sleep(delay * random.uniform(0.5, 1.0))
+        raise AssertionError("unreachable")  # the last attempt returns or raises
+
     async def get(self, path: str, *, timeout: float) -> httpx.Response:
-        """``GET base_url + path``; the response is returned whatever its status."""
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            return await client.get(f"{self.base_url}{path}", headers=self.headers)
+        """``GET base_url + path``; the response is returned whatever its status.
+
+        A read changes nothing, so any transport error or transient status is retried.
+        """
+        return await self._request(
+            "GET", path, timeout=timeout, retry_statuses=SERVER_RETRY_STATUSES, retry_errors=(httpx.TransportError,)
+        )
 
     async def post(self, path: str, body: dict[str, Any], *, timeout: float) -> httpx.Response:
-        """``POST base_url + path`` with a JSON ``body``; the response is returned whatever its status."""
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            return await client.post(f"{self.base_url}{path}", json=body, headers=self.headers)
+        """``POST base_url + path`` with a JSON ``body``; the response is returned whatever its status.
+
+        A POST may have run its command, so only what proves it didn't is retried: a 429, which
+        the server answers before running anything, and a connection that never opened.
+        """
+        return await self._request(
+            "POST",
+            path,
+            timeout=timeout,
+            retry_statuses=frozenset({429}),
+            retry_errors=(httpx.ConnectError, httpx.ConnectTimeout),
+            body=body,
+        )
 
 
 class _ServiceExecTransport:
@@ -569,14 +621,18 @@ class _ServiceExecTransport:
         except httpx.HTTPError as exc:
             raise RuntimeError(f"exec in compose service {service!r} failed: {exc}") from exc
 
-        # The server's 504 is the command's own timeout, which Harbor expects as a result, not an error.
-        if response.status_code == 504:
+        # The extension's 504 is the command's own timeout, which Harbor expects as a result, not an
+        # error. Any other 504 (a gateway's, say) says nothing about the command, so it raises below.
+        if response.status_code == 504 and _error_text(response).startswith("NEMO::EXEC_TIMEOUT"):
             return ExecResult(stdout="", stderr=f"timed out after {timeout}s", return_code=124)
+
         if response.status_code != 200:
             raise RuntimeError(
                 f"exec in compose service {service!r} failed ({response.status_code}): {_error_text(response)}"
             )
+
         body = response.json()
+
         return ExecResult(stdout=body["stdout"], stderr=body["stderr"], return_code=body["exit_code"])
 
     async def service_exec(
