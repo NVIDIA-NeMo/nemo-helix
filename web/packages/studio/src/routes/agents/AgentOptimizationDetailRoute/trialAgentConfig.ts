@@ -12,6 +12,16 @@ import { isPlainObject } from '@studio/util/functions';
 // translate_agent_config publishes the default harness's model under this key.
 const FABRIC_DEFAULT_MODEL_KEY = 'default';
 
+// The Studio optimize wizard sweeps this as a one-value choice so Fabric has a credential to
+// start with. Agent runtimes bind the same placeholder themselves, so a deploy leaves it out.
+const GATEWAY_CREDENTIAL_PATH = 'environment.env.NEMO_AGENTS_IGW_API_KEY';
+
+// The wizard also points the study's model at the gateway (gatewayAgentModel), replacing its
+// base_url and api_key_env and dropping a legacy settings.base_url. That changes how the study
+// reached the model, not what it ran, so a deploy neither keeps nor reports it.
+const GATEWAY_PATH_MARKER = '/apis/inference-gateway/';
+const GATEWAY_ROUTING_FIELDS = new Set(['base_url', 'api_key_env']);
+
 // Keys a plain object resolves through its prototype, so writing one would reach Object.prototype.
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -25,6 +35,8 @@ export interface StudyConfig {
   searchSpace: ReadonlyMap<string, SearchSpaceEntry>;
   // Each replaces the agent's model of the same key whole (build_optimize_payload).
   overlayModels: ReadonlyMap<string, Record<string, unknown>>;
+  // Models the study's evaluators score with, named by eval.evaluators.*.llm_name.
+  evaluatorModels: ReadonlySet<string>;
 }
 
 export interface StudyConfigLocation {
@@ -46,6 +58,8 @@ export interface AppliedTrialConfig {
   // Models only the optimize config defines. The study's agent had them, so the new one does too.
   addedModels: string[];
   modelDifferences: ModelDifference[];
+  // The trial's params the new agent takes; credential and scoring-only params are left out.
+  deployedParams: Trial['params'];
 }
 
 export const buildTrialAgentName = (sourceName: string, trial: Trial): string =>
@@ -69,6 +83,16 @@ const parseSearchSpace = (
   return space;
 };
 
+const parseEvaluatorModels = (optimizeConfig: Record<string, unknown>): Set<string> => {
+  const evalConfig = optimizeConfig.eval;
+  const evaluators = isPlainObject(evalConfig) ? evalConfig.evaluators : undefined;
+  return new Set(
+    ownEntries(evaluators).flatMap(([, evaluator]) =>
+      isPlainObject(evaluator) && typeof evaluator.llm_name === 'string' ? [evaluator.llm_name] : []
+    )
+  );
+};
+
 export const parseStudyConfig = (optimizeConfig: Record<string, unknown>): StudyConfig => ({
   searchSpace: parseSearchSpace(optimizeConfig),
   overlayModels: new Map(
@@ -76,6 +100,7 @@ export const parseStudyConfig = (optimizeConfig: Record<string, unknown>): Study
       isPlainObject(entry[1])
     )
   ),
+  evaluatorModels: parseEvaluatorModels(optimizeConfig),
 });
 
 // A bare fileset name resolves against the study's workspace, as the optimize job resolves it.
@@ -191,13 +216,27 @@ const agentModelSegments = (
   return isPlainObject(getAt(config, ['models', modelKey])) ? ['models', modelKey] : undefined;
 };
 
+const isGatewayRouted = (model: Record<string, unknown>): boolean =>
+  typeof model.base_url === 'string' && model.base_url.includes(GATEWAY_PATH_MARKER);
+
+const withoutLegacyBaseUrl = (model: Record<string, unknown>): Record<string, unknown> => {
+  if (!isPlainObject(model.settings) || !Object.hasOwn(model.settings, 'base_url')) return model;
+  const settings = { ...model.settings };
+  delete settings.base_url;
+  return { ...model, settings };
+};
+
 const findModelDifference = (
   modelKey: string,
   studyModel: Record<string, unknown>,
-  agentModel: Record<string, unknown>
+  deployedModel: Record<string, unknown>
 ): ModelDifference | undefined => {
+  const routed = isGatewayRouted(studyModel);
+  const agentModel = routed ? withoutLegacyBaseUrl(deployedModel) : deployedModel;
   const fields = [...new Set([...Object.keys(studyModel), ...Object.keys(agentModel)])].filter(
-    (field) => !isSameValue(studyModel[field], agentModel[field])
+    (field) =>
+      !(routed && GATEWAY_ROUTING_FIELDS.has(field)) &&
+      !isSameValue(studyModel[field], agentModel[field])
   );
   if (fields.length === 0) return undefined;
   return fields.includes('model')
@@ -212,18 +251,23 @@ const findModelDifference = (
 
 // The agent's config with the trial's params written over it, plus the optimize config's
 // models the agent lacks. Models both define keep the agent's settings, and every setting
-// that differs from what the study ran is reported.
+// that differs from what the study ran is reported. A model only the evaluators use, such as
+// the judge, scored the study rather than running in the agent, so it is not deployed.
 export const applyTrialToAgentConfig = (
   config: Record<string, unknown>,
   trial: Trial,
-  { searchSpace, overlayModels }: StudyConfig
+  { searchSpace, overlayModels, evaluatorModels }: StudyConfig
 ): AppliedTrialConfig => {
   const next = structuredClone(config);
+  const isScoringOnly = (modelKey: string): boolean =>
+    evaluatorModels.has(modelKey) && !agentModelSegments(config, modelKey);
   const studyModels = new Map(
-    [...overlayModels].map(([key, model]) => [key, structuredClone(model)] as const)
+    [...overlayModels]
+      .filter(([key]) => !isScoringOnly(key))
+      .map(([key, model]) => [key, structuredClone(model)] as const)
   );
 
-  const addedModels = [...overlayModels.keys()].filter(
+  const addedModels = [...studyModels.keys()].filter(
     (modelKey) => !agentModelSegments(config, modelKey)
   );
   for (const modelKey of addedModels) {
@@ -235,14 +279,18 @@ export const applyTrialToAgentConfig = (
     (overlayModels.has(modelKey) ? ['models', modelKey] : undefined);
 
   let setsSystemInstruction = false;
+  const deployedParams: Trial['params'] = [];
   for (const param of trial.params) {
     const entry = searchSpace.get(param.name);
     if (!entry) {
       throw new Error(`Parameter "${param.name}" is not in the study's search space.`);
     }
+    if (entry.path === GATEWAY_CREDENTIAL_PATH) continue;
     const value = coerceParamValue(param.value, entry);
     const segments = toSegments(entry.path);
     const [root, modelKey, ...field] = segments;
+    if (root === 'models' && modelKey && isScoringOnly(modelKey)) continue;
+    deployedParams.push(param);
 
     if (root !== 'models' || !modelKey) {
       if (isHelixAgent(config)) {
@@ -286,7 +334,7 @@ export const applyTrialToAgentConfig = (
     return difference ? [difference] : [];
   });
 
-  return { config: next, addedModels, modelDifferences };
+  return { config: next, addedModels, modelDifferences, deployedParams };
 };
 
 // translate_agent_config tags traces with telemetry.agent_name, so it follows the new name.

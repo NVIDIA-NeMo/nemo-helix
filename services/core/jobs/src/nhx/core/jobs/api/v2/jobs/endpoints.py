@@ -871,6 +871,7 @@ async def update_job_step_status(
                 request.status,
                 status_details=request.status_details,
                 error_details=request.error_details,
+                expected_step_id=request.expected_step_id,
             )
         except StateTransitionConflictError as exc:
             logger.info(

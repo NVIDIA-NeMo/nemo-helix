@@ -224,6 +224,13 @@ _PROBE_CONFIGS: dict[str, ProbeConfig] = {
     "google-gemini": ProbeConfig("GET", "models"),
 }
 
+# Custom names are not in the catalog. Probe the base URL the user entered as an
+# OpenAI-compatible root (``GET {base}/models``).
+_CUSTOM_PROVIDER_PROBE = ProbeConfig("GET", "models")
+_NVIDIA_BUILD_HOSTNAME = "integrate.api.nvidia.com"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_HTTPS_REQUIRED_MESSAGE = "API key validation requires an HTTPS provider URL."
+
 
 class KeyValidationStatus(StrEnum):
     """Outcome categories for an API key validation probe."""
@@ -1031,6 +1038,33 @@ def _get_all_model_choices(
 def _display_model_name(model_entity_id: str) -> str:
     """Strip workspace prefix from a model entity ID for display."""
     return model_entity_id.split("/", 1)[-1] if "/" in model_entity_id else model_entity_id
+
+
+def _refuses_credential_probe(host_url: str) -> bool:
+    """Return whether a bearer token must not be sent to ``host_url``.
+
+    Remote ``http://`` URLs would carry the key in cleartext. Loopback HTTP stays
+    allowed so a local OpenAI-compatible server can still be checked.
+    """
+    parsed = urlparse(host_url)
+    if parsed.scheme == "https":
+        return False
+    hostname = (parsed.hostname or "").lower()
+    return not (parsed.scheme == "http" and hostname in _LOOPBACK_HOSTS)
+
+
+def _nvidia_build_catalog_root(host_url: str) -> str | None:
+    """Return the NVIDIA Build origin when ``host_url`` points at that API.
+
+    ``GET /v1/models`` there does not check the key, so a 200 must not count as
+    validation. A custom base that already includes ``/v1`` still maps to the
+    origin so the probe does not request ``/v1/v1/models``.
+    """
+    parsed = urlparse(host_url)
+    if (parsed.hostname or "").lower() != _NVIDIA_BUILD_HOSTNAME:
+        return None
+    scheme = parsed.scheme or "https"
+    return f"{scheme}://{parsed.hostname}"
 
 
 def _resolve_provider_for_url(base_url: str) -> KnownProvider | None:
@@ -1919,7 +1953,10 @@ def _prompt_custom_provider() -> tuple[str, str, str | None]:
         hint="Start with a lowercase letter, then lowercase letters, digits, or hyphens; 2-63 chars (e.g. my-vllm-provider)",
     ).strip()
 
-    host_url = prompt_text("Provider base URL: ").strip()
+    host_url = prompt_text(
+        "Provider base URL: ",
+        hint="OpenAI-compatible API root. Include /v1 when the API uses it (e.g. https://inference-api.nvidia.com/v1)",
+    ).strip()
     if not host_url:
         raise typer.Exit(1)
 
@@ -2168,23 +2205,33 @@ def _validate_api_key(
     """Probe the provider with the API key to detect auth failures early.
 
     Makes a lightweight request to an auth-required endpoint.
-    Returns ``REJECTED`` only on a definitive 401/403 credential rejection.
-    Unavailable probe targets, other HTTP statuses, network errors, and unknown
-    providers are ``INCONCLUSIVE`` (fail-open) so setup can still register the
-    provider after an explicit warning.
+    Returns ``REJECTED`` on a definitive 401/403 credential rejection, and when the
+    URL is not HTTPS (loopback HTTP is still probed).
+    Names outside the catalog use an OpenAI-compatible ``GET {base}/models`` probe.
+    A host on ``integrate.api.nvidia.com`` still uses the Build chat follow-up,
+    because that catalog listing does not check the key.
+    Unavailable probe targets, other HTTP statuses, and network errors are
+    ``INCONCLUSIVE`` (fail-open) so setup can still register the provider after
+    an explicit warning.
     """
     if not api_key:
         return KeyValidationResult(status=KeyValidationStatus.VALID)
 
-    probe = _PROBE_CONFIGS.get(provider_name)
-    if probe is None:
-        return KeyValidationResult(
-            status=KeyValidationStatus.INCONCLUSIVE,
-            message=(
-                f"Could not verify API key: no validation probe configured for "
-                f"provider '{provider_name}'. {_KEY_UNVERIFIED_SUFFIX}"
-            ),
-        )
+    if _refuses_credential_probe(host_url):
+        return KeyValidationResult(status=KeyValidationStatus.REJECTED, message=_HTTPS_REQUIRED_MESSAGE)
+
+    # Build's model list is unauthenticated even when the user typed a custom
+    # name and a base URL that already ends in /v1.
+    build_root = _nvidia_build_catalog_root(host_url)
+    if provider_name == "nvidia-build" or build_root is not None:
+        probe = _PROBE_CONFIGS["nvidia-build"]
+        probe_host = build_root or host_url
+    else:
+        probe = _PROBE_CONFIGS.get(provider_name, _CUSTOM_PROVIDER_PROBE)
+        probe_host = host_url
+
+    if _refuses_credential_probe(probe_host):
+        return KeyValidationResult(status=KeyValidationStatus.REJECTED, message=_HTTPS_REQUIRED_MESSAGE)
 
     headers: dict[str, str] = {}
     if auth_header_format:
@@ -2196,7 +2243,7 @@ def _validate_api_key(
     if default_extra_headers:
         headers.update(default_extra_headers)
 
-    url = f"{host_url.rstrip('/')}/{probe.path}"
+    url = f"{probe_host.rstrip('/')}/{probe.path}"
 
     try:
         resp = httpx.request(
@@ -2209,8 +2256,8 @@ def _validate_api_key(
         if resp.status_code in _KEY_REJECTED_STATUS_CODES:
             return _probe_status_result(resp)
         if resp.is_success:
-            if provider_name == "nvidia-build":
-                return _nvidia_build_chat_probe(host_url, headers, resp, timeout=timeout)
+            if provider_name == "nvidia-build" or build_root is not None:
+                return _nvidia_build_chat_probe(probe_host, headers, resp, timeout=timeout)
             return KeyValidationResult(status=KeyValidationStatus.VALID)
         return _probe_status_result(resp)
     except httpx.TimeoutException:

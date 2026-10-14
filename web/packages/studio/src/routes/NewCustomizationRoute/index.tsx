@@ -29,13 +29,13 @@ export const NewCustomizationRoute = () => {
   });
 
   const handleContinue = (selection: StartSelection) => {
-    // A template's values go as router state rather than in the URL: they are a whole form
+    // Template and AI values go as router state rather than in the URL: they are a whole form
     // payload, and the provisioning behind them has already happened by the time we get here.
     navigate(
       getNewCustomizationFormRoute(workspace),
-      selection.optionId === 'template'
-        ? { state: { initialValues: selection.initialValues } }
-        : undefined
+      selection.optionId === 'scratch'
+        ? undefined
+        : { state: { initialValues: selection.initialValues } }
     );
   };
 
