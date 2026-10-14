@@ -238,6 +238,17 @@ def test_without_timed_calls_the_root_stays_untimed_rather_than_zero_length() ->
     assert (untimed_capture.start_time_unix_nano, untimed_capture.end_time_unix_nano) == (0, 0)
 
 
+def test_half_timed_calls_that_would_end_the_root_before_it_starts_leave_it_untimed() -> None:
+    calls = [
+        _capture(started_at=None, completed_at=1788534870.5),
+        _capture(model_call_id="c1", started_at=1788534872.0, completed_at=None),
+    ]
+
+    root = _spans({"response": {}}, model_calls=calls)[0]
+
+    assert (root.start_time_unix_nano, root.end_time_unix_nano) == (0, 0)
+
+
 def test_a_captured_call_reports_its_own_tokens_including_the_cached_ones() -> None:
     attributes = _attributes(
         [span for span in _spans({"response": {}}, model_calls=[_capture()]) if _kind(span) == "LLM"][0]

@@ -120,9 +120,13 @@ def _span_root_over_children(root: Span, children: Sequence[Span]) -> None:
     """Time the root from its earliest child start to its latest child end, since Intake derives latency from it."""
     starts = [child.start_time_unix_nano for child in children if child.start_time_unix_nano]
     ends = [child.end_time_unix_nano for child in children if child.end_time_unix_nano]
-    if starts and ends:
-        root.start_time_unix_nano = min(starts)
-        root.end_time_unix_nano = max(ends)
+    if not starts or not ends:
+        return
+    start = min(starts)
+    end = max(ends)
+    if end >= start:
+        root.start_time_unix_nano = start
+        root.end_time_unix_nano = end
 
 
 def _llm_span(
