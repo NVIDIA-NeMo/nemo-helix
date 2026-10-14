@@ -174,21 +174,32 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         workspace: Workspace,
         lease: _WorkspaceDeletionLease,
     ) -> None:
+        cleanup_task = asyncio.create_task(self._cleanup_resources(workspace))
         renewal_task = asyncio.create_task(self._renew_deletion_lease(lease))
+        try:
+            done, _ = await asyncio.wait(
+                {cleanup_task, renewal_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except asyncio.CancelledError:
+            cleanup_task.cancel()
+            renewal_task.cancel()
+            await asyncio.gather(cleanup_task, renewal_task, return_exceptions=True)
+            raise
+        if renewal_task in done:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
+            await self._handle_renewal_failure(workspace, lease)
+            return
+
+        await self._stop_lease_renewal(renewal_task)
         cleanup_error: Exception | None = None
         try:
-            await self._cleanup_resources(workspace)
+            cleanup_task.result()
         except Exception as error:
             cleanup_error = error
 
-        await self._stop_lease_renewal(renewal_task)
-        if isinstance(lease.error, WorkspaceDeletionLeaseLost):
-            logger.warning(
-                "Workspace deletion lease was lost",
-                extra={"workspace": workspace.name},
-            )
-            return
-        cleanup_error = cleanup_error or lease.error
         if cleanup_error is not None:
             await self._fail_cleanup_attempt(workspace, lease, cleanup_error)
             return
@@ -204,6 +215,21 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                 "Workspace deletion lease changed before final delete",
                 extra={"workspace": workspace.name},
             )
+
+    async def _handle_renewal_failure(
+        self,
+        workspace: Workspace,
+        lease: _WorkspaceDeletionLease,
+    ) -> None:
+        if isinstance(lease.error, WorkspaceDeletionLeaseLost):
+            logger.warning(
+                "Workspace deletion lease was lost; cancelled cleanup",
+                extra={"workspace": workspace.name},
+            )
+            return
+        if lease.error is None:
+            raise RuntimeError("Workspace deletion lease renewal stopped without an error")
+        await self._fail_cleanup_attempt(workspace, lease, lease.error)
 
     async def _cleanup_resources(self, workspace: Workspace) -> None:
         await self._cleanup_jobs(workspace)

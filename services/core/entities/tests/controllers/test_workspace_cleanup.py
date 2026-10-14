@@ -470,13 +470,18 @@ class TestWorkspaceCleanupAsyncStep:
     async def test_lost_lease_prevents_final_state_changes(self):
         pending = _make_workspace()
         claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
-        cleanup_release = asyncio.Event()
+        cleanup_started = asyncio.Event()
+        cleanup_cancelled = asyncio.Event()
         renewal_release = asyncio.Event()
         renewal_completed = asyncio.Event()
 
         async def block_cleanup(**_kwargs):
-            await cleanup_release.wait()
-            return _MockAsyncPaginatedResponse([])
+            cleanup_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleanup_cancelled.set()
+                raise
 
         async def controlled_sleep(_delay: float) -> None:
             await renewal_release.wait()
@@ -498,12 +503,57 @@ class TestWorkspaceCleanupAsyncStep:
             patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
+            await cleanup_started.wait()
             renewal_release.set()
             await renewal_completed.wait()
-            cleanup_release.set()
             await cleanup_task
 
+        assert cleanup_cancelled.is_set()
         repo.fail_workspace_deletion_if_claimed.assert_not_called()
+        repo.delete_workspace_if_claimed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_renewal_error_cancels_cleanup_and_fails_current_claim(self):
+        pending = _make_workspace()
+        claimed = _make_workspace(deletion_stage=WorkspaceDeletionStage.DELETING)
+        cleanup_started = asyncio.Event()
+        cleanup_cancelled = asyncio.Event()
+        renewal_release = asyncio.Event()
+
+        async def block_cleanup(**_kwargs):
+            cleanup_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleanup_cancelled.set()
+                raise
+
+        async def controlled_sleep(_delay: float) -> None:
+            await renewal_release.wait()
+
+        jobs_client = _make_jobs_client([])
+        jobs_client.list_jobs.side_effect = block_cleanup
+        repo = AsyncMock()
+        repo.list_workspaces.return_value = ([pending], None)
+        repo.claim_workspace_for_deletion.return_value = claimed
+        repo.renew_workspace_deletion_lease.side_effect = RuntimeError("database unavailable")
+        repo.fail_workspace_deletion_if_claimed.return_value = True
+        controller = _make_controller(workspace_repo=repo)
+
+        with (
+            _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
+            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+        ):
+            cleanup_task = asyncio.create_task(controller._async_step())
+            await cleanup_started.wait()
+            renewal_release.set()
+            await cleanup_task
+
+        assert cleanup_cancelled.is_set()
+        repo.fail_workspace_deletion_if_claimed.assert_awaited_once_with(
+            name=pending.name,
+            expected_updated_at=claimed.updated_at,
+        )
         repo.delete_workspace_if_claimed.assert_not_called()
 
     @pytest.mark.asyncio
