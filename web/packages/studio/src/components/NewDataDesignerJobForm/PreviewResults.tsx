@@ -130,14 +130,14 @@ export interface PreviewResultsProps {
   onStop: () => void;
 }
 
-export const PreviewResults: FC<PreviewResultsProps> = ({
+export const PreviewResults: FC<PreviewResultsProps> = memo(function PreviewResults({
   records,
   columnOrder,
   isPreviewing,
   status,
   error,
   onStop,
-}) => {
+}) {
   const [expandedCell, setExpandedCell] = useState<TableExpandableCellState | null>(null);
 
   const rows = useMemo(
@@ -215,4 +215,4 @@ export const PreviewResults: FC<PreviewResultsProps> = ({
       </Modal>
     </Stack>
   );
-};
+});

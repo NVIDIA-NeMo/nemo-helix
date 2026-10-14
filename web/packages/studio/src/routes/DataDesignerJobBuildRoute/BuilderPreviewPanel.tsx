@@ -21,7 +21,7 @@ import { PreviewResults } from '@studio/components/NewDataDesignerJobForm/Previe
 import { useResizableHeight } from '@studio/routes/DataDesignerJobBuildRoute/useResizableHeight';
 import cn from 'classnames';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { type FC, memo, useState } from 'react';
+import { type FC, memo, useMemo, useState } from 'react';
 
 type PreviewTab = 'rows' | 'logs';
 
@@ -57,6 +57,10 @@ export const BuilderPreviewPanel: FC<BuilderPreviewPanelProps> = memo(function B
   const { ref: logsScrollRef } = useStickToBottom<HTMLDivElement>({
     enabled: isExpanded && tab === 'logs' && !!logs,
   });
+  const displayedLogs = useMemo(
+    () => (logs ? formatPreviewLogsForDisplay(logs) : 'No logs yet.'),
+    [logs]
+  );
   const resize = useResizableHeight({
     defaultHeight: DEFAULT_PANEL_HEIGHT_PX,
     minHeight: MIN_PANEL_HEIGHT_PX,
@@ -158,7 +162,7 @@ export const BuilderPreviewPanel: FC<BuilderPreviewPanelProps> = memo(function B
               className="min-h-0 flex-1 flex-col items-stretch p-0 pt-density-lg"
             >
               <CodeSnippet
-                value={logs ? formatPreviewLogsForDisplay(logs) : 'No logs yet.'}
+                value={displayedLogs}
                 language="json"
                 kind="block"
                 attributes={{
