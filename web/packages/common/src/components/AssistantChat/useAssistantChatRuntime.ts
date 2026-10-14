@@ -120,6 +120,7 @@ export const useAssistantChatRuntime = ({
       const startMs = performance.now();
       let ttftMs = 0;
       let chunkCount = 0;
+      let responseModel: string | undefined;
 
       try {
         const result = await createChatCompletion({
@@ -152,6 +153,7 @@ export const useAssistantChatRuntime = ({
           if (runController.signal.aborted) streamController.abort();
           for await (const chunk of result) {
             if (runController.signal.aborted || !isCurrentRun()) break;
+            responseModel ??= chunk.model || undefined;
             const delta = chunk.choices[0]?.delta.content ?? '';
             const images = getCompletionImages(chunk);
             if (delta || images.length > 0) {
@@ -189,6 +191,7 @@ export const useAssistantChatRuntime = ({
               chunkCount,
               tokensPerSec: (completionTokens * 1000) / Math.max(1, totalMs),
               completionTokens,
+              responseModel,
             });
           }
         } else {
@@ -210,6 +213,7 @@ export const useAssistantChatRuntime = ({
               chunkCount: 1,
               tokensPerSec: (completionTokens * 1000) / Math.max(1, totalMs),
               completionTokens,
+              responseModel: result.model || undefined,
             });
           }
         }

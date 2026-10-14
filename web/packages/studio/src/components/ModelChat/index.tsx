@@ -35,6 +35,7 @@ interface ModelChatProps extends Pick<
   | 'broadcast'
   | 'stopCount'
   | 'onRunningChange'
+  | 'onMessageComplete'
 > {
   /**
    * When provided, ModelChat derives default `disabled` state and a
@@ -103,6 +104,7 @@ export const ModelChat: FC<ModelChatProps> = ({
   workspace,
   deployModelRef,
   deployModelLabel,
+  onMessageComplete,
   ...rest
 }) => {
   const resolvedDisabled = disabled ?? (modelChatStatus ? modelChatStatus !== 'enabled' : false);
@@ -137,6 +139,7 @@ export const ModelChat: FC<ModelChatProps> = ({
       completionTokens: info.completionTokens,
       tokensPerSec: info.tokensPerSec,
     });
+    onMessageComplete?.(info);
   };
 
   const containerRef = useRef<HTMLDivElement>(null);
