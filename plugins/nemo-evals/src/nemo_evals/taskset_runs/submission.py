@@ -3,7 +3,7 @@
 
 """Pure budget checks and deadline calculation for taskset run submission."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from nemo_evals.config import TasksetRunsConfig
 
@@ -38,7 +38,7 @@ def check_timeout(timeout_seconds: int | None, runs: TasksetRunsConfig) -> int:
 
 
 def resolve_deadlines(accepted_at: datetime, timeout: int, runs: TasksetRunsConfig) -> tuple[datetime, datetime]:
-    """Calculate execution and finalization deadlines without consulting a clock.
+    """Calculate elapsed-time deadlines without consulting a clock.
 
     Args:
         accepted_at: Timezone-aware acceptance timestamp supplied by submit.
@@ -53,5 +53,6 @@ def resolve_deadlines(accepted_at: datetime, timeout: int, runs: TasksetRunsConf
     """
     if accepted_at.utcoffset() is None:
         raise ValueError("accepted_at must be timezone-aware")
-    execution = accepted_at + timedelta(seconds=timeout)
-    return execution, execution + timedelta(seconds=runs.finalization_grace_seconds)
+    execution = accepted_at.astimezone(timezone.utc) + timedelta(seconds=timeout)
+    finalization = execution + timedelta(seconds=runs.finalization_grace_seconds)
+    return execution.astimezone(accepted_at.tzinfo), finalization.astimezone(accepted_at.tzinfo)

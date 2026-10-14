@@ -4,6 +4,7 @@
 """Failure tolerances, operator budgets and pure deadline arithmetic."""
 
 from datetime import datetime, timezone, tzinfo
+from zoneinfo import ZoneInfo
 
 import pytest
 from nemo_evals.api.taskset_run_schemas import HarborTaskJobsExecutionInput
@@ -131,3 +132,20 @@ def test_deadlines_preserve_timezone_and_roll_over_midnight(accepted, timeout, g
     )
     assert tuple(value.isoformat() for value in actual) == (execution, finalization)
     assert all(value.tzinfo is not None for value in actual)
+
+
+@pytest.mark.parametrize(
+    "accepted,timeout,grace",
+    [
+        (datetime(2026, 11, 1, 1, 30, tzinfo=ZoneInfo("America/New_York"), fold=0), 3600, 600),
+        (datetime(2026, 3, 8, 1, 30, tzinfo=ZoneInfo("America/New_York")), 3600, 600),
+        (datetime(2026, 11, 1, 1, 0, tzinfo=ZoneInfo("America/New_York"), fold=0), 1800, 3600),
+    ],
+)
+def test_deadlines_measure_elapsed_seconds_across_dst(accepted, timeout, grace):
+    runs = TasksetRunsConfig(finalization_grace_seconds=grace)
+    execution, finalization = resolve_deadlines(accepted, timeout, runs)
+    assert execution.timestamp() - accepted.timestamp() == timeout
+    assert finalization.timestamp() - execution.timestamp() == grace
+    assert execution.tzinfo is accepted.tzinfo
+    assert finalization.tzinfo is accepted.tzinfo
