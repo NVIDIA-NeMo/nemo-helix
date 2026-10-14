@@ -197,7 +197,7 @@ def test_failed_import_create_leaves_no_import() -> None:
     current = CurrentPrincipal(owner_type="user", owner_id="usr_test")
 
     with pytest.raises(HTTPException) as exc:
-        create_benchmark_import(body, Database(MagicMock()), current, Response())
+        create_benchmark_import(body, Database(), current, Response())
 
     assert exc.value.status_code == 409
     import_id = import_id_for("usr_test", body.manifest_sha256, "private")
@@ -230,7 +230,7 @@ def test_identical_create_while_the_first_is_populating_is_a_conflict() -> None:
     current = CurrentPrincipal(owner_type="user", owner_id="usr_test")
 
     with pytest.raises(HTTPException) as exc:
-        create_benchmark_import(body, Database(MagicMock()), current, Response())
+        create_benchmark_import(body, Database(), current, Response())
 
     assert exc.value.status_code == 409
     assert exc.value.detail == {

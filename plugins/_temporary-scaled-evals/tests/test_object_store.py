@@ -57,7 +57,5 @@ def test_startup_survives_unreachable_storage(monkeypatch: pytest.MonkeyPatch) -
         raise RuntimeError("files unreachable")
 
     monkeypatch.setattr(artifacts, "ensure_bucket", explode)
-    # Keep the database side out of it; this test is about storage readiness.
-    monkeypatch.setattr(ScaledEvalsService, "_apply_migrations", lambda _self: None)
 
     asyncio.run(ScaledEvalsService().on_startup())

@@ -148,7 +148,7 @@ def test_failed_evidence_still_records_the_terminal_span(monkeypatch: pytest.Mon
     store.load_for_dispatch.side_effect = rows.get
     store.resource_totals_for.side_effect = ConnectionError("store down")
     monkeypatch.setattr(worker_module, "EvaluationStore", lambda: store)
-    worker = Dispatcher(connect=MagicMock())
+    worker = Dispatcher()
 
     worker.build_evidence("ev_bad")
     worker.build_evidence("ev_live")
