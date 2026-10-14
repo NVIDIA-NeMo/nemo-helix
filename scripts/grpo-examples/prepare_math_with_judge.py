@@ -36,9 +36,11 @@ SYSTEM_PROMPT = (
 
 def _dapo17k_rows() -> Iterator[dict[str, Any]]:
     """DAPO-Math-17k, the train split NeMo-RL's `grpo-dapomath17k-*` recipes use."""
-    from datasets import load_dataset
+    from datasets import Dataset, load_dataset
 
-    for example in load_dataset("YouJiacheng/DAPO-Math-17k-dedup", split="train"):
+    dataset = load_dataset("YouJiacheng/DAPO-Math-17k-dedup", split="train")
+    assert isinstance(dataset, Dataset)  # a single split, not a DatasetDict
+    for example in dataset:
         yield {
             "responses_create_params": {"input": example["prompt"]},
             "question": example["prompt"][0]["content"],
@@ -48,9 +50,11 @@ def _dapo17k_rows() -> Iterator[dict[str, Any]]:
 
 def _aime24_rows() -> Iterator[dict[str, Any]]:
     """AIME 2024: 30 problems. Repeat at eval time for mean@k."""
-    from datasets import load_dataset
+    from datasets import Dataset, load_dataset
 
-    for example in load_dataset("HuggingFaceH4/aime_2024", split="train"):
+    dataset = load_dataset("HuggingFaceH4/aime_2024", split="train")
+    assert isinstance(dataset, Dataset)  # a single split, not a DatasetDict
+    for example in dataset:
         yield {
             "responses_create_params": {
                 "input": [
