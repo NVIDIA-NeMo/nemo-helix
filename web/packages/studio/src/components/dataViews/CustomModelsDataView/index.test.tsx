@@ -15,11 +15,12 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { getCustomizationJobListRoute } from '@studio/routes/utils';
 import { renderRoute } from '@studio/tests/util/render';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 const MODELS_URL = `${PLATFORM_BASE_URL}/apis/models/v2/workspaces/:workspace/models`;
+const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 const ADAPTER_DELETE_URL = `${PLATFORM_BASE_URL}/apis/models/v2/workspaces/:workspace/models/:modelName/adapters/:adapter`;
 
 const modelsPage: ModelEntitysPage = {
@@ -52,8 +53,25 @@ const renderComponent = () =>
         path: ROUTES.workspace.customizationJobList,
         element: <CustomModelsDataView workspace={workspace1.workspace} />,
       },
+      {
+        path: ROUTES.workspace.customizationJobDetails,
+        element: <div>Job details page</div>,
+      },
     ],
   });
+
+const jobsPage = (jobs: { id: string; name: string }[]) => ({
+  data: jobs,
+  pagination: { page: 1, page_size: 1, total_results: jobs.length, total_pages: 1 },
+});
+
+/** Opens the row-actions menu of the row whose name cell reads `rowName`. */
+const openRowActions = async (user: ReturnType<typeof userEvent.setup>, rowName: string) => {
+  await screen.findByText(rowName);
+  const row = screen.getAllByRole('row').find((r) => within(r).queryByText(rowName));
+  if (!row) throw new Error(`No table row for ${rowName}`);
+  await user.click(within(row).getByRole('button', { name: /actions/i }));
+};
 
 vi.mock('@nemo/common/src/components/DataView/StudioDataView', async () => {
   const { studioDataViewMock } = await import('@studio/tests/util');
@@ -131,6 +149,48 @@ describe('CustomModelsDataView', () => {
           adapter: adapterName,
         })
       );
+    });
+  });
+
+  describe('Job details action', () => {
+    it.each([
+      { kind: 'model', outputName: entityStoreCustomizedModel1.name },
+      { kind: 'adapter', outputName: entityStoreCustomizedModel1.adapters![0].name },
+    ])('opens the fine-tuning job that produced the $kind', async ({ outputName }) => {
+      const user = userEvent.setup();
+      let capturedUrl: URL | undefined;
+      server.use(
+        http.get(MODELS_URL, () => HttpResponse.json(modelsPage)),
+        http.get(JOBS_URL, ({ request }) => {
+          capturedUrl = new URL(request.url);
+          return HttpResponse.json(jobsPage([{ id: 'j1', name: 'automodel-2a4c86bf' }]));
+        })
+      );
+
+      renderComponent();
+      await openRowActions(user, outputName);
+      await user.click(await screen.findByRole('menuitem', { name: 'Job details' }));
+
+      expect(await screen.findByText('Job details page')).toBeInTheDocument();
+      expect(capturedUrl?.searchParams.get('filter[source]')).toBe('customization');
+      expect(capturedUrl?.searchParams.get('filter[spec.output.name]')).toBe(outputName);
+    });
+
+    it('reports when no fine-tuning job produced the model', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get(MODELS_URL, () => HttpResponse.json(modelsPage)),
+        http.get(JOBS_URL, () => HttpResponse.json(jobsPage([])))
+      );
+
+      renderComponent();
+      await openRowActions(user, entityStoreCustomizedModel1.name);
+      await user.click(await screen.findByRole('menuitem', { name: 'Job details' }));
+
+      expect(
+        await screen.findByText(`No fine-tuning job found for ${entityStoreCustomizedModel1.name}.`)
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Job details page')).not.toBeInTheDocument();
     });
   });
 });

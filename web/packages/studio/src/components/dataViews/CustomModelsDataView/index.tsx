@@ -13,6 +13,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getSortParam } from '@nemo/common/src/utils/query';
 import {
   getModelsListModelsQueryKey,
@@ -41,9 +42,14 @@ import { KindTag } from '@studio/components/dataViews/CustomModelsDataView/KindT
 import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import type { ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
+import { fetchCustomizationJobNameForOutput } from '@studio/hooks/useCustomizationJobForModel';
 import { useModelDeploymentStatuses } from '@studio/hooks/useModelDeploymentStatuses';
-import { getIntakeTracesRoute, getNewCustomizationJobRoute } from '@studio/routes/utils';
-import { keepPreviousData } from '@tanstack/react-query';
+import {
+  getIntakeTracesRoute,
+  getNewCustomizationJobRoute,
+  getWorkspaceCustomizationJobDetailsRoute,
+} from '@studio/routes/utils';
+import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -126,6 +132,8 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
     | null
   >(null);
   const navigate = useNavigate();
+  const toast = useToast();
+  const contextQueryClient = useQueryClient();
   const { mutateAsync: deleteModel } = useModelsDeleteModel();
   const { mutateAsync: deleteAdapter } = useModelsDeleteModelAdapter();
 
@@ -219,6 +227,30 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
     [tableData, adapterMap]
   );
   const deploymentStatuses = useModelDeploymentStatuses(statusTargets);
+
+  /**
+   * Resolved on select rather than per row: the row-actions menu may not call hooks,
+   * and looking up every row's job up front would cost a request per row.
+   */
+  const openJobDetails = useCallback(
+    async (outputName: string) => {
+      try {
+        const jobName = await fetchCustomizationJobNameForOutput(
+          contextQueryClient,
+          workspace,
+          outputName
+        );
+        if (jobName) {
+          navigate(getWorkspaceCustomizationJobDetailsRoute(workspace, jobName));
+          return;
+        }
+        toast.error(`No fine-tuning job found for ${outputName}.`);
+      } catch {
+        toast.error(`Failed to look up the fine-tuning job for ${outputName}.`);
+      }
+    },
+    [contextQueryClient, navigate, toast, workspace]
+  );
 
   const resetFilters = useCallback(() => {
     dataViewState.resetFilters();
@@ -362,6 +394,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
                     onRowClick?.(parentModel, 'model-details', adapter);
                   },
                 },
+                { children: 'Job details', onSelect: () => openJobDetails(row.name) },
                 ...deployEntries,
                 { kind: 'divider' as const },
                 {
@@ -382,6 +415,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
                 children: 'Model details',
                 onSelect: () => onRowClick?.(row, 'model-details'),
               },
+              { children: 'Job details', onSelect: () => openJobDetails(row.name) },
               {
                 children: 'Chat Playground',
                 onSelect: () => onRowClick?.(row, 'chat-playground'),
@@ -407,7 +441,15 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           },
         }),
       ],
-      [adapterMap, deploymentStatuses, handleKindClick, navigate, onRowClick, workspace]
+      [
+        adapterMap,
+        deploymentStatuses,
+        handleKindClick,
+        navigate,
+        onRowClick,
+        openJobDetails,
+        workspace,
+      ]
     );
 
   const hasActiveFilters =

@@ -14,7 +14,9 @@ import {
 import { dataset } from '@studio/mocks/datasets';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
+import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CustomizationJobDetailsRoute } from '@studio/routes/CustomizationJobDetailsRoute';
+import { getCustomizationJobListRoute } from '@studio/routes/utils';
 import { XL_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
 import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams';
 import { TestProviders } from '@studio/tests/util/TestProviders';
@@ -22,6 +24,8 @@ import { getBaseModel } from '@studio/util/customizations';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+
+vi.mock('@studio/providers/breadcrumbs/useBreadcrumbs');
 
 describe('CustomizationJobDetailsRoute', () => {
   beforeEach(() => {
@@ -57,6 +61,22 @@ describe('CustomizationJobDetailsRoute', () => {
       ).length
     ).toBeGreaterThan(0);
     expect(screen.queryByTestId('customization-error-banner')).not.toBeInTheDocument();
+  });
+
+  it('places the job under Fine-tuning in the breadcrumbs, named as in its URL', async () => {
+    render(
+      <TestProviders>
+        <CustomizationJobDetailsRoute />
+      </TestProviders>
+    );
+    await screen.findAllByText(customizationJob1.id!, {}, { timeout: XL_SELECTOR_TIMEOUT });
+
+    expect(vi.mocked(useBreadcrumbs)).toHaveBeenLastCalledWith({
+      items: [
+        { href: getCustomizationJobListRoute(workspace1.name), slotLabel: 'Fine-tuning' },
+        { slotLabel: customizationJob1.name },
+      ],
+    });
   });
 
   it('names the job in the page header with its type, base model, and created date', async () => {

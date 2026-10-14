@@ -58,10 +58,10 @@ export const CustomizationJobDetailsRoute: FC = () => {
     items: [
       {
         href: getCustomizationJobListRoute(workspace),
-        slotLabel: 'Customizations',
+        slotLabel: 'Fine-tuning',
       },
       {
-        slotLabel: job?.id || '',
+        slotLabel: customizationJobName,
       },
     ],
   });
