@@ -423,6 +423,10 @@ agents:
     default_image: ""
     # Container port the packaged agent runtime binds (and the readiness probe target)
     container_port: 8000
+    # Optional: readiness probe settings
+    # Restart the platform and redeploy agents to apply changes.
+    readiness_probe_timeout_seconds: 1
+    readiness_probe_failure_threshold: 12
 
 deployments:
   default_executor: local-docker
