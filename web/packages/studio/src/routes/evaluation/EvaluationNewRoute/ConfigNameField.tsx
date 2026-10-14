@@ -26,7 +26,7 @@ export const ConfigNameField: FC = () => {
     <ControlledTextInput
       useControllerProps={{ name: 'name', control }}
       formFieldProps={{
-        slotLabel: 'Configuration Name',
+        slotLabel: 'Name',
         ...nameFieldSlots({
           entity: 'configuration',
           preview,
