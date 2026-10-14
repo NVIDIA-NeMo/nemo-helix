@@ -51,13 +51,16 @@ def test_scaled_evals_healthz_via_adapter() -> None:
 
 
 def test_admin_routes_require_the_admin_permission() -> None:
+    from fastapi.routing import APIRoute
     from nemo_scaled_evals_plugin.authz import ADMIN
     from scaled_evals.api.tenancy import _ADMIN_PROBE
 
     gated = []
     for spec in ScaledEvalsService().get_routers():
         for route in spec.router.routes:
-            path = getattr(route, "path", "")
+            if not isinstance(route, APIRoute):
+                continue
+            path = route.path
             if not (path.startswith("/admin/") or path.endswith(("/qualification", "/promote"))):
                 continue
             rules = get_path_rules(route.endpoint)
