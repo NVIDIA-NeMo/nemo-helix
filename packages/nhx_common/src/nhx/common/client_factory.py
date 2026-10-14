@@ -162,6 +162,9 @@ def get_nemo_client(
             context, http_client, base_url, limits=limits, follow_redirects=follow_redirects
         ),
         client_runtime=_nemo_client_runtime(context, base_url),
+        # The factory passes a transport even when it creates one, so ownership
+        # must be explicit: close factory-created pools with the NeMo client,
+        # while caller-supplied transports remain open for reuse.
         owns_http_client=http_client is None,
     )
 
@@ -204,6 +207,9 @@ def get_async_nemo_client(
             context, http_client, base_url, limits=limits, follow_redirects=follow_redirects
         ),
         client_runtime=_nemo_client_runtime(context, base_url),
+        # The factory passes a transport even when it creates one, so ownership
+        # must be explicit: close factory-created pools with the NeMo client,
+        # while caller-supplied transports remain open for reuse.
         owns_http_client=http_client is None,
     )
 
