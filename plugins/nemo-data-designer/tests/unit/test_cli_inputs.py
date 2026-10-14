@@ -41,7 +41,7 @@ class _CreateOverrideCLI(NemoCLI):
             inputs.apply_create_cli_overrides(group)
 
 
-def test_create_cli_override_supports_root_generated_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_cli_override_delegates_to_generated_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     typer_ctx_sentinel = SimpleNamespace()
     group = typer.Typer()
