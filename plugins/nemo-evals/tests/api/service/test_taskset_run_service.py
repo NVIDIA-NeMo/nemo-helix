@@ -99,6 +99,7 @@ async def test_accept_freezes_resolved_harbor_content(
     assert plan.spec.tasks[0].spec.provenance.revision_digest
     assert plan.spec.max_concurrent_tasks == 8 and plan.spec.fail_fast is True
     assert plan.max_failed_tasks == 1
+    # M2 Story 3 adds these required fields and discards earlier development runs.
     assert "sandbox_policy" not in plan.model_dump() and "dispatcher_profile" not in plan.model_dump()
     assert len(files_service.filesets) == 1
     assert not (await entity_store.list(TasksetRunMemberEntity, workspace="default")).data

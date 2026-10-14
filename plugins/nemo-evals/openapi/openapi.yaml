@@ -5252,12 +5252,12 @@ components:
         instead of one Job.
 
 
-        Passing it as ``execution`` switches to the Kubernetes path: submit pins the
+        Passing it as ``execution`` selects the Kubernetes taskset-run path: submit
+        pins
 
-        taskset revision, registers one Jobs Service Job per task, and returns a single
-        taskset
+        the taskset revision and returns a durable run handle. Later execution stages
 
-        run that tracks progress and combines the per-task results.
+        register one Jobs Service Job per task and combine the per-task results.
 
 
         It exists because these settings mean nothing on the Docker path: where task
@@ -5276,10 +5276,21 @@ components:
         Submit validates this input, resolves the percent form of ``max_failed_tasks``
         into a
 
-        count, and freezes the result into the run''s stored plan; later changes to
-        operator
+        count, and stores the M1 execution caps and missing-image policy in the run''s
+        plan.
 
-        profiles or defaults do not affect an accepted run.'
+        In M1, ``sandbox_policy`` and ``dispatcher_profile`` participate in request
+        identity
+
+        only; their names are intentionally neither resolved nor stored while execution
+        is
+
+        unavailable. M2 Story 3 validates these selections and adds the resolved sandbox
+
+        policy, dispatcher profile and pinned dispatcher image as required plan fields
+        before
+
+        execution is enabled. Earlier development runs are deleted rather than migrated.'
     HelixJobListResultResponse:
       properties:
         data:

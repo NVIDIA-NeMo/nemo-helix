@@ -156,6 +156,9 @@ class TasksetRunService:
         try:
             accepted_at = self._clock()
             execution, finalization = resolve_deadlines(accepted_at, timeout, self._config.runs)
+            # M1 intentionally omits sandbox_policy and dispatcher_profile from the plan.
+            # M2 Story 3 freezes them with the dispatcher image before enabling execution;
+            # earlier development runs are deleted when those required fields are added.
             plan = TasksetRunPlan(
                 run_id=run_id,
                 workspace=workspace,
