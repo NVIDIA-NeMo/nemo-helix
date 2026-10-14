@@ -66,3 +66,25 @@ async def test_compile_delegates_to_app_jobs_compiler() -> None:
         job_name="job-x",
         profile="gpu-large",
     )
+
+
+def test_the_training_step_can_pause_and_keeps_checkpoints_out_of_the_model() -> None:
+    """Pause is rejected for a step without a deadline, and checkpoints must not be published with the model."""
+    from nhx.unsloth.app.constants import DEFAULT_CHECKPOINT_PATH, DEFAULT_OUTPUT_MODEL_PATH
+    from nhx.unsloth.app.jobs.training.compiler import compile_training_step
+    from nhx.unsloth.config import config
+
+    spec = UnslothJobOutput(
+        model=ModelLoadSpec(name="default/base"),
+        dataset=DatasetSpec(path="default/training"),
+        training=TrainingSpec(lora=LoRAParams()),
+        schedule=ScheduleSpec(max_steps=1),
+        output=OutputResponse(name="r", type="adapter", save_method="lora", fileset="r"),
+    )
+
+    step = compile_training_step(spec, base_env=[])
+
+    assert step.lifecycle is not None
+    assert step.lifecycle.pause_deadline_seconds == config.training_pause_deadline_seconds > 0
+    assert step.config["checkpoint_path"] == DEFAULT_CHECKPOINT_PATH
+    assert step.config["output_path"] == DEFAULT_OUTPUT_MODEL_PATH
