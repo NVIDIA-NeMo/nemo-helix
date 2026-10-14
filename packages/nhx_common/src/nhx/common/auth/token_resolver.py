@@ -95,11 +95,16 @@ async def resolve_bearer_token(
     skip_access_key_check: bool = False,
 ) -> ResolvedBearerToken | None:
     if config.access_keys.enabled and not skip_access_key_check:
-        from .access_keys import validate_access_key_token
+        from .access_keys import is_access_key_token_candidate, validate_access_key_token
 
         access_key_claims = await validate_access_key_token(config, token)
         if access_key_claims is not None:
             return ResolvedBearerToken(claims=access_key_claims, token_kind="access_key")
+        # A token that names itself an access key is never a workload or IdP token, so a failed
+        # check is final. Falling through would spend the IdP round-trips below on a key that can
+        # only be rejected.
+        if is_access_key_token_candidate(token):
+            return None
 
     for extra_resolver in extra_resolvers:
         resolved = await extra_resolver(token)
