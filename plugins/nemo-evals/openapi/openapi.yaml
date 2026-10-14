@@ -5039,9 +5039,9 @@ components:
           default: 1
         n_concurrent_trials:
           title: N Concurrent Trials
-          description: 'Maximum concurrent Harbor trials. Unset or null: the runner
-            default (4) on Docker. Must be unset or null on Kubernetes runs, which
-            run trials one at a time.'
+          description: Maximum concurrent Harbor trials. Native Harbor's default parallelism
+            is 4; unset or null uses that default on Docker. Must be unset or null
+            on Kubernetes runs, which run trials one at a time.
           nullable: true
           type: integer
           minimum: 1.0
