@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import types
 from pathlib import Path
 from types import SimpleNamespace
@@ -44,6 +45,20 @@ class Callback:
     def close(self) -> None:
         self.events.append("close")
 
+    def rewind_to(self, step: int) -> None:
+        return None
+
+
+class _IdlePoller:
+    def __init__(self, job_ctx: object, service_name: str) -> None:
+        self.requested = threading.Event()
+
+    def __enter__(self) -> "_IdlePoller":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
 
 def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[str] = []
@@ -74,7 +89,7 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
         def __init__(self, **kwargs: object) -> None:
             return None
 
-        def train(self) -> SimpleNamespace:
+        def train(self, resume_from_checkpoint: str | None = None) -> SimpleNamespace:
             events.append("train")
             return SimpleNamespace(training_loss=0.2)
 
@@ -98,6 +113,8 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
         "nhx.unsloth.tasks.training.backends.hf_trainer_callback.create_hf_trainer_progress_callback",
         lambda *args, **kwargs: object(),
     )
+    monkeypatch.setattr(unsloth_sft, "PausePoller", _IdlePoller)
+    monkeypatch.setattr(unsloth_sft, "create_pause_callback", lambda requested: SimpleNamespace(stopped=False))
 
     spec = UnslothJobOutput(
         model=ModelLoadSpec(name="meta/llama", load_in_4bit=False),
@@ -109,6 +126,7 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
         spec,
         SimpleNamespace(job_id="", workspace="default"),  # type: ignore[arg-type]
         output_path=str(tmp_path / "output"),
+        checkpoint_path=str(tmp_path / "checkpoints"),
         progress_callback=Callback(events),  # type: ignore[arg-type]
     )
 
