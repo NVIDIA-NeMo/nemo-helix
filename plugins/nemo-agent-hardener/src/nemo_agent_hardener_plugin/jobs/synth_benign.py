@@ -31,7 +31,12 @@ from nemo_agent_hardener_plugin.jobs.execution import (
     _run_service_driven,
     run_synth_benign,
 )
-from nemo_agent_hardener_plugin.jobs.manifest import _agent_staleness_warning, _manifest_facts, _materialize_manifest
+from nemo_agent_hardener_plugin.jobs.manifest import (
+    _agent_staleness_warning,
+    _manifest_facts,
+    _manifest_secret_values,
+    _materialize_manifest,
+)
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, _update_run, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.run import _effective_models
 from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec
@@ -124,10 +129,13 @@ class AgentHardenerSynthBenignJob(NemoJob):
         manifest_id = str(config["manifest_id"])
         manifest = _materialize_manifest(sdk, manifest_id, ctx)
         stale_warning = _agent_staleness_warning(sdk, manifest_id, ctx)
-        # Synthesis probes the live victim, so it needs the manifest's declared secrets. Studio sends no
-        # --env-file, so they come from the operator env; either way the victim's .env gets written.
+        # Synthesis probes the live victim, so it needs the manifest's declared secrets: from the operator env,
+        # the manifest's Secrets-store refs and any --env-file. Either way the victim's .env gets written.
         env, env_file = _common.prepare_victim_env(
-            manifest, _build_native_subprocess_env(plugin_config), config.get("env_file")
+            manifest,
+            _build_native_subprocess_env(plugin_config),
+            config.get("env_file"),
+            _manifest_secret_values(sdk, manifest_id, ctx),
         )
         _reject_platform_auth_sources(manifest, env_file)
         _common.check_victim_secrets(manifest, env, env_file)

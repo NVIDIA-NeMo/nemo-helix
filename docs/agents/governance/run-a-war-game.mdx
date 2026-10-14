@@ -101,8 +101,9 @@ URLs that route through the gateway use `host.docker.internal` instead of
 
 `--env` is repeatable and splits on the first `=` only, so values may contain
 `=`. Keep credentials out of it: `--env` values are stored in plaintext on the
-manifest, while `--secrets` stores only the names and resolves the values from
-the platform Secrets store when the run starts.
+manifest. Give credentials as `--secrets NAME=workspace/secret` instead, and the
+run reads them from the platform Secrets store when it starts. The secrets a
+deployed agent's running deployment uses are picked up automatically.
 
 </Tab>
 <Tab title="Unregistered project">

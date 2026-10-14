@@ -205,12 +205,17 @@ def register(app: typer.Typer) -> None:
             help="Host service the victim calls, as NAME:PORT[,PORT], repeatable (e.g. a remote MCP server "
             "running on the host). Opens the sandbox-to-host route for those ports.",
         ),
-        secrets: list[str] = typer.Option(None, "--secrets", help="Override the derived secret names (repeatable)."),
+        secrets: list[str] = typer.Option(
+            None,
+            "--secrets",
+            help="Secret the victim needs, repeatable: NAME takes its value from the operator env or --env-file; "
+            "NAME=[workspace/]secret reads it from the platform Secrets store at run time. Replaces the derived names.",
+        ),
         env: list[str] = typer.Option(
             None,
             "--env",
-            help="Non-secret env var for the victim as KEY=VALUE, repeatable. Credentials belong in "
-            "--secrets, which names them and resolves values from the platform Secrets store.",
+            help="Non-secret env var for the victim as KEY=VALUE, repeatable. Stored in plaintext; credentials "
+            "belong in --secrets NAME=workspace/secret.",
         ),
         port: int | None = typer.Option(None, "--port", help="Victim port (default: the agent's deployment port)."),
         attack_model: str | None = typer.Option(

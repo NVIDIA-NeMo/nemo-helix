@@ -25,6 +25,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
 from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_MANIFEST_TYPE
 from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
+from nemo_agent_hardener_plugin.jobs import _common
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_FILESET, CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.client import EntitiesClient
@@ -185,6 +186,18 @@ def _materialize_manifest(
     manifest_path = manifest_dir / "agent-hardener.yaml"
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
     return str(manifest_path)
+
+
+def _manifest_secret_values(sdk: Any, manifest_id: str, ctx: JobContext) -> dict[str, str]:
+    """Read the manifest's Secrets-store refs (deployment's, then the operator's explicit ones) into values."""
+    record = (
+        client_from_platform(sdk, EntitiesClient)
+        .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
+        .data()
+    )
+    data = getattr(record, "data", {}) or {}
+    refs = {**(data.get("deployed_secret_refs") or {}), **(data.get("secret_refs") or {})}
+    return _common.resolve_secret_refs(sdk, refs, ctx.workspace)
 
 
 def _agent_staleness_warning(sdk: Any, manifest_id: str, ctx: JobContext) -> str | None:

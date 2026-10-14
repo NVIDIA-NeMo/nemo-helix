@@ -80,7 +80,7 @@ Resolves a target once and saves it as a manifest. Pass either `--agent` or
 | `--workspace <name>` | Agent workspace |
 | `--output`, `-o <path>` | Where to write the rendered YAML. Default `agent-hardener.yaml` |
 | `--egress <host[:port]>` | Allow-list an outbound host. Repeatable. A bare host opens 443 only |
-| `--secrets <name>` | Override the derived secret names. Repeatable |
+| `--secrets <name>[=<ref>]` | Secret the agent needs, replacing the derived names. `NAME=[workspace/]secret` reads the value from the Secrets store at run time. Repeatable |
 | `--env <KEY=VALUE>` | Non-secret environment variable. Repeatable, splits on the first `=` |
 | `--backend <NAME:PORT[,PORT]>` | Host service the sandboxed agent calls, such as a remote MCP server running on the host. Repeatable. Reached through `host.docker.internal` |
 | `--port <n>` | Victim port |
@@ -105,9 +105,11 @@ agent's outbound calls are refused mid-run.
 Gateway backend is added automatically and its name, `nemo-inference-gateway`, is
 reserved. Backends you declare are kept when you `refresh` the manifest.
 
-`--env` values are stored in plaintext on the manifest. `--secrets` stores only
-the names and resolves values from the platform Secrets store at run time, so
-use it for credentials.
+`--env` values are stored in plaintext on the manifest, so keep credentials in
+`--secrets`. A secret written as `NAME=workspace/secret` is read from the
+platform Secrets store when the run starts. A plain `NAME` takes its value from
+the operator environment or `--env-file`. For a deployed agent, the secrets its
+running deployment uses are recorded automatically and read the same way.
 
 The rendered `agent-hardener.yaml` is a readable rendering. Editing it does not
 affect `--manifest-id` runs, which read the saved manifest — but `run --config`

@@ -102,6 +102,17 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
     manifest_yaml: str = Field(default="", description="The resolved agent-hardener.yaml content (for display).")
     port: int = Field(default=0, description="Victim port the war-game will target.")
     secrets: list[str] = Field(default_factory=list, description="Secret names the victim agent requires.")
+    secret_refs: dict[str, str] = Field(
+        default_factory=dict,
+        description="Secret names whose value a run reads from the platform Secrets store, as "
+        "``ENV_VAR -> workspace/secret``, set with ``--secrets NAME=workspace/secret``. Win over "
+        "``deployed_secret_refs``. Names without a ref take their value from the operator env or ``--env-file``.",
+    )
+    deployed_secret_refs: dict[str, str] = Field(
+        default_factory=dict,
+        description="The agent's running-deployment secret refs (``ENV_VAR -> workspace/secret``) when the "
+        "manifest was resolved, so the victim gets the deployment's own secrets. Re-read on refresh.",
+    )
     egress: list[str] = Field(
         default_factory=list,
         description="Allow-listed egress host[:port] entries the victim may reach. Config-only agents "
@@ -112,8 +123,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         default_factory=dict,
         description="Non-secret environment variables for the victim (agent-hardener's agent.env) — a "
         "host-backend URL, a feature flag. Stored in plaintext on this entity, so never put "
-        "credentials here: those belong in `secrets`, which names them and resolves the values from "
-        "the platform Secrets store at run time.",
+        "credentials here: those belong in `secrets`.",
     )
     warnings: list[str] = Field(default_factory=list, description="Non-fatal notes from scaffolding.")
     benign_suite: list[dict[str, str]] = Field(
@@ -163,6 +173,8 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         models: WarGameModels | None = None,
         agent_fileset: str = "",
         agent_updated_at: str = "",
+        secret_refs: dict[str, str] | None = None,
+        deployed_secret_refs: dict[str, str] | None = None,
     ) -> AgentHardenerManifest:
         """Build an ``agent``-source manifest entity from a resolved agent scaffold.
 
@@ -179,6 +191,8 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
             agent_updated_at=agent_updated_at,
             port=port,
             secrets=secrets,
+            secret_refs=secret_refs or {},
+            deployed_secret_refs=deployed_secret_refs or {},
             egress=egress or [],
             env=env or {},
             warnings=warnings,
@@ -201,6 +215,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         egress: list[str] | None = None,
         env: dict[str, str] | None = None,
         models: WarGameModels | None = None,
+        secret_refs: dict[str, str] | None = None,
     ) -> AgentHardenerManifest:
         """Build a ``project``-source manifest entity from an uploaded bundle and its derivation.
 
@@ -217,6 +232,7 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
             binaries=binaries,
             port=port,
             secrets=secrets,
+            secret_refs=secret_refs or {},
             egress=egress or [],
             env=env or {},
             warnings=warnings,

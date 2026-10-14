@@ -16,7 +16,7 @@ import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
-from nemo_agent_hardener_plugin.jobs import artifacts, benign_suite, execution
+from nemo_agent_hardener_plugin.jobs import _common, artifacts, benign_suite, execution
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_mod
 from nemo_agent_hardener_plugin.jobs import run as run_module
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
@@ -1294,6 +1294,7 @@ def test_war_game_reports_the_stale_agent_warning_in_its_final_progress(
     monkeypatch.setattr(run_module._common, "resolve_model_key", lambda *_a, **_k: None)
     monkeypatch.setattr(run_module, "_materialize_manifest", lambda *_a: str(manifest))
     monkeypatch.setattr(run_module, "_agent_staleness_warning", lambda *_a: "agent changed; refresh it")
+    monkeypatch.setattr(run_module, "_manifest_secret_values", lambda *_a: {})
     monkeypatch.setattr(run_module, "_cached_benign_suite", lambda *_a: [])
     monkeypatch.setattr(run_module, "_manifest_rounds", lambda *_a: 1)
     monkeypatch.setattr(run_module, "_run_one_shot", lambda *_a, **_k: execution.RunOutcome("completed", 0))
@@ -1306,3 +1307,103 @@ def test_war_game_reports_the_stale_agent_warning_in_its_final_progress(
 
     assert result["status"] == "completed"
     assert progress[-1]["details"]["warning"] == "agent changed; refresh it"
+
+
+# ── Secrets-store refs ─────────────────────────────────────────────────────────
+
+_SECRET_VALUE = "dummy-secret-value"  # pragma: allowlist secret
+
+
+def _fake_secret_store(monkeypatch: pytest.MonkeyPatch, values: dict[str, str | Exception]) -> list[tuple[str, str]]:
+    """Back ``_resolve_secret`` with *values* keyed ``workspace/name``; returns the lookups made."""
+    lookups: list[tuple[str, str]] = []
+
+    def fake(_sdk: Any, name: str, workspace: str) -> str | None:
+        lookups.append((workspace, name))
+        result = values.get(f"{workspace}/{name}")
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(_common, "_resolve_secret", fake)
+    return lookups
+
+
+def test_secret_refs_resolve_through_the_secrets_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    lookups = _fake_secret_store(monkeypatch, {"default/a-secret": "va", "ws2/b-secret": "vb"})
+
+    values = _common.resolve_secret_refs(None, {"A": "a-secret", "B": "ws2/b-secret"}, "default")
+
+    assert values == {"A": "va", "B": "vb"}
+    assert lookups == [("default", "a-secret"), ("ws2", "b-secret")]
+
+
+@pytest.mark.parametrize("stored", ["", RuntimeError(f"backend said {_SECRET_VALUE}")])
+def test_unreadable_secret_fails_naming_the_ref_not_the_value(
+    monkeypatch: pytest.MonkeyPatch, stored: str | Exception
+) -> None:
+    _fake_secret_store(monkeypatch, {"default/a-secret": stored})
+
+    with pytest.raises(AgentHardenerRunError) as exc_info:
+        _common.resolve_secret_refs(None, {"A_KEY": "a-secret"}, "default")
+
+    assert exc_info.value.category == "missing_credential"
+    message = str(exc_info.value)
+    assert "A_KEY" in message
+    assert "default/a-secret" in message
+    assert _SECRET_VALUE not in message
+
+
+def test_victim_env_precedence_is_operator_then_secrets_then_env_file(tmp_path: Path) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: c\n  secrets: [A, B, C]\n", encoding="utf-8")
+    user_env = tmp_path / "user.env"
+    user_env.write_text("C=from-file\n", encoding="utf-8")
+    operator = {"A": "from-operator", "B": "from-operator", "C": "from-operator"}
+
+    merged, env_file = _common.prepare_victim_env(
+        str(manifest), operator, str(user_env), {"B": _SECRET_VALUE, "C": "from-secret"}
+    )
+
+    assert (merged["A"], merged["B"], merged["C"]) == ("from-operator", _SECRET_VALUE, "from-file")
+    assert env_file == str(user_env)
+    assert f"B={_SECRET_VALUE}" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_manifest_secret_values_let_explicit_refs_win_over_the_deployments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sdk = _agent_manifest_sdk(
+        deployed_secret_refs={"SHARED": "default/deployed", "ONLY_DEPLOYED": "default/d2"},
+        secret_refs={"SHARED": "ws2/explicit"},
+    )
+    lookups = _fake_secret_store(monkeypatch, {"default/deployed": "wrong", "default/d2": "vd", "ws2/explicit": "vx"})
+
+    values = manifest_mod._manifest_secret_values(sdk, "m1", make_job_context(tmp_path))
+
+    assert values == {"SHARED": "vx", "ONLY_DEPLOYED": "vd"}
+    assert ("default", "deployed") not in lookups
+
+
+def test_manifest_secret_values_are_empty_without_refs(tmp_path: Path) -> None:
+    assert manifest_mod._manifest_secret_values(_agent_manifest_sdk(), "m1", make_job_context(tmp_path)) == {}
+
+
+def test_manifest_secrets_land_in_the_victim_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest = _manifest_with_secret(tmp_path)
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setattr(run_module, "_effective_models", lambda *_a: None)
+    monkeypatch.setattr(run_module._common, "resolve_model_key", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_module, "_materialize_manifest", lambda *_a: str(manifest))
+    monkeypatch.setattr(run_module, "_agent_staleness_warning", lambda *_a: None)
+    monkeypatch.setattr(run_module, "_manifest_secret_values", lambda *_a: {"REMOTE_TOKEN": _SECRET_VALUE})
+    monkeypatch.setattr(run_module, "_cached_benign_suite", lambda *_a: [])
+    monkeypatch.setattr(run_module, "_manifest_rounds", lambda *_a: 1)
+    monkeypatch.setattr(run_module, "_run_one_shot", lambda *_a, **_k: execution.RunOutcome("completed", 0))
+    sdk, _ = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=sdk)
+
+    assert f"REMOTE_TOKEN={_SECRET_VALUE}" in (tmp_path / ".env").read_text(encoding="utf-8")

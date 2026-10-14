@@ -230,6 +230,7 @@ saw and ask the user.
   model-group overrides (`--attack-model`, `--attack-key-secret`, `--analysis-model`, …) live on
   `run`.
 - Env vars vs secrets: `--env KEY=VALUE` is for plain config; anything credential-shaped goes
-  through `--env-file` / stored secrets so it never lands in the manifest.
+  through `--secrets NAME=workspace/secret` (read from the Secrets store at run time) or `--env-file`,
+  so it never lands in the manifest. A deployed agent's own secret references are recorded for you.
 - Running the platform from a source checkout needs
   `NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION=1` in the platform's environment.

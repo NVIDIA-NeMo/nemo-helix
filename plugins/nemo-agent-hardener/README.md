@@ -337,8 +337,10 @@ uv run nemo agent-hardener init --agent react-agent --env BACKEND_URL=http://hos
 ```
 
 `--env` is repeatable and only the first `=` splits, so values may contain `=`. **Keep credentials out
-of it**: `--env` values are stored in plaintext on the manifest, whereas `--secrets` stores only the
-*names* and resolves the values from the platform Secrets store when the run starts.
+of it**: `--env` values are stored in plaintext on the manifest. Give credentials as
+`--secrets NAME=workspace/secret` instead; the run reads them from the platform Secrets store when it
+starts. A plain `--secrets NAME` takes its value from the operator environment or `--env-file`, and a
+deployed agent's own secret references are recorded for you.
 
 **`synth-benign` is not optional.** The war-game validates two things: that attacks are blocked, and
 that ordinary requests still work. Those ordinary requests are the *benign suite*, and `run` is a

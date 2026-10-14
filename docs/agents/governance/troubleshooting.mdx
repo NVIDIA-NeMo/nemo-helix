@@ -98,7 +98,13 @@ default.
 The agent config references `${<NAME>}` and nothing supplies it. Required secrets
 are derived from the agent's stored config, so this means the variable was unset
 when the agent was registered. Export it and re-run `nemo agents create`, or
-supply it with `--env-file`.
+supply it with `--env-file` or `--secrets NAME=workspace/secret`.
+
+**A run fails with `could not read secret <workspace>/<name>`.**
+The manifest maps a secret to a Secrets-store entry the run cannot read, or that
+is empty. Check it with `nemo secrets list --workspace <workspace>`. For a
+deployed agent, the mapping comes from its running deployment; `refresh` the
+manifest after changing it.
 
 **The victim never becomes healthy, and its log shows a pydantic `union_tag_invalid` for a `_type`.**
 The agent references a component the scaffolded victim cannot resolve. The victim

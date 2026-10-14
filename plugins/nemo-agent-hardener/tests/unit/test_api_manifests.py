@@ -26,7 +26,9 @@ NOW = datetime.now(timezone.utc)
 PREFIX = "/apis/agent-hardener/v2/workspaces/{workspace}"
 
 
-def _resolved(egress: list[str] | None = None, agent_updated_at: str = "") -> ResolvedManifest:
+def _resolved(
+    egress: list[str] | None = None, agent_updated_at: str = "", deployed_secret_refs: dict[str, str] | None = None
+) -> ResolvedManifest:
     """The real resolver returns the *effective* egress — the flag plus what the config declares."""
     return ResolvedManifest(
         manifest={"agent": {"name": "clockbot", "port": 8000}, "backends": []},
@@ -39,6 +41,7 @@ def _resolved(egress: list[str] | None = None, agent_updated_at: str = "") -> Re
         egress=list(egress or []),
         warnings=["no running deployment; defaulting port to 8000."],
         agent_updated_at=agent_updated_at,
+        deployed_secret_refs=deployed_secret_refs or {},
     )
 
 
@@ -489,3 +492,63 @@ def test_refresh_advances_the_recorded_agent_timestamp(client, mock_entity_clien
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["agent_updated_at"] == "2026-10-05T10:00:00Z"
+
+
+def test_create_splits_secret_specs_into_names_and_refs(client, mock_entity_client, monkeypatch) -> None:
+    seen: list[list[str] | None] = []
+
+    def _resolve(*_a, **kw):
+        seen.append(kw.get("secrets"))
+        return _resolved(kw.get("egress"))
+
+    monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", _resolve)
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot", "secrets": ["A", "B=default/b-secret"]},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert seen == [["A", "B"]]
+    assert resp.json()["secret_refs"] == {"B": "default/b-secret"}
+
+
+def test_create_rejects_a_bad_secret_spec_with_422(client, mock_entity_client) -> None:
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot", "secrets": ["B=Bad_Name"]},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "invalid secret" in resp.text
+    mock_entity_client.create.assert_not_called()
+
+
+def test_refresh_keeps_explicit_refs_and_swaps_the_deployments(client, mock_entity_client, monkeypatch) -> None:
+    seen: list[list[str] | None] = []
+
+    def _resolve(*_a, **kw):
+        seen.append(kw.get("secrets"))
+        return _resolved(kw.get("egress"), deployed_secret_refs={"NEW_DEPLOYED": "default/new"})
+
+    monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", _resolve)
+    existing = AgentHardenerManifest(
+        name="m1",
+        workspace="default",
+        agent="default/clockbot",
+        agent_fileset="default/old",
+        secrets=["PLAIN", "EXPLICIT", "OLD_DEPLOYED"],
+        secret_refs={"EXPLICIT": "default/explicit"},
+        deployed_secret_refs={"OLD_DEPLOYED": "default/old", "EXPLICIT": "default/other"},
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/m1/refresh")
+
+    assert resp.status_code == 200, resp.text
+    assert seen == [["PLAIN", "EXPLICIT"]]  # a name only the old deployment supplied is not carried over
+    body = resp.json()
+    assert body["secret_refs"] == {"EXPLICIT": "default/explicit"}
+    assert body["deployed_secret_refs"] == {"NEW_DEPLOYED": "default/new"}

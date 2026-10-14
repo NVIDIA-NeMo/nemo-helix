@@ -18,6 +18,8 @@ import pytest
 import yaml
 from nemo_agent_hardener_plugin.agent_resolver import (
     AgentResolutionError,
+    _agents_resource,
+    _resolve_deployment,
     build_manifest_dict,
     check_relay_artifacts_dir,
     derive_agent_env,
@@ -29,6 +31,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     materialize_agent_package,
     parse_agent_ref,
     parse_backends,
+    parse_secret_specs,
     require_guardable_harness,
     resolve_agent_to_manifest,
     sandbox_reachable,
@@ -504,3 +507,53 @@ def test_resolve_keeps_user_backends_for_a_remote_platform(tmp_path):
         backends=[{"name": "remote-mcp", "ports": [9100]}],
     )
     assert resolved.manifest["backends"] == [{"name": "remote-mcp", "ports": [9100]}]
+
+
+# --------------------------------------------------------------------------- secrets
+def test_parse_secret_specs_without_specs_defers_to_the_agent():
+    assert parse_secret_specs(None) == (None, {})
+    assert parse_secret_specs([]) == (None, {})
+
+
+def test_parse_secret_specs_splits_names_and_refs():
+    names, refs = parse_secret_specs(["A", "B=ws/sec", "C=sec"])
+    assert names == ["A", "B", "C"]
+    assert refs == {"B": "ws/sec", "C": "sec"}
+
+
+@pytest.mark.parametrize("spec", ["1A", "B=Bad_Name", "B=", "B=a/b/c", "=sec", "A B"])
+def test_parse_secret_specs_rejects_malformed_specs(spec: str):
+    with pytest.raises(ValueError, match="invalid secret"):
+        parse_secret_specs([spec])
+
+
+def test_resolve_deployment_qualifies_unqualified_secret_refs_with_the_workspace():
+    deployment = {
+        "agent": "calc",
+        "status": "running",
+        "port": 9123,
+        "secrets": {"API_KEY": "my-secret", "OTHER": "ws2/other"},
+    }
+    port, refs, warnings = _resolve_deployment(_agents_resource(_client(_agent(), [deployment])), "default", "calc")
+    assert port == 9123
+    assert refs == {"API_KEY": "default/my-secret", "OTHER": "ws2/other"}
+    assert warnings == []
+
+
+def test_resolve_deployment_without_a_running_one_defaults():
+    port, refs, warnings = _resolve_deployment(_agents_resource(_client(_agent(), [])), "default", "calc")
+    assert (port, refs) == (8000, {})
+    assert any("no running deployment" in w for w in warnings)
+
+
+def test_resolve_returns_the_deployments_secrets_as_victim_secrets(tmp_path):
+    deployment = {"agent": "calc", "status": "running", "port": 9123, "secrets": {"EXTRA_KEY": "my-secret"}}
+    resolved = resolve_agent_to_manifest(
+        "calc",
+        client=_client(_agent(), [deployment]),
+        base_url="http://h:8080",
+        default_workspace="default",
+        manifest_dir=tmp_path,
+    )
+    assert resolved.deployed_secret_refs == {"EXTRA_KEY": "default/my-secret"}
+    assert resolved.secrets == ["NVIDIA_API_KEY", "EXTRA_KEY"]

@@ -44,6 +44,7 @@ from nemo_agent_hardener_plugin.jobs.execution import (
 from nemo_agent_hardener_plugin.jobs.manifest import (
     _agent_staleness_warning,
     _manifest_facts,
+    _manifest_secret_values,
     _materialize_manifest,
     _seed_validation_manifest,
 )
@@ -333,9 +334,11 @@ class AgentHardenerRunJob(NemoJob):
         )
         validate_only = bool(config.get("validate_only"))
         stale_warning: str | None = None
+        secret_values: dict[str, str] = {}
         if config.get("manifest_id"):
             manifest_id = str(config["manifest_id"])
             manifest = _materialize_manifest(sdk, manifest_id, ctx, config_overrides)
+            secret_values = _manifest_secret_values(sdk, manifest_id, ctx)
             stale_warning = _agent_staleness_warning(sdk, manifest_id, ctx)
             cached_suite = _cached_benign_suite(sdk, manifest_id, ctx)
             rounds = int(config["rounds"]) if config.get("rounds") else _manifest_rounds(sdk, manifest_id, ctx)
@@ -356,9 +359,9 @@ class AgentHardenerRunJob(NemoJob):
             _seed_validation_manifest(manifest, config.get("defense_guardrails"), config.get("defense_policy"), ctx)
             rounds = 1
         # agent-hardener reads victim creds from the project dotenv, so write one from the operator env (which
-        # carries the provisioned INFERENCE_API_KEY) plus any --env-file; Studio submits none.
+        # carries the provisioned INFERENCE_API_KEY), the manifest's Secrets-store refs and any --env-file.
         _, env_file = _common.prepare_victim_env(
-            manifest, _build_native_subprocess_env(plugin_config), config.get("env_file")
+            manifest, _build_native_subprocess_env(plugin_config), config.get("env_file"), secret_values
         )
         agent_name, port = _manifest_facts(manifest)
 
