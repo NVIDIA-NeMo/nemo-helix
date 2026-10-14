@@ -103,6 +103,39 @@ def test_collects_third_party_packages_reached_through_workspace_and_excluded_pa
     ]
 
 
+def test_a_package_first_listed_as_a_deduped_stub_still_has_its_dependencies_collected() -> None:
+    module = load_module()
+    # pnpm breaks the cycle core -> utilities -> core with a nested full copy, as it does for vitest.
+    core = {
+        "version": "6.3.1",
+        "dependencies": {
+            "@dnd-kit/accessibility": {"version": "3.1.1"},
+            "@dnd-kit/utilities": {"version": "3.2.2", "deduped": True},
+        },
+    }
+    listed = [
+        {
+            "name": "studio",
+            "dependencies": {
+                "@dnd-kit/sortable": {
+                    "version": "10.0.0",
+                    "dependencies": {"@dnd-kit/core": {"version": "6.3.1", "deduped": True}},
+                },
+                "@dnd-kit/utilities": {"version": "3.2.2", "dependencies": {"@dnd-kit/core": core}},
+            },
+        }
+    ]
+
+    packages = module.production_packages(listed, exclude=[])
+
+    assert [(p.name, p.version) for p in packages] == [
+        ("@dnd-kit/accessibility", "3.1.1"),
+        ("@dnd-kit/core", "6.3.1"),
+        ("@dnd-kit/sortable", "10.0.0"),
+        ("@dnd-kit/utilities", "3.2.2"),
+    ]
+
+
 def test_reads_integrities_from_the_lock_packages_section_only() -> None:
     module = load_module()
     integrities = {name: integrity(body) for name, body in TARBALLS.items()}

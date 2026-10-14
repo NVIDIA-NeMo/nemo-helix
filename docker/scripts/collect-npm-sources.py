@@ -47,16 +47,16 @@ class NpmPackage:
 
 
 def production_packages(pnpm_list: list[dict], exclude: list[str]) -> list[NpmPackage]:
-    """Every registry package in ``pnpm list --json`` output, once each, including the dependencies of skipped ones."""
+    """Every registry package in ``pnpm list --json`` output, once each, including the dependencies of skipped ones.
+
+    pnpm prints a repeated subtree in full in one place and elsewhere as a ``deduped`` stub, in no fixed
+    order, and breaks cycles the same way, so every node of the (finite) tree is walked.
+    """
     found: dict[tuple[str, str], NpmPackage] = {}
-    visited: set[tuple[str, str]] = set()
 
     def walk(dependencies: dict | None) -> None:
         for name, info in (dependencies or {}).items():
             version = info.get("version", "")
-            if (name, version) in visited:
-                continue
-            visited.add((name, version))
             skipped = version.startswith(("link:", "file:", "workspace:")) or any(
                 fnmatch.fnmatchcase(name, pattern) for pattern in exclude
             )
