@@ -1,0 +1,322 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Analyze Agent Telemetry with Insights"
+description: "Run the NeMo Analyst over an agent's traces to file evidence-backed Insights, on demand or on a schedule."
+---
+
+<a id="agents-insights-analysis"></a>
+
+An **analysis run** reads an agent's traces from NeMo Intake, looks for
+problems that recur across them, and files each one as an **Insight**: a
+named, persistent description of a recurring problem, backed by the traces
+that show it. Review Insights in [NeMo Studio Insights](/documentation/studio/insights),
+then resolve them as you fix the agent.
+
+You can start a run on demand, or opt an agent in to periodic analysis and let
+the platform run it on a daily or weekly schedule.
+
+## Before You Start
+
+You need:
+
+- A running NeMo Helix with the Insights plugin and Intake. The plugin is installed by
+  default. Runs execute as [execute-agent jobs](/documentation/agents/execute-agents-as-jobs),
+  so the platform also needs a working `agents.execute` runtime.
+- Traces for the agent in Intake. The Analyst can only diagnose what it can
+  observe. See [Observe Agents](/documentation/agents/observe-agents).
+- A default and fast model pair. `nemo setup` stores one, or you can pass
+  `--default-model` and `--fast-model` (Model Entity refs such as
+  `default/<model>`) on each command. The fast model reviews traces in each
+  evidence stream; the default model compiles the findings into Insights.
+
+<Note>
+
+If you installed NeMo Helix from PyPI, the analyst's two Git-hosted dependencies
+are not included in `nemo-helix[all]` and must be installed separately. Source
+checkouts and the platform images include them. See the
+[Insights plugin README](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-insights#install-analyst-dependencies-for-pypi-installations)
+for the install command.
+
+</Note>
+
+<Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
+
+### Telemetry Requirement
+
+The analysis selects traces by agent name, so the normalized `agent_name` on
+the agent's traces must match the `--agent` you pass. For OTLP, set
+`gen_ai.agent.name` on every span; Intake also normalizes `llm.agent.name` and
+`agent.name`. ATIF trajectories map their required `agent.name` automatically.
+
+## How an Analysis Run Works
+
+1. **Load traces.** The run reads the agent's traces and their spans from
+   Intake. `--since` and `--evaluation-id` narrow which traces are read.
+1. **Collect evidence.** Several evidence streams examine the traces in
+   parallel. Each stream either reports the problems it found or is skipped with a
+   reason.
+1. **Apply recurrence thresholds.** Isolated failures are dropped. Only
+   observations that recur often enough become Insight candidates. See
+   [Recurrence Thresholds](#recurrence-thresholds).
+1. **Compile Insights.** The default model turns candidates into Insights and
+   compares them with the agent's existing Open Insights. A new problem becomes a
+   new Insight; more evidence for an existing problem is appended to that
+   Insight's trace references. The Analyst does not change the title,
+   description, or status of an existing Insight.
+1. **Save the report.** The run files the Insights and saves an
+   `analysis-report` result that records what the run created, updated, and
+   left out.
+
+### Evidence Streams
+
+| Stream | Looks for | Skipped when |
+| ------ | --------- | ------------ |
+| `tool-issues` | Problems in tool calls, such as explicit tool failures, grouped by tool and issue type. | The traces contain no tool calls. |
+| `anomaly-and-patterns` | Statistical outliers, clusters of similar trajectories, and failures that recur with the same signature. | — |
+| `eval-failure-patterns` | Patterns among traces linked to failed evaluation results. | The traces have no evaluator results. |
+| `ethos-divergence` | Behavior that diverges from the agent's intended behavior, as described in an Ethos document. | No `--ethos` file was given. |
+| `user-sentiment` | User complaints in recorded user messages. | No embedding backend is configured. Analysis runs do not configure one, so this stream is always skipped. |
+
+Every stream is skipped with `No traces loaded` when the run finds no traces.
+
+### Recurrence Thresholds
+
+The Analyst only files an Insight for a problem that recurs:
+
+| Stream | Threshold | What is counted |
+| ------ | --------- | --------------- |
+| `tool-issues` | 3 | Independent cases |
+| `anomaly-and-patterns` | 3 | Distinct traces |
+
+An **independent case** is the evaluation test case name of the trace or, when
+the trace has none, the trace ID. Traces from the same evaluation test case
+count as one case, even when they come from separate sessions or repeated
+attempts. For example, three failing traces for one test case count as 1 of 3,
+and that tool issue is not filed.
+
+The thresholds are fixed; you cannot configure them. A run scoped with
+`--since` or `--evaluation-id`, or a run over a low-traffic agent, can see a
+real problem that does not yet meet them. The report lists these near misses
+so you can tell "nothing is wrong" apart from "not enough evidence yet". See
+[Read the Analysis Report](#read-the-analysis-report).
+
+## Run an Analysis On Demand
+
+Submit a run and wait for it to finish:
+
+```bash
+nemo insights analysis-runs create --agent my-agent --wait
+```
+
+With `--wait`, the command prints each job status change, then the final run.
+It exits non-zero unless the backing job completes. Without `--wait`, it
+returns as soon as the run is submitted.
+
+Useful options:
+
+| Option | Effect |
+| ------ | ------ |
+| `--since <timestamp>` | Analyze only traces that started at or after this ISO-8601 timestamp, such as `2026-10-01T00:00:00+00:00`. |
+| `--evaluation-id <id>` | Analyze only traces from one evaluation. |
+| `--ethos <path>` | Send an Ethos Markdown file describing the agent's intended behavior. This enables the `ethos-divergence` stream. |
+| `--default-model`, `--fast-model` | Override the model pair from `nemo setup`. If you pass only `--default-model`, the fast model falls back to the configured fast model, then to the default model. |
+| `--timeout-seconds <seconds>` | Timeout for the backing job. |
+
+The models are checked when you submit the run. A model that does not
+exist or uses an unsupported backend is rejected before anything is recorded.
+
+An on-demand run does not have a minimum trace count. A run that finds no traces
+still completes, files nothing, and reports `Analyzed 0 traces`.
+
+### Track a Run
+
+Each run is backed by an execute-agent job that has the same name as the run.
+`list` does not include job state; use `get` to see it:
+
+```bash
+nemo insights analysis-runs list --agent my-agent
+nemo insights analysis-runs get <run-name>
+nemo insights analysis-runs get <run-name> --wait
+```
+
+The `job` field in `get` shows the backing job's status: `completed`, `error`, or
+`cancelled` once the job finishes. A `job` of `null` means the submission never
+reached the job service. That run never finishes, so submit it again.
+
+## Read the Analysis Report
+
+The `analysis-report` result is the record of what one run did. Insights do not
+record which run created them. Download it like any other
+[job result](/documentation/agents/execute-agents-as-jobs#track-a-job-and-fetch-its-results):
+
+```bash
+nemo jobs results download analysis-report --job <run-name> -o analysis-report.txt
+cat analysis-report.txt
+```
+
+A report has a summary line, then one line per Insight created or updated, then
+notes about what the run left out:
+
+```text
+Analyzed 6 traces: 0 new insights, 0 existing insights with new evidence. Some observations did not meet minimum recurrence thresholds and were not promoted to insight candidates; see the analysis report for details.
+
+- no insights created or updated
+- below threshold: tool-issues knowledge_search explicit_tool_failure (2 of 3 independent cases)
+- skipped: ethos-divergence (No ethos document)
+- skipped: eval-failure-patterns (No evaluator results)
+- skipped: user-sentiment (No embedding backend configured)
+```
+
+| Line | Meaning |
+| ---- | ------- |
+| `- created: <title> [<id>] (<n> trace refs)` | The run filed a new Insight. |
+| `- updated: <id> (<n> trace refs)` | The run added new trace evidence to an existing Insight. |
+| `- no insights created or updated` | The run filed nothing. |
+| `- below threshold: tool-issues <tools> <issue type> (<count> of 3 independent cases)` | A tool issue recurred, but in too few independent cases. |
+| `- below threshold: anomaly-and-patterns <signature> (<count> of 3 traces)` | A failure pattern recurred, but in too few traces. |
+| `- ... and <n> more below threshold` | More near misses exist. The report lists the 5 closest to the threshold. |
+| `- skipped: <stream> (<reason>)` | An evidence stream did not run. The reason says why. |
+
+The summary line appears both in the report and in the job's Fabric run
+result. When any observation falls below a threshold, the summary ends with the
+sentence about minimum recurrence thresholds.
+
+When the report shows a `below threshold` line, you can:
+
+- Widen the run: drop or move back `--since`, or drop `--evaluation-id`.
+- Wait for more traffic and run again. For an evaluation, add test cases that
+  exercise the failing tool; repeating the same test case does not add
+  independent cases.
+- Supply the missing input for a skipped stream, such as `--ethos` or
+  evaluator results.
+
+## Run Analysis on a Schedule
+
+Opt an agent in to periodic analysis:
+
+```bash
+nemo insights analysis enable --agent my-agent
+nemo insights analysis status                    # all agents in the workspace
+nemo insights analysis status --agent my-agent
+nemo insights analysis disable --agent my-agent
+```
+
+`enable` stores the model pair that scheduled runs use: the `nemo setup` pair,
+or the pair from `--default-model` and `--fast-model`. Scheduled runs do not read
+your CLI configuration, so run `enable` again after you change the pair.
+
+A controller checks each opted-in agent every 60 seconds and submits a run when
+all of the following are true:
+
+- The scheduled time has passed since the agent's last successful run.
+- No analysis job is already active for the agent.
+- At least 10 new sessions have arrived since the last successful run. The
+  first scheduled run for an agent skips this check.
+
+Scheduled runs are incremental: each analyzes only traces since the last
+successful run. A trace that arrives while a run is in progress is still
+eligible for the next run. On-demand runs do not affect the schedule.
+
+`status` shows whether each agent is enabled and which model pair it uses. The
+scheduler's own state for an agent, including the last error, is available from Python:
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_insights_plugin.sdk import InsightsPluginResource
+
+client = NemoClient.from_config()
+insights_client = InsightsPluginResource(client)
+state = insights_client.analysis_run_statuses.get(workspace="default", agent="my-agent")
+print(state.status, state.last_successful_run_at, state.last_error)
+```
+
+`status` is `idle`, `running`, or `error`. When a scheduled job fails, the
+state is `error` and `last_error` records the job status.
+
+### Configure the Schedule
+
+The schedule is a deployment setting that applies to every opted-in agent. Set
+it in the `insights:` section of the platform configuration file:
+
+```yaml
+insights:
+  analyst:
+    enabled: true            # run the periodic analysis controller
+    frequency: daily         # daily or weekly
+    run_at_hour: 0           # local hour of day, 0-23
+    run_on_weekday: monday   # used only when frequency is weekly
+    timezone: UTC            # IANA name, such as America/Denver
+    job_profile: default     # jobs execution profile for scheduled runs
+    base_url: null           # platform URL passed to analyst jobs; unset uses the job's platform context
+```
+
+| Setting | Default | Description |
+| ------- | ------- | ----------- |
+| `enabled` | `true` | Whether the periodic analysis controller runs. |
+| `frequency` | `daily` | `daily` or `weekly`. |
+| `run_at_hour` | `0` | Hour of day that runs become due, in `timezone`. |
+| `run_on_weekday` | `monday` | Day of week runs become due. Used only with `weekly`. |
+| `timezone` | `UTC` | IANA time zone name. Runs keep their local hour across daylight saving changes. An unknown name fails validation. |
+| `job_profile` | `default` | Jobs execution profile for scheduled analyst jobs. |
+| `base_url` | unset | Platform base URL passed to analyst jobs. When unset, jobs use their active platform context. |
+
+## Review Insights
+
+Open **Observability > Insights** in NeMo Studio to review, resolve, delete, or
+reopen Insights. See [NeMo Studio Insights](/documentation/studio/insights).
+
+To list Insights from Python:
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_insights_plugin.sdk import InsightsPluginResource
+
+client = NemoClient.from_config()
+insights_client = InsightsPluginResource(client)
+page = insights_client.insights.list_insights(workspace="default", agent="my-agent", status="open")
+for insight in page.data:
+    print(f"[{insight.status}] {insight.title} ({len(insight.trace_refs)} traces)")
+```
+
+Each Insight has a `title`, a `description`, the `agent` it is about, a
+`status` (`open`, `resolved`, or `deleted`), and `trace_refs`, the Intake trace
+IDs cited as evidence. Later runs do not add evidence to resolved Insights, so a
+resolved problem that comes back can be filed as a new Insight.
+
+## Troubleshooting
+
+### The Run Completes but Files No Insights
+
+Download the `analysis-report` result and check it:
+
+- `Analyzed 0 traces`: no traces matched. Check that `--agent` matches the
+  agent name on the traces (see [Telemetry Requirement](#telemetry-requirement)),
+  that the workspace is correct, and that `--since` and `--evaluation-id` are
+  not too narrow.
+- `below threshold` lines: the problem is real but has not recurred enough.
+  See [Read the Analysis Report](#read-the-analysis-report).
+- Only `skipped` lines: no stream that ran found a problem.
+
+### Periodic Analysis Does Not Start
+
+- Check that the agent is enabled with `nemo insights analysis status`.
+- Check that `insights.analyst.enabled` is true.
+- Check that the scheduled time has passed in the configured `timezone`.
+- After the first scheduled run, a run starts only when at least 10 new sessions
+  have arrived since the last successful run.
+- If status shows no model pair, run `nemo insights analysis enable` again
+  with a model pair.
+
+### `create` Fails Without a Model Pair
+
+When `nemo setup` has not stored a model pair, pass `--default-model` and
+`--fast-model` explicitly.
+
+## Related Topics
+
+- [NeMo Studio Insights](/documentation/studio/insights)
+- [Observe Agents](/documentation/agents/observe-agents)
+- [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs)
+- [Full CLI Reference](/documentation/reference/cli-reference/full-cli-reference#nemo-insights)
