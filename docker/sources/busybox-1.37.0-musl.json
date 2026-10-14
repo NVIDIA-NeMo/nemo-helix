@@ -14,23 +14,29 @@
       "name": "busybox-no-cbq-patch",
       "version": "1.37.0",
       "license": "GPL-2.0-only",
-      "url": "https://web.archive.org/web/2024id_/https://bugs.busybox.net/attachment.cgi?id=9751",
-      "sha256": "6671a12c48dbcefb653fc8403d1f103a1e2eba4a49b1ee9a9c27da8aa2db80d4",
-      "filename": "busybox-1.37.0-no-cbq.patch"
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/54028ab642a011c458878f7393b1483f23ee1057/.patches/no-cbq.patch",
+      "sha256": "8451446ee0c7128f3eaca0322f113dadc11d1c05f616f6543a77908648f50785"
     },
     {
-      "name": "musl",
-      "version": "1.2.5",
-      "license": "MIT",
-      "url": "https://musl.libc.org/releases/musl-1.2.5.tar.gz",
-      "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4"
+      "name": "busybox-x86-hash-hackfix-patch",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/54028ab642a011c458878f7393b1483f23ee1057/.patches/hackfix-to-disable-HW-acceleration-for-MD5-SHA1-on-x86-1.37.patch",
+      "sha256": "02a518720e0a3dc451fc005187a32cd4b06513f5d6e0cccc432fd9ad7728bc07"
     },
     {
-      "name": "alpine-musl-getconf",
-      "version": "48b16204aeeda5bc1f87e49c6b8e23d9abb07c73",
-      "license": "BSD-2-Clause",
-      "url": "https://github.com/alpinelinux/aports/raw/48b16204aeeda5bc1f87e49c6b8e23d9abb07c73/main/musl/getconf.c",
-      "sha256": "d87d0cbb3690ae2c5d8cc218349fd8278b93855dd625deaf7ae50e320aad247c"
+      "name": "busybox-sha1-shani-musl-patch",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/54028ab642a011c458878f7393b1483f23ee1057/.patches/sha1_process_block64_shaNI-musl.patch",
+      "sha256": "9fc31a72297d1e8950ada8e88033daef684f5744a3b589a38597dbdcc1a7fd39"
+    },
+    {
+      "name": "busybox-docker-builder",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/54028ab642a011c458878f7393b1483f23ee1057/latest-1/musl/Dockerfile.builder",
+      "sha256": "674f88ea449f591a05a79976088caeae621dd5ff9d35ac032fde3aa752608861"
     }
   ]
 }

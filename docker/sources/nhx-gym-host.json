@@ -1,0 +1,57 @@
+{
+  "sources": [
+    {
+      "name": "ray",
+      "version": "2.58.0",
+      "license": "Apache-2.0",
+      "url": "https://github.com/ray-project/ray/archive/refs/tags/ray-2.58.0.tar.gz",
+      "sha256": "a9ea13cab24854ad6b802ef8da7fc8084bc4e1717b44737ae24a9192333b1cb1",
+      "covers": [
+        "python:ray@2.58.0"
+      ]
+    },
+    {
+      "name": "colorama",
+      "version": "0.4.6",
+      "license": "BSD-3-Clause",
+      "url": "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz",
+      "sha256": "08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44",
+      "covers": [
+        "python:colorama@0.4.6"
+      ],
+      "bundled_in": "ray (ray/thirdparty_files)"
+    },
+    {
+      "name": "idna",
+      "version": "3.15",
+      "license": "BSD-3-Clause",
+      "url": "https://files.pythonhosted.org/packages/82/77/7b3966d0b9d1d31a36ddf1746926a11dface89a83409bf1483f0237aa758/idna-3.15.tar.gz",
+      "sha256": "ca962446ea538f7092a95e057da437618e886f4d349216d2b1e294abfdb65fdc",
+      "covers": [
+        "python:idna@3.15"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "setuptools",
+      "version": "84.0.0",
+      "license": "MIT",
+      "url": "https://files.pythonhosted.org/packages/6d/44/f5da03a8ef95d369145c5bb53050e7877c9f3d312e128605fd9504829143/setuptools-84.0.0.tar.gz",
+      "sha256": "f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73",
+      "covers": [
+        "python:setuptools@84.0.0"
+      ],
+      "bundled_in": "the uv cache, which Gym reuses to build component venvs offline"
+    },
+    {
+      "name": "simple-launcher",
+      "version": "1.1.0.14",
+      "license": "BSD-3-Clause",
+      "url": "https://github.com/vsajip/simple_launcher/archive/2e1c7592574c4f42062fd3a5b1051ec02da4b543.tar.gz",
+      "sha256": "f2924fbe648314d0ab4a33c61fc52c536ce860743b674e98e9773a1bc5b84ec0",
+      "covers": [
+        "dotnet:Simple Launcher@1.1.0.14"
+      ]
+    }
+  ]
+}

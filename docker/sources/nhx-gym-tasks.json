@@ -1,0 +1,24 @@
+{
+  "sources": [
+    {
+      "name": "ray",
+      "version": "2.57.0",
+      "license": "Apache-2.0",
+      "url": "https://github.com/ray-project/ray/archive/refs/tags/ray-2.57.0.tar.gz",
+      "sha256": "75b8ab2eab971b4c1bfb1bbe1c4636951b746c04a2541f02d0ce0716189f547c",
+      "covers": [
+        "python:ray@2.57.0"
+      ]
+    },
+    {
+      "name": "simple-launcher",
+      "version": "1.1.0.14",
+      "license": "BSD-3-Clause",
+      "url": "https://github.com/vsajip/simple_launcher/archive/2e1c7592574c4f42062fd3a5b1051ec02da4b543.tar.gz",
+      "sha256": "f2924fbe648314d0ab4a33c61fc52c536ce860743b674e98e9773a1bc5b84ec0",
+      "covers": [
+        "dotnet:Simple Launcher@1.1.0.14"
+      ]
+    }
+  ]
+}

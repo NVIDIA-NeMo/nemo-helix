@@ -34,8 +34,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --output /app/.source-distributions/nhx-tasks && \
     python3 /usr/local/bin/collect-pinned-sources.py \
         --manifest /tmp/nhx-sources/busybox-1.37.0-musl.json \
+        --manifest /tmp/nhx-sources/alpine-3.23-musl.json \
         --manifest /tmp/nhx-sources/uv.json \
         --manifest /tmp/nhx-sources/nhx-tasks.json \
+        --installed-in /app/.venv/bin/python \
         --output /app/.source-distributions/nhx-tasks && \
     python3 /usr/local/bin/collect-cargo-crate-sources.py \
         --binary /bin/uv \

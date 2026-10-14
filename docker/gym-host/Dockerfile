@@ -74,7 +74,9 @@ RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
       -path '*/ray/jars/*' -print -quit)"
 
 # Sources of the host venv, each prefetched component venv, CPython, uv and its crates, and the Go
-# modules of every wandb-core binary. The uv cache holds the same package versions as the venvs.
+# modules of every wandb-core binary. The uv cache holds the same package versions as the venvs, plus
+# the setuptools uv built sdists with. docker/sources/nhx-gym-host.json pins ray, which has no sdist,
+# the packages ray bundles, that setuptools, and the source of distlib's Windows launchers.
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 COPY docker/sources/ /tmp/nhx-sources/
@@ -99,6 +101,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --output /source-distributions/nhx-gym-host && \
     python3 /usr/local/bin/collect-pinned-sources.py \
         --manifest /tmp/nhx-sources/uv.json \
+        --manifest /tmp/nhx-sources/nhx-gym-host.json \
+        --installed-in /opt/gym-host-venv/bin/python \
+        $(find "${NEMO_GYM_VENV_DIR}" -mindepth 3 -maxdepth 3 -type d -name .venv -printf '--installed-in %p/bin/python ') \
         --output /source-distributions/nhx-gym-host && \
     python3 /usr/local/bin/collect-cargo-crate-sources.py \
         --binary /bin/uv \
