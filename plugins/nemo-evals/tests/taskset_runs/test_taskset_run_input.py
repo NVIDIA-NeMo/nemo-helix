@@ -214,7 +214,8 @@ def test_shared_scoring_schema_has_correct_scope(spec_type):
     assert schema["fail_fast"]["default"] is False
     assert schema["fail_fast"]["description"] == (
         "Fail on the first metric error instead of recording an errored score. "
-        "On Kubernetes runs it fails only that task's Job."
+        "On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks "
+        "budget can also fail the run and cancel remaining task Jobs."
     )
 
 

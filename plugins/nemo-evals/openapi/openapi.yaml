@@ -2631,7 +2631,8 @@ components:
           type: boolean
           title: Fail Fast
           description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails only that task's Job.
+            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
+            budget can also fail the run and cancel remaining task Jobs.
           default: false
         labels:
           additionalProperties:
@@ -2886,7 +2887,8 @@ components:
           type: boolean
           title: Fail Fast
           description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails only that task's Job.
+            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
+            budget can also fail the run and cancel remaining task Jobs.
           default: false
         labels:
           additionalProperties:

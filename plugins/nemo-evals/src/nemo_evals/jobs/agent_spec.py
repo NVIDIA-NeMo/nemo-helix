@@ -813,7 +813,8 @@ class _AgentEvalSpecCommon(BaseModel):
     fail_fast: bool = Field(
         default=False,
         description="Fail on the first metric error instead of recording an errored score. "
-        "On Kubernetes runs it fails only that task's Job.",
+        "On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks "
+        "budget can also fail the run and cancel remaining task Jobs.",
     )
     labels: dict[str, str] = Field(
         default_factory=dict,
