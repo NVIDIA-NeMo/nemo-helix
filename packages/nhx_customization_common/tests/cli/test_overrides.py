@@ -31,14 +31,14 @@ class _ContextState:
 
 
 def _build_app(calls: list[dict[str, object]]) -> typer.Typer:
-    """Generated-shaped app (stub ``run``/``submit``) with the overrides applied."""
+    """Generated-shaped app (stub ``run`` verb and submit callback) with the overrides applied."""
     app = typer.Typer(no_args_is_help=False)
 
     @app.command("run")
     def generated_run() -> None:  # pragma: no cover - should be dropped
         raise AssertionError("overrides should remove generated run commands")
 
-    @app.command("submit")
+    @app.callback(invoke_without_command=True)
     def generated_submit(typer_ctx: typer.Context, **kwargs: object) -> None:
         calls.append(dict(kwargs))
 
