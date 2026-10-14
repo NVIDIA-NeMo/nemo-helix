@@ -16,6 +16,7 @@ import signal
 from pathlib import Path
 from typing import Any, Optional, cast
 
+from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.nccl import get_nccl_ib_env
@@ -44,7 +45,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.checkpoints import (
 from nhx.rl.tasks.training.chat_templates import apply_chat_template_to_checkpoint
 from nhx.rl.tasks.training.errors.parser import parse_error_from_output
 from nhx.rl.tasks.training.integrations import find_logger_mlflow_run_id
-from nhx.rl.tasks.training.protocol import LibraryConfig, TrainingBackend
+from nhx.rl.tasks.training.protocol import LibraryConfig, TrainingBackend, TrainingPaused
 
 from .dpo_config import compile_dpo_config
 from .grpo_config import compile_grpo_config
@@ -129,6 +130,9 @@ class NemoRLBackend(TrainingBackend):
 
         Returns:
             TrainingMetrics with results from the training run
+
+        Raises:
+            TrainingPaused: The driver stopped for a pause after saving its checkpoint.
         """
         progress.report_running("training", backend=self.backend_type.value)
 
@@ -200,6 +204,9 @@ class NemoRLBackend(TrainingBackend):
                 else:
                     os.environ[key] = original
 
+        if exit_code == PAUSE_EXIT_CODE:
+            logger.info("Training stopped for a pause after saving its checkpoint")
+            raise TrainingPaused()
         if exit_code != 0:
             parsed = parse_error_from_output(bootstrap.driver_output, exit_code)
             raise parsed.to_exception()

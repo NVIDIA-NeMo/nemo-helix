@@ -39,6 +39,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     ResourcesLimitsSpec,
     ResourcesRequestsSpec,
     ResourcesSpec,
+    StepLifecycle,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity
@@ -643,6 +644,7 @@ def _build_training_step(
         executor=executor,
         environment=environment,
         config=step_config.model_dump(mode="json"),
+        lifecycle=StepLifecycle(pause_deadline_seconds=config.training_pause_deadline_seconds),
     )
 
 
