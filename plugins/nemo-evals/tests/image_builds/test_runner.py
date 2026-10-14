@@ -10,8 +10,9 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from nemo_builder_plugin.entities import ContainerImage, Provenance
+from nemo_builder_plugin.schema import FileSetSource, SubmitBuildResponse
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.builder import ArchiveSource, BuilderImage, SubmittedBuild
 from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity
 from nemo_evals.image_builds.planning import TaskArchive
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
@@ -22,6 +23,30 @@ from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 Outcome = Literal["ready", "failed"]
 _SEPARATE_VERIFIER = {"verifier": {"environment_mode": "separate"}}
+
+
+def _container_image(
+    name: str, status: Literal["pending", "ready", "failed"] = "pending", *, detail: str | None = None
+) -> ContainerImage:
+    return ContainerImage(
+        name=name,
+        workspace="default",
+        status=status,
+        status_detail=detail,
+        registry="registry.test",
+        repository=f"default/{name}",
+        digest="sha256:" + "c" * 64 if status == "ready" else None,
+        provenance=Provenance(
+            build_set=name.rsplit("-", 1)[0],
+            revision=int(name.rsplit("-", 1)[1]),
+            job=f"default/builder-{name}",
+            request_digest="sha256:" + "a" * 64,
+        ),
+    )
+
+
+def _submitted(name: str, revision: int) -> SubmitBuildResponse:
+    return SubmitBuildResponse(job=f"builder-{name}-{revision}", images=[_container_image(f"{name}-{revision}")])
 
 
 class _Jobs:
@@ -41,27 +66,27 @@ class _Builder:
         self.images: dict[str, str] = {}
         self.submits = 0
 
-    async def get_image(self, name: str) -> BuilderImage | None:
+    async def get_image(self, name: str) -> ContainerImage | None:
         context = self.images.get(name)
         if context is None:
             return None
         outcome = self.outcomes[context]
-        return BuilderImage(
-            name=name,
-            status=outcome,
-            image_ref=f"registry.test/{name}@sha256:{'c' * 64}" if outcome == "ready" else None,
-            status_detail="kaniko exited 1" if outcome == "failed" else None,
-        )
+        return _container_image(name, outcome, detail="kaniko exited 1" if outcome == "failed" else None)
 
-    async def submit(self, *, name: str, revision: int, source: ArchiveSource, dockerfile: str) -> SubmittedBuild:
+    async def submit(self, *, name: str, revision: int, source: FileSetSource, dockerfile: str) -> SubmitBuildResponse:
         if self.refuse:
             raise PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed to build"}))
+        assert source.context_path is not None
         self.submits += 1
         self.images[f"{name}-{revision}"] = source.context_path
-        return SubmittedBuild(image=BuilderImage(name=f"{name}-{revision}", status="pending"), job=f"builder-{name}")
+        return _submitted(name, revision)
 
 
 async def _no_sleep(seconds: float) -> None:
+    pass
+
+
+async def _allow(workspace: str) -> None:
     pass
 
 
@@ -78,7 +103,7 @@ def archive(monkeypatch) -> list[str]:
 
 async def _start(entity_store, store_task, *, config: dict, allowed: list[str] | None = None) -> TaskImageBuildSpec:
     digest = await store_task(config=config)
-    service = ImageBuildService(entity_store, _Jobs())
+    service = ImageBuildService(entity_store, _Jobs(), _allow)
     await service.request_build("default", "sort-task", digest, ImageBuildRequest(allowed_registries=allowed or []))
     return TaskImageBuildSpec(workspace="default", task="sort-task", revision_digest=digest, attempt=1)
 
@@ -171,8 +196,8 @@ async def test_a_build_that_never_finishes_times_out(entity_store, store_task, a
     spec = await _start(entity_store, store_task, config={})
 
     class _Stuck(_Builder):
-        async def get_image(self, name: str) -> BuilderImage | None:
-            return None if name not in self.images else BuilderImage(name=name, status="pending")
+        async def get_image(self, name: str) -> ContainerImage | None:
+            return None if name not in self.images else _container_image(name)
 
     ticks = iter(range(0, 10_000, 100))
     build = await _run(entity_store, spec, _Stuck({}), timeout=250, clock=lambda: next(ticks))

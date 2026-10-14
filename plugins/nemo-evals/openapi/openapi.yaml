@@ -2165,6 +2165,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImageBuild'
+        '403':
+          description: The caller may not submit container image builds
         '404':
           description: Task or revision not found
         '409':

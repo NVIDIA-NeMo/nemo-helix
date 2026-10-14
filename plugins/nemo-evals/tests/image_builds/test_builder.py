@@ -10,19 +10,37 @@ from typing import Literal
 
 import httpx
 import pytest
-from nemo_evals.image_builds.builder import (
-    ArchiveSource,
-    BuilderImage,
-    HttpImageBuilder,
-    SubmittedBuild,
-    archive_source,
-    builder_name,
-    ensure_build,
-)
+from nemo_builder_plugin.entities import ContainerImage, Provenance
+from nemo_builder_plugin.schema import FileSetSource, SubmitBuildResponse
+from nemo_evals.image_builds.builder import HttpImageBuilder, archive_source, builder_name, ensure_build
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 
-_SOURCE = ArchiveSource(fileset="default/harbor-tasks", archive="sort/abc/task_archive", context_path="sort/tests")
+_SOURCE = FileSetSource(fileset="default/harbor-tasks", archive="sort/abc/task_archive", context_path="sort/tests")
+
+
+def _container_image(
+    name: str, status: Literal["pending", "ready", "failed"] = "pending", *, detail: str | None = None
+) -> ContainerImage:
+    return ContainerImage(
+        name=name,
+        workspace="default",
+        status=status,
+        status_detail=detail,
+        registry="registry.test",
+        repository=f"default/{name}",
+        digest="sha256:" + "c" * 64 if status == "ready" else None,
+        provenance=Provenance(
+            build_set=name.rsplit("-", 1)[0],
+            revision=int(name.rsplit("-", 1)[1]),
+            job=f"default/builder-{name}",
+            request_digest="sha256:" + "a" * 64,
+        ),
+    )
+
+
+def _submitted(name: str, revision: int) -> SubmitBuildResponse:
+    return SubmitBuildResponse(job=f"builder-{name}-{revision}", images=[_container_image(f"{name}-{revision}")])
 
 
 class _Builder:
@@ -30,15 +48,15 @@ class _Builder:
         self.statuses = revisions
         self.submitted: list[int] = []
 
-    async def get_image(self, name: str) -> BuilderImage | None:
+    async def get_image(self, name: str) -> ContainerImage | None:
         revision = int(name.rsplit("-", 1)[1])
         if revision > len(self.statuses):
             return None
-        return BuilderImage(name=name, status=self.statuses[revision - 1])
+        return _container_image(name, self.statuses[revision - 1])
 
-    async def submit(self, *, name: str, revision: int, source: ArchiveSource, dockerfile: str) -> SubmittedBuild:
+    async def submit(self, *, name: str, revision: int, source: FileSetSource, dockerfile: str) -> SubmitBuildResponse:
         self.submitted.append(revision)
-        return SubmittedBuild(image=BuilderImage(name=f"{name}-{revision}", status="pending"), job=f"builder-{name}")
+        return _submitted(name, revision)
 
 
 @pytest.mark.parametrize(
@@ -88,13 +106,7 @@ async def test_http_builder_submits_one_unnamed_spec_per_image() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(
-            201,
-            json={
-                "job": "builder-harbor-env-0123456789ab-2",
-                "images": [{"name": "harbor-env-0123456789ab-2", "status": "pending", "registry": "r"}],
-            },
-        )
+        return httpx.Response(201, json=_submitted("harbor-env-0123456789ab", 2).model_dump(mode="json"))
 
     submitted = await _http_builder(handler).submit(
         name="harbor-env-0123456789ab", revision=2, source=_SOURCE, dockerfile="Dockerfile"
@@ -116,23 +128,25 @@ async def test_http_builder_submits_one_unnamed_spec_per_image() -> None:
             }
         ],
     }
-    assert submitted == SubmittedBuild(
-        image=BuilderImage(name="harbor-env-0123456789ab-2", status="pending"), job="builder-harbor-env-0123456789ab-2"
-    )
+    assert submitted.job == "builder-harbor-env-0123456789ab-2"
+    assert [(image.name, image.status) for image in submitted.images] == [("harbor-env-0123456789ab-2", "pending")]
 
 
 async def test_http_builder_reads_an_image_and_reports_a_missing_one_as_none() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/harbor-env-0123456789ab-1"):
             return httpx.Response(
-                200, json={"name": "harbor-env-0123456789ab-1", "status": "ready", "image_ref": "r@x"}
+                200, json=_container_image("harbor-env-0123456789ab-1", "ready").model_dump(mode="json")
             )
         return httpx.Response(404, json={"detail": "not found"})
 
     builder = _http_builder(handler)
 
-    assert await builder.get_image("harbor-env-0123456789ab-1") == BuilderImage(
-        name="harbor-env-0123456789ab-1", status="ready", image_ref="r@x"
+    image = await builder.get_image("harbor-env-0123456789ab-1")
+    assert image is not None
+    assert (image.status, image.image_ref) == (
+        "ready",
+        f"registry.test/default/harbor-env-0123456789ab-1@sha256:{'c' * 64}",
     )
     assert await builder.get_image("harbor-env-0123456789ab-2") is None
 

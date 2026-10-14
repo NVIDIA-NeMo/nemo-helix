@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -38,6 +39,14 @@ _ENDED_JOB_STATUSES = frozenset({"completed", "error", "cancelled"})
 
 class ImageBuildJobConflictError(Exception):
     """The build's Job name is held by a Job that runs something else."""
+
+
+class ImageBuildForbiddenError(Exception):
+    """The caller may not submit container image builds in the workspace."""
+
+
+#: Raises :class:`ImageBuildForbiddenError` unless the caller may submit Builder builds in the workspace.
+AuthorizeBuilds = Callable[[str], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -75,9 +84,10 @@ class JobsServiceBuildJobs:
 class ImageBuildService:
     """Image builds of task revisions, stored as children of the revision they build."""
 
-    def __init__(self, entity_client: EntityClient, jobs: BuildJobs) -> None:
+    def __init__(self, entity_client: EntityClient, jobs: BuildJobs, authorize_builds: AuthorizeBuilds) -> None:
         self.entity_client = entity_client
         self.jobs = jobs
+        self.authorize_builds = authorize_builds
 
     async def request_build(
         self, workspace: str, name: str, revision: str, request: ImageBuildRequest
@@ -92,10 +102,12 @@ class ImageBuildService:
             UnsupportedTaskKindError: The task isn't a Harbor task.
             ImagePlanError: The task's configuration can't be built at all.
             ImageBuildJobConflictError: The build's Job name is held by another Job.
+            ImageBuildForbiddenError: The caller may not submit Builder builds in the workspace.
         """
         found = await self._revision(workspace, name, revision)
         if found is None:
             return None
+        await self.authorize_builds(workspace)
         head, task_revision = found
         if not isinstance(task_revision.spec, HarborTaskDefinition):
             raise UnsupportedTaskKindError(

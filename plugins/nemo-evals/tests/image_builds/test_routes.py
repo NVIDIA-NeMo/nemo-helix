@@ -9,16 +9,17 @@ import asyncio
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from nemo_evals.api.dependencies import get_image_build_service
 from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.models import TaskImageBuildEntity, build_job_name
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
-from nemo_evals.image_builds.service import BuildJob, ImageBuildService
+from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
 from nemo_evals.revisions import get_revision
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, PermissionDeniedError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
@@ -52,11 +53,27 @@ def jobs() -> _Jobs:
     return _Jobs()
 
 
+class _Authorizer:
+    def __init__(self) -> None:
+        self.allowed = True
+        self.checked: list[str] = []
+
+    async def __call__(self, workspace: str) -> None:
+        self.checked.append(workspace)
+        if not self.allowed:
+            raise ImageBuildForbiddenError(f"You may not submit container image builds in workspace {workspace}")
+
+
 @pytest.fixture
-def client(entity_store, jobs) -> TestClient:
+def authorizer() -> _Authorizer:
+    return _Authorizer()
+
+
+@pytest.fixture
+def client(entity_store, jobs, authorizer) -> TestClient:
     app = FastAPI()
     app.include_router(image_builds_routes.router, prefix="/v2/workspaces/{workspace}")
-    app.dependency_overrides[get_image_build_service] = lambda: ImageBuildService(entity_store, jobs)
+    app.dependency_overrides[get_image_build_service] = lambda: ImageBuildService(entity_store, jobs, authorizer)
     return TestClient(app)
 
 
@@ -95,6 +112,37 @@ def test_request_starts_a_build_and_its_job(client, store_task, jobs) -> None:
     assert step.executor.container.command == ["nemo_evals.tasks.task_image_build"]
     assert step.executor.resources.requests.memory == "128Mi"
     assert request.spec == {"workspace": "default", "task": "sort-task", "revision_digest": digest, "attempt": 1}
+
+
+def test_a_caller_who_may_not_build_is_forbidden_before_anything_starts(
+    client, store_task, jobs, authorizer, entity_store
+) -> None:
+    """Builder trusts evals' own permissions, so evals must check its caller's before a Job builds as them."""
+    digest = _store(store_task)
+    authorizer.allowed = False
+
+    response = client.post(f"{_BASE}/{digest}/image-builds")
+
+    assert response.status_code == 403
+    assert authorizer.checked == ["default"]
+    assert jobs.created == {}
+    assert client.get(f"{_BASE}/{digest}/image-builds").json()["data"] == []
+
+
+async def test_the_build_check_authorizes_builders_submit_route_as_the_caller(entity_store) -> None:
+    checked: list[tuple[str, str]] = []
+
+    async def authorize(method: str, path: str) -> None:
+        checked.append((method, path))
+        raise HTTPException(status_code=403, detail="Access to taskset member denied")
+
+    service = get_image_build_service(
+        "team a", entity_store, AsyncNemoClient(base_url="http://platform.test"), authorize
+    )
+
+    with pytest.raises(ImageBuildForbiddenError, match="workspace team a"):
+        await service.authorize_builds("team a")
+    assert checked == [("POST", "/apis/builder/v2/workspaces/team%20a/builds")]
 
 
 def test_request_by_tag_builds_the_revision_the_tag_names(client, store_task) -> None:

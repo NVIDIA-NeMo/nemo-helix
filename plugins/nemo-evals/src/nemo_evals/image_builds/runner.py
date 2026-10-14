@@ -181,9 +181,10 @@ async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTa
         image.status = "failed"
         image.error = f"Builder refused the build: {exc}"
         return
-    image.builder_image = submitted.image.name
+    builder_image = submitted.images[0]
+    image.builder_image = builder_image.name
     image.build_job = submitted.job
-    _apply(image, submitted.image.status, submitted.image.image_ref, submitted.image.status_detail)
+    _apply(image, builder_image.status, builder_image.image_ref, builder_image.status_detail)
 
 
 async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:

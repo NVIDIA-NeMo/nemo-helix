@@ -16,7 +16,7 @@ from nemo_evals.authz import scope
 from nemo_evals.entities import MAX_NAME_LENGTH, NAME_PATTERN
 from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest
 from nemo_evals.image_builds.planning import ImagePlanError
-from nemo_evals.image_builds.service import ImageBuildJobConflictError, ImageBuildService
+from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildJobConflictError, ImageBuildService
 from nemo_evals.revisions import RevisionNotFoundError
 from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
@@ -50,6 +50,7 @@ router = APIRouter()
     response_description="The build started, or the one already running or done",
     status_code=status.HTTP_202_ACCEPTED,
     responses={
+        status.HTTP_403_FORBIDDEN: {"description": "The caller may not submit container image builds"},
         status.HTTP_404_NOT_FOUND: {"description": "Task or revision not found"},
         status.HTTP_409_CONFLICT: {"description": "The build's Job name is held by another Job"},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "The task's images can't be built"},
@@ -75,6 +76,8 @@ async def request_task_image_build(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except (UnsupportedTaskKindError, ImagePlanError) as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
+    except ImageBuildForbiddenError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
     except ImageBuildJobConflictError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
     except PermissionDeniedError as e:
