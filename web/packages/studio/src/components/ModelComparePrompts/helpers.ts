@@ -5,8 +5,8 @@ import { FileFormat, InputFileSchemaType } from '@nemo/common/src/types';
 import { extractUserFriendlyKeysFromRow, resolveKeyPath } from '@nemo/common/src/utils/file';
 import { detectFileStructure, validateFileFormat } from '@nemo/common/src/utils/fileValidation';
 import { type FileSampleMethod, sampleIndices } from '@nemo/common/src/utils/sampleTextLines';
-import type { DatasetInputFileResult } from '@studio/components/DatasetInputFile';
 import type { PromptRow } from '@studio/components/ModelComparePrompts/types';
+import type { DatasetInputFileResult } from '@studio/types/dataset';
 
 /** Builds prompt rows from parsed dataset rows using the shared sampling controls. */
 export function buildPromptRowsFromParsedRows(
@@ -37,10 +37,9 @@ export function buildPromptRowsFromParsedRows(
 }
 
 /**
- * Inline upload parser. Mirrors `DatasetInputFile`'s file path but runs without
- * its full validation UI — errors surface as a small inline banner under the
- * picker. We can't reuse `DatasetInputFile` here because we want a single
- * dropdown that owns both sample selection and upload.
+ * Inline upload parser. Runs without a full validation UI — errors surface as a
+ * small inline banner under the picker, because a single dropdown owns both
+ * sample selection and upload.
  */
 export async function parseUploadedFile(
   file: File
