@@ -1576,6 +1576,49 @@ run_host_contracts() {
         --junitxml="${K8S_JUNIT_XML}"
 }
 
+# Capture the namespace's state before teardown deletes the cluster. A failed request through the
+# gateway can only be traced to Envoy, the API, or the IdP from these logs, and nothing after
+# this script runs can still reach the cluster.
+collect_k8s_diagnostics() {
+    local diagnostics="$1"
+    local context="$2"
+    local kubeconfig="$3"
+    local pod
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        k8s_kubectl_command "${context}" "${kubeconfig}" -n "${HELM_NAMESPACE}" logs --all-containers --prefix --timestamps
+        return
+    fi
+    if [[ ! -f "${kubeconfig}" ]]; then
+        echo "Skipping Kubernetes diagnostics: kubeconfig not found: ${kubeconfig}" >&2
+        return
+    fi
+
+    mkdir -p "${diagnostics}/k8s/logs"
+    k8s_kubectl_command "${context}" "${kubeconfig}" get pods -A -o wide \
+        >"${diagnostics}/k8s/pods-all-namespaces.txt" 2>&1 || true
+    k8s_kubectl_command "${context}" "${kubeconfig}" -n "${HELM_NAMESPACE}" get all -o wide \
+        >"${diagnostics}/k8s/resources.txt" 2>&1 || true
+    k8s_kubectl_command "${context}" "${kubeconfig}" -n "${HELM_NAMESPACE}" get events --sort-by=.lastTimestamp \
+        >"${diagnostics}/k8s/events.txt" 2>&1 || true
+    k8s_kubectl_command "${context}" "${kubeconfig}" -n "${HELM_NAMESPACE}" describe pods \
+        >"${diagnostics}/k8s/pods-describe.txt" 2>&1 || true
+
+    for pod in $(k8s_kubectl_command "${context}" "${kubeconfig}" -n "${HELM_NAMESPACE}" get pods -o name 2>/dev/null); do
+        pod="${pod#pod/}"
+        k8s_kubectl_command "${context}" "${kubeconfig}" -n "${HELM_NAMESPACE}" logs "${pod}" \
+            --all-containers --prefix --timestamps \
+            >"${diagnostics}/k8s/logs/${pod}.log" 2>&1 || true
+        # Only a restarted container has a previous log; keep the file only when it has one.
+        k8s_kubectl_command "${context}" "${kubeconfig}" -n "${HELM_NAMESPACE}" logs "${pod}" \
+            --all-containers --prefix --timestamps --previous \
+            >"${diagnostics}/k8s/logs/${pod}.previous.log" 2>/dev/null || true
+        if [[ ! -s "${diagnostics}/k8s/logs/${pod}.previous.log" ]]; then
+            rm -f "${diagnostics}/k8s/logs/${pod}.previous.log"
+        fi
+    done
+}
+
 run_k8s_tests() {
     local diagnostics
     local cluster_name
@@ -1609,6 +1652,7 @@ run_k8s_tests() {
     if [[ "${DRY_RUN}" != "true" ]]; then
         cp "$(k8s_port_forward_log_file_for_cluster "${cluster_name}")" "${diagnostics}/port-forward.log" 2>/dev/null || true
     fi
+    collect_k8s_diagnostics "${diagnostics}" "${context}" "${kubeconfig}"
     set -e
 
     if [[ "${K8S_KEEP_CLUSTER}" != "1" ]]; then

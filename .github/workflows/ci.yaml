@@ -1664,10 +1664,7 @@ jobs:
           NHX_ZITADEL_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
           NHX_ZITADEL_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_ZITADEL_K8S_IMAGE_PULL_SECRET }}
           NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
-      - name: Collect Kubernetes logs
-        if: always() && matrix.backend == 'kubernetes'
-        shell: bash
-        run: e2e/k8s/scripts/collect_k8s_logs.sh
+      # run.sh writes cluster diagnostics into E2E_SERVICES_LOG_DIR before it deletes the cluster.
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1676,7 +1673,6 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
           path: |
-            k8s-logs/
             report-auth-idp-${{ matrix.runtime }}.xml
             ${{ runner.temp }}/e2e-services-logs/
       - name: Delete kind cluster
