@@ -496,7 +496,8 @@ def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tup
         )
         pod_info = {
             "name": pod.metadata.name,  # type: ignore
-            "phase": pod.status.phase,  # type: ignore
+            # Not "phase": the task's own code reports its progress under that key.
+            "pod_phase": pod.status.phase,  # type: ignore
             "conditions": [],
             "containers": [],
             "events": None,
