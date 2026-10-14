@@ -26,8 +26,6 @@ jobs:
       - name: Check inactive pull requests
         uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
         with:
-          # Enable mutations only after reviewing the dry-run candidates.
-          debug-only: true
           days-before-issue-stale: -1
           days-before-issue-close: -1
           days-before-pr-close: 14
