@@ -11,7 +11,7 @@
 # nhx-python-dev-base-builder - runtime base + dev tools for building native extensions
 #######
 
-ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
+ARG NHX_PYTHON_IMAGE=python:3.13.16-slim-trixie
 FROM ${NHX_PYTHON_IMAGE} AS nhx-python-base-builder
 
 COPY docker/scripts/collect-apt-sources.sh \

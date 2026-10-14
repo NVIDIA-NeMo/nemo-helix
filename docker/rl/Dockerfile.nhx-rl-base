@@ -26,10 +26,10 @@ ARG NEMO_RL_REPO=https://github.com/soluwalana/RL.git
 ARG NEMO_RL_REF=
 
 # Stay on uv 0.11.x: 0.11.18's quinn-proto is vulnerable, and 0.12 breaks us.
-# Copy CPython from bookworm. uv has no linux-gnu 3.13.15, and a trixie build
+# Copy CPython from bookworm rather than uv; a trixie build
 # needs OpenSSL 3.3, which this Ubuntu 24.04 base does not have.
 ARG UV_VERSION=0.11.33
-ARG PYTHON_VERSION=3.13.15
+ARG PYTHON_VERSION=3.13.16
 ARG CPYTHON_IMAGE=python:${PYTHON_VERSION}-slim-bookworm
 ARG CMAKE_VERSION=4.0.3
 
@@ -77,8 +77,8 @@ RUN ARCH="$(uname -m)" && \
 COPY --from=cpython /usr/local /opt/cpython
 RUN chmod -R a+rX /opt/cpython
 
-# uv installs and syncs. UV_PYTHON must be this binary: a bare 3.13.15 misses
-# linux-gnu in uv's catalog, and RL's .python-version would pin 3.13.14.
+# uv installs and syncs. UV_PYTHON must be this patched binary rather than
+# the older interpreter pinned by RL's .python-version.
 # Retries cover large GitHub wheels under BuildKit.
 ARG UV_VERSION
 ENV UV_PYTHON=/opt/cpython/bin/python3.13 \
