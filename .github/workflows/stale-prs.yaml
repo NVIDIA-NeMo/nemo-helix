@@ -28,14 +28,14 @@ jobs:
         with:
           days-before-issue-stale: -1
           days-before-issue-close: -1
-          days-before-pr-close: 14
+          days-before-pr-stale: 30
           stale-pr-label: stale
           exempt-pr-labels: keep-open
           stale-pr-message: >-
-            This PR has had no activity for 60 days. It will be closed after
-            another 14 days without activity. Please comment or push an update
+            This PR has had no activity for 30 days. It will be closed after
+            another 7 days without activity. Please comment or push an update
             if you plan to continue. Maintainers can add `keep-open` for work
             that is intentionally paused or waiting on review.
           close-pr-message: >-
-            Closing this PR after 14 additional days without activity.
+            Closing this PR after 7 additional days without activity.
             Please reopen it when you're ready to continue.
