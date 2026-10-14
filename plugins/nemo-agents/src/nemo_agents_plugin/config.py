@@ -74,6 +74,16 @@ class DeploymentsRunnerConfig(BaseModel):
         default=8000,
         description="Container port the agent server listens on (and readiness probe target).",
     )
+    readiness_probe_timeout_seconds: int = Field(
+        default=1,
+        ge=1,
+        description="Readiness probe timeout in seconds for newly created agent containers.",
+    )
+    readiness_probe_failure_threshold: int = Field(
+        default=12,
+        ge=1,
+        description="Consecutive readiness probe failures before Kubernetes marks an agent pod unready.",
+    )
     gateway_url_override: str | None = Field(
         default=None,
         description=(
