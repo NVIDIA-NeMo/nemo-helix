@@ -19,6 +19,7 @@ from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrialStatus
 from nhx_evals_sdk.enums import ModelFormat
 from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
@@ -119,8 +120,22 @@ class FabricCandidateEvaluator:
         with self._trace_lock:
             self._record_traces(result, trial_number=trial_number, rep=rep, metadata=overlay_metadata)
             self._write_trace_map()
+        runtime_failure = ""
+        for trial in result.trials:
+            if trial.status == AgentEvalTrialStatus.FAILED:
+                runtime_failure = _bounded_diagnostics(
+                    f"task={trial.task_id} error_type={trial.metadata.get('error_type')} "
+                    f"error={trial.metadata.get('error')} timeout_s={self._timeout_s}"
+                )
+                logger.warning("Failed Fabric candidate trial: %s", runtime_failure)
+        try:
+            aggregate_metrics = reduce_agent_eval_scores(result.scores, self._metric_names)
+        except CandidateEvaluationError as exc:
+            if runtime_failure:
+                raise CandidateEvaluationError(f"{exc} Last runtime failure: {runtime_failure}") from exc
+            raise
         return CandidateEvaluationResult(
-            aggregate_metrics=reduce_agent_eval_scores(result.scores, self._metric_names),
+            aggregate_metrics=aggregate_metrics,
             scores=tuple(result.scores),
         )
 
@@ -218,9 +233,13 @@ def reduce_agent_eval_scores(scores: Sequence[AgentEvalTaskScore], metric_names:
     for metric_name in metric_names:
         values: list[float] = []
         skipped = 0
+        last_diagnostic = ""
         for score in scores:
             if score.status != AgentEvalScoreStatus.COMPLETED:
                 skipped += 1
+                last_diagnostic = _bounded_diagnostics(
+                    f"task={score.task_id} metric={score.metric_type}: {score.diagnostics}"
+                )
                 logger.warning(
                     "Skipping non-completed agent-eval score for candidate reduction (metric=%s task=%s status=%s): %s",
                     score.metric_type,
@@ -234,6 +253,8 @@ def reduce_agent_eval_scores(scores: Sequence[AgentEvalTaskScore], metric_names:
                     values.append(numeric_metric_value(output.value, metric_name=metric_name))
         if not values:
             detail = f" ({skipped} non-completed score(s) skipped)" if skipped else ""
+            if last_diagnostic:
+                detail += f". Last score diagnostic: {last_diagnostic}"
             raise CandidateEvaluationError(f"Agent evaluation did not produce metric output {metric_name!r}{detail}.")
         if skipped:
             logger.info(
