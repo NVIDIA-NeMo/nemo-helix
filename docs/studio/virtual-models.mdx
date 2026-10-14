@@ -16,25 +16,28 @@ Use **Models > Virtual Models** in the NeMo Studio workspace sidebar to inspect 
 
 ## Virtual Model List
 
-The Virtual Models table shows all user-created virtual models in the current workspace. Controller-managed passthrough routes are hidden. Select a row or choose **View** from the row actions menu to open the details panel.
+The Virtual Models table shows all user-created virtual models in the current workspace. Controller-managed passthrough routes are hidden. Select a row or choose **View** from the row actions menu to open the virtual model detail page.
 
 | Action | Where | Result |
 |--------|-------|--------|
-| View details | Select a row or row actions > **View** | Opens the virtual model details panel. |
-| Search | Name search bar | Filters the list to virtual models whose names match the query. |
+| View details | Select a row or row actions > **View** | Opens the virtual model detail page on the **Details** tab. |
+| Chat | Row actions > **Chat** | Opens the virtual model detail page on the **Chat** tab. |
+| Search | **Search by name...** search bar | Filters the list to virtual models whose names match the query. |
 | Filter by base model | **Default Model** filter | Shows only virtual models backed by the selected base model. |
 | Filter by date | **Created At** filter | Narrows results to a specific creation date range. |
-| Delete a virtual model | Row actions > **Delete** | Removes the virtual model. Requires typing the model name to confirm. |
+| Delete a virtual model | Row actions > **Delete** | Removes the virtual model and its middleware pipelines after you confirm. |
 
-The table shows each virtual model's name, default model, middleware call count, and creation time.
+The table shows each virtual model's name, default model, middleware call count (or **None**), and creation time.
 
 Virtual models are created and updated through the `nemo inference virtual-models` CLI or the Inference Gateway API. NeMo Studio reflects the current workspace state.
 
 ## Virtual Model Details
 
-Selecting a row opens a details panel with the full configuration of a single virtual model.
+Selecting a row opens the detail page for a single virtual model. The page has two tabs: **Details** shows the virtual model's full configuration, and **Chat** lets you send messages through the virtual model.
 
 ### Summary
+
+The **Details** tab lists the following fields.
 
 | Field | Description |
 |-------|-------------|
@@ -46,7 +49,7 @@ Selecting a row opens a details panel with the full configuration of a single vi
 
 ### Middleware
 
-The details panel shows three ordered middleware pipelines applied to every request through this virtual model.
+The **Details** tab shows three ordered middleware pipelines applied to every request through this virtual model.
 
 | Pipeline | When it runs |
 |----------|-------------|
@@ -55,3 +58,7 @@ The details panel shows three ordered middleware pipelines applied to every requ
 | Post-response middleware | After the response is returned to the caller. |
 
 Each middleware entry shows its plugin name, config type, config reference, and inline config payload if one is set. A guardrails middleware entry, for example, shows the plugin `nemo-guardrails`, the config type `guardrail_config`, and a config ID pointing to a workspace guardrail configuration.
+
+### Chat
+
+The **Chat** tab opens a chat session that sends requests through the virtual model, so its middleware pipelines (for example, guardrails) apply to every message. Use the **Inference parameters** control above the chat to adjust settings such as temperature and max tokens.
