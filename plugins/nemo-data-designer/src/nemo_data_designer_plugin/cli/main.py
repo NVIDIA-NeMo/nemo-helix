@@ -51,7 +51,7 @@ class DataDesignerCLI(NemoCLI):
 
     def update_function_cli(self, fn_cls: type[NemoFunction], group: typer.Typer) -> None:
         if fn_cls is PreviewFunction:
-            apply_preview_cli_overrides(group)
+            apply_preview_cli_overrides(group, fn_cls)
 
     def update_job_cli(self, job_cls: type[NemoJob], group: typer.Typer) -> None:
         if job_cls is CreateJob:

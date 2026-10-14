@@ -1060,6 +1060,54 @@ def take_job_submit(group: typer.Typer) -> JobSubmit:
     return submit
 
 
+class FunctionSubmit(Protocol):
+    """A generated function submit command detached by :func:`take_function_submit`."""
+
+    def __call__(
+        self,
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        request_id: str | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> None: ...
+
+
+def take_function_submit(app: typer.Typer, fn_cls: type[NemoFunction]) -> FunctionSubmit:
+    """Detach *fn_cls*'s generated submit command from *app* for a replacement to delegate to.
+
+    Call this from :meth:`~nemo_helix_plugin.cli.NemoCLI.update_function_cli`
+    before registering the replacement command. The returned callable submits
+    *spec* (JSON) as ``--spec`` would. *renderer_kwargs* reach the function
+    renderer as ``RendererContext.cli_kwargs`` and never the spec, so their
+    names must not collide with a generated flag.
+    """
+    command = next((c for c in app.registered_commands if c.name == fn_cls.name), None)
+    original = command.callback if command is not None else None
+    if original is None:
+        raise RuntimeError(f"missing generated submit command for function {fn_cls.name!r} to override")
+    app.registered_commands = [c for c in app.registered_commands if c is not command]
+    leaves = walk_spec_leaves(fn_cls.spec_schema, reserved=_FN_SUBMIT_RESERVED_FLAGS)
+    generated_names = {leaf.param_name for leaf in leaves} | _FN_SUBMIT_RESERVED_FLAGS
+
+    def submit(
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        request_id: str | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> None:
+        extra = dict(renderer_kwargs or {})
+        collisions = sorted(generated_names.intersection(extra))
+        if collisions:
+            raise ValueError(f"renderer_kwargs collide with generated {fn_cls.name!r} flags: {', '.join(collisions)}")
+        original(typer_ctx, spec=spec, spec_file=None, workspace=workspace, request_id=request_id, **extra)
+
+    return submit
+
+
 def _build_function_submit_url(
     typer_ctx: typer.Context,
     fn_cls: type[NemoFunction],

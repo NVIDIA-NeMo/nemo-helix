@@ -25,7 +25,8 @@ from data_designer.config.config_builder import DataDesignerConfigBuilder
 from data_designer.config.utils.constants import DEFAULT_NUM_RECORDS
 from nemo_helix_plugin.cli_options import WorkspaceOption
 from nemo_helix_plugin.cli_state import resolve_cli_workspace
-from nemo_helix_plugin.commands import take_job_submit
+from nemo_helix_plugin.commands import take_function_submit, take_job_submit
+from nemo_helix_plugin.function import NemoFunction
 
 _NON_INTERACTIVE_HELP = (
     "Display all records at once instead of browsing interactively. Ignored when --save-results is used."
@@ -76,9 +77,9 @@ def _spec_from_builder(config_source: str, num_records: int) -> Iterator[str]:
         _current_config_builder.reset(token)
 
 
-def apply_preview_cli_overrides(group: typer.Typer) -> None:
+def apply_preview_cli_overrides(group: typer.Typer, fn_cls: type[NemoFunction]) -> None:
     """Replace ``nemo data-designer preview`` with friendly wrapper that matches upstream library."""
-    _replace_function_submit(group)
+    _replace_function_submit(group, fn_cls)
 
 
 def apply_create_cli_overrides(group: typer.Typer) -> None:
@@ -109,10 +110,10 @@ def _allow_interspersed_root_args(group: typer.Typer) -> None:
     group.info.context_settings = {"allow_interspersed_args": True}
 
 
-def _replace_function_submit(group: typer.Typer) -> None:
-    original = _pluck_callback(group, "preview")
+def _replace_function_submit(group: typer.Typer, fn_cls: type[NemoFunction]) -> None:
+    submit = take_function_submit(group, fn_cls)
 
-    @group.command("preview")
+    @group.command(fn_cls.name)
     def preview(
         typer_ctx: typer.Context,
         config_source: str = typer.Argument(..., metavar="[CONFIG_SOURCE]", help=_CONFIG_SOURCE_HELP),
@@ -125,15 +126,16 @@ def _replace_function_submit(group: typer.Typer) -> None:
     ) -> None:
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         with _spec_from_builder(config_source, num_records) as spec:
-            original(
+            submit(
                 typer_ctx,
                 spec=spec,
-                spec_file=None,
                 workspace=workspace,
                 request_id=request_id,
-                non_interactive=non_interactive,
-                save_results=save_results,
-                artifact_path=artifact_path,
+                renderer_kwargs={
+                    "non_interactive": non_interactive,
+                    "save_results": save_results,
+                    "artifact_path": artifact_path,
+                },
             )
 
 
