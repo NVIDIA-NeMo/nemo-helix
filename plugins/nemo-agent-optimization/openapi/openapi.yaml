@@ -692,7 +692,7 @@ components:
         title:
           type: string
           title: Title
-          description: Friendly title for the strategy to display in user interfaces.
+          description: Human-readable strategy name shown in user interfaces.
         description:
           type: string
           title: Description
