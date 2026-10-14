@@ -175,6 +175,7 @@ def _environment(
     *,
     trial_name: str = TRIAL,
     session_id: str | None = None,
+    storage_mb: int | None = None,
     **kwargs: Any,
 ) -> NemoOpenSandboxEnvironment:
     return NemoOpenSandboxEnvironment(
@@ -182,7 +183,7 @@ def _environment(
         environment_name="hello-world",
         session_id=session_id or f"{trial_name}__env",
         trial_paths=TrialPaths(trial_dir=tmp_path / trial_name),
-        task_env_config=EnvironmentConfig(docker_image="registry.example/hello:1"),
+        task_env_config=EnvironmentConfig(docker_image="registry.example/hello:1", storage_mb=storage_mb),
         network_policy=NetworkPolicy(network_mode=mode, allowed_hosts=allowed_hosts or []),
         domain="opensandbox.example",
         api_key="",
@@ -204,6 +205,9 @@ def test_harbor_private_hooks_still_exist() -> None:
     assert list(inspect.signature(base._create_sandbox).parameters) == ["self", "sdk"]
     assert "self._metadata" in inspect.getsource(base._create_sandbox)
     assert "self._build_network_policy(sdk)" in inspect.getsource(base._create_sandbox)
+    assert list(inspect.signature(base._build_resource).parameters) == ["self"]
+    assert "self._build_resource()" in inspect.getsource(base._create_sandbox)
+    assert isinstance(base._effective_storage_mb, property)
     assert hasattr(base, "_safe_kill")
     assert hasattr(base, "_build_connection_config")
     assert list(inspect.signature(base._resolve_uid).parameters) == ["self", "user"]
@@ -458,3 +462,72 @@ async def test_a_failed_probe_keeps_harbor_behavior(tmp_path: Path, server: _Ser
 
     assert commands.uids_sent("tmux -V") == [0, 0]
     assert commands.probes() == 1
+
+
+def _resource_sent(server: _Server) -> dict[str, str]:
+    return server.creates[-1]["resource"]
+
+
+async def test_sandbox_disk_is_limited_to_the_tasks_storage(tmp_path: Path, server: _Server) -> None:
+    environment = _environment(tmp_path, NetworkMode.PUBLIC, storage_mb=10240)
+
+    await environment._create_sandbox(environment._load_opensandbox())
+
+    assert _resource_sent(server)["ephemeral-storage"] == "10240Mi"
+
+
+async def test_disk_limit_is_capped_and_the_cap_is_recorded(tmp_path: Path, server: _Server) -> None:
+    environment = _environment(tmp_path, NetworkMode.PUBLIC, storage_mb=1_024_000, max_disk_mb=131072)
+
+    sandbox = await environment._create_sandbox(environment._load_opensandbox())
+
+    assert _resource_sent(server)["ephemeral-storage"] == "131072Mi"
+    record = json.loads((tmp_path / TRIAL / applied_egress_filename(sandbox.id)).read_text())
+    assert (record["disk_requested_mb"], record["disk_limit_mb"]) == (1_024_000, 131072)
+
+
+async def test_task_below_the_cap_keeps_its_own_limit(tmp_path: Path, server: _Server) -> None:
+    environment = _environment(tmp_path, NetworkMode.PUBLIC, storage_mb=4096, max_disk_mb=131072)
+
+    await environment._create_sandbox(environment._load_opensandbox())
+
+    assert _resource_sent(server)["ephemeral-storage"] == "4096Mi"
+
+
+@pytest.mark.parametrize(
+    ("storage_mb", "kwargs"),
+    [(None, {}), (10240, {"enforce_disk_limit": False})],
+    ids=["task-sets-no-storage", "enforcement-off"],
+)
+async def test_no_disk_limit_is_sent_and_none_is_recorded(
+    tmp_path: Path, server: _Server, storage_mb: int | None, kwargs: dict[str, Any]
+) -> None:
+    environment = _environment(tmp_path, NetworkMode.PUBLIC, storage_mb=storage_mb, **kwargs)
+
+    sandbox = await environment._create_sandbox(environment._load_opensandbox())
+
+    assert "ephemeral-storage" not in _resource_sent(server)
+    record = json.loads((tmp_path / TRIAL / applied_egress_filename(sandbox.id)).read_text())
+    assert record["disk_limit_mb"] is None
+
+
+async def test_cpu_and_memory_limits_still_reach_the_server(tmp_path: Path, server: _Server) -> None:
+    environment = _environment(tmp_path, NetworkMode.PUBLIC, storage_mb=10240)
+    environment.task_env_config.cpus = 2
+    environment.task_env_config.memory_mb = 4096
+
+    await environment._create_sandbox(environment._load_opensandbox())
+
+    resource = _resource_sent(server)
+    assert resource["cpu"] == "2"
+    assert resource["memory"] == "4096Mi"
+
+
+async def test_a_retried_create_sends_the_same_disk_limit(tmp_path: Path, server: _Server) -> None:
+    server.create_failures.append(SandboxApiException("transient"))
+    environment = _environment(tmp_path, NetworkMode.PUBLIC, storage_mb=10240)
+
+    await environment._create_sandbox(environment._load_opensandbox())
+
+    assert len(server.creates) == 2
+    assert [create["resource"]["ephemeral-storage"] for create in server.creates] == ["10240Mi", "10240Mi"]

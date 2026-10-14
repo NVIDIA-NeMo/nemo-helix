@@ -145,7 +145,7 @@ def test_run_provenance_manifest_schema_round_trips(tmp_path, monkeypatch) -> No
     assert parsed.sbom[1].value == "oci://registry.example/api@sha256:sbom"
 
 
-def _opensandbox_row(*, verification: str = "strict", **overrides):  # noqa: ANN003, ANN202
+def _opensandbox_row(*, verification: str = "strict", enforce_disk_limit: bool = True, **overrides):  # noqa: ANN003, ANN202
     return _row(
         runtime="harbor_opensandbox",
         framework_version="0.20.0",
@@ -161,6 +161,8 @@ def _opensandbox_row(*, verification: str = "strict", **overrides):  # noqa: ANN
                     "opensandbox_sdk_version": "0.1.16",
                     "trusted_allowed_hosts": ["inference.example.test", "pypi.org"],
                     "egress_verification": verification,
+                    "enforce_disk_limit": enforce_disk_limit,
+                    "max_disk_mb": 131072,
                 },
             },
         },
@@ -709,3 +711,36 @@ def test_run_provenance_manifest_reports_variant_operational_overrides(tmp_path)
         ).operational_overrides
         == {}
     )
+
+
+def test_opensandbox_provenance_records_disk_limits_and_the_sandboxes_without_one(tmp_path) -> None:  # noqa: ANN001
+    applied = _opensandbox_applied("1" * 64, "1" * 64, "1" * 64)
+    applied[0].update(disk_requested_mb=10240, disk_limit_mb=10240)
+    applied[1].update(disk_requested_mb=1_024_000, disk_limit_mb=131072)
+    applied[2].update(disk_requested_mb=None, disk_limit_mb=None)
+
+    manifest = build_run_provenance_manifest(
+        _opensandbox_row(opensandbox_applied_egress=applied),
+        status="succeeded",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    sandbox = manifest.runtime.sandbox
+    assert sandbox["disk_limit_enforcement"] == "enforced"
+    assert sandbox["max_task_disk_mb"] == "131072"
+    assert sandbox["sandboxes_without_disk_limit"] == "1"
+    assert sandbox["sandboxes_with_clamped_disk_limit"] == "1"
+
+
+def test_opensandbox_provenance_says_when_disk_limits_are_off(tmp_path) -> None:  # noqa: ANN001
+    manifest = build_run_provenance_manifest(
+        _opensandbox_row(enforce_disk_limit=False, opensandbox_applied_egress=_opensandbox_applied("1" * 64)),
+        status="succeeded",
+        artifact_prefix="evaluations/ev_test123/artifacts/",
+        artifact_root=tmp_path,
+    )
+
+    sandbox = manifest.runtime.sandbox
+    assert sandbox["disk_limit_enforcement"] == "off"
+    assert sandbox["sandboxes_without_disk_limit"] == "1"

@@ -285,6 +285,8 @@ def test_render_owns_environment_block(tmp_path: Path) -> None:
         "sandbox_timeout_sec": settings.harbor_opensandbox_sandbox_timeout_seconds,
         "trusted_allowed_hosts": ["igw", "pypi.org"],
         "egress_verification": "default_action",
+        "enforce_disk_limit": True,
+        "max_disk_mb": 131072,
         "metadata": {
             cleanup.DEPLOYMENT_METADATA_KEY: DEPLOYMENT,
             cleanup.EVALUATION_METADATA_KEY: "ev_os1",
@@ -475,7 +477,15 @@ def _write_applied(tmp_path: Path, trial: str, sha: str, *, sandbox_id: str | No
     trial_dir = tmp_path / "harbor" / "jobs" / "ev_os1" / trial
     trial_dir.mkdir(parents=True, exist_ok=True)
     sandbox_id = sandbox_id or f"sb-{trial}"
-    record = {"sandbox_id": sandbox_id, "role": role, "network_mode": "public", "policy_sha256": sha, "policy": {}}
+    record = {
+        "sandbox_id": sandbox_id,
+        "role": role,
+        "network_mode": "public",
+        "policy_sha256": sha,
+        "policy": {},
+        "disk_requested_mb": 10240,
+        "disk_limit_mb": 10240,
+    }
     (trial_dir / cleanup.applied_egress_filename(sandbox_id)).write_text(json.dumps(record))
 
 
@@ -527,6 +537,8 @@ def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_writes_applied_egress
             "role": "agent",
             "network_mode": "public",
             "policy_sha256": "1" * 64,
+            "disk_requested_mb": 10240,
+            "disk_limit_mb": 10240,
         },
         {
             "trial": "trial-b",
@@ -534,6 +546,8 @@ def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_writes_applied_egress
             "role": "agent",
             "network_mode": "public",
             "policy_sha256": "1" * 64,
+            "disk_requested_mb": 10240,
+            "disk_limit_mb": 10240,
         },
     ]
 

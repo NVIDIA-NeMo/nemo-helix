@@ -14,6 +14,9 @@ This subclass keeps all of that and changes what the sandbox is allowed to reach
   if it cannot be read at all.
 * Every create attempt is labelled, so a sandbox the server created but whose handle was lost to a
   failed or retried request can still be found and killed.
+* Each sandbox's writable storage is capped at the task's ``storage_mb`` through an
+  ``ephemeral-storage`` limit. Harbor leaves disk out of the create request, so without this a task
+  that fills its disk fills the node's. Kubernetes evicts a pod that exceeds the limit.
 * On an image with a non-root ``USER``, Harbor's ``user="root"`` commands run as the image's user.
   ``execd`` runs as that user and the kernel refuses its switch to uid 0, so asking for root fails
   every such command before it starts, even checks like ``tmux -V``.
@@ -68,6 +71,10 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
             ``/etc/resolv.conf``, which in-cluster is the resolver sandboxes share.
         egress_verification: How strictly to compare the applied policy with the requested one;
             see ``verify_applied_egress``. Readback itself is always required.
+        enforce_disk_limit: Cap each sandbox's ephemeral storage at the task's ``storage_mb``. Turn
+            this off only on a runtime that doesn't enforce the limit.
+        max_disk_mb: Ceiling on the limit, so a task asking for far more than any node holds can't
+            make its pod unschedulable. ``None`` applies the task's value as given.
     """
 
     def __init__(
@@ -81,6 +88,8 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
         trusted_allowed_hosts: list[str] | None = None,
         resolver_addresses: list[str] | None = None,
         egress_verification: EgressVerificationMode = "default_action",
+        enforce_disk_limit: bool = True,
+        max_disk_mb: int | None = None,
         **kwargs: Any,
     ) -> None:
         # BaseEnvironment.__init__ validates network policy support, which reads these.
@@ -89,6 +98,9 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
         self._egress_verification: EgressVerificationMode = egress_verification
         self._expected_egress: EgressPolicy | None = None
+        self._enforce_disk_limit = enforce_disk_limit
+        self._max_disk_mb = max_disk_mb
+        self._disk_limit_mb: int | None = None
         self._image_uid: int | None = None
         self._image_uid_probed = False
         self._image_uid_lock = asyncio.Lock()
@@ -119,6 +131,25 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
             network_allowlist_ipv4_cidrs=True,
             network_allowlist_ipv6_cidrs=True,
         )
+
+    @override
+    def _build_resource(self) -> dict[str, str]:
+        """Add the task's disk limit to the resource map Harbor sends, which leaves disk out.
+
+        Harbor builds this map on every create attempt, so a retry sends the same limit.
+        """
+        resource = super()._build_resource()
+        self._disk_limit_mb = self._task_disk_limit_mb()
+        if self._disk_limit_mb is not None:
+            resource["ephemeral-storage"] = f"{self._disk_limit_mb}Mi"
+        return resource
+
+    def _task_disk_limit_mb(self) -> int | None:
+        """The task's ``storage_mb`` capped at ``max_disk_mb``, or ``None`` when no limit applies."""
+        requested = self._effective_storage_mb
+        if not self._enforce_disk_limit or requested is None:
+            return None
+        return min(requested, self._max_disk_mb) if self._max_disk_mb is not None else requested
 
     @override
     def validate_network_policy_support(self, network_policy: NetworkPolicy | None = None) -> None:
@@ -207,6 +238,8 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
             "network_mode": self._network_policy.network_mode.value,
             "policy_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
             "policy": payload,
+            "disk_requested_mb": self._effective_storage_mb,
+            "disk_limit_mb": self._disk_limit_mb,
         }
         filename = applied_egress_filename(sandbox_id or self.session_id)
         try:
