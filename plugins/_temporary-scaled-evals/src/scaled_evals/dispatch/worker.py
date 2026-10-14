@@ -49,6 +49,7 @@ from psycopg.rows import dict_row
 
 from scaled_evals.api import artifacts
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
+from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.execution_analytics import emit_execution_span
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
@@ -1482,7 +1483,7 @@ class Dispatcher:
 
         config = row.get("intake_config")
         if not isinstance(config, dict):
-            profile_row = EvaluationRepository(conn).load_intake_profile(profile_id)
+            profile_row = ConfigProfileStore().get_typed(profile_id, ("intake",))
             if profile_row is None:
                 LOG.warning("intake profile %s not found for %s", profile_id, row["id"])
                 return f"intake profile not found: {profile_id}"

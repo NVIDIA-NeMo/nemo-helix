@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Entity Store access shared by the resources that live there."""
+
+from __future__ import annotations
+
+import functools
+from threading import Lock
+from typing import Any
+
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.client_provider import get_nemo_client
+from nemo_helix_plugin.entities.base import EntityT, SyncEntityClient
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+
+from scaled_evals.api.repositories.base_repository import normalize_order
+from scaled_evals.api.schemas.common import decode_cursor
+from scaled_evals.api.settings import settings
+
+SERVICE_NAME = "scaled-evals"
+
+_client: SyncEntityClient | None = None
+_client_lock = Lock()
+
+
+def entity_client() -> SyncEntityClient:
+    """Return the process-wide Entity Store client acting as the scaled-evals service."""
+    global _client
+    with _client_lock:
+        if _client is None:
+            _client = SyncEntityClient(
+                EntitiesClient.from_client(get_nemo_client(as_service=SERVICE_NAME, internal=True))
+            )
+        return _client
+
+
+@functools.cache
+def private_workspace() -> str:
+    """Return the workspace only this service can read, creating it on first use.
+
+    The plugin authorizes reads of what it keeps there itself, so no user may
+    reach those entities directly through the Entities API.
+
+    Raises:
+        RuntimeError: if someone else created a workspace with that name first.
+
+    """
+    name = settings.entity_store_private_workspace
+    client = WorkspacesClient.from_client(get_nemo_client(as_service=SERVICE_NAME, internal=True))
+    try:
+        client.create_workspace(body=CreateWorkspaceRequest(name=name))
+    except ConflictError:
+        # Its creator is its Admin; a user who claimed the name first could read every entity.
+        owner = client.get_workspace(name=name).data().created_by
+        if owner != f"service:{SERVICE_NAME}":
+            raise RuntimeError(f"workspace {name!r} belongs to {owner!r}, not the {SERVICE_NAME} service") from None
+    return name
+
+
+def list_all(client: SyncEntityClient, entity_type: type[EntityT]) -> list[EntityT]:
+    """Return every entity of `entity_type` in the private workspace."""
+    items: list[EntityT] = []
+    page = 1
+    while True:
+        response = client.list(entity_type, workspace=private_workspace(), page=page, page_size=100)
+        items.extend(response.data)
+        if page >= response.pagination.total_pages:
+            return items
+        page += 1
+
+
+def keyset_page(rows: list[dict[str, Any]], *, cursor: str | None, order: str, limit: int) -> list[dict[str, Any]]:
+    """Return up to `limit + 1` rows after `cursor`, in `(created_at, id)` order.
+
+    This matches the SQL keyset the list cursors encode, so `page_from_rows`
+    pages these rows exactly as it paged the Postgres results.
+    """
+    descending = normalize_order(order) == "desc"
+    ordered = sorted(rows, key=lambda row: (row["created_at"], row["id"]), reverse=descending)
+    if (position := decode_cursor(cursor)) is not None:
+        after = (position.created_at, position.id)
+        ordered = [
+            row
+            for row in ordered
+            if ((row["created_at"], row["id"]) < after if descending else (row["created_at"], row["id"]) > after)
+        ]
+    return ordered[: limit + 1]
+
+
+def contains(query: str | None, *values: object) -> bool:
+    """Return whether any value contains the stripped query, ignoring case; no query matches all."""
+    if query is None or not (needle := query.strip().lower()):
+        return True
+    return any(needle in str(value or "").lower() for value in values)
