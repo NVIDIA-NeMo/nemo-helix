@@ -41,12 +41,35 @@ async def test_create_conflicts_unless_exist_ok_and_delete_removes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_failure_status_fails_uploads_without_storing() -> None:
+async def test_failures_answer_with_a_status_or_raise_without_storing() -> None:
     service = InMemoryFilesService()
     files = service.client()
     await files.create_fileset(body=CreateFilesetRequest(name="bundle"))
-    service.upload_failure_status = 500
+    service.failures["upload"] = 500
+    service.fail_when = lambda operation, workspace, name: RuntimeError("boom") if operation == "download" else None
 
     with pytest.raises(InternalServerError):
         await files.upload_file(name="bundle", path="bundle.json", content=b"{}")
+    with pytest.raises(RuntimeError, match="boom"):
+        await (await files.download_file(name="bundle", path="bundle.json")).read()
     assert service.filesets == {("default", "bundle"): {}}
+    assert service.calls == [
+        ("create", "default", "bundle"),
+        ("upload", "default", "bundle"),
+        ("download", "default", "bundle"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_after_upload_runs_once_the_content_is_stored() -> None:
+    service = InMemoryFilesService()
+    files = service.client()
+    await files.create_fileset(body=CreateFilesetRequest(name="bundle"))
+    seen: list[dict[str, bytes]] = []
+
+    async def after_upload() -> None:
+        seen.append(dict(service.filesets[("default", "bundle")]))
+
+    service.after_upload = after_upload
+    await files.upload_file(name="bundle", path="bundle.json", content=b"{}")
+    assert seen == [{"bundle.json": b"{}"}]

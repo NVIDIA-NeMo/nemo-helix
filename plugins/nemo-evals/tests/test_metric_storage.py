@@ -68,7 +68,7 @@ async def test_store_cleans_up_fileset_on_upload_failure() -> None:
     fake_files = files_service.client()
     bundle = _sample_bundle()
 
-    files_service.upload_failure_status = 500
+    files_service.failures["upload"] = 500
 
     with pytest.raises(MetricBundleStorageError):
         await store_bundle(fake_files, "default", "my-metric", bundle)

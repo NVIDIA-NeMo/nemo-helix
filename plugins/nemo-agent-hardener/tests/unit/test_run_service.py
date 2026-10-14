@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -160,7 +160,7 @@ def test_service_driven_reuses_cached_suite_and_skips_interview(
     )
 
     @contextlib.contextmanager
-    def auth_proxy() -> Iterator[str]:
+    def auth_proxy() -> Generator[str, None, None]:
         yield "http://127.0.0.1:54321"
 
     monkeypatch.setattr(
