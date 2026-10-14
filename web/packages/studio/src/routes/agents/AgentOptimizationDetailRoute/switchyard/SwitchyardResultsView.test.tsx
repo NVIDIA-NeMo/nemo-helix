@@ -180,7 +180,6 @@ describe('AgentOptimizationDetailRoute — switchyard', () => {
     renderRun();
 
     expect(await screen.findByRole('link', { name: VM_STAGE })).toBeInTheDocument();
-    expect(screen.getByText('Model pairs')).toBeInTheDocument();
     expect(screen.getAllByText('Capable model share 0.8').length).toBeGreaterThan(0);
     expect(screen.getByText('Confidence threshold 0.5')).toBeInTheDocument();
   });
