@@ -248,10 +248,13 @@ def check_victim_secrets(manifest: str, env: dict[str, str], env_file: str | Non
     extra_env_files = [Path(env_file)] if env_file else []
     missing = missing_secrets(Path(manifest), env_files=extra_env_files, environ=env)
     if missing:
+        # Secrets-store names are lowercase kebab-case, so the store entry cannot share the env var's name.
+        refs = " ".join(f"--secrets {name}=<workspace>/{name.lower().replace('_', '-')}" for name in missing)
         raise AgentHardenerRunError(
             CATEGORY_MISSING_CREDENTIAL,
-            f"missing required secrets for the victim agent: {', '.join(missing)}. "
-            "Provide them via --env-file or the environment.",
+            f"missing required secrets for the victim agent: {', '.join(missing)}.",
+            remediation=f"Store each value in the Secrets store and map it on the manifest ({refs}), "
+            "or supply it with --env-file or the platform environment.",
         )
 
 

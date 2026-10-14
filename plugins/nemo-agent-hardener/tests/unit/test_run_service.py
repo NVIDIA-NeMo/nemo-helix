@@ -1354,6 +1354,18 @@ def test_unreadable_secret_fails_naming_the_ref_not_the_value(
     assert _SECRET_VALUE not in message
 
 
+def test_missing_victim_secret_points_at_a_secrets_store_ref(tmp_path: Path) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n  secrets:\n    - NVIDIA_API_KEY\n", encoding="utf-8")
+
+    with pytest.raises(AgentHardenerRunError) as raised:
+        _common.check_victim_secrets(str(manifest), {}, None)
+
+    assert raised.value.category == "missing_credential"
+    assert "--secrets NVIDIA_API_KEY=<workspace>/nvidia-api-key" in raised.value.remediation
+    assert "--env-file" in raised.value.remediation
+
+
 def test_victim_env_precedence_is_operator_then_secrets_then_env_file(tmp_path: Path) -> None:
     manifest = tmp_path / "agent-hardener.yaml"
     manifest.write_text("agent:\n  name: c\n  secrets: [A, B, C]\n", encoding="utf-8")
