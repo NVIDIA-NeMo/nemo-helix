@@ -82,7 +82,7 @@ describe('launchOptimizeStudy', () => {
     ).toEqual(['dataset.json', 'optimize.yaml']);
     expect(agentOptimizationCreateRunStrategyJob).toHaveBeenCalledWith('ws', {
       spec: {
-        strategy: 'legacy',
+        strategy: 'config-tuning',
         optimize_config: 'optimize.yaml',
         optimize_config_fileset: `ws/${filesetName}`,
         agent: 'hermes',
@@ -107,7 +107,7 @@ describe('launchOptimizeStudy', () => {
     // No `studio_bundle_fileset`, so deleting the study can never delete the user's fileset.
     expect(agentOptimizationCreateRunStrategyJob).toHaveBeenCalledWith('ws', {
       spec: {
-        strategy: 'legacy',
+        strategy: 'config-tuning',
         optimize_config: 'configs/optimize.yaml',
         optimize_config_fileset: 'ws/curated-bundle',
         agent: 'hermes',

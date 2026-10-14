@@ -87,6 +87,12 @@ def staged_spec(**overrides: Any) -> OptimizeSpec:
     )
 
 
+def test_declares_the_config_tuning_strategy() -> None:
+    strategy = OptimizeJob.nemo_agent_optimization_strategy
+    assert (strategy.name, strategy.requires_config) == ("config-tuning", True)
+    assert strategy.title
+
+
 # ---------------------------------------------------------------------------
 # compile — fileset requirement
 # ---------------------------------------------------------------------------
@@ -116,7 +122,18 @@ def test_spec_rejects_absolute_config_alongside_a_fileset() -> None:
         OptimizeSpec(optimize_config="/abs/optimize.yml", optimize_config_fileset=FilesetRef("opt-bundle"))
 
 
-@pytest.mark.parametrize("config_path", ["../escape.yml", "~/optimize.yml", "C:\\bundle\\optimize.yml"])
+@pytest.mark.parametrize(
+    "config_path",
+    [
+        "/abs/optimize.yml",
+        "../escape.yml",
+        "configs/../escape.yml",
+        "~/optimize.yml",
+        "C:\\bundle\\optimize.yml",
+        "\\\\server\\share\\optimize.yml",
+        "\\optimize-chatonly.yaml",
+    ],
+)
 def test_spec_rejects_config_paths_that_escape_the_fileset(config_path: str) -> None:
     with pytest.raises(ValidationError, match="relative to the fileset root"):
         OptimizeSpec(optimize_config=config_path, optimize_config_fileset=FilesetRef("opt-bundle"))

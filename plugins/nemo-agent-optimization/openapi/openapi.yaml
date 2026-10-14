@@ -689,15 +689,25 @@ components:
           type: string
           title: Name
           description: Value to pass as 'strategy' when submitting a run.
+        title:
+          type: string
+          title: Title
+          description: Human-readable strategy name shown in user interfaces.
         description:
           type: string
           title: Description
           description: What this strategy optimizes, in the words of the plugin that
             ships it.
           default: ''
+        requires_config:
+          type: boolean
+          title: Requires Config
+          description: Whether a configuration is mandatory for this strategy.
+          default: false
       type: object
       required:
       - name
+      - title
       title: OptimizationStrategy
       description: 'One installed strategy, as ``--strategy`` accepts it.
 
@@ -914,8 +924,8 @@ components:
           type: string
           minLength: 1
           title: Strategy
-          description: Installed optimization strategy to run, e.g. 'legacy'. List
-            what this platform has with `nemo agents optimize list-strategies`.
+          description: Installed optimization strategy to run, e.g. 'config-tuning'.
+            List what this platform has with `nemo agents optimize list-strategies`.
         optimize_config:
           title: Optimize Config
           description: "Location of the strategy's configuration YAML, for strategies\
@@ -966,8 +976,8 @@ components:
           type: string
           minLength: 1
           title: Strategy
-          description: Installed optimization strategy to run, e.g. 'legacy'. List
-            what this platform has with `nemo agents optimize list-strategies`.
+          description: Installed optimization strategy to run, e.g. 'config-tuning'.
+            List what this platform has with `nemo agents optimize list-strategies`.
         optimize_config:
           title: Optimize Config
           description: "Location of the strategy's configuration YAML, for strategies\
