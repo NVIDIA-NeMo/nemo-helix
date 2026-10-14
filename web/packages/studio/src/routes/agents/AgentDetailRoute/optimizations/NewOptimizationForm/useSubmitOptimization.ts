@@ -5,6 +5,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getAgentOptimizationListRunStrategyJobsQueryKey } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import { agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import { launchOptimizeStudy } from '@studio/api/agents/useLaunchOptimizeStudy';
+import { evaluationConfigRef } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/evaluationConfigRef';
 import type { OptimizationFormOutput } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
 import { optimizationTargets } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
 import {
@@ -12,7 +13,6 @@ import {
   gatewayAgentModel,
   OPTIMIZE_CONFIG_PATH,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizeConfig';
-import { studyRowsQueryOptions } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useStudyRowCount';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { getAgentOptimizationsTabRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
@@ -26,8 +26,8 @@ export interface UseSubmitOptimizationParams {
 }
 
 /**
- * The submit path behind {@link NewOptimizationForm}: stage the selected evaluation's data beside
- * a generated optimize config, start the study, and return to the jobs table.
+ * The submit path behind {@link NewOptimizationForm}: stage a generated optimize config, start the
+ * study scored by the selected evaluation's stored config, and return to the jobs table.
  *
  * Rejects with a user-facing message on any failure; the form shows it beside the run button.
  */
@@ -48,8 +48,8 @@ export const useSubmitOptimization = ({
       );
       if (!target) throw new Error('The selected evaluation is no longer available.');
 
-      const [evaluationData, agent] = await Promise.all([
-        queryClient.fetchQuery(studyRowsQueryOptions(workspace, target.evaluation)),
+      const [evaluationConfig, agent] = await Promise.all([
+        evaluationConfigRef(workspace, target.evaluation),
         agentsGetAgent(workspace, agentName),
       ]);
       const agentModel = gatewayAgentModel(workspace, agent.config);
@@ -57,8 +57,9 @@ export const useSubmitOptimization = ({
         workspace,
         agentName,
         name: values.name,
-        entries: buildStudyBundle({ workspace, values, evaluationData, agentModel }),
+        entries: buildStudyBundle({ values, agentModel }),
         optimizeConfig: OPTIMIZE_CONFIG_PATH,
+        evaluationConfig,
       });
 
       toast.success(`Optimization study "${job.name ?? values.name}" submitted`);

@@ -9,7 +9,7 @@ import re
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
-from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef, OutputTarget
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FILESET_REF_PATTERN, FilesetRef, OutputTarget
 from pydantic import BaseModel, Field, ValidationInfo, model_validator
 
 FILESET_REQUIRED = (
@@ -46,6 +46,14 @@ class OptimizeSpec(BaseModel):
         min_length=1,
         description="Optional platform agent reference ('name' or 'workspace/name'). "
         "When omitted, the optimization config must include an inline Fabric agent package.",
+    )
+    evaluation_config: str | None = Field(
+        default=None,
+        pattern=FILESET_REF_PATTERN,
+        description="Stored eval config of the evaluation to score trials against, as "
+        "'workspace/fileset#path'.  When set, the study reads that evaluation's dataset and LLM "
+        "judge and generates eval.general.dataset, eval.evaluators and models.judge from them, "
+        "replacing any the optimize config declares.",
     )
     output: OutputTarget | None = Field(
         default=None,

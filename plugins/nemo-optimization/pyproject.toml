@@ -13,6 +13,8 @@ dependencies = [
     # exists to avoid.
     "nemo-agent-optimization-plugin",
     "nemo-agents-plugin",
+    # Reads a stored evaluation with the evaluator's own spec models and dataset download.
+    "nemo-evals-plugin",
     "nemo-helix-plugin",
     "nemo-helix",
     "nhx-evals-sdk",
@@ -55,6 +57,7 @@ packages = ["src/nemo_optimization"]
 [tool.uv.sources]
 nemo-agent-optimization-plugin = { workspace = true }
 nemo-agents-plugin = { workspace = true }
+nemo-evals-plugin = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 nemo-helix = { workspace = true }
 nhx-evals-sdk = { workspace = true }
