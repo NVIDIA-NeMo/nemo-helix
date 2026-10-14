@@ -4,15 +4,21 @@
 import { BuilderPreviewPanel } from '@studio/routes/DataDesignerJobBuildRoute/BuilderPreviewPanel';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
-const renderPanel = (onClose: () => void = () => undefined) =>
+const renderPanel = ({
+  isExpanded = true,
+  isPreviewing = false,
+  onToggleExpanded = () => undefined,
+}: { isExpanded?: boolean; isPreviewing?: boolean; onToggleExpanded?: () => void } = {}) =>
   render(
     <BuilderPreviewPanel
       records={[{ topic: 'invoice' }]}
       columnOrder={['topic']}
       logs="Sampling topics"
-      isPreviewing={false}
+      status={undefined}
+      isPreviewing={isPreviewing}
       error={undefined}
-      onClose={onClose}
+      isExpanded={isExpanded}
+      onToggleExpanded={onToggleExpanded}
     />
   );
 
@@ -21,21 +27,39 @@ describe('BuilderPreviewPanel', () => {
     window.innerHeight = 1000;
   });
 
-  it('shows both tabs and a close button', () => {
+  it('shows both tabs, the rows and a collapse button when expanded', () => {
     renderPanel();
 
     expect(screen.getByRole('tab', { name: 'Preview Rows' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Preview Run Logs' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Close preview' })).toBeInTheDocument();
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse preview' })).toBeInTheDocument();
   });
 
-  it('calls onClose when the close button is clicked', () => {
-    const onClose = vi.fn();
-    renderPanel(onClose);
+  it('shows a Preview Rows title instead of the tabs when collapsed', () => {
+    renderPanel({ isExpanded: false });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+    expect(screen.getByText('Preview Rows')).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Generating preview rows')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand preview' })).toBeInTheDocument();
+  });
 
-    expect(onClose).toHaveBeenCalledTimes(1);
+  it('shows a spinner next to the collapsed title while the preview runs', () => {
+    renderPanel({ isExpanded: false, isPreviewing: true });
+
+    expect(screen.getByLabelText('Generating preview rows')).toBeInTheDocument();
+  });
+
+  it('calls onToggleExpanded when the chevron is clicked', () => {
+    const onToggleExpanded = vi.fn();
+    renderPanel({ onToggleExpanded });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse preview' }));
+
+    expect(onToggleExpanded).toHaveBeenCalledTimes(1);
   });
 
   it('grows when the handle is dragged up and shrinks when dragged down', () => {

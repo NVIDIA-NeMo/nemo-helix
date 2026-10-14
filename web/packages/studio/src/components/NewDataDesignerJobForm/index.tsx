@@ -140,6 +140,7 @@ export const NewDataDesignerJobForm: FC = () => {
   );
   const {
     previewLogs,
+    previewStatus,
     previewRecords,
     previewColumnOrder,
     previewError,
@@ -299,6 +300,7 @@ export const NewDataDesignerJobForm: FC = () => {
             records={previewRecords}
             columnOrder={previewColumnOrder}
             isPreviewing={isPreviewing}
+            status={previewStatus}
             error={previewError}
           />
         ) : null}

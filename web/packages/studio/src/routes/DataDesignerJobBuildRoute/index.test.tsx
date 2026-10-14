@@ -9,7 +9,7 @@ import { DataDesignerJobBuildRoute } from '@studio/routes/DataDesignerJobBuildRo
 import type { DataDesignerGeneratedState } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import { getDataDesignerJobBuildRoute } from '@studio/routes/utils';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
@@ -152,7 +152,7 @@ describe('DataDesignerJobBuildRoute', () => {
     await screen.findByText(/Sampling topics/, {}, { timeout: 5_000 });
   });
 
-  it('stops a running preview when the panel is closed', async () => {
+  it('keeps a running preview going when the panel is collapsed', async () => {
     const onAbort = vi.fn();
     holdPreviewStreamOpen('Sampling topics', onAbort);
     renderBuildRoute({ generatedJobRequest });
@@ -161,26 +161,34 @@ describe('DataDesignerJobBuildRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
     expect(await screen.findByRole('button', { name: 'Stop preview' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse preview' }));
 
-    await waitFor(() => expect(onAbort).toHaveBeenCalled());
-    expect(screen.queryByRole('tab', { name: 'Preview Rows' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand preview' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Generating preview rows')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop preview' })).toBeInTheDocument();
+    expect(onAbort).not.toHaveBeenCalled();
   });
 
-  it('has no preview panel until a preview runs, closes it with the X, and reopens it on the next run', async () => {
+  it('has no preview panel until a preview runs, then collapses, re-expands, and expands on the next run', async () => {
     respondToPreview({ kind: 'dataset', records: [{ topic: 'invoice' }] }, { kind: 'done' });
     renderBuildRoute({ generatedJobRequest });
     await screen.findByText('email_body');
     expect(screen.queryByRole('tab', { name: 'Preview Rows' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
-    expect(await screen.findByRole('tab', { name: 'Preview Rows' })).toBeInTheDocument();
+    expect(await screen.findByRole('table')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse preview' }));
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Preview Rows' })).not.toBeInTheDocument();
+    expect(screen.getByText('Preview Rows')).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Expand preview' }));
+    expect(screen.getByRole('table')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse preview' }));
     fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
-    expect(await screen.findByRole('tab', { name: 'Preview Rows' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Collapse preview' })).toBeInTheDocument();
   });
 
   it('shows the preview error when the stream fails', async () => {

@@ -59,6 +59,7 @@ describe('usePreview', () => {
 
     expect(streamPreviewMock).toHaveBeenCalled();
     expect(result.current.previewLogs).toContain('a log line');
+    expect(result.current.previewStatus).toBeUndefined();
     expect(result.current.isPreviewing).toBe(false);
     expect(result.current.hasPreviewRun).toBe(true);
     expect(result.current.previewRecords).toBeUndefined();
@@ -167,6 +168,31 @@ describe('usePreview', () => {
       expect(result.current.isPreviewing).toBe(false);
     });
 
+    it('groups indented status lines under the update they belong to', async () => {
+      const streams = openStreams();
+      const { result } = renderHook(() =>
+        usePreview({ workspace: 'ws', accessToken: 'token', getCurrentConfig: () => CONFIG })
+      );
+      await act(async () => {
+        void result.current.runPreview();
+      });
+
+      act(() => {
+        streams[0].handlers.onStatus('🚀 Dispatching');
+        streams[0].handlers.onStatus('📊 Progress [12.5s]:');
+        streams[0].handlers.onStatus("  |-- column 'subject': 1/10 (10%)");
+        streams[0].handlers.onStatus("  |-- column 'body': 0/10 (0%)");
+      });
+      expect(result.current.previewStatus).toBe(
+        "📊 Progress [12.5s]:\n  |-- column 'subject': 1/10 (10%)\n  |-- column 'body': 0/10 (0%)"
+      );
+
+      act(() => {
+        streams[0].handlers.onStatus('🔄 Salvaging 6 deferred task(s)');
+      });
+      expect(result.current.previewStatus).toBe('🔄 Salvaging 6 deferred task(s)');
+    });
+
     it('keeps an earlier run’s logs and failure out of the newer run', async () => {
       const streams = openStreams();
       const { result } = renderHook(() =>
@@ -184,7 +210,9 @@ describe('usePreview', () => {
 
       act(() => {
         streams[0].handlers.onLog('stale log');
+        streams[0].handlers.onStatus('stale status');
         streams[1].handlers.onLog('fresh log');
+        streams[1].handlers.onStatus('fresh status');
       });
       await act(async () => {
         streams[0].reject(new Error('stale failure'));
@@ -194,6 +222,7 @@ describe('usePreview', () => {
       expect(result.current.previewLogs).toContain('fresh log');
       expect(result.current.previewLogs).not.toContain('stale log');
       expect(result.current.previewLogs).not.toContain('stale failure');
+      expect(result.current.previewStatus).toBe('fresh status');
       expect(result.current.previewError).toBeUndefined();
       expect(result.current.isPreviewing).toBe(true);
 

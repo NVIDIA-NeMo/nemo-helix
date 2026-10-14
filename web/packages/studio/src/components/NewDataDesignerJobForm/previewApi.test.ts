@@ -65,7 +65,12 @@ describe('isAbortError', () => {
 });
 
 describe('dispatchPreviewLine', () => {
-  const makeHandlers = () => ({ onLog: vi.fn(), onRecords: vi.fn(), onError: vi.fn() });
+  const makeHandlers = () => ({
+    onLog: vi.fn(),
+    onStatus: vi.fn(),
+    onRecords: vi.fn(),
+    onError: vi.fn(),
+  });
 
   it('routes a dataset frame to onRecords without logging it', () => {
     const handlers = makeHandlers();
@@ -110,6 +115,33 @@ describe('dispatchPreviewLine', () => {
 
     expect(handlers.onLog.mock.calls).toEqual([['{"kind":"done"}'], ['plain text'], ['7']]);
     expect(handlers.onRecords).not.toHaveBeenCalled();
+  });
+
+  it('reports log messages as status updates', () => {
+    const handlers = makeHandlers();
+    dispatchPreviewLine('{"kind":"log","level":"info","message":"Generating"}', handlers);
+    dispatchPreviewLine('plain text', handlers);
+
+    expect(handlers.onStatus.mock.calls).toEqual([['Generating'], ['plain text']]);
+  });
+
+  it('logs heartbeats without reporting them as status updates', () => {
+    const handlers = makeHandlers();
+    dispatchPreviewLine('{"kind":"heartbeat"}', handlers);
+
+    expect(handlers.onLog).toHaveBeenCalledWith('{"kind":"heartbeat"}');
+    expect(handlers.onStatus).not.toHaveBeenCalled();
+  });
+
+  it('pretty-prints JSON status updates', () => {
+    const handlers = makeHandlers();
+    dispatchPreviewLine('{"kind":"done"}', handlers);
+    dispatchPreviewLine('{"kind":"log","message":"{\\"step\\":3}"}', handlers);
+
+    expect(handlers.onStatus.mock.calls).toEqual([
+      ['{\n  "kind": "done"\n}'],
+      ['{\n  "step": 3\n}'],
+    ]);
   });
 });
 

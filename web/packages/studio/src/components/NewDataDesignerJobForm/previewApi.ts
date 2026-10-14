@@ -44,6 +44,8 @@ export type PreviewRecord = Record<string, unknown>;
 
 export interface PreviewStreamHandlers {
   onLog: (line: string) => void;
+  /** The newest progress update; heartbeats are not reported. */
+  onStatus: (message: string) => void;
   onRecords: (records: PreviewRecord[]) => void;
   onError: (message: string) => void;
 }
@@ -72,7 +74,8 @@ const asRecordList = (value: unknown): PreviewRecord[] =>
 
 /**
  * Route one NDJSON frame: `dataset` frames carry the generated records, frames with a
- * `message` (log, error) become log lines, and anything else is logged verbatim.
+ * `message` (log, error) become log lines and status updates, and anything else is logged
+ * verbatim and, unless it is a heartbeat, reported as a status pretty-printed if JSON.
  */
 export function dispatchPreviewLine(line: string, handlers: PreviewStreamHandlers): void {
   const trimmed = line.trim();
@@ -83,6 +86,7 @@ export function dispatchPreviewLine(line: string, handlers: PreviewStreamHandler
     decoded = JSON.parse(trimmed);
   } catch {
     handlers.onLog(trimmed);
+    handlers.onStatus(trimmed);
     return;
   }
 
@@ -95,10 +99,14 @@ export function dispatchPreviewLine(line: string, handlers: PreviewStreamHandler
   const message = frame?.message;
   if (typeof message !== 'string') {
     handlers.onLog(trimmed);
+    if (frame?.kind !== 'heartbeat') {
+      handlers.onStatus(JSON.stringify(decoded, null, 2));
+    }
     return;
   }
   if (frame?.kind === 'error') handlers.onError(message);
   handlers.onLog(message);
+  handlers.onStatus(formatPreviewLogsForDisplay(message));
 }
 
 /**

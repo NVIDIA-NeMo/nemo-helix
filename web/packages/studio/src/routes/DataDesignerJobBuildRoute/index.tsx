@@ -116,6 +116,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
 
   const validateAndCollectErrors = useCallback(() => {
     const { columns, models, name, rows } = builder.getBuilderValues();
@@ -149,6 +150,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
   }, [builder, servedModelNames]);
   const {
     previewLogs,
+    previewStatus,
     previewRecords,
     previewColumnOrder,
     previewError,
@@ -164,6 +166,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
   const handlePreview = useCallback(() => {
     if (validateAndCollectErrors().length > 0) return;
     setIsPreviewVisible(true);
+    setIsPreviewExpanded(true);
     void runPreview();
   }, [validateAndCollectErrors, runPreview]);
 
@@ -197,10 +200,10 @@ export const DataDesignerJobBuildRoute: FC = () => {
   }, [validateAndCollectErrors, builder, createJob, workspace, servedModelNames, navigate]);
 
   const toggleDetails = useCallback(() => setIsDetailsOpen((open) => !open), []);
-  const closePreview = useCallback(() => {
-    stopPreview();
-    setIsPreviewVisible(false);
-  }, [stopPreview]);
+  const togglePreviewExpanded = useCallback(
+    () => setIsPreviewExpanded((expanded) => !expanded),
+    []
+  );
   const onColumnRemove = useCallback(() => {
     if (builder.selectedColumnId) builder.removeColumn(builder.selectedColumnId);
   }, [builder]);
@@ -278,9 +281,11 @@ export const DataDesignerJobBuildRoute: FC = () => {
               records={previewRecords}
               columnOrder={previewColumnOrder}
               logs={previewLogs}
+              status={previewStatus}
               isPreviewing={isPreviewing}
               error={previewError}
-              onClose={closePreview}
+              isExpanded={isPreviewExpanded}
+              onToggleExpanded={togglePreviewExpanded}
             />
           ) : null}
         </Stack>

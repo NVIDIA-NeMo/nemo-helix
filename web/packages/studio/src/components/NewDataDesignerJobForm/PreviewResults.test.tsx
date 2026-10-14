@@ -29,6 +29,7 @@ describe('PreviewResults', () => {
         records={records}
         columnOrder={['scheduler', 'period', 'question', 'expected_answer']}
         isPreviewing={false}
+        status={undefined}
         error={undefined}
       />
     );
@@ -44,7 +45,13 @@ describe('PreviewResults', () => {
 
   it('opens a long cell in a modal', async () => {
     render(
-      <PreviewResults records={records} columnOrder={[]} isPreviewing={false} error={undefined} />
+      <PreviewResults
+        records={records}
+        columnOrder={[]}
+        isPreviewing={false}
+        status={undefined}
+        error={undefined}
+      />
     );
 
     fireEvent.click(screen.getByLabelText('Expand cell'));
@@ -53,9 +60,31 @@ describe('PreviewResults', () => {
   });
 
   it('shows a loading state while previewing without rows', () => {
-    render(<PreviewResults records={undefined} columnOrder={[]} isPreviewing error={undefined} />);
+    render(
+      <PreviewResults
+        records={undefined}
+        columnOrder={[]}
+        isPreviewing
+        status={undefined}
+        error={undefined}
+      />
+    );
 
     expect(screen.getByText('Generating preview rows…')).toBeInTheDocument();
+  });
+
+  it('shows the latest status under the loading spinner', () => {
+    render(
+      <PreviewResults
+        records={undefined}
+        columnOrder={[]}
+        isPreviewing
+        status="🚀 (1/1) Dispatching with 10 records"
+        error={undefined}
+      />
+    );
+
+    expect(screen.getByText('🚀 (1/1) Dispatching with 10 records')).toBeInTheDocument();
   });
 
   it('shows the error when the preview fails without rows', () => {
@@ -64,6 +93,7 @@ describe('PreviewResults', () => {
         records={undefined}
         columnOrder={[]}
         isPreviewing={false}
+        status={undefined}
         error="model unavailable"
       />
     );
@@ -73,7 +103,15 @@ describe('PreviewResults', () => {
   });
 
   it('shows an empty state when the preview finishes without rows', () => {
-    render(<PreviewResults records={[]} columnOrder={[]} isPreviewing={false} error={undefined} />);
+    render(
+      <PreviewResults
+        records={[]}
+        columnOrder={[]}
+        isPreviewing={false}
+        status={undefined}
+        error={undefined}
+      />
+    );
 
     expect(screen.getByText(/didn't return any rows/)).toBeInTheDocument();
   });

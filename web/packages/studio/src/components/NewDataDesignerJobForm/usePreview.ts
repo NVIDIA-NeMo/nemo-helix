@@ -24,6 +24,8 @@ export interface UsePreviewOptions {
 
 export interface UsePreviewResult {
   previewLogs: string;
+  /** The newest non-heartbeat update of the current run. */
+  previewStatus: string | undefined;
   /** Undefined until the stream delivers its dataset frame. */
   previewRecords: PreviewRecord[] | undefined;
   /** Column names of the previewed config, in config order. */
@@ -35,6 +37,8 @@ export interface UsePreviewResult {
   /** Aborts the in-flight preview. A no-op when nothing is running. */
   stopPreview: () => void;
 }
+
+const isIndentedContinuation = (message: string) => /^\s/.test(message);
 
 const configColumnNames = (config: DataDesignerConfig): string[] =>
   Array.isArray(config.columns) ? config.columns.map((column) => column.name) : [];
@@ -49,6 +53,7 @@ export function usePreview({
   getCurrentConfig,
 }: UsePreviewOptions): UsePreviewResult {
   const [previewLogs, setPreviewLogs] = useState('');
+  const [previewStatus, setPreviewStatus] = useState<string | undefined>(undefined);
   const [previewRecords, setPreviewRecords] = useState<PreviewRecord[] | undefined>(undefined);
   const [previewColumnOrder, setPreviewColumnOrder] = useState<string[]>([]);
   const [previewError, setPreviewError] = useState<string | undefined>(undefined);
@@ -95,6 +100,7 @@ export function usePreview({
     }
 
     setPreviewLogs('');
+    setPreviewStatus(undefined);
     setPreviewRecords(undefined);
     setPreviewColumnOrder(configColumnNames(config));
     setPreviewError(undefined);
@@ -112,6 +118,14 @@ export function usePreview({
         {
           onLog: (line) => {
             if (isCurrent()) appendLogLine(line);
+          },
+          onStatus: (message) => {
+            if (!isCurrent()) {
+              return;
+            }
+            setPreviewStatus((prev) =>
+              prev && isIndentedContinuation(message) ? `${prev}\n${message}` : message
+            );
           },
           onRecords: (records) => {
             if (isCurrent()) setPreviewRecords(records);
@@ -141,6 +155,7 @@ export function usePreview({
 
   return {
     previewLogs,
+    previewStatus,
     previewRecords,
     previewColumnOrder,
     previewError,

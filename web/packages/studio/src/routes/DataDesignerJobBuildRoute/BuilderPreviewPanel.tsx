@@ -6,10 +6,12 @@ import {
   Button,
   CodeSnippet,
   Flex,
+  Spinner,
   TabsContent,
   TabsList,
   TabsRoot,
   TabsTrigger,
+  Text,
 } from '@nvidia/foundations-react-core';
 import {
   formatPreviewLogsForDisplay,
@@ -18,7 +20,7 @@ import {
 import { PreviewResults } from '@studio/components/NewDataDesignerJobForm/PreviewResults';
 import { useResizableHeight } from '@studio/routes/DataDesignerJobBuildRoute/useResizableHeight';
 import cn from 'classnames';
-import { X } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type FC, memo, useState } from 'react';
 
 type PreviewTab = 'rows' | 'logs';
@@ -32,22 +34,26 @@ export interface BuilderPreviewPanelProps {
   records: PreviewRecord[] | undefined;
   columnOrder: readonly string[];
   logs: string;
+  status: string | undefined;
   isPreviewing: boolean;
   error: string | undefined;
-  onClose: () => void;
+  isExpanded: boolean;
+  onToggleExpanded: () => void;
 }
 
 export const BuilderPreviewPanel: FC<BuilderPreviewPanelProps> = memo(function BuilderPreviewPanel({
   records,
   columnOrder,
   logs,
+  status,
   isPreviewing,
   error,
-  onClose,
+  isExpanded,
+  onToggleExpanded,
 }) {
   const [tab, setTab] = useState<PreviewTab>('rows');
   const { ref: logsScrollRef } = useStickToBottom<HTMLDivElement>({
-    enabled: tab === 'logs' && !!logs,
+    enabled: isExpanded && tab === 'logs' && !!logs,
   });
   const resize = useResizableHeight({
     defaultHeight: DEFAULT_PANEL_HEIGHT_PX,
@@ -58,78 +64,110 @@ export const BuilderPreviewPanel: FC<BuilderPreviewPanelProps> = memo(function B
   return (
     <div
       // eslint-disable-next-line no-restricted-syntax
-      style={{ height: resize.height }}
+      style={isExpanded ? { height: resize.height } : undefined}
       className="relative flex shrink-0 flex-col border-t border-base px-density-2xl"
     >
-      <div
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize preview panel"
-        aria-valuemin={resize.minHeight}
-        aria-valuemax={resize.maxHeight}
-        aria-valuenow={resize.height}
-        tabIndex={0}
-        className="group absolute inset-x-0 top-[-5px] z-10 flex h-[10px] cursor-row-resize items-center justify-center focus-visible:outline-none"
-        onMouseDown={resize.onMouseDown}
-        onKeyDown={resize.onKeyDown}
-      >
-        <span
-          className={cn(
-            'h-1 w-10 rounded-full bg-border-base transition-colors group-hover:bg-border-strong group-focus-visible:bg-border-brand',
-            resize.isDragging && 'bg-border-brand'
-          )}
-        />
-      </div>
+      {isExpanded ? (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize preview panel"
+          aria-valuemin={resize.minHeight}
+          aria-valuemax={resize.maxHeight}
+          aria-valuenow={resize.height}
+          tabIndex={0}
+          className="group absolute inset-x-0 top-[-5px] z-10 flex h-[10px] cursor-row-resize items-center justify-center focus-visible:outline-none"
+          onMouseDown={resize.onMouseDown}
+          onKeyDown={resize.onKeyDown}
+        >
+          <span
+            className={cn(
+              'h-1 w-10 rounded-full bg-border-base transition-colors group-hover:bg-border-strong group-focus-visible:bg-border-brand',
+              resize.isDragging && 'bg-border-brand'
+            )}
+          />
+        </div>
+      ) : null}
 
       <TabsRoot
         value={tab}
         onValueChange={(value) => setTab(value as PreviewTab)}
-        className="flex min-h-0 flex-1 flex-col pb-density-lg pt-density-sm"
+        className={cn(
+          'flex min-h-0 flex-1 flex-col pt-density-sm',
+          isExpanded ? 'pb-density-lg' : 'pb-density-sm'
+        )}
       >
-        <Flex align="center" justify="between" gap="density-md">
-          <TabsList aria-label="Preview output">
-            <TabsTrigger value="rows">Preview Rows</TabsTrigger>
-            <TabsTrigger value="logs">Preview Run Logs</TabsTrigger>
-          </TabsList>
+        <Flex
+          align="center"
+          justify="between"
+          gap="density-md"
+          className={cn(isExpanded && 'shadow-[inset_0_-2px_0_0_var(--border-color-base)]')}
+        >
+          {isExpanded ? (
+            <TabsList aria-label="Preview output" className="shadow-none!">
+              <TabsTrigger value="rows">Preview Rows</TabsTrigger>
+              <TabsTrigger value="logs">Preview Run Logs</TabsTrigger>
+            </TabsList>
+          ) : (
+            <Flex align="center" gap="density-sm" className="h-10">
+              <Text kind="label/bold/md">Preview Rows</Text>
+              {isPreviewing ? (
+                <Spinner
+                  size="small"
+                  aria-label="Generating preview rows"
+                  className="[&>div:first-child]:h-4!"
+                />
+              ) : null}
+            </Flex>
+          )}
           <Button
             kind="tertiary"
             color="neutral"
             size="small"
-            aria-label="Close preview"
-            onClick={onClose}
+            aria-label={isExpanded ? 'Collapse preview' : 'Expand preview'}
+            onClick={onToggleExpanded}
           >
-            <X size={16} aria-hidden />
+            {isExpanded ? (
+              <ChevronDown size={16} aria-hidden />
+            ) : (
+              <ChevronUp size={16} aria-hidden />
+            )}
           </Button>
         </Flex>
 
-        <TabsContent
-          value="rows"
-          className="min-h-0 flex-1 flex-col items-stretch p-0 pt-density-lg"
-        >
-          <PreviewResults
-            records={records}
-            columnOrder={columnOrder}
-            isPreviewing={isPreviewing}
-            error={error}
-          />
-        </TabsContent>
+        {isExpanded ? (
+          <>
+            <TabsContent
+              value="rows"
+              className="min-h-0 flex-1 flex-col items-stretch p-0 pt-density-lg"
+            >
+              <PreviewResults
+                records={records}
+                columnOrder={columnOrder}
+                isPreviewing={isPreviewing}
+                status={status}
+                error={error}
+              />
+            </TabsContent>
 
-        <TabsContent
-          value="logs"
-          className="min-h-0 flex-1 flex-col items-stretch p-0 pt-density-lg"
-        >
-          <CodeSnippet
-            value={logs ? formatPreviewLogsForDisplay(logs) : 'No logs yet.'}
-            language="json"
-            kind="block"
-            attributes={{
-              CodeSnippetCode: {
-                ref: logsScrollRef,
-                style: { maxHeight: Math.max(resize.height - LOGS_CHROME_PX, 0) },
-              },
-            }}
-          />
-        </TabsContent>
+            <TabsContent
+              value="logs"
+              className="min-h-0 flex-1 flex-col items-stretch p-0 pt-density-lg"
+            >
+              <CodeSnippet
+                value={logs ? formatPreviewLogsForDisplay(logs) : 'No logs yet.'}
+                language="json"
+                kind="block"
+                attributes={{
+                  CodeSnippetCode: {
+                    ref: logsScrollRef,
+                    style: { maxHeight: Math.max(resize.height - LOGS_CHROME_PX, 0) },
+                  },
+                }}
+              />
+            </TabsContent>
+          </>
+        ) : null}
       </TabsRoot>
     </div>
   );
