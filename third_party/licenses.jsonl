@@ -208,7 +208,6 @@
 {"name": "langsmith", "license": "MIT", "compatible": true}
 {"name": "lark", "license": "MIT", "compatible": true}
 {"name": "litellm", "license": "MIT", "compatible": true}
-{"name": "llguidance", "license": "MIT", "compatible": true}
 {"name": "loguru", "license": "MIT", "compatible": true}
 {"name": "lxml", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "lz4", "license": "BSD-3-CLAUSE", "compatible": true}
@@ -220,13 +219,7 @@
 {"name": "matplotlib", "license": "PSF-2.0", "compatible": true}
 {"name": "mcp", "license": "MIT", "compatible": true}
 {"name": "mdurl", "license": "MIT", "compatible": true}
-{"name": "miniaudio", "license": "MIT", "compatible": true}
 {"name": "mlflow-skinny", "license": "APACHE-2.0", "compatible": true}
-{"name": "mlx", "license": "MIT", "compatible": true}
-{"name": "mlx-audio", "license": "MIT", "compatible": true}
-{"name": "mlx-lm", "license": "MIT", "compatible": true}
-{"name": "mlx-metal", "license": "MIT", "compatible": true}
-{"name": "mlx-vlm", "license": "MIT", "compatible": true}
 {"name": "mmh3", "license": "MIT", "compatible": true}
 {"name": "more-itertools", "license": "MIT", "compatible": true}
 {"name": "mpmath", "license": "BSD-3-CLAUSE", "compatible": true}
@@ -288,7 +281,6 @@
 {"name": "openai-codex", "license": "APACHE-2.0", "compatible": true}
 {"name": "openai-codex-cli-bin", "license": "APACHE-2.0", "compatible": true}
 {"name": "openapi-pydantic", "license": "MIT", "compatible": true}
-{"name": "opencv-python", "license": "APACHE-2.0", "compatible": true}
 {"name": "openinference-instrumentation", "license": "APACHE-2.0", "compatible": true}
 {"name": "openinference-instrumentation-litellm", "license": "APACHE-2.0", "compatible": true}
 {"name": "openinference-semantic-conventions", "license": "APACHE-2.0", "compatible": true}
@@ -398,7 +390,6 @@
 {"name": "smart-open", "license": "MIT", "compatible": true}
 {"name": "smmap", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "sniffio", "license": "APACHE-2.0 OR MIT", "compatible": true}
-{"name": "sounddevice", "license": "MIT", "compatible": true}
 {"name": "sqlalchemy", "license": "MIT", "compatible": true}
 {"name": "sqlfluff", "license": "MIT", "compatible": true}
 {"name": "sqlite-vec", "license": "APACHE-2.0 OR MIT", "compatible": true}

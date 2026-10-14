@@ -62,7 +62,7 @@ is the unit of work the rest of the optimization loop runs on. Each carries:
   context near the token limit"
 - `description` — the failure mode, the tool or model call it affects, and the
   conditions that trigger it
-- `trace_refs` — the Intake trace IDs cited as evidence, so a developer can
+- `evidence` — supporting trace IDs with optional URLs and span references, so a developer can
   audit the reasoning and build regression tests
 
 The Analyst targets at least three representative traces per Insight and appends
@@ -102,7 +102,7 @@ nemo insights analysis-runs get "<run-name>" --workspace "<workspace>"
 
 Confirm the job completed and inspect its analysis report. A completed run may
 produce no new insights. When it records insights, read them back and check
-for a clear title, an actionable description, and non-empty `trace_refs`.
+for a clear title, an actionable description, and non-empty `evidence`.
 Listing all insights for the agent can include earlier runs.
 
 ```bash
