@@ -281,6 +281,14 @@ def _materialize_from_bundle(
         agent["secrets"] = list(data["secrets"])
     if data.get("env"):
         agent["env"] = {**(agent.get("env") or {}), **data["env"]}
+    # `env` is plaintext and ends up in the victim image, so a secret set there would leak its value.
+    leaked = sorted(set(agent.get("env") or {}) & set(agent.get("secrets") or []))
+    if leaked:
+        raise AgentHardenerRunError(
+            CATEGORY_MANIFEST,
+            f"manifest {manifest_id!r} sets secret(s) {', '.join(leaked)} in plaintext env.",
+            remediation="Remove them from env; declare them with --secrets NAME=workspace/secret instead.",
+        )
     _apply_manifest_overrides(manifest, data)
     return manifest
 

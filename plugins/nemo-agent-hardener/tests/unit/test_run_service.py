@@ -1401,6 +1401,22 @@ def test_no_shadowing_warning_when_the_environment_agrees(
     assert not caplog.records
 
 
+def test_stored_env_may_not_carry_a_declared_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """env is plaintext in the victim image; a secret set there would leak its value."""
+    sdk = SimpleNamespace(
+        entities=SimpleNamespace(
+            get_entity_by_name=lambda **_k: _frozen_agent_record(secrets=["API_KEY"], env={"API_KEY": _SECRET_VALUE})
+        )
+    )
+    monkeypatch.setattr(manifest_mod, "download_and_extract_project", lambda *_a, **_k: tmp_path / "restored")
+
+    with pytest.raises(AgentHardenerRunError, match="API_KEY") as exc_info:
+        manifest_mod._materialize_manifest(sdk, "m1", make_job_context(tmp_path))
+
+    assert exc_info.value.category == "manifest"
+    assert _SECRET_VALUE not in str(exc_info.value)
+
+
 def test_manifest_secret_values_let_explicit_refs_win_over_the_deployments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
