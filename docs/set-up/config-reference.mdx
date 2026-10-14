@@ -872,6 +872,41 @@ safe_synthesizer:
   default_job_resource_cpu_limit: '4'
 ```
 
+### `builder`
+
+Configuration for in-cluster container image builds.
+
+```yaml wordWrap
+builder:
+  sandbox:
+    # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
+    image:
+    # CPU request for the sandbox. | default: '2'
+    cpu: '2'
+    # Memory request for the sandbox. | default: '8Gi'
+    memory: 8Gi
+    # Resolvers the sandbox uses instead of cluster DNS, so a network policy can block every cluster address.
+    dns_nameservers:
+    - 8.8.8.8
+    - 1.1.1.1
+  # The Jobs execution profile, provider `cpu` on `kubernetes_job`, the fetch step runs on. The sandboxes use its work volume (`storage.pvc_name`) and nodes. All three profiles must name one namespace, and the push step's the same work volume. | default: 'build-fetch'
+  fetch_profile: build-fetch
+  # The one the build step runs on, which starts the sandboxes. | default: 'build-control'
+  control_profile: build-control
+  # The one the push step runs on, the only step that holds the registry credential and signing key. | default: 'build-push'
+  push_profile: build-push
+  # Host of the registry every image is published to, with an optional port; prefix it with `http://` for plain HTTP. Unset refuses every submit.
+  registry:
+  # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''
+  repository_prefix: ''
+  # The platform secret holding the username the push step logs in to `registry` with. Null, with `registry_password_secret`, pushes without logging in, which only a registry open to anonymous pushes allows. | default: 'builder-registry-username'
+  registry_username_secret: builder-registry-username
+  # The platform secret holding that username's password or token. | default: 'builder-registry-password'
+  registry_password_secret: builder-registry-password
+  # The platform secret holding the PEM private key, EC or RSA and unencrypted, the push step signs every image with. Its public half is what the workspace's images verify against. Null publishes images unsigned. | default: 'builder-signing-key'
+  signing_key_secret: builder-signing-key
+```
+
 ### `studio`
 
 Configuration for the Studio service.

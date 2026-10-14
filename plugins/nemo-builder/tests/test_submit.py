@@ -265,8 +265,8 @@ class TestRefusals:
     @pytest.mark.asyncio
     async def test_a_deployment_that_cannot_build_writes_nothing(self) -> None:
         client = FakeEntityClient()
-        with pytest.raises(BackendRejectedError, match="sandbox.image"):
-            await _submit(client, config=_config(sandbox={"image": None}))
+        with pytest.raises(BackendRejectedError, match="builder.registry"):
+            await _submit(client, config=_config(registry=None))
         assert client.events == []
 
     @pytest.mark.asyncio

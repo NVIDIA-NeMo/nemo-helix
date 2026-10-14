@@ -36,8 +36,9 @@ class SandboxConfig(BaseModel):
     image: str | None = Field(
         default=None,
         description=(
-            "The kaniko image the sandbox runs, built from `docker/Dockerfile.kaniko`, or any with `/kaniko/executor` "
-            "and a shell at `/busybox/sh`. Unset refuses every submit."
+            "The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` "
+            "at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take "
+            "the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have."
         ),
     )
     cpu: str = Field(default="2", description="CPU request for the sandbox.")
@@ -58,9 +59,22 @@ class BuilderConfig(NemoConfig):
 
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
 
-    fetch_profile: str = Field(default="build-fetch")
-    control_profile: str = Field(default="build-control")
-    push_profile: str = Field(default="build-push")
+    fetch_profile: str = Field(
+        default="build-fetch",
+        description=(
+            "The Jobs execution profile, provider `cpu` on `kubernetes_job`, the fetch step runs on. The sandboxes use "
+            "its work volume (`storage.pvc_name`) and nodes. All three profiles must name one namespace, and the push "
+            "step's the same work volume."
+        ),
+    )
+    control_profile: str = Field(
+        default="build-control",
+        description="The one the build step runs on, which starts the sandboxes.",
+    )
+    push_profile: str = Field(
+        default="build-push",
+        description="The one the push step runs on, the only step that holds the registry credential and signing key.",
+    )
 
     registry: str | None = Field(
         default=None,
