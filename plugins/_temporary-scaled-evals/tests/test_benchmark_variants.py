@@ -17,7 +17,7 @@ from api_test_fixture import client, v1
 from scaled_evals.api.auth import current_principal
 from scaled_evals.api.benchmark_store import BenchmarkStore, TaskRef
 from scaled_evals.api.db import get_conn
-from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
+from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.dispatch.sandbox_k8s import apply_agent_timeout_floor
 from scaled_evals.dispatch.worker import (
     Dispatcher,
@@ -26,7 +26,7 @@ from scaled_evals.dispatch.worker import (
     snapshot_agent_timeout_floor,
 )
 from scaled_evals.models.execution_snapshot import EXECUTION_SNAPSHOT_SCHEMA_VERSION
-from task_fixtures import seed_benchmark, seed_task_revision
+from task_fixtures import seed_benchmark, seed_benchmark_run, seed_task_revision
 
 
 @pytest.fixture(autouse=True)
@@ -204,18 +204,16 @@ def test_benchmark_variant_snapshot_freezes_lineage_and_policy() -> None:
         visibility="private",
         operational_policy={"agent_timeout_floor_sec": 7200},
     )
-    cur = MagicMock()
-    cur.fetchone.return_value = {"benchmark_id": "bm_variant", "benchmark_revision": 1}
-    assert EvaluationRepository._benchmark_variant_snapshot(cur, "bmr_1") == {
+    run = {"framework": "harbor", "runtime": "sandbox_k8s", "parallelism": 1}
+    seed_benchmark_run({**run, "id": "bmr_variant", "name": "v", "benchmark_id": "bm_variant", "benchmark_revision": 1})
+    seed_benchmark_run({**run, "id": "bmr_base", "name": "b", "benchmark_id": "bm_base", "benchmark_revision": 2})
+    assert EvaluationStore._benchmark_variant_snapshot("bmr_variant") == {
         "derived_from": {"benchmark_id": "bm_base", "revision": 2},
         "operational_policy": {"agent_timeout_floor_sec": 7200},
     }
-
-    cur.fetchone.return_value = {"benchmark_id": "bm_base", "benchmark_revision": 2}
-    assert EvaluationRepository._benchmark_variant_snapshot(cur, "bmr_1") is None
-    cur.fetchone.return_value = None
-    assert EvaluationRepository._benchmark_variant_snapshot(cur, "bmr_1") is None
-    assert EvaluationRepository._benchmark_variant_snapshot(cur, None) is None
+    assert EvaluationStore._benchmark_variant_snapshot("bmr_base") is None
+    assert EvaluationStore._benchmark_variant_snapshot("bmr_missing") is None
+    assert EvaluationStore._benchmark_variant_snapshot(None) is None
 
 
 def test_create_variant_404_when_base_missing() -> None:

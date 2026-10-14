@@ -48,22 +48,15 @@ import yaml
 from psycopg.rows import dict_row
 
 from scaled_evals.api import artifacts
+from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
 from scaled_evals.api.config_profile_store import ConfigProfileStore
+from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.execution_analytics import emit_execution_span
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
-from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
-from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
-from scaled_evals.api.repositories.execution_cleanup_repository import (
-    ExecutionCleanupRepository,
-)
-from scaled_evals.api.repositories.execution_telemetry_repository import (
-    ExecutionTelemetryRepository,
-)
-from scaled_evals.api.repositories.resource_usage_repository import ResourceUsageRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import build_benchmark_archive
 from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives as cleanup_archive_objects
@@ -270,7 +263,6 @@ def teardown_orphaned_execution(
     cleanup: Mapping[str, Any],
     *,
     worker_id: str,
-    connect: ConnFactory,
     resolve: BackendResolver = _resolve_backend,
 ) -> None:
     """Teardown one claimed orphaned runtime, then release its evaluation for retry."""
@@ -290,15 +282,13 @@ def teardown_orphaned_execution(
             cleanup["execution_number"],
             detail,
         )
-        with connect() as conn:
-            ExecutionCleanupRepository(conn).mark_failed(int(cleanup["id"]), worker_id=worker_id, detail=detail)
+        EvaluationStore().mark_cleanup_failed(str(cleanup["id"]), worker_id=worker_id, detail=detail)
         return
-    with connect() as conn:
-        EvaluationRepository(conn).complete_execution_cleanup(
-            int(cleanup["id"]),
-            worker_id=worker_id,
-            retry_delay_seconds=_retry_delay_seconds(str(cleanup["evaluation_id"]), int(cleanup["execution_number"])),
-        )
+    EvaluationStore().complete_execution_cleanup(
+        str(cleanup["id"]),
+        worker_id=worker_id,
+        retry_delay_seconds=_retry_delay_seconds(str(cleanup["evaluation_id"]), int(cleanup["execution_number"])),
+    )
 
 
 def _copy_runtime_logs_to_artifact_root(evaluation_id: str, runtime: str) -> None:
@@ -473,25 +463,23 @@ class Dispatcher:
 
     def claim_next_archive(self, evaluation_id: str | None = None, *, min_age: float = 0.0) -> str | None:
         """Claim one terminal evaluation that requested an archive rebuild."""
-        with self.connect() as conn:
-            row = EvaluationRepository(conn).claim_next_archive(
-                claim_timeout=self.claim_timeout,
-                worker_id=self.worker_id,
-                evaluation_id=evaluation_id,
-                min_age=min_age,
-            )
-            return None if row is None else row["id"]
+        row = EvaluationStore().claim_next_archive(
+            claim_timeout=self.claim_timeout,
+            worker_id=self.worker_id,
+            evaluation_id=evaluation_id,
+            min_age=min_age,
+        )
+        return None if row is None else row["id"]
 
     def claim_next_evidence(self, evaluation_id: str | None = None, *, min_age: float = 0.0) -> str | None:
         """Claim one terminal evaluation needing provenance/SBOM generation."""
-        with self.connect() as conn:
-            row = EvaluationRepository(conn).claim_next_evidence(
-                claim_timeout=self.claim_timeout,
-                worker_id=self.worker_id,
-                evaluation_id=evaluation_id,
-                min_age=min_age,
-            )
-            return None if row is None else row["id"]
+        row = EvaluationStore().claim_next_evidence(
+            claim_timeout=self.claim_timeout,
+            worker_id=self.worker_id,
+            evaluation_id=evaluation_id,
+            min_age=min_age,
+        )
+        return None if row is None else row["id"]
 
     def finalize(self, evaluation_id: str) -> None:
         """Build pending evidence, then the archive, for one terminal evaluation."""
@@ -505,7 +493,7 @@ class Dispatcher:
         execution_number: int | None = None
         try:
             with self.connect() as conn:
-                row: dict[str, Any] | None = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+                row: dict[str, Any] | None = EvaluationStore().load_for_dispatch(evaluation_id)
                 if row is None:
                     raise RuntimeError(f"evaluation not found: {evaluation_id}")
                 if row.get("status") not in _DB_TERMINAL_STATUSES:
@@ -561,7 +549,7 @@ class Dispatcher:
                     artifacts.evaluation_artifact_prefix(evaluation_id),
                 )
             with self.connect() as conn:
-                EvaluationRepository(conn).mark_evidence_ready(
+                EvaluationStore().mark_evidence_ready(
                     evaluation_id,
                     expected_execution_number=execution_number,
                 )
@@ -569,7 +557,7 @@ class Dispatcher:
         except Exception as exc:  # noqa: BLE001 — durable queue retries up to its limit
             LOG.warning("evidence generation failed for %s: %s", evaluation_id, exc)
             with self.connect() as conn:
-                EvaluationRepository(conn).mark_evidence_failed(
+                EvaluationStore().mark_evidence_failed(
                     evaluation_id,
                     str(exc),
                     expected_execution_number=execution_number,
@@ -578,8 +566,7 @@ class Dispatcher:
     def _record_analytics(self, row: dict[str, Any]) -> None:
         """Record the terminal evaluation in Intake; analytics never block evidence."""
         try:
-            with self.connect() as conn:
-                usage = ResourceUsageRepository(conn).totals_for_evaluation(str(row["id"]))
+            usage = EvaluationStore().resource_totals_for(str(row["id"]))
         except Exception:  # noqa: BLE001 — analytics are best-effort
             LOG.warning("could not read resource usage for %s", row["id"], exc_info=True)
             return
@@ -589,11 +576,10 @@ class Dispatcher:
         """Build ``results.tar.gz`` for an evaluation from synced artifacts."""
         runtime = None
         execution_number = None
-        with self.connect() as conn:
-            row = EvaluationRepository(conn).load_status_runtime(evaluation_id)
-            if row is not None:
-                runtime = row.get("runtime")
-                execution_number = int(row.get("current_execution") or 1)
+        row = EvaluationStore().load_status_runtime(evaluation_id)
+        if row is not None:
+            runtime = row.get("runtime")
+            execution_number = int(row.get("current_execution") or 1)
         self._build_archive_warn(
             evaluation_id,
             runtime=str(runtime) if runtime else None,
@@ -613,7 +599,7 @@ class Dispatcher:
         Args:
             evaluation_id: the evaluation to run.
             expected_execution_number: skip the run unless this is the current execution.
-            inputs: the execution's immutable launch inputs; ``None`` loads them from Postgres.
+            inputs: the execution's immutable launch inputs; ``None`` loads them from the evaluation.
 
         """
         try:
@@ -669,7 +655,7 @@ class Dispatcher:
         (spawned at create time); the worker runs those members like any other
         evaluation and is otherwise unaware of benchmarks. The run's
         status/reward are derived from its members on read (see
-        ``benchmark_run_repository.derive_run_view``), so there is no fan-in here.
+        ``benchmark_run_store.derive_run_view``), so there is no fan-in here.
         """
         with self.connect() as conn:
             row: dict[str, Any] | None = (
@@ -678,7 +664,7 @@ class Dispatcher:
             if row is None:
                 return
             if row["status"] == "cancelled" and row.get("cancel_teardown_status") == "pending":
-                EvaluationRepository(conn).record_cancel_teardown_succeeded(evaluation_id)
+                EvaluationStore().record_cancel_teardown_succeeded(evaluation_id)
                 return
             if row["status"] not in _RESUMABLE_STATUSES:
                 return
@@ -955,7 +941,7 @@ class Dispatcher:
                     )
                     return
 
-            db_status = EvaluationRepository(conn).load_runtime_status(
+            db_status = EvaluationStore().load_runtime_status(
                 evaluation_id,
                 expected_execution_number=execution_number,
             )
@@ -1061,7 +1047,7 @@ class Dispatcher:
                 if teardown_note is not None:
                     detail = f"{detail}; {teardown_note}"
                 if is_retryable_failure(failure_code, detail):
-                    scheduled = EvaluationRepository(conn).schedule_retry(
+                    scheduled = EvaluationStore().schedule_retry(
                         evaluation_id,
                         execution_number=execution_number,
                         failure_code=failure_code,
@@ -1247,12 +1233,11 @@ class Dispatcher:
             samples = list(sampler(handle))
             if not samples:
                 return
-            with self.connect() as conn:
-                ResourceUsageRepository(conn).record_samples(
-                    evaluation_id,
-                    execution_number=execution_number,
-                    samples=samples,
-                )
+            EvaluationStore().record_resource_samples(
+                evaluation_id,
+                execution_number=execution_number,
+                samples=samples,
+            )
         except Exception as exc:  # noqa: BLE001 - telemetry must not fail the evaluation
             LOG.warning(
                 "resource telemetry unavailable for %s execution %s: %s",
@@ -1273,15 +1258,14 @@ class Dispatcher:
         *,
         execution_number: int,
     ) -> str:
-        with self.connect() as conn:
-            repo = EvaluationRepository(conn)
-            status = repo.load_runtime_status(
-                evaluation_id,
-                expected_execution_number=execution_number,
-            )
-            if status is None:
-                raise DispatchClaimLost(evaluation_id)
-            return status
+        repo = EvaluationStore()
+        status = repo.load_runtime_status(
+            evaluation_id,
+            expected_execution_number=execution_number,
+        )
+        if status is None:
+            raise DispatchClaimLost(evaluation_id)
+        return status
 
     def _teardown_cancelled_runtime(
         self,
@@ -1295,32 +1279,30 @@ class Dispatcher:
         try:
             backend.teardown(handle)
         except Exception as exc:  # noqa: BLE001 — cancellation must stay durable
-            with self.connect() as conn:
-                EvaluationRepository(conn).record_cancel_teardown_failure(
-                    evaluation_id,
-                    f"cancelled; evaluation-runtime cleanup failed: {exc}",
-                )
+            EvaluationStore().record_cancel_teardown_failure(
+                evaluation_id,
+                f"cancelled; evaluation-runtime cleanup failed: {exc}",
+            )
         else:
-            with self.connect() as conn:
-                self._write_provenance_warn(
-                    row,
-                    status="cancelled",
-                    artifact_root=artifact_root,
-                    handle=handle,
-                )
-                self._sync_artifacts_warn(
-                    evaluation_id,
-                    handle.backend,
-                    execution_id=str(row.get("execution_id") or handle.external_id),
-                    execution_number=int(row.get("execution_number") or 1),
-                )
-                EvaluationRepository(conn).record_cancel_teardown_succeeded(evaluation_id)
-                self._build_archive_warn(
-                    evaluation_id,
-                    runtime=handle.backend,
-                    artifact_root=artifact_root,
-                    execution_number=int(row.get("execution_number") or 1),
-                )
+            self._write_provenance_warn(
+                row,
+                status="cancelled",
+                artifact_root=artifact_root,
+                handle=handle,
+            )
+            self._sync_artifacts_warn(
+                evaluation_id,
+                handle.backend,
+                execution_id=str(row.get("execution_id") or handle.external_id),
+                execution_number=int(row.get("execution_number") or 1),
+            )
+            EvaluationStore().record_cancel_teardown_succeeded(evaluation_id)
+            self._build_archive_warn(
+                evaluation_id,
+                runtime=handle.backend,
+                artifact_root=artifact_root,
+                execution_number=int(row.get("execution_number") or 1),
+            )
 
     @staticmethod
     def _teardown_failed_runtime_warn(
@@ -1420,8 +1402,7 @@ class Dispatcher:
             if not config and snap_role not in profiles:
                 raise RuntimeError(f"{role} profile missing from execution snapshot")
             return config
-        loader = getattr(EvaluationRepository(conn), f"load_{role}_profile")
-        profile_row = loader(str(profile_id))
+        profile_row = ConfigProfileStore().get(str(profile_id))
         if profile_row is None:
             raise RuntimeError(f"{role} profile not found: {profile_id}")
         config = profile_row.get("config") or {}
@@ -1515,7 +1496,7 @@ class Dispatcher:
             "benchmark_run_id": benchmark_run_id,
         }
         if benchmark_run_id:
-            identity = BenchmarkRunRepository(conn).load_experiment_identity(benchmark_run_id) or {}
+            identity = BenchmarkRunStore().load_experiment_identity(benchmark_run_id) or {}
             benchmark = identity.get("benchmark_slug") or row.get("task_slug") or "eval"
             metadata["benchmark_run_name"] = identity.get("run_name")
             run_key = str(benchmark_run_id)
@@ -1577,7 +1558,7 @@ class Dispatcher:
                 count = artifacts.sync_directory_to_prefix(artifact_root, artifact_prefix)
             else:
                 with self.connect() as conn, conn.transaction():
-                    if not EvaluationRepository(conn).lock_current_execution(
+                    if not EvaluationStore().current_execution_is(
                         evaluation_id,
                         expected_execution_number=execution_number,
                     ):
@@ -1588,7 +1569,7 @@ class Dispatcher:
                         else artifacts.sync_directory_to_prefix
                     )
                     count = sync(artifact_root, artifact_prefix)
-                    ExecutionTelemetryRepository(conn).record_artifact_sync(
+                    EvaluationStore().record_artifact_sync(
                         evaluation_id,
                         execution_number=execution_number,
                         status="succeeded",
@@ -1601,7 +1582,7 @@ class Dispatcher:
             if execution_number is not None:
                 try:
                     with self.connect() as conn, conn.transaction():
-                        ExecutionTelemetryRepository(conn).record_artifact_sync(
+                        EvaluationStore().record_artifact_sync(
                             evaluation_id,
                             execution_number=execution_number,
                             status="failed",
@@ -1631,10 +1612,10 @@ class Dispatcher:
                 loaded = json.loads(diagnostic_path.read_text(encoding="utf-8"))
                 diagnostic = loaded if isinstance(loaded, dict) else {}
             with self.connect() as conn, conn.transaction():
-                row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+                row = EvaluationStore().load_for_dispatch(evaluation_id)
                 if row is None:
                     return
-                repository = ExecutionTelemetryRepository(conn)
+                repository = EvaluationStore()
                 repository.record_summary(
                     evaluation_id,
                     execution_number=execution_number,
@@ -1689,7 +1670,7 @@ class Dispatcher:
         try:
             if runtime is not None and not get_backend_capabilities(runtime).supports_archive:
                 with self.connect() as conn:
-                    EvaluationRepository(conn).mark_archive_missing(
+                    EvaluationStore().mark_archive_missing(
                         evaluation_id,
                         detail=f"runtime {runtime} does not support result archives",
                         expected_execution_number=execution_number,
@@ -1697,7 +1678,7 @@ class Dispatcher:
                 return None
             if not already_claimed:
                 with self.connect() as conn:
-                    EvaluationRepository(conn).mark_archive_building(
+                    EvaluationStore().mark_archive_building(
                         evaluation_id,
                         worker_id=self.worker_id,
                         expected_execution_number=execution_number,
@@ -1711,14 +1692,14 @@ class Dispatcher:
                 else:
                     archive = artifacts.build_evaluation_archive(evaluation_id)
                 with self.connect() as conn:
-                    EvaluationRepository(conn).mark_archive_ready(
+                    EvaluationStore().mark_archive_ready(
                         evaluation_id,
                         object_key=archive["object_key"],
                         size_bytes=archive["size_bytes"],
                     )
             else:
                 with self.connect() as conn, conn.transaction():
-                    if not EvaluationRepository(conn).lock_current_execution(
+                    if not EvaluationStore().current_execution_is(
                         evaluation_id,
                         expected_execution_number=execution_number,
                     ):
@@ -1730,7 +1711,7 @@ class Dispatcher:
                         )
                     else:
                         archive = artifacts.build_evaluation_archive(evaluation_id)
-                    EvaluationRepository(conn).mark_archive_ready(
+                    EvaluationStore().mark_archive_ready(
                         evaluation_id,
                         object_key=archive["object_key"],
                         size_bytes=archive["size_bytes"],
@@ -1743,7 +1724,7 @@ class Dispatcher:
             LOG.warning("archive build failed for %s: %s", evaluation_id, detail)
             try:
                 with self.connect() as conn:
-                    EvaluationRepository(conn).mark_archive_missing(
+                    EvaluationStore().mark_archive_missing(
                         evaluation_id,
                         detail=detail,
                         expected_execution_number=execution_number,
@@ -1755,12 +1736,12 @@ class Dispatcher:
 
     @staticmethod
     def _load(conn: psycopg.Connection, evaluation_id: str) -> dict | None:
-        return EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+        return EvaluationStore().load_for_dispatch(evaluation_id)
 
     @staticmethod
     def _load_state(conn: psycopg.Connection, evaluation_id: str, inputs: Mapping[str, Any]) -> dict | None:
         """Overlay the row's live state, which the API still writes, on the immutable inputs."""
-        state = EvaluationRepository(conn).load_dispatch_state(evaluation_id)
+        state = EvaluationStore().load_dispatch_state(evaluation_id)
         return None if state is None else {**inputs, **state}
 
     def _set_status(
@@ -1774,7 +1755,7 @@ class Dispatcher:
         handle: str | None = None,
         failure_code: str | None = None,
     ) -> None:
-        telemetry = ExecutionTelemetryRepository(conn)
+        telemetry = EvaluationStore()
         if status in {"provisioning", "running"}:
             telemetry.record_phase(
                 evaluation_id,
@@ -1788,7 +1769,7 @@ class Dispatcher:
                 phase="terminal",
                 terminal_status=status,
             )
-        updated = EvaluationRepository(conn).set_status(
+        updated = EvaluationStore().set_status(
             evaluation_id,
             status,
             detail=detail,
@@ -1820,13 +1801,13 @@ class Dispatcher:
         note from :meth:`_maybe_upload_atif`) is appended to the trial-count
         ``status_detail`` when present.
         """
-        ExecutionTelemetryRepository(conn).record_phase(
+        EvaluationStore().record_phase(
             evaluation_id,
             execution_number=execution_number,
             phase="terminal",
             terminal_status=terminal_status,
         )
-        updated = EvaluationRepository(conn).persist_result(
+        updated = EvaluationStore().persist_result(
             evaluation_id,
             EvaluationResultWrite(result=result, summary=summary, extra_detail=extra_detail),
             terminal_status=terminal_status,
