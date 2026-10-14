@@ -7,6 +7,7 @@ import httpx
 import pytest
 from nhx_evals_sdk.resilience.config import ResilienceConfig
 from nhx_evals_sdk.resilience.scheduler import (
+    ResilienceCancelledError,
     ResilienceDeadlineExceededError,
     ResilienceMaxAttemptsExceededError,
     ResilienceQueueFullError,
@@ -398,6 +399,49 @@ async def test_target_runtime_is_unknown_when_the_scheduler_never_dispatched():
         await scheduler.run_with_resilience("endpoint-full", answers, max_attempts=1, deadline_at=None)
 
     assert runtime.seconds is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_attempt_leaves_the_sample_runtime_unknown():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+    started = asyncio.Event()
+
+    async def hangs() -> str:
+        started.set()
+        clock.now += 12.0
+        await asyncio.Event().wait()
+        return "never"
+
+    with measure_target_runtime() as runtime:
+        task = asyncio.create_task(
+            scheduler.run_with_resilience("endpoint-cancelled", hangs, max_attempts=1, deadline_at=None)
+        )
+        await started.wait()
+        task.cancel()
+        with pytest.raises(ResilienceCancelledError):
+            await task
+
+    assert runtime.seconds is None
+
+
+@pytest.mark.asyncio
+async def test_operation_kwargs_named_like_scheduler_internals_pass_through():
+    scheduler = ResilienceScheduler(_no_wait_config())
+
+    async def echo(*, operation_key: str, attempt: int) -> tuple[str, int]:
+        return operation_key, attempt
+
+    result = await scheduler.run_with_resilience(
+        "endpoint-kwargs",
+        echo,
+        max_attempts=1,
+        deadline_at=None,
+        operation_key="body",  # ty: ignore[invalid-argument-type]
+        attempt=3,  # ty: ignore[invalid-argument-type]
+    )
+
+    assert result == ("body", 3)
 
 
 @pytest.mark.asyncio
