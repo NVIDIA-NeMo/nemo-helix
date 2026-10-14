@@ -331,6 +331,24 @@ def test_create_resolves_default_model_placeholder(tmp_path, placeholder: str) -
     assert sent["config_format"] == "nat-workflow-v1"
 
 
+def test_create_reports_malformed_agent_config_yaml_without_traceback(tmp_path) -> None:
+    config = tmp_path / "agent.yaml"
+    config.write_text("llms:\n  - [unterminated\n", encoding="utf-8")
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise AssertionError("malformed YAML should fail before any API request")
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(app, ["create", "--name", "calc", "--agent-config", str(config)])
+
+    assert result.exit_code == 1
+    assert "invalid YAML in agent config" in result.stderr
+    assert "line" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert ".venv" not in result.stderr
+
+
 def test_create_validates_platform_agent_config_before_post(tmp_path) -> None:
     import json as _json
 
