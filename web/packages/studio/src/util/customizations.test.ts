@@ -15,6 +15,7 @@ import {
   formatFinetuningType,
   formatTrainingPhase,
   getBaseModel,
+  getCurrentStage,
   getCustomizationTrainingProgress,
   getDatasetUri,
   getFinetuningType,
@@ -756,6 +757,57 @@ describe('getJobStartDate', () => {
   });
 });
 
+describe('getCurrentStage', () => {
+  const step = (name: string, status: string, phase?: string) => ({
+    name,
+    status,
+    tasks: [{ status_details: phase ? { phase } : {} }],
+  });
+
+  it('names the first step that has not completed, with what its task reports', () => {
+    expect(
+      getCurrentStage([
+        step('model-and-dataset-download', 'completed', 'completed'),
+        step('training', 'active', 'saving_checkpoint'),
+        step('model-upload', 'pending'),
+      ])
+    ).toEqual({ label: 'Training', detail: 'saving checkpoint' });
+  });
+
+  it('leaves out a task phase that only repeats the stage', () => {
+    expect(getCurrentStage([step('training', 'active', 'training')])).toEqual({
+      label: 'Training',
+    });
+  });
+
+  it('never shows the previous step’s phase while the next pod starts', () => {
+    expect(
+      getCurrentStage([step('training', 'completed', 'completed'), step('model-upload', 'pending')])
+    ).toEqual({ label: 'Uploading Model', detail: 'starting' });
+  });
+
+  it('reads the phase from whichever task reports one on a multi-node step', () => {
+    expect(
+      getCurrentStage([
+        {
+          name: 'training',
+          status: 'active',
+          tasks: [{ status_details: {} }, { status_details: { phase: 'merging_adapter' } }],
+        },
+      ])
+    ).toEqual({ label: 'Training', detail: 'merging adapter' });
+  });
+
+  it('title-cases a step it has no label for', () => {
+    expect(getCurrentStage([step('model-export', 'active')])).toEqual({ label: 'Model Export' });
+  });
+
+  it('has nothing to say before the steps load or once all have completed', () => {
+    expect(getCurrentStage(undefined)).toBeUndefined();
+    expect(getCurrentStage([step('training', 'completed', 'completed')])).toBeUndefined();
+  });
+});
+
 describe('getTrainingDiagnosticsTiles', () => {
   const running = { isTerminal: false, duration: '1m 12s' };
   const finished = { isTerminal: true, duration: '00:01:12' };
@@ -802,6 +854,15 @@ describe('getTrainingDiagnosticsTiles', () => {
       ['Train/Val Gap', '—'],
       ['Phase', 'Checkpoint Saved'],
     ]);
+  });
+
+  it('shows the current stage over the job-level phase, which can be another step’s', () => {
+    const tiles = getTrainingDiagnosticsTiles({ phase: 'completed' }, undefined, {
+      ...running,
+      currentStage: { label: 'Registering Model', detail: 'starting' },
+    });
+
+    expect(tiles[3]).toEqual({ label: 'Phase', value: 'Registering Model', hint: 'starting' });
   });
 
   it('swaps phase for duration once terminal, since phase then repeats the status badge', () => {
