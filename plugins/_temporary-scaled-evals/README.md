@@ -378,6 +378,15 @@ changed since it was read returns `409 profile_changed` or
 can be renamed, but its config cannot change and it cannot be deleted
 (`409 profile_in_use`).
 
+Tasks are `scaled_evals_task` entities in the same workspace, with their
+revisions and build state embedded. The build queue claims a revision by
+rewriting its task entity, so build heartbeats also move the task's
+`updated_at`. A write that loses a concurrent update retries, then returns
+`409 task_changed`. Slug uniqueness is checked before the write, so two
+simultaneous creates with the same slug can both succeed. A task referenced by
+a non-terminal evaluation cannot be deleted (`409 task_in_use`). Benchmark and
+benchmark-run member lists skip tasks or revisions that no longer exist.
+
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox
 `lifecycle_timeout` plus a grace, and never less than

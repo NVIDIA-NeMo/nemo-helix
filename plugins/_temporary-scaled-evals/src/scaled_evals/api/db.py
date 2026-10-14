@@ -22,11 +22,11 @@ from scaled_evals.api.repositories import (
     ExecutionTelemetryRepository,
     OperationsRepository,
     ResourceUsageRepository,
-    TaskRepository,
     UserRepository,
 )
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.settings import settings
+from scaled_evals.api.task_store import TaskStore
 
 _pool: ConnectionPool | None = None
 _pool_lock = Lock()
@@ -79,8 +79,8 @@ class Database:
         return AgentBundleStore()
 
     @property
-    def tasks(self) -> TaskRepository:
-        return TaskRepository(self.conn)
+    def tasks(self) -> TaskStore:
+        return TaskStore()
 
     @property
     def benchmarks(self) -> BenchmarkRepository:

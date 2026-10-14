@@ -12,6 +12,7 @@ try:
     from nemo_scaled_evals_plugin import migrations
     from scaled_evals.api.config_profile_store import ConfigProfileStore
     from scaled_evals.api.repositories.base_repository import (
+        InvalidReference,
         order_by_clause,
         patch_set_clause,
         substring_search_pattern,
@@ -26,10 +27,11 @@ try:
         ExecutionTelemetryRepository,
     )
     from scaled_evals.api.repositories.ops_repository import OperationsRepository
-    from scaled_evals.api.repositories.task_repository import TaskRepository
     from scaled_evals.api.repositories.user_repository import UserRepository
     from scaled_evals.api.schemas.common import encode_cursor
+    from scaled_evals.api.task_store import TaskStore
     from scaled_evals.models.evaluations import EvaluationResultSummary, EvaluationResultWrite
+    from task_fixtures import seed_task_revision, stored_revision
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -47,65 +49,6 @@ def _conn() -> tuple[MagicMock, MagicMock]:
 def _executed_sql_and_params(cur: MagicMock, index: int = 0) -> tuple[str, tuple | list]:
     call = cur.execute.call_args_list[index]
     return call.args[0], call.args[1]
-
-
-def test_task_create_parameterizes_name_and_slug() -> None:
-    conn, cur = _conn()
-
-    TaskRepository(conn).create_with_initial_revision(
-        "task_safe",
-        name=MALICIOUS,
-        slug="safe-slug",
-        description=MALICIOUS,
-        visibility="private",
-        object_key="task_safe/rev/1/tarball.tar.gz",
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert MALICIOUS not in sql
-    assert params[1] == MALICIOUS
-    assert params[3] == MALICIOUS
-
-
-def test_task_patch_parameterizes_slug_and_patch_values() -> None:
-    conn, cur = _conn()
-
-    TaskRepository(conn).update(
-        "task_safe",
-        name=MALICIOUS,
-        slug="safe-slug",
-        description=MALICIOUS,
-        visibility="org",
-    )
-
-    sql, params = _executed_sql_and_params(cur)
-    assert MALICIOUS not in sql
-    assert "safe-slug" not in sql
-    assert MALICIOUS in params
-    assert "safe-slug" in params
-
-
-def test_task_failed_revision_count_is_digest_scoped_and_parameterized() -> None:
-    conn, cur = _conn()
-    cur.fetchone.return_value = {"count": 2}
-
-    count = TaskRepository(conn).count_failed_revisions("task_safe", MALICIOUS)
-
-    sql, params = _executed_sql_and_params(cur)
-    assert count == 2
-    assert MALICIOUS not in sql
-    assert params == ("task_safe", MALICIOUS)
-
-
-def test_benchmark_resolved_tasks_uses_effective_revision_in_one_query() -> None:
-    conn, cur = _conn()
-
-    BenchmarkRepository(conn).list_resolved_tasks("bm_safe", 4)
-
-    sql, params = _executed_sql_and_params(cur)
-    assert "COALESCE(m.task_revision, t.current_revision)" in sql
-    assert "LEFT JOIN task_revisions" in sql
-    assert params == ("bm_safe", 4)
 
 
 def test_benchmark_run_revision_returns_qualification_metadata() -> None:
@@ -131,31 +74,32 @@ def test_benchmark_run_revision_returns_qualification_metadata() -> None:
     assert params == ("bm_safe",)
 
 
-def test_task_prebuilt_finalize_is_atomic_and_parameterized() -> None:
-    conn, cur = _conn()
-    cur.fetchone.side_effect = [
-        {"id": "task_safe"},
-        {
-            "revision": 3,
-            "status": "uploading",
-            "tarball_object_key": "task_safe/rev/3/tarball.tar.gz",
-        },
-    ]
-    cur.rowcount = 1
+def test_task_prebuilt_finalize_marks_ready_with_verifier_image() -> None:
+    store = TaskStore()
+    store.create_with_initial_revision(
+        "task_safe", name="task", slug="task", description=None, visibility="private", object_key="k"
+    )
 
-    result = TaskRepository(conn).finalize_latest_revision_prebuilt(
+    result = store.finalize_latest_revision_prebuilt(
         "task_safe",
-        image_ref=MALICIOUS,
+        image_ref="registry/task:signed",
         image_digest="sha256:" + "a" * 64,
         tarball_sha256="package-hash",
+        verifier_image_ref="registry/verifier:signed",
+        verifier_image_digest="sha256:" + "b" * 64,
     )
 
     assert result is not None and result.finalized and result.status == "ready"
-    update = cur.execute.call_args_list[2]
-    assert MALICIOUS not in update.args[0]
-    assert update.args[1][0] == MALICIOUS
-    assert "status = 'ready'" in update.args[0]
-    assert update.args[1][2:4] == (None, None)
+    revision = stored_revision("task_safe", 1)
+    assert (revision["status"], revision["tarball_sha256"], revision["verifier_image_digest"]) == (
+        "ready",
+        "package-hash",
+        "sha256:" + "b" * 64,
+    )
+    uploading = store.revision_for_finalize("task_safe", expected_revision=1)
+    assert uploading is not None and uploading.status == "ready"
+    again = store.finalize_latest_revision_prebuilt("task_safe", image_ref="x", image_digest="y", tarball_sha256=None)
+    assert again is not None and again.finalized is False
 
 
 def test_verifier_image_columns_exist_in_baseline_and_replayable_migration() -> None:
@@ -166,29 +110,6 @@ def test_verifier_image_columns_exist_in_baseline_and_replayable_migration() -> 
     for column in ("verifier_image_ref", "verifier_image_digest"):
         assert f"ADD COLUMN IF NOT EXISTS {column} TEXT" in migration
         assert re.search(rf"^\s+{column}\s+TEXT,$", baseline, re.MULTILINE)
-
-
-def test_task_prebuilt_finalize_persists_verifier_image() -> None:
-    conn, cur = _conn()
-    cur.fetchone.side_effect = [
-        {"id": "task_safe"},
-        {"revision": 3, "status": "uploading", "tarball_object_key": "k"},
-    ]
-    cur.rowcount = 1
-
-    TaskRepository(conn).finalize_latest_revision_prebuilt(
-        "task_safe",
-        image_ref="registry/task:signed",
-        image_digest="sha256:" + "a" * 64,
-        tarball_sha256=None,
-        verifier_image_ref=MALICIOUS,
-        verifier_image_digest="sha256:" + "b" * 64,
-    )
-
-    sql, params = cur.execute.call_args_list[2].args
-    assert MALICIOUS not in sql
-    assert "verifier_image_ref = %s, verifier_image_digest = %s" in sql
-    assert params[2:4] == (MALICIOUS, "sha256:" + "b" * 64)
 
 
 def test_evaluation_list_parameterizes_filters_and_cursor() -> None:
@@ -219,7 +140,6 @@ def test_evaluation_list_parameterizes_filters_and_cursor() -> None:
 @pytest.mark.parametrize(
     ("repository", "kwargs", "expected_sql"),
     [
-        (TaskRepository, {"owner_id": None}, "id ILIKE %s"),
         (BenchmarkRepository, {}, "slug ILIKE %s"),
         (
             BenchmarkRunRepository,
@@ -272,9 +192,11 @@ def test_substring_search_pattern_treats_like_metacharacters_as_literals() -> No
 
 
 def test_evaluation_load_for_dispatch_selects_provenance_inputs() -> None:
+    seed_task_revision("task_safe", slug="task-safe", image_digest="sha256:task", verifier_image_ref="verifier:1")
     conn, cur = _conn()
+    cur.fetchone.return_value = {"id": "ev_safe", "task_id": "task_safe", "task_revision": 1}
 
-    EvaluationRepository(conn).load_for_dispatch("ev_safe")
+    row = EvaluationRepository(conn).load_for_dispatch("ev_safe")
 
     sql, params = _executed_sql_and_params(cur)
     assert params == ("ev_safe",)
@@ -289,12 +211,15 @@ def test_evaluation_load_for_dispatch_selects_provenance_inputs() -> None:
     assert "e.runner_metadata" in sql
     assert "e.dispatch_job_name" in sql
     assert "e.dispatch_job_uid" in sql
-    assert "b.slug AS task_slug" in sql
-    assert "r.image_digest" in sql
-    assert "r.verifier_image_ref" in sql
-    assert "r.verifier_image_digest" in sql
-    assert "r.tarball_sha256" in sql
-    assert "r.tarball_object_key" in sql
+    assert row is not None
+    assert (row["task_slug"], row["image_digest"], row["verifier_image_ref"]) == (
+        "task-safe",
+        "sha256:task",
+        "verifier:1",
+    )
+    assert {"verifier_image_digest", "tarball_sha256", "tarball_object_key"} <= row.keys()
+    cur.fetchone.return_value = {"id": "ev_safe", "task_id": "task_safe", "task_revision": 9}
+    assert EvaluationRepository(conn).load_for_dispatch("ev_safe") is None
 
 
 def test_evaluation_stale_dispatch_jobs_parameterize_reconcile_window() -> None:
@@ -649,8 +574,10 @@ def test_operations_status_counts_use_dict_rows() -> None:
 
 def test_operations_fleet_totals_include_jobs_executions_and_trials() -> None:
     conn, cur = _conn()
+    TaskStore().create_with_initial_revision(
+        "task_1", name="t", slug="t", description=None, visibility="private", object_key="k"
+    )
     cur.fetchone.return_value = {
-        "task_definitions": 12,
         "tasks_run": 9,
         "evaluation_jobs": 34,
         "evaluation_executions": 39,
@@ -661,7 +588,7 @@ def test_operations_fleet_totals_include_jobs_executions_and_trials() -> None:
     totals = OperationsRepository(conn).fleet_totals()
 
     assert totals == {
-        "task_definitions": 12,
+        "task_definitions": 1,
         "tasks_run": 9,
         "evaluation_jobs": 34,
         "evaluation_executions": 39,
@@ -669,7 +596,7 @@ def test_operations_fleet_totals_include_jobs_executions_and_trials() -> None:
         "benchmark_runs": 4,
     }
     sql = cur.execute.call_args.args[0]
-    assert "COUNT(*) FROM tasks" in sql
+    assert "FROM tasks" not in sql
     assert "COUNT(DISTINCT task_id)" in sql
     assert "COUNT(*) FROM evaluations" in sql
     assert "SUM(current_execution)" in sql
@@ -681,7 +608,7 @@ def test_repository_order_rejects_unallowed_sort_direction() -> None:
     conn, _cur = _conn()
 
     with pytest.raises(ValueError, match="order"):
-        TaskRepository(conn).list(limit=20, cursor=None, order="desc; DROP TABLE tasks")
+        BenchmarkRepository(conn).list(limit=20, cursor=None, order="desc; DROP TABLE tasks")
 
 
 def test_order_by_clause_rejects_unallowed_columns() -> None:
@@ -729,12 +656,13 @@ def test_execution_telemetry_repository_records_attempt_aware_phases_and_summary
 
 
 def test_live_usage_counts_only_unfinished_evaluations() -> None:
+    seed_task_revision("task_1")
+    seed_task_revision("task_2")
     conn, cur = _conn()
     cur.fetchone.return_value = {
         "queued_runs": 1,
         "active_runs": Decimal("2"),
         "total_parallelism": None,
-        "total_tasks": 5,
     }
     cur.fetchall.return_value = [{"owner_id": "usr_1", "queued_runs": 1, "active_runs": 2}]
 
@@ -749,7 +677,7 @@ def test_live_usage_counts_only_unfinished_evaluations() -> None:
         "queued_runs": 1,
         "active_runs": 2,
         "total_parallelism": 0,
-        "total_tasks": 5,
+        "total_tasks": 2,
         "actors": [{"owner_id": "usr_1", "queued_runs": 1, "active_runs": 2}],
     }
 
@@ -760,6 +688,7 @@ def test_patch_set_clause_rejects_unlisted_patch_field() -> None:
 
 
 def test_evaluation_create_persists_initial_user_turn_order() -> None:
+    seed_task_revision("task_safe")
     conn, cur = _conn()
 
     EvaluationRepository(conn).create(
@@ -784,16 +713,13 @@ def test_evaluation_create_persists_initial_user_turn_order() -> None:
     assert ["turn zero", "/skill-b", "/skill-a"] in params
 
 
-def test_evaluation_snapshot_locks_and_captures_mutable_inputs() -> None:
+def test_evaluation_snapshot_captures_mutable_inputs() -> None:
     cur = MagicMock()
-    cur.fetchone.return_value = {
-        "id": "task_safe",
-        "name": "task",
-        "slug": "task",
-        "revision": 1,
-        "status": "ready",
-        "build_payload": {"source_ref": "abc123"},
-    }
+    store = TaskStore()
+    store.create_with_initial_revision(
+        "task_safe", name="task", slug="task", description=None, visibility="private", object_key="k"
+    )
+    store.mark_latest_revision_building("task_safe", build_backend="buildkit", build_payload={"source_ref": "abc123"})
     ConfigProfileStore().create("cfg_safe", name="profile", type="harbor", config={"env": {"SAFE": "1"}})
 
     snapshot = EvaluationRepository._capture_execution_snapshot(
@@ -808,22 +734,9 @@ def test_evaluation_snapshot_locks_and_captures_mutable_inputs() -> None:
     assert snapshot["profiles"]["harbor"]["config"] == {"env": {"SAFE": "1"}}
     assert snapshot["credentials"] == {"openai": "team-a/openai-key"}
     assert snapshot["task"]["build_payload"] == {"source_ref": "abc123"}
-    assert all("FOR KEY SHARE" in call.args[0] for call in cur.execute.call_args_list)
-
-
-def test_task_revision_for_finalize_binds_exact_revision() -> None:
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchone.return_value = {
-        "revision": 2,
-        "status": "uploading",
-        "tarball_object_key": "task_one/rev/2/tarball.tar.gz",
-    }
-
-    result = TaskRepository(conn).revision_for_finalize("task_one", expected_revision=2)
-
-    assert result is not None
-    assert result.revision == 2
-    query, params = cur.execute.call_args.args
-    assert query.count("%s") == len(params)
-    assert params == (2, "task_one")
+    assert snapshot["task"]["slug"] == "task"
+    store.soft_delete("task_safe")
+    with pytest.raises(InvalidReference):
+        EvaluationRepository._capture_execution_snapshot(
+            cur, evaluation={"id": "ev"}, task_id="task_safe", task_revision=1, profile_ids={}, credentials={}
+        )

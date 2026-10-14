@@ -25,16 +25,16 @@ try:
     from scaled_evals.api.build import buildkit
     from scaled_evals.api.build.errors import BuildError
     from scaled_evals.api.build.image_builder_service import _post_resolve
-    from scaled_evals.api.repositories.build_repository import TaskBuildRepository
     from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
-    from scaled_evals.api.repositories.task_repository import TaskRepository
     from scaled_evals.api.routers import evaluations as evaluations_router
+    from scaled_evals.api.task_store import TaskStore
     from scaled_evals.cli.client import download_artifact, make_client, request, upload_file
     from scaled_evals.dispatch import detached_runner
     from scaled_evals.dispatch.credentials import write_env_file
     from scaled_evals.dispatch.gym.docker import make_gym_docker_submitter
     from scaled_evals.dispatch.kubectl import execute_kubectl
     from scaled_evals.dispatch.runtime_backend import LaunchSpec
+    from task_fixtures import stored_revision, stored_task
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
@@ -61,19 +61,16 @@ class _MigrationConnection:
 
 
 def test_build_success_only_advances_a_transitioned_revision() -> None:
-    connection = MagicMock()
-    connection.transaction.return_value = nullcontext()
-    cursor = connection.cursor.return_value.__enter__.return_value
-    repository = TaskBuildRepository(connection)
+    store = TaskStore()
+    store.create_with_initial_revision(
+        "task", name="task", slug="task", description=None, visibility="private", object_key="k"
+    )
+    store.record_success("task", 1, image_ref="image:1", image_digest="sha256:" + "a" * 64)
+    assert stored_revision("task", 1)["status"] == "uploading"
 
-    cursor.rowcount = 0
-    repository.record_success("task", 2, image_ref="image:2", image_digest="sha256:" + "a" * 64)
-    assert cursor.execute.call_count == 1
-
-    cursor.reset_mock()
-    cursor.rowcount = 1
-    repository.record_success("task", 2, image_ref="image:2", image_digest="sha256:" + "a" * 64)
-    assert cursor.execute.call_count == 2
+    store.mark_latest_revision_building("task", build_backend="buildkit")
+    store.record_success("task", 1, image_ref="image:1", image_digest="sha256:" + "a" * 64)
+    assert stored_revision("task", 1)["status"] == "ready"
 
 
 def test_fresh_schema_is_atomic(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,17 +239,21 @@ def test_repair_and_cleanup_sql_preserve_recoverability() -> None:
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.rowcount = 1
 
-    assert TaskRepository(connection).mark_task_pack_missing(
-        owner_id="owner",
-        task_id="task",
-        revision=3,
-        object_key="tasks/task/rev/3.tar.gz",
-        previous_status="ready",
+    store = TaskStore()
+    store.create_with_initial_revision(
+        "task", name="task", slug="task", description=None, visibility="private", object_key="k1", owner_id="owner"
     )
-    repair_sql = cursor.execute.call_args_list[1].args[0]
-    assert "latest.revision IS NOT NULL" in repair_sql
-
-    cursor.reset_mock()
+    for revision in (1, 2):
+        if revision == 2:
+            store.create_next_revision("task")
+        store.mark_latest_revision_building("task", build_backend="buildkit")
+        store.record_success("task", revision, image_ref=f"image:{revision}", image_digest="sha256:" + "a" * 64)
+    object_key = stored_revision("task", 2)["tarball_object_key"]
+    assert store.mark_task_pack_missing(
+        owner_id="owner", task_id="task", revision=2, object_key=object_key, previous_status="ready"
+    )
+    assert stored_revision("task", 2)["status"] == "failed"
+    assert stored_task("task")["current_revision"] == 1
     cursor.fetchone.side_effect = [
         {
             "id": "ev",
