@@ -10,6 +10,7 @@ TTY-aware subprocess execution. This module holds that shared logic so the jobs 
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -35,6 +36,8 @@ from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.secrets.client import SecretsClient
+
+logger = logging.getLogger(__name__)
 
 
 def require_provisioned(plugin_config: AgentHardenerConfig) -> None:
@@ -66,6 +69,28 @@ def build_subprocess_env(plugin_config: AgentHardenerConfig, extra_env: dict[str
     if extra_env:
         env.update(extra_env)
     return env
+
+
+def warn_shadowed_operator_env(plugin_config: AgentHardenerConfig) -> list[str]:
+    """Warn about operator-dotenv names the platform's own environment overrides with another value.
+
+    The shell that started the platform wins (see :func:`build_subprocess_env`), so a stale export such as a
+    different ``INFERENCE_API_KEY`` silently replaces the dotenv key and surfaces only as a 401 mid-run.
+    Returns the names; values are never logged.
+    """
+    shadowed = sorted(
+        key
+        for key, value in read_env_file(plugin_config.operator_env_file).items()
+        if key in os.environ and os.environ[key] != value
+    )
+    if shadowed:
+        logger.warning(
+            "the platform environment overrides %s from %s; unset them where the platform was started "
+            "to use the file's values",
+            ", ".join(shadowed),
+            plugin_config.operator_env_file,
+        )
+    return shadowed
 
 
 # Map each model group to agent-hardener's native env knobs. attack → garak's red-team + detector (name/uri

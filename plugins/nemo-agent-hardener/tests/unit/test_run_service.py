@@ -1370,6 +1370,37 @@ def test_victim_env_precedence_is_operator_then_secrets_then_env_file(tmp_path: 
     assert f"B={_SECRET_VALUE}" in (tmp_path / ".env").read_text(encoding="utf-8")
 
 
+def test_shadowed_operator_env_names_differing_values_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _provisioned_config(tmp_path)
+    cfg.operator_env_file.write_text("SAME=1\nDIFFERENT=file-value\nUNSET=3\n", encoding="utf-8")
+    monkeypatch.setenv("SAME", "1")
+    monkeypatch.setenv("DIFFERENT", _SECRET_VALUE)
+    monkeypatch.delenv("UNSET", raising=False)
+
+    with caplog.at_level("WARNING"):
+        shadowed = _common.warn_shadowed_operator_env(cfg)
+
+    assert shadowed == ["DIFFERENT"]
+    assert "DIFFERENT" in caplog.text
+    assert _SECRET_VALUE not in caplog.text
+    assert "file-value" not in caplog.text
+
+
+def test_no_shadowing_warning_when_the_environment_agrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _provisioned_config(tmp_path)
+    cfg.operator_env_file.write_text("SAME=1\n", encoding="utf-8")
+    monkeypatch.setenv("SAME", "1")
+
+    with caplog.at_level("WARNING"):
+        assert _common.warn_shadowed_operator_env(cfg) == []
+
+    assert not caplog.records
+
+
 def test_manifest_secret_values_let_explicit_refs_win_over_the_deployments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

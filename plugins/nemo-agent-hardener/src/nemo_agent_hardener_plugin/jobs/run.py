@@ -360,6 +360,7 @@ class AgentHardenerRunJob(NemoJob):
             rounds = 1
         # agent-hardener reads victim creds from the project dotenv, so write one from the operator env (which
         # carries the provisioned INFERENCE_API_KEY), the manifest's Secrets-store refs and any --env-file.
+        _common.warn_shadowed_operator_env(plugin_config)
         _, env_file = _common.prepare_victim_env(
             manifest, _build_native_subprocess_env(plugin_config), config.get("env_file"), secret_values
         )

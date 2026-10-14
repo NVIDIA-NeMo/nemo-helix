@@ -131,6 +131,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
         stale_warning = _agent_staleness_warning(sdk, manifest_id, ctx)
         # Synthesis probes the live victim, so it needs the manifest's declared secrets: from the operator env,
         # the manifest's Secrets-store refs and any --env-file. Either way the victim's .env gets written.
+        _common.warn_shadowed_operator_env(plugin_config)
         env, env_file = _common.prepare_victim_env(
             manifest,
             _build_native_subprocess_env(plugin_config),

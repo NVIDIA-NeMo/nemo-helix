@@ -232,5 +232,7 @@ saw and ask the user.
 - Env vars vs secrets: `--env KEY=VALUE` is for plain config; anything credential-shaped goes
   through `--secrets NAME=workspace/secret` (read from the Secrets store at run time) or `--env-file`,
   so it never lands in the manifest. A deployed agent's own secret references are recorded for you.
+- A key exported in the shell that started the platform overrides `~/.agent-hardener/.env`; the run
+  logs `the platform environment overrides <NAME>` when that happens.
 - Running the platform from a source checkout needs
   `NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION=1` in the platform's environment.
