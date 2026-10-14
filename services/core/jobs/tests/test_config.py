@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 import pytest
 import yaml
-from nemo_helix_plugin.capabilities import ProbeResult
+from nemo_helix_plugin.capabilities import CapabilityUnavailableError, ProbeResult
+from nemo_helix_plugin.jobs.execution_profiles import (
+    OpenShellJobExecutionProfile,
+    OpenShellJobExecutionProfileConfig,
+)
 from nhx.common.config import Configuration, Runtime
 from nhx.core.jobs.app.providers import (
     ComputeResources,
@@ -573,6 +577,35 @@ def test_backend_registry_skips_docker_init_connection_errors(mock_nemo_client, 
 
     assert registry.registered_profile_keys() == frozenset({("subprocess", "default")})
     assert "Docker backend initialization failed" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        DockerJobExecutionProfile(
+            provider="cpu", profile="default", backend="docker", config=DockerJobExecutionProfileConfig()
+        ),
+        OpenShellJobExecutionProfile(
+            provider="cpu", profile="default", backend="openshell", config=OpenShellJobExecutionProfileConfig()
+        ),
+    ],
+    ids=["docker", "openshell"],
+)
+def test_backend_registry_skips_capability_unavailable(mock_nemo_client, caplog, profile):
+    class UnavailableBackend:
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
+            raise CapabilityUnavailableError("optional dependency missing")
+
+    caplog.set_level(logging.WARNING)
+    with patch("nhx.core.jobs.controllers.backends.registry.probe_docker", return_value=ProbeResult(available=True)):
+        registry = BackendRegistry.from_config(
+            nemo_client=mock_nemo_client,
+            profiles=[profile],
+            backends={BackendKey("cpu", profile.backend): UnavailableBackend},
+        )
+
+    assert registry.registered_profile_keys() == frozenset()
+    assert "optional dependency missing" in caplog.text
 
 
 def test_backend_registry_propagates_non_connection_errors_for_docker(mock_nemo_client):
