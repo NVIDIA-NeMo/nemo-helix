@@ -169,7 +169,7 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         "max_failed_tasks",
     }
     with pytest.raises(ValidationError, match="frozen"):
-        plan.run_id = "changed"
+        setattr(plan, "run_id", "changed")  # a runtime write the type already forbids
     for field, value in [
         ("schema_version", 1),
         ("max_failed_tasks", -1),

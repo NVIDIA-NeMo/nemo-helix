@@ -156,23 +156,21 @@ def register_query_param_schemas(spec: Dict[str, Any]) -> Dict[str, Any]:
     return spec
 
 
-def install_query_param_schema_openapi_hook(app: FastAPI) -> None:
-    """Wrap ``app.openapi`` so live specs include registered query-param schemas."""
-    default_openapi = app.openapi
+class QueryParamSchemaFastAPI(FastAPI):
+    """A FastAPI app whose live OpenAPI spec includes the registered query-param schemas."""
 
-    def custom_openapi() -> dict[str, Any]:
-        if app.openapi_schema:
-            return app.openapi_schema
-        openapi_schema = default_openapi()
+    def openapi(self) -> dict[str, Any]:
+        if self.openapi_schema:
+            return self.openapi_schema
+        openapi_schema = super().openapi()
         try:
             openapi_schema = register_query_param_schemas(openapi_schema)
         except Exception:
-            app.openapi_schema = None
+            # Leave nothing cached, so the next request retries registration.
+            self.openapi_schema = None
             raise
-        app.openapi_schema = openapi_schema
-        return app.openapi_schema
-
-    app.openapi = custom_openapi  # type: ignore[method-assign]
+        self.openapi_schema = openapi_schema
+        return self.openapi_schema
 
 
 def parse_deep_object(name: str, params: QueryParams) -> dict[str, Any] | None:

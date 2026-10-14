@@ -12,12 +12,12 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 from fastapi import HTTPException
+from nemo_helix_plugin.jobs.openapi_utils import (
+    QueryParamSchemaFastAPI as QueryParamSchemaFastAPI,  # noqa: F401
+)
 from nemo_helix_plugin.jobs.openapi_utils import clear_query_param_schemas as clear_query_param_schemas  # noqa: F401
 from nemo_helix_plugin.jobs.openapi_utils import (
     generate_openapi_extra_params as generate_openapi_extra_params,  # noqa: F401
-)
-from nemo_helix_plugin.jobs.openapi_utils import (
-    install_query_param_schema_openapi_hook as install_query_param_schema_openapi_hook,  # noqa: F401
 )
 from nemo_helix_plugin.jobs.openapi_utils import parse_deep_object as parse_deep_object  # noqa: F401
 from nemo_helix_plugin.jobs.openapi_utils import (

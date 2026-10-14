@@ -44,7 +44,7 @@ from nhx_evals_sdk.execution.values import EvaluationError, EvaluationPhase
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.hooks import HooksBase
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric as RuntimeLLMJudgeMetric
-from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nhx_evals_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resilience.api import run_with_resilience, use_resilience_session
 from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime
@@ -185,8 +185,8 @@ class _TestMetric:
         return [MetricOutputSpec.continuous_score("score")]
 
 
-def _make_test_metric() -> Metric:
-    return cast(Metric, _TestMetric())
+def _make_test_metric() -> _TestMetric:
+    return _TestMetric()
 
 
 class _DistinctScoreNameMetric(_TestMetric):
@@ -199,8 +199,8 @@ class _DistinctScoreNameMetric(_TestMetric):
         return [MetricOutputSpec.continuous_score("score")]
 
 
-def _make_distinct_score_name_metric() -> Metric:
-    return cast(Metric, _DistinctScoreNameMetric())
+def _make_distinct_score_name_metric() -> _DistinctScoreNameMetric:
+    return _DistinctScoreNameMetric()
 
 
 class _AppendMessageHook(inference.PreprocessRequest):

@@ -369,12 +369,15 @@ async def make_inference_request(
         fn = inference_client.chat.completions.create if "messages" in request else inference_client.completions.create
         # ty cannot bind `fn`'s ParamSpec because `fn` is selected at runtime
         # (chat vs text completions), so the spread body cannot be validated here.
-        completion: ChatCompletion | Completion = await run_with_resilience(
+        completion = await run_with_resilience(
             endpoint_key,
             fn,  # ty: ignore[invalid-argument-type]
             max_attempts=max_attempts,
             **request_body,  # ty: ignore[invalid-argument-type]
         )
+        if not isinstance(completion, (ChatCompletion, Completion)):
+            # A request with ``stream`` set gets a stream back, which this function can't log or return.
+            raise ValueError(f"streaming is not supported here; the server returned a {type(completion).__name__}")
         logged_request_body = redact_request_for_logging(request_body)
         requests_log.append({"request": logged_request_body, "response": completion.model_dump()})
         return completion.model_dump()

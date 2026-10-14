@@ -19,7 +19,7 @@ import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from nhx.common.api.utils import install_query_param_schema_openapi_hook
+from nhx.common.api.utils import QueryParamSchemaFastAPI
 from nhx.common.auth import AuthorizationMiddleware
 from nhx.common.config import get_auth_config, get_platform_config
 from nhx.common.http_clients import close_shared_http_clients
@@ -256,7 +256,7 @@ def create_app(
         await close_shared_http_clients()
         logger.info("Shutting down Nemo Helix API server")
 
-    app = FastAPI(
+    app = QueryParamSchemaFastAPI(
         title="Nemo Helix API",
         description="API for Nemo Helix services",
         version="0.0.1",
@@ -318,7 +318,6 @@ def create_app(
         if service_instance._service_config is not None:
             app.state.service_configs[type(service_instance._service_config)] = service_instance._service_config
 
-    install_query_param_schema_openapi_hook(app)
     app.add_exception_handler(Exception, platform_global_exception_handler)
     return app
 
