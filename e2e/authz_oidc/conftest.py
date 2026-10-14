@@ -210,7 +210,7 @@ def _spawn_platform(
                 proc.kill()
                 proc.wait(timeout=5)
             # Intake keeps its local ClickHouse container across shutdowns, keyed by data dir.
-            remove_intake_clickhouse(data_dir, env=env)
+            remove_intake_clickhouse(data_dir)
 
 
 def _wait_healthy(platform: Platform) -> None:

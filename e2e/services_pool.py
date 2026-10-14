@@ -925,7 +925,7 @@ def _start_services_subprocess(
         except Exception:
             proc.kill()
             proc.wait(timeout=5)
-        remove_intake_clickhouse(data_dir, env=env)
+        remove_intake_clickhouse(data_dir)
         pytest.fail(
             f"nemo services run did not become healthy within {_HEALTH_TIMEOUT}s.\nlog:\n{log_path.read_text()}"
         )
@@ -937,7 +937,7 @@ def _start_services_subprocess(
         except Exception:
             proc.kill()
             proc.wait(timeout=5)
-        remove_intake_clickhouse(data_dir, env=env)
+        remove_intake_clickhouse(data_dir)
         pytest.fail(
             f"Platform auth seed did not become ready within {_AUTH_READY_TIMEOUT}s.\nlog:\n{log_path.read_text()}"
         )

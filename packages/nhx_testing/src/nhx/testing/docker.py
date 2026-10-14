@@ -38,7 +38,6 @@ import os
 import subprocess
 import sys
 import tarfile
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -401,7 +400,6 @@ INTAKE_CLICKHOUSE_REMOVE_TIMEOUT_SECONDS = 120.0
 def remove_intake_clickhouse(
     platform_data_dir: Path,
     *,
-    env: Mapping[str, str] | None = None,
     timeout: float = INTAKE_CLICKHOUSE_REMOVE_TIMEOUT_SECONDS,
 ) -> None:
     """Remove the local ClickHouse container Intake provisioned for a platform data directory.
@@ -417,7 +415,6 @@ def remove_intake_clickhouse(
 
     Args:
         platform_data_dir: The ``NHX_DATA_DIR`` the platform ran with.
-        env: The platform's environment; defaults to this process's environment.
         timeout: Seconds to wait for the removal command.
     """
     command = [
@@ -428,9 +425,10 @@ def remove_intake_clickhouse(
         "--data-dir",
         str(platform_data_dir / INTAKE_CLICKHOUSE_DATA_SUBDIR),
     ]
-    # The platform's NHX_DATA_DIR puts the data under the user data dir, which makes the removal
-    # hand the ClickHouse files back to the host user so pytest can delete its tmp dirs.
-    removal_env = {**(os.environ if env is None else env), "NHX_DATA_DIR": str(platform_data_dir)}
+    # Without NHX_DATA_DIR the tmp data dir is outside the user data dir, so the removal skips
+    # handing the files back to the host user. That step restarts ClickHouse and waits for it to
+    # stop again (~30s per container), which pushed the e2e job past its timeout.
+    removal_env = {key: value for key, value in os.environ.items() if key != "NHX_DATA_DIR"}
     try:
         result = subprocess.run(command, env=removal_env, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as e:

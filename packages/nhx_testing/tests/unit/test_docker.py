@@ -63,12 +63,14 @@ def test_cleanup_model_deployment_containers_filters_by_owner_labels():
 
 
 def test_remove_intake_clickhouse_removes_the_platform_data_dir_container(monkeypatch):
-    """Removal targets Intake's ClickHouse subdir and runs with the platform's NHX_DATA_DIR."""
+    """Removal targets Intake's ClickHouse subdir without NHX_DATA_DIR, which skips the slow ownership restore."""
     run = MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""))
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setenv("NHX_DATA_DIR", "/tmp/platform/data")
+    monkeypatch.setenv("NHX_BASE_URL", "http://localhost:8090")
     data_dir = Path("/tmp/platform/data")
 
-    remove_intake_clickhouse(data_dir, env={"NHX_BASE_URL": "http://localhost:8090"})
+    remove_intake_clickhouse(data_dir)
 
     command = run.call_args.args[0]
     assert command == [
@@ -79,7 +81,9 @@ def test_remove_intake_clickhouse_removes_the_platform_data_dir_container(monkey
         "--data-dir",
         str(data_dir / "intake-clickhouse"),
     ]
-    assert run.call_args.kwargs["env"] == {"NHX_BASE_URL": "http://localhost:8090", "NHX_DATA_DIR": str(data_dir)}
+    env = run.call_args.kwargs["env"]
+    assert "NHX_DATA_DIR" not in env
+    assert env["NHX_BASE_URL"] == "http://localhost:8090"
 
 
 @pytest.mark.parametrize(
@@ -101,6 +105,6 @@ def test_remove_intake_clickhouse_failures_warn_without_raising(monkeypatch, cap
 
     monkeypatch.setattr(subprocess, "run", run)
 
-    remove_intake_clickhouse(Path("/tmp/platform/data"), env={})
+    remove_intake_clickhouse(Path("/tmp/platform/data"))
 
     assert "Could not remove Intake ClickHouse for /tmp/platform/data" in capsys.readouterr().out

@@ -136,11 +136,10 @@ def running_platform(
     if _port_in_use(host, port):
         raise RuntimeError(f"{host}:{port} is already in use; stop other platform instances before running these tests")
 
-    env = {**os.environ, "NHX_BASE_URL": base_url, **(env_vars or {})}
     process = subprocess.Popen(
         ["uv", "run", "nemo", "services", "run", *run_args, "--port", str(port)],
         cwd=REPO_ROOT,
-        env=env,
+        env={**os.environ, "NHX_BASE_URL": base_url, **(env_vars or {})},
     )
     try:
         _wait_for_ready(base_url, timeout=ready_timeout, process=process)
@@ -157,7 +156,7 @@ def running_platform(
         # in is throwaway: an NHX_DATA_DIR inherited from the shell is the developer's own platform,
         # whose container must survive the test session.
         if data_dir := (env_vars or {}).get(DATA_DIR_ENVVAR):
-            remove_intake_clickhouse(Path(data_dir), env=env)
+            remove_intake_clickhouse(Path(data_dir))
 
 
 @pytest.fixture(autouse=True)
