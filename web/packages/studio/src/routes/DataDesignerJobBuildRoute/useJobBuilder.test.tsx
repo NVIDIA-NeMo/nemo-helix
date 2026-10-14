@@ -147,3 +147,80 @@ describe('useJobBuilder template auto-fill', () => {
     expect(mockListModels).not.toHaveBeenCalled();
   });
 });
+
+describe('useJobBuilder removeModel', () => {
+  const llmColumn = (name: string, modelAlias: string) => ({
+    columnType: 'llm-text',
+    name,
+    values: { prompt: 'Write something.', model_alias: modelAlias },
+  });
+  const twoModels = [
+    { alias: 'default', model: NEMOTRON },
+    { alias: 'model_1', model: 'some-other-model' },
+  ];
+  const templateWithModels = (models: { alias: string; model: string }[]) =>
+    ({
+      id: 'with-models',
+      models,
+      columns: [
+        { columnType: 'sampler', samplerType: 'uuid', name: 'id', values: {} },
+        llmColumn('subject', 'default'),
+        llmColumn('body', 'model_1'),
+      ],
+    }) as unknown as FilesetTemplate;
+
+  const renderAutoFilled = async (models: { alias: string; model: string }[]) => {
+    const view = renderHook(() => useJobBuilder(templateWithModels(models), 'ws1'));
+    await waitFor(() =>
+      expect(view.result.current.getBuilderValues().models.every((m) => m.provider)).toBe(true)
+    );
+    return view;
+  };
+
+  const columnAliases = (columns: { values: Record<string, string> }[]) =>
+    columns.map((column) => column.values.model_alias);
+
+  it('points every LLM column at the only model left', async () => {
+    const { result } = await renderAutoFilled(twoModels);
+    const defaultId = result.current.getBuilderValues().models[0].id;
+
+    act(() => result.current.removeModel(defaultId));
+
+    expect(columnAliases(result.current.getBuilderValues().columns)).toEqual([
+      undefined,
+      'model_1',
+      'model_1',
+    ]);
+  });
+
+  it('leaves column aliases alone while more than one model remains', async () => {
+    const { result } = await renderAutoFilled([
+      ...twoModels,
+      { alias: 'model_2', model: 'some-other-model' },
+    ]);
+    const defaultId = result.current.getBuilderValues().models[0].id;
+
+    act(() => result.current.removeModel(defaultId));
+
+    expect(columnAliases(result.current.getBuilderValues().columns)).toEqual([
+      undefined,
+      'default',
+      'model_1',
+    ]);
+  });
+
+  it('points every LLM column at a model added after the last one was removed', async () => {
+    const { result } = await renderAutoFilled([{ alias: 'default', model: NEMOTRON }]);
+    const defaultId = result.current.getBuilderValues().models[0].id;
+
+    act(() => result.current.removeModel(defaultId));
+    act(() => result.current.handleAddModel({ model: 'ws1/some-other-model' }, 'ws1/build'));
+
+    const [added] = result.current.getBuilderValues().models;
+    expect(columnAliases(result.current.getBuilderValues().columns)).toEqual([
+      undefined,
+      added.alias,
+      added.alias,
+    ]);
+  });
+});
