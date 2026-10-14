@@ -33,6 +33,20 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --python /app/.venv/bin/python \
         --output /app/.source-distributions/nhx-builder-tasks
 
+# crane's Go modules, and go-containerregistry itself: crane is built from a modified checkout, so its
+# own module is pinned in docker/sources/nhx-builder-tasks.json rather than fetched from the Go proxy.
+FROM ${NHX_PYTHON_BASE} AS crane-sources
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+COPY docker/sources/nhx-builder-tasks.json /tmp/nhx-builder-tasks.json
+COPY --from=crane /ko-app/crane /tmp/crane
+RUN python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-builder-tasks.json \
+        --output /source-distributions/nhx-builder-tasks && \
+    python3 /usr/local/bin/collect-go-module-sources.py \
+        --binary /tmp/crane \
+        --output /source-distributions/nhx-builder-tasks
+
 # The runtime's own Debian packages, not the builder's build tools.
 FROM ${NHX_PYTHON_IMAGE} AS apt-sources
 ARG NHX_COLLECT_SOURCES=0
@@ -46,6 +60,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=crane /ko-app/crane /usr/local/bin/crane
 COPY --from=builder /app/.source-distributions/nhx-builder-tasks/ /usr/share/nemo-helix/source-distributions/nhx-builder-tasks/
 COPY --from=apt-sources /source-distributions/nhx-builder-tasks/ /usr/share/nemo-helix/source-distributions/nhx-builder-tasks/
+COPY --from=crane-sources /source-distributions/nhx-builder-tasks/ /usr/share/nemo-helix/source-distributions/nhx-builder-tasks/
 ENV PATH="/app/.venv/bin:$PATH" \
     VIRTUAL_ENV=/app/.venv \
     PYTHONUNBUFFERED=1
