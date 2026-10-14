@@ -136,9 +136,11 @@ nemo agents create --agent agent.yaml --workspace <workspace>
 **4. Install the trigger workflow** on the target repo(s): the generic
 `.github/workflows/helix-agent-dispatch.yaml` + `.github/scripts/helix-agent-dispatch.cjs`
 (from the nemo-helix PR), plus the `CI_DISPATCH_TOKEN` / `CI_DISPATCH_REPO` secrets.
-`CI_DISPATCH_TOKEN` needs `issues: write` on the TARGET repo for the 👀 reaction AND
-`repository_dispatch` to the worker repo; if it lacks the former the reaction is
-silently skipped (caught) while dispatch still succeeds.
+`CI_DISPATCH_TOKEN` needs, for a fine-grained token: `Issues: write` on the TARGET repo
+for the 👀 reaction, and `Contents: write` on the WORKER repo to send the
+`repository_dispatch` (without the latter, dispatch is denied and the worker never
+starts). If it lacks the reaction permission the 👀 is silently skipped (caught) while
+dispatch still succeeds.
 
 **Test it:** comment `/helix-<name>` on a PR in an allowed repo (as an org
 OWNER/MEMBER — the trigger is author-gated). You should see a 👀 reaction, then the
