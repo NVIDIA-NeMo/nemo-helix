@@ -5,10 +5,14 @@ import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
+import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
 import { EVAL_CONFIG_FILESET_KEY } from '@studio/components/evaluation/experimentEvalConfig';
-import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
+import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
+import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
+import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -73,30 +77,22 @@ const mockLists = () => {
   );
 };
 
-const renderModal = (props: Partial<React.ComponentProps<typeof SubmitEvaluationModal>> = {}) =>
+const renderWizard = (props: Partial<React.ComponentProps<typeof AgentEvaluationWizard>> = {}) =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
     routes: [
       {
         path: '/workspaces/:workspace',
-        element: (
-          <SubmitEvaluationModal
-            open
-            onClose={() => {}}
-            workspace={DEFAULT_WORKSPACE}
-            agent={AGENT}
-            {...props}
-          />
-        ),
+        element: <AgentEvaluationWizard workspace={DEFAULT_WORKSPACE} agent={AGENT} {...props} />,
       },
     ],
   });
 
-describe('SubmitEvaluationModal', () => {
+describe('AgentEvaluationWizard', () => {
   it('starts by asking how to begin, and routes to the experiment form for a new experiment', async () => {
     mockLists();
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     expect(await screen.findByText('How do you want to start?')).toBeInTheDocument();
     // Neither path's fields are on screen until the choice is made.
@@ -115,7 +111,7 @@ describe('SubmitEvaluationModal', () => {
   it("does not carry the re-run path's derived name onto a new experiment", async () => {
     mockLists();
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     // Seed a name on the re-run path first: pick a source, let it prefill, then switch paths.
     await screen.findByText('How do you want to start?');
@@ -142,7 +138,7 @@ describe('SubmitEvaluationModal', () => {
   it('offers a parallel-requests setting that defaults to 4', async () => {
     mockLists();
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -156,7 +152,7 @@ describe('SubmitEvaluationModal', () => {
   it('will not advance past the experiment step without a name', async () => {
     mockLists();
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -171,7 +167,7 @@ describe('SubmitEvaluationModal', () => {
   it('names every step under its dot, not just the one in progress', async () => {
     mockLists();
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     // Re-running has no experiment to set up, so it is two steps.
     expect(await screen.findByText('Begin')).toBeInTheDocument();
@@ -189,7 +185,7 @@ describe('SubmitEvaluationModal', () => {
   it("puts the new run's name under the picker it is derived from", async () => {
     mockLists();
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -205,7 +201,7 @@ describe('SubmitEvaluationModal', () => {
   it('routes the re-run path to a picker grouped by experiment', async () => {
     mockLists();
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -227,7 +223,7 @@ describe('SubmitEvaluationModal', () => {
 
   it('opens on the last step for a handed-in source, with an editable derived name', async () => {
     mockLists();
-    renderModal({ sourceEvaluation: 'nemotron-super-3-temp-point5' });
+    renderWizard({ sourceEvaluation: 'nemotron-super-3-temp-point5' });
 
     // Straight to naming the run — the first two answers came in with the source.
     const nameField = await screen.findByLabelText<HTMLInputElement>('New Evaluation Name');
@@ -249,11 +245,32 @@ describe('SubmitEvaluationModal', () => {
   it('lets Back walk out of a handed-in source so the choice stays reviewable', async () => {
     mockLists();
     const user = userEvent.setup();
-    renderModal({ sourceEvaluation: 'baseline' });
+    renderWizard({ sourceEvaluation: 'baseline' });
 
     await screen.findByLabelText('New Evaluation Name');
     await user.click(screen.getByRole('button', { name: 'Back' }));
 
     expect(await screen.findByText('How do you want to start?')).toBeInTheDocument();
+  });
+
+  it("cancels to the agent's evaluations when opened by a direct link", async () => {
+    mockLists();
+    const user = userEvent.setup();
+    renderRoute(undefined, {
+      history: `/workspaces/${DEFAULT_WORKSPACE}`,
+      routes: [
+        {
+          path: '/workspaces/:workspace',
+          element: <AgentEvaluationWizard workspace={DEFAULT_WORKSPACE} agent={AGENT} />,
+        },
+        { path: ROUTES.workspace.agentDetail, element: <LocationDisplay /> },
+      ],
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
+      getAgentEvaluationsTabRoute(DEFAULT_WORKSPACE, AGENT)
+    );
   });
 });

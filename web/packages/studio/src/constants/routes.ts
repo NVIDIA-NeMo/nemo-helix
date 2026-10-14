@@ -151,6 +151,8 @@ export const ROUTES = {
     agentsList: `/workspaces/:${P.workspace}/agents`,
     assistantChat: `/workspaces/:${P.workspace}/dashboard/assistant`,
     agentDetail: `/workspaces/:${P.workspace}/agents/:${P.agentName}`,
+    /** The Run Agent Evaluation wizard. `?source=` names a run to re-run. */
+    agentEvaluationNew: `/workspaces/:${P.workspace}/agents/:${P.agentName}/evaluations/new`,
     agentDeploymentsList: `/workspaces/:${P.workspace}/agent-deployments`,
     agentDeploymentDetail: `/workspaces/:${P.workspace}/agent-deployments/:${P.agentDeploymentName}`,
     /** Detail view for a single agent-evaluation job. */

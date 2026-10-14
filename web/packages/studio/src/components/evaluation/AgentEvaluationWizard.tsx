@@ -2,15 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
-import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getEntityNameError, toValidEntityName } from '@nemo/common/src/utils/entityName';
-import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
 import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { AgentEvaluateJobRequest, EvaluateJobRequest } from '@nemo/sdk/generated/evals/schema';
 import { deleteEvaluation, useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
@@ -27,13 +23,13 @@ import {
 } from '@nemo/sdk/generated/platform/files';
 import {
   Anchor,
+  Banner,
   Button,
   Flex,
   FormField,
   RadioGroup,
   SegmentedControl,
   Stack,
-  Stepper,
   Text,
   Tooltip,
   Upload,
@@ -42,6 +38,7 @@ import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { isConflictError } from '@studio/api/evaluation/eval-config-fileset';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import { DATASET_FILE_ACCEPT, EVAL_CONFIG_FILE_ACCEPT } from '@studio/components/evaluation/consts';
+import { EvalWizardPage } from '@studio/components/evaluation/EvalWizardPage';
 import {
   createRunEvaluation,
   evalConfigFilename,
@@ -55,7 +52,6 @@ import {
   type StoredDatasetFile,
 } from '@studio/components/evaluation/inspectDatasetFile';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
-import '@studio/components/evaluation/evalWizard.css';
 import {
   entityNameField,
   nameCheckStatus,
@@ -105,7 +101,7 @@ import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 import { FormProvider, type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { useDebounce } from 'use-debounce';
@@ -276,15 +272,13 @@ const readConfigPick = async (file: File): Promise<ConfigPick> => {
   }
 };
 
-interface SubmitEvaluationModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
+interface AgentEvaluationWizardProps {
   workspace: string;
-  /** When provided, pre-fills + locks the agent selector. */
-  agent?: string;
+  /** The agent under evaluation. */
+  agent: string;
   /** Name of an evaluation to start from. Opens the wizard on its last step with that run already
    *  chosen, which is how "New evaluation from this configuration" hands a row's config over. */
   sourceEvaluation?: string;
-  /** Called after a successful submission with the new job's name. */
-  onSubmitted?: (jobName: string) => void;
 }
 
 interface SeededEntities {
@@ -405,13 +399,10 @@ const loadPersistedSpec = async (
   return parseEvalConfig(await blob.text());
 };
 
-export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
-  open,
-  onClose,
+export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   workspace,
   agent: agentProp,
   sourceEvaluation,
-  onSubmitted,
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -425,13 +416,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
 
   // A handed-in source has already answered the first two steps, so the wizard opens on the last
   // one. Back still walks all the way out, so the choice stays reviewable rather than assumed.
-  // A handed-in source only skips the first step when its agent came with it; the picker is
-  // agent-scoped, so without one the evaluation step has nothing to show.
-  const startingStep = useCallback(
-    (): WizardStep => (sourceEvaluation && agentProp ? 'evaluation' : 'start'),
-    [sourceEvaluation, agentProp]
-  );
-  const [step, setStep] = useState<WizardStep>(startingStep);
+  const [step, setStep] = useState<WizardStep>(sourceEvaluation ? 'evaluation' : 'start');
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [datasetPick, setDatasetPick] = useState<InspectedDataset | null>(null);
   const [datasetSource, setDatasetSource] = useState<FileSource>(FILE_SOURCE_UPLOAD);
@@ -443,27 +428,19 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const datasetToken = useRef(0);
   const configToken = useRef(0);
 
-  const { data: agentsResponse, isLoading: isAgentsLoading } = useAgentsListAgents(
-    workspace,
-    undefined,
-    { query: { enabled: open && !agentProp } }
-  );
-  const agents = agentsResponse?.data ?? [];
-
   const methods = useForm<SubmitEvaluationFormData>({
     resolver: zodResolver(schema),
     defaultValues: makeDefaultValues(agentProp, sourceEvaluation),
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });
-  const { control, reset: resetForm, setValue, handleSubmit, clearErrors, formState } = methods;
+  const { control, setValue, handleSubmit, clearErrors, formState } = methods;
   const { errors } = formState;
 
   const mode = useWatch({ control, name: 'mode' }) as EvaluationMode;
   const selectedAgent = useWatch({ control, name: 'agent' });
   const steps = stepsFor(mode);
 
-  const agentFieldError = errors.agent?.message;
   const evaluationName = useWatch({ control, name: 'evaluationName' });
 
   // Every reusable evaluation for this agent, resolved to its experiment. One list feeds the
@@ -471,7 +448,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const sources = useEvaluationSources({
     workspace,
     agent: selectedAgent || undefined,
-    enabled: open && !!selectedAgent,
+    enabled: !!selectedAgent,
   });
   const selectedSource = sources.byName[evaluationName];
   const selectedEvaluation = selectedSource?.evaluation;
@@ -483,10 +460,10 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   // Default the start mode once the list resolves; `selectedAgent` gates it because a disabled
   // query reports isLoading false, which would read as empty before anything was fetched.
   useEffect(() => {
-    if (!open || !selectedAgent || sources.isLoading || modeDefaultApplied.current) return;
+    if (!selectedAgent || sources.isLoading || modeDefaultApplied.current) return;
     modeDefaultApplied.current = true;
     if (sources.isEmpty) setValue('mode', MODE_DEFAULT);
-  }, [open, selectedAgent, sources.isLoading, sources.isEmpty, setValue]);
+  }, [selectedAgent, sources.isLoading, sources.isEmpty, setValue]);
 
   // Nothing is preselected here. A step whose whole job is "choose the run to re-run" should not
   // answer itself — Next stays disabled until the user picks, and stepBlocker says why. (A run
@@ -497,7 +474,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     queryKey: ['evaluation-eval-config', workspace, evaluationName],
     queryFn: ({ signal }) =>
       selectedEvaluation ? evaluationConfigError(workspace, selectedEvaluation, signal) : null,
-    enabled: open && mode === MODE_EXPERIMENT && !!selectedEvaluation,
+    enabled: mode === MODE_EXPERIMENT && !!selectedEvaluation,
   });
 
   const evaluationFileset = selectedEvaluation ? evaluationFilesetName(selectedEvaluation) : null;
@@ -513,7 +490,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     workspace,
     fileset: datasetFileset,
     path: datasetFilePath,
-    enabled: open && isFilesetSource,
+    enabled: isFilesetSource,
   });
   const downloadedFile = filesetFile.data;
   const filesetInspection = useQuery({
@@ -538,7 +515,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     workspace,
     fileset: configFileset,
     path: configFilePath,
-    enabled: open && isConfigFromFileset,
+    enabled: isConfigFromFileset,
   });
   const downloadedConfig = configFilesetFile.data;
   const filesetConfigRead = useQuery({
@@ -607,12 +584,12 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const experimentConflictQuery = useListExperiments(
     workspace,
     { page_size: 1, filter: { name: debouncedExperimentName } },
-    { query: { enabled: open && isCreateMode && !!debouncedExperimentName } }
+    { query: { enabled: isCreateMode && !!debouncedExperimentName } }
   );
   const recordConflictQuery = useListEvaluations(
     workspace,
     { page_size: 1, filter: { name: debouncedRecordName } },
-    { query: { enabled: open && !!debouncedRecordName } }
+    { query: { enabled: !!debouncedRecordName } }
   );
 
   const datasetError =
@@ -668,7 +645,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
 
   // A different query from the one behind the dropdown (lazy, paginated for search); this is the
   // only complete workspace list, so it decides what counts as valid.
-  const { data: judgeModels, isLoading: isJudgeModelsLoading } = useJudgeModels({ enabled: open });
+  const { data: judgeModels, isLoading: isJudgeModelsLoading } = useJudgeModels({});
 
   const workspaceModelUrns = new Set<string>(
     judgeModels
@@ -753,7 +730,6 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     mutateAsync: submitEvaluation,
     error: submitError,
     isPending,
-    reset: resetMutation,
   } = useMutation({
     mutationFn: async (formData: SubmitEvaluationFormData) => {
       const spec = await loadPersistedSpec(workspace, formData, evaluationFileset, uploads);
@@ -829,53 +805,11 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
     onSuccess: ({ name }, formData) => {
       toast.success(`Evaluation "${name}" submitted`);
       void queryClient.invalidateQueries({ queryKey: ['evaluator-jobs', workspace] });
-      onSubmitted?.(name);
-      resetAndClose();
-      navigate(getAgentEvaluationsTabRoute(workspace, bareName(formData.agent)));
+      navigate(getAgentEvaluationsTabRoute(workspace, bareName(formData.agent)), {
+        replace: true,
+      });
     },
   });
-
-  useEffect(() => {
-    if (open) return;
-    resetForm(makeDefaultValues(agentProp, sourceEvaluation));
-    setStep(startingStep());
-    suggestedRecordName.current = '';
-    seededForSource.current = null;
-    modeDefaultApplied.current = false;
-    datasetToken.current += 1;
-    configToken.current += 1;
-    setDatasetPick(null);
-    setDatasetSource(FILE_SOURCE_UPLOAD);
-    setConfigPick(null);
-    setConfigSource(FILE_SOURCE_UPLOAD);
-    setSubmitAttempted(false);
-  }, [open, agentProp, sourceEvaluation, resetForm, startingStep]);
-
-  // Seed the locked agent and the handed-in source on open. A blanket reset here would clobber
-  // the judge-model preselect above, which runs earlier in effect order.
-  useEffect(() => {
-    if (!open) return;
-    if (agentProp) setValue('agent', agentProp);
-    if (sourceEvaluation) {
-      setValue('mode', MODE_EXPERIMENT);
-      setValue('evaluationName', sourceEvaluation);
-    }
-  }, [open, agentProp, sourceEvaluation, setValue]);
-
-  const resetAndClose = () => {
-    resetMutation();
-    resetForm(makeDefaultValues(agentProp, sourceEvaluation));
-    setStep(startingStep());
-    suggestedRecordName.current = '';
-    seededForSource.current = null;
-    modeDefaultApplied.current = false;
-    clearDatasetPick();
-    setDatasetSource(FILE_SOURCE_UPLOAD);
-    clearConfigPick();
-    setConfigSource(FILE_SOURCE_UPLOAD);
-    setSubmitAttempted(false);
-    onClose();
-  };
 
   // What the current step still needs before Next means anything. Kept separate from the zod
   // schema: the schema judges the whole submission, and a step must only answer for its own
@@ -932,90 +866,65 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const onLastStep = isLastStep(steps, step);
 
   // Enter on an intermediate step means "next", not "submit the half-filled form".
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleContinue = () => {
     if (!onLastStep) {
       goNext();
       return;
     }
     setSubmitAttempted(true);
-    void handleSubmit(onSubmit)(event);
+    void handleSubmit(onSubmit)();
   };
 
   const errorMessage = submitErrorMessage(submitError);
 
   return (
-    <FormModal
-      open={open}
-      onClose={resetAndClose}
-      title="Run Agent Evaluation"
-      submitButtonText="Submit"
-      onSubmit={handleFormSubmit}
-      disabled={isPending}
-      loading={isPending}
-      className="w-[690px]! max-w-[95vw]!"
-      slotFooterRight={
-        <Flex gap="2">
-          <Button kind="tertiary" type="button" onClick={resetAndClose} disabled={isPending}>
-            Cancel
-          </Button>
-          {stepIndex(steps, step) > 0 && (
-            <Button kind="secondary" type="button" onClick={goBack} disabled={isPending}>
-              Back
-            </Button>
-          )}
-          {onLastStep ? (
-            <LoadingButton color="brand" type="submit" loading={isPending} disabled={isPending}>
-              Submit
-            </LoadingButton>
-          ) : (
-            <Button color="brand" type="button" onClick={goNext} disabled={!!blocker || isPending}>
-              Next
-            </Button>
-          )}
-        </Flex>
+    <EvalWizardPage
+      heading="Run Agent Evaluation"
+      headingDescription="Score your agent against a dataset. Start a new experiment, or re-run an existing evaluation to compare against it."
+      steps={steps.map(stepHeading)}
+      activeStep={stepIndex(steps, step)}
+      onSubmit={(event) => {
+        event.preventDefault();
+        handleContinue();
+      }}
+      slotBanner={
+        errorMessage ? (
+          <Banner kind="inline" status="error">
+            {errorMessage}
+          </Banner>
+        ) : null
       }
+      slotFooterStart={
+        stepIndex(steps, step) > 0 ? (
+          <Button kind="secondary" onClick={goBack} disabled={isPending}>
+            Back
+          </Button>
+        ) : null
+      }
+      cancelTo={getAgentEvaluationsTabRoute(workspace, agentProp)}
+      continueLabel={onLastStep ? 'Run Evaluation' : 'Next'}
+      continueLoading={isPending}
+      canContinue={onLastStep || !blocker}
+      onContinue={handleContinue}
     >
       <FormProvider {...methods}>
         <Stack gap="density-xl">
-          <Stepper
-            aria-label="Run evaluation progress"
-            className="eval-wizard-stepper"
-            activeStep={stepIndex(steps, step)}
-            items={steps.map((item) => ({ slotHeading: stepHeading(item) }))}
-          />
-
           {step === 'start' && (
             <>
-              {agentProp ? (
-                <Text kind="body/regular/md">
-                  Run evaluation via NeMo Helix Evals&apos;s built-in runner. Evaluator also
-                  supports Harbor and Gym as runners.{' '}
-                  <Anchor
-                    kind="inline"
-                    textKind="body/regular/md"
-                    href={LINK_EVAL_DOCS}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Learn more
-                  </Anchor>
-                  .
-                </Text>
-              ) : (
-                <ControlledSelect
-                  useControllerProps={{ control, name: 'agent' }}
-                  loading={isAgentsLoading}
-                  items={agents.flatMap((agent) =>
-                    agent.name ? [{ value: agent.name, children: agent.name }] : []
-                  )}
-                  formFieldProps={{
-                    slotLabel: 'Agent',
-                    slotError: agentFieldError,
-                    status: agentFieldError ? 'error' : undefined,
-                  }}
-                />
-              )}
+              <Text kind="body/regular/md">
+                Run evaluation via NeMo Helix Evals built-in runner. Evaluator also supports Harbor
+                and Gym as runners.{' '}
+                <Anchor
+                  kind="inline"
+                  textKind="body/regular/md"
+                  href={LINK_EVAL_DOCS}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Learn more
+                </Anchor>
+                .
+              </Text>
 
               <FormField slotLabel="How do you want to start?">
                 <RadioGroup
@@ -1233,14 +1142,8 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
               {blocker}
             </Text>
           )}
-
-          {errorMessage && (
-            <Text kind="body/regular/md" className="text-feedback-danger whitespace-normal">
-              {errorMessage}
-            </Text>
-          )}
         </Stack>
       </FormProvider>
-    </FormModal>
+    </EvalWizardPage>
   );
 };

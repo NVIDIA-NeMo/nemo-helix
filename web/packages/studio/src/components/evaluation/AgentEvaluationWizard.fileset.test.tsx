@@ -14,8 +14,8 @@ import {
   getFilesListFilesetFilesQueryKey,
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
+import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
 import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
-import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
@@ -143,20 +143,13 @@ const pickFilesetFile = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(await screen.findByRole('option', { name: 'output/part-0.parquet' }));
 };
 
-const renderModal = () =>
+const renderWizard = () =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
     routes: [
       {
         path: '/workspaces/:workspace',
-        element: (
-          <SubmitEvaluationModal
-            open
-            onClose={() => {}}
-            workspace={DEFAULT_WORKSPACE}
-            agent={AGENT}
-          />
-        ),
+        element: <AgentEvaluationWizard workspace={DEFAULT_WORKSPACE} agent={AGENT} />,
       },
       { path: ROUTES.workspace.agentDetail, element: <div>Agent page</div> },
     ],
@@ -181,10 +174,10 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('SubmitEvaluationModal dataset from a fileset', () => {
+describe('AgentEvaluationWizard dataset from a fileset', () => {
   it('stores the picked fileset file as the run dataset and submits it', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
@@ -194,8 +187,10 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
@@ -222,7 +217,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
       )
     );
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
@@ -236,8 +231,10 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
@@ -251,7 +248,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
 
   it('forgets the fileset file after switching back to upload', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
@@ -261,7 +258,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
       screen.getByLabelText('Select Evaluator Config'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     expect(screen.getByLabelText('Add Dataset')).toBeInTheDocument();
     expect(await screen.findByText('Add a dataset')).toBeVisible();
@@ -270,7 +267,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
 
   it('still shows the picked file after stepping back and forward', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await pickFilesetFile(user);
@@ -286,7 +283,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
   it('shows why a fileset file could not be downloaded', async () => {
     vi.mocked(filesDownloadFile).mockRejectedValue(new Error('Unable to find base file.'));
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await pickFilesetFile(user);
@@ -297,7 +294,7 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
   it('shows why a fileset file is not a usable dataset', async () => {
     vi.mocked(filesDownloadFile).mockResolvedValue(parquetFile(PARQUET.empty));
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await pickFilesetFile(user);
@@ -306,10 +303,10 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
   });
 });
 
-describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
+describe('AgentEvaluationWizard uploaded Parquet dataset', () => {
   it('stores an uploaded Parquet file as-is and points the config at it', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
@@ -319,8 +316,10 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
@@ -336,7 +335,7 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
 
   it('stores several uploaded Parquet files as parts of one dataset', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
@@ -349,8 +348,10 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
@@ -368,7 +369,7 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
 
   it('refuses to combine Parquet with another format', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.upload(screen.getByLabelText('Add Dataset'), [
@@ -381,7 +382,7 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
 
   it('keeps Submit from sending a fileset dataset that was never picked', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
@@ -390,7 +391,7 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
       screen.getByLabelText('Select Evaluator Config'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     expect(await screen.findByText('Add a dataset')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
@@ -405,10 +406,10 @@ const pickFilesetConfig = async (user: ReturnType<typeof userEvent.setup>, path:
   await user.click(await screen.findByRole('option', { name: path }));
 };
 
-describe('SubmitEvaluationModal evaluator config from a fileset', () => {
+describe('AgentEvaluationWizard evaluator config from a fileset', () => {
   it('offers only JSON and YAML files outside logs/', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.click(configSource().getByRole('radio', { name: 'Choose from a fileset' }));
@@ -425,15 +426,17 @@ describe('SubmitEvaluationModal evaluator config from a fileset', () => {
 
   it('submits a YAML config picked from a fileset like an uploaded one', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
     await pickFilesetFile(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     const [, request] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
@@ -445,7 +448,7 @@ describe('SubmitEvaluationModal evaluator config from a fileset', () => {
 
   it('shows why a fileset config is not a usable eval config', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await pickFilesetConfig(user, 'configs/strict.json');
@@ -455,14 +458,14 @@ describe('SubmitEvaluationModal evaluator config from a fileset', () => {
 
   it('forgets the fileset config after switching back to upload', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
     await pickFilesetFile(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
     await user.click(configSource().getByRole('radio', { name: 'Upload a file' }));
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     expect(screen.getByLabelText('Select Evaluator Config')).toBeInTheDocument();
     expect(await screen.findByText('Select an evaluator config')).toBeVisible();

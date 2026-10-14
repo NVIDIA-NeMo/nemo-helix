@@ -10,13 +10,13 @@ import {
 } from '@nemo/sdk/generated/platform/experiments';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
+import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
 import {
   createRunEvaluation,
   EVAL_CONFIG_FILESET_KEY,
   evaluationConfigError,
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
-import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
@@ -108,20 +108,13 @@ const mockLists = () => {
   );
 };
 
-const renderModal = () =>
+const renderWizard = () =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
     routes: [
       {
         path: '/workspaces/:workspace',
-        element: (
-          <SubmitEvaluationModal
-            open
-            onClose={() => {}}
-            workspace={DEFAULT_WORKSPACE}
-            agent={AGENT}
-          />
-        ),
+        element: <AgentEvaluationWizard workspace={DEFAULT_WORKSPACE} agent={AGENT} />,
       },
       { path: ROUTES.workspace.agentDetail, element: <div>Agent page</div> },
     ],
@@ -153,10 +146,10 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('SubmitEvaluationModal parallel requests', () => {
+describe('AgentEvaluationWizard parallel requests', () => {
   it('submits the chosen parallelism for a new experiment', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -177,8 +170,10 @@ describe('SubmitEvaluationModal parallel requests', () => {
     );
     await setParallelism(user, '2');
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     expect(submittedParallelism()).toBe(2);
@@ -186,7 +181,7 @@ describe('SubmitEvaluationModal parallel requests', () => {
 
   it('submits the chosen parallelism when re-running an evaluation', async () => {
     const user = userEvent.setup();
-    renderModal();
+    renderWizard();
 
     await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -197,8 +192,10 @@ describe('SubmitEvaluationModal parallel requests', () => {
     await user.type(name, 'baseline-throttled');
     await setParallelism(user, '2');
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     expect(submittedParallelism()).toBe(2);
