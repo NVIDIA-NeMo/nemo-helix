@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
+import { DEFAULT_WORKSPACE, SYSTEM_WORKSPACE } from '@nemo/common/src/models/constants';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { WorkspaceSettingsRoute } from '@studio/routes/WorkspaceSettingsRoute';
 import { render, screen } from '@studio/tests/util/render';
@@ -25,6 +25,14 @@ describe('WorkspaceSettingsRoute', () => {
 
     expect(getDeleteButton()).toBeDisabled();
     expect(screen.getByText('The default workspace cannot be deleted.')).toBeInTheDocument();
+  });
+
+  it('disables the Delete Workspace button for the system workspace', () => {
+    mockUseWorkspaceFromPath.mockReturnValue(SYSTEM_WORKSPACE);
+    render(<WorkspaceSettingsRoute />);
+
+    expect(getDeleteButton()).toBeDisabled();
+    expect(screen.getByText('The system workspace cannot be deleted.')).toBeInTheDocument();
   });
 
   it('enables the Delete Workspace button for non-default workspaces', () => {

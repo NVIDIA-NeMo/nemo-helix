@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
+import { DEFAULT_WORKSPACE, SYSTEM_WORKSPACE } from '@nemo/common/src/models/constants';
 import {
   Button,
   Divider,
@@ -52,7 +52,7 @@ const SettingsSection: FC<SettingsSectionProps> = ({ label, body, action }) => (
 
 export const WorkspaceSettingsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
-  const isDefaultWorkspace = workspace === DEFAULT_WORKSPACE;
+  const isDeletionProtected = workspace === DEFAULT_WORKSPACE || workspace === SYSTEM_WORKSPACE;
   const navigate = useNavigate();
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -155,14 +155,14 @@ export const WorkspaceSettingsRoute: FC = () => {
             <SettingsSection
               label="Delete Workspace"
               body={
-                isDefaultWorkspace
-                  ? 'The default workspace cannot be deleted.'
+                isDeletionProtected
+                  ? `The ${workspace} workspace cannot be deleted.`
                   : 'Permanently delete your Workspace and all of its contents from NeMo Studio. Once deleted, it cannot be recovered.'
               }
               action={
                 <Button
                   color="danger"
-                  disabled={isDefaultWorkspace}
+                  disabled={isDeletionProtected}
                   onClick={() => setDeleteModalOpen(true)}
                   className="shrink-0"
                 >
