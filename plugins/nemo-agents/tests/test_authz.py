@@ -53,6 +53,26 @@ def test_crud_binding_agent_create() -> None:
     assert "agents.agents.create" in contrib.permissions
 
 
+def test_crud_binding_agent_reads_allow_task_service_principals() -> None:
+    contrib = _contribution()
+    for path, method, permission in (
+        (f"{_BASE}/agents", "get", "agents.agents.list"),
+        (f"{_BASE}/agents/{{name}}", "get", "agents.agents.read"),
+    ):
+        binding = contrib.endpoints[path][method]
+        assert binding.permissions == [permission], (path, method)
+        assert binding.scopes == ["agents:read", "platform:read"], (path, method)
+        assert binding.callers == ["principal", "service_principal"], (path, method)
+        assert not binding.deny, (path, method)
+
+
+def test_crud_binding_agent_writes_stay_principal_only() -> None:
+    contrib = _contribution()
+    for path, method in ((f"{_BASE}/agents", "post"), (f"{_BASE}/agents/{{name}}", "delete")):
+        binding = contrib.endpoints[path][method]
+        assert binding.callers == ["principal"], (path, method)
+
+
 def test_crud_binding_deployment_read_covers_logs() -> None:
     contrib = _contribution()
     # The two log routes are read-only and share the deployments.read permission.

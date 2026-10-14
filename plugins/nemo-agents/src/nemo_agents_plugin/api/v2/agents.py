@@ -85,7 +85,7 @@ async def create_agent(
 @router.get("/agents", response_model=AgentPage, tags=["Agents"])
 @scope.read
 @path_rule(
-    callers=[CallerKind.PRINCIPAL],
+    callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL],
     permissions=[AgentPerms.LIST],
 )
 async def list_agents(
@@ -123,7 +123,7 @@ async def list_agents(
 @router.get("/agents/{name}", response_model=Agent, tags=["Agents"])
 @scope.read
 @path_rule(
-    callers=[CallerKind.PRINCIPAL],
+    callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL],
     permissions=[AgentPerms.READ],
 )
 async def get_agent(
