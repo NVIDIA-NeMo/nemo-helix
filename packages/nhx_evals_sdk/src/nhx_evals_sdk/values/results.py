@@ -787,6 +787,8 @@ class EvaluationResult(BaseModel):
                 flatten_dict("sample", serialize_value(row_score.sample), record)
                 if error_text := row_error_text(row_score):
                     record["error"] = error_text
+                if row_score.runtime_sec is not None:
+                    record["runtime_sec"] = row_score.runtime_sec
                 for metric_scores in row_score.metrics.values():
                     for output in metric_scores:
                         record[f"output.{output.name}"] = serialize_value(output.value)

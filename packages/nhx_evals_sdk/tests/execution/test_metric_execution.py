@@ -1836,7 +1836,9 @@ class TestEvaluateMetricOnline:
         for row_score in (succeeded, failed):
             assert row_score.runtime_sec is not None and row_score.runtime_sec >= 0.02
             assert "runtime_sec" not in row_score.sample
-        assert all("sample.runtime_sec" not in record for record in result.to_records())
+        records = result.to_records()
+        assert [record["runtime_sec"] for record in records] == [succeeded.runtime_sec, failed.runtime_sec]
+        assert all("sample.runtime_sec" not in record for record in records)
 
     @pytest.mark.asyncio
     async def test_offline_rows_have_no_generation_runtime(self, mocker: MockerFixture):
@@ -1847,6 +1849,7 @@ class TestEvaluateMetricOnline:
         )
 
         assert result.row_scores[0].runtime_sec is None
+        assert "runtime_sec" not in result.to_records()[0]
 
     @pytest.mark.asyncio
     async def test_metric_failure_raises_evaluation_error_with_strict_mode(self, mocker: MockerFixture):
