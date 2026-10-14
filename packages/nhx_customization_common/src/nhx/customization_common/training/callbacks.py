@@ -66,6 +66,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import Any, ClassVar, cast
 
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.training.progress import JobsServiceProgressReporter
 from nhx.customization_common.training.reporting import ALL_METRICS, DEFAULT_MIN_REPORT_INTERVAL_SECONDS
 
@@ -260,7 +261,7 @@ class _Progress:
     observation supersedes an older one outright.
     """
 
-    phase: str
+    phase: TrainingPhase
     step: int
     epoch: int
     backend: str | None
@@ -363,7 +364,7 @@ class TrainingProgressCallback:
     def _resolve_backend(self, backend: str | None) -> str | None:
         return backend if backend is not None else self._default_backend
 
-    def _send(self, phase: str, details: dict[str, object], backend: str | None) -> None:
+    def _send(self, phase: TrainingPhase, details: dict[str, object], backend: str | None) -> None:
         """Stamp the backend field, if there is one, and hand the report over.
 
         In one place because a change that missed a copy would be near-invisible:
@@ -378,7 +379,7 @@ class TrainingProgressCallback:
     def _report_metrics(
         self,
         phase: str,
-        report_phase: str,
+        report_phase: TrainingPhase,
         step: int,
         epoch: int,
         metrics: Mapping[str, object],
@@ -570,7 +571,7 @@ class TrainingProgressCallback:
             "max_steps": max_steps,
             "num_epochs": num_epochs,
         }
-        self._send("training", details, backend)
+        self._send(TrainingPhase.TRAINING, details, backend)
 
     def report_train_step(
         self, step: int, epoch: int, metrics: Mapping[str, object], *, backend: str | None = None
@@ -587,7 +588,7 @@ class TrainingProgressCallback:
         A dict rather than ``**kwargs`` so metric names cannot collide with this
         method's own parameters -- a framework is free to call something ``step``.
         """
-        self._report_metrics("train", "training", step, epoch, metrics, backend)
+        self._report_metrics("train", TrainingPhase.TRAINING, step, epoch, metrics, backend)
 
     def report_validation(
         self, step: int, epoch: int, metrics: Mapping[str, object], *, backend: str | None = None
@@ -597,7 +598,19 @@ class TrainingProgressCallback:
         The same rule under the ``val_`` prefix. An algorithm that validates on
         task metrics alone and reports no ``loss`` just leaves ``val_loss`` empty.
         """
-        self._report_metrics("val", "validation", step, epoch, metrics, backend)
+        self._report_metrics("val", TrainingPhase.VALIDATION, step, epoch, metrics, backend)
+
+    def report_checkpoint_saving(self, step: int, epoch: int, *, backend: str | None = None) -> None:
+        """Report that a checkpoint save has started.
+
+        A save can run far longer than a training step -- the final one also
+        writes the consolidated model -- and nothing else reports until it ends.
+        """
+        details: dict[str, object] = {
+            "step": step,
+            "epoch": epoch,
+        }
+        self._send(TrainingPhase.SAVING_CHECKPOINT, details, backend)
 
     def report_checkpoint_saved(
         self,
@@ -619,7 +632,7 @@ class TrainingProgressCallback:
         }
         if checkpoint_path:
             details["checkpoint_path"] = checkpoint_path
-        self._send("checkpoint_saved", details, backend)
+        self._send(TrainingPhase.CHECKPOINT_SAVED, details, backend)
 
     def report_epoch_end(self, step: int, epoch: int, *, backend: str | None = None) -> None:
         """Report that an epoch has completed."""
@@ -627,7 +640,17 @@ class TrainingProgressCallback:
             "step": step,
             "epoch": epoch,
         }
-        self._send("epoch_end", details, backend)
+        self._send(TrainingPhase.EPOCH_END, details, backend)
+
+    def report_phase(self, phase: TrainingPhase, *, backend: str | None = None) -> None:
+        """Report a phase that comes with no metrics, such as the work after training.
+
+        Whatever the limiter withheld goes first. Left for ``close()``, it would
+        be sent after this report and put the training phase back.
+        """
+        if self._current_progress is not None:
+            self._flush()
+        self._send(phase, {}, backend)
 
     def close(self) -> None:
         """Flush whatever the limiter withheld, then clean up resources.
