@@ -6,7 +6,9 @@
 # third-party component syft finds in it.
 #
 # Usage: check-image-source-coverage.sh <image-ref> <image-name>
-#   image-name names /usr/share/nemo-helix/source-distributions/<image-name> inside the image.
+#   image-name names /usr/share/nemo-helix/source-distributions/<image-name> inside the image, or
+#   /kaniko/source-distributions/<image-name> in the kaniko image, whose builds replace everything
+#   outside /kaniko.
 
 set -euo pipefail
 
@@ -26,7 +28,15 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "${syft_image}" \
     "docker:${image_ref}" -o syft-json -q > "${work_dir}/sbom.json"
 
 container="$(docker create "${image_ref}" true)"
-docker cp -q "${container}:/usr/share/nemo-helix/source-distributions/${image_name}" "${work_dir}/sources"
+for source_root in /usr/share/nemo-helix/source-distributions /kaniko/source-distributions; do
+    if docker cp -q "${container}:${source_root}/${image_name}" "${work_dir}/sources" 2>/dev/null; then
+        break
+    fi
+done
+if [[ ! -d "${work_dir}/sources" ]]; then
+    echo "${image_ref} has no source-distributions/${image_name} directory" >&2
+    exit 1
+fi
 
 python3 "${repo_root}/docker/scripts/check-source-coverage.py" \
     --sbom "${work_dir}/sbom.json" \

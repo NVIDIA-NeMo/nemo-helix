@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 CRATES_IO_DOWNLOAD = "https://static.crates.io/crates"
+#: crates.io crates are downloaded; local (workspace) crates are in the project's own pinned archive.
+COLLECTED_SOURCES = {"crates.io", "local"}
 CRATES_IO_LOCK_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 DOWNLOAD_WORKERS = 8
 
@@ -66,16 +68,31 @@ def elf_section(data: bytes, wanted: str) -> bytes:
     raise RuntimeError(f"no {wanted} section; build the binary with cargo-auditable")
 
 
+def audited_packages(binary: bytes) -> list[dict]:
+    """The packages recorded in a binary's cargo-auditable ``.dep-v0`` section."""
+    return json.loads(zlib.decompress(elf_section(binary, ".dep-v0")))["packages"]
+
+
 def audited_crates(binary: bytes, source: str = "crates.io") -> list[Crate]:
     """Crates from ``source`` recorded in a binary's cargo-auditable ``.dep-v0`` section."""
-    audit = json.loads(zlib.decompress(elf_section(binary, ".dep-v0")))
     return sorted(
         {
             Crate(package["name"], package["version"])
-            for package in audit["packages"]
+            for package in audited_packages(binary)
             if package.get("source") == source
         },
         key=lambda crate: (crate.name, crate.version),
+    )
+
+
+def uncollectable_crates(binary: bytes) -> list[str]:
+    """Crates from a source other than crates.io or the project itself, such as git or another registry."""
+    return sorted(
+        {
+            f"{package['name']} {package['version']} ({package.get('source')})"
+            for package in audited_packages(binary)
+            if package.get("source") not in COLLECTED_SOURCES
+        }
     )
 
 
@@ -134,6 +151,9 @@ def main() -> int:
         return 0
 
     binary = Path(args.binary).read_bytes()
+    uncollectable = uncollectable_crates(binary)
+    if uncollectable:
+        raise RuntimeError(f"{args.binary} uses crates this collector can't fetch: {', '.join(uncollectable)}")
     crates = audited_crates(binary)
     local_crates = audited_crates(binary, source="local")
     checksums = lock_checksums(Path(args.cargo_lock).read_text(encoding="utf-8"))

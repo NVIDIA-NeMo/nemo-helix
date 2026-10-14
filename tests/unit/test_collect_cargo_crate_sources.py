@@ -73,9 +73,16 @@ def cargo_lock(checksums: dict[str, str]) -> str:
 CRATES = {"anyhow": b"anyhow crate", "serde": b"serde crate"}
 
 
-def run(module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lock: str, bodies: dict[str, bytes]) -> Path:
+def run(
+    module,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    lock: str,
+    bodies: dict[str, bytes],
+    packages: list[dict] = PACKAGES,
+) -> Path:
     binary = tmp_path / "uv"
-    binary.write_bytes(elf_with_sections({".text": b"\x90" * 8, ".dep-v0": audit_section(PACKAGES)}))
+    binary.write_bytes(elf_with_sections({".text": b"\x90" * 8, ".dep-v0": audit_section(packages)}))
     (tmp_path / "Cargo.lock").write_text(lock)
     output = tmp_path / "out"
     monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
@@ -147,3 +154,15 @@ def test_a_binary_without_audit_data_is_refused() -> None:
 
     with pytest.raises(RuntimeError, match="no .dep-v0 section"):
         module.audited_crates(elf_with_sections({".text": b"\x90"}))
+
+
+@pytest.mark.parametrize("source", ["git", "registry"])
+def test_a_crate_from_git_or_another_registry_fails_the_build(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str
+) -> None:
+    module = load_module()
+    lock = cargo_lock({name: hashlib.sha256(body).hexdigest() for name, body in CRATES.items()})
+    packages = [*PACKAGES, {"name": "forked", "version": "0.1.0", "source": source}]
+
+    with pytest.raises(RuntimeError, match=rf"can't fetch: forked 0.1.0 \({source}\)"):
+        run(module, monkeypatch, tmp_path, lock, CRATES, packages)

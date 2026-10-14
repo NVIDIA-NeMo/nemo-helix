@@ -170,6 +170,24 @@ def test_collects_modules_verified_against_recorded_and_checksum_database_hashes
     ]
 
 
+def test_upper_case_versions_are_escaped_in_proxy_and_checksum_database_urls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = load_module()
+    data = module_zip("example.com/a@v1.0.0-RC1", {"a.go": b"package a\n"})
+    responses = {
+        f"{module.GO_PROXY}/example.com/a/@v/v1.0.0-!r!c1.zip": data,
+        f"{module.GO_SUMDB}/lookup/example.com/a@v1.0.0-!r!c1": (
+            f"123\nexample.com/a v1.0.0-RC1 {module.module_zip_hash(data)}\n"
+        ).encode(),
+        **go_release_index(module),
+    }
+
+    output = run_collector(module, monkeypatch, tmp_path, "dep\texample.com/a\tv1.0.0-RC1\t", responses)
+
+    assert (output / "go-modules" / "example.com_a@v1.0.0-RC1.zip").read_bytes() == data
+
+
 def test_a_module_zip_that_does_not_match_its_hash_fails_the_build(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

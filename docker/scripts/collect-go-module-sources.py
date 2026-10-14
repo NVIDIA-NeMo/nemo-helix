@@ -131,7 +131,7 @@ def linked_modules(binaries: list[Path]) -> tuple[list[GoModule], dict[GoModule,
 
 
 def escape_module_path(path: str) -> str:
-    """Escape a module path for the proxy protocol: each upper-case letter becomes ``!`` and its lower case."""
+    """Escape a module path or version for the proxy protocol: each upper-case letter becomes ``!`` and its lower case."""
     return "".join(f"!{char.lower()}" if char.isupper() else char for char in path)
 
 
@@ -156,7 +156,9 @@ def fetch(url: str, timeout: int = 120) -> bytes:
 
 
 def checksum_database_hash(module: GoModule) -> str:
-    lookup = fetch(f"{GO_SUMDB}/lookup/{escape_module_path(module.path)}@{module.version}", timeout=60)
+    lookup = fetch(
+        f"{GO_SUMDB}/lookup/{escape_module_path(module.path)}@{escape_module_path(module.version)}", timeout=60
+    )
     for line in lookup.decode("utf-8").splitlines():
         fields = line.split()
         if len(fields) == 3 and fields[0] == module.path and fields[1] == module.version:
@@ -166,7 +168,7 @@ def checksum_database_hash(module: GoModule) -> str:
 
 def download_module(module: GoModule, destination: Path) -> None:
     expected = module.sum or checksum_database_hash(module)
-    data = fetch(f"{GO_PROXY}/{escape_module_path(module.path)}/@v/{module.version}.zip")
+    data = fetch(f"{GO_PROXY}/{escape_module_path(module.path)}/@v/{escape_module_path(module.version)}.zip")
     actual = module_zip_hash(data)
     if actual != expected:
         raise RuntimeError(f"{module.path}@{module.version}: expected {expected}, downloaded {actual}")

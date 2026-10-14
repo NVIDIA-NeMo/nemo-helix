@@ -17,8 +17,11 @@ ARG NHX_PYTHON_BASE=nhx-python-base
 FROM ghcr.io/osscontainertools/kaniko:${KANIKO_VERSION}-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS kaniko
 
 # The image has no Python, so its sources are collected here. docker/sources/nhx-kaniko.json pins the
-# components its Go binaries don't record: kaniko itself, BusyBox and the musl it is linked against,
-# and tini and the Ubuntu glibc it is linked against. Re-check it whenever the digest above moves.
+# components its Go binaries don't record: kaniko itself; BusyBox with the patches and build script
+# Docker builds it with, and Alpine 3.23's musl package it links statically; tini's release binaries
+# and the Ubuntu xenial glibc they link statically (glibc 2.23-0ubuntu10 on amd64, and on arm64 the
+# 2.23-0ubuntu3 that cross-toolchain-base 10ubuntu1 built); and Debian trixie's ca-certificates, from
+# which the CA bundle is generated. Re-check it whenever the digest above moves.
 FROM ${NHX_PYTHON_BASE} AS sources
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
@@ -36,8 +39,10 @@ RUN python3 /usr/local/bin/collect-pinned-sources.py \
         --binary /tmp/kaniko/docker-credential-acr-env \
         --output /source-distributions/nhx-kaniko
 
+# Under /kaniko, unlike other images: kaniko builds in its own root filesystem and never snapshots
+# /kaniko, so a build's RUN steps can't change the sources or copy them into the image they build.
 FROM kaniko AS runtime
-COPY --from=sources /source-distributions/nhx-kaniko/ /usr/share/nemo-helix/source-distributions/nhx-kaniko/
+COPY --from=sources /source-distributions/nhx-kaniko/ /kaniko/source-distributions/nhx-kaniko/
 
 # The binary runs on the image's platform, and `supervise`'s shell, /busybox/sh, is there.
 FROM runtime AS smoke-test
