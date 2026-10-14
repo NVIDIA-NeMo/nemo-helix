@@ -145,6 +145,7 @@ describe('DataDesignerJobBuildRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
 
     expect(await screen.findByText('Generating preview rows…')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Records to generate' })).toBeDisabled();
     expect(screen.getByRole('tab', { name: 'Preview Rows' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Preview Run Logs' }));
     await screen.findByText(/Sampling topics/, {}, { timeout: 5_000 });
