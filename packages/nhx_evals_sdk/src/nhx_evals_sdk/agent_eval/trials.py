@@ -171,6 +171,8 @@ class TrialMeasurements(BaseModel):
         return self
 
     def with_runtime(self, runtime_sec: float | None) -> Self:
+        if runtime_sec is None:
+            return self
         return self.model_validate({**self.model_dump(), "runtime_sec": runtime_sec})
 
 

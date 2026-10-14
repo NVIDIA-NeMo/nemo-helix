@@ -49,6 +49,7 @@ from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskS
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, TrialMeasurements
 from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
 from nhx_evals_sdk.values.otlp import (
+    fill_missing_root_end_time,
     fill_missing_start_times,
     root_span_id,
     set_root_span_attributes,
@@ -173,7 +174,9 @@ async def otlp_ingest_for_trial(
 
     ``started_at`` fills in any span that recorded no start time of its own, because Intake
     otherwise stores it against the ingest clock and start time is part of the key its spans
-    table replaces on — so a re-publish would insert rather than replace.
+    table replaces on — so a re-publish would insert rather than replace. A root span with no
+    end of its own gets the trial's measured runtime, as the ATIF path does, so Intake's latency
+    rollup does not read 0 for a run whose duration is known.
 
     Identity is written onto spans rather than resource attributes because Intake merges the
     layers as ``{**resource, **span}``. An agent that records its own ``gen_ai.conversation.id``
@@ -212,6 +215,8 @@ async def otlp_ingest_for_trial(
     if trial.error is not None:
         set_root_span_error(resource_spans, message=trial.error.message)
     fill_missing_start_times(resource_spans, start_time_unix_nano=int(started_at.timestamp() * 1_000_000_000))
+    if measurements.runtime_sec is not None:
+        fill_missing_root_end_time(resource_spans, duration_unix_nano=int(measurements.runtime_sec * 1_000_000_000))
     # The Export RPC envelope goes on only here, at the point these actually cross a wire.
     return ExportTraceServiceRequest(resource_spans=resource_spans).SerializeToString(), span_id
 

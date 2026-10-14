@@ -734,6 +734,42 @@ async def test_a_span_without_a_start_time_is_given_the_runs() -> None:
     )
 
 
+async def test_an_untimed_root_span_is_given_the_trials_runtime_as_its_end() -> None:
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    trial = _otlp_trial().model_copy(update={"measurements": TrialMeasurements(runtime_sec=45.0)})
+    client = _client()
+
+    await publish_to_intake(_result([trial], []), client=client, experiment_id="exp-1", agent_name="a")
+
+    sent = ExportTraceServiceRequest()
+    sent.ParseFromString(client.otlp_calls[0]["body"])
+    root = sent.resource_spans[0].scope_spans[0].spans[0]
+    assert root.end_time_unix_nano - root.start_time_unix_nano == 45_000_000_000
+
+
+async def test_a_root_span_with_its_own_end_keeps_it_over_the_trials_runtime() -> None:
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    spans = [{"traceId": _OTLP_TRACE_ID, "spanId": _OTLP_SPAN_ID, "name": "agent run", "endTimeUnixNano": "2000"}]
+    trace = EvidenceDescriptor(
+        kind="trace", format="otlp", data={"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+    )
+    trial = _trial("t-1").model_copy(
+        update={
+            "evidence": CandidateEvidence(descriptors={"trace": trace}),
+            "measurements": TrialMeasurements(runtime_sec=45.0),
+        }
+    )
+    client = _client()
+
+    await publish_to_intake(_result([trial], []), client=client, experiment_id="exp-1", agent_name="a")
+
+    sent = ExportTraceServiceRequest()
+    sent.ParseFromString(client.otlp_calls[0]["body"])
+    assert sent.resource_spans[0].scope_spans[0].spans[0].end_time_unix_nano == 2000
+
+
 async def test_a_failed_trial_marks_its_root_span_failed() -> None:
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
     from opentelemetry.proto.trace.v1.trace_pb2 import Status

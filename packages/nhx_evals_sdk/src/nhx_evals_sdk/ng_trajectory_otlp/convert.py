@@ -117,14 +117,18 @@ def _root_span(
 
 
 def _span_root_over_children(root: Span, children: Sequence[Span]) -> None:
-    """Time the root from its earliest child start to its latest child end, since Intake derives latency from it."""
+    """Time the root from its earliest child start to its latest child end, since Intake derives latency from it.
+
+    Half-timed children can put a known start or end outside that window; the root then stays
+    untimed rather than excluding one of its own children.
+    """
     starts = [child.start_time_unix_nano for child in children if child.start_time_unix_nano]
     ends = [child.end_time_unix_nano for child in children if child.end_time_unix_nano]
     if not starts or not ends:
         return
     start = min(starts)
     end = max(ends)
-    if end >= start:
+    if start == min(*starts, *ends) and end == max(*starts, *ends):
         root.start_time_unix_nano = start
         root.end_time_unix_nano = end
 
