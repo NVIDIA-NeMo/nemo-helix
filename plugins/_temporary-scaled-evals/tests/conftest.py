@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import base64
 import os
 
 import pytest
@@ -15,11 +14,7 @@ import pytest
 # take effect in the repo-wide CI run, and per-module skips do not depend on that mechanism.
 #
 # conftest runs before any of those per-module guards, so it must import nothing the plugin
-# brings in. A Fernet key is 32 random bytes in urlsafe base64, which is why this builds one
-# from the standard library rather than calling Fernet.generate_key().
-
-# Settings() is constructed at import time and requires a valid Fernet key.
-os.environ.setdefault("CREDENTIALS_ENCRYPTION_KEY", base64.urlsafe_b64encode(os.urandom(32)).decode())
+# brings in.
 os.environ.setdefault("DATABASE_SSL_MODE", "disable")
 os.environ.setdefault("CONTROL_PLANE_AUTH_ENABLED", "false")
 

@@ -20,7 +20,7 @@ from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.evaluation_logs import collect_log_lines
-from scaled_evals.api.runnability import BlockedPreflight, preflight_evaluation
+from scaled_evals.api.runnability import BlockedPreflight, SecretReadable, caller_secret_readable, preflight_evaluation
 from scaled_evals.api.schemas.common import (
     DeleteResponse,
     ListEnvelope,
@@ -69,6 +69,7 @@ router = APIRouter(prefix="/evaluations", tags=["evaluations"])
 
 Db = Annotated[Database, Depends(get_db)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
+Secrets = Annotated[SecretReadable, Depends(caller_secret_readable)]
 StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 
 _TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
@@ -260,8 +261,8 @@ def _create_command(body: CreateEvaluationRequest) -> list[str]:
     ):
         if value:
             command.extend([option, value])
-    for role, credential_id in sorted(body.credentials.items()):
-        command.extend(["--credential", f"{role}={credential_id}"])
+    for provider, secret_ref in sorted(body.credentials.items()):
+        command.extend(["--credential", f"{provider}={secret_ref}"])
     if body.agent_bundle_id is not None:
         command.extend(["--agent-bundle", body.agent_bundle_id])
     for object_key in body.extra_skill_object_keys:
@@ -278,7 +279,7 @@ def _create_command(body: CreateEvaluationRequest) -> list[str]:
 
 def _reproduce_notes(row: Mapping[str, Any], body: CreateEvaluationRequest) -> list[str]:
     notes = [
-        "Secret material is not exported; credential values remain credential ids.",
+        "Secret material is not exported; credentials remain platform secret references.",
         "The rerun will fail validation if referenced credentials, profiles, task revision, "
         "or runtime backend are unavailable.",
     ]
@@ -296,8 +297,8 @@ def _reproduce_notes(row: Mapping[str, Any], body: CreateEvaluationRequest) -> l
             "this request reruns only this member task."
         )
     if body.credentials:
-        roles = ", ".join(sorted(body.credentials))
-        notes.append(f"Credential references required for roles: {roles}.")
+        providers = ", ".join(sorted(body.credentials))
+        notes.append(f"Readable credential secrets required for providers: {providers}.")
     return notes
 
 
@@ -473,6 +474,7 @@ def preflight_evaluation_request(
     body: CreateEvaluationRequest,
     db: Db,
     current: Principal,
+    secrets: Secrets,
 ) -> RunnabilityReport:
     """Check whether an evaluation request is runnable without creating it."""
     result = preflight_evaluation(
@@ -481,6 +483,7 @@ def preflight_evaluation_request(
         current,
         object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
+        secret_readable=secrets,
     )
     return result.report
 
@@ -490,6 +493,7 @@ def create_evaluation(
     body: CreateEvaluationRequest,
     db: Db,
     current: Principal,
+    secrets: Secrets,
 ) -> EvaluationResponse:
     """Start an evaluation run over a single task.
 
@@ -506,6 +510,7 @@ def create_evaluation(
         current,
         object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
+        secret_readable=secrets,
     )
     if isinstance(preflight, BlockedPreflight):
         raise _http_error(
@@ -533,7 +538,7 @@ def create_evaluation(
         framework_profile_id=body.framework_profile_id,
         harbor_profile_id=body.harbor_profile_id,
         intake_profile_id=body.intake_profile_id,
-        credentials=body.credentials,
+        credentials={provider: ref for provider, ref in body.credentials.items()},
         extra_skill_object_keys=body.extra_skill_object_keys,
         instruction_prefix=body.instruction_prefix,
         instruction_postfix=body.instruction_postfix,

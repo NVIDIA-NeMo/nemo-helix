@@ -42,7 +42,6 @@ def runner_with(monkeypatch, handler) -> CliRunner:
 
 def test_cli_import_does_not_require_server_settings() -> None:
     env = os.environ.copy()
-    env.pop("CREDENTIALS_ENCRYPTION_KEY", None)
     proc = subprocess.run(
         [sys.executable, "-c", "from scaled_evals.cli.main import cli; print(cli.name)"],
         capture_output=True,
@@ -135,41 +134,6 @@ def test_json_option_help_mentions_trailing_position() -> None:
     command_help = " ".join(command_result.output.split())
     assert "accepted before or after subcommands" in root_help
     assert "accepted before or after subcommands" in command_help
-
-
-def test_credential_create_does_not_echo_secret(monkeypatch) -> None:
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["body"] = json.loads(request.content)
-        return httpx.Response(
-            201,
-            json={
-                "id": "cred_1",
-                "name": "openai key",
-                "provider": "openai",
-                "payload_kind": "key",
-                "fingerprint": "sha256:abcd",
-            },
-        )
-
-    result = runner_with(monkeypatch, handler).invoke(
-        cli,
-        [
-            "credential",
-            "create",
-            "--name",
-            "openai key",
-            "--provider",
-            "openai",
-            "--key",
-            "sk-secret",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert seen["body"]["key"] == "sk-secret"
-    assert "sk-secret" not in result.output
-    assert "sha256:abcd" in result.output
 
 
 def test_config_profile_create_parses_config_json(monkeypatch) -> None:
@@ -337,9 +301,9 @@ def test_evaluation_create_builds_body(monkeypatch) -> None:
             "--n-attempts",
             "3",
             "--credential",
-            "anthropic=cred_1",
+            "anthropic=team-a/anthropic-key",
             "--credential",
-            "intake=cred_2",
+            "nhx=team-a/intake",
             "--parallelism",
             "4",
         ],
@@ -351,7 +315,7 @@ def test_evaluation_create_builds_body(monkeypatch) -> None:
         "task_id": "task_1",
         "task_revision": 2,
         "framework_version": "stable",
-        "credentials": {"anthropic": "cred_1", "intake": "cred_2"},
+        "credentials": {"anthropic": "team-a/anthropic-key", "nhx": "team-a/intake"},
         "agent_bundle_id": "ab_claude",
         "extra_skill_object_keys": ["skills/review/SKILL.md"],
         "instruction_prefix": "inspect first",
@@ -433,7 +397,7 @@ def test_evaluation_create_preflights_exact_body_before_creation(monkeypatch) ->
             "--task-revision",
             "2",
             "--credential",
-            "anthropic=cred_1",
+            "anthropic=team-a/anthropic-key",
         ],
     )
 
@@ -904,7 +868,7 @@ def test_benchmark_run_reproduce_prints_complete_command(monkeypatch) -> None:
                     "benchmark_revision": 2,
                     "framework": "harbor",
                     "framework_version": "0.6.3",
-                    "credentials": {"openai": "cred_openai"},
+                    "credentials": {"openai": "team-a/openai-key"},
                     "extra_skill_object_keys": ["skills/review/SKILL.md"],
                     "instruction_prefix": "inspect first",
                     "instruction_postfix": "summarize last",
@@ -929,7 +893,7 @@ def test_benchmark_run_reproduce_prints_complete_command(monkeypatch) -> None:
     assert "benchmark-run create" in result.output
     assert "--n-attempts 3" in result.output
     assert "--max-concurrent-members 4" in result.output
-    assert "openai=cred_openai" in result.output
+    assert "openai=team-a/openai-key" in result.output
 
 
 def test_benchmark_run_reproduce_rerun_posts_request(monkeypatch) -> None:
@@ -1377,155 +1341,6 @@ def test_task_list_update_delete(monkeypatch) -> None:
     assert "deleted task task_1" in deleted.output
 
 
-def test_credential_list_filters_by_provider(monkeypatch) -> None:
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["path"] = request.url.path
-        seen["params"] = dict(request.url.params)
-        return httpx.Response(
-            200,
-            json={
-                "data": [
-                    {
-                        "id": "cred_1",
-                        "name": "anthropic prod",
-                        "provider": "anthropic",
-                        "payload_kind": "key",
-                        "fingerprint": "sha256:abcd",
-                    }
-                ],
-                "next_cursor": "next",
-            },
-        )
-
-    result = runner_with(monkeypatch, handler).invoke(
-        cli,
-        ["credential", "list", "--provider", "anthropic", "--limit", "5", "--order", "asc"],
-    )
-    assert result.exit_code == 0, result.output
-    assert seen["path"] == "/v1/credentials"
-    assert seen["params"]["provider"] == "anthropic"
-    assert seen["params"]["limit"] == "5"
-    assert seen["params"]["order"] == "asc"
-    assert "cred_1" in result.output
-    assert "sha256:abcd" in result.output
-    assert "next_cursor: next" in result.output
-
-
-def test_credential_create_accepts_openshift_provider(monkeypatch) -> None:
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["body"] = json.loads(request.content)
-        return httpx.Response(
-            201,
-            json={
-                "id": "cred_os",
-                "name": "cluster token",
-                "provider": "openshift",
-                "payload_kind": "key",
-                "fingerprint": "sha256:os",
-            },
-        )
-
-    result = runner_with(monkeypatch, handler).invoke(
-        cli,
-        [
-            "credential",
-            "create",
-            "--name",
-            "cluster token",
-            "--provider",
-            "openshift",
-            "--key",
-            "openshift-token",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert seen["body"] == {
-        "name": "cluster token",
-        "provider": "openshift",
-        "key": "openshift-token",
-    }
-    assert "cred_os" in result.output
-    assert "openshift-token" not in result.output
-
-
-def test_credential_get_does_not_echo_secret(monkeypatch) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "GET"
-        assert request.url.path == "/v1/credentials/cred_1"
-        return httpx.Response(
-            200,
-            json={
-                "id": "cred_1",
-                "name": "openai key",
-                "provider": "openai",
-                "payload_kind": "key",
-                "fingerprint": "sha256:abcd",
-            },
-        )
-
-    result = runner_with(monkeypatch, handler).invoke(cli, ["credential", "get", "cred_1"])
-    assert result.exit_code == 0, result.output
-    assert "cred_1" in result.output
-    assert "sha256:abcd" in result.output
-    assert "sk-" not in result.output
-
-
-def test_credential_verify_posts(monkeypatch) -> None:
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["method"] = request.method
-        seen["path"] = request.url.path
-        return httpx.Response(
-            200,
-            json={"id": "cred_1", "verified": True, "reason": "ok"},
-        )
-
-    result = runner_with(monkeypatch, handler).invoke(cli, ["credential", "verify", "cred_1"])
-    assert result.exit_code == 0, result.output
-    assert seen["method"] == "POST"
-    assert seen["path"] == "/v1/credentials/cred_1/verify"
-    assert "verified: True" in result.output
-
-
-def test_credential_rename_rotate_delete(monkeypatch) -> None:
-    seen = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content) if request.content else None
-        seen.append((request.method, request.url.path, body))
-        if request.method == "DELETE":
-            return httpx.Response(200, json={"id": "cred_1", "deleted": True})
-        return httpx.Response(
-            200,
-            json={
-                "id": "cred_1",
-                "name": body.get("name") if body and "name" in body else "renamed",
-                "provider": "openai",
-                "payload_kind": "key",
-                "fingerprint": "sha256:new",
-            },
-        )
-
-    runner = runner_with(monkeypatch, handler)
-    renamed = runner.invoke(cli, ["credential", "rename", "cred_1", "--name", "renamed"])
-    rotated = runner.invoke(cli, ["credential", "rotate", "cred_1", "--key", "sk-new-secret"])
-    deleted = runner.invoke(cli, ["credential", "delete", "cred_1"])
-
-    assert renamed.exit_code == 0, renamed.output
-    assert rotated.exit_code == 0, rotated.output
-    assert deleted.exit_code == 0, deleted.output
-    assert seen[0] == ("PATCH", "/v1/credentials/cred_1", {"name": "renamed"})
-    assert seen[1] == ("POST", "/v1/credentials/cred_1/rotate", {"key": "sk-new-secret"})
-    assert seen[2] == ("DELETE", "/v1/credentials/cred_1", None)
-    assert "sk-new-secret" not in rotated.output
-    assert "sha256:new" in rotated.output
-
-
 def test_config_profile_list_and_get(monkeypatch) -> None:
     seen = []
 
@@ -1911,7 +1726,7 @@ def test_evaluation_reproduce_prints_command_and_request(monkeypatch) -> None:
                     "framework_profile_id": "cfg_h",
                     "harbor_profile_id": "cfg_h",
                     "intake_profile_id": None,
-                    "credentials": {"openai": "cred_openai"},
+                    "credentials": {"openai": "team-a/openai-key"},
                     "extra_skill_object_keys": [],
                     "runtime": "sandbox_k8s",
                     "parallelism": 4,
@@ -1924,7 +1739,7 @@ def test_evaluation_reproduce_prints_command_and_request(monkeypatch) -> None:
                     "--name",
                     "rerun of run 7",
                     "--credential",
-                    "openai=cred_openai",
+                    "openai=team-a/openai-key",
                 ],
                 "notes": ["Secret material is not exported."],
             },
@@ -1933,7 +1748,7 @@ def test_evaluation_reproduce_prints_command_and_request(monkeypatch) -> None:
     result = runner_with(monkeypatch, handler).invoke(cli, ["evaluation", "reproduce", "ev_1"])
     assert result.exit_code == 0, result.output
     assert "rerun command:" in result.output
-    assert "openai=cred_openai" in result.output
+    assert "openai=team-a/openai-key" in result.output
     assert '"task_id": "task_1"' in result.output
     assert "Secret material" in result.output
 
@@ -1954,7 +1769,7 @@ def test_evaluation_reproduce_rerun_posts_request(monkeypatch) -> None:
                         "task_id": "task_1",
                         "task_revision": 2,
                         "framework": "harbor",
-                        "credentials": {"openai": "cred_openai"},
+                        "credentials": {"openai": "team-a/openai-key"},
                         "extra_skill_object_keys": [],
                         "runtime": "sandbox_k8s",
                         "parallelism": 4,

@@ -47,7 +47,7 @@ def _use_conn(conn: MagicMock) -> None:
 @pytest.fixture(autouse=True)
 def _clear_overrides() -> Iterator[None]:
     yield
-    v1.dependency_overrides.clear()
+    v1.dependency_overrides.pop(get_conn, None)
 
 
 @pytest.fixture(autouse=True)
@@ -783,7 +783,7 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
         },
         framework_profile_id="cfg_h",
         harbor_profile_id="cfg_h",
-        credentials={"openai": "cred_openai"},
+        credentials={"openai": "team-a/openai-key"},
         parallelism=2,
         max_concurrent_members=4,
     )
