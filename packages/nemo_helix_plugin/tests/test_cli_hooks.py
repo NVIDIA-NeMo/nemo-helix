@@ -15,11 +15,20 @@ Covers the override-by-replacement contract:
 from __future__ import annotations
 
 import json
-from typing import ClassVar
+from types import SimpleNamespace
+from typing import ClassVar, cast
 
+import pytest
 import typer
 from nemo_helix_plugin.cli import NemoCLI
-from nemo_helix_plugin.commands import add_function_commands, add_job_commands
+from nemo_helix_plugin.cli_renderer import CLIRenderer, RendererContext
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.commands import (
+    add_function_commands,
+    add_job_commands,
+    take_function_submit,
+    take_job_submit,
+)
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.job import NemoJob
 from pydantic import BaseModel
@@ -81,6 +90,14 @@ class _ByeFunction(NemoFunction[_GreetSpec]):
 
 class _FlatGreetFunction(_GreetFunction):
     pass
+
+
+class _ClientState:
+    """Stand-in CLI state; function submit only needs a client for headers."""
+
+    def get_client(self, timeout: object = None) -> NemoClient:
+        del timeout
+        return NemoClient(base_url="http://platform.example")
 
 
 class _NoOpCLI(NemoCLI):
@@ -173,6 +190,91 @@ class TestUpdateJobCli:
         result = runner.invoke(app, ["greet", "--name", "Wrapped"])
         assert result.exit_code == 0
         assert json.loads(result.output) == {"message": "Hello, Wrapped!"}
+
+    def test_take_job_submit_delegates_without_spec_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A replacement with none of the generated flags still submits, not prints help."""
+        submitted: list[dict] = []
+
+        def _capture(_self: object, _job_cls: type[NemoJob], spec: dict, **_kwargs: object) -> dict:
+            submitted.append(spec)
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
+
+        class _CLI(_NoOpCLI):
+            def update_job_cli(self, job_cls, group) -> None:
+                if job_cls is not _GreetJob:
+                    return
+                submit = take_job_submit(group)
+
+                @group.callback(invoke_without_command=True)
+                def greet(typer_ctx: typer.Context, who: str = typer.Argument(...)) -> None:
+                    submit(typer_ctx, spec=json.dumps({"name": who}), workspace="default")
+
+        app = _app_with_jobs(_GreetJob, cli=_CLI())
+
+        result = runner.invoke(app, ["greet", "Wrapped"])
+
+        assert result.exit_code == 0, result.output
+        assert "Usage:" not in result.output
+        assert submitted == [{"name": "Wrapped"}]
+
+    def test_take_job_submit_forwards_renderer_kwargs_to_renderer_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        submitted: list[dict] = []
+        rendered: list[dict] = []
+
+        def _capture(_self: object, _job_cls: type[NemoJob], spec: dict, **_kwargs: object) -> dict:
+            submitted.append(spec)
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
+
+        class _Renderer(CLIRenderer):
+            def on_start(self, *, ctx: RendererContext) -> None:
+                rendered.append(dict(ctx.cli_kwargs))
+
+        class _CLI(_NoOpCLI):
+            def get_job_renderer(self, job_cls, *, verb) -> type[CLIRenderer] | None:  # noqa: ARG002
+                return _Renderer
+
+            def update_job_cli(self, job_cls, group) -> None:
+                submit = take_job_submit(group)
+
+                @group.callback(invoke_without_command=True)
+                def greet(typer_ctx: typer.Context, who: str = typer.Argument(...)) -> None:
+                    submit(
+                        typer_ctx,
+                        spec=json.dumps({"name": who}),
+                        workspace="default",
+                        renderer_kwargs={"loud": True},
+                    )
+
+        app = _app_with_jobs(_GreetJob, cli=_CLI())
+
+        result = runner.invoke(app, ["greet", "Wrapped"])
+
+        assert result.exit_code == 0, result.output
+        assert submitted == [{"name": "Wrapped"}]
+        [cli_kwargs] = rendered
+        assert cli_kwargs["loud"] is True
+
+    @pytest.mark.parametrize("name", ["spec_file", "profile", "config"])
+    def test_take_job_submit_rejects_renderer_kwargs_that_shadow_flags(self, name: str) -> None:
+        job_group = _app_with_jobs(_GreetJob).registered_groups[0].typer_instance
+        assert job_group is not None
+        submit = take_job_submit(job_group)
+
+        with pytest.raises(ValueError, match=name):
+            submit(
+                cast(typer.Context, SimpleNamespace()),
+                spec="{}",
+                workspace="default",
+                renderer_kwargs={name: "x"},
+            )
+
+    def test_take_job_submit_requires_generated_callback(self) -> None:
+        with pytest.raises(RuntimeError, match="missing generated job submit callback"):
+            take_job_submit(typer.Typer())
 
     def test_hook_dispatches_per_job(self) -> None:
         """A hook that only modifies _GreetJob leaves _ByeJob untouched."""
@@ -269,3 +371,54 @@ class TestUpdateFunctionCli:
         result = runner.invoke(app, ["greet"])
         assert result.exit_code == 0
         assert result.output.strip() == "flat-function-replaced"
+
+    def test_take_function_submit_replaces_command_and_forwards_renderer_kwargs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        posted: list[tuple[dict, dict]] = []
+
+        def _capture(_url: str, body: dict, *, cli_kwargs: dict, **_kwargs: object) -> None:
+            posted.append((body, dict(cli_kwargs)))
+
+        monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _capture)
+
+        class _CLI(_NoOpCLI):
+            def update_function_cli(self, fn_cls, group) -> None:
+                submit = take_function_submit(group, fn_cls)
+
+                @group.command(fn_cls.name)
+                def greet(typer_ctx: typer.Context, who: str = typer.Argument(...)) -> None:
+                    submit(
+                        typer_ctx,
+                        spec=json.dumps({"name": who}),
+                        workspace="default",
+                        renderer_kwargs={"loud": True},
+                    )
+
+        app = _app_with_functions(_GreetFunction, cli=_CLI())
+
+        assert [c.name for c in app.registered_commands] == ["greet"]
+        result = runner.invoke(app, ["greet", "Wrapped"], obj=_ClientState())
+
+        assert result.exit_code == 0, result.output
+        [(body, cli_kwargs)] = posted
+        assert body == {"name": "Wrapped"}
+        assert cli_kwargs["loud"] is True
+        assert "loud" not in body
+
+    @pytest.mark.parametrize("name", ["name", "spec_file", "request_id"])
+    def test_take_function_submit_rejects_renderer_kwargs_that_shadow_flags(self, name: str) -> None:
+        app = _app_with_functions(_GreetFunction)
+        submit = take_function_submit(app, _GreetFunction)
+
+        with pytest.raises(ValueError, match=name):
+            submit(
+                cast(typer.Context, SimpleNamespace()),
+                spec="{}",
+                workspace="default",
+                renderer_kwargs={name: "x"},
+            )
+
+    def test_take_function_submit_requires_generated_command(self) -> None:
+        with pytest.raises(RuntimeError, match="missing generated submit command for function 'greet'"):
+            take_function_submit(typer.Typer(), _GreetFunction)

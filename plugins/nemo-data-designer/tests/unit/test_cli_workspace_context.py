@@ -26,6 +26,7 @@ import typer
 from nemo_data_designer_plugin.cli import inputs
 from nemo_data_designer_plugin.cli import renderers as renderers_mod
 from nemo_data_designer_plugin.cli.retrieval import retrieval_app
+from nemo_data_designer_plugin.functions.preview import PreviewFunction
 from nemo_helix_plugin.cli_renderer import RendererContext
 from rich.console import Console
 from typer.testing import CliRunner
@@ -198,23 +199,15 @@ def test_create_wrapper_falls_back_to_default_without_cli_state(
 def _preview_app(captured: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> typer.Typer:
     group = typer.Typer()
 
-    # Unlike ``create``, the preview override leaves the original command
-    # registered, so Typer still introspects this signature -- it has to be
-    # spelled out rather than swallowed by ``**kwargs``.
+    # Keeps Typer from collapsing the app into its single ``preview`` command.
+    @group.callback()
+    def _noop() -> None:
+        pass
+
     @group.command("preview")
-    def original(
-        typer_ctx: typer.Context,
-        spec: str = typer.Option("", "--spec"),
-        spec_file: str | None = typer.Option(None, "--spec-file"),
-        workspace: str | None = typer.Option(None, "--workspace"),
-        request_id: str | None = typer.Option(None, "--request-id"),
-        non_interactive: bool = typer.Option(False, "--non-interactive"),
-        save_results: bool = typer.Option(False, "--save-results"),
-        artifact_path: str | None = typer.Option(None, "--artifact-path"),
-    ) -> None:
-        del typer_ctx, spec, spec_file
-        del request_id, non_interactive, save_results, artifact_path
-        captured["workspace"] = workspace
+    def original(typer_ctx: typer.Context, **kwargs: object) -> None:
+        del typer_ctx
+        captured.update(kwargs)
 
     @contextlib.contextmanager
     def fake_spec_from_builder(config_source: str, num_records: int) -> Iterator[str]:
@@ -222,7 +215,7 @@ def _preview_app(captured: dict[str, object], monkeypatch: pytest.MonkeyPatch) -
         yield '{"spec": true}'
 
     monkeypatch.setattr(inputs, "_spec_from_builder", fake_spec_from_builder)
-    inputs.apply_preview_cli_overrides(group)
+    inputs.apply_preview_cli_overrides(group, PreviewFunction)
     return group
 
 
@@ -236,6 +229,30 @@ def test_preview_wrapper_passes_context_workspace_to_generated_verb(
 
     assert result.exit_code == 0, result.output
     assert captured["workspace"] == "research"
+
+
+def test_preview_wrapper_replaces_generated_verb_and_forwards_renderer_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    app = _preview_app(captured, monkeypatch)
+
+    result = runner.invoke(
+        app,
+        ["preview", "config.yaml", "--non-interactive", "--save-results", "--artifact-path", "out"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [c.name for c in app.registered_commands] == ["preview"]
+    assert captured == {
+        "spec": '{"spec": true}',
+        "spec_file": None,
+        "workspace": "default",
+        "request_id": None,
+        "non_interactive": True,
+        "save_results": True,
+        "artifact_path": "out",
+    }
 
 
 def test_preview_wrapper_falls_back_to_default_without_cli_state(
