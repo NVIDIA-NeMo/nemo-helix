@@ -48,6 +48,7 @@ import yaml
 from psycopg.rows import dict_row
 
 from scaled_evals.api import artifacts
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
 from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
 from scaled_evals.api.config_profile_store import ConfigProfileStore
@@ -56,7 +57,6 @@ from scaled_evals.api.execution_analytics import emit_execution_span
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
-from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import build_benchmark_archive
 from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives as cleanup_archive_objects
@@ -412,7 +412,7 @@ class Dispatcher:
     def cleanup_benchmark_archives(self, run_id: str, *, object_keys: list[str] | None = None) -> None:
         """Best-effort immediate cleanup; durable periodic sweeps retry failures."""
         try:
-            cleanup_archive_objects(self.connect, run_id, object_keys=object_keys)
+            cleanup_archive_objects(run_id, object_keys=object_keys)
         except Exception as exc:  # noqa: BLE001 - retain objects when database/store state is uncertain
             LOG.warning("benchmark archive cleanup deferred for %s: %s", run_id, redact_secret_text(str(exc)))
 
@@ -423,12 +423,11 @@ class Dispatcher:
         def keep_claim() -> None:
             while not stop.wait(max(0.1, min(30.0, self.claim_timeout / 3))):
                 try:
-                    with self.connect() as conn:
-                        owned = BenchmarkArchiveRepository(conn).heartbeat(job["benchmark_run_id"], job["claim_token"])
+                    owned = BenchmarkArchiveStore().heartbeat(job["benchmark_run_id"], job["claim_token"])
                     if not owned:
                         lost.set()
                         return
-                except Exception:  # noqa: BLE001 - a transient DB failure is not proof of lease loss
+                except Exception:  # noqa: BLE001 - a transient store failure is not proof of lease loss
                     LOG.exception("benchmark archive heartbeat failed")
 
         def check_claim() -> None:
@@ -440,26 +439,23 @@ class Dispatcher:
         archive: dict | None = None
         published = False
         try:
-            with self.connect() as conn:
-                BenchmarkArchiveRepository(conn).validate_members(job["benchmark_run_id"], job["members"])
+            BenchmarkArchiveStore().validate_members(job["benchmark_run_id"], job["members"])
             archive = build_benchmark_archive(job, check_claim=check_claim)
             check_claim()
-            with self.connect() as conn:
-                published = BenchmarkArchiveRepository(conn).finish(job, **archive)
+            published = BenchmarkArchiveStore().finish(job, **archive)
             if not published:
                 raise RuntimeError("benchmark archive claim lost before publication")
         except Exception as exc:  # noqa: BLE001 — record a retryable export failure
             # Object-store errors may contain URLs; expose only a redacted message.
             detail = redact_secret_text(str(exc))[:2000]
             LOG.warning("benchmark archive failed for %s: %s", job["benchmark_run_id"], detail)
-            with self.connect() as conn:
-                BenchmarkArchiveRepository(conn).fail(job, detail)
+            BenchmarkArchiveStore().fail(job, detail)
         finally:
             stop.set()
             keeper.join(timeout=5)
             if archive is not None and not published:
-                # A commit acknowledgement can fail after the row became ready.
-                # Recheck authoritative references under lock before deleting.
+                # A write acknowledgement can fail after the archive became ready.
+                # Recheck its references before deleting.
                 self.cleanup_benchmark_archives(job["benchmark_run_id"], object_keys=[archive["object_key"]])
 
     def claim_next_archive(self, evaluation_id: str | None = None, *, min_age: float = 0.0) -> str | None:
