@@ -13,6 +13,7 @@ import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataView
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
+import { useListEvaluatorResults } from '@nemo/sdk/generated/platform/evaluator-results';
 import {
   listEvaluationSessions,
   useListEvaluationSessions,
@@ -23,7 +24,7 @@ import type {
   EvaluationSessionResponse,
   ListEvaluationSessionsParams,
 } from '@nemo/sdk/generated/platform/schema';
-import { Badge, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Badge, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';
@@ -32,7 +33,7 @@ import { formatInteger } from '@studio/util/intakeTelemetry';
 import { keepPreviousData } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { Columns3 } from 'lucide-react';
-import { type ComponentProps, type FC, useMemo } from 'react';
+import { type ComponentProps, type FC, useMemo, useState } from 'react';
 
 type SessionRow = EvaluationSessionResponse & { _rowId: string };
 
@@ -89,6 +90,58 @@ const getSessionSortParam = (sortingState: { id: string; desc: boolean }[]): str
     })
     .filter((f): f is string => f !== undefined);
   return fields.length > 0 ? fields.join(',') : undefined;
+};
+
+interface FailedEvaluatorBadgeProps {
+  workspace: string;
+  sessionId: string;
+  evaluator: string;
+}
+
+/**
+ * The "Failed" marker for an evaluator that ran on this session but produced no score, with the
+ * reason the evaluator recorded (its diagnostic, stored as the result's `comment`) on hover. The
+ * session row only says *which* evaluators failed; the reason lives on the evaluator result, so it
+ * is fetched when the tooltip opens rather than for every cell on the page.
+ */
+const FailedEvaluatorBadge: FC<FailedEvaluatorBadgeProps> = ({
+  workspace,
+  sessionId,
+  evaluator,
+}) => {
+  const [opened, setOpened] = useState(false);
+  const { data, isPending } = useListEvaluatorResults(
+    workspace,
+    { filter: { session_id: sessionId, name: evaluator, status: 'FAILED' }, page_size: 10 },
+    { query: { enabled: opened } }
+  );
+  const reasons = [...new Set((data?.data ?? []).map((result) => result.comment).filter(Boolean))];
+  return (
+    <Tooltip
+      side="bottom"
+      onOpenChange={(open) => open && setOpened(true)}
+      slotContent={
+        <Stack gap="density-xs">
+          <Text kind="body/semibold/sm">The evaluator ran but produced no score.</Text>
+          {!opened || isPending ? (
+            <Text kind="body/regular/sm">Loading the reason…</Text>
+          ) : reasons.length > 0 ? (
+            reasons.map((reason) => (
+              <Text key={reason} kind="body/regular/sm">
+                {reason}
+              </Text>
+            ))
+          ) : (
+            <Text kind="body/regular/sm">No reason was recorded.</Text>
+          )}
+        </Stack>
+      }
+    >
+      <Badge kind="outline" color="red" className="cursor-default">
+        Failed
+      </Badge>
+    </Tooltip>
+  );
 };
 
 export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = ({
@@ -263,9 +316,11 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
           const value = row.original.evaluator_scores?.[name];
           if (value == null && row.original.failed_evaluators?.includes(name)) {
             return (
-              <Badge kind="outline" color="red" title="The evaluator ran but produced no score.">
-                Failed
-              </Badge>
+              <FailedEvaluatorBadge
+                workspace={workspace}
+                sessionId={row.original.session_id}
+                evaluator={name}
+              />
             );
           }
           return <Text>{formatEvaluatorScore(value)}</Text>;

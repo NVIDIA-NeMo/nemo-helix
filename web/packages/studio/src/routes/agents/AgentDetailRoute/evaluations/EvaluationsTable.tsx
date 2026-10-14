@@ -17,13 +17,16 @@ import {
   deleteEvaluation,
   getListEvaluationsQueryKey,
 } from '@nemo/sdk/generated/platform/evaluations';
-import { Button, Flex, Text } from '@nvidia/foundations-react-core';
+import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
-import { evaluatorScores } from '@studio/routes/agents/AgentDetailRoute/evaluations/formatRollups';
+import {
+  type EvaluatorScore,
+  evaluatorScores,
+} from '@studio/routes/agents/AgentDetailRoute/evaluations/formatRollups';
 import {
   type AgentEvaluationRow,
   primaryExperimentName,
@@ -95,6 +98,33 @@ const DurationCell: FC<{ job: EvalJobRow | null; durationMs?: number }> = ({ job
   if (runningJob) return <Text>{formatTimeInSeconds(liveSeconds) || '0s'}</Text>;
   return <Text>{formatDurationMs(durationMs, { hideMsAboveMinute: true })}</Text>;
 };
+
+/** A row has room for two lines of chips. Two evaluators fit as they are; past that, the first
+ *  chip takes one line and the "+N more" chip the other, so nothing is clipped. */
+const visibleScoreChips = (count: number): number => (count <= 2 ? count : 1);
+
+/** One evaluator's mean for a run, with how many of its attempts failed to score. */
+const ScoreChip: FC<{ score: EvaluatorScore }> = ({ score }) => (
+  <Flex
+    gap="density-xxs"
+    align="baseline"
+    className="whitespace-nowrap rounded bg-surface-raised px-1.5 py-0.5"
+  >
+    <Text className="text-secondary" kind="body/regular/sm">
+      {score.label}
+    </Text>
+    <Text kind="body/semibold/sm">{score.value}</Text>
+    {score.failedCount > 0 && (
+      <Text
+        kind="body/regular/sm"
+        color="danger"
+        title={`${score.failedCount} of the attempts failed to score and count as 0`}
+      >
+        ({score.failedCount} failed)
+      </Text>
+    )}
+  </Flex>
+);
 
 interface EvaluationsTableProps {
   workspace: string;
@@ -218,30 +248,46 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             const { evaluation } = row.original;
             const scores = evaluation ? evaluatorScores(evaluation) : [];
             if (scores.length === 0) return <Text>—</Text>;
+            // The cell is a fixed height, so past a couple of chips the rest would be clipped
+            // without a trace. Fold the remainder into one chip whose tooltip lists them; the
+            // full comparison lives on the experiment page.
+            const visible = visibleScoreChips(scores.length);
+            const shown = scores.slice(0, visible);
+            const folded = scores.slice(visible);
             return (
               <Flex gap="density-xs" className="flex-wrap">
-                {scores.map((score) => (
-                  <Flex
-                    key={score.key}
-                    gap="density-xxs"
-                    align="baseline"
-                    className="whitespace-nowrap rounded bg-surface-raised px-1.5 py-0.5"
-                  >
-                    <Text className="text-secondary" kind="body/regular/sm">
-                      {score.label}
-                    </Text>
-                    <Text kind="body/semibold/sm">{score.value}</Text>
-                    {score.failedCount > 0 && (
-                      <Text
-                        kind="body/regular/sm"
-                        color="danger"
-                        title={`${score.failedCount} of the attempts failed to score and count as 0`}
-                      >
-                        ({score.failedCount} failed)
-                      </Text>
-                    )}
-                  </Flex>
+                {shown.map((score) => (
+                  <ScoreChip key={score.key} score={score} />
                 ))}
+                {folded.length > 0 && (
+                  <Tooltip
+                    side="bottom"
+                    slotContent={
+                      <Stack gap="density-xs">
+                        {folded.map((score) => (
+                          <Text key={score.key} kind="body/regular/sm">
+                            {score.label} {score.value}
+                            {score.failedCount > 0 ? ` (${score.failedCount} failed)` : ''}
+                          </Text>
+                        ))}
+                      </Stack>
+                    }
+                  >
+                    <Text
+                      kind="body/semibold/sm"
+                      className="cursor-default whitespace-nowrap rounded bg-surface-raised px-1.5 py-0.5"
+                      data-testid="more-scores"
+                    >
+                      +{folded.length} more
+                      {folded.some((score) => score.failedCount > 0) && (
+                        <Text kind="body/regular/sm" color="danger">
+                          {' '}
+                          ({folded.reduce((sum, score) => sum + score.failedCount, 0)} failed)
+                        </Text>
+                      )}
+                    </Text>
+                  </Tooltip>
+                )}
               </Flex>
             );
           },
