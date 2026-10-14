@@ -336,6 +336,39 @@ def _optional_string(value: object) -> str | None:
     return value or None
 
 
+def _parse_legacy_public_client(oidc: dict[str, object]) -> tuple[AdvertisedOidcClient, ...]:
+    """Normalize the pre-multi-client discovery shape to one public client."""
+    client_id = oidc.get("cli_client_id") or oidc.get("client_id")
+    if not isinstance(client_id, str) or not client_id:
+        raise ValueError("OIDC legacy client_id must be a non-empty string")
+    default_scopes = oidc.get("default_scopes", DEFAULT_OAUTH_SCOPES)
+    if not isinstance(default_scopes, str) or not default_scopes:
+        raise ValueError("OIDC legacy default_scopes must be a non-empty string")
+    return (
+        AdvertisedOidcClient(
+            name="public",
+            client_id=client_id,
+            client_authentication="public",
+            default=True,
+            default_scopes=default_scopes,
+            bearer_token_source=_parse_bearer_token_source(oidc.get("bearer_token_source", "access_token")),
+            scope_prefix=_optional_string(oidc.get("scope_prefix")),
+            authorization_endpoint=_optional_string(oidc.get("authorization_endpoint")),
+            token_endpoint=_optional_string(oidc.get("token_endpoint")),
+            device_authorization_endpoint=_optional_string(oidc.get("device_authorization_endpoint")),
+            device_authorization_requires_device_id=_boolean(
+                oidc.get("device_authorization_requires_device_id", False),
+                field_name="device_authorization_requires_device_id",
+            ),
+            device_authorization_display_name=_optional_string(oidc.get("device_authorization_display_name")),
+            device_token_request_includes_scope=_boolean(
+                oidc.get("device_token_request_includes_scope", True),
+                field_name="device_token_request_includes_scope",
+            ),
+        ),
+    )
+
+
 def _boolean(value: object, *, field_name: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"OIDC advertised {field_name} must be a boolean")
@@ -362,10 +395,11 @@ def parse_nhx_config(data: object) -> NHXOIDCConfig:
     issuer = oidc.get("issuer")
     if not isinstance(issuer, str) or not issuer:
         raise ValueError("OIDC discovery issuer must be a non-empty string")
+    clients = _parse_advertised_clients(oidc.get("clients")) if "clients" in oidc else _parse_legacy_public_client(oidc)
     return NHXOIDCConfig(
         auth_enabled=auth_enabled,
         issuer=issuer,
-        clients=_parse_advertised_clients(oidc.get("clients")),
+        clients=clients,
         workload_token_exchange_enabled=_boolean(
             oidc.get("workload_token_exchange_enabled", False), field_name="workload_token_exchange_enabled"
         ),
