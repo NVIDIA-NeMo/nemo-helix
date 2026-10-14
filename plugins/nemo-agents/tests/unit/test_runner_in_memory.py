@@ -11,9 +11,9 @@ CLI) rely on:
   ``log_path_for(name)`` — so the CLI can locate logs without round-trip
   through the API.
 - Subprocess exit (``proc.poll() is not None``) is surfaced through
-  ``get_deployment_status`` with the exit code in ``DeploymentInfo.error``,
-  so the controller can mark deployments failed without waiting for the
-  health-check timeout.
+  ``get_deployment_status`` with the exit code and startup log diagnostics in
+  ``DeploymentInfo.error``, so the controller can mark deployments failed
+  without waiting for the health-check timeout.
 - The system dir lives under the configured ``workspace_dir`` (default:
   ``nhx_user_data_dir() / "agents"``), not the plugin source tree.
 """
@@ -436,6 +436,34 @@ async def test_get_deployment_status_reports_dead_subprocess(tmp_path: Path) -> 
     assert status is not None
     assert status.status == "failed"
     assert "exited with code 1" in status.error
+
+
+@pytest.mark.asyncio
+async def test_get_deployment_status_preserves_startup_log_diagnostics(tmp_path: Path) -> None:
+    """A failed subprocess reports actionable startup logs, not only an exit code."""
+    backend = _backend(tmp_path)
+
+    class _FakeProc:
+        pid = 7777
+        returncode = 1
+
+        def poll(self) -> int | None:
+            return 1
+
+    def _fake_spawn(self_, name, config_path, log_path, port):  # noqa: ANN001
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("Unsupported workflow target_id 'nvidia.unsupported.workflow'\n")
+        return _FakeProc()
+
+    with patch.object(InMemoryRunnerBackend, "_spawn", _fake_spawn):
+        await backend.create_deployment("ws", "calc-1", {}, port=49201)
+
+    status = await backend.get_deployment_status("ws", "calc-1")
+
+    assert status is not None
+    assert status.status == "failed"
+    assert "Process exited with code 1" in status.error
+    assert "Unsupported workflow target_id 'nvidia.unsupported.workflow'" in status.error
 
 
 @pytest.mark.asyncio
