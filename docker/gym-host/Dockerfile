@@ -73,6 +73,11 @@ RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
     && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
       -path '*/ray/jars/*' -print -quit)"
 
+# Include retained extracted caches: prebuilt environments can reference them.
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/tmp/wandb-core,readonly \
+    /opt/gym-host-venv/bin/python /tmp/wandb-core/install.py --artifact /tmp/wandb-core \
+    /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv
+
 FROM ${NHX_PYTHON_IMAGE} AS runtime
 
 RUN apt-get update \

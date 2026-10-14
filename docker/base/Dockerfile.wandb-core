@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# One cross-compiled build per TARGETARCH, shared by every consuming Bake target.
+# No Go toolchain, module cache, or upstream source tree enters runtime images.
+FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm AS build
+ARG TARGETARCH
+ENV GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH}
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+# W&B v0.30.0 (release tag resolves directly to this commit).
+ADD --checksum=sha256:0be0f4f840f0df49d558bc63987a90a2c2bcf812cee7d9db746591855eebaeb5 https://codeload.github.com/wandb/wandb/tar.gz/e5ec9dc9236d1a4fbb9fe7c0795bbccdff1e0e77 /tmp/wandb.tar.gz
+RUN tar -xzf /tmp/wandb.tar.gz --strip-components=1 && rm /tmp/wandb.tar.gz
+COPY docker/scripts/build-wandb-core.py /build-wandb-core.py
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    python3 /build-wandb-core.py
+
+FROM scratch AS artifacts
+COPY --from=build /out/ /wandb-core/
+COPY docker/scripts/install-wandb-core.py /wandb-core/install.py
+
+# CPU-only integration check, including real core startup and offline run finalization.
+FROM python:3.13-slim-bookworm AS smoke-test
+COPY --from=docker.io/astral/uv:0.11.26 /uv /bin/uv
+RUN uv venv /opt/venv && uv pip install --python /opt/venv/bin/python --no-cache wandb==0.30.0
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/patch,readonly \
+    /opt/venv/bin/python /patch/install.py --artifact /patch /opt/venv
+RUN --network=none /opt/venv/bin/python -c 'import tempfile, pathlib, wandb; d=tempfile.mkdtemp(); r=wandb.init(mode="offline", project="patched-core-smoke", dir=d); r.log({"loss": 1.0}); r.finish(); assert list(pathlib.Path(d).rglob("*.wandb"))'

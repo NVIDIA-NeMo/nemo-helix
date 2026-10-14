@@ -62,6 +62,10 @@ RUN if find /tmp/fastembed_cache/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots
         uv run --no-sync python -c 'import os, tempfile; from huggingface_hub import snapshot_download; snapshot_download(repo_id="qdrant/all-MiniLM-L6-v2-onnx", cache_dir=os.path.join(tempfile.gettempdir(), "fastembed_cache"))'; \
     fi
 
+# Last dependency install is complete; optional because this service group may omit W&B.
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/tmp/wandb-core,readonly \
+    /app/.venv/bin/python /tmp/wandb-core/install.py --artifact /tmp/wandb-core --optional /app
+
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 RUN --mount=type=cache,target=/root/.cache/uv \

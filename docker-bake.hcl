@@ -458,7 +458,31 @@ target "customizer-platform-workspace" {
   platforms  = get_platforms()
 }
 
+# Shared patched W&B core: BuildKit deduplicates this target per architecture.
+target "wandb-core-artifacts" {
+  context    = "."
+  dockerfile = "docker/base/Dockerfile.wandb-core"
+  target     = "artifacts"
+  platforms  = get_platforms()
+}
+
+target "wandb-core-smoke-test" {
+  inherits = ["_with-wandb-core"]
+  context    = "."
+  dockerfile = "docker/base/Dockerfile.wandb-core"
+  target     = "smoke-test"
+  output     = ["type=cacheonly"]
+  platforms  = get_platforms()
+}
+
+target "_with-wandb-core" {
+  contexts = {
+    wandb-core-artifacts = "target:wandb-core-artifacts"
+  }
+}
+
 target "nhx-customizer-tasks" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-customizer-tasks"
@@ -478,6 +502,7 @@ target "nhx-customizer-tasks" {
 }
 
 target "nhx-customizer-tasks-smoke-test" {
+  inherits = ["_with-wandb-core"]
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-customizer-tasks"
@@ -508,6 +533,7 @@ target "rl-platform-workspace" {
 # Heavy base: cuda-dl-base + NeMo-RL (with its Gym/Automodel/Megatron-Bridge submodules) built FROM
 # SOURCE (Python 3.13, CUDA 13). RL is pinned via NEMO_RL_REF; Gym rides in as RL's own submodule
 target "nhx-rl-base-builder" {
+  inherits = ["_with-wandb-core"]
   target     = "nhx-rl-base"
   context    = "."
   dockerfile = "docker/rl/Dockerfile.nhx-rl-base"
@@ -529,6 +555,7 @@ target "nhx-rl-base-builder" {
 # GPU DPO + GRPO training image (also the Gym environment runtime): base + platform glue.
 # Bootstraps Ray at runtime.
 target "nhx-rl-training" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/rl/Dockerfile.nhx-rl-training"
@@ -548,6 +575,7 @@ target "nhx-rl-training" {
 
 # CPU-only import smoke tests for the training image (smoke-test stage runs pytest during build).
 target "nhx-rl-training-smoke-test" {
+  inherits = ["_with-wandb-core"]
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/rl/Dockerfile.nhx-rl-training"
@@ -692,6 +720,7 @@ target "nhx-gpu-workspace" {
 
 # NHX API - All Python services (core + application)
 target "nhx-api-docker" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-api"
@@ -719,6 +748,7 @@ target "nhx-api-docker" {
 
 # E2E-only nhx-api variant with the DeepAgents harness installed.
 target "nhx-agents-deepagents-e2e-docker" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-api"
@@ -770,6 +800,7 @@ target "nhx-core-docker" {
 
 # NHX CPU Tasks - CPU-only batch task execution
 target "nhx-tasks-docker" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-tasks"
@@ -791,6 +822,7 @@ target "nhx-tasks-docker" {
 
 # Cheap import validation for Evaluator's standard and sandboxed Gym task entrypoints.
 target "nhx-tasks-smoke-test" {
+  inherits = ["_with-wandb-core"]
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-tasks"
@@ -813,6 +845,7 @@ target "nhx-tasks-smoke-test" {
 # test runs in docker-cpu-ci); build with
 # `make docker-load DOCKER_TARGET=nhx-tasks-openshell-docker`.
 target "nhx-tasks-openshell-docker" {
+  inherits = ["_with-wandb-core"]
   target     = "openshell"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-tasks"
@@ -842,6 +875,7 @@ target "nhx-tasks-openshell-smoke-test" {
 
 # Dedicated colocated Gym task image. Gym and Ray remain isolated from the shared CPU task image.
 target "nhx-gym-tasks-docker" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-gym-tasks"
@@ -859,6 +893,7 @@ target "nhx-gym-tasks-docker" {
 
 # Cheap import/CLI validation for the isolated Gym environment. Built in docker-cpu-ci.
 target "nhx-gym-tasks-smoke-test" {
+  inherits = ["_with-wandb-core"]
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-gym-tasks"
@@ -875,6 +910,7 @@ target "nhx-gym-tasks-smoke-test" {
 # Sandboxed Gym host. Evaluator provisions this image through OpenSandbox so
 # user-authored environments run outside the trusted task container.
 target "nhx-gym-host-docker" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/gym-host/Dockerfile"
@@ -893,6 +929,7 @@ target "nhx-gym-host-docker" {
 
 # Validate the published host's CLI, runtime module, and locked dependencies.
 target "nhx-gym-host-smoke-test" {
+  inherits = ["_with-wandb-core"]
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/gym-host/Dockerfile"
@@ -1054,6 +1091,7 @@ target "rl-cuda-ext-wheel" {
 }
 
 target "nhx-safe-synthesizer-tasks-docker" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
@@ -1072,6 +1110,7 @@ target "nhx-safe-synthesizer-tasks-docker" {
 # Smoke test - built in parallel with nhx-safe-synthesizer-tasks-docker, never pushed.
 # Fails the build if any critical import fails (missing package or ABI mismatch).
 target "nhx-safe-synthesizer-tasks-smoke-test" {
+  inherits = ["_with-wandb-core"]
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
@@ -1224,6 +1263,7 @@ target "automodel-platform-workspace" {
 }
 
 target "nhx-automodel-base-builder" {
+  inherits = ["_with-wandb-core"]
   target          = "nhx-automodel-base"
   context         = "."
   dockerfile      = "docker/automodel/Dockerfile.nhx-automodel-base"
@@ -1245,6 +1285,7 @@ target "nhx-automodel-base-builder" {
 }
 
 target "nhx-automodel-training-docker" {
+  inherits = ["_with-wandb-core"]
   target     = "runtime"
   context    = "."
   dockerfile = "docker/automodel/Dockerfile.nhx-automodel-training"
@@ -1263,6 +1304,7 @@ target "nhx-automodel-training-docker" {
 }
 
 target "nhx-automodel-training-smoke-test" {
+  inherits = ["_with-wandb-core"]
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/automodel/Dockerfile.nhx-automodel-training"
@@ -1288,6 +1330,7 @@ target "unsloth-platform-workspace" {
 }
 
 target "nhx-unsloth-training" {
+  inherits = ["_with-wandb-core"]
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-unsloth-training"
   target     = "runtime"
@@ -1349,6 +1392,7 @@ target "nhx-guardrails-callout-mock-llm" {
 
 # Garak
 target "nhx-garak-tasks-docker" {
+  inherits = ["_with-wandb-core"]
   target  = "release"
   context = "."
   contexts = {

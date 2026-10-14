@@ -9,5 +9,6 @@ accelerate; sys_platform == 'never'
 safetensors; sys_platform == 'never'
 numpy; sys_platform == 'never'
 
-# Keep W&B's bundled wandb-core binary on a build with patched Go stdlib/modules.
-wandb>=0.30.0
+# Must match docker/base/Dockerfile.wandb-core; its shared installer replaces
+# the upstream wheel's still-vulnerable Go binary after the final install.
+wandb==0.30.0

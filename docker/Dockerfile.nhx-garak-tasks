@@ -92,6 +92,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "cryptography>=50.0.0,<51" \
     "nltk>=3.10.3"
 
+RUN --mount=from=wandb-core-artifacts,source=/wandb-core,target=/tmp/wandb-core,readonly \
+    /app/.venv/bin/python /tmp/wandb-core/install.py --artifact /tmp/wandb-core --optional /app
+
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 RUN --mount=type=cache,target=/root/.cache/uv \
