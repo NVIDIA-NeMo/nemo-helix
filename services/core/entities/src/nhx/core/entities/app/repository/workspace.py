@@ -4,10 +4,11 @@
 """Repository interface for Workspace operations."""
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import List, Optional
 
 from nhx.common.api.filter import FilterOperation
-from nhx.core.entities.entities import Workspace
+from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -90,6 +91,52 @@ class WorkspaceRepositoryInterface(ABC):
         Returns:
             True if updated, False if not found/no changes made
         """
+        pass
+
+    @abstractmethod
+    async def claim_workspace_for_deletion(
+        self,
+        *,
+        name: str,
+        expected_stage: WorkspaceDeletionStage,
+        expected_updated_at: datetime,
+        lease_expired_before: datetime | None = None,
+        session: AsyncSession | None = None,
+    ) -> Workspace | None:
+        """Atomically claim a deletion attempt from the observed state."""
+        pass
+
+    @abstractmethod
+    async def renew_workspace_deletion_lease(
+        self,
+        *,
+        name: str,
+        expected_updated_at: datetime,
+        session: AsyncSession | None = None,
+    ) -> Workspace | None:
+        """Renew a deletion claim if its lease timestamp still matches."""
+        pass
+
+    @abstractmethod
+    async def fail_workspace_deletion_if_claimed(
+        self,
+        *,
+        name: str,
+        expected_updated_at: datetime,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Mark a deletion failed only while holding its current lease."""
+        pass
+
+    @abstractmethod
+    async def delete_workspace_if_claimed(
+        self,
+        *,
+        name: str,
+        expected_updated_at: datetime,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Delete a workspace only while holding its current lease."""
         pass
 
     @abstractmethod
