@@ -28,6 +28,14 @@ Deployments. Also preserve your existing release name, resource names, storage
 configuration, and encryption key and its Secret reference. Fresh installations
 use the chart defaults.
 
+### Preserve existing PostgreSQL claim-template labels
+
+For older embedded PostgreSQL installations, copy the labels from the existing
+StatefulSet's `data` claim template into `postgresql.persistence.claimTemplateLabels`.
+Retain those exact values on future upgrades, including old version labels.
+The default `{}` preserves current behavior. This addresses claim labels only;
+the other migration requirements above still apply.
+
 ## Platform Secrets Encryption Key
 
 The platform secrets service reads `NHX_SECRETS_DEFAULT_ENCRYPTION_KEY` from the
