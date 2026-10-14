@@ -7,6 +7,8 @@ from typing import Any, cast
 
 import psycopg
 
+from scaled_evals.api.task_store import TaskStore
+
 
 class OperationsRepository:
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
@@ -73,7 +75,6 @@ class OperationsRepository:
             cur.execute(
                 """
                 SELECT
-                    (SELECT COUNT(*) FROM tasks) AS task_definitions,
                     (SELECT COUNT(DISTINCT task_id) FROM evaluations) AS tasks_run,
                     (SELECT COUNT(*) FROM evaluations) AS evaluation_jobs,
                     (SELECT COALESCE(SUM(current_execution), 0) FROM evaluations)
@@ -83,7 +84,8 @@ class OperationsRepository:
                 """
             )
             row = cur.fetchone() or {}
-        return {key: int(value or 0) for key, value in row.items()}
+        totals = {key: int(value or 0) for key, value in row.items()}
+        return {"task_definitions": TaskStore().count(include_deleted=True), **totals}
 
     def dispatch_observability_snapshot(
         self,
@@ -210,17 +212,4 @@ class OperationsRepository:
         }
 
     def ready_task_pack_revisions(self, *, limit: int) -> list[dict]:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT t.owner_id, r.task_id, r.revision, r.tarball_object_key
-                FROM task_revisions r
-                JOIN tasks t ON t.id = r.task_id
-                WHERE t.deleted_at IS NULL
-                  AND r.status = 'ready'
-                ORDER BY t.updated_at DESC, r.task_id, r.revision DESC
-                LIMIT %s
-                """,
-                (limit,),
-            )
-            return cur.fetchall()
+        return TaskStore().ready_task_pack_revisions(limit=limit)

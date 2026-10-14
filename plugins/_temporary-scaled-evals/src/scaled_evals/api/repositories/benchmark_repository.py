@@ -23,6 +23,7 @@ from scaled_evals.api.repositories.base_repository import (
     patch_set_clause,
     substring_search_pattern,
 )
+from scaled_evals.api.task_store import TaskStore
 
 BENCHMARK_COLUMNS = (
     "id, owner_id, name, slug, description, visibility, qualification_status, "
@@ -51,23 +52,17 @@ class BenchmarkRepository:
         (router → 422) on any bad/duplicate member.
         """
         seen: set[str] = set()
+        store = TaskStore()
+        live = {task_id for task_id, task in store.tasks(ref.task_id for ref in tasks).items() if not task["deleted"]}
+        pinned = store.revisions((ref.task_id, ref.task_revision) for ref in tasks if ref.task_revision is not None)
         for position, ref in enumerate(tasks):
             if ref.task_id in seen:
                 raise InvalidReference(f"duplicate task in benchmark: {ref.task_id}")
             seen.add(ref.task_id)
-            cur.execute(
-                "SELECT 1 FROM tasks WHERE id = %s AND deleted_at IS NULL",
-                (ref.task_id,),
-            )
-            if cur.fetchone() is None:
+            if ref.task_id not in live:
                 raise InvalidReference(f"task not found: {ref.task_id}")
-            if ref.task_revision is not None:
-                cur.execute(
-                    "SELECT 1 FROM task_revisions WHERE task_id = %s AND revision = %s",
-                    (ref.task_id, ref.task_revision),
-                )
-                if cur.fetchone() is None:
-                    raise InvalidReference(f"task revision not found: {ref.task_id} rev {ref.task_revision}")
+            if ref.task_revision is not None and (ref.task_id, ref.task_revision) not in pinned:
+                raise InvalidReference(f"task revision not found: {ref.task_id} rev {ref.task_revision}")
             cur.execute(
                 """
                 INSERT INTO benchmark_revision_tasks
@@ -311,8 +306,8 @@ class BenchmarkRepository:
         limit: int | None = None,
         cursor: int | None = None,
     ) -> builtins.list[dict]:
-        # Join tasks so members carry their human-readable slug/name, not just
-        # the opaque task_id (used by the benchmark detail + /tasks listing).
+        # Members carry their task's human-readable slug/name, not just the
+        # opaque task_id (used by the benchmark detail + /tasks listing).
         position_filter = "AND m.position >= %s" if cursor is not None else ""
         pagination = "" if limit is None else "LIMIT %s"
         params: list[Any] = [benchmark_id, revision]
@@ -323,10 +318,8 @@ class BenchmarkRepository:
         with self.conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT m.task_id, m.task_revision, m.position,
-                       t.slug AS task_slug, t.name AS task_name
+                SELECT m.task_id, m.task_revision, m.position
                 FROM benchmark_revision_tasks m
-                JOIN tasks t ON t.id = m.task_id
                 WHERE m.benchmark_id = %s AND m.revision = %s
                   {position_filter}
                 ORDER BY m.position, m.task_id
@@ -334,29 +327,38 @@ class BenchmarkRepository:
                 """,
                 params,
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+        tasks = TaskStore().tasks(row["task_id"] for row in rows)
+        return [
+            {**row, "task_slug": task["slug"], "task_name": task["name"]}
+            for row in rows
+            if (task := tasks.get(row["task_id"]))
+        ]
 
     def list_resolved_tasks(self, benchmark_id: str, revision: int) -> builtins.list[dict]:
         """List members with their effective immutable task revision and build state."""
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT m.task_id, m.task_revision, m.position,
-                       t.slug AS task_slug, t.name AS task_name,
-                       COALESCE(m.task_revision, t.current_revision) AS resolved_task_revision,
-                       r.status, r.image_ref, r.image_digest,
-                       r.tarball_object_key, r.tarball_size_bytes
+                SELECT m.task_id, m.task_revision, m.position
                 FROM benchmark_revision_tasks m
-                JOIN tasks t ON t.id = m.task_id AND t.deleted_at IS NULL
-                LEFT JOIN task_revisions r
-                  ON r.task_id = m.task_id
-                 AND r.revision = COALESCE(m.task_revision, t.current_revision)
                 WHERE m.benchmark_id = %s AND m.revision = %s
                 ORDER BY m.position, m.task_id
                 """,
                 (benchmark_id, revision),
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+        fields = ("status", "image_ref", "image_digest", "tarball_object_key", "tarball_size_bytes")
+        return [
+            {
+                **member,
+                "task_slug": task["slug"],
+                "task_name": task["name"],
+                "resolved_task_revision": revision["revision"] if revision else task["current_revision"],
+                **{field: revision[field] if revision else None for field in fields},
+            }
+            for member, task, revision in TaskStore().resolve_members(rows, include_deleted=False)
+        ]
 
     def get_detail(self, benchmark_id: str) -> dict | None:
         row = self.get(benchmark_id)

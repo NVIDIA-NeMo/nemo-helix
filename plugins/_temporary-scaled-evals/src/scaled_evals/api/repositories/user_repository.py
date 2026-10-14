@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import psycopg
 
+from scaled_evals.api.task_store import TaskStore
+
 
 class UserRepository:
     """Owner-scoped and cluster-wide views over live evaluation and task state."""
@@ -32,25 +34,9 @@ class UserRepository:
                 (owner_id,),
             )
             evaluations = dict(cur.fetchone())
-            cur.execute(
-                """
-                SELECT
-                    COUNT(*) FILTER (WHERE r.status = 'ready') AS ready,
-                    COUNT(*) FILTER (WHERE r.status IN ('pending', 'uploading', 'building'))
-                        AS building
-                FROM tasks t
-                LEFT JOIN LATERAL (
-                    SELECT status FROM task_revisions
-                    WHERE task_id = t.id ORDER BY revision DESC LIMIT 1
-                ) r ON TRUE
-                WHERE t.owner_id = %s AND t.deleted_at IS NULL
-                """,
-                (owner_id,),
-            )
-            tasks = dict(cur.fetchone())
         return {
             "evaluations": {key: int(value or 0) for key, value in evaluations.items()},
-            "tasks": {key: int(value or 0) for key, value in tasks.items()},
+            "tasks": TaskStore().owner_summary(owner_id),
         }
 
     def capacity(self) -> dict[str, int]:
@@ -79,11 +65,9 @@ class UserRepository:
         """
         live_filter = "deleted_at IS NULL AND status IN ('queued', 'blocked', 'provisioning', 'running')"
         with self.conn.cursor() as cur:
-            cur.execute(
-                f"SELECT {live_columns}, (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL) AS total_tasks "
-                f"FROM evaluations WHERE {live_filter}"
-            )
+            cur.execute(f"SELECT {live_columns} FROM evaluations WHERE {live_filter}")
             summary = {key: int(value or 0) for key, value in cur.fetchone().items()}
+            summary["total_tasks"] = TaskStore().count()
             cur.execute(
                 f"SELECT owner_id, {live_columns}, MAX(created_at) AS last_run_at "
                 f"FROM evaluations WHERE {live_filter} GROUP BY owner_id"
@@ -109,36 +93,20 @@ class UserRepository:
                 (owner_id,),
             )
             usage = dict(cur.fetchone())
-            cur.execute(
-                """
-                SELECT COUNT(*) AS tasks_owned
-                FROM tasks
-                WHERE owner_id = %s AND deleted_at IS NULL
-                """,
-                (owner_id,),
-            )
-            usage.update(cur.fetchone())
+        usage["tasks_owned"] = TaskStore().count(owner_id=owner_id)
         return {key: int(value or 0) for key, value in usage.items()}
 
     def recent_activity(self, owner_id: str, *, limit: int) -> list[dict]:
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, kind, name, status, created_at FROM (
-                    SELECT id, 'evaluation' AS kind, name, status::text AS status, created_at
-                    FROM evaluations WHERE owner_id = %s AND deleted_at IS NULL
-                    UNION ALL
-                    SELECT t.id, 'task' AS kind, t.name, r.status::text, t.created_at
-                    FROM tasks t
-                    LEFT JOIN LATERAL (
-                        SELECT status FROM task_revisions
-                        WHERE task_id = t.id ORDER BY revision DESC LIMIT 1
-                    ) r ON TRUE
-                    WHERE t.owner_id = %s AND t.deleted_at IS NULL
-                ) activity
+                SELECT id, 'evaluation' AS kind, name, status::text AS status, created_at
+                FROM evaluations WHERE owner_id = %s AND deleted_at IS NULL
                 ORDER BY created_at DESC, id DESC
                 LIMIT %s
                 """,
-                (owner_id, owner_id, limit),
+                (owner_id, limit),
             )
-            return cur.fetchall()
+            rows = cur.fetchall() + TaskStore().owner_activity(owner_id)
+        rows.sort(key=lambda row: (row["created_at"], row["id"]), reverse=True)
+        return rows[:limit]

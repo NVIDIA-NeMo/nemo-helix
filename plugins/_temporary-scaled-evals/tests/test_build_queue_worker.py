@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,12 +11,7 @@ pytest.importorskip("scaled_evals")
 
 import scaled_evals.api.build.queue_worker as queue_worker
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
-from scaled_evals.api.repositories.build_repository import TaskBuildJob
-
-
-@contextmanager
-def _connect():
-    yield MagicMock()
+from scaled_evals.api.task_store import TaskBuildJob
 
 
 def _job(*, attempt: int = 1) -> TaskBuildJob:
@@ -38,8 +32,7 @@ def _job(*, attempt: int = 1) -> TaskBuildJob:
 def test_worker_completes_claimed_job(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = MagicMock()
     repo.complete.return_value = True
-    monkeypatch.setattr(queue_worker, "TaskBuildRepository", lambda conn: repo)
-    worker = TaskBuildWorker(connect=_connect, heartbeat_interval=60)
+    worker = TaskBuildWorker(store=lambda: repo, heartbeat_interval=60)
     monkeypatch.setattr(worker, "_execute", lambda job: ("registry/image", "sha256:abc"))
 
     worker.run(_job())
@@ -70,14 +63,13 @@ def _prebuilt_job(**payload: str) -> TaskBuildJob:
 def test_worker_completes_prebuilt_job_with_resolved_verifier_image(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = MagicMock()
     repo.complete.return_value = True
-    monkeypatch.setattr(queue_worker, "TaskBuildRepository", lambda conn: repo)
     resolved = MagicMock(
         runtime_ref="registry.example.com/team/task-verifier:signed",
         digest="sha256:" + "b" * 64,
     )
     verify = MagicMock(return_value=resolved)
     monkeypatch.setattr(queue_worker, "resolve_task_image", verify)
-    worker = TaskBuildWorker(connect=_connect, heartbeat_interval=60)
+    worker = TaskBuildWorker(store=lambda: repo, heartbeat_interval=60)
     monkeypatch.setattr(worker, "_execute", lambda job: ("registry/image", "sha256:abc"))
 
     worker.run(
@@ -104,9 +96,8 @@ def test_worker_completes_prebuilt_job_with_resolved_verifier_image(monkeypatch:
 
 def test_worker_retries_when_verifier_image_does_not_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = MagicMock()
-    monkeypatch.setattr(queue_worker, "TaskBuildRepository", lambda conn: repo)
     monkeypatch.setattr(queue_worker, "resolve_task_image", MagicMock(side_effect=RuntimeError("digest mismatch")))
-    worker = TaskBuildWorker(connect=_connect, heartbeat_interval=60, max_attempts=3)
+    worker = TaskBuildWorker(store=lambda: repo, heartbeat_interval=60, max_attempts=3)
     monkeypatch.setattr(worker, "_execute", lambda job: ("registry/image", "sha256:abc"))
 
     worker.run(_prebuilt_job(verifier_image_ref="registry.example.com/team/task-verifier:signed"))
@@ -142,8 +133,7 @@ def test_resolve_verifier_image_skips_jobs_without_prebuilt_verifier(
 
 def test_worker_retries_failure_without_losing_job(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = MagicMock()
-    monkeypatch.setattr(queue_worker, "TaskBuildRepository", lambda conn: repo)
-    worker = TaskBuildWorker(connect=_connect, heartbeat_interval=60, max_attempts=3)
+    worker = TaskBuildWorker(store=lambda: repo, heartbeat_interval=60, max_attempts=3)
 
     def fail(job):  # noqa: ANN001
         raise RuntimeError("builder unavailable")
@@ -164,8 +154,7 @@ def test_worker_retries_failure_without_losing_job(monkeypatch: pytest.MonkeyPat
 
 def test_worker_records_failure_after_final_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = MagicMock()
-    monkeypatch.setattr(queue_worker, "TaskBuildRepository", lambda conn: repo)
-    worker = TaskBuildWorker(connect=_connect, heartbeat_interval=60, max_attempts=3)
+    worker = TaskBuildWorker(store=lambda: repo, heartbeat_interval=60, max_attempts=3)
     monkeypatch.setattr(
         worker,
         "_execute",
@@ -194,7 +183,7 @@ def test_cloudbuild_job_resolves_registry_identity(monkeypatch: pytest.MonkeyPat
     )
     verify = MagicMock(return_value=resolved)
     monkeypatch.setattr(queue_worker, "resolve_task_image", verify)
-    worker = TaskBuildWorker(connect=_connect)
+    worker = TaskBuildWorker()
     job = TaskBuildJob(
         task_id="task_1",
         revision=2,
@@ -233,7 +222,7 @@ def test_prebuilt_job_resolves_registry_identity(monkeypatch: pytest.MonkeyPatch
         attempt=1,
     )
 
-    assert TaskBuildWorker(connect=_connect)._execute(job) == (
+    assert TaskBuildWorker()._execute(job) == (
         resolved.runtime_ref,
         resolved.digest,
     )
