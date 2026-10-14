@@ -39,6 +39,7 @@ export interface BuilderPreviewPanelProps {
   error: string | undefined;
   isExpanded: boolean;
   onToggleExpanded: () => void;
+  onStop: () => void;
 }
 
 export const BuilderPreviewPanel: FC<BuilderPreviewPanelProps> = memo(function BuilderPreviewPanel({
@@ -50,6 +51,7 @@ export const BuilderPreviewPanel: FC<BuilderPreviewPanelProps> = memo(function B
   error,
   isExpanded,
   onToggleExpanded,
+  onStop,
 }) {
   const [tab, setTab] = useState<PreviewTab>('rows');
   const { ref: logsScrollRef } = useStickToBottom<HTMLDivElement>({
@@ -147,6 +149,7 @@ export const BuilderPreviewPanel: FC<BuilderPreviewPanelProps> = memo(function B
                 isPreviewing={isPreviewing}
                 status={status}
                 error={error}
+                onStop={onStop}
               />
             </TabsContent>
 

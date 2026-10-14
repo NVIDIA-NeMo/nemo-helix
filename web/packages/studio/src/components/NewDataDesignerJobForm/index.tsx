@@ -147,6 +147,7 @@ export const NewDataDesignerJobForm: FC = () => {
     hasPreviewRun,
     isPreviewing,
     runPreview,
+    stopPreview,
   } = usePreview({
     workspace,
     accessToken: bearerToken,
@@ -302,6 +303,7 @@ export const NewDataDesignerJobForm: FC = () => {
             isPreviewing={isPreviewing}
             status={previewStatus}
             error={previewError}
+            onStop={stopPreview}
           />
         ) : null}
 

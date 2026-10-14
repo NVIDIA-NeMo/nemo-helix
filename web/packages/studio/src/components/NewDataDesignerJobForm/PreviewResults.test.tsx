@@ -31,6 +31,7 @@ describe('PreviewResults', () => {
         isPreviewing={false}
         status={undefined}
         error={undefined}
+        onStop={() => undefined}
       />
     );
 
@@ -51,6 +52,7 @@ describe('PreviewResults', () => {
         isPreviewing={false}
         status={undefined}
         error={undefined}
+        onStop={() => undefined}
       />
     );
 
@@ -67,6 +69,7 @@ describe('PreviewResults', () => {
         isPreviewing
         status={undefined}
         error={undefined}
+        onStop={() => undefined}
       />
     );
 
@@ -81,10 +84,29 @@ describe('PreviewResults', () => {
         isPreviewing
         status="🚀 (1/1) Dispatching with 10 records"
         error={undefined}
+        onStop={() => undefined}
       />
     );
 
     expect(screen.getByText('🚀 (1/1) Dispatching with 10 records')).toBeInTheDocument();
+  });
+
+  it('stops the run from the loading state', () => {
+    const onStop = vi.fn();
+    render(
+      <PreviewResults
+        records={undefined}
+        columnOrder={[]}
+        isPreviewing
+        status={undefined}
+        error={undefined}
+        onStop={onStop}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    expect(onStop).toHaveBeenCalledTimes(1);
   });
 
   it('shows the error when the preview fails without rows', () => {
@@ -95,6 +117,7 @@ describe('PreviewResults', () => {
         isPreviewing={false}
         status={undefined}
         error="model unavailable"
+        onStop={() => undefined}
       />
     );
 
@@ -110,6 +133,7 @@ describe('PreviewResults', () => {
         isPreviewing={false}
         status={undefined}
         error={undefined}
+        onStop={() => undefined}
       />
     );
 

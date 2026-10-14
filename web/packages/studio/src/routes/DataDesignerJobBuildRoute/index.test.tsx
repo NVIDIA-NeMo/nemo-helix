@@ -9,7 +9,7 @@ import { DataDesignerJobBuildRoute } from '@studio/routes/DataDesignerJobBuildRo
 import type { DataDesignerGeneratedState } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import { getDataDesignerJobBuildRoute } from '@studio/routes/utils';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
@@ -134,9 +134,7 @@ describe('DataDesignerJobBuildRoute', () => {
     expect(within(table).getByText('Reset your password now.')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Preview Run Logs' }));
-    expect(
-      await screen.findByText(/Preview generation complete/, {}, { timeout: 5_000 })
-    ).toBeInTheDocument();
+    await screen.findByText(/Preview generation complete/, {}, { timeout: 5_000 });
   });
 
   it('shows the preview tabs and live logs while the stream is still open', async () => {
@@ -167,6 +165,18 @@ describe('DataDesignerJobBuildRoute', () => {
     expect(screen.getByLabelText('Generating preview rows')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop preview' })).toBeInTheDocument();
     expect(onAbort).not.toHaveBeenCalled();
+  });
+
+  it('stops a running preview from the Stop button under the progress', async () => {
+    const onAbort = vi.fn();
+    holdPreviewStreamOpen('Sampling topics', onAbort);
+    renderBuildRoute({ generatedJobRequest });
+    await screen.findByText('email_body');
+
+    fireEvent.click(screen.getByRole('button', { name: /Preview \d+ rows/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+
+    await waitFor(() => expect(onAbort).toHaveBeenCalled());
   });
 
   it('has no preview panel until a preview runs, then collapses, re-expands, and expands on the next run', async () => {

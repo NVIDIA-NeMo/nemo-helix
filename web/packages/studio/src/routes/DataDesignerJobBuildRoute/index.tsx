@@ -286,6 +286,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
               error={previewError}
               isExpanded={isPreviewExpanded}
               onToggleExpanded={togglePreviewExpanded}
+              onStop={stopPreview}
             />
           ) : null}
         </Stack>

@@ -13,6 +13,7 @@ import {
   orderPreviewColumns,
   type PreviewRecord,
 } from '@studio/components/NewDataDesignerJobForm/previewApi';
+import { CircleStop } from 'lucide-react';
 import {
   type ComponentProps,
   type FC,
@@ -126,6 +127,7 @@ export interface PreviewResultsProps {
   /** Shown under the spinner while waiting for rows. */
   status: string | undefined;
   error: string | undefined;
+  onStop: () => void;
 }
 
 export const PreviewResults: FC<PreviewResultsProps> = ({
@@ -134,6 +136,7 @@ export const PreviewResults: FC<PreviewResultsProps> = ({
   isPreviewing,
   status,
   error,
+  onStop,
 }) => {
   const [expandedCell, setExpandedCell] = useState<TableExpandableCellState | null>(null);
 
@@ -155,16 +158,24 @@ export const PreviewResults: FC<PreviewResultsProps> = ({
   if (rows.length === 0) {
     if (isPreviewing) {
       return (
-        <Stack gap="density-md" align="center" className="min-h-0 py-density-2xl">
+        <Stack
+          gap="density-md"
+          align="center"
+          className="min-h-0 overflow-y-auto py-density-lg [&>*]:shrink-0"
+        >
           <Spinner description="Generating preview rows…" />
           {status ? (
             <Text
               kind="mono/sm"
-              className="max-w-full overflow-hidden whitespace-pre-wrap break-words text-secondary"
+              className="max-w-full whitespace-pre-wrap break-words text-secondary"
             >
               {status}
             </Text>
           ) : null}
+          <Button kind="tertiary" color="danger" onClick={onStop}>
+            <CircleStop size={16} aria-hidden />
+            Stop
+          </Button>
         </Stack>
       );
     }

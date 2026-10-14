@@ -19,6 +19,7 @@ const renderPanel = ({
       error={undefined}
       isExpanded={isExpanded}
       onToggleExpanded={onToggleExpanded}
+      onStop={() => undefined}
     />
   );
 
