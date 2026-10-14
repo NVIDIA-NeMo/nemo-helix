@@ -18,7 +18,7 @@ const SwitchyardStatTiles: FC<{ results: SwitchyardResults }> = ({ results }) =>
   const strategies = new Set(routes.map((route) => route.configType));
 
   return (
-    <Grid cols={{ base: 1, md: 2, xl: 4 }} gap="density-xl" className="shrink-0">
+    <Grid cols={{ base: 1, md: 2 }} gap="density-xl" className="shrink-0">
       <StatTile variant="metric" label="Virtual models" value={String(routes.length)} />
       <StatTile variant="metric" label="Routing strategies" value={String(strategies.size)} />
     </Grid>
