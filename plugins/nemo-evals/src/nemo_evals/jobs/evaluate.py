@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -214,6 +215,20 @@ class EvaluateSpec(_EvaluateSpecCommon):
         return self
 
 
+def evaluate_secret_refs(spec: EvaluateSpec) -> Iterator[tuple[str, str]]:
+    """Yield ``(env_name, secret_name)`` for each metric secret and the endpoint target's api key."""
+    for bundle in spec.metrics:
+        for env_name, secret_ref in bundle.secrets.items():
+            yield env_name, secret_ref.root
+
+    if (
+        isinstance(spec.target, (Model, AgentBase))
+        and spec.target.api_key_secret is not None
+        and spec.target.api_key_env
+    ):
+        yield spec.target.api_key_env, spec.target.api_key_secret.root
+
+
 class _EvaluateJobBase(NemoJob):
     """Run evals SDK metrics against inline rows or FilesetRef datasets."""
 
@@ -326,7 +341,7 @@ class _EvaluateJobBase(NemoJob):
         # nowhere to put it. Publication needs a start time that is a function of the run, not of
         # when it was published, or re-ingest duplicates spans instead of replacing them.
         started_at = datetime.now(UTC)
-        evaluator = job_evaluator()
+        evaluator = job_evaluator(evaluate_secret_refs(spec))
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
         require_resolved_model_refs(metrics, subject="EvaluateSpec")

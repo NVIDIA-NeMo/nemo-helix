@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from nemo_evals.jobs.evaluate import (
     EvaluateSpec,
 )
 from nemo_evals.jobs.metric_resolution import to_runtime_bundle
+from nemo_evals.jobs.secret_env import JobSecretResolver
 from nemo_evals.shared.metric_bundles.bundles import (
     MetricBundle,
     MetricBundlePackager,
@@ -59,8 +61,6 @@ from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.f1 import F1Metric
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nhx_evals_sdk.resolver_protocols import MissingSecretError
-from nhx_evals_sdk.resolvers import LocalSecretResolver
 from nhx_evals_sdk.values import (
     Agent,
     AggregatedMetricResult,
@@ -1179,17 +1179,7 @@ class TestEvaluateJobCompile:
 
 
 def _assert_job_secret_resolver(backend: LocalBackend) -> None:
-    """In a job, a workspace ref never falls back to a bare env var, which may hold another consumer's secret."""
-    resolver = backend.secret_resolver
-    assert isinstance(resolver, LocalSecretResolver)
-    with pytest.MonkeyPatch.context() as mp:
-        mp.delenv("DEFAULT_OPENAI_API_KEY", raising=False)
-        mp.setenv("OPENAI_API_KEY", "target-key")
-        mp.setenv("NVIDIA_BUILD_API_KEY", "metric-key")
-        with pytest.raises(MissingSecretError):
-            resolver.env_var_for(SecretRef("default/openai-api-key"))
-        # A bare ref's own names are still searched.
-        assert resolver.env_var_for(SecretRef("nvidia-build-api-key")) == "NVIDIA_BUILD_API_KEY"
+    assert isinstance(backend.secret_resolver, JobSecretResolver)
 
 
 class TestEvaluateJobRun:
@@ -1261,6 +1251,26 @@ class TestEvaluateJobRun:
         assert call_kwargs["config"] == expected_config
         assert call_kwargs["target"] == expected_spec.target
         assert call_kwargs["prompt_template"] == expected_spec.prompt_template
+
+    @pytest.mark.parametrize("secret_name", ["my-ws/judge-key", "judge-key"])
+    def test_metric_secret_resolves_from_the_env_name_its_bundle_declares(
+        self, secret_name: str, tmp_path: Path, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The job injects a metric secret under its bundle's ``secrets`` key, which need not derive from the ref."""
+        evaluator = mocker.Mock()
+        evaluator.run_sync.return_value = _empty_evaluation_result()
+        evaluator_cls = mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=evaluator)
+        metric = _exact_match_spec()["metrics"][0]
+        metric["secrets"] = {"LLM_JUDGE_TOKEN": secret_name}
+        config = {**_exact_match_spec(), "metrics": [metric]}
+        for derived in ("MY_WS_JUDGE_KEY", "JUDGE_KEY", "my_ws_judge_key", "judge_key"):
+            monkeypatch.delenv(derived, raising=False)
+        monkeypatch.setenv("LLM_JUDGE_TOKEN", "injected")
+
+        EvaluateJob().run(config, ctx=_make_job_context(tmp_path), client=_sync_client())
+
+        resolver = evaluator_cls.call_args.args[0].secret_resolver
+        assert asyncio.run(resolver.resolve_secret(SecretRef(secret_name))) == "injected"
 
     def test_delegates_metrics_sequence_to_sdk_evaluator(self, tmp_path: Path, mocker: MockerFixture) -> None:
         result = _empty_evaluation_result()
