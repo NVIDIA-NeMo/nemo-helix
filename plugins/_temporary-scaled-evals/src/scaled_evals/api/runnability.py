@@ -183,7 +183,7 @@ def _append_reference_checks(
         )
     profile_slots = [(profile_id, kind) for profile_id, kind in profile_slots if profile_id]
     try:
-        db.evaluations.validate_profile_references(profile_slots)
+        db.config_profiles.validate_references(profile_slots)
     except InvalidReference as exc:
         checks.append(
             _check(
@@ -207,7 +207,7 @@ def _append_reference_checks(
     if isinstance(body, CreateBenchmarkRunRequest):
         framework_profile_ids.update(body.member_framework_profile_ids.values())
     for framework_profile_id in sorted(framework_profile_ids) if body.framework == "harbor" else ():
-        profile_row = db.evaluations.load_framework_profile(framework_profile_id)
+        profile_row = db.config_profiles.get_typed(framework_profile_id, ("harbor", "gym"))
         profile = profile_row.get("config") if profile_row else None
         if isinstance(profile, dict) and profile.get("dataset_only") is True:
             try:

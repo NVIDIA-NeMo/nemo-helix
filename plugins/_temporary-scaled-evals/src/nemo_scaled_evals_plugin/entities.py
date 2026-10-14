@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Entity Store projections of scaled-evals metadata.
+"""Entity Store entities for scaled-evals metadata.
 
-Postgres stays authoritative during this phase. `ScaledEvaluation` is a derived
+Config profiles and agent bundles live only here. `ScaledEvaluation` is a derived
 read model with exactly one writer (the controller's projection phase), which is
 what makes it safe on a store that offers per-entity optimistic locking but no
 multi-entity transaction and no atomic dequeue.
@@ -83,6 +83,39 @@ class ScaledEvaluationExecution(NemoEntity, entity_type="scaled_evals_execution"
     evaluation_id: str
     execution_number: int
     inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScaledEvalsConfigProfile(NemoEntity, entity_type="scaled_evals_config_profile"):
+    """A reusable framework or intake config profile, named by its profile id."""
+
+    owner_id: str | None = None
+    display_name: str
+    type: str
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScaledEvalsAgentBundle(NemoEntity, entity_type="scaled_evals_agent_bundle"):
+    """A registered agent runtime bundle, named by its bundle id."""
+
+    owner_id: str
+    bundle_name: str
+    agent_name: str
+    agent_version: str
+    image_ref: str
+    image_digest: str
+    entrypoint: str
+    platform: str = "linux/amd64"
+    runtime_abi: str = "glibc"
+    bundle_layout_version: int = 1
+    builder_profile: str = "node22-npm-v1"
+    source_lock_digest: str
+    fingerprint: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    visibility: str = "private"
+    qualification_status: str = "registered"
+    qualification_evidence: dict[str, Any] = Field(default_factory=dict)
+    qualified_at: datetime | None = None
+    qualified_by: str | None = None
 
 
 def searchable_blob(row: dict[str, Any]) -> str:

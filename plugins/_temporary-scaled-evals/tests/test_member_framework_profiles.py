@@ -54,8 +54,8 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
         == "member_framework_profile_ids[task_0] must be a cfg_ id"
     )
 
-    evaluations = MagicMock()
-    db = MagicMock(evaluations=evaluations)
+    config_profiles = MagicMock()
+    db = MagicMock(config_profiles=config_profiles)
     body = CreateBenchmarkRunRequest(
         name="suite",
         benchmark_id="bm_suite",
@@ -71,9 +71,7 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
         )
         is None
     )
-    evaluations.validate_profile_references.assert_called_once_with(
-        [("cfg_default", "harbor"), ("cfg_member", "harbor")]
-    )
+    config_profiles.validate_references.assert_called_once_with([("cfg_default", "harbor"), ("cfg_member", "harbor")])
 
     monkeypatch.setattr("scaled_evals.api.runnability._append_reference_checks", lambda *_args: None)
     monkeypatch.setattr(
@@ -104,8 +102,8 @@ def test_member_profile_references_are_validated(monkeypatch: pytest.MonkeyPatch
 def test_member_dataset_profiles_receive_image_and_builder_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    evaluations = MagicMock()
-    db = MagicMock(evaluations=evaluations)
+    config_profiles = MagicMock()
+    db = MagicMock(config_profiles=config_profiles)
     body = CreateBenchmarkRunRequest(
         name="suite",
         benchmark_id="bm_suite",
@@ -121,7 +119,7 @@ def test_member_dataset_profiles_receive_image_and_builder_checks(
             }
         },
     }
-    evaluations.load_framework_profile.side_effect = profiles.get
+    config_profiles.get_typed.side_effect = lambda profile_id, _types: profiles.get(profile_id)
 
     blocker = _append_reference_checks(
         db,
@@ -144,7 +142,7 @@ def test_member_dataset_profiles_receive_image_and_builder_checks(
     )
     assert blocker is not None
     assert blocker.code == "managed_dataset_builder_unavailable"
-    assert {call.args[0] for call in evaluations.load_framework_profile.call_args_list[-2:]} == {
+    assert {call.args[0] for call in config_profiles.get_typed.call_args_list[-2:]} == {
         "cfg_default",
         "cfg_member",
     }

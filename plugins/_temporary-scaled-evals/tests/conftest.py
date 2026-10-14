@@ -20,6 +20,20 @@ os.environ.setdefault("CONTROL_PLANE_AUTH_ENABLED", "false")
 
 
 @pytest.fixture(autouse=True)
+def entity_store(monkeypatch: pytest.MonkeyPatch):
+    """Give every test a fresh in-memory Entity Store in place of the platform's."""
+    try:
+        import scaled_evals.api.entity_store as entity_store_module  # noqa: PLC0415
+        from fake_entity_store import FakeEntityStore  # noqa: PLC0415
+    except ImportError:
+        return None
+    store = FakeEntityStore()
+    monkeypatch.setattr(entity_store_module, "entity_client", lambda: store)
+    monkeypatch.setattr(entity_store_module, "private_workspace", lambda: "scaled-evals-internal")
+    return store
+
+
+@pytest.fixture(autouse=True)
 def _no_immediate_job_submission(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep API tests from reaching Platform Jobs after creating an evaluation."""
     try:
