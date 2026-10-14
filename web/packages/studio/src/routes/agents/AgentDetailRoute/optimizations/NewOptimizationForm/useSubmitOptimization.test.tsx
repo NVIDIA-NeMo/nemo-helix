@@ -152,7 +152,7 @@ describe('optimization form submission', () => {
     expect(submitted[0]).toMatchObject({
       spec: {
         agent: AGENT,
-        strategy: 'legacy',
+        strategy: 'config-tuning',
         optimize_config: 'optimize.yaml',
         optimize_config_fileset: expect.stringMatching(
           new RegExp(`^${DEFAULT_WORKSPACE}/${AGENT}-optimize-`)

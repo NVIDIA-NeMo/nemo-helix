@@ -110,7 +110,7 @@ uv run nemo agents create \
 ```
 
 Stage the config with `nemo files` rather than `nemo agents optimize
-prepare-fileset`: that verb belongs to the `legacy` strategy, preflights a
+prepare-fileset`: that verb belongs to the `config-tuning` strategy, preflights a
 hyperparameter bundle, and rejects a config with no `optimizer:` section.
 
 ## What the run produces
