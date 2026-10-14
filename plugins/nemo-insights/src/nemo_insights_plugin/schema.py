@@ -20,11 +20,13 @@ from nemo_insights_plugin.entities import (
     AnalysisRunStatus,
     Insight,
     InsightStatus,
+    NullableInsightRating,
 )
+from nemo_insights_plugin.evidence import EvidenceCompatibility, TraceEvidence
 from pydantic import BaseModel, Field, StringConstraints
 
 
-class CreateInsightRequest(BaseModel):
+class CreateInsightRequest(EvidenceCompatibility):
     """Body for ``POST /insights``.
 
     ``status`` defaults to :attr:`InsightStatus.OPEN`; callers that want to
@@ -45,17 +47,23 @@ class CreateInsightRequest(BaseModel):
         description=("The problem statement: specific enough to act on. This is editable by the developer."),
     )
     status: InsightStatus = Field(default=InsightStatus.OPEN)
-    trace_refs: list[str] = Field(default_factory=list)
+    severity: NullableInsightRating = None
+    confidence: NullableInsightRating = None
+    updated_date: datetime | None = None
+    evidence: list[TraceEvidence] = Field(default_factory=list)
 
 
-class UpdateInsightRequest(BaseModel):
+class UpdateInsightRequest(EvidenceCompatibility):
     """Body for ``PATCH /insights/{insight_id}``. Omitted fields are unchanged."""
 
     title: str | None = None
     agent: str | None = None
     description: str | None = None
     status: InsightStatus | None = None
-    trace_refs: list[str] | None = None
+    severity: NullableInsightRating = None
+    confidence: NullableInsightRating = None
+    updated_date: datetime | None = None
+    evidence: list[TraceEvidence] | None = None
 
 
 class InsightListItem(Insight, entity_type="insights_insight"):

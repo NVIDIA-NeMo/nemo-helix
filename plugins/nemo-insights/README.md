@@ -5,7 +5,7 @@
 
 NeMo Helix plugin for analyzing agent telemetry and persisting actionable insights.
 
-Analysis uses [NeMo Compass](https://github.com/NVIDIA-NeMo/labs-nemo-compass).
+Analysis uses [NeMo Compass](https://github.com/NVIDIA-NeMo/nemo-compass).
 NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
 
 ## Prerequisites
@@ -31,8 +31,8 @@ installation, include both when installing Helix before running Insights analysi
 
 ```bash
 uv tool install --force \
-  --with "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137" \
-  --with "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest" \
+  --with "insight-agent @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42" \
+  --with "trace-ingest @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42#subdirectory=packages/trace-ingest" \
   "nemo-helix[all]"
 ```
 
@@ -41,8 +41,8 @@ that runs the analyst:
 
 ```bash
 uv pip install \
-  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137" \
-  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest"
+  "insight-agent @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42" \
+  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42#subdirectory=packages/trace-ingest"
 ```
 
 Source checkouts and the platform images install these pinned dependencies through
@@ -87,7 +87,7 @@ least 3 traces. Runs over a few sessions, such as runs scoped by `--since` or
 
 When that happens, the run summary says some observations did not meet the
 thresholds. The `analysis-report` result lists the closest ones (up to 5) and
-any evidence streams that were skipped, with their reason:
+any Compass Signals that were skipped, with their reason:
 
 ```text
 - below threshold: tool-issues knowledge_search explicit_tool_failure (2 of 3 independent cases)
