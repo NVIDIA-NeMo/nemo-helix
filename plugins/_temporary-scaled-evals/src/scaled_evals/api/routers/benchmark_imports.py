@@ -9,9 +9,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
+from scaled_evals.api.benchmark_import_store import import_id_for
+from scaled_evals.api.benchmark_store import TaskRef
 from scaled_evals.api.db import Database, get_db
 from scaled_evals.api.repositories.base_repository import InvalidReference
-from scaled_evals.api.repositories.benchmark_repository import TaskRef
 from scaled_evals.api.routers.tasks import _upload_for, finalize_task
 from scaled_evals.api.schemas.benchmark_imports import (
     BenchmarkImport,
@@ -183,18 +184,7 @@ def create_benchmark_import(
     if unknown_images:
         raise _http_error(422, "unknown_image_slug", f"images reference unknown tasks: {unknown_images}")
 
-    db.benchmark_imports.lock_identity(current.owner_id, body.manifest_sha256, body.visibility)
-    existing_import = db.benchmark_imports.get_by_identity(
-        owner_id=current.owner_id,
-        manifest_sha256=body.manifest_sha256,
-        visibility=body.visibility,
-    )
-    if existing_import is not None:
-        _attach_images(existing_import["id"], body.images, db)
-        response.status_code = 200
-        return _detail(db, existing_import)
-
-    import_id = make_id("bmi")
+    import_id = import_id_for(current.owner_id, body.manifest_sha256, body.visibility)
     row = db.benchmark_imports.create(
         import_id,
         owner_id=current.owner_id,
@@ -203,6 +193,22 @@ def create_benchmark_import(
         visibility=body.visibility,
         description=body.description,
     )
+    if row is None:
+        existing_import = _owned_import(import_id, db, current)
+        _attach_images(import_id, body.images, db)
+        response.status_code = 200
+        return _detail(db, existing_import)
+    try:
+        _populate_import(import_id, body, db, current)
+    except BaseException:
+        # ponytail: no transaction, so a failed create is undone by deleting the
+        # import; task revisions it already allocated stay as unused uploads.
+        db.benchmark_imports.delete(import_id)
+        raise
+    return _detail(db, row)
+
+
+def _populate_import(import_id: str, body: BenchmarkImportCreate, db: Database, current: CurrentPrincipal) -> None:
     for position, task in enumerate(body.manifest.tasks):
         existing_task = db.tasks.get_by_slug(task.slug)
         if existing_task is not None and existing_task.get("owner_id") != current.owner_id:
@@ -263,7 +269,6 @@ def create_benchmark_import(
             name=benchmark.name,
             task_slugs=benchmark.tasks,
         )
-    return _detail(db, row)
 
 
 @router.get("/{import_id}", response_model=BenchmarkImport)
@@ -368,7 +373,6 @@ def publish_benchmark_import(
             existing_slugs.add(smoke_slug)
             position += 1
     for benchmark in db.benchmark_imports.benchmarks(import_id):
-        db.benchmark_imports.lock_benchmark_slug(benchmark["slug"])
         refs = [
             TaskRef(
                 task_id=tasks_by_slug[slug]["task_id"],

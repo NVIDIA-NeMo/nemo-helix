@@ -387,6 +387,16 @@ simultaneous creates with the same slug can both succeed. A task referenced by
 a non-terminal evaluation cannot be deleted (`409 task_in_use`). Benchmark and
 benchmark-run member lists skip tasks or revisions that no longer exist.
 
+Benchmarks are `scaled_evals_benchmark` entities with their revisions and
+member pins embedded; a write that loses a concurrent update returns
+`409 benchmark_changed`, and slug uniqueness is checked before the write as for
+tasks. Benchmark imports are `scaled_evals_benchmark_import` entities whose id
+is derived from the owner, manifest digest, and visibility, so a repeated create
+resumes the existing import. A create racing an identical one can return the
+other's import while it is still being populated. A create that fails partway
+deletes its import; task revisions it already allocated remain as unused
+uploads.
+
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox
 `lifecycle_timeout` plus a grace, and never less than

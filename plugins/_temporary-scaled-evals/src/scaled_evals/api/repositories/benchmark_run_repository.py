@@ -12,6 +12,7 @@ import psycopg
 from psycopg.types.json import Json
 
 from scaled_evals.api import config_profile_store
+from scaled_evals.api.benchmark_store import BenchmarkStore
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.repositories.base_repository import (
     created_at_cursor_clause,
@@ -64,14 +65,6 @@ _DERIVED_STATUS_SQL = """
         ) THEN 'succeeded'
         ELSE 'failed'
     END
-"""
-
-# Member tasks of a benchmark revision, in benchmark order.
-_LOAD_MEMBERS_SQL = """
-    SELECT m.task_id, m.position, m.task_revision
-    FROM benchmark_revision_tasks m
-    WHERE m.benchmark_id = %s AND m.revision = %s
-    ORDER BY m.position, m.task_id
 """
 
 # Member executions of one or more runs (for derive_run_view). Ordered by
@@ -313,36 +306,6 @@ class BenchmarkRunRepository:
     def __init__(self, conn: psycopg.Connection) -> None:
         self.conn = conn
 
-    def benchmark_revision_for_run(self, benchmark_id: str, revision: int | None = None) -> dict[str, Any] | None:
-        """Resolve a live benchmark revision and its advisory qualification state."""
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT current_revision, qualification_status,
-                       qualification_evidence, qualified_at
-                FROM benchmarks
-                WHERE id = %s AND deleted_at IS NULL
-                """,
-                (benchmark_id,),
-            )
-            row = cur.fetchone()
-            if row is None:
-                return None
-            resolved_revision = revision if revision is not None else row["current_revision"]
-            if revision is not None:
-                cur.execute(
-                    "SELECT 1 FROM benchmark_revisions WHERE benchmark_id = %s AND revision = %s",
-                    (benchmark_id, revision),
-                )
-                if cur.fetchone() is None:
-                    return None
-            return {
-                "revision": resolved_revision,
-                "qualification_status": row.get("qualification_status"),
-                "qualification_evidence": row.get("qualification_evidence") or {},
-                "qualified_at": row.get("qualified_at"),
-            }
-
     def load_experiment_identity(self, benchmark_run_id: str) -> dict | None:
         """Resolve a benchmark run to its intake Experiment identity.
 
@@ -351,16 +314,12 @@ class BenchmarkRunRepository:
         the run (or its benchmark) is missing.
         """
         with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT b.slug AS benchmark_slug, br.name AS run_name
-                FROM benchmark_runs br
-                JOIN benchmarks b ON b.id = br.benchmark_id
-                WHERE br.id = %s
-                """,
-                (benchmark_run_id,),
-            )
-            return cur.fetchone()
+            cur.execute("SELECT benchmark_id, name AS run_name FROM benchmark_runs WHERE id = %s", (benchmark_run_id,))
+            row = cur.fetchone()
+        if row is None:
+            return None
+        slug = BenchmarkStore().slug(row["benchmark_id"])
+        return {"benchmark_slug": slug, "run_name": row["run_name"]} if slug else None
 
     def load_members(self, benchmark_id: str, revision: int) -> builtins.list[dict]:
         """Member tasks of a benchmark revision, each resolved to a task revision.
@@ -368,9 +327,7 @@ class BenchmarkRunRepository:
         `revision_status` and the image fields are None when the resolved
         revision does not exist; the router validates `ready`.
         """
-        with self.conn.cursor() as cur:
-            cur.execute(_LOAD_MEMBERS_SQL, (benchmark_id, revision))
-            rows = cur.fetchall()
+        rows = BenchmarkStore().members(benchmark_id, revision)
         return [
             {
                 "task_id": member["task_id"],

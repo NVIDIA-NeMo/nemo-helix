@@ -3,8 +3,9 @@
 
 from typing import Any
 
-from nemo_scaled_evals_plugin.entities import ScaledEvalsTask
+from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmark, ScaledEvalsTask
 from scaled_evals.api import entity_store
+from scaled_evals.api.benchmark_store import BenchmarkStore, TaskRef
 from scaled_evals.api.task_store import TaskStore
 
 
@@ -53,3 +54,28 @@ def stored_revision(task_id: str, revision: int, **kwargs: Any) -> dict[str, Any
     view = TaskStore().revision(task_id, revision, **kwargs)
     assert view is not None, (task_id, revision)
     return view
+
+
+def seed_benchmark(
+    benchmark_id: str = "bm_x",
+    tasks: tuple[tuple[str, int | None], ...] = (),
+    *,
+    name: str = "Suite",
+    slug: str | None = None,
+    **fields: Any,
+) -> None:
+    """Store a benchmark whose revision 1 has `(task_id, task_revision)` members, setting `fields` on it."""
+    BenchmarkStore().create_with_initial_revision(
+        benchmark_id,
+        name=name,
+        slug=slug or benchmark_id.replace("_", "-"),
+        description=None,
+        visibility="private",
+        tasks=[TaskRef(task_id, task_revision) for task_id, task_revision in tasks],
+    )
+    if fields:
+        client = entity_store.entity_client()
+        entity = client.get(ScaledEvalsBenchmark, benchmark_id, workspace=entity_store.private_workspace())
+        for field, value in fields.items():
+            setattr(entity, field, value)
+        client.update(entity)
