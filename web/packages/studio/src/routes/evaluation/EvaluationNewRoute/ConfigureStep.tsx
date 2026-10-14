@@ -12,11 +12,8 @@ import { FC } from 'react';
  */
 export const ConfigureStep: FC = () => (
   <Stack gap="density-2xl" className="w-full min-w-0">
+    <Text kind="label/bold/xl">Configuration</Text>
     <ConfigNameField />
-
-    <Stack gap="density-sm" className="min-w-0">
-      <Text kind="label/bold/xl">Dataset</Text>
-      <DatasetPanel />
-    </Stack>
+    <DatasetPanel />
   </Stack>
 );

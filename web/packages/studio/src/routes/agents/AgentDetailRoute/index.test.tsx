@@ -16,10 +16,9 @@ import { getAgentDetailRoute, getAgentRunEvaluationRoute } from '@studio/routes/
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
-import { fireEvent, waitFor } from '@testing-library/react';
+import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
-import { useNavigate } from 'react-router';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
@@ -30,36 +29,13 @@ const renderDetail = () =>
     routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
   });
 
-const PREVIOUS_PAGE = '/previous-page';
-
-const GoBack = () => {
-  const navigate = useNavigate();
-  return (
-    <button type="button" onClick={() => navigate(-1)}>
-      Go back
-    </button>
-  );
-};
-
-/**
- * Arrives by link from another page, with the location on screen and a way back, so a test can
- * tell whether the one-shot param was replaced in history rather than pushed over.
- */
-const renderArrivingAt = (path: string) =>
+/** The agent page, plus a stand-in for the Run Agent Evaluation page that reports where it is. */
+const renderWithWizardRoute = () =>
   renderRoute(undefined, {
-    history: [PREVIOUS_PAGE, path],
+    history: getAgentDetailRoute(workspace, agentName),
     routes: [
-      { path: PREVIOUS_PAGE, element: <LocationDisplay /> },
-      {
-        path: ROUTES.workspace.agentDetail,
-        element: (
-          <>
-            <AgentDetailRoute />
-            <LocationDisplay />
-            <GoBack />
-          </>
-        ),
-      },
+      { path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> },
+      { path: ROUTES.workspace.agentEvaluationNew, element: <LocationDisplay /> },
     ],
   });
 
@@ -258,53 +234,16 @@ describe('AgentDetailRoute', () => {
     ).not.toBeInTheDocument();
   });
 
-  describe('arriving with ?action=run-evaluation', () => {
-    it('opens the Run Evaluation modal on the Evaluations tab', async () => {
-      renderArrivingAt(getAgentRunEvaluationRoute(workspace, agentName));
+  it('opens the Run Agent Evaluation page from the header', async () => {
+    const user = userEvent.setup();
+    renderWithWizardRoute();
 
-      expect(
-        await screen.findByRole('dialog', { name: 'Run Agent Evaluation' })
-      ).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: 'Evaluations' })).toHaveAttribute(
-        'aria-selected',
-        'true'
-      );
-    });
+    const [headerButton] = await screen.findAllByRole('button', { name: 'Run Evaluation' });
+    await waitFor(() => expect(headerButton).toBeEnabled());
+    await user.click(headerButton);
 
-    it('replaces the param in history so reload and Back do not reopen the modal', async () => {
-      renderArrivingAt(getAgentRunEvaluationRoute(workspace, agentName));
-
-      await screen.findByRole('dialog', { name: 'Run Agent Evaluation' });
-      await waitFor(() =>
-        expect(currentLocation()).toBe(
-          `${getAgentDetailRoute(workspace, agentName)}?tab=evaluations`
-        )
-      );
-
-      // Pushed rather than replaced, Back would land on the entry still carrying the action.
-      // fireEvent, not userEvent: the open modal makes the page behind it inert to real input.
-      fireEvent.click(screen.getByRole('button', { name: 'Go back', hidden: true }));
-      await waitFor(() => expect(currentLocation()).toBe(PREVIOUS_PAGE));
-    });
-
-    it('lands on the tab without the modal when the agent cannot be evaluated', async () => {
-      server.use(
-        http.get(`${agentsUrl}/:name`, () =>
-          HttpResponse.json({ name: agentName, workspace, created_at: '2026-04-20T10:00:00Z' })
-        )
-      );
-      renderArrivingAt(getAgentRunEvaluationRoute(workspace, agentName));
-
-      await waitFor(() =>
-        expect(currentLocation()).toBe(
-          `${getAgentDetailRoute(workspace, agentName)}?tab=evaluations`
-        )
-      );
-      expect(screen.getByRole('tab', { name: 'Evaluations' })).toHaveAttribute(
-        'aria-selected',
-        'true'
-      );
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    });
+    await waitFor(() =>
+      expect(currentLocation()).toBe(getAgentRunEvaluationRoute(workspace, agentName))
+    );
   });
 });

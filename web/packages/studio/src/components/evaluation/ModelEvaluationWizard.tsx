@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import '@studio/components/evaluation/evalWizard.css';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
-import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
-import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import {
   Banner,
@@ -16,10 +13,10 @@ import {
   FormField,
   RadioGroup,
   Stack,
-  Stepper,
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
+import { EvalWizardPage } from '@studio/components/evaluation/EvalWizardPage';
 import { MODEL_EVAL_CONFIG_DESCRIPTION } from '@studio/components/evaluation/submitEvaluationJob';
 import { LINK_EVAL_DOCS } from '@studio/constants/links';
 import { ConfigureStep } from '@studio/routes/evaluation/EvaluationNewRoute/ConfigureStep';
@@ -42,6 +39,7 @@ import {
   type SavedConfig,
   useSavedConfig,
 } from '@studio/routes/evaluation/EvaluationNewRoute/useSavedConfig';
+import { getEvaluationResultsRoute } from '@studio/routes/utils';
 import { Info } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 import { FormProvider, useForm, useFormContext, useWatch } from 'react-hook-form';
@@ -201,7 +199,7 @@ const SavedConfigLoader: FC<{
   return null;
 };
 
-const ModalBody: FC<{
+const WizardBody: FC<{
   workspace: string;
   step: WizardStep;
   mode: string;
@@ -217,7 +215,7 @@ const ModalBody: FC<{
       {step === 'start' ? (
         <>
           <Text kind="body/regular/md">
-            Run evaluation via NeMo Helix Evals&apos;s built-in runner.{' '}
+            Run evaluation via NeMo Helix Evals built-in runner.{' '}
             <Anchor
               kind="inline"
               textKind="body/regular/md"
@@ -250,22 +248,18 @@ const ModalBody: FC<{
   );
 };
 
-export interface ModelEvaluationModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
+export interface ModelEvaluationWizardProps {
   workspace: string;
 }
 
 /**
- * Run Model Evaluation, as a two-step wizard.
+ * Run Model Evaluation, as a page-length wizard.
  *
  * The first step decides whether this run authors a configuration or reuses a
- * saved one; the second is the configuration itself, inert when reused. Wider
- * than the agent modal because that second step is a three-column layout.
+ * saved one. Authoring walks through the configuration and its metrics before
+ * the model is picked; reusing skips straight to the model.
  */
-export const ModelEvaluationModal: FC<ModelEvaluationModalProps> = ({
-  open,
-  onClose,
-  workspace,
-}) => {
+export const ModelEvaluationWizard: FC<ModelEvaluationWizardProps> = ({ workspace }) => {
   const [step, setStep] = useState<WizardStep>('start');
   /** Wizard navigation, not part of the spec: known before a configuration is
    *  named, so it cannot live on `configSource`. */
@@ -275,18 +269,10 @@ export const ModelEvaluationModal: FC<ModelEvaluationModalProps> = ({
     resolver: zodResolver(evaluationSchema),
     mode: 'onChange',
   });
-  const close = () => {
-    form.reset(EVALUATION_FORM_DEFAULTS);
-    setStep('start');
-    setMode(NEW_CONFIG);
-    onClose();
-  };
 
   return (
     <FormProvider {...form}>
-      <ModelEvaluationModalInner
-        open={open}
-        onClose={close}
+      <ModelEvaluationWizardInner
         workspace={workspace}
         step={step}
         setStep={setStep}
@@ -299,15 +285,13 @@ export const ModelEvaluationModal: FC<ModelEvaluationModalProps> = ({
 
 /** Split out so the submit handler can read the bindings, which are derived from
  *  form state and therefore only available inside the provider. */
-const ModelEvaluationModalInner: FC<{
-  open: boolean;
-  onClose: () => void;
+const ModelEvaluationWizardInner: FC<{
   workspace: string;
   step: WizardStep;
   setStep: (step: WizardStep) => void;
   mode: string;
   onModeChange: (mode: string) => void;
-}> = ({ open, onClose, workspace, step, setStep, mode, onModeChange }) => {
+}> = ({ workspace, step, setStep, mode, onModeChange }) => {
   const form = useFormContext<EvaluationFormValues>();
   const bindings = useDatasetBindings();
   const { createEvaluation, isPending } = useCreateEvaluation();
@@ -387,64 +371,38 @@ const ModelEvaluationModalInner: FC<{
     setStep(steps[Math.max(at - 1, 0)]);
   };
 
+  const handleContinue = () => void (isLast ? handleSubmit() : goNext());
+
   return (
-    <FormModal
-      open={open}
-      onClose={onClose}
-      title="Run Model Evaluation"
-      // Required by the props even though `slotFooterRight` replaces the button
-      // it labels; the agent modal passes it for the same reason.
-      submitButtonText="Submit"
-      disabled={isPending}
-      // One width for both steps, matching the agent modal: the configuration
-      // step is a single column now, so it no longer needs the extra room.
-      className="w-[690px]! max-w-[95vw]!"
-      onSubmit={handleSubmit}
-      slotAboveBody={
-        <Stepper
-          className="eval-wizard-stepper"
-          aria-label="New evaluation progress"
-          activeStep={steps.indexOf(step)}
-          items={steps.map((item) => ({ slotHeading: STEP_HEADINGS[item] }))}
-        />
-      }
-      // The whole footer, matching the agent modal: Cancel, then Back, then the
-      // forward action. Supplying this replaces FormModal's default pair, which
-      // is the only way to get Back between them rather than off to the left.
-      slotFooterRight={
-        <Flex gap="2">
-          <Button kind="tertiary" type="button" onClick={onClose} disabled={isPending}>
-            Cancel
+    <EvalWizardPage
+      heading="Run Model Evaluation"
+      headingDescription="Score a model against a dataset."
+      steps={steps.map((item) => STEP_HEADINGS[item])}
+      activeStep={at}
+      onSubmit={(event) => {
+        event.preventDefault();
+        handleContinue();
+      }}
+      slotFooterStart={
+        at > 0 ? (
+          <Button kind="secondary" onClick={goBack} disabled={isPending}>
+            Back
           </Button>
-          {at > 0 && (
-            <Button kind="secondary" type="button" onClick={goBack} disabled={isPending}>
-              Back
-            </Button>
-          )}
-          {isLast ? (
-            <LoadingButton
-              color="brand"
-              type="submit"
-              loading={isPending}
-              disabled={isPending || !configReady || nameTaken}
-            >
-              Submit
-            </LoadingButton>
-          ) : (
-            <Button color="brand" type="button" onClick={() => void goNext()} disabled={isPending}>
-              Next
-            </Button>
-          )}
-        </Flex>
+        ) : null
       }
+      cancelTo={getEvaluationResultsRoute(workspace)}
+      continueLabel={isLast ? 'Run Evaluation' : 'Next'}
+      continueLoading={isPending}
+      canContinue={!isLast || (configReady && !nameTaken)}
+      onContinue={handleContinue}
     >
-      <ModalBody
+      <WizardBody
         workspace={workspace}
         step={step}
         mode={mode}
         onModeChange={onModeChange}
         saved={saved}
       />
-    </FormModal>
+    </EvalWizardPage>
   );
 };

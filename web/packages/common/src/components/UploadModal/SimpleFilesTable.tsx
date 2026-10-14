@@ -202,12 +202,9 @@ export const SimpleFilesTable = () => {
         </Flex>
       ) : null}
       {errors.file && (
-        <Flex gap="density-md" align="center">
-          <CircleAlert className="text-feedback-danger" />
-          <Text kind="label/regular/sm" className="text-feedback-danger">
-            {errors.file}
-          </Text>
-        </Flex>
+        <Text kind="label/regular/sm" className="text-feedback-danger">
+          {errors.file}
+        </Text>
       )}
       {trailingButton ? (
         <Flex justify="between" align="center">
