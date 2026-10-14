@@ -252,6 +252,28 @@ class TestWorkspaceDeletionBehavior:
             # Clean up override
             app.dependency_overrides.clear()
 
+    async def test_mark_failed_advances_updated_at(self, client: AsyncClient, repos):
+        workspace_name = "mark-failed-bumps-updated-at"
+        created = await client.post(
+            "/apis/entities/v2/workspaces",
+            json={"name": workspace_name, "description": "updated_at contract"},
+        )
+        assert created.status_code == 201
+
+        workspace_repo: WorkspaceRepositoryInterface = repos["workspace"]
+        before = await workspace_repo.get_workspace_by_name(name=workspace_name)
+        assert before is not None
+
+        marked = await workspace_repo.mark_workspace_for_deletion(
+            name=workspace_name,
+            deletion_stage=WorkspaceDeletionStage.FAILED,
+        )
+        assert marked is True
+
+        after = await workspace_repo.get_workspace_by_name(name=workspace_name)
+        assert after is not None
+        assert after.updated_at > before.updated_at
+
 
 def _workspace_names_and_total(list_response) -> tuple[set[str], int]:
     body = list_response.json()
