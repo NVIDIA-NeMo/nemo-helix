@@ -60,7 +60,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     require_full_coverage,
     trials_from_rollouts,
 )
-from nhx_evals_sdk.agent_eval.trials import AgentEvalTrialStatus, TrialMeasurements
+from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
 from pydantic import ValidationError
@@ -399,6 +399,66 @@ def test_failures_sidecar_yields_failed_trials(tmp_path: Path) -> None:
     assert failed.measurements.total_tokens == 5
     assert failed.metadata["reward"] is None
     assert failed.metadata["gym_failure"] == "boom"
+
+
+@pytest.mark.parametrize(
+    ("failure", "error"),
+    [
+        pytest.param(
+            {
+                "_ng_failure_class": "agent_run_error",
+                "_ng_failure_type": "ClientResponseError",
+                "_ng_failure_message": "500, message='Internal Server Error'",
+            },
+            TrialError(type="ClientResponseError", message="500, message='Internal Server Error'"),
+            id="gym-0.6-request-failure",
+        ),
+        pytest.param(
+            {"_ng_failure_class": "judge_failed", "_ng_failure_judge_error": "judge 503"},
+            TrialError(type="judge_failed", message="judge 503"),
+            id="gym-0.5-judge-failsafe",
+        ),
+        pytest.param(
+            {"_ng_failure_class": "transient", "error_message": "rate limited"},
+            TrialError(type="transient", message="rate limited"),
+            id="agent-error-message",
+        ),
+        pytest.param(
+            {"error": "boom", "_ng_failure_message": "gym"},
+            TrialError(type=UNKNOWN_ERROR_TYPE, message="boom"),
+            id="agent-error-kept",
+        ),
+        pytest.param(
+            {"_ng_failure_type": " ", "_ng_failure_class": 7, "error": {"status": 503}},
+            TrialError(type=UNKNOWN_ERROR_TYPE),
+            id="odd-diagnostic",
+        ),
+    ],
+)
+def test_a_failed_attempt_keeps_its_diagnostic_and_model_calls(
+    tmp_path: Path, failure: dict[str, Any], error: TrialError
+) -> None:
+    # Gym records why an attempt failed and captures the model calls it made first. The FAILED trial
+    # must carry both, not only the sidecar every failure shares.
+    tasks = discover_gym_tasks(EXAMPLE)
+    _, index_map = _index_map(tasks, tmp_path)
+    bundle = tmp_path / "rollouts.jsonl"
+    bundle.write_text("", encoding="utf-8")
+    failures = tmp_path / "rollouts_failures.jsonl"
+    failures.write_text(json.dumps({NG_TASK_INDEX: 0, NG_ROLLOUT_INDEX: 0, **failure}) + "\n", encoding="utf-8")
+    captures = model_call_capture_dir(tmp_path)
+    captures.mkdir(parents=True)
+    (captures / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
+
+    (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
+
+    assert trial.error == error
+    # gym_failure keeps the raw diagnostic, including one too odd for the error message.
+    assert trial.metadata["gym_failure"] == (error.message or failure.get("error"))
+    assert trial.evidence is not None
+    # No OTLP trace: that would move publication off the ATIF fallback, which records the agent identity.
+    assert trial.evidence.descriptors.keys() == {"rollout_failures", "ng_trajectory"}
+    assert trial.evidence.require("rollout_failures").ref == str(failures)
 
 
 def test_ensure_fresh_output_rejects_reused_dir(tmp_path: Path) -> None:
