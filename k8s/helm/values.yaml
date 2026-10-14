@@ -379,6 +379,8 @@ postgresql:
   persistence:
     enabled: true
     size: 5Gi
+    # -- Labels to preserve on the PostgreSQL volume claim template. Copy existing StatefulSet claim-template labels exactly and retain them on future upgrades; these labels are immutable. Supplied labels override the default component label.
+    claimTemplateLabels: {}
     # -- Storage class for the PostgreSQL PVC. If unset, the cluster default is used.
     storageClass: ""
   # -- Optional resource limits/requests for the PostgreSQL container.
