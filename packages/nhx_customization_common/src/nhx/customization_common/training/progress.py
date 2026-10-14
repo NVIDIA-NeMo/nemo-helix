@@ -37,6 +37,7 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobTaskUpdate
 from nhx.common.client_factory import get_task_nemo_client
+from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 
 logger = logging.getLogger(__name__)
@@ -229,7 +230,7 @@ class JobsServiceProgressReporter:
             {name: list(points) for name, points in metrics.items() if isinstance(points, list)},
         )
 
-    def report_running(self, phase: str, **details: Any) -> None:
+    def report_running(self, phase: TrainingPhase, **details: Any) -> None:
         if "step" in details and "percentage_done" not in details and self._max_steps > 0:
             details["percentage_done"] = self._calculate_percentage_done(details["step"])
 
@@ -237,7 +238,7 @@ class JobsServiceProgressReporter:
         self.update_task(status="active", status_details=status_details)
 
     def report_completed(self, message: str = "Completed") -> None:
-        self.update_task(status="completed", status_details={"message": message, "phase": "completed"})
+        self.update_task(status="completed", status_details={"message": message, "phase": TrainingPhase.COMPLETED})
 
     def report_error(self, error: str | dict[str, Any]) -> None:
         error_details = {"message": error} if isinstance(error, str) else error

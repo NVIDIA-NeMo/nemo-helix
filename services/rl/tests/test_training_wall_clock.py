@@ -200,3 +200,16 @@ def test_result_json_omits_duration_when_training_never_started(
 
     assert result.training_duration_seconds is None
     assert written_duration(tmp_path) is None
+
+
+def test_postprocessing_reports_that_it_is_finalizing_the_checkpoint(tmp_path: Path) -> None:
+    """Converting or copying a large checkpoint can run for minutes after the last step."""
+    runner = runner_with_duration(tmp_path, 1.0)
+    sent: list[str] = []
+    runner._progress.report_running = lambda reported, **details: sent.append(reported)
+    runner._backend.find_best_checkpoint.return_value = tmp_path / "ckpt"
+    runner._backend.process_checkpoint.side_effect = lambda *a, **k: sent.append("process")
+
+    runner._postprocess_phase(None, TrainingMetrics(), MagicMock())
+
+    assert sent == ["finalizing_checkpoint", "process"]
