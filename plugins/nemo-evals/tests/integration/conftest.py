@@ -153,7 +153,9 @@ def running_platform(
             process.kill()
             process.wait()
         # Intake keeps its local ClickHouse container across shutdowns, keyed by data dir, so
-        # each per-run data dir would otherwise leave one behind.
+        # each per-run data dir would otherwise leave one behind. Only a data dir the caller passed
+        # in is throwaway: an NHX_DATA_DIR inherited from the shell is the developer's own platform,
+        # whose container must survive the test session.
         if data_dir := (env_vars or {}).get(DATA_DIR_ENVVAR):
             remove_intake_clickhouse(Path(data_dir), env=env)
 
