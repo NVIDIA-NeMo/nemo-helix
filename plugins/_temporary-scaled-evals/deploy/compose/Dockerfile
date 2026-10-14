@@ -134,9 +134,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Harbor loads NemoOpenSandboxEnvironment, and the backend runs the cleanup
 # module, inside those same venvs. The rest of scaled_evals is not installed
-# there, so a .pth file adds just these two modules.
+# there, so a .pth file adds just these modules.
 COPY plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_environment.py \
      plugins/_temporary-scaled-evals/src/scaled_evals/harbor_opensandbox_cleanup.py \
+     plugins/_temporary-scaled-evals/src/scaled_evals/opensandbox_diagnostics.py \
      /tmp/nemo-extensions/scaled_evals/
 RUN set -eu; for version in $(cat /opt/harbor/selectable-versions.txt); do \
         runner="/opt/harbor/${version}"; \
