@@ -94,6 +94,8 @@ SERVER_RETRY_STATUSES = frozenset({429, 502, 503, 504})
 SERVER_RETRY_ATTEMPTS = 5
 SERVER_RETRY_BASE_SEC = 0.5
 SERVER_RETRY_MAX_SEC = 8.0
+# Harbor polls _terminal_provisioning_failure itself, so each poll's status read gets only this long.
+PROVISIONING_STATUS_BUDGET_SEC = 30
 
 
 class NemoOpenSandboxEnvironment(ComposeServiceOpsMixin, OpenSandboxEnvironment):
@@ -282,9 +284,12 @@ class NemoOpenSandboxEnvironment(ComposeServiceOpsMixin, OpenSandboxEnvironment)
                 "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
             )
 
-    async def _services_status(self, sandbox_id: str) -> dict[str, Any]:
-        """The extension's view of the sandbox's services: ``{"failure": str | None, "not_ready": [names]}``."""
-        response = await self._server().get(f"/nemo-ext/sandboxes/{sandbox_id}/services", timeout=30)
+    async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:
+        """The extension's view of the sandbox's services: ``{"failure": str | None, "not_ready": [names]}``.
+
+        The read, with its retries, stops at ``deadline`` (a ``time.monotonic()`` value).
+        """
+        response = await self._server().get(f"/nemo-ext/sandboxes/{sandbox_id}/services", timeout=30, deadline=deadline)
         if response.status_code != 200:
             raise RuntimeError(f"reading compose services failed ({response.status_code}): {_error_text(response)}")
         return response.json()
@@ -300,7 +305,9 @@ class NemoOpenSandboxEnvironment(ComposeServiceOpsMixin, OpenSandboxEnvironment)
         if failure is not None or self._services is None:
             return failure
         try:
-            status = await self._services_status(str(_sandbox_id(sandbox)))
+            status = await self._services_status(
+                str(_sandbox_id(sandbox)), deadline=time.monotonic() + PROVISIONING_STATUS_BUDGET_SEC
+            )
         except Exception:
             # The pod may not exist yet, or the read hit a transient error; Harbor polls again.
             return None
@@ -349,7 +356,7 @@ class NemoOpenSandboxEnvironment(ComposeServiceOpsMixin, OpenSandboxEnvironment)
         """
         sandbox_id = str(_sandbox_id(self._sandbox))
         while True:
-            status = await self._services_status(sandbox_id)
+            status = await self._services_status(sandbox_id, deadline)
             if status["failure"]:
                 raise RuntimeError(f"OpenSandbox sandbox {sandbox_id}: {status['failure']}")
             if not status["not_ready"]:
@@ -548,34 +555,55 @@ class _ServerClient:
         retry_statuses: frozenset[int],
         retry_errors: tuple[type[httpx.HTTPError], ...],
         body: dict[str, Any] | None = None,
+        deadline: float | None = None,
     ) -> httpx.Response:
         """Send one request, retrying a ``retry_statuses`` answer or a ``retry_errors`` failure with backoff.
 
         After the last attempt the response is returned as is, or the error raised, so callers
-        map failures exactly as they would without retries.
+        map failures exactly as they would without retries. With a ``deadline`` (a
+        ``time.monotonic()`` value), no attempt waits past it by more than a second and none
+        starts after it, and a response that does arrive is returned whenever it came.
         """
         for attempt in range(1, SERVER_RETRY_ATTEMPTS + 1):
-            last = attempt == SERVER_RETRY_ATTEMPTS
+            # Always at least one second, so a deadline that already passed still gets a real try.
+            attempt_timeout = timeout if deadline is None else max(1.0, min(timeout, deadline - time.monotonic()))
+            error: httpx.HTTPError | None = None
+            response: httpx.Response | None = None
+
             try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
+                async with httpx.AsyncClient(timeout=attempt_timeout) as client:
                     response = await client.request(method, f"{self.base_url}{path}", json=body, headers=self.headers)
-            except retry_errors:
-                if last:
-                    raise
-            else:
-                if last or response.status_code not in retry_statuses:
-                    return response
-            delay = min(SERVER_RETRY_MAX_SEC, SERVER_RETRY_BASE_SEC * 2 ** (attempt - 1))
-            await asyncio.sleep(delay * random.uniform(0.5, 1.0))
+            except retry_errors as exc:
+                error = exc
+
+            is_final_attempt = attempt == SERVER_RETRY_ATTEMPTS or (
+                deadline is not None and time.monotonic() >= deadline
+            )
+            if response is not None and (is_final_attempt or response.status_code not in retry_statuses):
+                return response
+            if error is not None and is_final_attempt:
+                raise error
+
+            pause = min(SERVER_RETRY_MAX_SEC, SERVER_RETRY_BASE_SEC * 2 ** (attempt - 1)) * random.uniform(0.5, 1.0)
+            if deadline is not None:
+                pause = min(pause, deadline - time.monotonic())
+
+            await asyncio.sleep(pause)
         raise AssertionError("unreachable")  # the last attempt returns or raises
 
-    async def get(self, path: str, *, timeout: float) -> httpx.Response:
+    async def get(self, path: str, *, timeout: float, deadline: float | None = None) -> httpx.Response:
         """``GET base_url + path``; the response is returned whatever its status.
 
-        A read changes nothing, so any transport error or transient status is retried.
+        A read changes nothing, so any transport error or transient status is retried, until
+        ``deadline`` if there is one.
         """
         return await self._request(
-            "GET", path, timeout=timeout, retry_statuses=SERVER_RETRY_STATUSES, retry_errors=(httpx.TransportError,)
+            "GET",
+            path,
+            timeout=timeout,
+            retry_statuses=SERVER_RETRY_STATUSES,
+            retry_errors=(httpx.TransportError,),
+            deadline=deadline,
         )
 
     async def post(self, path: str, body: dict[str, Any], *, timeout: float) -> httpx.Response:

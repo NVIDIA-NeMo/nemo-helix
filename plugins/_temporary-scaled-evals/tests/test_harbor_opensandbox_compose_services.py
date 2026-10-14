@@ -71,6 +71,8 @@ class _Extension:
         self.statuses: list[dict[str, Any]] = []
         # Answers (or errors to raise) that come before the routes, for any request, one per request.
         self.preempt: list[httpx.Response | Exception] = []
+        # The timeout each HTTP attempt was given.
+        self.timeouts: list[float] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         """The ``httpx.MockTransport`` handler: route by path to health, services status, or exec."""
@@ -202,6 +204,7 @@ def extension(monkeypatch: pytest.MonkeyPatch) -> _Extension:
     real_client = httpx.AsyncClient
 
     def client(**kwargs: Any) -> httpx.AsyncClient:
+        extension.timeouts.append(kwargs["timeout"])
         return real_client(transport=httpx.MockTransport(extension.handle), **kwargs)
 
     monkeypatch.setattr(environment_module.httpx, "AsyncClient", client)
@@ -478,6 +481,41 @@ async def test_status_reads_retry_transient_errors(tmp_path: Path, server: _Serv
 
     # Two transient failures, then the answer.
     assert [r.url.path for r in extension.requests[started:]] == ["/v1/nemo-ext/sandboxes/sbx-1/services"] * 3
+
+
+async def test_status_reads_stop_retrying_at_the_deadline(
+    tmp_path: Path, server: _Server, extension: _Extension
+) -> None:
+    environment = await _started(_environment(_task(tmp_path)))
+    started = len(extension.requests)
+    extension.preempt = [httpx.Response(503)] * environment_module.SERVER_RETRY_ATTEMPTS
+
+    with pytest.raises(RuntimeError, match=r"reading compose services failed \(503\)"):
+        await environment._wait_for_services(time.monotonic() - 1)
+
+    # The deadline had passed, so the read got its one try and no retries.
+    assert len(extension.requests) - started == 1
+
+
+async def test_status_read_timeouts_are_capped_by_the_deadline(
+    tmp_path: Path, server: _Server, extension: _Extension
+) -> None:
+    environment = await _started(_environment(_task(tmp_path)))
+    extension.timeouts.clear()
+    extension.statuses = [{"failure": None, "not_ready": []}]
+
+    await environment._wait_for_services(time.monotonic() + 5)
+
+    assert extension.timeouts == [pytest.approx(5, abs=1)]  # not the usual 30
+
+
+async def test_ready_status_is_accepted_after_the_deadline(
+    tmp_path: Path, server: _Server, extension: _Extension
+) -> None:
+    environment = await _started(_environment(_task(tmp_path)))
+    extension.statuses = [{"failure": None, "not_ready": []}]
+
+    await environment._wait_for_services(time.monotonic() - 1)  # returns, doesn't raise
 
 
 async def test_status_reads_give_up_after_the_attempts(tmp_path: Path, server: _Server, extension: _Extension) -> None:
