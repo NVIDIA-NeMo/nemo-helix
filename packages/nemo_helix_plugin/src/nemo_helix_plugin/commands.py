@@ -73,7 +73,7 @@ import os
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, Optional, Protocol, cast
 
 import click
 import httpx
@@ -147,7 +147,7 @@ _JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = (
     | _RETIRED_ROUTING_FLAGS
 )
 
-# Set on the Typer context by :func:`programmatic_submit` so the job submit
+# Set on the Typer context by :func:`_programmatic_submit` so the job submit
 # callback skips its no-input help fallback for wrapper-supplied specs.
 _PROGRAMMATIC_SUBMIT_ATTR = "_nemo_programmatic_submit"
 
@@ -986,13 +986,13 @@ def resolve_submit_base_url(typer_ctx: typer.Context) -> str:
 
 
 @contextlib.contextmanager
-def programmatic_submit(typer_ctx: typer.Context) -> Iterator[None]:
+def _programmatic_submit(typer_ctx: typer.Context) -> Iterator[None]:
     """Mark a job submit callback call as carrying a caller-built spec.
 
-    A wrapper that replaces the generated submit flags and passes ``spec``
-    directly must call the original callback inside this block. Without it,
-    the callback inspects the wrapper's Click parameter sources, finds no
-    spec flag, and prints help instead of submitting.
+    Without it, a callback called from a replacement command inspects the
+    replacement's Click parameter sources, finds no spec flag, and prints
+    help instead of submitting. Overrides get this through
+    :func:`take_job_submit` rather than calling it directly.
     """
     had_marker = hasattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
     previous = getattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, False)
@@ -1004,6 +1004,60 @@ def programmatic_submit(typer_ctx: typer.Context) -> Iterator[None]:
             setattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, previous)
         else:
             delattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
+
+
+class JobSubmit(Protocol):
+    """A generated job submit callback detached by :func:`take_job_submit`."""
+
+    def __call__(
+        self,
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        profile: str | None = None,
+        options: list[str] | None = None,
+        options_file: Path | None = None,
+    ) -> SubmittedJob | None: ...
+
+
+def take_job_submit(group: typer.Typer) -> JobSubmit:
+    """Detach the generated submit callback from *group* for a replacement to delegate to.
+
+    Call this from a CLI override before registering the replacement
+    callback on *group*. The returned callable submits *spec* (JSON) as
+    ``--spec`` would, inside :func:`_programmatic_submit`, so the generated
+    callback never mistakes the call for one without input.
+    """
+    callback_info = group.registered_callback
+    original = callback_info.callback if callback_info is not None else None
+    if original is None:
+        raise RuntimeError("missing generated job submit callback to override")
+    group.registered_callback = None
+
+    def submit(
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        profile: str | None = None,
+        options: list[str] | None = None,
+        options_file: Path | None = None,
+    ) -> SubmittedJob | None:
+        with _programmatic_submit(typer_ctx):
+            return original(
+                typer_ctx,
+                spec=spec,
+                spec_file=None,
+                options=options or [],
+                options_file=options_file,
+                profile=profile,
+                workspace=workspace,
+                config=None,
+                config_file=None,
+            )
+
+    return submit
 
 
 def _build_function_submit_url(

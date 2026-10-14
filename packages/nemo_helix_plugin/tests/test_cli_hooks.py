@@ -17,9 +17,10 @@ from __future__ import annotations
 import json
 from typing import ClassVar
 
+import pytest
 import typer
 from nemo_helix_plugin.cli import NemoCLI
-from nemo_helix_plugin.commands import add_function_commands, add_job_commands
+from nemo_helix_plugin.commands import add_function_commands, add_job_commands, take_job_submit
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.job import NemoJob
 from pydantic import BaseModel
@@ -173,6 +174,38 @@ class TestUpdateJobCli:
         result = runner.invoke(app, ["greet", "--name", "Wrapped"])
         assert result.exit_code == 0
         assert json.loads(result.output) == {"message": "Hello, Wrapped!"}
+
+    def test_take_job_submit_delegates_without_spec_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A replacement with none of the generated flags still submits, not prints help."""
+        submitted: list[dict] = []
+
+        def _capture(_self: object, _job_cls: type[NemoJob], spec: dict, **_kwargs: object) -> dict:
+            submitted.append(spec)
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
+
+        class _CLI(_NoOpCLI):
+            def update_job_cli(self, job_cls, group) -> None:
+                if job_cls is not _GreetJob:
+                    return
+                submit = take_job_submit(group)
+
+                @group.callback(invoke_without_command=True)
+                def greet(typer_ctx: typer.Context, who: str = typer.Argument(...)) -> None:
+                    submit(typer_ctx, spec=json.dumps({"name": who}), workspace="default")
+
+        app = _app_with_jobs(_GreetJob, cli=_CLI())
+
+        result = runner.invoke(app, ["greet", "Wrapped"])
+
+        assert result.exit_code == 0, result.output
+        assert "Usage:" not in result.output
+        assert submitted == [{"name": "Wrapped"}]
+
+    def test_take_job_submit_requires_generated_callback(self) -> None:
+        with pytest.raises(RuntimeError, match="missing generated job submit callback"):
+            take_job_submit(typer.Typer())
 
     def test_hook_dispatches_per_job(self) -> None:
         """A hook that only modifies _GreetJob leaves _ByeJob untouched."""

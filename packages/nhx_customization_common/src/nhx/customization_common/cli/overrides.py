@@ -36,9 +36,9 @@ from nemo_helix_plugin.cli_state import resolve_cli_workspace
 from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.commands import (
     SubmittedJob,
-    programmatic_submit,
     resolve_submit_auth_headers,
     resolve_submit_base_url,
+    take_job_submit,
 )
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.models.client import ModelsClient
@@ -74,7 +74,7 @@ def apply_job_cli_overrides(
     spec_refs: SpecRefs | None = None,
     validate_job_spec: ValidateJobSpec | None = None,
 ) -> None:
-    """Drop generated ``run``/``submit`` verbs, then install the flat backend command.
+    """Drop the generated ``run`` verb, then replace generated submit with the flat backend command.
 
     Order matters: drop first, then re-register. Typer iterates
     ``registered_commands`` in insertion order, so stale entries would route
@@ -82,16 +82,6 @@ def apply_job_cli_overrides(
     """
     _drop_command(group, "run")
     _replace_job_callback(group, backend, load_job_json, job_json_help, submit_help, spec_refs, validate_job_spec)
-
-
-def _pluck_submit_callback(group: typer.Typer) -> Callable[..., SubmittedJob | None]:
-    callback_info = group.registered_callback
-    if callback_info is not None and callback_info.callback is not None:
-        return callback_info.callback
-    command = next((c for c in group.registered_commands if c.name == "submit"), None)
-    if command is None or command.callback is None:
-        raise RuntimeError("missing generated submit callback to override")
-    return command.callback
 
 
 def _drop_command(group: typer.Typer, name: str) -> None:
@@ -108,11 +98,7 @@ def _replace_job_callback(
     validate_job_spec: ValidateJobSpec | None = None,
 ) -> None:
     """Replace generated submit with a flat ``--job-json JOB_JSON`` backend callback."""
-    original = _pluck_submit_callback(group)
-    # Drop the original submit command/callback before re-registering so Typer
-    # can't route users back to the legacy nested shape.
-    _drop_command(group, "submit")
-    group.registered_callback = None
+    original = take_job_submit(group)
 
     @group.callback(invoke_without_command=True, help=submit_help)
     def submit(
@@ -224,18 +210,14 @@ def _replace_job_callback(
                 exist_ok=exist_ok,
                 hf_token_secret=hf_token_secret,
             )
-        with programmatic_submit(typer_ctx):
-            submitted = original(
-                typer_ctx,
-                spec=spec_json,
-                spec_file=None,
-                options=options,
-                options_file=options_file,
-                profile=profile,
-                workspace=workspace,
-                config=None,
-                config_file=None,
-            )
+        submitted = original(
+            typer_ctx,
+            spec=spec_json,
+            workspace=workspace,
+            profile=profile,
+            options=options,
+            options_file=options_file,
+        )
         _report_submitted(submitted, wait=wait, watch=watch, timeout=timeout, poll_interval=poll_interval)
 
 
