@@ -136,6 +136,30 @@ def test_a_package_first_listed_as_a_deduped_stub_still_has_its_dependencies_col
     ]
 
 
+def test_an_aliased_dependency_is_collected_as_the_package_it_names() -> None:
+    module = load_module()
+    listed = [
+        {
+            "name": "studio",
+            "dependencies": {
+                "typescript": {"from": "@typescript/typescript6", "version": "6.0.2"},
+                "@typescript/old": {"from": "typescript", "version": "6.0.3"},
+            },
+        }
+    ]
+
+    packages = module.production_packages(listed, exclude=[])
+
+    assert [(p.name, p.version, p.resolved) for p in packages] == [
+        (
+            "@typescript/typescript6",
+            "6.0.2",
+            "https://registry.npmjs.org/@typescript/typescript6/-/typescript6-6.0.2.tgz",
+        ),
+        ("typescript", "6.0.3", "https://registry.npmjs.org/typescript/-/typescript-6.0.3.tgz"),
+    ]
+
+
 def test_reads_integrities_from_the_lock_packages_section_only() -> None:
     module = load_module()
     integrities = {name: integrity(body) for name, body in TARBALLS.items()}

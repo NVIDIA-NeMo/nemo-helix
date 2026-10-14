@@ -55,7 +55,9 @@ def production_packages(pnpm_list: list[dict], exclude: list[str]) -> list[NpmPa
     found: dict[tuple[str, str], NpmPackage] = {}
 
     def walk(dependencies: dict | None) -> None:
-        for name, info in (dependencies or {}).items():
+        for key, info in (dependencies or {}).items():
+            # An aliased dependency ("typescript": "npm:@typescript/typescript6@6.0.2") is keyed by its alias.
+            name = info.get("from") or key
             version = info.get("version", "")
             skipped = version.startswith(("link:", "file:", "workspace:")) or any(
                 fnmatch.fnmatchcase(name, pattern) for pattern in exclude
