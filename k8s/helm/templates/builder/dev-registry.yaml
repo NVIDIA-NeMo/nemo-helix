@@ -1,0 +1,91 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- /*
+A registry for kind and minikube, so builds need no external one: plain HTTP, one username and password, and storage
+that doesn't survive a restart.
+*/}}
+{{- if and .Values.builder.enabled .Values.builder.devRegistry.enabled }}
+{{- $name := include "nemo-helix.builder.devRegistryName" . }}
+{{- $registry := .Values.builder.devRegistry }}
+{{- if not $registry.password }}
+{{- fail "builder.devRegistry.password is required when builder.devRegistry.enabled is true" }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/component: nhx-builder-registry
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  htpasswd: {{ htpasswd $registry.username $registry.password | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/component: nhx-builder-registry
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: nhx-builder-registry
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: nhx-builder-registry
+        {{- include "nemo-helix.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: registry
+          image: {{ $registry.image }}
+          ports:
+            - containerPort: 5000
+          env:
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: "true"
+            - name: REGISTRY_AUTH
+              value: htpasswd
+            - name: REGISTRY_AUTH_HTPASSWD_REALM
+              value: {{ $name }}
+            - name: REGISTRY_AUTH_HTPASSWD_PATH
+              value: /etc/distribution/auth/htpasswd
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+            - name: htpasswd
+              mountPath: /etc/distribution/auth
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: htpasswd
+          secret:
+            secretName: {{ $name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/component: nhx-builder-registry
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/component: nhx-builder-registry
+    {{- include "nemo-helix.selectorLabels" . | nindent 4 }}
+  ports:
+    - port: 5000
+      targetPort: 5000
+{{- end }}

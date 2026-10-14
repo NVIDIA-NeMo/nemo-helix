@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The builder in a named build namespace, with an external registry, and the user's own Jobs profiles beside the builder's.
+builder:
+  enabled: true
+  namespace: builds
+platformConfig:
+  builder:
+    registry: registry.example.com
+  jobs:
+    executors:
+      - provider: cpu
+        profile: extra
+        backend: kubernetes_job
+        config:
+          service_account_name: default

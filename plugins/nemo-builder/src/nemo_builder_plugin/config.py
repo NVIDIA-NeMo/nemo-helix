@@ -41,8 +41,12 @@ class SandboxConfig(BaseModel):
             "the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have."
         ),
     )
-    cpu: str = Field(default="2", description="CPU request for the sandbox.")
-    memory: str = Field(default="8Gi", description="Memory request for the sandbox.")
+    cpu: str = Field(default="2", description="CPU for each sandbox: its request and its limit.")
+    memory: str = Field(default="8Gi", description="Memory for each sandbox: its request and its limit.")
+    ephemeral_storage: str = Field(
+        default="20Gi",
+        description="Ephemeral storage for each sandbox, its request and its limit: kaniko unpacks each base image into it.",
+    )
     dns_nameservers: list[str] = Field(
         default_factory=lambda: ["8.8.8.8", "1.1.1.1"],
         description=(

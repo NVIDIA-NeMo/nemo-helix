@@ -19,7 +19,7 @@ spec:
       {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
-  {{- if or $api.sameReleasePods.enabled $api.managedJobs.enabled $api.extraIngress }}
+  {{- if or $api.sameReleasePods.enabled $api.managedJobs.enabled $api.extraIngress .Values.builder.enabled }}
   ingress:
     {{- if $api.sameReleasePods.enabled }}
     - from:
@@ -33,6 +33,18 @@ spec:
     {{- if $api.managedJobs.enabled }}
     - from:
         - podSelector:
+            {{- toYaml $api.managedJobs.podSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ default .Values.api.service.port $api.port }}
+    {{- end }}
+    {{- if .Values.builder.enabled }}
+    # The build steps, which run in the build namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "nemo-helix.builder.namespace" . }}
+          podSelector:
             {{- toYaml $api.managedJobs.podSelector | nindent 12 }}
       ports:
         - protocol: TCP
