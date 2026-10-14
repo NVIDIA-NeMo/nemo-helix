@@ -969,7 +969,9 @@ class TestNATAgentExecutor:
         assert result.evidence is not None
         error = result.evidence.require("translation_error", kind="error")
         assert isinstance(error.data, dict)
-        assert "reserved names" in error.data["error"]
+        message = error.data["error"]
+        assert isinstance(message, str)
+        assert "reserved names" in message
 
     @pytest.mark.asyncio
     async def test_translator_must_return_canonical_atif_v1_7(self):
@@ -1016,7 +1018,9 @@ class TestNATAgentExecutor:
         assert result.evidence is not None
         error = result.evidence.require("translation_error", kind="error")
         assert isinstance(error.data, dict)
-        assert "ATIF-v1.7" in error.data["error"]
+        message = error.data["error"]
+        assert isinstance(message, str)
+        assert "ATIF-v1.7" in message
 
     @pytest.mark.asyncio
     async def test_translator_runs_for_partial_stream_and_preserves_partial_status(self):

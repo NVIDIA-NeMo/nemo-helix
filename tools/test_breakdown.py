@@ -90,22 +90,30 @@ class CollectionPlugin:
             self.collected_items.append(TestItem(nodeid=item.nodeid, name=item.name, fspath=fpath, markers=markers))
 
 
+@dataclass
+class DirStats:
+    """Test counts for one top-level directory."""
+
+    total: int = 0
+    markers: defaultdict[str, int] = field(default_factory=lambda: defaultdict(int))
+
+
 def analyze_tests(items: List[TestItem]):
     """Analyze collected tests by directory and markers."""
-    by_dir = defaultdict(lambda: {"total": 0, "markers": defaultdict(int)})
+    by_dir: defaultdict[str, DirStats] = defaultdict(DirStats)
     overall_markers = defaultdict(int)
 
     for item in items:
         top_dir = item.top_dir
 
-        by_dir[top_dir]["total"] += 1
+        by_dir[top_dir].total += 1
 
         # Count markers for this item
         # Note: A test can have multiple markers (e.g., integration AND slow)
         for marker in item.markers:
             # Filter to only the markers we care about for the report to keep it clean
             if marker in ("unit", "integration", "e2e", "regression", "slow"):
-                by_dir[top_dir]["markers"][marker] += 1
+                by_dir[top_dir].markers[marker] += 1
                 overall_markers[marker] += 1
 
     return by_dir, overall_markers
@@ -138,11 +146,11 @@ def print_breakdown(by_dir, overall_markers, total_tests):
     # Sort by directory name
     for dir_name in sorted(by_dir.keys()):
         info = by_dir[dir_name]
-        total = info["total"]
-        unit = info["markers"].get("unit", 0)
-        integration = info["markers"].get("integration", 0)
-        e2e = info["markers"].get("e2e", 0)
-        slow = info["markers"].get("slow", 0)
+        total = info.total
+        unit = info.markers.get("unit", 0)
+        integration = info.markers.get("integration", 0)
+        e2e = info.markers.get("e2e", 0)
+        slow = info.markers.get("slow", 0)
 
         print(f"{dir_name:<60} {total:8d} {unit:6d} {integration:6d} {e2e:6d} {slow:6d}")
 
@@ -151,8 +159,8 @@ def print_breakdown(by_dir, overall_markers, total_tests):
     # Summary by category
     print("\n\nCategory Breakdown:")
     print("-" * 40)
-    services_total = sum(info["total"] for dir_name, info in by_dir.items() if dir_name.startswith("services/"))
-    packages_total = sum(info["total"] for dir_name, info in by_dir.items() if dir_name.startswith("packages/"))
+    services_total = sum(info.total for dir_name, info in by_dir.items() if dir_name.startswith("services/"))
+    packages_total = sum(info.total for dir_name, info in by_dir.items() if dir_name.startswith("packages/"))
     other_total = total_tests - services_total - packages_total
 
     if total_tests > 0:

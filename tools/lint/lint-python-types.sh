@@ -19,7 +19,6 @@ ci_ignored_rules=(
   invalid-return-type      # 18
   invalid-method-override  # 18
   no-matching-overload     # 2
-  unsupported-operator     # 2
 )
 
 ignore_args=()
