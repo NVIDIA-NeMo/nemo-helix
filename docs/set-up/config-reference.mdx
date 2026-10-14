@@ -850,6 +850,8 @@ unsloth:
   default_job_resource_cpu_limit: '4'
   # default: '16Gi'
   default_job_resource_memory_limit: 16Gi
+  # How long a paused training step may take to finish its current step, save a checkpoint, and exit. Past this, the step is stopped and fails. 0 means training cannot be paused. | default: 1800
+  training_pause_deadline_seconds: 1800
   # Default GPU execution profile when the job spec omits training.execution_profile. | default: 'gpu'
   default_training_execution_profile: gpu
 ```

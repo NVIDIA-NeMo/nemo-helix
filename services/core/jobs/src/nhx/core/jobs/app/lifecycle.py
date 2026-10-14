@@ -16,6 +16,7 @@ from nemo_helix_plugin.jobs.types import JobControl
 from nhx.core.jobs.app.constants import (
     DEFAULT_PROFILE,
     DEFAULT_PROVIDER,
+    IMAGE_COMPARISON_DETAILS,
     IMAGE_DIGEST,
     IMAGE_DIGEST_AT_SAVE,
     IMAGE_DIGEST_COMPARISON_SKIPPED,
@@ -205,35 +206,40 @@ def saved_image_digest_for_step(attempt_details: Mapping[str, Any] | None, step_
 
 
 def image_digest_updates(existing: dict[str, Any] | None, observed: str | None) -> dict[str, Any]:
-    """Record the live image digest, and compare it once a saved digest exists.
+    """Record the live image digest, and compare it with the saved one once per resume or rerun.
 
-    The saved digest is ``image_digest_at_save``, copied when the step enters
-    ``paused`` or ``error``. Until that exists, the live digest is overwritten
-    as pods start. The comparison runs on the first reconcile that sees the
-    new pod.
+    ``observed`` is None until the task container starts, for example while the
+    image is still pulling, so nothing is decided then. The saved digest is
+    ``image_digest_at_save``: copied when the step enters ``paused`` or ``error``,
+    or seeded into a rerun's step. A resumed step without one gets a single note
+    that the images were not compared.
     """
-    current = existing or {}
-    saved = current.get(IMAGE_DIGEST_AT_SAVE)
-    has_saved = isinstance(saved, str) and bool(saved)
-    if not has_saved:
-        if observed and current.get(IMAGE_DIGEST) != observed:
-            return {IMAGE_DIGEST: observed}
-        return {}
-
-    updates: dict[str, Any] = {}
-    if observed and current.get(IMAGE_DIGEST) != observed:
-        updates[IMAGE_DIGEST] = observed
-    if IMAGE_DIGEST_WARNING in current or IMAGE_DIGEST_COMPARISON_SKIPPED in current:
-        return updates
     if not observed:
-        updates[IMAGE_DIGEST_COMPARISON_SKIPPED] = "Image digest comparison skipped because the new digest is missing."
+        return {}
+    current = existing or {}
+    updates: dict[str, Any] = {}
+    if current.get(IMAGE_DIGEST) != observed:
+        updates[IMAGE_DIGEST] = observed
+    if any(current.get(key) for key in IMAGE_COMPARISON_DETAILS):
         return updates
-    if observed != saved:
-        updates[IMAGE_DIGEST_WARNING] = (
-            "The training image changed since this state was saved "
-            f"(was {saved}, now {observed}). Training may behave differently or fail to resume."
+    saved = current.get(IMAGE_DIGEST_AT_SAVE)
+    if isinstance(saved, str) and saved:
+        if observed != saved:
+            updates[IMAGE_DIGEST_WARNING] = (
+                "The training image changed since this state was saved "
+                f"(was {saved}, now {observed}). Training may behave differently or fail to resume."
+            )
+    elif current.get(RESUMED_AT):
+        updates[IMAGE_DIGEST_COMPARISON_SKIPPED] = (
+            "Image digests were not compared because none was recorded when the job paused."
         )
     return updates
+
+
+def clear_image_comparison(status_details: dict[str, Any] | None) -> None:
+    """Drop the previous resume's comparison result, so the next pod is compared afresh."""
+    for key in IMAGE_COMPARISON_DETAILS:
+        (status_details or {}).pop(key, None)
 
 
 def storage_window_expired(

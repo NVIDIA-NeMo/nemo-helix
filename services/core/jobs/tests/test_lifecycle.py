@@ -12,6 +12,7 @@ from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.lifecycle import (
     active_ttl_anchor,
     attempt_can_transition,
+    clear_image_comparison,
     describe_paused_exit,
     effective_pause_ttl_seconds,
     image_digest_updates,
@@ -136,10 +137,36 @@ def test_image_digest_comparison():
     saved = {"image_digest_at_save": "sha256:a"}
     assert image_digest_updates(saved, "sha256:a") == {"image_digest": "sha256:a"}
     assert "image_digest_warning" in image_digest_updates(saved, "sha256:b")
-    assert "image_digest_comparison_skipped" in image_digest_updates(saved, None)
-    # The warning or skip note is written once.
+    # The warning is written once.
     warned = {**saved, "image_digest_warning": "changed"}
     assert image_digest_updates(warned, "sha256:c") == {"image_digest": "sha256:c"}
+
+
+def test_a_pod_that_has_not_started_its_container_decides_nothing():
+    """While the new pod pulls its image there is no digest yet, and a later reconcile compares."""
+    saved = {"image_digest_at_save": "sha256:a", "resumed_at": "2026-10-14T00:00:00+00:00"}
+
+    assert image_digest_updates(saved, None) == {}
+    assert "image_digest_warning" in image_digest_updates(saved, "sha256:b")
+
+
+def test_a_resume_without_a_saved_digest_gets_one_note():
+    resumed = {"resumed_at": "2026-10-14T00:00:00+00:00"}
+
+    note = image_digest_updates(resumed, "sha256:a")
+
+    assert set(note) == {"image_digest", "image_digest_comparison_skipped"}
+    assert image_digest_updates({**resumed, **note}, "sha256:a") == {}
+
+
+def test_a_resume_compares_again():
+    """A second pause saves a newer digest, and the warning from the first resume must not block that comparison."""
+    details = {"image_digest": "sha256:b", "image_digest_at_save": "sha256:b", "image_digest_warning": "was a, now b"}
+
+    clear_image_comparison(details)
+
+    assert "image_digest_warning" not in details
+    assert "image_digest_warning" in image_digest_updates(details, "sha256:c")
 
 
 def test_storage_targets_lists_each_backend_that_mounts_storage_once():
