@@ -1291,6 +1291,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-anonymizer
     #   nemo-anonymizer-plugin
     #   nemo-builder-plugin
+    #   nemo-compass
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
     #   nemo-fabric-adapters-remote-agent
@@ -1321,7 +1322,6 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   supabase
     #   supabase-auth
     #   supabase-functions
-    #   trace-ingest
 httpx-retries==0.6.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:3e0b404969a564829d368417964fd21e6b400a10d17c92d29b8bc247ce8186e3 \
     --hash=sha256:d1e52a8f68a5df42de75ab89049d5020b2d0ab2f5f8bceacda008d12aa1257a3
@@ -1380,7 +1380,6 @@ importlib-metadata==8.9.0 ; (platform_machine == 'arm64' and sys_platform == 'da
     #   diffusers
     #   litellm
     #   mlflow-skinny
-insight-agent @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 instructor==1.15.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:00e0ecda80fd9746fb6d082d3f9641e193adb1d8849f0775f91519a82aeff968 \
     --hash=sha256:ea2280c3678d0f6891c4d826104f95624b680e69877113a6345b1d7c9027ba0f
@@ -1523,9 +1522,9 @@ jsonschema==4.26.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     # via
     #   data-designer-engine
     #   harbor
-    #   insight-agent
     #   litellm
     #   mcp
+    #   nemo-compass
     #   nemo-helix
     #   nemo-helix-plugin
     #   nemo-safe-synthesizer
@@ -1734,7 +1733,7 @@ litellm==1.95.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or 
     --hash=sha256:cf014ff515825ad49937b4cdf95616270789311db7841d16702e0a5b1ac5b067
     # via
     #   harbor
-    #   insight-agent
+    #   nemo-compass
     #   nooa
 loguru==0.7.3 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6 \
@@ -1997,7 +1996,7 @@ mypy-extensions==1.0.0 ; (platform_machine == 'arm64' and sys_platform == 'darwi
     # via
     #   nemohelix
     #   typing-inspect
-narwhals==2.24.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+narwhals==2.24.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:42fdedf44e5b2ca7505630d45b4ac3058f38d8485cba9fe1652ca23152df7489 \
     --hash=sha256:b5c0f684ccd9d7475b564111e319a4964abcf2baf79d3cf6b1003d06ac9b828d
     # via scikit-learn
@@ -2006,6 +2005,11 @@ nemo-anonymizer==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwi
     # via
     #   nemo-anonymizer-plugin
     #   nemo-helix
+nemo-compass==0.1.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:6b50a6cc8b13991af5dce5469f5eb8e97103e77f3d59e6f2b90d8a9b4762a0a4
+    # via
+    #   nemo-helix
+    #   nemo-insights-plugin
 nemo-fabric==0.5.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:9308238f62fb1792659c3651bf10cc8bca6e02dd940eeee7802b1e6ce6cf3c5a
     # via
@@ -2158,7 +2162,7 @@ nooa==0.0.10 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     --hash=sha256:8a74d3e62bb4a216d6fcb1ba912b5d9e49ecc0bf8c2d685f808594a816cbe4ca \
     --hash=sha256:91d44a48610b116561d2ddc42ed80a7c4011c7324a67236300d2fe78182d3c78
     # via
-    #   insight-agent
+    #   nemo-compass
     #   nemo-helix
     #   nemo-insights-plugin
 numpy==2.5.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -2196,10 +2200,10 @@ numpy==2.5.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   datasets
     #   diffusers
     #   fastembed
-    #   insight-agent
     #   langchain-aws
     #   langchain-community
     #   matplotlib
+    #   nemo-compass
     #   nemo-helix
     #   nemo-optimization-plugin
     #   nvidia-nat-config-optimizer
@@ -2387,7 +2391,7 @@ openinference-instrumentation==0.1.56 ; (platform_machine == 'arm64' and sys_pla
     --hash=sha256:ae7ae74bd93c0f733cf2649056c94246e1a2d0432ddf9b675dd4e58718094b62 \
     --hash=sha256:c43bea7f1f4460fe13c3c88aff092500cc3397aaffea37188d72246489dcbc9f
     # via
-    #   insight-agent
+    #   nemo-compass
     #   nooa
     #   openinference-instrumentation-litellm
 openinference-instrumentation-litellm==0.1.35 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -2468,7 +2472,7 @@ opentelemetry-exporter-otlp-proto-http==1.43.0 ; (platform_machine == 'arm64' an
     --hash=sha256:647f603aa8efdbdb4dbff842e0729d0406a6fff26b295a72d3d60e7d963b2610 \
     --hash=sha256:fa8a42bb7d00ee5391f4c0b04d8e6a46c03caa437903296ab73a81dc11ba118f
     # via
-    #   insight-agent
+    #   nemo-compass
     #   nhx-common
     #   opentelemetry-exporter-otlp
     #   wandb
@@ -3002,7 +3006,6 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   fastmcp-slim
     #   google-genai
     #   harbor
-    #   insight-agent
     #   instructor
     #   langchain
     #   langchain-anthropic
@@ -3019,6 +3022,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nemo-anonymizer
     #   nemo-automodel-plugin
     #   nemo-builder-plugin
+    #   nemo-compass
     #   nemo-customizer-plugin
     #   nemo-deployments-plugin
     #   nemo-evals-plugin
@@ -3066,7 +3070,6 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   sqlmodel
     #   storage3
     #   supabase-auth
-    #   trace-ingest
     #   unsloth
     #   wandb
 pydantic-core==2.46.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -3108,11 +3111,11 @@ pydantic-settings==2.14.2 ; (platform_machine == 'arm64' and sys_platform == 'da
     #   data-designer-retrieval-sdg
     #   fastapi
     #   fastmcp-slim
-    #   insight-agent
     #   langchain-community
     #   mcp
     #   nemo-anonymizer
     #   nemo-automodel-plugin
+    #   nemo-compass
     #   nemo-helix
     #   nemo-helix-plugin
     #   nemo-optimization-plugin
@@ -3192,9 +3195,9 @@ python-dotenv==1.2.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin'
     # via
     #   fastmcp-slim
     #   harbor
-    #   insight-agent
     #   litellm
     #   mlflow-skinny
+    #   nemo-compass
     #   nvidia-nat-core
     #   pydantic-settings
     #   pymilvus
@@ -3270,7 +3273,6 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   garak-api
     #   harbor
     #   huggingface-hub
-    #   insight-agent
     #   jsonschema-path
     #   kubernetes
     #   langchain-classic
@@ -3279,6 +3281,7 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   mlflow-skinny
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
+    #   nemo-compass
     #   nemo-deployments-plugin
     #   nemo-fabric
     #   nemo-garak-plugin
@@ -3415,8 +3418,8 @@ rich==14.3.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   data-designer-engine
     #   fastmcp-slim
     #   harbor
-    #   insight-agent
     #   instructor
+    #   nemo-compass
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-safe-synthesizer
@@ -3530,7 +3533,7 @@ scantree==0.0.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or 
     --hash=sha256:15bd5cb24483b04db2c70653604e8ea3522e98087db7e38ab8482f053984c0ac \
     --hash=sha256:7616ab65aa6b7f16fcf8e6fa1d9afaa99a27ab72bba05c61b691853b96763174
     # via dirhash
-scikit-learn==1.9.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+scikit-learn==1.9.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:056c92bb67ad4c28463c2f2653d9701449201e7e7a9e94e321be0f71c4fef2b8 \
     --hash=sha256:147e9329ef0e39f75d4cffa02b2aa48d827832684926cd5210d9a2cb5c57246b \
     --hash=sha256:1fea2cc5677ab49d6f5bade978c866da44957b712d92e9635e8b4f723013c3cb \
@@ -3545,7 +3548,7 @@ scikit-learn==1.9.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin')
     --hash=sha256:da76d09304a4706db7cc1e3ebaa3b6b98a67365cc11d2996c4f1e58ba47df714 \
     --hash=sha256:ee1a8db2c18c08e34c7412d4b10be1cac214cd4ea7dc9715a6a327eb49a37c96
     # via
-    #   insight-agent
+    #   nemo-compass
     #   sentence-transformers
 scikit-network==0.33.5 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:2408d3f4c81256a3193d536aad4a6ffcfbb05d096abe6a9cc0b6b5e275df876d \
@@ -3809,7 +3812,7 @@ tenacity==9.1.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or 
     #   nhx-models
     #   nhx-rl
     #   nhx-unsloth
-threadpoolctl==3.6.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+threadpoolctl==3.6.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb \
     --hash=sha256:8ab8b4aa3491d812b623328249fab5302a68d2d71745c8a4c719a2fcaba9f44e
     # via scikit-learn
@@ -3855,8 +3858,8 @@ tokenizers==0.22.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     --hash=sha256:473b83b915e547aa366d1eee11806deaf419e17be16310ac0a14077f1e28f917
     # via
     #   fastembed
-    #   insight-agent
     #   litellm
+    #   nemo-compass
     #   transformers
 toml==0.10.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b \
@@ -3945,8 +3948,6 @@ tqdm==4.70.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   transformers
     #   unsloth
     #   unsloth-zoo
-trace-ingest @ git+https://github.com/NVIDIA-NeMo/nemo-compass.git@8cdf744f417b89d46cd91543c0fe771868850c42#subdirectory=packages/trace-ingest ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via insight-agent
 transformers==5.5.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:821a9ff0961abbb29eb1eb686d78df1c85929fdf213a3fe49dc6bd94f9efa944 \
     --hash=sha256:c8db656cf51c600cd8c75f06b20ef85c72e8b8ff9abc880c5d3e8bc70e0ddcbd

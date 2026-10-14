@@ -96,7 +96,7 @@ def _stub_pipeline(monkeypatch: pytest.MonkeyPatch, seen: dict[str, object]) -> 
     monkeypatch.setattr(run_module, "setup_analyst_observability", lambda **_kwargs: Observability())
 
 
-@pytest.mark.parametrize("missing_dependency", ["insight_agent", "trace_ingest", "unexpected_dependency"])
+@pytest.mark.parametrize("missing_dependency", ["compass", "trace_ingest", "unexpected_dependency"])
 def test_missing_analyst_dependencies(missing_dependency: str) -> None:
     # A fresh process exercises adapter imports without cached analyst dependencies.
     script = """
@@ -106,7 +106,7 @@ import sys
 from unittest.mock import AsyncMock
 
 missing = sys.argv[1]
-blocked = "insight_agent" if missing == "unexpected_dependency" else missing
+blocked = "compass" if missing == "unexpected_dependency" else missing
 
 class BlockDependency(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
@@ -128,8 +128,7 @@ async def check():
         else:
             assert error.__cause__.name == missing
             message = str(error)
-            for text in ("insight-agent", "trace-ingest", "uv tool", "virtual-environment",
-                         "#install-analyst-dependencies-for-pypi-installations"):
+            for text in ("nemo-compass==0.1.0", "Python 3.12 or 3.13", "nemo-helix[all]"):
                 assert text in message
     else:
         raise AssertionError("Missing dependency did not fail analyst execution")

@@ -5,21 +5,21 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from insight_agent.compass_signals.anomaly_and_patterns.signal import (
+from compass.compass_signals.anomaly_and_patterns.signal import (
     AnomalyAndPatternsAnalysis,
     AnomalyAndPatternsArtifacts,
     AnomalyAndPatternsConfig,
     CrossToolFailureGroup,
 )
-from insight_agent.compass_signals.compass_signals import CompassSignalResult
-from insight_agent.compass_signals.tool_issues.signal import (
+from compass.compass_signals.compass_signals import CompassSignalResult
+from compass.compass_signals.tool_issues.signal import (
     ToolIssueConfig,
     ToolIssueEvidenceArtifacts,
     build_cards,
 )
-from insight_agent.insight import Insight
-from insight_agent.insight import SpanEvidence as CompassSpanEvidence
-from insight_agent.insight import TraceEvidence as CompassTraceEvidence
+from compass.insight import Insight
+from compass.insight import SpanEvidence as CompassSpanEvidence
+from compass.insight import TraceEvidence as CompassTraceEvidence
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients
 from nemo_insights_plugin.analyst import trace_intel
 from nemo_insights_plugin.analyst.analyst_backend import RemoteAnalystBackend
