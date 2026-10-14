@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import nhx_evals_sdk.inference as inference
 import pyarrow as pa
 import pytest
-from nhx_evals_sdk.agent_inference import AgentInvocationResult, AgentInvocationStatus
+from nhx_evals_sdk.agent_inference import AgentInvocationResult, AgentInvocationStatus, invoke_agent
 from nhx_evals_sdk.datasets.loader import discover_files, normalize_dataset, rows_from_dataset, split_glob_path
 from nhx_evals_sdk.enums import AgentFormat, MetricType, ModelFormat
 from nhx_evals_sdk.execution.backends.local.backend import LocalBackend
@@ -32,6 +33,7 @@ from nhx_evals_sdk.execution.metric_execution import (
     evaluate_metric,
     generate_online_sample,
     generate_online_sample_agent,
+    resolve_target_structured_output_mode,
     run_generated_sample_scoring_pipeline,
     run_sync,
 )
@@ -44,6 +46,8 @@ from nhx_evals_sdk.metrics.hooks import HooksBase
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric as RuntimeLLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nhx_evals_sdk.metrics.utils import metric_type_name
+from nhx_evals_sdk.resilience.api import run_with_resilience, use_resilience_session
+from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime
 from nhx_evals_sdk.resolvers import LocalSecretResolver, _candidate_env_names
 from nhx_evals_sdk.structured_output import StructuredOutputMode
 from nhx_evals_sdk.values.agents import Agent, GenericAgent
@@ -701,6 +705,32 @@ class TestTargetStructuredOutputPreflight:
         assert generation, "expected a generation request"
         assert generation[0]["extra_body"]["nvext"]["guided_json"] is not None
 
+    @pytest.mark.asyncio
+    async def test_probe_requests_are_not_counted_as_target_runtime(self):
+        async def probe_through_scheduler(model, request, max_retries, **kwargs):
+            async def answer() -> dict:
+                await asyncio.sleep(0.01)
+                return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
+
+            return await run_with_resilience("probe-endpoint", answer, max_attempts=1)
+
+        params = RunConfigOnlineModel(
+            parallelism=1,
+            structured_output={"schema": {"type": "object", "properties": {"a": {"type": "string"}}}},
+        )
+        preprocess_hooks, _ = inference.new_hooks(params)
+
+        async with use_resilience_session():
+            with measure_target_runtime() as runtime:
+                await resolve_target_structured_output_mode(
+                    preprocess_hooks=preprocess_hooks,
+                    model=_make_model(),
+                    inference_fn=probe_through_scheduler,
+                    params=params,
+                )
+
+        assert runtime.seconds is None
+
 
 class TestBenchmarkPathStructuredOutput:
     """The multi-metric LocalBackend path bypasses evaluate_metric and must still probe."""
@@ -852,6 +882,47 @@ class TestGenerateOnlineSample:
         assert sample["response"] == processed_response
         assert sample["invocation_status"] == "completed"
         hook.postprocess.assert_called_once_with(raw_response, id="0")
+
+    @pytest.mark.asyncio
+    async def test_measures_agent_runtime_through_the_resilience_scheduler(self):
+        async def slow_agent(request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(0.05)
+            return httpx.Response(200, json={"output": "done"})
+
+        async with (
+            use_resilience_session(),
+            httpx.AsyncClient(transport=httpx.MockTransport(slow_agent)) as client,
+        ):
+            with measure_target_runtime() as runtime:
+                sample = await generate_online_sample(
+                    target=_make_agent(),
+                    row={"prompt": "hello"},
+                    index=0,
+                    prompt_template={"messages": [{"role": "user", "content": "{{item.prompt}}"}]},
+                    inference_fn=invoke_agent,
+                    client=client,
+                )
+
+        assert sample["output_text"] == "done"
+        assert runtime.seconds is not None and runtime.seconds >= 0.05
+        assert "runtime_sec" not in sample
+
+    @pytest.mark.asyncio
+    async def test_custom_inference_fn_runtime_falls_back_to_the_call_duration(self):
+        async def custom_inference(model: Model, request: dict, max_retries: int | None, **kwargs) -> dict:
+            await asyncio.sleep(0.05)
+            return {"choices": [{"message": {"content": "done"}}]}
+
+        with measure_target_runtime() as runtime:
+            await generate_online_sample(
+                target=_make_model(),
+                row={"prompt": "hello"},
+                index=0,
+                prompt_template={"messages": [{"role": "user", "content": "{{item.prompt}}"}]},
+                inference_fn=custom_inference,
+            )
+
+        assert runtime.seconds is not None and runtime.seconds >= 0.05
 
 
 class TestGenerateOnlineSampleAgent:
@@ -1738,6 +1809,47 @@ class TestEvaluateMetricOnline:
         assert result.aggregate_scores.scores[0].count == 0
         assert result.aggregate_scores.scores[0].nan_count == 1
         metric.compute_scores.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rows_record_generation_runtime_whether_inference_succeeds_or_fails(self, mocker: MockerFixture):
+        async def _fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs) -> dict:
+            await asyncio.sleep(0.02)
+            if "fail" in json.dumps(request):
+                raise RuntimeError("gen bad")
+            return {"choices": [{"message": {"content": "world"}}]}
+
+        mocker.patch(
+            "nhx_evals_sdk.execution.metric_execution.inference.make_inference_request",
+            new_callable=AsyncMock,
+            side_effect=_fake_inference,
+        )
+
+        result = await evaluate_metric(
+            _make_test_metric(),
+            rows=[{"prompt": "hello"}, {"prompt": "fail"}],
+            target=_make_model(),
+            params=RunConfigOnlineModel(parallelism=1, ignore_request_failure=True),
+        )
+
+        succeeded, failed = result.row_scores
+        assert failed.metric_errors
+        for row_score in (succeeded, failed):
+            assert row_score.runtime_sec is not None and row_score.runtime_sec >= 0.02
+            assert "runtime_sec" not in row_score.sample
+        records = result.to_records()
+        assert [record["runtime_sec"] for record in records] == [succeeded.runtime_sec, failed.runtime_sec]
+        assert all("sample.runtime_sec" not in record for record in records)
+
+    @pytest.mark.asyncio
+    async def test_offline_rows_have_no_generation_runtime(self, mocker: MockerFixture):
+        result = await evaluate_metric(
+            _make_test_metric(),
+            rows=[{"prompt": "hello", "output_text": "world"}],
+            params=RunConfig(),
+        )
+
+        assert result.row_scores[0].runtime_sec is None
+        assert "runtime_sec" not in result.to_records()[0]
 
     @pytest.mark.asyncio
     async def test_metric_failure_raises_evaluation_error_with_strict_mode(self, mocker: MockerFixture):

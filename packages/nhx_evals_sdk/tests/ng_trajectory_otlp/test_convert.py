@@ -218,6 +218,60 @@ def test_each_captured_model_call_becomes_its_own_timed_span() -> None:
     assert llm[0].span_id != llm[1].span_id
 
 
+def test_the_root_spans_from_the_first_captured_call_start_to_the_last_end() -> None:
+    calls = [
+        _capture(started_at=1788534871.0, completed_at=1788534874.0),
+        _capture(model_call_id="c1", started_at=1788534870.5, completed_at=1788534872.0),
+    ]
+
+    root = _spans({"response": {}}, model_calls=calls)[0]
+
+    assert root.start_time_unix_nano == 1788534870_500_000_000
+    assert root.end_time_unix_nano == 1788534874_000_000_000
+
+
+def test_without_timed_calls_the_root_stays_untimed_rather_than_zero_length() -> None:
+    uncaptured = _spans({"response": {}})[0]
+    untimed_capture = _spans({"response": {}}, model_calls=[_capture(started_at=None, completed_at=None)])[0]
+
+    assert (uncaptured.start_time_unix_nano, uncaptured.end_time_unix_nano) == (0, 0)
+    assert (untimed_capture.start_time_unix_nano, untimed_capture.end_time_unix_nano) == (0, 0)
+
+
+def test_half_timed_calls_that_would_end_the_root_before_it_starts_leave_it_untimed() -> None:
+    calls = [
+        _capture(started_at=None, completed_at=1788534870.5),
+        _capture(model_call_id="c1", started_at=1788534872.0, completed_at=None),
+    ]
+
+    root = _spans({"response": {}}, model_calls=calls)[0]
+
+    assert (root.start_time_unix_nano, root.end_time_unix_nano) == (0, 0)
+
+
+def test_a_half_timed_call_starting_after_the_last_end_leaves_the_root_untimed() -> None:
+    calls = [
+        _capture(started_at=1788534870.0, completed_at=1788534871.0),
+        _capture(model_call_id="c1", started_at=1788534873.0, completed_at=None),
+    ]
+
+    root = _spans({"response": {}}, model_calls=calls)[0]
+
+    assert (root.start_time_unix_nano, root.end_time_unix_nano) == (0, 0)
+
+
+def test_a_half_timed_call_inside_the_window_still_times_the_root() -> None:
+    calls = [
+        _capture(started_at=1788534870.0, completed_at=1788534874.0),
+        _capture(model_call_id="c1", started_at=1788534871.0, completed_at=None),
+    ]
+
+    root = _spans({"response": {}}, model_calls=calls)[0]
+
+    assert root.start_time_unix_nano == 1788534870_000_000_000
+    assert root.end_time_unix_nano == 1788534874_000_000_000
+
+
 def test_a_captured_call_reports_its_own_tokens_including_the_cached_ones() -> None:
     attributes = _attributes(
         [span for span in _spans({"response": {}}, model_calls=[_capture()]) if _kind(span) == "LLM"][0]

@@ -126,6 +126,7 @@ async def score_row(
     fail_fast: bool,
     generation_requests: list[dict[str, Any]],
     logger: Logger | None = None,
+    runtime_sec: float | None = None,
 ) -> tuple[int, MetricResult | None, RowScore]:
     """Score an already-prepared sample for one row.
 
@@ -141,6 +142,7 @@ async def score_row(
         generation_requests: Requests collected before metric scoring,
             such as online generation requests.
         logger: Optional logger override for row-scoring logs.
+        runtime_sec: Seconds the target spent generating ``sample``, if measured.
     Returns:
         Tuple of ``(index, metric_result_or_none, row_score_payload)``.
 
@@ -174,6 +176,7 @@ async def score_row(
                 sample=sample,
                 metrics={metric_key: result.outputs},
                 requests=[*generation_requests, *metric_requests],
+                runtime_sec=runtime_sec,
                 metric_diagnostics={metric_key: result.diagnostics} if result.diagnostics else None,
             ),
         )
@@ -196,6 +199,7 @@ async def score_row(
                 sample=sample,
                 metrics={metric_key: result.outputs},
                 requests=[*generation_requests, *metric_requests],
+                runtime_sec=runtime_sec,
                 metric_errors={metric_key: str(e)},
             ),
         )

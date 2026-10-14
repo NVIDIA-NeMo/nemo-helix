@@ -7,11 +7,13 @@ import httpx
 import pytest
 from nhx_evals_sdk.resilience.config import ResilienceConfig
 from nhx_evals_sdk.resilience.scheduler import (
+    ResilienceCancelledError,
     ResilienceDeadlineExceededError,
     ResilienceMaxAttemptsExceededError,
     ResilienceQueueFullError,
     ResilienceScheduler,
 )
+from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime, timed_target_call, untimed
 
 
 @pytest.mark.asyncio
@@ -251,3 +253,209 @@ async def test_scheduler_retry_budget_exhaustion_does_not_leak_inflight_or_queue
     controller = await scheduler._get_controller(endpoint)  # noqa: SLF001
     assert controller.state.inflight == 0
     assert controller.state.queued == 0
+
+
+class _ManualClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def _no_wait_config(**overrides: int) -> ResilienceConfig:
+    return ResilienceConfig(
+        backoff_initial_ms=0.0,
+        backoff_cap_ms=0.0,
+        cooldown_seconds_soft=0.0,
+        cooldown_seconds_hard=0.0,
+        **overrides,
+    )
+
+
+@pytest.mark.asyncio
+async def test_target_runtime_excludes_retried_attempts():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+    call_count = 0
+
+    async def slow_failure_then_success() -> str:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            clock.now += 50.0
+            raise httpx.ReadTimeout("timeout")
+        clock.now += 7.0
+        return "ok"
+
+    with measure_target_runtime() as runtime:
+        result = await scheduler.run_with_resilience(
+            "endpoint-timing", slow_failure_then_success, max_attempts=2, deadline_at=None
+        )
+
+    assert result == "ok"
+    assert runtime.seconds == 7.0
+
+
+@pytest.mark.asyncio
+async def test_target_runtime_counts_the_attempt_that_failed_the_call():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+
+    async def always_times_out() -> str:
+        clock.now += 60.0
+        raise httpx.ReadTimeout("timeout")
+
+    with measure_target_runtime() as runtime, pytest.raises(ResilienceMaxAttemptsExceededError):
+        await scheduler.run_with_resilience("endpoint-timing-fail", always_times_out, max_attempts=2, deadline_at=None)
+
+    assert runtime.seconds == 60.0
+
+
+@pytest.mark.asyncio
+async def test_target_runtime_sums_every_call_made_for_one_sample():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+
+    def step(seconds: float):
+        async def run() -> str:
+            clock.now += seconds
+            return "ok"
+
+        return run
+
+    with measure_target_runtime() as runtime:
+        for seconds in (4.0, 5.0, 1.0):
+            await scheduler.run_with_resilience("endpoint-multi-step", step(seconds), max_attempts=1, deadline_at=None)
+
+    assert runtime.seconds == 10.0
+
+
+@pytest.mark.asyncio
+async def test_target_runtime_and_latency_exclude_time_waiting_for_a_concurrency_slot():
+    clock = _ManualClock()
+    config = _no_wait_config(endpoint_initial_limit=1, endpoint_max_limit=1)
+    scheduler = ResilienceScheduler(config, clock=clock)
+    endpoint = "endpoint-queued"
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def first_call() -> str:
+        first_started.set()
+        await release_first.wait()
+        clock.now += 30.0
+        return "first"
+
+    async def second_call() -> str:
+        clock.now += 2.0
+        return "second"
+
+    async def run_second() -> float | None:
+        with measure_target_runtime() as runtime:
+            await scheduler.run_with_resilience(endpoint, second_call, max_attempts=1, deadline_at=None)
+        return runtime.seconds
+
+    first = asyncio.create_task(scheduler.run_with_resilience(endpoint, first_call, max_attempts=1, deadline_at=None))
+    await first_started.wait()
+    second = asyncio.create_task(run_second())
+    await asyncio.sleep(0)
+    release_first.set()
+    await first
+
+    assert await second == 2.0
+    controller = await scheduler._get_controller(endpoint)  # noqa: SLF001
+    assert controller.state.latency_ewma == pytest.approx(0.2 * 2.0 + 0.8 * 30.0)
+
+
+@pytest.mark.asyncio
+async def test_target_runtime_keeps_a_failed_call_when_a_later_call_succeeds():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+
+    async def times_out() -> str:
+        clock.now += 60.0
+        raise httpx.ReadTimeout("timeout")
+
+    async def answers() -> str:
+        clock.now += 5.0
+        return "ok"
+
+    with measure_target_runtime() as runtime:
+        with pytest.raises(ResilienceMaxAttemptsExceededError):
+            await scheduler.run_with_resilience("endpoint-a", times_out, max_attempts=2, deadline_at=None)
+        await scheduler.run_with_resilience("endpoint-b", answers, max_attempts=1, deadline_at=None)
+
+    assert runtime.seconds == 65.0
+
+
+@pytest.mark.asyncio
+async def test_target_runtime_is_unknown_when_the_scheduler_never_dispatched():
+    scheduler = ResilienceScheduler(_no_wait_config(endpoint_max_queued=0))
+
+    async def answers() -> str:
+        return "ok"
+
+    with measure_target_runtime() as runtime, timed_target_call(), pytest.raises(ResilienceQueueFullError):
+        await scheduler.run_with_resilience("endpoint-full", answers, max_attempts=1, deadline_at=None)
+
+    assert runtime.seconds is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_attempt_leaves_the_sample_runtime_unknown():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+    started = asyncio.Event()
+
+    async def hangs() -> str:
+        started.set()
+        clock.now += 12.0
+        await asyncio.Event().wait()
+        return "never"
+
+    with measure_target_runtime() as runtime:
+        task = asyncio.create_task(
+            scheduler.run_with_resilience("endpoint-cancelled", hangs, max_attempts=1, deadline_at=None)
+        )
+        await started.wait()
+        task.cancel()
+        with pytest.raises(ResilienceCancelledError):
+            await task
+
+    assert runtime.seconds is None
+
+
+@pytest.mark.asyncio
+async def test_operation_kwargs_named_like_scheduler_internals_pass_through():
+    scheduler = ResilienceScheduler(_no_wait_config())
+
+    async def echo(*, operation_key: str, attempt: int) -> tuple[str, int]:
+        return operation_key, attempt
+
+    result = await scheduler.run_with_resilience(
+        "endpoint-kwargs",
+        echo,
+        max_attempts=1,
+        deadline_at=None,
+        operation_key="body",  # ty: ignore[invalid-argument-type]
+        attempt=3,  # ty: ignore[invalid-argument-type]
+    )
+
+    assert result == ("body", 3)
+
+
+@pytest.mark.asyncio
+async def test_untimed_calls_stay_out_of_the_target_runtime():
+    clock = _ManualClock()
+    scheduler = ResilienceScheduler(_no_wait_config(), clock=clock)
+
+    async def answers() -> str:
+        clock.now += 5.0
+        return "ok"
+
+    with measure_target_runtime() as runtime:
+        with untimed():
+            await scheduler.run_with_resilience("endpoint-probe", answers, max_attempts=1, deadline_at=None)
+        await scheduler.run_with_resilience("endpoint-target", answers, max_attempts=1, deadline_at=None)
+
+    assert runtime.seconds == 5.0

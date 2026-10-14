@@ -22,6 +22,7 @@ from nhx_evals_sdk.resilience.policy import (
     pressure,
     retry_wait_seconds,
 )
+from nhx_evals_sdk.resilience.target_runtime import record_attempt, record_scheduled_call
 from nhx_evals_sdk.resilience.types import (
     ClassifierResult,
     Clock,
@@ -120,14 +121,16 @@ class ResilienceScheduler:
                 "deadline_at": deadline_at,
             },
         )
+        record_scheduled_call()
         controller = await self._get_controller(endpoint_key)
         async with controller.lock:
             controller.state.counters.operations_started += 1
         async with self._lock:
             self._metrics.operations_started += 1
+        operation_key = object()
         for attempt in range(1, max_attempts + 1):
             try:
-                result = await self._run_once(endpoint_key, operation, *args, attempt=attempt, **kwargs)
+                result = await self._run_once(endpoint_key, operation, attempt, operation_key, *args, **kwargs)
             except ResilienceCancelledError:
                 raise
             except Exception as exc:
@@ -206,8 +209,10 @@ class ResilienceScheduler:
         self,
         endpoint_key: str,
         operation: Callable[_P, Awaitable[_T]],
+        attempt: int,
+        operation_key: object,
+        /,
         *args: _P.args,
-        attempt: int,  # ty: ignore[invalid-paramspec]
         **kwargs: _P.kwargs,
     ) -> _T:
         controller = await self._get_controller(endpoint_key)
@@ -215,17 +220,21 @@ class ResilienceScheduler:
 
         endpoint_acquired = False
         global_acquired = False
-        dispatched = False
-        started = self.now()
+        dispatched_at: float | None = None
+        succeeded = False
+        cancelled = False
         try:
             await controller.limiter.acquire()
             endpoint_acquired = True
             await self._global_limiter.acquire()
             global_acquired = True
             await self._on_dispatch(controller.state, attempt=attempt)
-            dispatched = True
-            return await operation(*args, **kwargs)
+            dispatched_at = self.now()
+            result = await operation(*args, **kwargs)
+            succeeded = True
+            return result
         except asyncio.CancelledError as exc:
+            cancelled = True
             async with controller.lock, self._lock:
                 self._metrics.cancellations += 1
                 controller.state.counters.cancellations += 1
@@ -236,8 +245,13 @@ class ResilienceScheduler:
                 cause=exc,
             ) from exc
         finally:
-            elapsed = max(0.0, self.now() - started)
-            await self._on_complete(controller.state, dispatched=dispatched, elapsed_seconds=elapsed)
+            elapsed = 0.0
+            if dispatched_at is not None:
+                elapsed = max(0.0, self.now() - dispatched_at)
+                # A cancelled attempt measured neither a response nor a failure, so it says nothing about the target.
+                if not cancelled:
+                    record_attempt(elapsed, succeeded=succeeded, operation=operation_key)
+            await self._on_complete(controller.state, dispatched=dispatched_at is not None, elapsed_seconds=elapsed)
             if global_acquired:
                 self._global_limiter.release()
             if endpoint_acquired:

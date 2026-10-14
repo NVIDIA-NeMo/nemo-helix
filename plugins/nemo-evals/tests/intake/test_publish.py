@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 import pytest
 from nemo_evals.intake.publish import PublishError, _token_final_metrics, publish_to_intake
+from nemo_evals.intake.row_adapter import row_result_to_agent_eval_result
 from nemo_helix_plugin.client.errors import NotFoundError, UnprocessableEntityError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.intake.types import (
@@ -35,6 +36,7 @@ from nhx_evals_sdk.agent_eval.trials import (
 )
 from nhx_evals_sdk.metrics.protocol import MetricOutput
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from nhx_evals_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
 from pydantic import ValidationError
 
 # --- fakes ------------------------------------------------------------------
@@ -276,6 +278,54 @@ async def test_publishes_trajectory_and_scores() -> None:
     )
 
 
+async def test_an_agent_row_trial_publishes_its_runtime_as_the_trajectory_window() -> None:
+    row = RowScore(
+        row_index=0,
+        item={"prompt": "2+2?"},
+        sample={"output_text": "4", "response": {"choices": []}},
+        metrics={},
+        requests=[],
+        runtime_sec=37.25,
+    )
+    result = row_result_to_agent_eval_result(
+        EvaluationResult(row_scores=[row], aggregate_scores=AggregatedMetricResult(scores=[])),
+        run_id="job-1",
+        started_at=STARTED_AT,
+    )
+    client = _FakeClient()
+
+    await publish_to_intake(result, client=client, experiment_id="exp-1")
+
+    (step,) = client.atif_calls[0]["steps"]
+    invocation = step["extra"]["invocation"]
+    assert invocation["start_timestamp"] == STARTED_AT.timestamp()
+    assert invocation["end_timestamp"] - invocation["start_timestamp"] == 37.25
+
+
+async def test_a_row_whose_generation_failed_publishes_an_errored_trajectory() -> None:
+    row = RowScore(
+        row_index=0,
+        item={"prompt": "2+2?"},
+        sample={"output_text": None, "response": {}, "inference_error": "Row 0 failed inference: timed out"},
+        metrics={},
+        requests=[],
+        runtime_sec=4.0,
+    )
+    result = row_result_to_agent_eval_result(
+        EvaluationResult(row_scores=[row], aggregate_scores=AggregatedMetricResult(scores=[])),
+        run_id="job-1",
+        started_at=STARTED_AT,
+    )
+    client = _FakeClient()
+
+    await publish_to_intake(result, client=client, experiment_id="exp-1")
+
+    assert client.atif_calls[0]["extra"]["error"] == {
+        "type": "InferenceError",
+        "message": "Row 0 failed inference: timed out",
+    }
+
+
 async def test_publish_revalidates_model_copy_corrupted_measurements_before_network_calls() -> None:
     trial = _trial("t-1").model_copy(update={"measurements": TrialMeasurements(prompt_tokens=8, completion_tokens=2)})
     result = _result([trial], [])
@@ -476,6 +526,40 @@ async def test_a_rejected_trajectory_falls_back_instead_of_failing_the_trial(tmp
     assert report.trial_count == 1
 
 
+async def test_a_trial_with_an_untimed_recorded_trajectory_publishes_its_runtime(tmp_path: Path) -> None:
+    trace = tmp_path / "trajectory.json"
+    trace.write_text(
+        json.dumps(
+            {
+                "schema_version": "ATIF-v1.7",
+                "session_id": "s",
+                "agent": {"name": "codex", "version": "1.0"},
+                "steps": [
+                    {"step_id": 1, "source": "user", "message": "q"},
+                    {"step_id": 2, "source": "agent", "message": "a"},
+                ],
+            }
+        )
+    )
+    trial = AgentEvalTrial(
+        id="t-1",
+        task_id="task-1",
+        status=AgentEvalTrialStatus.COMPLETED,
+        output=AgentOutput(output_text="a"),
+        evidence=CandidateEvidence(
+            descriptors={"trace": EvidenceDescriptor(kind="trace", format="atif", ref=str(trace))}
+        ),
+        measurements=TrialMeasurements(runtime_sec=12.5),
+    )
+    client = _FakeClient()
+
+    await publish_to_intake(_result([trial], []), client=client, experiment_id="exp-1")
+
+    *_, last_step = client.atif_calls[0]["steps"]
+    invocation = last_step["extra"]["invocation"]
+    assert invocation["end_timestamp"] - invocation["start_timestamp"] == 12.5
+
+
 # --- OTLP publish path ------------------------------------------------------
 
 _OTLP_TRACE_ID = "0123456789abcdef0123456789abcdef"
@@ -648,6 +732,42 @@ async def test_a_span_without_a_start_time_is_given_the_runs() -> None:
     assert sent.resource_spans[0].scope_spans[0].spans[0].start_time_unix_nano == int(
         STARTED_AT.timestamp() * 1_000_000_000
     )
+
+
+async def test_an_untimed_root_span_is_given_the_trials_runtime_as_its_end() -> None:
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    trial = _otlp_trial().model_copy(update={"measurements": TrialMeasurements(runtime_sec=45.0)})
+    client = _client()
+
+    await publish_to_intake(_result([trial], []), client=client, experiment_id="exp-1", agent_name="a")
+
+    sent = ExportTraceServiceRequest()
+    sent.ParseFromString(client.otlp_calls[0]["body"])
+    root = sent.resource_spans[0].scope_spans[0].spans[0]
+    assert root.end_time_unix_nano - root.start_time_unix_nano == 45_000_000_000
+
+
+async def test_a_root_span_with_its_own_end_keeps_it_over_the_trials_runtime() -> None:
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    spans = [{"traceId": _OTLP_TRACE_ID, "spanId": _OTLP_SPAN_ID, "name": "agent run", "endTimeUnixNano": "2000"}]
+    trace = EvidenceDescriptor(
+        kind="trace", format="otlp", data={"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+    )
+    trial = _trial("t-1").model_copy(
+        update={
+            "evidence": CandidateEvidence(descriptors={"trace": trace}),
+            "measurements": TrialMeasurements(runtime_sec=45.0),
+        }
+    )
+    client = _client()
+
+    await publish_to_intake(_result([trial], []), client=client, experiment_id="exp-1", agent_name="a")
+
+    sent = ExportTraceServiceRequest()
+    sent.ParseFromString(client.otlp_calls[0]["body"])
+    assert sent.resource_spans[0].scope_spans[0].spans[0].end_time_unix_nano == 2000
 
 
 async def test_a_failed_trial_marks_its_root_span_failed() -> None:

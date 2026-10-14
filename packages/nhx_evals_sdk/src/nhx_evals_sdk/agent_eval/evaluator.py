@@ -66,6 +66,7 @@ from nhx_evals_sdk.execution.metric_execution import (
     resolve_target_structured_output_mode,
     run_sync,
 )
+from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime
 from nhx_evals_sdk.session import begin_evaluation_session
 from nhx_evals_sdk.execution.samples import build_metric_input
 from nhx_evals_sdk.inference import InferenceFn
@@ -393,23 +394,24 @@ class AgentEvaluator:
                                 metadata=agent_eval_context,
                             )
                         )
-                    try:
-                        sample = await _generate_sample(
-                            target=target,
-                            row=_task_row(task),
-                            index=index,
-                            prompt_template=prompt_template,
-                            params=params,
-                            inference_fn=resolved_inference_fn,
-                            client=client,
-                            default_headers=self.default_headers,
-                            agent_eval_context=agent_eval_context,
-                        )
-                    except Exception as exc:
-                        if params.ignore_request_failure:
-                            return _failed_generation_trial(task, target, exc)
-                        raise
-                    return _trial_from_sample(task, target, sample)
+                    with measure_target_runtime() as target_runtime:
+                        try:
+                            sample = await _generate_sample(
+                                target=target,
+                                row=_task_row(task),
+                                index=index,
+                                prompt_template=prompt_template,
+                                params=params,
+                                inference_fn=resolved_inference_fn,
+                                client=client,
+                                default_headers=self.default_headers,
+                                agent_eval_context=agent_eval_context,
+                            )
+                        except Exception as exc:
+                            if params.ignore_request_failure:
+                                return _failed_generation_trial(task, target, exc, runtime_sec=target_runtime.seconds)
+                            raise
+                    return _trial_from_sample(task, target, sample, runtime_sec=target_runtime.seconds)
 
             return await asyncio.gather(*(generate_one(index, task) for index, task in enumerate(tasks)))
         finally:
@@ -575,7 +577,9 @@ async def _generate_sample(
     )
 
 
-def _trial_from_sample(task: AgentEvalTask, target: Model | Agent, sample: dict[str, Any]) -> AgentEvalTrial:
+def _trial_from_sample(
+    task: AgentEvalTask, target: Model | Agent, sample: dict[str, Any], *, runtime_sec: float | None = None
+) -> AgentEvalTrial:
     output_text = sample.get("output_text")
     if not (isinstance(output_text, str) and output_text.strip()):
         # Reasoning models that exhaust the token budget can return only
@@ -631,7 +635,9 @@ def _trial_from_sample(task: AgentEvalTask, target: Model | Agent, sample: dict[
             },
         ),
         evidence=evidence,
-        measurements=_live_response_usage_measurements(sample.get("response"), trial_id=trial_id),
+        measurements=_live_response_usage_measurements(sample.get("response"), trial_id=trial_id).with_runtime(
+            runtime_sec
+        ),
         metadata={
             **invocation_metadata,
             "model_id": target.name,
@@ -735,13 +741,16 @@ def _reasoning_content_fallback(response: Any) -> str | None:
     return None
 
 
-def _failed_generation_trial(task: AgentEvalTask, target: Model | Agent, exc: Exception) -> AgentEvalTrial:
+def _failed_generation_trial(
+    task: AgentEvalTask, target: Model | Agent, exc: Exception, *, runtime_sec: float | None = None
+) -> AgentEvalTrial:
     return AgentEvalTrial(
         id=f"{task.id}:{target.name}",
         task_id=task.id,
         status=AgentEvalTrialStatus.FAILED,
         output=None,
         error=TrialError(type=exc.__class__.__name__, message=str(exc)),
+        measurements=TrialMeasurements(runtime_sec=runtime_sec),
         evidence=CandidateEvidence(
             descriptors={
                 "error": EvidenceDescriptor(
