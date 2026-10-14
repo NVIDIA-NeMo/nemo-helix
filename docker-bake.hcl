@@ -378,6 +378,7 @@ group "docker-cpu" {
   targets = [
     "nhx-api-docker",
     "nhx-tasks-docker",
+    "nhx-tasks-openshell-docker",
     "nhx-gym-tasks-docker",
     "nhx-builder-tasks-docker",
     "nhx-kaniko-docker",
