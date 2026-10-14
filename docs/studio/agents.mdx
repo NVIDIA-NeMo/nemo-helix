@@ -11,7 +11,7 @@ Use **Agents** in the NeMo Studio workspace sidebar to review and operate agent 
 
 New agents use the NeMo Helix-managed `nemo-agents-spec-v1` `agent.yaml` format. NeMo Helix translates this durable configuration into the NVIDIA Agent Intelligence Toolkit Fabric runtime configuration when it deploys the agent. Fabric is the execution layer; `nemo-agents-spec-v1` remains the configuration contract that you author and store.
 
-This Fabric-first path is recommended for new agents. Studio can also display legacy `nat-workflow-v1` agents, so the fields shown on the **Details** tab depend on the agent's config format. Create a sample `nemo-agents-spec-v1` agent with **Create Example Agent**, or register your own agent through the `nemo agents` CLI or Agents API. Studio does not currently provide a general-purpose editor for authoring an arbitrary `agent.yaml`.
+This Fabric-first path is recommended for new agents. Studio can also display legacy `nat-workflow-v1` agents, so the fields shown on the **Details** tab depend on the agent's config format. Register an agent from Studio with **Register Agent**, or through the `nemo agents` CLI or Agents API. Studio does not currently provide a general-purpose editor for authoring an arbitrary `agent.yaml`.
 
 ## Agent List
 
@@ -20,12 +20,25 @@ The Agents table shows the agents in the selected workspace, including their dep
 | Action | Where | Result |
 |--------|-------|--------|
 | Review details | Select an agent | Opens the agent details page with deployment, log, chat, evaluation, and configuration views. |
-| Create a sample agent | **Create Example Agent** | Creates a NeMo Helix-managed example agent in the current workspace. |
+| Register an agent | **Register Agent** | Opens **Register an agent with NeMo Helix**. See [Register an Agent](#register-an-agent). |
 | Deploy an agent | Row actions > **Deploy** | Creates a deployment for the selected agent. |
 | Clone an agent | Row actions > **Clone** | Creates a copy of the agent definition with a new name. |
 | Chat with a deployment | Agent details page > **Chat** tab | Opens chat for a running deployment. |
 | Delete a deployment | Agent details page > **Deployments** > **Delete** | Removes that deployment. |
 | Delete an agent | Row actions > **Delete** | Removes the stored agent definition from the workspace. |
+
+## Register an Agent
+
+Select **Register Agent** to open **Register an agent with NeMo Helix**. The dialog offers four ways to register an agent:
+
+| Tab | What it does |
+| --- | ------------ |
+| Register with code upload | Choose or drop a folder containing `agent.yaml`, or select **Choose files instead** to pick individual files, then enter a **Name**. |
+| Register from GitHub | Enter a **Repository** (`github.com/owner/repo`, optionally with `@branch` and `#sub/directory`) and a **Name**. Select an **Access token secret** for a private repository. Studio reads the files from GitHub on demand rather than copying them. |
+| Register from traces | Select an unregistered agent that appears in ingested traces, identified by the `agent.name` attribute. The agent is registered without a configuration, so it needs one before you can deploy or chat with it. |
+| Coding agent prompt | Shows a prompt to give a coding agent so it can connect your agent to NeMo Helix. |
+
+On the upload and GitHub tabs, turn on **Deploy after creating** to deploy the agent as soon as it is registered. Select **Register** to register the agent.
 
 ## Agent Details
 
@@ -35,8 +48,10 @@ The agent details page has the following tabs:
 - **Deployments** lists active and historical deployments for the agent. Use this tab to deploy the agent, open chat for a running deployment, view logs, or delete a deployment.
 - **Logs** shows deployment logs.
 - **Chat** opens an interactive chat with a running deployment.
-- **Evaluations** shows active jobs, completed evaluations, and experiments scoped to this agent, and lets you start a new evaluation.
-- **Details** shows the config format and the stored agent configuration. For `nemo-agents-spec-v1`, this includes the Fabric-first harness, named models, instructions, skills, MCP servers, environment, telemetry, and other fields present in `agent.yaml`. Legacy NAT agents show their workflow, LLM, and function configuration instead.
+- **Evaluations** lists this agent's evaluations, including runs still in progress, and can group them by experiment. Start a new evaluation from this tab.
+- **Optimizations**, when enabled, lists optimization runs for the agent and lets you start a new one. See [Optimize Agents](/documentation/agents/optimize-agents).
+- **Insights**, when enabled, configures **Insights analysis** for this agent: whether to **Run periodic analysis**, and the **Default model** and **Fast model** the analysis uses. See [NeMo Studio Insights](/documentation/studio/insights).
+- **Details** shows a **Summary** of the agent (name, workspace, models, config format, and timestamps) and its stored configuration. Legacy NAT agents show their `workflow`, `llms`, and `functions` sections in **Workflow**, **Models**, and **Tools** panels. All other top-level fields, including every `nemo-agents-spec-v1` field such as the harness, models, instructions, skills, and MCP servers, are listed in a collapsed **Additional configuration** panel.
 
 ## Evaluate an Agent
 
@@ -46,9 +61,15 @@ Agent evaluations are not a separate item under the **Agents** navigation parent
 2. Select an agent.
 3. Select the **Evaluations** tab.
 
-Select **Run evaluation** to start an evaluation for the current agent. The tab keeps active jobs visible and lets you switch between **Completed Evaluations** and **Experiments**. This agent-scoped view differs from **Models > Model Evaluations**, which shows model evaluation results.
+Select **Run Evaluation** in the page header to open the **Run Agent Evaluation** wizard. The button is available whenever the agent has a stored configuration; the agent doesn't need a running deployment. The wizard has these steps:
 
-Agents are created and updated through the `nemo agents` CLI or Agents API. NeMo Studio reflects the current workspace state after the Helix services refresh.
+1. **Begin**: Choose **Re-run an existing evaluation** or **Create a new experiment**. Re-running reuses the eval config from a previous run, adds the new run to that run's experiment, and skips directly to **Run Evaluation**.
+2. **Create experiment**: Enter a **Name** for the new experiment and, optionally, its description and default sort order.
+3. **Run Evaluation**: Name the run and set **Parallel requests**. When re-running, select the evaluation to base the run on and enter a **New Evaluation Name**. When creating an experiment, enter an **Evaluation Name** and choose the evaluation dataset and evaluator config. Upload the dataset or choose it from a fileset; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files, and you can upload several Parquet files to combine them. When a fileset folder holds more than one Parquet file, the file list also offers all of them as one dataset, which the evaluator reads through a `<folder>/*.parquet` pattern. Upload the evaluator config as a JSON or YAML file.
+
+The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Switch to **Experiments** to group the runs by experiment. This agent-scoped view differs from **Models > Evaluations**, which shows model evaluation results.
+
+You can also create and update agents through the `nemo agents` CLI or Agents API. NeMo Studio reflects the current workspace state after the Helix services refresh.
 
 ## Related Topics
 

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "NeMo Studio Guardrail Configs"
-description: "View NeMo Guardrails configurations in Studio when the preview feature is enabled."
+description: "Create, edit, and test NeMo Guardrails configurations in Studio when the preview feature is enabled."
 ---
 
 <Warning>
@@ -12,7 +12,7 @@ The Guardrails Studio UI is a preview feature and is disabled by default. An adm
 
 </Warning>
 
-Use **Governance > Guardrails** in the NeMo Studio workspace sidebar to view and manage NeMo Guardrails configurations for the selected workspace.
+Use **Governance > Guardrails** in the NeMo Studio workspace sidebar to create, edit, test, and manage NeMo Guardrails configurations for the selected workspace.
 
 ## Guardrail Config List
 
@@ -20,31 +20,58 @@ The Guardrail Configs table shows all guardrail configurations in the current wo
 
 | Action | Where | Result |
 |--------|-------|--------|
+| Create a config | **Create Guardrail** | Opens the create dialog. |
 | View details | Select a row | Opens the guardrail config detail page. |
-| Search | Name search bar | Filters the list to configs whose names match the query. |
+| Search | **Search Guardrail Configs...** search bar | Filters the list to configs whose names match the query. |
+| Filter by date | **Updated At** and **Created At** filters | Narrows results to a specific date range. |
+| Duplicate a config | Row actions > **Duplicate** | Opens the create dialog prefilled with a copy of the config. |
 | Delete a config | Row actions > **Delete** | Removes the guardrail configuration from the workspace. |
+| Delete several configs | Select rows, then **Delete** | Removes all selected configurations. |
 
-The table shows each config's name, description, model count, rail count, and last updated time.
+The table shows each config's name, main model, flows (**Input** and **Output** badges for the rail stages the config uses), and last updated time. The **Created** column is hidden by default and can be enabled from the column controls.
 
-Guardrail configurations are created and updated through the `nemo guardrail` CLI or the Guardrails API. NeMo Studio reflects the current workspace state.
+## Create a Guardrail Config
+
+Select **Create Guardrail**, enter a **Name** for the config, and select **Create**. Studio creates the config and opens its detail page. When a workspace model is available, Studio sets it as the config's main model so you can run tests right away; otherwise, set the main model on the **Configuration** tab.
+
+**Duplicate** opens the same dialog, titled **Duplicate Guardrail**, with a copy name prefilled. The new config copies the source config's description and full configuration.
+
+You can also create and update configurations through the `nemo guardrail configs` CLI or the Guardrails API. NeMo Studio reflects the current workspace state.
 
 ## Guardrail Config Detail
 
-The detail page shows the stored properties of a single guardrail configuration.
+The detail page header shows the config name and an actions menu (**⋯**) with **Duplicate** and **Delete**. The page has three tabs: **Configuration**, **Test and Validate**, and **Virtual Models**.
+
+### Configuration
+
+The **Guardrail Configuration** panel is where you edit the config.
 
 | Field | Description |
 |-------|-------------|
-| Description | A short summary of the config's purpose, if set. |
-| Models | Number of task models (for example, `content_safety`) attached to the config. |
-| Rails | Total count of input, output, and retrieval flows defined in the config. |
-| Created | When the configuration was first stored. |
-| Updated | When the configuration was last modified. |
-| Config | The full configuration payload as formatted JSON. |
+| Main Model | The model that generates completions when you run this config's tests. It does not change routing at inference time. |
+| Guardrails | The rails Studio can configure, each with a switch to turn it on or off, stage badges (for example, **Input** and **Output**) that show which stages are active, and a settings button. Studio currently supports **Self Checks**, which asks your own model to judge whether user inputs and LLM outputs violate your policies, using prompts you define. |
 
-The **Edit** action is not yet available. To modify a configuration, use the `nemo guardrail` CLI or the Guardrails API, then reload the page.
+Turning a rail on writes every setting it needs (flows and prompts) into the config. When you turn a rail off and its settings remain, a discard button removes them.
+
+The **Configuration JSON** panel below shows the full configuration as it will be saved, including any settings the panel does not surface. It is read-only and updates as you edit.
+
+When the config has unsaved changes, the header shows **Reset** and **Save Guardrail**. **Save Guardrail** saves your changes to the platform; **Reset** discards them and restores the saved config. Unsaved edits are kept in your browser if you leave the page, until you save or reset them or the stored config changes.
+
+### Test and Validate
+
+The **Test and Validate** tab holds the config's test cases under **Guardrail Test Cases**.
+
+- **Tests** lists each test as a conversation of messages. Add, reorder, duplicate, or remove messages, switch a test between **Chat** and **JSON** views, and use **Add Another Test** to create another test. Edits save automatically.
+- **Test Results** summarizes the latest results and shows a table of each test's input, output, and result. Select a row to view the result details.
+
+The run button, labeled with the test count (for example, **Run 3 Tests**), runs every test against the config. When the config has unsaved changes, choose **Draft** to test your unsaved edits or **Saved** to test the stored config. Running tests requires a main model.
+
+### Virtual Models
+
+The **Virtual Models** tab lists the inference routes that apply this guardrail config to requests or responses. It uses the same table and row actions as the [Virtual Models](/documentation/studio/virtual-models) page.
 
 ## Delete a Guardrail Config
 
 Select **Delete** from the row actions menu on the list page, or open the actions menu (**⋯**) in the detail page header and select **Delete**. Confirm the prompt to remove the configuration. Deletion is permanent.
 
-Before deleting a config, check whether it is referenced by any virtual model middleware pipeline. Removing a config that is wired to a virtual model does not automatically remove the middleware reference.
+A config that a virtual model still applies cannot be deleted. When you delete a single config, the error message names the virtual models that use it; detach the config from those virtual models, then delete it.
