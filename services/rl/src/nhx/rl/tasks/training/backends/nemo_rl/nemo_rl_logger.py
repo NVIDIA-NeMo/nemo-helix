@@ -348,6 +348,15 @@ class NemoRLLogger(LoggerInterface):
             run_facts=run_facts,
         )
 
+    def rewind_to(self, step: int) -> None:
+        """Drop recorded points past ``step``, the step training restored to.
+
+        A rerun after a crash restores the newest complete checkpoint, which can be
+        behind the last reported step. Call once, after ``setup()`` restores it and
+        before training reports.
+        """
+        self._callback.rewind_to(step)
+
     def log_metrics(
         self,
         metrics: dict[str, Any],

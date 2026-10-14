@@ -39,6 +39,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     ResourcesLimitsSpec,
     ResourcesRequestsSpec,
     ResourcesSpec,
+    StepLifecycle,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
@@ -676,6 +677,7 @@ def _build_training_step(
         environment=environment,
         config=step_config.model_dump(mode="json"),
         network=network,
+        lifecycle=StepLifecycle(pause_deadline_seconds=config.training_pause_deadline_seconds),
     )
 
 
