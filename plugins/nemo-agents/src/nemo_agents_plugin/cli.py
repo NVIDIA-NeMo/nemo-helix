@@ -3223,9 +3223,18 @@ def _delete_agent_entity_if_present(client: AgentsClient, *, agent_name: str, wo
     return True
 
 
-def _load_yaml(path: Path) -> dict:
-    with open(path, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+def _load_yaml(path: Path) -> Any:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return yaml.safe_load(fh)
+    except yaml.YAMLError as error:
+        problem = getattr(error, "problem", None) or "could not parse YAML"
+        mark = getattr(error, "problem_mark", None)
+        location = ""
+        if mark is not None:
+            location = f" at line {mark.line + 1}, column {mark.column + 1}"
+        typer.echo(f"Error: invalid YAML in agent config {path}{location}: {problem}", err=True)
+        raise typer.Exit(code=1) from error
 
 
 # Mirrors ``nemo_agents_plugin.utils._ENV_VAR_PATTERN`` semantics: matches
