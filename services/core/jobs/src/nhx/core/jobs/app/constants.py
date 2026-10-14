@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Constants
+JOB_TASK_CLEANUP_PENDING_KEY = "task_cleanup_pending"
 JOB_WORKSPACE_ID_LABEL = "nhx.nvidia.com/job_workspace_id"
 JOB_ID_LABEL = "nhx.nvidia.com/job_id"
 JOB_ATTEMPT_ID_LABEL = "nhx.nvidia.com/job_attempt_id"

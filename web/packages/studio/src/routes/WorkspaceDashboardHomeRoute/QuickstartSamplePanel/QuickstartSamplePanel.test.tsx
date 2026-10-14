@@ -302,7 +302,7 @@ describe('QuickstartSamplePanel', () => {
           ].join(' \\\n  '),
           [
             'nemo agents optimize run-strategy',
-            '--strategy legacy',
+            '--strategy config-tuning',
             `--agent '${AGENT_NAME}'`,
             `--optimize-config-fileset '${WS}/${AGENT_NAME}-optimize'`,
             "--optimize-config 'optimize.yaml'",

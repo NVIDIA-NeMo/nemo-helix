@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -38,6 +39,53 @@ def _provisioned_config(tmp_path: Path) -> AgentHardenerConfig:
 
 def _ctx(tmp_path: Path) -> JobContext:
     return make_job_context(tmp_path)
+
+
+_LEGACY_PLATFORM_ENV_PREFIX = "NM" + "P_"
+
+_PLATFORM_AUTH_ENV = {
+    "AGENT_HARDENER_EVENT_SINK_HEADERS": "Authorization=Bearer platform-token",
+    "NEMO_JOB_SECRETS": "SECRET=system/platform-secret",
+    "NEMO_WORKFLOW_TOKEN": "legacy-workflow-token",
+    "NEMO_WORKLOAD_TOKEN": "legacy-workload-token",
+    "NEMO_WORKLOAD_TOKEN_FILE": "/platform/legacy-workload-token",
+    "NHX_ACCESS_TOKEN": "current-access-token",
+    "NHX_AGENT_TELEMETRY_HEADER_AUTHORIZATION": "Bearer retired-token",
+    "NHX_API_KEY": "legacy-api-key",
+    "NHX_AUTH_PROXY_ON_BEHALF_OF": "victim-user",
+    "NHX_AUTH_PROXY_PRINCIPAL": "service:jobs",
+    "NHX_AUTH_URL": "https://platform.test/apis/auth",
+    "NHX_CONFIG_FILE": "/platform/user-config.yaml",
+    "NHX_CONFIG_FILE_PATH": "/platform/server-config.yaml",
+    "NHX_INTAKE_CLICKHOUSE_PASSWORD": "clickhouse-password",
+    "NHX_OIDC_PASSWORD": "oidc-password",
+    "NHX_PRINCIPAL": '{"id":"qa@example.com"}',
+    "NHX_RUNTIME": "platform-runtime-metadata",
+    "NHX_WORKLOAD_IDENTITY_TOKEN_FILE": "/platform/workload-token",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}ACCESS_TOKEN": "pre-helix-access-token",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}API_KEY": "pre-helix-api-key",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}AUTH_PROXY_ON_BEHALF_OF": "pre-helix-user",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}AUTH_PROXY_PRINCIPAL": "service:jobs",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}AUTH_URL": "https://platform.test/legacy-auth",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}CONFIG_FILE": "/platform/legacy-user-config.yaml",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}CONFIG_FILE_PATH": "/platform/legacy-server-config.yaml",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}PRINCIPAL": '{"id":"legacy@example.com"}',
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}WORKLOAD_IDENTITY_TOKEN_FILE": "/platform/legacy-subject-token",
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS": "Authorization=Bearer logs-token",
+}
+
+_NATIVE_RUNTIME_ENV = {
+    "NHX_BASE_URL": "https://platform.test",
+    "AGENT_HARDENER_BASE_URL": "https://analysis.test/v1",
+    "GARAK_RED_TEAM_MODEL_URI": "https://attack.test/v1",
+    "INFERENCE_API_KEY": "analysis-key",
+    "NIM_API_KEY": "attack-key",
+    "OPENAI_API_KEY": "victim-model-key",
+    "VICTIM_BACKEND_TOKEN": "victim-backend-token",
+    "NEMO_AGENTS_IGW_API_KEY": "victim-igw-key",
+    "NEMO_DEFAULT_INFERENCE_BASE_URL": "https://inference.test/v1",
+    "NEMO_DEFAULT_INFERENCE_KEY": "default-inference-key",
+}
 
 
 def test_service_driven_flow_sequences_up_hitl_then_reuse_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,19 +139,45 @@ def test_service_driven_reuses_cached_suite_and_skips_interview(
     manifest = tmp_path / "agent-hardener.yaml"
     manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
     cfg = _provisioned_config(tmp_path)
+    for name, value in {**_PLATFORM_AUTH_ENV, **_NATIVE_RUNTIME_ENV}.items():
+        monkeypatch.setenv(name, value)
 
     commands: list[list[str]] = []
+    subprocess_envs: list[dict[str, str]] = []
+
+    def capture_execute(cmd, env, *args, **kwargs):
+        commands.append(cmd)
+        subprocess_envs.append(env)
+        return SimpleNamespace(returncode=0), "", None
+
     monkeypatch.setattr(
         run_module._common,
         "execute",
-        lambda cmd, *a, **k: (commands.append(cmd), (SimpleNamespace(returncode=0), "", None))[1],
+        capture_execute,
     )
     monkeypatch.setattr(
         execution, "drive_synth_hitl", lambda *a, **k: pytest.fail("interview must be skipped when cached")
     )
+
+    @contextlib.contextmanager
+    def auth_proxy() -> Iterator[str]:
+        yield "http://127.0.0.1:54321"
+
+    monkeypatch.setattr(
+        execution,
+        "optional_platform_auth_proxy",
+        auth_proxy,
+    )
     written: dict[str, Any] = {}
     monkeypatch.setattr(benign_suite, "write_suite", lambda path, suite: written.update(path=str(path), suite=suite))
-    sdk = SimpleNamespace(entities=SimpleNamespace(create=lambda *a, **k: SimpleNamespace(name="run-x")))
+    sdk = SimpleNamespace(
+        default_headers={
+            "X-NHX-Principal-Id": "service:agent-hardener",
+            "X-NHX-Principal-On-Behalf-Of": "qa@example.com",
+            "traceparent": "must-not-be-forwarded",
+        },
+        entities=SimpleNamespace(create=lambda *a, **k: SimpleNamespace(name="run-x")),
+    )
 
     outcome = execution._run_service_driven(
         str(manifest),
@@ -126,6 +200,77 @@ def test_service_driven_reuses_cached_suite_and_skips_interview(
     assert commands[0][commands[0].index("--benign-suite") + 1].endswith("benign-suite.csv")
     assert "--reuse" not in commands[0]
     assert "--rounds" not in commands[0]  # default (1 round) omits the flag
+    assert subprocess_envs[0]["AGENT_HARDENER_EVENT_SINK_URL"] == (
+        "http://127.0.0.1:54321/apis/agent-hardener/v2/workspaces/default/runs/run-x/events"
+    )
+    assert _PLATFORM_AUTH_ENV.keys().isdisjoint(subprocess_envs[0])
+    assert {name: subprocess_envs[0][name] for name in _NATIVE_RUNTIME_ENV} == _NATIVE_RUNTIME_ENV
+
+
+def test_native_process_boundary_scrubs_platform_auth_without_mutating_caller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, str] = {}
+
+    def capture_execute(_cmd, env, *_args, **_kwargs):
+        captured.update(env)
+        return SimpleNamespace(returncode=0), "", None
+
+    monkeypatch.setattr(run_module._common, "execute", capture_execute)
+    supplied = {**_PLATFORM_AUTH_ENV, **_NATIVE_RUNTIME_ENV}
+
+    execution._run_agent_hardener(
+        ["agent-hardener", "run"],
+        supplied,
+        tmp_path / "agent-hardener.log",
+        _ctx(tmp_path),
+        artifact_name="agent-hardener-log",
+    )
+
+    assert _PLATFORM_AUTH_ENV.keys().isdisjoint(captured)
+    assert {name: captured[name] for name in _NATIVE_RUNTIME_ENV} == _NATIVE_RUNTIME_ENV
+    assert captured["AGENT_HARDENER_ERROR_FILE"].endswith("run-error.json")
+    assert supplied == {**_PLATFORM_AUTH_ENV, **_NATIVE_RUNTIME_ENV}
+
+
+def test_war_game_generated_victim_env_cannot_reload_platform_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text(
+        "agent:\n  name: clockbot\n  port: 1\n  secrets:\n    - OPENAI_API_KEY\n    - NHX_ACCESS_TOKEN\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "victim-model-key")
+    monkeypatch.setenv("NHX_ACCESS_TOKEN", "platform-access-token")
+    sdk, _captured = _capturing_sdk()
+    job = run_module.AgentHardenerRunJob()
+    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+
+    result = job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=sdk)
+
+    assert result["status"] == "failed"
+    assert result["error"]["category"] == "manifest"
+    assert "reserved Platform environment variables: NHX_ACCESS_TOKEN" in result["error"]["message"]
+    dotenv = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY" in dotenv
+    assert "victim-model-key" in dotenv
+    assert "NHX_ACCESS_TOKEN" not in dotenv
+    assert "platform-access-token" not in dotenv
+
+
+def test_explicit_victim_env_cannot_reintroduce_platform_credentials(tmp_path: Path) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 8000\n", encoding="utf-8")
+    env_file = tmp_path / "victim.env"
+    env_file.write_text(
+        "OPENAI_API_KEY=victim-key\nNHX_OIDC_PASSWORD=platform-password\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AgentHardenerRunError, match="reserved Platform environment variables: NHX_OIDC_PASSWORD"):
+        execution._reject_platform_auth_sources(str(manifest), str(env_file))
 
 
 def test_service_driven_passes_rounds_flag_when_multi_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -670,6 +815,23 @@ def test_apply_manifest_overrides_applies_explicit_port_only() -> None:
     manifest2 = {"agent": {"name": "x", "port": 8000, "workflow": "w"}, "backends": []}
     manifest_mod._apply_manifest_overrides(manifest2, {"defenders": []})
     assert manifest2["agent"]["port"] == 8000
+
+
+@pytest.mark.parametrize("original_port", [8000, 8765])
+def test_port_override_updates_generated_fabric_listener(original_port: int) -> None:
+    from nemo_agent_hardener_plugin.agent_resolver import fabric_start_command
+
+    manifest = {"agent": {"port": original_port, "start_command": fabric_start_command(original_port)}}
+    manifest_mod._apply_manifest_overrides(manifest, {"port": 9001})
+    assert manifest["agent"]["port"] == 9001
+    assert manifest["agent"]["start_command"] == fabric_start_command(9001)
+
+
+def test_port_override_preserves_byo_start_command() -> None:
+    manifest = {"agent": {"port": 8000, "start_command": "python server.py --port 8000"}}
+    manifest_mod._apply_manifest_overrides(manifest, {"port": 9001})
+    assert manifest["agent"]["port"] == 9001
+    assert manifest["agent"]["start_command"] == "python server.py --port 8000"
 
 
 def test_materialize_manifest_overlays_per_run_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

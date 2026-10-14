@@ -43,6 +43,30 @@ def test_defense_ids_reads_ids() -> None:
     assert defense_ids(_mitigations()) == ["custom_guardrail_1", "custom_guardrail_2", "openshell_policy"]
 
 
+@pytest.mark.parametrize("contents", ["{invalid", "[]", "null", '"string"'])
+def test_cli_rejects_malformed_mitigations(contents: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    mitigations_file = tmp_path / "mitigations.json"
+    mitigations_file.write_text(contents, encoding="utf-8")
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _config: None)
+    result = CliRunner().invoke(
+        cli_main.AgentHardenerCLI().get_cli(),
+        [
+            "sanity-check",
+            "--manifest-id",
+            "m1",
+            "--mitigations",
+            str(mitigations_file),
+            "--replay-hitlog",
+            "default/hits",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Could not read mitigations file" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_select_defense_ids_keep_exclude_default() -> None:
     all_ids = ["custom_guardrail_1", "custom_guardrail_2", "openshell_policy"]
     assert select_defense_ids(all_ids) == all_ids

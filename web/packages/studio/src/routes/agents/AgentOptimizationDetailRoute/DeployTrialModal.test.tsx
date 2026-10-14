@@ -20,7 +20,7 @@ const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/f
 const FILE_URL = `${FILESETS_URL}/:name/-/:path`;
 
 const SPEC = {
-  strategy: 'legacy',
+  strategy: 'config-tuning',
   agent: 'hermes',
   optimize_config: 'optimize.yaml',
   optimize_config_fileset: 'hermes-bundle',
@@ -183,6 +183,27 @@ models:
     });
   });
 
+  it('leaves out the judge model the study only scored with', async () => {
+    const user = userEvent.setup();
+    const captured = mockHelix({
+      optimizeYaml: `${OPTIMIZE_YAML}
+models:
+  judge: {provider: nvidia, model: judge-model}
+eval:
+  evaluators:
+    accuracy: {_type: tunable_rag_evaluator, llm_name: judge}
+`,
+    });
+    renderModal();
+
+    const { dialog, deploy } = await deployButton();
+    expect(within(dialog).queryByText(/Also adds/)).not.toBeInTheDocument();
+    await user.click(deploy);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(captured.agent.config?.models).not.toHaveProperty('judge');
+  });
+
   it('warns when the study ran the agent model with different settings', async () => {
     const user = userEvent.setup();
     const captured = mockHelix({
@@ -216,7 +237,7 @@ models:
 
   it('blocks deploying when the study has no optimize config fileset', async () => {
     mockHelix();
-    renderModal(TRIAL, { ...JOB, spec: { strategy: 'legacy', agent: 'hermes' } });
+    renderModal(TRIAL, { ...JOB, spec: { strategy: 'config-tuning', agent: 'hermes' } });
 
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(/has no optimize config fileset/)).toBeInTheDocument();

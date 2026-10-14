@@ -9,8 +9,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
+from nemo_agent_hardener_plugin import sdk as sdk_module
 from nemo_agent_hardener_plugin.cli import _shared, lifecycle
+from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 
 
 def _project(tmp_path: Path) -> Path:
@@ -95,3 +100,33 @@ def test_init_project_dir_creates_manifest(tmp_path: Path, monkeypatch: pytest.M
     assert created["start_command"] == "/app/run.sh"
     assert created["harness"] == "langgraph"
     assert created["relay_integration_confirmed"] is True
+
+
+def test_project_init_uses_typed_client_without_sdk_namespace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"dockerfile": "deploy/Dockerfile", "unresolved": []})
+
+    monkeypatch.setattr(sdk_module, "client_from_platform", client_from_platform)
+    monkeypatch.setattr(lifecycle, "upload_project_dir", lambda *_args, **_kwargs: "default/proj-bundle")
+    with NemoClient(
+        base_url="http://platform.test",
+        http_client=httpx.Client(transport=httpx.MockTransport(respond)),
+    ) as client:
+        context = SimpleNamespace(sdk=client, agent_hardener=AgentHardenerPluginResource(client), workspace="default")
+        body = lifecycle._project_init_body(
+            context,
+            project_dir=str(_project(tmp_path)),
+            name="byo",
+            dockerfile=None,
+            start_command="/app/run.sh",
+            binaries=[],
+            harness="langgraph",
+            relay_confirmed=True,
+        )
+    assert body["project_fileset"] == "default/proj-bundle"
+    assert len(requests) == 1
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/apis/agent-hardener/v2/workspaces/default/manifests/inspect-project"

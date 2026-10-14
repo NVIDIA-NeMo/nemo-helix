@@ -227,7 +227,13 @@ def register(app: typer.Typer) -> None:
         if not path.exists():
             typer.secho(f"Mitigations file {mitigations_file} not found.", fg="red")
             raise typer.Exit(code=1)
-        mitigations = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            mitigations = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(mitigations, dict):
+                raise ValueError("expected a JSON object")
+        except (OSError, UnicodeError, ValueError) as exc:
+            typer.secho(f"Could not read mitigations file {mitigations_file}: {exc}", fg="red")
+            raise typer.Exit(code=1) from exc
         selected = select_defense_ids(defense_ids(mitigations), keep=keep or None, exclude=exclude or None)
         typer.echo(f"Sanity-checking {len(selected)} defense(s): {', '.join(selected) or '(none)'}")
 

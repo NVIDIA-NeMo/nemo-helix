@@ -55,7 +55,8 @@ def test_the_job_declares_the_prompt_master_strategy() -> None:
     strategy = declared_strategy(PromptMasterOptimizeJob)
 
     assert strategy is not None
-    assert strategy.name == "prompt-master"
+    assert (strategy.name, strategy.requires_config) == ("prompt-master", False)
+    assert strategy.title
     assert strategy.description, f"{STRATEGY_ATTR} should say what the strategy optimizes for list-strategies"
 
 

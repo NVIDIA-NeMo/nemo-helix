@@ -8,7 +8,7 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentOptimizationDetailRoute } from '@studio/routes/agents/AgentOptimizationDetailRoute';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
-import { renderRoute, screen, within } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import { http, HttpResponse } from 'msw';
 
 const workspace = workspace1.workspace;
@@ -37,7 +37,7 @@ const renderStudy = (status: HelixJobStatus) => {
         status,
         created_at: '2026-08-13T09:00:00Z',
         spec: {
-          strategy: 'legacy',
+          strategy: 'config-tuning',
           agent: 'hermes',
           optimize_config: 'optimize.yaml',
           optimize_config_fileset: 'hermes-bundle',
@@ -83,7 +83,7 @@ describe('AgentOptimizationDetailRoute', () => {
     renderStudy('active');
 
     const inProgress = await screen.findByTestId('study-in-progress');
-    expect(within(inProgress).getByText('legacy')).toBeInTheDocument();
+    expect(within(inProgress).getByText('config-tuning')).toBeInTheDocument();
     expect(within(inProgress).getByText('hermes')).toBeInTheDocument();
     expect(within(inProgress).getByText('optimize.yaml')).toBeInTheDocument();
     expect(within(inProgress).getByText('hermes-bundle')).toBeInTheDocument();
@@ -143,7 +143,11 @@ describe('AgentOptimizationDetailRoute', () => {
       );
 
       expect(await screen.findByText('results/switchyard/agent-routed.yaml')).toBeInTheDocument();
-      expect(await screen.findByText(/Created routed virtual model/)).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.getByTestId('nv-code-snippet-code')).toHaveTextContent(
+          'Created routed virtual model'
+        )
+      );
       expect(screen.getAllByText('Logs')).toHaveLength(1);
       expect(screen.getByText('Artifacts')).toBeInTheDocument();
     }

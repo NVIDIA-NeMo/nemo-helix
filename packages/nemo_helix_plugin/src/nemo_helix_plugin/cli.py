@@ -123,29 +123,33 @@ class NemoCLI(_NamedPlugin):
         """Return the Typer app contributed by this plugin."""
 
     def update_function_cli(self, fn_cls: type[NemoFunction], group: typer.Typer) -> None:
-        """Customize the auto-generated function sub-CLI for *fn_cls*.
+        """Customize the auto-generated function command for *fn_cls*.
 
         Called once per :class:`~nemo_helix_plugin.function.NemoFunction` the plugin
-        contributes, **after** the default ``run`` / ``submit`` verbs are
-        registered on *group* and **before** the group is mounted on the
-        plugin's CLI app. ``group.registered_commands`` carries one
-        :class:`typer.models.CommandInfo` per verb, each with ``.name`` and
-        ``.callback`` (the auto-generated function with its synthetic
-        ``__signature__`` attached).
+        contributes, **after** its generated submit command is registered.
+        *group* is the plugin's CLI app itself: the function is a flat command
+        on it named :attr:`~nemo_helix_plugin.function.NemoFunction.name`.
 
-        Override by replacement: pluck the original callback, write a wrapper
-        with the desired signature, and re-register under the same verb name —
-        Typer's last-write-wins materialization rule
-        (``typer/main.py``: ``commands[name] = command``) keeps the new
-        registration. The default is a no-op.
+        To replace the command, call
+        :func:`~nemo_helix_plugin.commands.take_function_submit` to detach it,
+        then register a command with the desired signature under the same name
+        that builds a spec and delegates to the returned callable. The default
+        is a no-op.
         """
 
     def update_job_cli(self, job_cls: type[NemoJob], group: typer.Typer) -> None:
         """Customize the auto-generated job sub-CLI for *job_cls*.
 
-        Same shape and override-by-replacement contract as
-        :meth:`update_function_cli`, but for jobs (with ``run`` / ``submit`` /
-        ``explain`` verbs). The default is a no-op.
+        Called once per :class:`~nemo_helix_plugin.job.NemoJob` the plugin
+        contributes, **after** the generated verbs are registered on *group*
+        and **before** the group is mounted on the plugin's CLI app. *group*
+        is the job's own sub-app: submit is its callback (``invoke_without_command``)
+        and ``explain`` is its one subcommand.
+
+        To replace submit, call :func:`~nemo_helix_plugin.commands.take_job_submit`
+        to detach the generated callback, then register a callback with the
+        desired signature that builds a spec and delegates to the returned
+        callable. The default is a no-op.
         """
 
     def get_function_renderer(  # noqa: ARG002 — non-abstract default with named parameters

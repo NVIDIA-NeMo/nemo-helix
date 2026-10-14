@@ -88,3 +88,10 @@ class AnalystResult(BaseModel):
             "record anything else, file a new insight."
         ),
     )
+    notes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Report lines describing evidence the run did not promote to insight candidates, such as "
+            "issues below a recurrence threshold or skipped evidence streams."
+        ),
+    )
