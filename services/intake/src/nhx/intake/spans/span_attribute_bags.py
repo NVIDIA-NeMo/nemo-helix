@@ -127,7 +127,8 @@ class SpanAttributeBags:
             ):
                 raw[key] = value
         for key, value in self.number.items():
-            if key not in KNOWN_BAG_KEYS:
+            # A raw JSON number, such as nemo.step_id, keeps its original form over its number-bag float copy.
+            if key not in KNOWN_BAG_KEYS and not isinstance(raw.get(key), int | float):
                 raw[key] = value
         for key, value in self.boolean.items():
             if key not in KNOWN_BAG_KEYS:
