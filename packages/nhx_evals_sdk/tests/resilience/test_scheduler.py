@@ -12,7 +12,7 @@ from nhx_evals_sdk.resilience.scheduler import (
     ResilienceQueueFullError,
     ResilienceScheduler,
 )
-from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime, untimed
+from nhx_evals_sdk.resilience.target_runtime import measure_target_runtime, timed_target_call, untimed
 
 
 @pytest.mark.asyncio
@@ -385,6 +385,19 @@ async def test_target_runtime_keeps_a_failed_call_when_a_later_call_succeeds():
         await scheduler.run_with_resilience("endpoint-b", answers, max_attempts=1, deadline_at=None)
 
     assert runtime.seconds == 65.0
+
+
+@pytest.mark.asyncio
+async def test_target_runtime_is_unknown_when_the_scheduler_never_dispatched():
+    scheduler = ResilienceScheduler(_no_wait_config(endpoint_max_queued=0))
+
+    async def answers() -> str:
+        return "ok"
+
+    with measure_target_runtime() as runtime, timed_target_call(), pytest.raises(ResilienceQueueFullError):
+        await scheduler.run_with_resilience("endpoint-full", answers, max_attempts=1, deadline_at=None)
+
+    assert runtime.seconds is None
 
 
 @pytest.mark.asyncio

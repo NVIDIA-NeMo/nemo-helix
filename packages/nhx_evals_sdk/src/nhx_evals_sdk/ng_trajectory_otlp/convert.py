@@ -80,8 +80,10 @@ def rollout_to_resource_spans(
         _captured_llm_span(call, trace_id=trace_id, parent_id=root_id, seed=rollout_id, ordinal=ordinal)
         for ordinal, call in enumerate(model_calls)
     ] or [_llm_span(record, response, trace_id=trace_id, parent_id=root_id, seed=rollout_id, answer=answer)]
+    root = _root_span(record, response, trace_id=trace_id, span_id=root_id, task_id=task_id, answer=answer)
+    _span_root_over_children(root, llm_spans)
     spans = [
-        _root_span(record, response, trace_id=trace_id, span_id=root_id, task_id=task_id, answer=answer),
+        root,
         *llm_spans,
         *_tool_spans(response, trace_id=trace_id, parent_id=root_id, seed=rollout_id),
     ]
@@ -112,6 +114,15 @@ def _root_span(
     if isinstance(reward, (int, float)) and not isinstance(reward, bool):
         attributes["nemo.gym.reward"] = reward
     return Span(trace_id=trace_id, span_id=span_id, name=task_id or "rollout", attributes=_attributes(attributes))
+
+
+def _span_root_over_children(root: Span, children: Sequence[Span]) -> None:
+    """Time the root from its earliest child start to its latest child end, since Intake derives latency from it."""
+    starts = [child.start_time_unix_nano for child in children if child.start_time_unix_nano]
+    ends = [child.end_time_unix_nano for child in children if child.end_time_unix_nano]
+    if starts and ends:
+        root.start_time_unix_nano = min(starts)
+        root.end_time_unix_nano = max(ends)
 
 
 def _llm_span(

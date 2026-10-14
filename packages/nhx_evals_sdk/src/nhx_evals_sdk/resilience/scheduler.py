@@ -22,7 +22,7 @@ from nhx_evals_sdk.resilience.policy import (
     pressure,
     retry_wait_seconds,
 )
-from nhx_evals_sdk.resilience.target_runtime import record_attempt
+from nhx_evals_sdk.resilience.target_runtime import record_attempt, record_scheduled_call
 from nhx_evals_sdk.resilience.types import (
     ClassifierResult,
     Clock,
@@ -121,6 +121,7 @@ class ResilienceScheduler:
                 "deadline_at": deadline_at,
             },
         )
+        record_scheduled_call()
         controller = await self._get_controller(endpoint_key)
         async with controller.lock:
             controller.state.counters.operations_started += 1

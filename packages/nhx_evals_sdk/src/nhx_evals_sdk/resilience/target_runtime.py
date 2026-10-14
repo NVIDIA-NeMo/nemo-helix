@@ -25,6 +25,7 @@ class TargetRuntime:
     _succeeded_attempt_seconds: float = 0.0
     _last_failure_seconds_by_operation: dict[object, float] = field(default_factory=dict)
     _scheduled_attempts: int = 0
+    _scheduled_calls: int = 0
     _target_call_seconds: float = 0.0
     _target_calls: int = 0
 
@@ -32,9 +33,14 @@ class TargetRuntime:
     def seconds(self) -> float | None:
         if self._scheduled_attempts:
             return self._succeeded_attempt_seconds + sum(self._last_failure_seconds_by_operation.values())
+        if self._scheduled_calls:
+            return None
         if self._target_calls:
             return self._target_call_seconds
         return None
+
+    def record_scheduled_call(self) -> None:
+        self._scheduled_calls += 1
 
     def record_attempt(self, seconds: float, *, succeeded: bool, operation: object) -> None:
         self._scheduled_attempts += 1
@@ -89,3 +95,9 @@ def record_attempt(seconds: float, *, succeeded: bool, operation: object) -> Non
     runtime = _current_runtime.get()
     if runtime is not None:
         runtime.record_attempt(seconds, succeeded=succeeded, operation=operation)
+
+
+def record_scheduled_call() -> None:
+    runtime = _current_runtime.get()
+    if runtime is not None:
+        runtime.record_scheduled_call()
