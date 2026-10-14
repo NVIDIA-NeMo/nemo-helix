@@ -5,6 +5,7 @@ import logging
 from typing import Annotated, List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi.openapi.models import Example
 from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -29,24 +30,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_CREATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES = {
+_CREATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES: dict[str, Example] = {
     "deployment_config": {
         "summary": "Create a NIM deployment config",
         "value": {
             "name": "nim-config-v1",
             "engine": "nim",
-            "model_spec": {},
+            "model_spec": {"model_namespace": "meta", "model_name": "llama-3.1-8b-instruct"},
             "executor_config": {"gpu": 1},
         },
     }
 }
 
-_UPDATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES = {
+_UPDATE_DEPLOYMENT_CONFIG_OPENAPI_EXAMPLES: dict[str, Example] = {
     "deployment_config": {
         "summary": "Update a NIM deployment config",
         "value": {
             "engine": "nim",
-            "model_spec": {},
+            "model_spec": {"model_namespace": "meta", "model_name": "llama-3.1-8b-instruct"},
             "executor_config": {"gpu": 1},
         },
     }

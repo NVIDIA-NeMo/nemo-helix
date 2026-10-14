@@ -15,7 +15,9 @@ Run these from the repo root (they wrap `cd docs/fern && npm run …`):
 | `make docs` | Local dev server (live preview) |
 | `make docs-watch` | Local dev server plus repo-level watcher for `docs/**` changes outside `docs/fern/` |
 | `make docs-check` | `fern check` + MDX validation + NotebookViewer artifact validation + gated-link check (what CI runs) |
-| `make docs-lint-snippets` | Syntax-check Python fenced snippets across all docs, type-check the curated executable-doc subset, and run `docs-check-base-url` |
+| `make docs-lint-snippets` | Check Python syntax and module imports across all docs, type-check the curated executable-doc subset, validate Helm YAML and API examples, and run `docs-check-base-url` |
+| `make docs-lint-helm-snippets` | Parse Helm docs YAML, reject duplicate keys, and check chart-value nesting against `k8s/helm/values.yaml` |
+| `make docs-lint-api-examples` | Validate explicit OpenAPI examples against schemas, reject empty required objects that Fern drops, and check bodyless response samples |
 | `make docs-check-base-url` | Flag snippets that bypass the CLI context: Python that reads `NHX_BASE_URL`, or shell that assigns it a literal URL |
 | `make docs-check-python-snippets DOCS_PATH=...` | Syntax-check and type-check Python fenced snippets in one doc |
 | `make docs-run-notebook DOCS_PATH=...` | Execute the source notebook for one Fern `.mdx`/`.ipynb` doc using `nemo-nb` markers |
@@ -34,6 +36,14 @@ Use `make docs` when you are only editing `docs/fern/` config. Use `make docs-wa
 - **Internal links** use canonical nav URLs like `/documentation/get-started/core-concepts/workspaces`, not relative `.md`/source paths. `make docs-broken-links` is the check.
 - **Connect through the CLI context, not `NHX_BASE_URL`.** Build Python clients with `NemoClient.from_config()` and leave `NHX_BASE_URL` unset for `nemo` commands. Direct-URL tools such as `curl` may default it with `${NHX_BASE_URL:-http://localhost:8080}`. Mark a deliberate override with `{/* @nemo-docs: allow-nhx-base-url */}` before the fence. `make docs-check-base-url` enforces this; see `docs/cli/connect-to-deployments.mdx` for the user-facing guidance.
 - **No `{{variable}}` substitutions.** Fern has no substitution step; product names are inlined as literal text. (Prompt-template tokens like `` `{{input}}` `` inside backticks are real content — leave them.)
+
+## Snippet lint coverage
+
+Python module-import checks run in page order, including blocks marked `skip-python-type-check`, so an import in a later optional cell cannot satisfy an earlier use. Function bodies are deferred; this is not a general control-flow or runtime checker. Prefer a narrow, explained `ty: ignore[unresolved-import]` for a tutorial-only dependency over skipping an entire block's type checks.
+
+Helm YAML syntax alone does not catch flattened nesting that still parses. The Helm snippet linter also checks partial overrides against the chart defaults, flags implicit empty values, and allows free-form configuration maps. Use explicit `null` for intentional deletion of a Helm default. These checks do not validate SCC admission, credentials, filesystem permissions, or whether prose agrees with configuration; those still need review or runtime tests.
+
+API examples live in service route/model definitions, not generated pages. Required object examples must have representative nonempty values: Fern can omit `{}` fields from its generated snippets even when the schema accepts them. The API example linter validates source examples and checks explicit bodyless-response code samples; it does not replace inspecting a Fern preview of generated language snippets.
 
 ## Generated pages — do not hand-edit
 

@@ -164,6 +164,8 @@ nemo agents environments create research \
 <Tab title="Python SDK">
 
 ```python
+import os
+
 sdk.secrets.create(name="research-github-pat", value=os.environ["GITHUB_PAT"])
 
 agents.environment_specs.create(

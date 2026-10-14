@@ -9,6 +9,7 @@ import re
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
+from fastapi.openapi.models import Example
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
 from nemo_helix_plugin.log_utils import sanitize_for_log
@@ -68,12 +69,12 @@ from starlette.responses import FileResponse
 
 logger = logging.getLogger(__name__)
 
-_CREATE_JOB_OPENAPI_EXAMPLES = {
+_CREATE_JOB_OPENAPI_EXAMPLES: dict[str, Example] = {
     "job": {
         "summary": "Create a CPU container job",
         "value": {
             "name": "hello-world",
-            "spec": {},
+            "spec": {"message": "Hello from NeMo Helix"},
             "source": "api-reference",
             "platform_spec": {
                 "steps": [
@@ -81,9 +82,12 @@ _CREATE_JOB_OPENAPI_EXAMPLES = {
                         "name": "run",
                         "executor": {
                             "provider": "cpu",
-                            "container": {"image": "python:3.11"},
+                            "container": {
+                                "image": "python:3.11",
+                                "command": ["python", "-c", "print('Hello from NeMo Helix')"],
+                            },
                         },
-                        "config": {},
+                        "config": {"message": "Hello from NeMo Helix"},
                     }
                 ]
             },

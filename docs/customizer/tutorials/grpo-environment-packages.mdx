@@ -277,13 +277,12 @@ weather_simple_agent:
 `resources_servers/weather_verifier/app.py` is a `SimpleResourcesServer`: one route per tool, plus the `verify()` that returns the reward.
 
 {/* nemo_gym ships in the training image, not in the venv the docs linter runs in. */}
-{/* @nemo-docs: skip-python-type-check */}
 
 ```python
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from nemo_gym.base_resources_server import (
+from nemo_gym.base_resources_server import (  # ty: ignore[unresolved-import] -- training-image dependency
     BaseResourcesServerConfig,
     BaseVerifyRequest,
     BaseVerifyResponse,
@@ -373,7 +372,7 @@ pip download --dest weather-env/wheels \
   --platform "manylinux_2_17_$ARCH" \
   --platform "manylinux2014_$ARCH" \
   "nemo-gym==$GYM_VERSION" "ray[default]==$RAY_VERSION" "openai==$OPENAI_VERSION" pip \
-  -r resources_servers/weather_verifier/requirements.txt
+  -r weather-env/resources_servers/weather_verifier/requirements.txt
 uv run --package nhx-rl pi-to-gym-conversion --validate-only ./weather-env
 ```
 

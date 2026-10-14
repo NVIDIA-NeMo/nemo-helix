@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from nhx.common.api.common import Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -47,7 +48,23 @@ API_TAG = "Evaluator Results"
 )
 async def create_evaluator_result(
     workspace: str,
-    body: EvaluatorResultInput,
+    body: Annotated[
+        EvaluatorResultInput,
+        Body(
+            openapi_examples={
+                "numeric": {
+                    "summary": "Record a numeric evaluator score",
+                    "value": {
+                        "span_id": "span-123",
+                        "session_id": "session-123",
+                        "name": "faithfulness/v1",
+                        "data_type": "NUMERIC",
+                        "value": 0.95,
+                    },
+                }
+            }
+        ),
+    ],
     service: SpansServiceDep,
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> EvaluatorResult:
