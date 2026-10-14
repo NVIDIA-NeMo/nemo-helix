@@ -66,7 +66,8 @@ def read_refusal(row: ContainerImage, caller: Caller) -> str | None:
 
     A person needs only the permission, which the policy checks. A service must act for a person, though not
     necessarily the image's submitter, so that one person's build can be reused for another. The policy admits a
-    service on its own permissions, whoever it acts for: the calling service checks that its user may read here.
+    service on its own permissions, whoever it acts for, so the calling service must check that its user may read
+    images here.
     """
     if not caller.auth or caller.actor is None or not is_service_principal_id(caller.actor):
         return None
