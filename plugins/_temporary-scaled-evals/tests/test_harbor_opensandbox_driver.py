@@ -74,10 +74,22 @@ async def test_create_sends_the_request_and_labels_the_attempt(server: Server) -
     assert sent["resource"] == {"cpu": "2"}
     assert sent["network_policy"].payload == {"defaultAction": "deny", "egress": []}
     assert sent["skip_health_check"] is True
+    assert sent["entrypoint"] is None
     assert sent["connection_config"].request_timeout.total_seconds() == 90
     assert sent["metadata"]["owner"] == "eval-1"
     assert len(sent["metadata"][CREATE_ATTEMPT_METADATA_KEY]) == 32
     assert server.live() == {sandbox.id}
+
+
+async def test_create_sends_an_entrypoint_and_extensions(server: Server) -> None:
+    """An entrypoint replaces the server's default command; extensions pass through unchanged."""
+    await _driver(server).create(
+        _request(entrypoint=("/app/start.sh", "sh", "-c", "sleep infinity"), extensions={"nemo.ext": "{}"})
+    )
+
+    sent = server.creates[-1]
+    assert sent["entrypoint"] == ["/app/start.sh", "sh", "-c", "sleep infinity"]
+    assert sent["extensions"] == {"nemo.ext": "{}"}
 
 
 async def test_transient_errors_are_retried_and_orphans_killed(server: Server) -> None:
