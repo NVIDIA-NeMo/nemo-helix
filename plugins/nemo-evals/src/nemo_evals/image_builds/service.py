@@ -119,8 +119,8 @@ class ImageBuildService:
     ) -> ImageBuild | None:
         """Start a build of a revision, or return the one already running or done.
 
-        A new attempt starts only when there is none yet or the newest one failed. Returns ``None``
-        when the task doesn't exist.
+        A new attempt starts only when none for the requested platform is pending, running or ready. Returns
+        ``None`` when the task doesn't exist.
 
         Raises:
             RevisionNotFoundError: ``revision`` names no revision of the task.
@@ -140,7 +140,10 @@ class ImageBuildService:
             )
         parse_task_config(task_revision.spec.config)
 
-        newest = await self._newest(head, task_revision.content_hash)
+        builds = await self._newest_first(head, task_revision.content_hash)
+        latest = builds[0] if builds else None
+        # Another platform's build is no answer to this request, so only builds for this one are reused.
+        newest = next((build for build in builds if build.platform == request.platform), None)
         if newest is not None and newest.status == "ready":
             return ImageBuild.from_entity(newest)
         if newest is not None and newest.status != "failed":
@@ -152,7 +155,7 @@ class ImageBuildService:
             if newest.status != "failed":
                 return ImageBuild.from_entity(newest)
 
-        attempt = 1 if newest is None else newest.attempt + 1
+        attempt = 1 if latest is None else latest.attempt + 1
         task = f"{workspace}/{name}"
         build = TaskImageBuildEntity(
             name=build_entity_name(task_revision.content_hash, attempt),
@@ -163,6 +166,7 @@ class ImageBuildService:
             attempt=attempt,
             job=build_job_name(task, task_revision.content_hash, attempt),
             allowed_registries=request.allowed_registries,
+            platform=request.platform,
         )
         build._parent = head.id
         try:
@@ -171,6 +175,10 @@ class ImageBuildService:
             build = await self.entity_client.get(
                 TaskImageBuildEntity, name=build.name, workspace=workspace, parent=head.id
             )
+            if build.platform != request.platform:
+                raise ImageBuildJobConflictError(
+                    f"attempt {attempt} of this revision was just started for another platform; request again"
+                )
         await self._ensure_job(build)
         return ImageBuild.from_entity(build)
 
@@ -217,15 +225,16 @@ class ImageBuildService:
             return None
         return head, await get_revision(self.entity_client, TaskRevisionEntity, head, revision)
 
-    async def _newest(self, head: TaskEntity, revision_digest: str) -> TaskImageBuildEntity | None:
+    async def _newest_first(self, head: TaskEntity, revision_digest: str) -> list[TaskImageBuildEntity]:
+        """The task's builds of these contents, newest first: as many as one page holds, which is more than they get."""
         result = await self.entity_client.list(
             TaskImageBuildEntity,
             workspace=head.workspace,
             filter_operation=_builds_of(head, revision_digest),
             sort="-created_at",
-            page_size=1,
+            page_size=100,
         )
-        return result.data[0] if result.data else None
+        return list(result.data)
 
     async def _fail_abandoned(self, build: TaskImageBuildEntity, job_status: str) -> TaskImageBuildEntity:
         """Fail a build whose Job ended without recording a result, unless it just recorded one."""

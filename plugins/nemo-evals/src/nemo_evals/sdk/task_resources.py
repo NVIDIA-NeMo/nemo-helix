@@ -39,6 +39,16 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 
 
+def _image_build_request(
+    allowed_registries: builtins.list[str] | None, platform: str | None
+) -> CreateTaskImageBuildRequest:
+    # `platform` only when given: a server from before it existed refuses the field, even as null.
+    body: dict[str, object] = {"allowed_registries": allowed_registries or []}
+    if platform is not None:
+        body["platform"] = platform
+    return CreateTaskImageBuildRequest.model_validate(body)
+
+
 class EvaluatorTasksResource:
     """Sync resource mounted as ``client.evals.tasks``."""
 
@@ -270,17 +280,20 @@ class EvaluatorTasksResource:
         *,
         revision: str = "latest",
         allowed_registries: builtins.list[str] | None = None,
+        platform: str | None = None,
         workspace: str | None = None,
     ) -> ImageBuild:
         """Build the container images of a task revision, or return the build already running or done.
 
-        ``revision`` is a digest or a tag. After a failed build, this starts the next attempt.
+        ``revision`` is a digest or a tag. ``platform``, such as ``linux/arm64``, builds every image for it;
+        omitted, each image follows the task's own pin or the deployment's default. After a failed build, this
+        starts the next attempt.
         """
         response = self._client.create_task_image_build(
             name=name,
             revision=revision,
             workspace=workspace,
-            body=CreateTaskImageBuildRequest(allowed_registries=allowed_registries or []),
+            body=_image_build_request(allowed_registries, platform),
         )
         return ImageBuild.model_validate(response.data().model_dump(mode="json"))
 
@@ -617,17 +630,20 @@ class AsyncEvaluatorTasksResource:
         *,
         revision: str = "latest",
         allowed_registries: builtins.list[str] | None = None,
+        platform: str | None = None,
         workspace: str | None = None,
     ) -> ImageBuild:
         """Build the container images of a task revision, or return the build already running or done.
 
-        ``revision`` is a digest or a tag. After a failed build, this starts the next attempt.
+        ``revision`` is a digest or a tag. ``platform``, such as ``linux/arm64``, builds every image for it;
+        omitted, each image follows the task's own pin or the deployment's default. After a failed build, this
+        starts the next attempt.
         """
         response = await self._client.create_task_image_build(
             name=name,
             revision=revision,
             workspace=workspace,
-            body=CreateTaskImageBuildRequest(allowed_registries=allowed_registries or []),
+            body=_image_build_request(allowed_registries, platform),
         )
         return ImageBuild.model_validate(response.data().model_dump(mode="json"))
 

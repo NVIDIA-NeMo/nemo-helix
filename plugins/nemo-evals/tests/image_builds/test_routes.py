@@ -273,3 +273,26 @@ def test_list_and_get_builds(client, store_task, entity_store) -> None:
     assert (one.status_code, one.json()["status"]) == (200, "failed")
     assert client.get(f"{_BASE}/{digest}/image-builds/3").status_code == 404
     assert client.get(f"{_BASE}/{digest}/image-builds/latest").status_code == 404
+
+
+def test_a_build_for_another_platform_is_not_reused(client, store_task, entity_store) -> None:
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/amd64"})
+    _set_status(entity_store, digest, 1, "ready")
+
+    arm = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
+    amd = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/amd64"}).json()
+    again = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
+
+    assert (arm["id"], arm["platform"], arm["status"]) == ("2", "linux/arm64", "pending")
+    assert (amd["id"], amd["platform"], amd["status"]) == ("1", "linux/amd64", "ready")
+    assert again["id"] == "2"
+
+
+@pytest.mark.parametrize("platform", ["arm64", "linux/ARM64", ""])
+def test_a_platform_that_is_not_os_and_architecture_is_rejected(client, store_task, platform: str) -> None:
+    digest = _store(store_task)
+
+    response = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": platform})
+
+    assert response.status_code == 422

@@ -4570,6 +4570,12 @@ components:
           title: Image
           description: The image the task names, for a `prebuilt` image.
           type: string
+        platform:
+          title: Platform
+          description: 'The platform the image is built or copied for, once the build
+            decides it: the request''s `platform`, the task''s own pin, or a prebuilt
+            image''s only platform. None means the deployment''s default.'
+          type: string
         status:
           type: string
           enum:
@@ -6471,6 +6477,9 @@ components:
             type: string
           type: array
           title: Allowed Registries
+        platform:
+          title: Platform
+          type: string
         images:
           items:
             $ref: '#/components/schemas/BuildImage'
@@ -6509,6 +6518,15 @@ components:
             named by the task may be copied from. Narrows the registries the deployment
             allows; empty allows all of those. A prebuilt image from any other registry
             fails the build.
+        platform:
+          title: Platform
+          description: 'The platform to build every image for, as `os/architecture`,
+            such as `linux/arm64`. Omit to follow the task: an image whose Dockerfile
+            or compose service pins a platform is built for it, a prebuilt image published
+            for one platform is copied for that one, and anything else follows the
+            deployment''s default. An image pinned to another platform fails the build.'
+          type: string
+          pattern: ^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$
       additionalProperties: false
       type: object
       title: ImageBuildRequest
