@@ -9012,8 +9012,8 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 
 **Job Spec:**
 
-* `--max-concurrent-tasks <INTEGER>`: Maximum number of tasks evaluated concurrently. Distinct from a target's `params.parallelism`, which bounds concurrent inference requests *within* trial generation.
-* `--fail-fast`: Stop the run on the first scoring failure when True.
+* `--max-concurrent-tasks <INTEGER>`: Concurrency for this evaluation's SDK work. Harbor and Gym: concurrent scoring calls only (trials are bounded by the runner). Other runners: concurrent trials and scoring calls. For model and agent targets, target.params.parallelism bounds concurrent inference requests during trial generation. On Kubernetes runs it applies per task Job; the task-Job cap is execution.max_concurrent_task_jobs.
+* `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks budget can also fail the run and cancel remaining task Jobs.
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
 * `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.

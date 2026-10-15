@@ -627,10 +627,18 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
         "OPENAI_API_KEY": "${OPENAI_API_KEY}"
     }
     assert target._config.n_attempts == 2
+    assert target._config.n_concurrent_trials == 8
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
     assert prompt_template is None
     assert params is None
+
+
+def test_resolve_target_uses_harbor_default_for_unset_trial_concurrency(tmp_path: Path) -> None:
+    target, _, _ = AgentEvalJob._resolve_target(HarborRunnerTarget(n_concurrent_trials=None), _job_context(tmp_path))
+    assert isinstance(target, HarborAgentTaskRunner)
+    assert target._config is not None
+    assert target._config.n_concurrent_trials == 4
 
 
 def test_resolve_target_unpacks_model_target_request_config(tmp_path: Path) -> None:

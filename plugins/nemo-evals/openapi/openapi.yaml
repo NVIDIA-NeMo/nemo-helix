@@ -2620,14 +2620,19 @@ components:
           type: integer
           minimum: 1.0
           title: Max Concurrent Tasks
-          description: Maximum number of tasks evaluated concurrently. Distinct from
-            a target's `params.parallelism`, which bounds concurrent inference requests
-            *within* trial generation.
+          description: 'Concurrency for this evaluation''s SDK work. Harbor and Gym:
+            concurrent scoring calls only (trials are bounded by the runner). Other
+            runners: concurrent trials and scoring calls. For model and agent targets,
+            target.params.parallelism bounds concurrent inference requests during
+            trial generation. On Kubernetes runs it applies per task Job; the task-Job
+            cap is execution.max_concurrent_task_jobs.'
           default: 4
         fail_fast:
           type: boolean
           title: Fail Fast
-          description: Stop the run on the first scoring failure when True.
+          description: Fail on the first metric error instead of recording an errored
+            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
+            budget can also fail the run and cancel remaining task Jobs.
           default: false
         labels:
           additionalProperties:
@@ -2871,14 +2876,19 @@ components:
           type: integer
           minimum: 1.0
           title: Max Concurrent Tasks
-          description: Maximum number of tasks evaluated concurrently. Distinct from
-            a target's `params.parallelism`, which bounds concurrent inference requests
-            *within* trial generation.
+          description: 'Concurrency for this evaluation''s SDK work. Harbor and Gym:
+            concurrent scoring calls only (trials are bounded by the runner). Other
+            runners: concurrent trials and scoring calls. For model and agent targets,
+            target.params.parallelism bounds concurrent inference requests during
+            trial generation. On Kubernetes runs it applies per task Job; the task-Job
+            cap is execution.max_concurrent_task_jobs.'
           default: 4
         fail_fast:
           type: boolean
           title: Fail Fast
-          description: Stop the run on the first scoring failure when True.
+          description: Fail on the first metric error instead of recording an errored
+            score. On Kubernetes runs it fails that task's Job; the separate execution.max_failed_tasks
+            budget can also fail the run and cancel remaining task Jobs.
           default: false
         labels:
           additionalProperties:
@@ -4740,11 +4750,13 @@ components:
           description: Number of attempts Harbor runs per task.
           default: 1
         n_concurrent_trials:
+          title: N Concurrent Trials
+          description: 'Maximum concurrent Harbor trials. Unset or null: the runner
+            default (4) on Docker. Must be unset or null on Kubernetes runs, which
+            run trials one at a time.'
+          nullable: true
           type: integer
           minimum: 1.0
-          title: N Concurrent Trials
-          description: Maximum concurrent Harbor trials.
-          default: 4
         max_retries:
           type: integer
           minimum: 0.0
