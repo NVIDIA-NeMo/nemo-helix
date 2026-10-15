@@ -279,8 +279,12 @@ async def list_deployments(
         raise HTTPException(status_code=500, detail="Failed to list deployments.") from exc
 
     pagination = PaginationData.model_validate(result.pagination.model_dump()) if result.pagination else None
+    # Startup diagnostics may include child-process log content. Keep them on
+    # the READ-protected detail endpoint rather than exposing them to callers
+    # that only have permission to list deployments.
+    deployments = [deployment.model_copy(update={"error": ""}) for deployment in result.data]
     return DeploymentPage(
-        data=result.data,
+        data=deployments,
         pagination=pagination,
         sort=sort,
         filter=filter,
