@@ -256,9 +256,10 @@ def _codex_adapter_installed() -> bool:
     raises rather than returning None when the parent package is missing, hence the guard.
     """
     try:
-        return importlib.util.find_spec("nemo_fabric_adapters.codex") is not None
-    except ModuleNotFoundError:
+        importlib.import_module("nemo_fabric_adapters.codex.adapter")
+    except ImportError:  # the adapter package or one of its own dependencies (e.g. openai_codex) is absent
         return False
+    return True
 
 
 # No NeMo-Fabric checkout in the gate: the adapter registry resolves from the installed wheels

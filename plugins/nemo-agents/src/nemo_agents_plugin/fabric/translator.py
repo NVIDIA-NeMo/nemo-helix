@@ -336,7 +336,7 @@ def _telemetry_agent_name(config: AgentConfig) -> str:
 def _relay_observability_config(config: AgentConfig, model: ModelConfig) -> dict[str, Any]:
     telemetry = config.telemetry
     agent_name = _telemetry_agent_name(config)
-    observability: dict[str, Any] = {"version": 3}
+    observability: dict[str, Any] = {"version": 4}
 
     if telemetry.atif is not None:
         atif = dict(telemetry.atif)

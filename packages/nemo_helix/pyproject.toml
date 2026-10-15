@@ -182,7 +182,8 @@ guardrails-service = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 harbor = [
   "nemo-helix[nhx-evals-sdk]",
-  "harbor>=0.20,<0.21",
+  "harbor>=0.23,<0.24",
+  "nemo-fabric[harbor]>=0.5.0,<0.6.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -281,44 +282,44 @@ nemo-agents-plugin = [
   "pyyaml>=6.0",
   "jinja2>=3.1",
   "python-on-whales>=0.60",
-  "nemo-fabric[relay,streaming]>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-mini-swe-agent>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-nooa>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'",
-  "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
+  "nemo-fabric[relay,streaming]>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-claude>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-codex>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-deepagents>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-mini-swe-agent>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-nooa>=0.5.0,<0.6.0; python_version >= '3.12' and python_version < '3.14'",
+  "nemo-fabric-adapters-remote-agent>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-hermes>=0.5.0,<0.6.0; python_version < '3.14'",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-claude = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-claude[harness]>=0.5.0,<0.6.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-codex = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-codex[harness]>=0.5.0,<0.6.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-deepagents = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-deepagents[harness]>=0.5.0,<0.6.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-mini-swe-agent = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-mini-swe-agent[harness]>=0.5.0,<0.6.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-nooa = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-nooa[harness]>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'",
+  "nemo-fabric-adapters-nooa[harness]>=0.5.0,<0.6.0; python_version >= '3.12' and python_version < '3.14'",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -445,8 +446,8 @@ nemo-helix-plugin = [
 nemo-insights-plugin = [
   "fastapi>=0.115",
   "httpx",
-  "nemo-fabric-adapter-contract>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-common>=0.4.0,<0.5.0",
+  "nemo-fabric-adapter-contract>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-common>=0.5.0,<0.6.0",
   "nemo-helix-plugin",
   "nemo-relay>=0.9.3,<0.10",
   "nooa>=0.0.10,<0.0.11",
@@ -485,7 +486,7 @@ nemo-rl-plugin = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-safe-synthesizer-plugin = [
-  "datasets>=3.3.1,<6",
+  "datasets>=5.1.0,<6",
   "fastapi>=0.115.8",
   "fsspec>=2024.10.0",
   "gunicorn>=23.0.0",
@@ -578,7 +579,7 @@ nhx-evals-sdk = [
   "langchain-openai>=1.3.5",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
   "nemo-relay>=0.9.3,<0.10",
-  "nemo-fabric>=0.4.0,<0.5.0",
+  "nemo-fabric>=0.5.0,<0.6.0",
   "opentelemetry-proto>=1.27.0",
   "pytrec-eval-terrier==0.5.10",
 ]

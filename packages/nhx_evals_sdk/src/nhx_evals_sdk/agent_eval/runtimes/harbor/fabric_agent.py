@@ -32,7 +32,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from nemo_fabric import EnvironmentConfig, FabricConfig, RelayAtofFileSinkConfig
-from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent, harbor_harness_defaults
+from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent
 
 #: build.nvidia.com's OpenAI-compatible endpoint, for configs that name an ``nvidia`` model directly.
 NVIDIA_MODEL_BASE_URL = "https://integrate.api.nvidia.com/v1"
@@ -60,6 +60,7 @@ HARBOR_OUTPUT_SCHEMA = "message"
 #: Claude Code refuses ``bypassPermissions`` as root unless it is told it is sandboxed.
 _CLAUDE_ADAPTER_ID = "nvidia.fabric.claude"
 _CLAUDE_UNATTENDED_ENV = {"IS_SANDBOX": "1"}
+_CLAUDE_UNATTENDED_SETTINGS = {"permission_mode": "bypassPermissions"}
 
 #: The platform's Inference Gateway authenticates the job, not the request, but a harness's client
 #: still refuses an empty key, so a gateway-routed model is handed a placeholder under its
@@ -121,9 +122,9 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         config.environment = environment
 
         assert config.harness is not None  # checked at construction
-        for key, value in harbor_harness_defaults(config.harness.adapter_id).items():
-            config.harness.settings.setdefault(key, value)
         if config.harness.adapter_id == _CLAUDE_ADAPTER_ID:
+            for key, value in _CLAUDE_UNATTENDED_SETTINGS.items():
+                config.harness.settings.setdefault(key, value)
             for key, value in _CLAUDE_UNATTENDED_ENV.items():
                 environment.env.setdefault(key, value)
         for model in config.models.values():

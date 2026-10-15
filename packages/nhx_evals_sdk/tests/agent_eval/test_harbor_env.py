@@ -48,9 +48,9 @@ def test_missing_secret_is_named_with_its_key() -> None:
     [
         ({"X": "${WORKER_VAR}"}, "looks like a ${NAME} template"),
         ({"TOKENIZERS_PARALLELISM": "false"}, "Harbor treats keys matching"),
-        ({"MAX_TOKENS": "4096"}, "Harbor treats keys matching"),
+        ({"MAX_TOKENS": "4096"}, "look like plaintext credentials"),
         ({"AUTH_ENABLED": "1"}, "Harbor treats keys matching"),
-        ({"max_tokens": "4096"}, "Harbor treats keys matching"),
+        ({"max_tokens": "4096"}, "look like plaintext credentials"),
         ({"MODEL_CREDS": "sk-not-a-real-key-0123456789"}, "look like plaintext credentials"),
         ({"LLM_API_KEY": "x"}, "appear in both env_vars and env_secrets"),
     ],

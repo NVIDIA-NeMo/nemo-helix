@@ -88,7 +88,7 @@ _TRIAL_LOG_DESCRIPTIONS = {
 _MAX_TRACEBACK_CHARS = 8192
 _HARBOR_EXTRA_REQUIRED_MESSAGE = (
     "Harbor execution and result adaptation require the optional `harbor` extra on Python >=3.12. "
-    "If NeMo Helix is installed as a package, run: uv pip install 'harbor>=0.20,<0.21' "
+    "If NeMo Helix is installed as a package, run: uv pip install 'harbor>=0.23,<0.24' "
     "(the `all`, `services`, and `plugins` extras already include it). "
     "From a NeMo Helix source checkout's repository root, run: "
     "uv sync --frozen --package nhx-evals-sdk --extra harbor"

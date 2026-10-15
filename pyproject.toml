@@ -346,17 +346,17 @@ constraint-dependencies = [
   "mcp>=1.28.1",
   "mlflow-skinny>=3.15.0,<3.16.0",
   "msgpack>=1.2.1",
-  "nemo-fabric-adapter-contract>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-common>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-mini-swe-agent>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-nooa>=0.4.0,<0.5.0",
-  "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
-  "nemo-fabric-collector>=0.4.0,<0.5.0",
-  "nemo-fabric-runtime>=0.4.0,<0.5.0",
+  "nemo-fabric-adapter-contract>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-claude>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-codex>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-common>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-deepagents>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-hermes>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-mini-swe-agent>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-nooa>=0.5.0,<0.6.0",
+  "nemo-fabric-adapters-remote-agent>=0.5.0,<0.6.0",
+  "nemo-fabric-collector>=0.5.0,<0.6.0",
+  "nemo-fabric-runtime>=0.5.0,<0.6.0",
   "nbconvert>=7.17.1",
   "nltk>=3.10.3",
   "pillow>=12.3.0",
@@ -376,10 +376,10 @@ constraint-dependencies = [
 
 override-dependencies = [
   # unsloth requires a later version but will never be used on macos. mostly useful for dev
-  "datasets>=3.3.1, <6",
+  "datasets>=5.1.0,<6",
   "jsonpath-ng>=1.6.1",
   "grpcio>=1.71.0",
-  "huggingface-hub>=1.0.1,<2.0.0",
+  "huggingface-hub>=1.31.0,<2.0.0",
   "ray; sys_platform == 'never'",       # ray has an unfixed critical CVE, as for why we're removing it this way see https://github.com/astral-sh/uv/issues/9174
   "fschat; sys_platform == 'never'",    # fschat is unmaintained with unfixed High/Medium CVEs; transitive via garak but never imported
   "diskcache; sys_platform == 'never'", # unfixed CVE-2025-69872; transitive via ragas but not imported

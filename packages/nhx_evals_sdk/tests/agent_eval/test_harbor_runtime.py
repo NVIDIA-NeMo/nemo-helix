@@ -927,7 +927,7 @@ def test_runtime_config_accepts_kwargs_that_only_look_credential_shaped() -> Non
             "env": {"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
             "api_key": None,
             # An issued-token prefix counts only on a value long enough to be one.
-            "fabric_package": "nemo-fabric[codex]==0.4.0",
+            "fabric_package": "nemo-fabric[codex]==0.5.0",
             "model": "sk-tiny",
             # A marker must stand as a word in the path, so a tokenizer is not a token.
             "tokenizer": "o200k_base",
@@ -2150,7 +2150,15 @@ _STAMP_COVERED_HARBOR_FIELDS = {
 # Left at Harbor's defaults by _build_native_job, so two SDK-built configs can never
 # disagree on them. (A dir written by the Harbor CLI could, but it carries no SDK cache
 # stamp, so it is stale and gets discarded before Harbor ever sees it.)
-_SDK_NEVER_SETS = {"install_only", "metrics", "tasks", "extra_instruction_paths"}
+_SDK_NEVER_SETS = {
+    "install_only",
+    "metrics",
+    "tasks",
+    "extra_instruction_paths",
+    "extra_instructions",
+    "source_jobs",
+    "user_agent",
+}
 # A fixed bundled Compose override, independent of SDK runtime configuration.
 _SDK_CONSTANT_FIELDS = {"environment"}
 # Compared by Harbor, deliberately *not* keyed by the SDK stamp. Harbor asks "can I

@@ -596,7 +596,7 @@ class TestTranslateAgentConfig:
         assert relay.project == "example-agent"
         assert relay.output_dir == "./artifacts/relay"
         assert observability.model_dump(exclude_none=True) == {
-            "version": 3,
+            "version": 4,
             "enable_full_payloads": False,
             "atif": {
                 "enabled": True,

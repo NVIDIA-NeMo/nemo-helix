@@ -48,7 +48,7 @@ def _registered_agent_config() -> dict[str, Any]:
             "project": "calculator-agent",
             "output_dir": "./artifacts/relay",
             "observability": {
-                "version": 3,
+                "version": 4,
                 "atif": {"enabled": True, "agent_name": "calculator-agent", "output_directory": "./artifacts/relay"},
                 "atof": {
                     "enabled": True,
@@ -206,11 +206,11 @@ def test_install_and_run_keywords_still_pass_through(tmp_path: Path) -> None:
     bundle.mkdir()
     agent = _agent(
         tmp_path,
-        fabric_package="nemo-fabric[deepagents]==0.4.0",
+        fabric_package="nemo-fabric[deepagents]==0.5.0",
         fabric_config_bundle=bundle,
         fabric_config_target="/tmp/agent",
     )
-    assert agent.fabric_package == "nemo-fabric[deepagents]==0.4.0"
+    assert agent.fabric_package == "nemo-fabric[deepagents]==0.5.0"
     assert agent.fabric_config_bundle == bundle
     # Relative paths in the config (skills) resolve against the uploaded bundle.
     assert str(agent._build_spec("hi").config_base_dir) == "/tmp/agent"

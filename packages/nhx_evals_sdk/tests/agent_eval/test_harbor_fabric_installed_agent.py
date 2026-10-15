@@ -23,7 +23,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import (
 )
 
 _DEEPAGENTS = "nvidia.fabric.langchain.deepagents"
-_PACKAGE = "nemo-fabric[deepagents,relay]==0.4.0"
+_PACKAGE = "nemo-fabric[deepagents,relay]==0.5.0"
 _CONFIG: dict[str, Any] = {
     "metadata": {"name": "hello-world"},
     "harness": {"adapter_id": _DEEPAGENTS},

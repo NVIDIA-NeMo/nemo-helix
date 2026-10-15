@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 #: matching keys in ``config.json`` and scrubs those values from every trial file. Copied because Harbor
 #: is an optional SDK extra and ``HarborRuntimeConfig`` must validate without it; a test pins it to
 #: Harbor's pattern and flags.
-HARBOR_SENSITIVE_ENV_KEY_RE = re.compile(r"(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)", re.IGNORECASE)
+HARBOR_SENSITIVE_ENV_KEY_RE = re.compile(r"(KEY|SECRET|TOKEN(?!S)|PASSWORD|CREDENTIAL|AUTH)", re.IGNORECASE)
 
 
 def harbor_env_templates(env_secrets: Mapping[str, SecretRef], source: EnvSecretSource) -> dict[str, str]:
@@ -54,7 +54,7 @@ def validate_harbor_env(env_vars: Mapping[str, str], env_secrets: Mapping[str, o
             )
         if HARBOR_SENSITIVE_ENV_KEY_RE.search(key):
             raise ValueError(
-                f"env_vars[{key!r}]: Harbor treats keys matching KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH "
+                f"env_vars[{key!r}]: Harbor treats keys matching KEY|SECRET|TOKEN(?!S)|PASSWORD|CREDENTIAL|AUTH "
                 "(case-insensitive substring) as secrets: it masks them in config.json and scrubs their values "
                 "from every trial file. A credential belongs in env_secrets. For a non-secret setting, pass it "
                 "through agent_kwargs if the agent supports it, or use a key that doesn't match."
@@ -71,7 +71,7 @@ def warn_unscrubbed_secret_keys(env_secrets: Mapping[str, object]) -> None:
     for key in env_secrets:
         if not HARBOR_SENSITIVE_ENV_KEY_RE.search(key):
             logger.warning(
-                "env_secrets[%r] doesn't match Harbor's sensitive-key pattern (KEY|SECRET|TOKEN|PASSWORD|"
+                "env_secrets[%r] doesn't match Harbor's sensitive-key pattern (KEY|SECRET|TOKEN(?!S)|PASSWORD|"
                 "CREDENTIAL|AUTH), so Harbor won't scrub its value from trial logs. Rename it if the agent allows.",
                 key,
             )
