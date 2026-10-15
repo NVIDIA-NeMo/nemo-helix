@@ -71,7 +71,9 @@ def render() -> str:
         indicator = "|" if text.endswith("\n") else "|-"
         if text.endswith("\n\n"):
             indicator = "|+"
-        body = text[:-1] if text.endswith("\n") and indicator == "|" else text
+        # `|` clips to one trailing newline and `|+` keeps them all, so either way the block's last line break
+        # comes from the writer below, not from `body`.
+        body = text[:-1] if text.endswith("\n") else text
         out.append(f"  {key}: {indicator}\n")
         out.extend(f"    {line}\n" if line else "\n" for line in body.split("\n"))
     return "".join(out)
@@ -97,6 +99,7 @@ def check_server_values() -> None:
 
 
 def main() -> int:
+    """Write the ConfigMap, or with --check fail if the committed copy is out of date."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="fail if the committed ConfigMap is out of date")
     args = parser.parse_args()

@@ -185,6 +185,9 @@ reads the ConfigMap only when it starts**, so a new or changed ConfigMap has no
 effect until you restart it. If you deploy with GitOps, trigger a rollout of the
 server (for example, change a pod annotation) after the chart syncs.
 
+If you applied the ConfigMap and Role by hand before, read
+[Move a manual install to the chart](#move-a-manual-install-to-the-chart) first.
+
 ### Enable it without Helm
 
 Apply the generated ConfigMap and the example Role yourself:
@@ -200,6 +203,25 @@ kubectl rollout restart deploy/opensandbox-server -n opensandbox-system
 `configmap.yaml` is generated from the extension's source files by
 `script/generate_opensandbox_ext_configmap.py`, and CI fails if the committed
 copy is out of date. Don't edit it by hand.
+
+### Move a manual install to the chart
+
+`helm upgrade` refuses to take over objects it didn't create, and stops with
+`exists and cannot be imported into the current release`. Before enabling
+`composeServices`, find the objects from the manual steps: the ConfigMap
+`nemo-opensandbox-ext` in the server's namespace, and the Role and RoleBinding
+of the same name in the sandbox namespace. Either delete them (the server keeps
+running the loaded extension until you restart it, and the upgrade recreates
+them), or hand them to the release:
+
+```bash
+# For each of the three objects: the ConfigMap in the server's namespace, the Role and RoleBinding in the sandbox namespace
+kubectl label <kind>/nemo-opensandbox-ext -n <namespace> app.kubernetes.io/managed-by=Helm
+kubectl annotate <kind>/nemo-opensandbox-ext -n <namespace> \
+  meta.helm.sh/release-name=<release> meta.helm.sh/release-namespace=<release namespace>
+```
+
+Then run the `helm upgrade` above and restart the server.
 
 ### Upgrade, remove, troubleshoot
 
