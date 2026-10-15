@@ -10,6 +10,9 @@ on:
   pull_request:
     paths:
       - 'docs/**'
+      - 'openapi/**'
+      - 'services/**/src/**/*.py'
+      - 'k8s/helm/values.yaml'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'Makefile'
@@ -65,7 +68,10 @@ jobs:
           cache-dependency-glob: uv.lock
           version: ${{ env.UV_VERSION }}
 
-      - name: Lint Python snippets
+      - name: Test docs linters
+        run: uv run --frozen pytest docs/_scripts -q
+
+      - name: Lint docs snippets
         run: make docs-lint-snippets
 
       - name: Setup Node.js

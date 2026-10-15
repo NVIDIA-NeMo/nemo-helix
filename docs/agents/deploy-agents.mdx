@@ -645,6 +645,40 @@ inside the container.
 
 </Note>
 
+### Auth-Enabled Container Deployments
+
+On an auth-enabled platform, `nemo agents deploy --mode docker` and
+`--mode k8s` also handle platform credentials automatically. The Agents service
+creates the underlying `DeploymentConfig` with an `auth-proxy` sidecar request,
+rewrites Platform and Inference Gateway URLs in the agent config to the proxy's
+loopback URL (`http://127.0.0.1:8090` by default), and, when workload token
+exchange is enabled, requests workload identity for the deployment. Deploy with
+an authenticated CLI or SDK client so the platform can capture the creator auth
+context; otherwise token-exchange deployments are rejected instead of falling
+back to an unscoped service principal.
+
+The auth-proxy sidecar image is the platform API image by default
+(`deployments.auth_proxy_image_name: nhx-api`, qualified with the configured
+platform registry and tag). If your environment cannot resolve that image name,
+set `deployments.auth_proxy_image` to a fully qualified image that contains the
+`nemo` CLI and can run `nemo services run --sidecars auth-proxy`; do not leave a
+placeholder image value in production configuration.
+
+The proxy forwards to `platform.base_url` (with host-loopback rewriting for
+Docker), not `agents.deployments.gateway_url_override`. Ensure that upstream
+is reachable from the sidecar. In workload token-exchange mode, use HTTPS for
+a remote upstream; HTTP is allowed only for loopback development endpoints.
+
+If you create a deployments-plugin `DeploymentConfig` directly instead of
+using `nemo agents deploy`, the auth wiring is not automatic: request
+`authProxySidecar: true` with `authProxySidecarIdentity: agents`, point the
+agent's Platform and Inference Gateway URLs at the proxy loopback address,
+and configure workload identity and creator auth context when token exchange
+is enabled. In trusted-header mode (token exchange disabled), set
+`authProxySidecarOnBehalfOf` to the creator principal to avoid running with an
+unscoped service identity. Prefer `nemo agents deploy` to have the Agents
+service generate this wiring.
+
 #### Docker mode on Linux
 
 On **Linux**, `host.docker.internal` doesn't resolve inside containers, so agent

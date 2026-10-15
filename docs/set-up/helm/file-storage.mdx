@@ -28,10 +28,10 @@ The default configuration is equivalent to:
 
 ```yaml
 platformConfig:
- files:
- default_storage_config:
- type: local
- path: /vol/files
+  files:
+    default_storage_config:
+      type: local
+      path: /vol/files
 ```
 
 You do not need to add this to your `values.yaml`. Once the PVC is set up as described in [Persistent Volumes](/documentation/kubernetes-deployment/setup/helm/persistent-volumes), local storage works out of the box.
@@ -48,12 +48,12 @@ Configure S3 storage in your Helm values:
 
 ```yaml
 platformConfig:
- files:
- default_storage_config:
- type: s3
- bucket: my-nemo-bucket
- region: us-east-1
- use_sdk_auth: true
+  files:
+    default_storage_config:
+      type: s3
+      bucket: my-nemo-bucket
+      region: us-east-1
+      use_sdk_auth: true
 ```
 
 The platform uses the [boto3 credential chain](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html) for S3 authentication. It is the cluster administrator's responsibility to ensure the platform pod has valid credentials available through one of the standard boto3 mechanisms:
@@ -78,25 +78,25 @@ Then use the `api.env` field in your Helm values with `valueFrom` to inject the 
 
 ```yaml
 api:
- env:
- AWS_ACCESS_KEY_ID:
- valueFrom:
- secretKeyRef:
- name: s3-credentials
- key: access_key_id
- AWS_SECRET_ACCESS_KEY:
- valueFrom:
- secretKeyRef:
- name: s3-credentials
- key: secret_access_key
+  env:
+    AWS_ACCESS_KEY_ID:
+      valueFrom:
+        secretKeyRef:
+          name: s3-credentials
+          key: access_key_id
+    AWS_SECRET_ACCESS_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: s3-credentials
+          key: secret_access_key
 
 platformConfig:
- files:
- default_storage_config:
- type: s3
- bucket: my-nemo-bucket
- region: us-east-1
- use_sdk_auth: true
+  files:
+    default_storage_config:
+      type: s3
+      bucket: my-nemo-bucket
+      region: us-east-1
+      use_sdk_auth: true
 ```
 
 ### Additional Options
@@ -107,13 +107,13 @@ You can use the `prefix` field to scope the Files service to a specific path wit
 
 ```yaml
 platformConfig:
- files:
- default_storage_config:
- type: s3
- bucket: my-nemo-bucket
- prefix: nemo-helix/files
- region: us-east-1
- use_sdk_auth: true
+  files:
+    default_storage_config:
+      type: s3
+      bucket: my-nemo-bucket
+      prefix: nemo-helix/files
+      region: us-east-1
+      use_sdk_auth: true
 ```
 
 All files will be stored under `s3://my-nemo-bucket/nemo-helix/files/`.
@@ -124,13 +124,13 @@ For S3-compatible storage like MinIO or Ceph, specify a custom endpoint URL:
 
 ```yaml
 platformConfig:
- files:
- default_storage_config:
- type: s3
- bucket: my-nemo-bucket
- endpoint_url: http://minio.minio-system.svc.cluster.local:9000
- region: us-east-1
- use_sdk_auth: true
+  files:
+    default_storage_config:
+      type: s3
+      bucket: my-nemo-bucket
+      endpoint_url: http://minio.minio-system.svc.cluster.local:9000
+      region: us-east-1
+      use_sdk_auth: true
 ```
 
 <Note>
