@@ -39,7 +39,6 @@ from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
 from nhx.core.jobs.app.dispatcher import (
     JobDeletionConflictError,
     JobDispatcher,
-    JobNameValidationError,
     JobStatusUpdateSkippedError,
     generate_job_name,
 )
@@ -2793,34 +2792,6 @@ async def test_create_job_without_name_derives_valid_fileset_from_source(
     assert "--" not in job.name
     fileset_request = mock_files_client.create_fileset.await_args.kwargs["body"]
     assert fileset_request.name == f"job-fileset-{job.name}"
-
-
-@pytest.mark.parametrize("name", ["bad--name", "trailing-hyphen-", "Upper", "a" * 52])
-@pytest.mark.asyncio
-async def test_create_job_rejects_name_that_cannot_name_its_fileset(
-    mock_dispatcher: JobDispatcher,
-    mock_files_client,
-    sample_platform_job_request: CreateHelixJobRequest,
-    name: str,
-):
-    request = sample_platform_job_request.model_copy(update={"name": name})
-
-    with pytest.raises(JobNameValidationError):
-        await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
-
-    mock_files_client.create_fileset.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_create_job_accepts_longest_name_that_fits_its_fileset(
-    mock_dispatcher: JobDispatcher,
-    sample_platform_job_request: CreateHelixJobRequest,
-):
-    request = sample_platform_job_request.model_copy(update={"name": "a" * 51})
-
-    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
-
-    assert job.name == "a" * 51
 
 
 @pytest.mark.asyncio

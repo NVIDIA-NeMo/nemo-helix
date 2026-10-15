@@ -52,7 +52,6 @@ from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDeletionConflictError,
     JobDispatcher,
-    JobNameValidationError,
     JobOutputLocationError,
     JobSecretValidationError,
     JobStatusUpdateSkippedError,
@@ -306,12 +305,6 @@ async def create_job(
         )
     except JobOutputLocationError as exc:
         logger.info("Invalid output_location for workspace '%s'", sanitize_for_log(workspace), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(exc),
-        ) from exc
-    except JobNameValidationError as exc:
-        logger.info("Invalid job name for workspace '%s'", sanitize_for_log(workspace), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),

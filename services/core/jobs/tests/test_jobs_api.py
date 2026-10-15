@@ -389,7 +389,7 @@ async def test_create_job_conflict_sanitizes_log_fields(
             response = await test_client.post(
                 "/apis/jobs/v2/workspaces/default%0Aforged/jobs",
                 json={
-                    "name": "dup-job\r\nforged",
+                    "name": "dup-job",
                     "source": "test-source",
                     "spec": {},
                     "platform_spec": {
@@ -1730,11 +1730,10 @@ async def test_create_job_without_name_for_source_ending_in_separator_is_admitte
 
 
 @pytest.mark.asyncio
-async def test_create_job_with_name_that_cannot_name_its_fileset_returns_422(test_client: AsyncClient):
-    """An invalid caller-supplied name is a validation error, not a conflict with existing state."""
-    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=_create_job_body(name="bad--name"))
+@pytest.mark.parametrize("name", ["bad--name", "a" * 52])
+async def test_create_job_with_name_that_cannot_name_its_fileset_returns_422(test_client: AsyncClient, name: str):
+    """An invalid caller-supplied name is rejected at request validation, not reported as a state conflict."""
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=_create_job_body(name=name))
 
     assert response.status_code == 422
-    detail = response.json()["detail"]
-    assert detail.startswith("Invalid job name.")
-    assert "conflicts with existing platform state" not in detail
+    assert "conflicts with existing platform state" not in response.text

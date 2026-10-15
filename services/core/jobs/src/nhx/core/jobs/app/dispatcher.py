@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
-from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.types import JOB_FILESET_NAME_PREFIX
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
@@ -82,10 +82,6 @@ class JobSecretValidationError(ValueError):
 
 class JobOutputLocationError(ValueError):
     """Exception raised when a job's output_location references a fileset that does not exist."""
-
-
-class JobNameValidationError(ValueError):
-    """Exception raised when a caller-supplied job name cannot name the job's artifact fileset."""
 
 
 _AUTO_NAME_SOURCE_MAX_LENGTH = 20
@@ -374,16 +370,9 @@ class JobDispatcher:
                 fileset_name = job_req.output_location
             else:
                 try:
-                    fileset_request = CreateFilesetRequest(name=f"job-fileset-{job_name}")
+                    fileset_request = CreateFilesetRequest(name=f"{JOB_FILESET_NAME_PREFIX}{job_name}")
                 except ValidationError as exc:
-                    if not job_req.name:
-                        raise RuntimeError(f"generated job name '{job_name}' is not a valid name") from exc
-                    raise JobNameValidationError(
-                        "Invalid job name. The job's artifact fileset is named 'job-fileset-<job name>', "
-                        "so the job name must be at most "
-                        f"{NAME_MAX_LENGTH - len('job-fileset-')} characters, use lowercase letters, digits, "
-                        "hyphens, and dots, contain no consecutive hyphens, and not end with a hyphen."
-                    ) from exc
+                    raise RuntimeError(f"job name '{job_name}' cannot name its artifact fileset") from exc
                 fileset_resp = await self.files.create_fileset(body=fileset_request, workspace=workspace)
                 fileset_name = fileset_resp.data().name
 
