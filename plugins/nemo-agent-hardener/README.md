@@ -449,11 +449,14 @@ CLI-only. `uv tool uninstall openshell`, then use the curl installer above.
 | `NEMO_AGENT_HARDENER_OPERATOR_ENV_FILE` | `~/.agent-hardener/.env` | Dotenv the war-game subprocess reads |
 | `NEMO_AGENT_HARDENER_INDEX_URL` | unset | Extra package index `setup` resolves agent-hardener from |
 | `NEMO_AGENT_HARDENER_INDEX_STRATEGY` | unset | uv `--index-strategy` for that install |
+| `NEMO_AGENT_HARDENER_OPENSHELL_GATEWAY_ENDPOINT` | unset | OpenShell gateway a job registers before it runs, for jobs without `setup` (Helm). `http://` is plaintext, `https://` is mTLS |
+| `NEMO_AGENT_HARDENER_OPENSHELL_CA_SECRET` | unset | NeMo Secret with the CA for an `https://` gateway |
+| `NEMO_AGENT_HARDENER_OPENSHELL_CLIENT_CERT_SECRET` | unset | NeMo Secret with the client certificate for an `https://` gateway |
+| `NEMO_AGENT_HARDENER_OPENSHELL_CLIENT_KEY_SECRET` | unset | NeMo Secret with the client key for an `https://` gateway |
 
-The plugin runs only on a source/local deployment (`nemo services run`). It is not in the `nhx-api`
-image, so Helm and other container deployments do not load it and Studio shows no Agent Hardening
-entry there. War-games need host Docker, the OpenShell gateway, and the per-machine venvs, none of
-which a pod provides yet.
+All `NEMO_AGENT_HARDENER_*` values can also be set via Helm `platformConfig.agent_hardener.*`. On Helm, jobs run in the
+`nhx-agent-hardener-tasks` image, which ships both venvs and the `openshell` CLI, so `setup` is not needed; see
+`k8s/helm/examples/openshell/agent-hardener-values.yaml`.
 
 ---
 
