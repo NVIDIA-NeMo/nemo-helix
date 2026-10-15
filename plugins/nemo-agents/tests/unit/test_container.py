@@ -534,6 +534,10 @@ class TestRenderFabricDockerfile:
         ("kind", "extra"),
         [
             ("claude", "nemo-agents-plugin-claude"),
+            ("mini-swe-agent", "nemo-agents-plugin-mini-swe-agent"),
+            ("nvidia.fabric.mini-swe-agent", "nemo-agents-plugin-mini-swe-agent"),
+            ("nooa-bench-agent", "nemo-agents-plugin-nooa"),
+            ("nvidia.fabric.nooa.bench-agent", "nemo-agents-plugin-nooa"),
             ("remote-agent", "nemo-agents-plugin"),
             ("nvidia.fabric.remote-agent", "nemo-agents-plugin"),
             ("nvidia.fabric.codex", "nemo-agents-plugin-codex"),
@@ -558,6 +562,102 @@ class TestRenderFabricDockerfile:
         assert f'"nemo-helix[{extra}]=={get_contract_version()}"' in result
         if extra != "nemo-agents-plugin-claude":
             assert "nemo-agents-plugin-claude]==" not in result
+
+    @pytest.mark.parametrize("kind", ["nooa-bench-agent", "nvidia.fabric.nooa.bench-agent"])
+    @pytest.mark.parametrize("version", [None, "3.12", "3.13.12", "3.11", "3.14", "3.130", "invalid"])
+    def test_nooa_container_python_version(self, tmp_path: Path, kind: str, version: str | None) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"default_harness: selected\nharnesses:\n  selected:\n    kind: {kind}\n")
+        if version in {None, "3.12", "3.13.12"}:
+            result = render_fabric_dockerfile(config, python_version=version)
+            assert f"ARG PYTHON_VERSION={version or '3.13'}" in result
+        else:
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version)
+
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            "default_harness: bench\nharnesses:\n  bench:\n    kind: nooa-bench-agent\n",
+            "workflow:\n  target_id: nvidia.nooa.coding-agent\n",
+        ],
+    )
+    @pytest.mark.parametrize("version", ["3.12", "3.13", "3.11", "3.14"])
+    def test_nooa_custom_template_python_version(self, tmp_path: Path, selection: str, version: str) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(selection)
+        custom = tmp_path / "Dockerfile.j2"
+        custom.write_text("FROM python:{{ python_version }}\nRUN uv pip install nemo-helix[{{ platform_extra }}]\n")
+
+        if version in {"3.12", "3.13"}:
+            result = render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
+            assert f"FROM python:{version}" in result
+            assert "nemo-helix[nemo-agents-plugin-nooa]" in result
+        else:
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
+
+    @pytest.mark.parametrize("kind", ["nooa", "nvidia.fabric.nooa"])
+    def test_generic_nooa_kind_does_not_select_harness_dependencies(self, tmp_path: Path, kind: str) -> None:
+        from nemo_agents_plugin.container.template import resolve_fabric_harness_install
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"default_harness: selected\nharnesses:\n  selected:\n    kind: {kind}\n")
+
+        assert resolve_fabric_harness_install(config) == ("nemo-agents-plugin", False, False)
+
+    def test_nooa_container_checks_python_environment_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(
+            "default_harness: selected\nharnesses:\n  selected:\n    kind: nvidia.fabric.nooa.bench-agent\n"
+        )
+        monkeypatch.setenv("NEMO_AGENTS_PYTHON_VERSION", "3.14")
+        with pytest.raises(ValueError, match="Set --python-version 3.13"):
+            render_fabric_dockerfile(config)
+        assert "ARG PYTHON_VERSION=3.13" in render_fabric_dockerfile(config, python_version="3.13")
+
+    def test_unused_nooa_does_not_restrict_container_python(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(
+            "default_harness: selected\nharnesses:\n  selected:\n    kind: codex\n"
+            "  unused:\n    kind: nvidia.fabric.nooa.bench-agent\n"
+        )
+        assert "ARG PYTHON_VERSION=3.14" in render_fabric_dockerfile(config, python_version="3.14")
+
+    @pytest.mark.parametrize("target", ["nvidia.nooa.coding-agent", "nvidia.nooa.arc-solver"])
+    @pytest.mark.parametrize("version", ["3.12", "3.13.12", "3.14"])
+    def test_nooa_workflow_container_install(self, tmp_path: Path, target: str, version: str) -> None:
+        from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"workflow:\n  target_id: {target}\n")
+        if version == "3.14":
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version)
+        else:
+            result = render_fabric_dockerfile(config, python_version=version)
+            assert f'"nemo-helix[nemo-agents-plugin-nooa]=={get_contract_version()}"' in result
+            assert f"ARG PYTHON_VERSION={version}" in result
+
+    @pytest.mark.parametrize("target", ["com.example.agent", "nvidia.nooa.custom-agent"])
+    def test_custom_workflow_does_not_infer_harness_dependencies(self, tmp_path: Path, target: str) -> None:
+        from nemo_agents_plugin.container.template import get_contract_version, render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"workflow:\n  target_id: {target}\n")
+        result = render_fabric_dockerfile(config, python_version="3.14")
+        assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
+        assert "nemo-agents-plugin-nooa" not in result
 
     def test_hermes_uses_an_isolated_pinned_environment(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import (
@@ -588,6 +688,80 @@ class TestRenderFabricDockerfile:
         assert "--editable /opt/hermes-agent" in result
         assert "uv pip check --python /opt/hermes-venv/bin/python" in result
         assert "ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python" in result
+
+    def test_pi_harness_installs_node_adapter_and_stages_descriptor(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import (
+            PI_ADAPTER_NPM_SPEC,
+            PI_RELAY_EXTENSION_PATH,
+            PI_RELAY_EXTENSION_REF,
+            PINNED_NODE_MAJOR,
+            get_contract_version,
+            render_fabric_dockerfile,
+        )
+
+        agent_config = tmp_path / "agent.yaml"
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: pi-agent\n"
+            "default_harness: pi\n"
+            "harnesses:\n"
+            "  pi:\n"
+            "    kind: nvidia.fabric.pi\n"
+        )
+
+        result = render_fabric_dockerfile(agent_config)
+
+        # The Python/Rust Fabric stack is still installed under the base plugin extra.
+        assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
+        # Node is installed additively and the npm adapter + Pi SDK peers are present.
+        assert f"setup_{PINNED_NODE_MAJOR}.x" in result
+        assert "apt-get install -y --no-install-recommends nodejs" in result
+        assert PI_ADAPTER_NPM_SPEC in result
+        assert "@earendil-works/pi-coding-agent@^0.86.0" in result
+        assert "@earendil-works/pi-ai@^0.86.0" in result
+        # Relay 0.9 CLI for telemetry and git for the agent's own GitHub work.
+        assert "nemo-relay-cli-bin" in result
+        assert "ca-certificates curl git" in result
+        # The RUN block must render as a real multi-line Dockerfile instruction with
+        # backslash-newline continuations — not collapse to one physical line.
+        assert " \\\n    curl -fsSL" in result
+        assert "uv pip install --no-sources --prerelease=allow" in result
+        # Guarded symlink staging (fail-fast if the descriptor is missing, not a dangling link).
+        assert 'test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json"' in result
+        # The descriptor is linked into the Fabric share/ tree for preinstalled discovery.
+        assert "share/nemo-fabric/adapters/pi" in result
+        assert "pi.fabric-adapter.json" in result
+        # The Relay Pi extension is fetched from the pinned Relay 0.9 ref and staged
+        # in-image (the npm adapter + CLI wheel do not ship it), so a Relay-enabled
+        # Pi agent has an extension to point relay_extension_path at.
+        assert f"fetch --depth 1 origin {PI_RELAY_EXTENSION_REF}" in result
+        assert "crates/cli/assets/pi-extension" in result
+        assert f'cp -r "/opt/pi-relay-src/crates/cli/assets/pi-extension" "{PI_RELAY_EXTENSION_PATH}"' in result
+        # The transient clone is removed so it does not bloat the image layer.
+        assert "rm -rf /opt/pi-relay-src" in result
+
+    def test_non_pi_harness_omits_node_install(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        agent_config = tmp_path / "agent.yaml"
+        agent_config.write_text(
+            "config_format: nemo-agents-spec-v1\n"
+            "name: deepagents-agent\n"
+            "default_harness: deepagents\n"
+            "harnesses:\n"
+            "  deepagents:\n"
+            "    kind: deepagents\n"
+        )
+
+        result = render_fabric_dockerfile(agent_config)
+
+        # Node and the Pi adapter must not leak into a non-Pi image.
+        assert "nodejs" not in result
+        assert "nemo-fabric-adapters-pi" not in result
+        assert "share/nemo-fabric/adapters/pi" not in result
+        # The Relay Pi extension fetch is likewise Pi-gated.
+        assert "pi-relay-src" not in result
+        assert "crates/cli/assets/pi-extension" not in result
 
     def test_unresolved_contract_version_is_rejected(
         self,
@@ -1807,13 +1981,13 @@ class TestEndToEndPipeline:
 
 @pytest.fixture()
 def package_cli():
-    """Return a Typer app with only the ``package`` command registered.
+    """Return a Typer app with the local commands (``package`` included) registered.
 
     A no-op callback keeps the app in multi-command mode so ``package``
     must be invoked explicitly (matching real ``nemo agents package`` usage).
     """
     import typer
-    from nemo_agents_plugin.cli import _register_package_command
+    from nemo_agents_plugin.cli import _register_local_commands
     from typer.testing import CliRunner
 
     app = typer.Typer(no_args_is_help=True)
@@ -1822,7 +1996,7 @@ def package_cli():
     def _root() -> None:
         pass
 
-    _register_package_command(app)
+    _register_local_commands(app)
     return app, CliRunner()
 
 
@@ -2965,7 +3139,7 @@ class TestFabricWheelInstall:
         dist = tmp_path / "dist"
         dist.mkdir()
         ours = dist / "nemo_helix-0.4.0-py3-none-any.whl"
-        theirs = dist / "nemo_evaluator-9.9.9-py3-none-any.whl"
+        theirs = dist / "nemo_evals-9.9.9-py3-none-any.whl"
         ours.write_bytes(b"ours")
         theirs.write_bytes(b"theirs")
         os.utime(ours, (1, 1))
@@ -2989,7 +3163,7 @@ class TestFabricWheelInstall:
 
         dist = tmp_path / "dist"
         dist.mkdir()
-        (dist / "nemo_evaluator-9.9.9-py3-none-any.whl").write_bytes(b"theirs")
+        (dist / "nemo_evals-9.9.9-py3-none-any.whl").write_bytes(b"theirs")
         monkeypatch.setattr(builder, "_source_checkout_dist_dir", lambda: dist)
         monkeypatch.setenv(WHEEL_ENV, WHEEL_LATEST)
 

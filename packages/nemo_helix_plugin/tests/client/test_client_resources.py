@@ -3,10 +3,8 @@
 
 """Tests for typed resource dispatch and transport auth.
 
-Covers two behaviours that only surface through the compatibility layer:
-
-- ``sdk.inference.*`` must hand back a resource client matching the owning
-  client's sync/async flavour.
+- Resource properties hand back a client matching the owning client's
+  sync/async flavour.
 - Raw calls through the exposed ``_client`` transport must stay authenticated.
 """
 
@@ -14,63 +12,24 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 BASE = "http://test:8000"
 
 
-# ---------------------------------------------------------------------------
-# sdk.inference.* sync/async dispatch
-# ---------------------------------------------------------------------------
-
-
-def test_inference_namespace_returns_sync_clients_for_sync_client() -> None:
-    from nemo_helix_plugin.models.client import ModelsClient
-    from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
-
-    client = NemoClient(base_url=BASE)
-
-    assert isinstance(client.inference.providers, ModelsClient)
-    assert isinstance(client.inference.deployments, ModelsClient)
-    assert isinstance(client.inference.deployment_configs, ModelsClient)
-    assert isinstance(client.inference.virtual_models, VirtualModelsClient)
-
-
-def test_inference_namespace_returns_async_clients_for_async_client() -> None:
-    """An async client must never wrap its AsyncClient in a sync resource."""
-    from nemo_helix_plugin.models.client import AsyncModelsClient
-    from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
-
-    client = AsyncNemoClient(base_url=BASE)
-
-    assert isinstance(client.inference.providers, AsyncModelsClient)
-    assert isinstance(client.inference.deployments, AsyncModelsClient)
-    assert isinstance(client.inference.deployment_configs, AsyncModelsClient)
-    assert isinstance(client.inference.virtual_models, AsyncVirtualModelsClient)
-
-
-@pytest.mark.parametrize(
-    ("client_factory", "transport_type"),
-    [(NemoClient, httpx.Client), (AsyncNemoClient, httpx.AsyncClient)],
-)
-def test_inference_resources_transport_matches_flavour(client_factory, transport_type) -> None:
-    client = client_factory(base_url=BASE)
-
-    assert isinstance(client.inference.providers._http, transport_type)
-    assert isinstance(client.inference.virtual_models._http, transport_type)
-
-
 def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
     from nemo_helix_plugin.agent_hardener.client import AgentHardenerClient
     from nemo_helix_plugin.agents.client import AgentsClient
-    from nemo_helix_plugin.auditor.client import AuditorClient
     from nemo_helix_plugin.auth.access_keys.client import AccessKeysClient
     from nemo_helix_plugin.auth.client import AuthenticationClient
     from nemo_helix_plugin.data_designer.client import DataDesignerClient
-    from nemo_helix_plugin.evaluator.client import EvaluatorClient
+    from nemo_helix_plugin.evals.client import EvaluatorClient
     from nemo_helix_plugin.files.client import FilesClient
+    from nemo_helix_plugin.garak.client import GarakClient
     from nemo_helix_plugin.guardrail.client import GuardrailClient
     from nemo_helix_plugin.iam.client import IAMClient
+    from nemo_helix_plugin.intake.client import IntakeClient
     from nemo_helix_plugin.jobs.client import JobsClient
     from nemo_helix_plugin.models.client import ModelsClient
     from nemo_helix_plugin.projects.client import ProjectsClient
@@ -88,10 +47,11 @@ def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
         ("access_keys", AccessKeysClient),
         ("iam", IAMClient),
         ("agents", AgentsClient),
-        ("auditor", AuditorClient),
+        ("garak", GarakClient),
         ("guardrail", GuardrailClient),
-        ("evaluator", EvaluatorClient),
+        ("evals", EvaluatorClient),
         ("projects", ProjectsClient),
+        ("intake", IntakeClient),
         ("data_designer", DataDesignerClient),
         ("agent_hardener", AgentHardenerClient),
     ]
@@ -105,14 +65,15 @@ def test_convenience_properties_return_sync_clients_for_sync_client() -> None:
 def test_convenience_properties_return_async_clients_for_async_client() -> None:
     from nemo_helix_plugin.agent_hardener.client import AsyncAgentHardenerClient
     from nemo_helix_plugin.agents.client import AsyncAgentsClient
-    from nemo_helix_plugin.auditor.client import AsyncAuditorClient
     from nemo_helix_plugin.auth.access_keys.client import AsyncAccessKeysClient
     from nemo_helix_plugin.auth.client import AsyncAuthenticationClient
     from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient
-    from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient
+    from nemo_helix_plugin.evals.client import AsyncEvaluatorClient
     from nemo_helix_plugin.files.client import AsyncFilesClient
+    from nemo_helix_plugin.garak.client import AsyncGarakClient
     from nemo_helix_plugin.guardrail.client import AsyncGuardrailClient
     from nemo_helix_plugin.iam.client import AsyncIAMClient
+    from nemo_helix_plugin.intake.client import AsyncIntakeClient
     from nemo_helix_plugin.jobs.client import AsyncJobsClient
     from nemo_helix_plugin.models.client import AsyncModelsClient
     from nemo_helix_plugin.projects.client import AsyncProjectsClient
@@ -130,10 +91,11 @@ def test_convenience_properties_return_async_clients_for_async_client() -> None:
         ("access_keys", AsyncAccessKeysClient),
         ("iam", AsyncIAMClient),
         ("agents", AsyncAgentsClient),
-        ("auditor", AsyncAuditorClient),
+        ("garak", AsyncGarakClient),
         ("guardrail", AsyncGuardrailClient),
-        ("evaluator", AsyncEvaluatorClient),
+        ("evals", AsyncEvaluatorClient),
         ("projects", AsyncProjectsClient),
+        ("intake", AsyncIntakeClient),
         ("data_designer", AsyncDataDesignerClient),
         ("agent_hardener", AsyncAgentHardenerClient),
     ]
@@ -142,6 +104,33 @@ def test_convenience_properties_return_async_clients_for_async_client() -> None:
         resource = getattr(client, attr)
         assert isinstance(resource, expected_type)
         assert isinstance(resource._http, httpx.AsyncClient)
+
+
+def test_sync_intake_shares_transport_and_workspace() -> None:
+    from nemo_helix_plugin.intake.client import IntakeClient
+
+    with httpx.Client() as http_client:
+        client = NemoClient(base_url=BASE, workspace="team", http_client=http_client)
+
+        intake = client.intake
+
+        assert isinstance(intake, IntakeClient)
+        assert intake._http is http_client
+        assert intake.workspace == "team"
+
+
+@pytest.mark.asyncio
+async def test_async_intake_shares_transport_and_workspace() -> None:
+    from nemo_helix_plugin.intake.client import AsyncIntakeClient
+
+    async with httpx.AsyncClient() as http_client:
+        client = AsyncNemoClient(base_url=BASE, workspace="team", http_client=http_client)
+
+        intake = client.intake
+
+        assert isinstance(intake, AsyncIntakeClient)
+        assert intake._http is http_client
+        assert intake.workspace == "team"
 
 
 @pytest.mark.parametrize("client_factory", [NemoClient, AsyncNemoClient])
@@ -153,12 +142,12 @@ def test_unknown_attribute_still_raises(client_factory) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Auth on the raw _client transport
+# Auth headers for raw _client calls
 # ---------------------------------------------------------------------------
 
 
-def test_raw_client_calls_are_authenticated() -> None:
-    """Plugin resources using owner._client bypass send() but keep auth."""
+def test_request_headers_authenticate_raw_client_calls() -> None:
+    """Plugin resources using owner._client can attach auth without transport-level auth."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -170,31 +159,31 @@ def test_raw_client_calls_are_authenticated() -> None:
 
     transport = client._client
     assert isinstance(transport, httpx.Client)
-    transport.get(f"{BASE}/apis/anything")
+    transport.get(f"{BASE}/apis/anything", headers=client.request_headers())
 
     assert seen[0].headers["Authorization"] == "Bearer tok"
 
 
 @pytest.mark.asyncio
-async def test_raw_async_client_calls_are_authenticated() -> None:
+async def test_async_request_headers_authenticate_raw_client_calls() -> None:
     seen: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return httpx.Response(200, json={})
 
-    client = AsyncNemoClient(base_url=BASE, auth="tok")
+    client = AsyncNemoClient(base_url=BASE, auth=StaticToken("tok"))
     client._http._transport = httpx.MockTransport(handler)
 
     transport = client._client
     assert isinstance(transport, httpx.AsyncClient)
-    await transport.get(f"{BASE}/apis/anything")
+    await transport.get(f"{BASE}/apis/anything", headers=await client.request_headers())
 
     assert seen[0].headers["Authorization"] == "Bearer tok"
 
 
-def test_transport_auth_does_not_override_explicit_header() -> None:
-    """send() and per-call overrides stay authoritative over transport auth."""
+def test_request_headers_do_not_override_explicit_authorization() -> None:
+    """Per-call overrides stay authoritative over client auth."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -206,7 +195,10 @@ def test_transport_auth_does_not_override_explicit_header() -> None:
 
     transport = client._client
     assert isinstance(transport, httpx.Client)
-    transport.get(f"{BASE}/apis/anything", headers={"Authorization": "Bearer explicit"})
+    transport.get(
+        f"{BASE}/apis/anything",
+        headers=client.request_headers({"Authorization": "Bearer explicit"}),
+    )
 
     assert seen[0].headers["Authorization"] == "Bearer explicit"
 
@@ -218,12 +210,12 @@ def test_no_auth_configured_leaves_transport_unauthenticated() -> None:
 
 
 def test_shared_transport_keeps_auth_across_from_client() -> None:
-    """Resource clients built from a parent share its authenticated transport."""
-    from nemo_helix_plugin.client.auth import TokenProviderAuth
+    """Resource clients built from a parent share the neutral transport and auth provider."""
     from nemo_helix_plugin.models.client import ModelsClient
 
     parent = NemoClient(base_url=BASE, auth="tok")
     child = ModelsClient.from_client(parent)
 
     assert child._http is parent._http
-    assert isinstance(child._http.auth, TokenProviderAuth)
+    assert child._http.auth is None
+    assert child.request_headers() == {"Authorization": "Bearer tok"}

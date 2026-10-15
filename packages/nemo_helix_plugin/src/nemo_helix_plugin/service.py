@@ -90,10 +90,22 @@ class NemoService(_NamedPlugin):
 
         Names of Helix services that must start before this one.
         Defaults to ``[]``.
+
+    .. attribute:: permission_namespace
+        :type: str | None
+
+        Legacy permission namespace (the first segment of every permission id)
+        when it differs from :attr:`name`. Defaults to ``None``, meaning the
+        namespace is :attr:`name`. Set only when a service was renamed but its
+        existing permissions must keep their original ids; delete it once the
+        permissions migrate. The namespace is resolved from
+        ``authz_discovery.LEGACY_PERMISSION_NAMESPACES`` by :attr:`name`; a value
+        declared here that disagrees with that mapping fails the plugin closed.
     """
 
     name: ClassVar[str]
     dependencies: ClassVar[list[str]] = []
+    permission_namespace: ClassVar[str | None] = None
 
     @abstractmethod
     def get_routers(self) -> list[RouterSpec]:

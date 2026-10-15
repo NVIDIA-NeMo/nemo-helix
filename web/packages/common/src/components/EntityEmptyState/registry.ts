@@ -169,16 +169,15 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No evaluation jobs yet',
     subheading:
       'Apply a model_optimization suggestion or submit an evaluate-agent job to see results here.',
-    cliCommand: 'nemo evaluator agent-evaluate --spec-file <spec>.json --workspace <workspace>',
-    skillPrompt:
-      'Help me create my first agent evaluation with the nemo-nemo-evaluator-plugin skill',
+    cliCommand: 'nemo evals agent-evaluate --spec-file <spec>.json --workspace <workspace>',
+    skillPrompt: 'Help me create my first agent evaluation with the nemo-nemo-evals-plugin skill',
   },
   evaluationResults: {
     heading: 'No evaluations yet',
     subheading: 'Submit an evaluation job to score a model or agent against a benchmark.',
     createAction: { label: 'Create Evaluation' },
-    cliCommand: 'nemo evaluator evaluate --spec-file <spec>.json --workspace <workspace>',
-    skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evaluator-plugin skill',
+    cliCommand: 'nemo evals evaluate --spec-file <spec>.json --workspace <workspace>',
+    skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evals-plugin skill',
   },
   evaluationSessions: {
     heading: 'No test cases',
@@ -198,8 +197,8 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   optimizerInsights: {
     heading: 'No insights yet',
     subheading: 'Run an optimizer analysis on an agent to surface insights here.',
-    cliCommand: 'nemo agents optimize-skills --spec-file <spec>.yml',
-    skillPrompt: 'Help me run my first optimizer analysis with the nemo-skills-optimization skill',
+    cliCommand: 'nemo insights analysis-runs create --agent <agent-name> --workspace <workspace>',
+    skillPrompt: 'Help me run my first analysis of my agent with the nemo-analyst skill',
   },
   insightExperiments: {
     heading: 'No experiments yet',

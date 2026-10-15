@@ -125,19 +125,23 @@ const parseTrials = (
   return { trials, metrics };
 };
 
-/**
- * Locate the study artifacts inside the job's registered results.
- */
-const locateStudyFiles = async (
-  workspace: string,
-  jobName: string,
-  signal?: AbortSignal
-): Promise<{
+export interface JobResultFiles {
   workspace: string;
   fileset: string;
-  summaryPath?: string;
-  trialsPath?: string;
-} | null> => {
+  /** Fileset path of each requested file name the result holds; absent when it holds none. */
+  paths: Partial<Record<string, string>>;
+}
+
+/**
+ * Locate the named files inside an optimize job's registered results: the first fileset-backed
+ * result holding any of them wins.
+ */
+export const locateJobResultFiles = async (
+  workspace: string,
+  jobName: string,
+  fileNames: readonly string[],
+  signal?: AbortSignal
+): Promise<JobResultFiles | null> => {
   const { data: results } = await agentOptimizationListRunStrategyJobResults(
     workspace,
     jobName,
@@ -155,20 +159,22 @@ const locateStudyFiles = async (
       { path: parsed.filesListPathPrefix },
       signal
     );
-    const at = (fileName: string) =>
-      files.find((file) => file.path === fileName || file.path.endsWith(`/${fileName}`))?.path;
-
-    const summaryPath = at(SUMMARY_FILE);
-    const trialsPath = at(TRIALS_FILE);
-    if (summaryPath ?? trialsPath) {
-      return { workspace: parsed.workspace, fileset: parsed.name, summaryPath, trialsPath };
+    const paths: Partial<Record<string, string>> = {};
+    for (const fileName of fileNames) {
+      const path = files.find(
+        (file) => file.path === fileName || file.path.endsWith(`/${fileName}`)
+      )?.path;
+      if (path) paths[fileName] = path;
+    }
+    if (Object.keys(paths).length) {
+      return { workspace: parsed.workspace, fileset: parsed.name, paths };
     }
   }
 
   return null;
 };
 
-const downloadText = async (
+export const downloadText = async (
   workspace: string,
   fileset: string,
   path: string,
@@ -186,10 +192,17 @@ export const fetchStudyResults = async (
   jobName: string,
   signal?: AbortSignal
 ): Promise<StudyResults | null> => {
-  const located = await locateStudyFiles(workspace, jobName, signal);
+  const located = await locateJobResultFiles(
+    workspace,
+    jobName,
+    [SUMMARY_FILE, TRIALS_FILE],
+    signal
+  );
   if (!located) return null;
 
-  const { workspace: artifactWorkspace, fileset, summaryPath, trialsPath } = located;
+  const { workspace: artifactWorkspace, fileset, paths } = located;
+  const summaryPath = paths[SUMMARY_FILE];
+  const trialsPath = paths[TRIALS_FILE];
   const [summaryText, trialsText] = await Promise.all([
     summaryPath ? downloadText(artifactWorkspace, fileset, summaryPath, signal) : null,
     trialsPath ? downloadText(artifactWorkspace, fileset, trialsPath, signal) : null,

@@ -8,11 +8,14 @@ x-authentik-env: &authentik-env
   AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
   AUTHENTIK_POSTGRESQL__USER: ${PG_USER:-authentik}
   AUTHENTIK_POSTGRESQL__NAME: ${PG_DB:-authentik}
-  AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS:-authentik}
-  AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-dev-only}
-  AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-akadmin-dev}
-  AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-bootstrap-token-dev}
-  AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD: ${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:-svc-nemo-token-secret-dev}
+  AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS:?run contrib/auth/authentik/run.sh prepare-local}
+  AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?run contrib/auth/authentik/run.sh prepare-local}
+  AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}
+  AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:?run contrib/auth/authentik/run.sh prepare-local}
+  AUTHENTIK_INTERACTIVE_USER_PASSWORD: ${AUTHENTIK_INTERACTIVE_USER_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}
+  AUTHENTIK_SETUP_CLIENT_SECRET: ${AUTHENTIK_SETUP_CLIENT_SECRET:?run contrib/auth/authentik/run.sh prepare-local}
+  AUTHENTIK_SETUP_PASSWORD: ${AUTHENTIK_SETUP_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}
+  AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD: ${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}
 
 services:
   nemo:
@@ -22,7 +25,7 @@ services:
         "--host",
         "0.0.0.0",
         "--services",
-        "auth,models,files,inference-gateway,jobs,secrets,entities,deployments",
+        "auth,models,files,inference-gateway,jobs,secrets,entities,deployments,studio",
         "--controllers",
         "jobs,models,entities,deployments",
       ]
@@ -35,15 +38,17 @@ services:
       NHX_CONFIG_WARNINGS_DISABLED: "1"
       NHX_AUTH_POLICY_DECISION_POINT_BASE_URL: http://127.0.0.1:8080
       NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: /var/run/secrets/nemo-helix/workload-token-signing/private-key.pem
+      NHX_OIDC_CLIENT_SECRET: ${NHX_OIDC_CLIENT_SECRET:?run contrib/auth/authentik/run.sh prepare-local}
+      NHX_AUTH_SESSION_ENCRYPTION_KEY: ${NHX_AUTH_SESSION_ENCRYPTION_KEY:?run contrib/auth/authentik/run.sh prepare-local}
+      NHX_SECRETS_DEFAULT_ENCRYPTION_KEY: ${NHX_SECRETS_DEFAULT_ENCRYPTION_KEY:?run contrib/auth/authentik/run.sh prepare-local}
       NHX_SEED_ON_STARTUP: "true"
       NHX_PLATFORM_SEED_MODEL_PROVIDER_ENABLED: "false"
-      NHX_SECRETS_ALLOW_KEY_CREATION: "1"
       NEMO_JOBS_DEFAULT_DOCKER_NETWORK: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}
       NEMO_DEPLOYMENTS_DOCKER_NETWORK: ${AUTHENTIK_WORKLOAD_NETWORK_NAME:-authentik_workload}
       NEMO_DEPLOYMENTS_DOCKER_ENDPOINT_MODE: network
       SSL_CERT_FILE: /etc/nhx/gateway-tls/tls.crt
       REQUESTS_CA_BUNDLE: /etc/nhx/gateway-tls/tls.crt
-      AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD: ${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:-svc-nemo-token-secret-dev}
+      AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD: ${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}
     depends_on:
       gateway-tls-init:
         condition: service_completed_successfully
@@ -114,7 +119,7 @@ services:
     environment:
       POSTGRES_USER: ${PG_USER:-authentik}
       POSTGRES_DB: ${PG_DB:-authentik}
-      POSTGRES_PASSWORD: ${PG_PASS:-authentik}
+      POSTGRES_PASSWORD: ${PG_PASS:?run contrib/auth/authentik/run.sh prepare-local}
     volumes:
       - authentik-pgdata:/var/lib/postgresql/data
     networks:
@@ -184,7 +189,10 @@ services:
           attempt=$$((attempt + 1))
           sleep 2
         done
-    environment: *authentik-env
+    environment:
+      <<: *authentik-env
+      NHX_OIDC_LOGIN_REDIRECT_URI: https://127.0.0.1:${AUTHENTIK_GATEWAY_PORT:-18080}/apis/auth/v2/login/callback
+      NHX_OIDC_CLIENT_SECRET: ${NHX_OIDC_CLIENT_SECRET:?run contrib/auth/authentik/run.sh prepare-local}
     volumes:
       - ${AUTHENTIK_BLUEPRINT_DIR:-../helm/files/blueprints}:/blueprints/custom:ro
       - authentik-media:/media

@@ -85,15 +85,32 @@ NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE=/etc/nhx/workload-token/private-key.pem
 ```
 
 Nested auth keys use a double underscore after `NHX_AUTH_`: for example,
-`NHX_AUTH_OIDC__ISSUER`, `NHX_AUTH_OIDC__CLIENT_ID`, and
+`NHX_AUTH_OIDC__ISSUER`, `NHX_AUTH_OIDC__PUBLIC_CLIENT__CLIENT_ID`, and
 `NHX_AUTH_ACCESS_KEYS__ENABLED`.
 
 ## Scoped Access Keys
 
-Scoped Access Keys let an authenticated user create a scoped bearer token for
-non-SDK clients and automation. The implementation creates user-scoped signed
-JWT access keys, persists their lifecycle metadata, and rejects service principals.
-Users can list and revoke their own keys. Rotation is not implemented.
+Scoped Access Keys let a signed-in user create a bearer token for non-SDK
+clients and automation. NeMo issues a signed JWT, stores the key, and rejects
+the reserved internal `service:` principal prefix.
+
+By default, a key is bound to the signed-in user's effective principal. A human
+HelixAdmin can create a service-account-bound key by passing
+`service_account_id` to the API or `--service-account <id>` to the CLI. The
+issued token authenticates as `service-account:<id>`. Service-account IDs are
+NeMo Helix identities, not Kubernetes service account tokens, and they do not
+need matching IdP users or email addresses.
+
+Service account IDs must start with a letter or number and may contain letters,
+numbers, `.`, `_`, `+`, `/`, or `-`. Pass the unprefixed ID to
+`--service-account`; use the prefixed `service-account:<id>` principal when
+granting workspace roles.
+
+Users can list, suspend, unsuspend, rotate, and revoke their own user-bound
+keys. HelixAdmins can also list, suspend, unsuspend, rotate, and revoke
+service-account keys, including keys created by other admins. Rotation is
+explicit: callers invoke `rotate` and then cut over their external secret or
+configuration during the grace period.
 
 Scoped Access Keys are an auth-service feature exposed under the auth CLI
 namespace (`nemo auth access-keys ...`) and the `/apis/auth/v2/access-keys` API routes.
@@ -137,6 +154,13 @@ NHX_AUTH_ACCESS_KEYS__ROTATION_GRACE_PERIOD_SECONDS=172800
 List-valued env vars for accepted Scoped Access Key formats are written as
 comma-separated values, for example `NHX_AUTH_ACCESS_KEYS__ACCEPTED_FORMATS=jwt`.
 
+Create requests can include service-area scopes and workspace grants. The CLI
+spells these as `--scope intake,entities` and
+`--workspace <workspace>:<role1>,<role2>`. For service-account access keys,
+combine service-area scopes with minimum workspace role bindings, short finite
+lifetimes, suspension, and revocation. API-scope checks apply to bearer tokens
+that contain `scope` or `scp` claims.
+
 Service-level `AuthorizationMiddleware` accepts Scoped Access Key bearer tokens
 directly when `auth.access_keys.enabled=true`. When
 `auth.access_keys.enabled=false`, the middleware does not try to authenticate
@@ -174,12 +198,15 @@ The issuer defaults to `<platform.base_url>/apis/auth` when
 when a gateway validates Scoped Access Keys before forwarding requests to
 Helix services.
 
+For Intake reader and writer tokens, see
+[Scoped Intake Tokens](/documentation/access-control/deployment/scoped-intake-tokens).
+
 ## OIDC Workload Identity Exchange
 
-`auth.oidc` can also advertise SDK workload identity token exchange metadata.
-Workload tokens share `auth.token_signing` by default, while
-`auth.oidc.workload_token_*` fields remain available for workload-specific
-overrides:
+`auth.oidc.workload` configures SDK workload identity token exchange. The
+profile's presence enables workload exchange. Workload tokens share
+`auth.token_signing` by default, while fields under `workload` provide
+workload-specific overrides:
 
 ```yaml
 auth:
@@ -189,53 +216,56 @@ auth:
    private_key_file: "/etc/nhx/workload-token/private-key.pem"
  oidc:
    enabled: true
-   token_endpoint: "https://idp.example.com/oauth/token"
-   workload_token_exchange_enabled: true
-   workload_kubernetes_token_review_enabled: true
-   workload_client_id: "nemo-helix-workload"
-   workload_token_endpoint: "https://idp.example.com/oauth/token"
-   workload_audience: "nemo-helix"
-   workload_scope: "openid email groups"
+   workload:
+     client_id: "nemo-helix-workload"
+     token_endpoint: "https://nhx.company.com/apis/auth/token"
+     audience: "nemo-helix"
+     scope: "openid email groups"
+     kubernetes_token_review_enabled: true
 ```
 
+Create the RSA signing key, mount it on the API, and grant TokenReview before
+you add `auth.oidc.workload`. See
+[Deployment Secrets](/documentation/access-control/deployment/deployment-secrets).
+
 Workload token exchange is a platform-wide mode. When
-`auth.oidc.workload_token_exchange_enabled=true`, managed workloads that need
+`auth.oidc.workload` is configured, managed workloads that need
 creator-scoped platform access use exchanged bearer tokens, and trusted
 `X-NHX-*` identity headers are rejected on protected service routes. When it is
-disabled but `auth.enabled=true`, the platform uses trusted-header mode.
+absent but `auth.enabled=true`, the platform uses trusted-header mode.
 
 By default, workload-exchange access tokens use `auth.token_signing.key_id` as
 their JWT `kid`. To give workload tokens a distinct key identifier, set
-`auth.oidc.workload_token_key_id`. For cryptographic separation, also set
-`auth.oidc.workload_token_private_key_file`; changing only the key ID is useful
+`auth.oidc.workload.token_key_id`. For cryptographic separation, also set
+`auth.oidc.workload.token_private_key_file`; changing only the key ID is useful
 for debugging and rotation labeling, but still reuses the same RSA private key.
 
 When `NHX_WORKLOAD_IDENTITY_TOKEN_FILE` is present, the SDK reads the subject
 token from that file and sends an RFC 8693 exchange request using
 `subject_token`, fixed JWT subject/access-token token types, optional `audience`,
-and optional `scope`. `workload_token_endpoint` is optional; when it is unset,
-the SDK uses `token_endpoint`. This is useful when host CLI login and workload
-containers need different network-reachable IdP URLs.
+and optional `scope`. `workload.token_endpoint` is optional; when it is unset,
+the SDK uses the Helix workload token-exchange route advertised by discovery.
 
-`auth.oidc.workload_scope` is a blanket allow-list for scopes minted by the
+`auth.oidc.workload.scope` is a blanket allow-list for scopes minted by the
 current workload token exchange endpoint. It is not a per-service or
 per-workload grant model. Use it conservatively; per-service and per-workload
 scope grants should be modeled with stable service identities and role bindings
 when those grants are available.
 
-For Docker-backed job runtimes, `auth.oidc.workload_token_exchange_enabled`
-controls workload identity. When enabled, job steps with a delegation auth
-context receive a NeMo Helix opaque workload proof token at
+For Docker-backed job runtimes, the presence of `auth.oidc.workload` controls
+workload identity. When configured, job steps with a delegation auth context
+receive a NeMo Helix opaque workload proof token at
 `NHX_WORKLOAD_IDENTITY_TOKEN_FILE`.
 
 For Kubernetes-backed job runtimes, the jobs backend can project a Kubernetes
 service account token into each workload pod for token exchange. The projected
 token expiration defaults to `600` seconds and must be at least `600` seconds.
-Set `auth.oidc.workload_kubernetes_token_review_enabled: true` so the auth service
+Set `auth.oidc.workload.kubernetes_token_review_enabled: true` so the auth service
 validates projected service-account tokens with the Kubernetes TokenReview API.
 The API service account must also be authorized to create
-`authentication.k8s.io/v1` `tokenreviews` (for example, by binding it to the
-built-in `system:auth-delegator` ClusterRole).
+`authentication.k8s.io/v1` `tokenreviews`. See
+[Deployment Secrets](/documentation/access-control/deployment/deployment-secrets)
+for that ClusterRole.
 In platform configuration, set
 `jobs.executors[].config.workload_identity.token_expiration_seconds` on the
 Kubernetes job executor profile. For example, this changes the projected token
@@ -306,7 +336,8 @@ auth:
  oidc:
    enabled: true
    issuer: "https://login.microsoftonline.com/<tenant>/v2.0"
-   client_id: "<client-id>"
+   public_client:
+     client_id: "<client-id>"
 ```
 
 ### Production with external OPA

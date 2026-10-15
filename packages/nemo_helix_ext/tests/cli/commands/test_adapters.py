@@ -367,7 +367,6 @@ def test_code_output_does_not_send_request() -> None:
         'CreateAdapterRequest(name="lora-1", fileset="ws/fs", finetuning_type=FinetuningType.LORA, model="llama")'
         in (result.stdout)
     )
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_code_output_for_patch() -> None:
@@ -379,4 +378,3 @@ def test_code_output_for_patch() -> None:
     assert result.exit_code == 0, result.output
     assert recorder.requests == []
     assert 'client.update_adapter(name="lora-1", body=UpdateAdapterRequest(enabled=True))' in result.stdout
-    assert "NeMoHelix" not in result.stdout

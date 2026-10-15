@@ -472,7 +472,6 @@ class NhxCommand(NhxErrorHandlingMixin, TyperCommand):
         self.format_help_text(ctx, formatter)
         self.format_options(ctx, formatter)
         self.format_epilog(ctx, formatter)
-        _maybe_format_agent_helpers(ctx, formatter)
 
     def format_help_text(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         """Write the help text (description)."""
@@ -636,7 +635,6 @@ class NhxGroup(NhxErrorHandlingMixin, TyperGroup):
         self.format_commands(ctx, formatter)
         self.format_options(ctx, formatter)
         self.format_epilog(ctx, formatter)
-        _maybe_format_agent_helpers(ctx, formatter)
 
     def format_help_text(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         """
@@ -818,24 +816,3 @@ def create_typer_app(**kwargs) -> Typer:
     """
     kwargs.setdefault("cls", NhxGroup)
     return plugin_create_typer_app(**kwargs)
-
-
-def _maybe_format_agent_helpers(ctx: click.Context, formatter: click.HelpFormatter) -> None:
-    """Append agent helper hints to help output when agent mode is active."""
-    cli_ctx = getattr(ctx, "obj", None)
-    if cli_ctx is None or not getattr(cli_ctx, "agent_mode", False):
-        return
-
-    from nemo_helix_ext.cli.core.agent_helpers import get_agent_helpers
-
-    # Build command path without program name
-    command_path = ctx.command_path
-    parts = command_path.split(None, 1)
-    command_path = parts[1] if len(parts) > 1 else ""
-
-    helpers = get_agent_helpers(command_path)
-    if helpers:
-        formatter.write("\n")
-        formatter.write(click.style("AGENT HINTS:", fg="bright_green", bold=True) + "\n")
-        for helper in helpers:
-            formatter.write(f"  {helper}\n")

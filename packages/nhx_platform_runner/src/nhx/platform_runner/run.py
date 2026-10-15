@@ -274,11 +274,15 @@ def _display_banner(
         )
         return
 
-    from nhx.core.entities.config import EntitiesConfig
+    if service_names:
+        from nhx.core.entities.config import EntitiesConfig
 
-    entities_config = get_service_config(EntitiesConfig)
-    db_url = entities_config.database_config.sqlalchemy_database_url()
-    db_display = _database_display(db_url)
+        entities_config = get_service_config(EntitiesConfig)
+        db_url = entities_config.database_config.sqlalchemy_database_url()
+        db_display = _database_display(db_url)
+    else:
+        # No entity store; resolving the URL would mkdir the default SQLite dir.
+        db_display = "none"
 
     auth_config = get_auth_config()
     auth_status = "enabled" if auth_config.enabled else "disabled"

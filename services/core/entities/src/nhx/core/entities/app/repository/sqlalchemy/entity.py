@@ -177,7 +177,9 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
 
             if filter_op is not None:
                 filter_repo = SQLAlchemyFilterRepository(
-                    DBEntity, relationship_child_workspaces=relationship_child_workspaces
+                    DBEntity,
+                    relationship_child_workspaces=relationship_child_workspaces,
+                    dialect_name=sess.get_bind().dialect.name,
                 )
                 query = query.where(filter_op.apply(filter_repo))
 
@@ -226,7 +228,9 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 string_type = "string"
 
             filter_repo = SQLAlchemyFilterRepository(
-                DBEntity, relationship_child_workspaces=relationship_child_workspaces
+                DBEntity,
+                relationship_child_workspaces=relationship_child_workspaces,
+                dialect_name=sess.get_bind().dialect.name,
             )
             query = select(group_column, func.count()).select_from(DBEntity).where(DBEntity.entity_type == entity_type)
 

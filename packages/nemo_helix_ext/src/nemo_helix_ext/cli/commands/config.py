@@ -17,6 +17,7 @@ from nemo_helix_ext.cli.core.errors import handle_errors
 from nemo_helix_ext.cli.core.formatters import format_output
 from nemo_helix_ext.cli.core.help_formatter import create_typer_app
 from nemo_helix_ext.cli.core.types import ConfigOutputFormatOption, ListOutputFormat, TimestampFormat
+from nemo_helix_ext.config.config import Config
 
 OutputFormat = ListOutputFormat
 
@@ -69,6 +70,16 @@ def config_callback(ctx: typer.Context) -> None:
         typer.echo(ctx.get_help())
 
 
+def _effective_context_name(ctx: typer.Context, config: Config) -> str | None:
+    """Return the context selected by --context, then NHX_CURRENT_CONTEXT, then the config file."""
+    cli_context: CLIContext = ctx.obj
+    return (
+        cli_context.overrides.get("current_context")
+        or config.current_context
+        or config.get_config_file().current_context
+    )
+
+
 @app.command("current-context")
 @handle_errors
 def current_context(ctx: typer.Context) -> None:
@@ -78,10 +89,7 @@ def current_context(ctx: typer.Context) -> None:
     """
     from nemo_helix_ext.config.config import Config
 
-    cli_context: CLIContext = ctx.obj
-    config = Config.load()
-    config_file = config.get_config_file()
-    context_name = cli_context.overrides.get("current_context") or config.current_context or config_file.current_context
+    context_name = _effective_context_name(ctx, Config.load())
 
     if context_name:
         typer.echo(context_name)
@@ -300,6 +308,7 @@ def delete_context(
 @app.command("view")
 @handle_errors
 def view_config(
+    ctx: typer.Context,
     output_format: ConfigOutputFormatOption = None,
     all_contexts: Annotated[
         bool,
@@ -308,7 +317,8 @@ def view_config(
 ) -> None:
     """Display the configuration file.
 
-    By default, this shows only the current context and its referenced cluster and user.
+    By default, this shows only the effective current context (from --context,
+    NHX_CURRENT_CONTEXT, or the config file) and its referenced cluster and user.
     Use --all-contexts to show the full configuration.
     """
     from nemo_helix_ext.config.config import Config
@@ -316,27 +326,28 @@ def view_config(
     config = Config.load()
     config_file = config.get_config_file()
     config_path = config.get_config_path()
+    context_name = _effective_context_name(ctx, config)
 
     # Get the config data (secrets automatically redacted by Pydantic serializers)
     config_data = config_file.model_dump(mode="json", exclude_none=True)
 
     if not all_contexts:
         # Filter to only show current context and its references
-        if not config_file.current_context:
+        if not context_name:
             raise ConfigError("No current context set")
 
         # Find the current context
         current_ctx = None
         for context in config_file.contexts or []:
-            if context.name == config_file.current_context:
+            if context.name == context_name:
                 current_ctx = context
                 break
 
         if current_ctx is None:
-            raise ConfigError(f"Current context '{config_file.current_context}' not found")
+            raise ConfigError(f"Current context '{context_name}' not found")
 
         # Build current-context config with only referenced items
-        current_context_config: dict = {"current_context": config_file.current_context}
+        current_context_config: dict = {"current_context": context_name}
 
         # Include only the current context
         current_context_config["contexts"] = [current_ctx.model_dump(mode="json", exclude_none=True)]
@@ -363,7 +374,7 @@ def view_config(
 
     if not all_contexts:
         context_count = len(config_file.contexts or [])
-        context_message = f"# Showing config for context: {config_file.current_context}"
+        context_message = f"# Showing config for context: {context_name}"
         if context_count > 1:
             context_message += ", to see all use `--all-contexts`"
         typer.echo(f"{context_message}\n", err=True)

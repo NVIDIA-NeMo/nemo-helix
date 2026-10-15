@@ -21,49 +21,66 @@ see [the top-level Authentik README](README.md). For runtime internals, see the
 
 All credentials in this example are for local development only.
 
-## Choose A Runtime
+## Start A Runtime
 
-Use either Docker Compose or Kubernetes. After the chosen runtime is running,
-continue with [Wait For The Gateway](#wait-for-the-gateway).
+Use either Docker Compose or Kubernetes. The harness prepares generated local
+secrets, starts the runtime, waits for the gateway, and registers a NeMo CLI
+context.
 
-From the repo root, prepare shared generated inputs once:
-
-```bash
-contrib/auth/authentik/run.sh prepare-local
-```
-
-This creates the shared workload-token signing key, gateway TLS material, and
-rendered Authentik blueprint under `contrib/auth/authentik/.generated`.
+Both paths assume `curl`, `openssl`, a bootstrapped NeMo Helix checkout, and a
+shell from the repo root.
 
 ### Docker Compose
 
 Prerequisites:
 
 - Docker with `docker compose`
-- `openssl`
-- `curl`
-- a bootstrapped NeMo Helix checkout
-- a shell from the repo root
 
-Start Compose in one terminal:
+Start Compose:
 
 ```bash
-docker compose -f contrib/auth/authentik/compose/docker-compose.yml up
+contrib/auth/authentik/run.sh up compose
 ```
 
-This starts NeMo, Authentik, and the local gateway with the default NeMo API
-image, `my-registry/nhx-api:local`. The Compose stack does not build images.
-
-In another terminal from the repo root, export the runtime variables used by the
-rest of the tutorial:
+Export the variables used by the rest of the tutorial:
 
 ```bash
 export AUTHENTIK_RUNTIME=compose
 export AUTHENTIK_CONTEXT=authentik-compose
-export AUTHENTIK_BASE_URL=https://127.0.0.1:18080
+export AUTHENTIK_BASE_URL=https://127.0.0.1:18083
 export AUTHENTIK_GATEWAY_CA=contrib/auth/authentik/.generated/gateway-tls/tls.crt
-export NHX_CLIENT_SSL_CERT_FILE="$AUTHENTIK_GATEWAY_CA"
 export AUTHENTIK_WORKLOAD_GROUP=nemo-workloads
+```
+
+### Kubernetes
+
+Prerequisites:
+
+- `helm`, `kubectl`, and `kind`
+- Docker
+- outbound image pull access for the third-party Authentik, Envoy, and
+  PostgreSQL images
+
+Start Kubernetes:
+
+```bash
+contrib/auth/authentik/run.sh up k8s
+```
+
+Export the variables used by the rest of the tutorial:
+
+```bash
+export AUTHENTIK_RUNTIME=kubernetes
+export AUTHENTIK_CONTEXT=authentik-k8s
+export AUTHENTIK_BASE_URL=https://127.0.0.1:18082
+export AUTHENTIK_GATEWAY_CA=contrib/auth/authentik/.generated/k8s/nhx-authentik-reuse/ca.crt
+export AUTHENTIK_WORKLOAD_GROUP=system:serviceaccounts:nemo-authentik
+```
+
+For either runtime, export the shared tutorial variables:
+
+```bash
+export NHX_CLIENT_SSL_CERT_FILE="$AUTHENTIK_GATEWAY_CA"
 export WORKSPACE=authentik-demo
 export JOB_NAME=authentik-workload-demo
 export IMAGE_REGISTRY="${IMAGE_REGISTRY:-my-registry}"
@@ -71,129 +88,15 @@ export BAKE_TAG="${BAKE_TAG:-local}"
 export NHX_API_IMAGE="${NHX_API_IMAGE:-${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}}"
 ```
 
-`AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD` has a local-development default. If you
-override it, keep the same value until you remove the Compose volumes with
-`docker compose down -v`.
+If you start either runtime with `--image`, set `NHX_API_IMAGE` to that same
+image before submitting the workload job.
 
-### Kubernetes
-
-Prerequisites:
-
-- `helm`
-- `kubectl`
-- `kind`
-- Docker
-- `curl`
-- outbound image pull access for the third-party Authentik, Envoy, and
-  PostgreSQL images
-- a NeMo Helix service image loaded into the kind cluster, or pushed to a
-  registry the cluster can pull
-
-From the repo root:
-
-```bash
-export AUTHENTIK_RUNTIME=kubernetes
-export KIND_CLUSTER=nhx-authentik-dev
-export KUBE_CONTEXT="kind-${KIND_CLUSTER}"
-export NAMESPACE=nemo-authentik
-export HELM_RELEASE=authentik-demo
-export IMAGE_REGISTRY="${IMAGE_REGISTRY:-my-registry}"
-export BAKE_TAG="${BAKE_TAG:-local}"
-export NHX_API_IMAGE="${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"
-export NEMO_AUTHENTIK_TMP_DIR="${TMPDIR:-/tmp}/nemo-authentik"
-export KUBECONFIG="${NEMO_AUTHENTIK_TMP_DIR}/kubeconfig.yaml"
-
-mkdir -p "${NEMO_AUTHENTIK_TMP_DIR}"
-
-if kind get clusters | grep -qx "${KIND_CLUSTER}"; then
-  kind export kubeconfig --name "${KIND_CLUSTER}" --kubeconfig "${KUBECONFIG}"
-else
-  kind create cluster --name "${KIND_CLUSTER}" --kubeconfig "${KUBECONFIG}"
-fi
-
-kubectl --context "${KUBE_CONTEXT}" create namespace "${NAMESPACE}" \
-  --dry-run=client -o yaml | \
-  kubectl --context "${KUBE_CONTEXT}" apply -f -
-```
-
-Build the local NeMo Helix image and load it into kind:
-
-```bash
-make docker-load DOCKER_TARGET=nhx-api-docker
-docker image inspect "${NHX_API_IMAGE}" >/dev/null
-kind load docker-image "${NHX_API_IMAGE}" --name "${KIND_CLUSTER}"
-```
-
-Install the chart:
-
-```bash
-helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update
-helm repo add authentik https://charts.goauthentik.io --force-update
-helm repo update
-
-helm dependency build k8s/helm
-helm dependency build contrib/auth/authentik/helm
-helm --kube-context "${KUBE_CONTEXT}" upgrade --install "${HELM_RELEASE}" contrib/auth/authentik/helm \
-  --namespace "${NAMESPACE}" \
-  --create-namespace \
-  --wait \
-  --wait-for-jobs \
-  --timeout 10m \
-  --set-string nemo-helix.api.image.repository="${IMAGE_REGISTRY}/nhx-api" \
-  --set-string nemo-helix.api.image.tag="${BAKE_TAG}" \
-  --set-string nemo-helix.core.image.repository="${IMAGE_REGISTRY}/nhx-api" \
-  --set-string nemo-helix.core.image.tag="${BAKE_TAG}" \
-  --set-string nemo-helix.platformConfig.platform.image_registry="${IMAGE_REGISTRY}" \
-  --set-string nemo-helix.platformConfig.platform.image_tag="${BAKE_TAG}" \
-  --set nemo-helix.platformConfig.auth.access_keys.enabled=true \
-  --set-file workloadTokenSigningKey.privateKeyPem=contrib/auth/authentik/.generated/workload-token-private-key.pem
-```
-
-Wait for the main workloads:
-
-```bash
-kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" rollout status statefulset/shared-postgresql
-kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" rollout status deploy/authentik-server
-kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" rollout status deploy/authentik-worker
-kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" rollout status deploy/nemo-helix-api
-kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" rollout status deploy/nemo-helix-envoy
-```
-
-Port-forward the NeMo Helix Envoy service in a separate terminal with the
-same `KUBECONFIG`, `KUBE_CONTEXT`, and `NAMESPACE` exports:
-
-```bash
-kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" port-forward svc/nemo-helix-envoy 18081:8080
-```
-
-In the original terminal, export the demo CA and runtime variables used by the
-rest of the tutorial:
-
-```bash
-kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" get secret nemo-helix-envoy-tls \
-  -o jsonpath='{.data.ca\.crt}' | base64 -d \
-  > "${NEMO_AUTHENTIK_TMP_DIR}/ca.crt"
-
-touch "${NEMO_AUTHENTIK_TMP_DIR}/config.yaml"
-
-export AUTHENTIK_CONTEXT=authentik-k8s
-export AUTHENTIK_BASE_URL=https://127.0.0.1:18081
-export AUTHENTIK_GATEWAY_CA="${NEMO_AUTHENTIK_TMP_DIR}/ca.crt"
-export NHX_CLIENT_SSL_CERT_FILE="$AUTHENTIK_GATEWAY_CA"
-export NHX_CONFIG_FILE="${NEMO_AUTHENTIK_TMP_DIR}/config.yaml"
-export AUTHENTIK_WORKLOAD_GROUP="system:serviceaccounts:${NAMESPACE}"
-export WORKSPACE=authentik-demo
-export JOB_NAME=authentik-workload-demo
-```
-
-## Wait For The Gateway
+## Check The Gateway
 
 From this point on, the commands are the same for Compose and Kubernetes.
 
 ```bash
-until curl --cacert "$AUTHENTIK_GATEWAY_CA" -sf "${AUTHENTIK_BASE_URL}/health/gateway/ready" >/dev/null; do
-  sleep 2
-done
+curl --cacert "$AUTHENTIK_GATEWAY_CA" -sf "${AUTHENTIK_BASE_URL}/health/gateway/ready"
 echo "NeMo Helix and Authentik Ready"
 ```
 
@@ -414,25 +317,8 @@ Do not include `NHX_WORKLOAD_IDENTITY_TOKEN_FILE`, `NEMO_WORKLOAD_TOKEN`, or
 `NEMO_WORKLOAD_TOKEN_FILE` in the job request. Managed job backends own those
 auth variables.
 
-If a Kubernetes job pod does not start, inspect the pod:
-
-```bash
-if [ "$AUTHENTIK_RUNTIME" = "kubernetes" ]; then
-  kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" get pods \
-    -l "nhx.nvidia.com/job_id=${JOB_NAME}"
-
-  kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" get pod \
-    -l "nhx.nvidia.com/job_id=${JOB_NAME}" \
-    -o jsonpath='{range .items[*].spec.initContainers[*]}init {.name}: {.image}{"\n"}{end}{range .items[*].spec.containers[*]}container {.name}: {.image}{"\n"}{end}'
-
-  kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" describe pod \
-    -l "nhx.nvidia.com/job_id=${JOB_NAME}"
-fi
-```
-
-For the local kind path, `launcher-injector` and `nemo-job-task` should both use
-`${NHX_API_IMAGE}`. If either container shows an unexpected image, rerun the
-Helm install command with the image overrides shown above.
+For runtime-specific debugging, see the Compose or Kubernetes implementation
+details linked at the end of this tutorial.
 
 ## Refresh The CLI Session
 
@@ -457,17 +343,16 @@ uv run nemo --context "$AUTHENTIK_CONTEXT" workspaces delete "$WORKSPACE"
 
 Then clean up the runtime you chose.
 
-For Compose, stop the foreground process with `Ctrl-C`, then run:
+For Compose:
 
 ```bash
-docker compose -f contrib/auth/authentik/compose/docker-compose.yml down -v
+contrib/auth/authentik/run.sh down compose
 ```
 
 For Kubernetes:
 
 ```bash
-helm --kube-context "$KUBE_CONTEXT" uninstall "$HELM_RELEASE" --namespace "$NAMESPACE"
-kind delete cluster --name "$KIND_CLUSTER"
+contrib/auth/authentik/run.sh down k8s
 ```
 
 ## Next Steps

@@ -128,7 +128,6 @@ class WireState:
     api: FakeInsightsAPI
     workspace: str | None = "default"
     output_format: ListOutputFormat = "table"
-    agent_mode: bool = False
 
     def get_client(self, timeout: float = 60.0) -> NemoClient:
         return NemoClient(base_url=BASE_URL, http_client=httpx.Client(transport=httpx.MockTransport(self.api)))
@@ -162,9 +161,6 @@ class WireState:
 
     def get_no_truncate(self, override: bool | None = None) -> bool:
         return bool(override)
-
-    def get_agent_hints(self, command_path: str) -> list[str]:
-        return []
 
 
 def app_with_state(state: object | None) -> typer.Typer:

@@ -34,6 +34,21 @@ def _direct_principal_from_claims(claims: TokenClaims) -> Principal:
 
 def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
     if claims.actor is None:
+        account_id = claims.raw_claims.get("nhx_actor_account_id")
+        aliases = claims.raw_claims.get("nhx_actor_aliases")
+        if (
+            isinstance(account_id, str)
+            and account_id
+            and isinstance(aliases, list)
+            and all(isinstance(alias, str) for alias in aliases)
+        ):
+            return Principal(
+                id=claims.subject,
+                account_id=account_id,
+                email=claims.email,
+                groups=claims.groups,
+                authz_aliases=[alias for alias in aliases if isinstance(alias, str)],
+            )
         return _direct_principal_from_claims(claims)
     return Principal(
         id=claims.actor.subject,
@@ -80,11 +95,17 @@ async def resolve_bearer_token(
     skip_access_key_check: bool = False,
 ) -> ResolvedBearerToken | None:
     if config.access_keys.enabled and not skip_access_key_check:
-        from .access_keys import validate_access_key_token
+        from .access_keys import is_access_key_token_candidate, validate_access_key_token
 
         access_key_claims = await validate_access_key_token(config, token)
         if access_key_claims is not None:
             return ResolvedBearerToken(claims=access_key_claims, token_kind="access_key")
+        # validate_access_key_token returns None both for tokens that are not access keys and for
+        # access keys that fail validation (bad signature, expired, wrong issuer). Only the former
+        # should fall through to the workload and OIDC resolvers; a failed access key is rejected
+        # here rather than spending their IdP round-trips on a token that can only be refused.
+        if is_access_key_token_candidate(token):
+            return None
 
     for extra_resolver in extra_resolvers:
         resolved = await extra_resolver(token)

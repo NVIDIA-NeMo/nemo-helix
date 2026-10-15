@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, AsyncIterator, ClassVar, cast
@@ -23,13 +24,22 @@ import click
 import httpx
 import pytest
 import typer
-from nemo_helix_plugin.commands import add_function_commands, add_job_commands
+from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_ext.config.models import Cluster, Context, OAuthUser, Preferences
+from nemo_helix_plugin.cli_renderer import CLIRenderer
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.commands import (
+    _post_function_submit,
+    _programmatic_submit,
+    add_function_commands,
+    add_job_commands,
+)
 from nemo_helix_plugin.discovery import discover, discover_manifests
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
 from nemo_helix_plugin.functions.frames import Done, Heartbeat
 from nemo_helix_plugin.job import NemoJob
-from pydantic import BaseModel, ValidationInfo, model_validator
+from pydantic import BaseModel, HttpUrl, SecretStr
 from typer.testing import CliRunner
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -79,7 +89,7 @@ class _RunNamedJob(NemoJob):
 
 
 class _FlatGreetJob(_GreetJob):
-    generate_legacy_verbs: ClassVar[bool] = False
+    pass
 
 
 runner = CliRunner()
@@ -93,6 +103,57 @@ class _BaseUrlState:
 
     def get_base_url(self, default: str | None = None) -> str | None:
         return self._base_url
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        return NemoClient(base_url=self._base_url, timeout=timeout)
+
+
+class _SharedSubmitClientState(_BaseUrlState):
+    def __init__(
+        self,
+        base_url: str,
+        client: httpx.Client,
+        default_headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(base_url)
+        self._client = client
+        self._default_headers = default_headers or {"Authorization": "Bearer stale-context-token"}
+        self.timeout: float | httpx.Timeout | None = None
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        self.timeout = timeout
+        return NemoClient(
+            base_url=self._base_url,
+            default_headers=self._default_headers,
+            http_client=self._client,
+            owns_http_client=False,
+        )
+
+    def get_sdk_context(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            user=SimpleNamespace(
+                get_client_config=lambda: {
+                    "default_headers": self._default_headers,
+                }
+            )
+        )
+
+
+class _SubmitCLIContext(CLIContext):
+    def __init__(self, *, base_url: HttpUrl, token: str) -> None:
+        super().__init__(overrides={"access_token": token})
+        self.timeout: float | httpx.Timeout | None = None
+        self._sdk_context = Context(
+            context_name="default",
+            cluster=Cluster(name="test", base_url=base_url),
+            user=OAuthUser(name="test-user", token=SecretStr(token)),
+            workspace="default",
+            preferences=Preferences(),
+        )
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        self.timeout = timeout
+        return super().get_client(timeout)
 
 
 def _typer_context_with_obj(obj: object | None) -> typer.Context:
@@ -153,7 +214,7 @@ class TestSubgroupRegistration:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
-        assert "submit" in result.output
+        assert "--spec" in result.output
         assert "explain" in result.output
 
     def test_subgroup_help_includes_description(self) -> None:
@@ -166,7 +227,7 @@ class TestSubgroupRegistration:
         result = runner.invoke(app, ["run", "--help"])
 
         assert result.exit_code == 0
-        assert "Submit to a cluster." in result.output
+        assert "--spec" in result.output
         assert "Show input/output schemas." in result.output
         assert "Run run locally" not in result.output
         assert "schemas for run" not in result.output
@@ -209,12 +270,39 @@ class TestBareFormBreaks:
         result = runner.invoke(app, ["greet"])
         assert result.exit_code != 0
 
-    def test_bare_job_name_prints_usage(self) -> None:
+    def test_bare_job_name_shows_help_without_submitting(self, monkeypatch: pytest.MonkeyPatch) -> None:
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet"])
-        # Usage should mention at least one of the verbs so the user knows
-        # what to type next.
-        assert "submit" in result.output or "explain" in result.output
+        submit_calls: list[object] = []
+
+        def _capture_submit(*args: object, **kwargs: object) -> dict:
+            submit_calls.append((args, kwargs))
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture_submit)
+        result = runner.invoke(app, ["greet"], obj=_BaseUrlState("http://context.example"))
+
+        assert result.exit_code == 1
+        assert "Usage:" in result.output
+        assert "No such command" not in result.output
+        assert submit_calls == []
+
+
+class TestProgrammaticSubmit:
+    def test_marker_is_set_inside_block_and_removed_after(self) -> None:
+        typer_ctx = cast(typer.Context, SimpleNamespace())
+
+        with _programmatic_submit(typer_ctx):
+            assert getattr(typer_ctx, "_nemo_programmatic_submit") is True
+
+        assert not hasattr(typer_ctx, "_nemo_programmatic_submit")
+
+    def test_existing_marker_is_restored_after_error(self) -> None:
+        typer_ctx = cast(typer.Context, SimpleNamespace(_nemo_programmatic_submit=False))
+
+        with pytest.raises(RuntimeError), _programmatic_submit(typer_ctx):
+            raise RuntimeError("submit failed")
+
+        assert getattr(typer_ctx, "_nemo_programmatic_submit") is False
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +347,7 @@ class TestSubmitVerb:
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
 
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit"], obj=_State(context_base_url))
+        result = runner.invoke(app, ["greet", "--spec", "{}"], obj=_State(context_base_url))
 
         assert result.exit_code == 0, result.output
         assert captured == {"base_url": expected_base_url}
@@ -269,9 +357,9 @@ class TestSubmitVerb:
     def test_submit_rejects_the_retired_routing_flags(self, flag: str, kind: str) -> None:
         """The platform comes from the global ``nemo --base-url`` / ``--context`` flags."""
         if kind == "job":
-            app, argv = _app_with_jobs(_GreetJob), ["greet", "submit"]
+            app, argv = _app_with_jobs(_GreetJob), ["greet"]
         else:
-            app, argv = _app_with_functions(_GreetFunction), ["greet", "submit", "--spec", '{"name": "x"}']
+            app, argv = _app_with_functions(_GreetFunction), ["greet", "--spec", '{"name": "x"}']
 
         result = runner.invoke(app, [*argv, flag, "http://elsewhere"])
 
@@ -287,7 +375,7 @@ class TestSubmitVerb:
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _raise_connect)
 
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit"], obj=_BaseUrlState("http://test"))
+        result = runner.invoke(app, ["greet", "--spec", "{}"], obj=_BaseUrlState("http://test"))
 
         assert result.exit_code == 2
         combined = (result.output or "") + (result.stderr or "")
@@ -299,7 +387,7 @@ class TestSubmitVerb:
 
     def test_submit_accepts_profile_but_not_routing_flags(self) -> None:
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit", "--help"])
+        result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
         output = _plain(result.output)
         assert "--profile" in output
@@ -328,7 +416,7 @@ class TestSubmitVerb:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(
             app,
-            ["greet", "submit"],
+            ["greet", "--spec", "{}"],
             obj=_State(),
         )
 
@@ -351,7 +439,7 @@ class TestSubmitVerb:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(
             app,
-            ["greet", "submit"],
+            ["greet", "--spec", "{}"],
             obj=_State(),
         )
 
@@ -391,7 +479,7 @@ class TestSubmitVerb:
         }
 
         assert runner.invoke(app, ["greet", "run"]).exit_code != 0
-        assert runner.invoke(app, ["greet", "submit"]).exit_code != 0
+        assert runner.invoke(app, ["greet", "--help"]).exit_code == 0
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +532,7 @@ class TestSpecFlagRename:
 
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit", "--spec", '{"name": "Claude"}'])
+        result = runner.invoke(app, ["greet", "--spec", '{"name": "Claude"}'])
         assert result.exit_code == 0
         assert captured["spec"] == {"name": "Claude"}
 
@@ -459,7 +547,7 @@ class TestSpecFlagRename:
         spec_file = tmp_path / "spec.yaml"
         spec_file.write_text("name: FromYaml\n")
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit", "--spec-file", str(spec_file)])
+        result = runner.invoke(app, ["greet", "--spec-file", str(spec_file)])
         assert result.exit_code == 0
         assert captured["spec"] == {"name": "FromYaml"}
 
@@ -468,7 +556,7 @@ class TestSpecFlagRename:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(
             app,
-            ["greet", "submit", "--spec-file", str(missing_file)],
+            ["greet", "--spec-file", str(missing_file)],
             catch_exceptions=False,
         )
         assert result.exit_code == 1
@@ -480,7 +568,7 @@ class TestSpecFlagRename:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(
             app,
-            ["greet", "submit", "--spec-file", str(tmp_path)],
+            ["greet", "--spec-file", str(tmp_path)],
             catch_exceptions=False,
         )
         assert result.exit_code == 1
@@ -498,7 +586,7 @@ class TestSpecFlagRename:
 
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit", "--config", '{"name": "Legacy"}'])
+        result = runner.invoke(app, ["greet", "--config", '{"name": "Legacy"}'])
         assert result.exit_code == 0
         assert captured["spec"] == {"name": "Legacy"}
 
@@ -512,7 +600,7 @@ class TestSubmitOptionsPassthrough:
     def test_submit_accepts_dash_o_flag(self) -> None:
         """The --help for submit must list -o so users can discover it."""
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit", "--help"])
+        result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
         output = _plain(result.output)
         assert "-o" in output
@@ -525,7 +613,6 @@ class TestSubmitOptionsPassthrough:
             app,
             [
                 "greet",
-                "submit",
                 "--profile",
                 "research",
                 "-o",
@@ -545,7 +632,6 @@ class TestSubmitOptionsPassthrough:
             app,
             [
                 "greet",
-                "submit",
                 "--options-file",
                 str(bad_file),
             ],
@@ -559,7 +645,6 @@ class TestSubmitOptionsPassthrough:
             app,
             [
                 "greet",
-                "submit",
                 "--options-file",
                 str(scalar_file),
             ],
@@ -575,7 +660,6 @@ class TestSubmitOptionsPassthrough:
             app,
             [
                 "greet",
-                "submit",
                 "--options-file",
                 str(missing_file),
             ],
@@ -603,7 +687,7 @@ class _GreetResponse(BaseModel):
 class _GreetFunction(NemoFunction[_GreetSpec]):
     name: ClassVar[str] = "greet"
     description: ClassVar[str] = "Say hello to a name."
-    spec_schema: ClassVar[type[BaseModel]] = _GreetSpec
+    spec_schema: ClassVar[type[_GreetSpec]] = _GreetSpec
 
     async def run(self, spec: _GreetSpec) -> _GreetResponse:
         return _GreetResponse(message=f"Hello, {spec.name}!")
@@ -615,7 +699,7 @@ class _CountSpec(BaseModel):
 
 class _CountFunction(NemoFunction[_CountSpec]):
     name: ClassVar[str] = "count"
-    spec_schema: ClassVar[type[BaseModel]] = _CountSpec
+    spec_schema: ClassVar[type[_CountSpec]] = _CountSpec
 
     async def run(self, spec: _CountSpec) -> AsyncIterator[BaseModel]:
         for i in range(spec.upto):
@@ -630,7 +714,7 @@ class _WorkspaceSpec(BaseModel):
 
 class _WorkspaceFunction(NemoFunction[_WorkspaceSpec]):
     name: ClassVar[str] = "echo-workspace"
-    spec_schema: ClassVar[type[BaseModel]] = _WorkspaceSpec
+    spec_schema: ClassVar[type[_WorkspaceSpec]] = _WorkspaceSpec
 
     async def run(self, spec: _WorkspaceSpec, *, ctx: FunctionContext) -> dict:
         del spec
@@ -639,7 +723,7 @@ class _WorkspaceFunction(NemoFunction[_WorkspaceSpec]):
 
 class _LocalityFunction(NemoFunction[_WorkspaceSpec]):
     name: ClassVar[str] = "echo-locality"
-    spec_schema: ClassVar[type[BaseModel]] = _WorkspaceSpec
+    spec_schema: ClassVar[type[_WorkspaceSpec]] = _WorkspaceSpec
 
     async def run(self, spec: _WorkspaceSpec, *, is_local: bool) -> dict:
         del spec
@@ -647,7 +731,7 @@ class _LocalityFunction(NemoFunction[_WorkspaceSpec]):
 
 
 class _FlatGreetFunction(_GreetFunction):
-    generate_legacy_verbs: ClassVar[bool] = False
+    pass
 
 
 def _app_with_functions(*function_classes: type[NemoFunction]) -> typer.Typer:
@@ -677,8 +761,8 @@ class TestFunctionSubgroupRegistration:
         app = _app_with_functions(_GreetFunction)
         result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
-        assert "run" in result.output
-        assert "submit" in result.output
+        assert "--spec" in result.output
+        assert "--spec" in result.output
         # Functions deliberately do NOT get an `explain` verb — schemas
         # are introspected through `--help`.
         assert "explain" not in result.output
@@ -708,102 +792,10 @@ class TestFunctionSubgroupRegistration:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionRunVerb:
-    def test_runs_function_with_json_spec(self) -> None:
-        app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "run", "--spec", '{"name": "Claude"}'])
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"message": "Hello, Claude!"}
-
-    def test_runs_function_with_spec_file(self, tmp_path: Path) -> None:
-        spec_file = tmp_path / "spec.yaml"
-        spec_file.write_text("name: FromYaml\n")
-        app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "run", "--spec-file", str(spec_file)])
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output)["message"] == "Hello, FromYaml!"
-
-    def test_invalid_spec_exits_with_error(self) -> None:
-        # Validation runs against spec_schema before run is awaited, so an
-        # unknown-type value surfaces as a clean Typer exit, not a traceback.
-        app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "run", "--spec", "{}"])
-        assert result.exit_code != 0
-        combined = (result.output or "") + (result.stderr or "")
-        assert "invalid spec" in combined
-
-    def test_non_object_spec_exits_with_error(self) -> None:
-        # ``--spec '[]'`` is syntactically valid JSON but not a mapping;
-        # the deep-merge with per-field overlays would otherwise raise
-        # a raw TypeError. Reject it at load time with the same clean
-        # exit code 1 the malformed-JSON path uses.
-        app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "run", "--spec", "[]"])
-        assert result.exit_code == 1
-        combined = (result.output or "") + (result.stderr or "")
-        assert "invalid spec" in combined
-
-    def test_run_streams_async_generator_frames_one_per_line(self) -> None:
-        app = _app_with_functions(_CountFunction)
-        result = runner.invoke(app, ["count", "run", "--spec", '{"upto": 2}'])
-        assert result.exit_code == 0, result.output
-        lines = [line for line in result.output.splitlines() if line.strip()]
-        # 2 heartbeats + 1 terminator frame
-        assert len(lines) == 3
-        kinds = [json.loads(line)["kind"] for line in lines]
-        assert kinds == ["heartbeat", "heartbeat", "done"]
-
-    def test_run_injects_function_context_when_signature_asks(self) -> None:
-        # Functions opt in to FunctionContext by name; --workspace flows
-        # straight into ctx.workspace.
-        app = _app_with_functions(_WorkspaceFunction)
-        result = runner.invoke(
-            app,
-            ["echo-workspace", "run", "--spec", "{}", "--workspace", "team-alpha"],
-        )
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"workspace": "team-alpha"}
-
-    def test_run_injects_is_local_true_when_signature_asks(self) -> None:
-        app = _app_with_functions(_LocalityFunction)
-        result = runner.invoke(app, ["echo-locality", "run", "--spec", "{}"])
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"is_local": True}
-
-    def test_run_validates_spec_with_local_context(self) -> None:
-        class _LocalContextSpec(BaseModel):
-            @model_validator(mode="before")
-            @classmethod
-            def require_local_context(cls, data: Any, info: ValidationInfo) -> Any:
-                context = info.context
-                if not (isinstance(context, dict) and context.get("is_local") is True):
-                    raise ValueError("missing local validation context")
-                return data
-
-        class _LocalContextFunction(NemoFunction[_LocalContextSpec]):
-            name: ClassVar[str] = "local-context"
-            spec_schema: ClassVar[type[BaseModel]] = _LocalContextSpec
-
-            async def run(self, spec: _LocalContextSpec) -> dict:
-                del spec
-                return {"ok": True}
-
-        app = _app_with_functions(_LocalContextFunction)
-        result = runner.invoke(app, ["local-context", "run", "--spec", "{}"])
-
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"ok": True}
-
-
-# ---------------------------------------------------------------------------
-# Function `submit` verb
-# ---------------------------------------------------------------------------
-
-
 class TestFunctionSubmitVerb:
     def test_submit_help_lists_expected_flags(self) -> None:
         app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "submit", "--help"])
+        result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
         output = _plain(result.output)
         assert "--spec" in output
@@ -826,7 +818,7 @@ class TestFunctionSubmitVerb:
         monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _fail)
 
         app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "submit", "--spec", "{}"])
+        result = runner.invoke(app, ["greet", "--spec", "{}"])
         assert result.exit_code == 1
         assert called == []
 
@@ -842,7 +834,7 @@ class TestFunctionSubmitVerb:
         monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _fail)
 
         app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "submit", "--spec", "[]"])
+        result = runner.invoke(app, ["greet", "--spec", "[]"])
         assert result.exit_code == 1
         assert called == []
         combined = (result.output or "") + (result.stderr or "")
@@ -867,7 +859,6 @@ class TestFunctionSubmitVerb:
             app,
             [
                 "greet",
-                "submit",
                 "--spec",
                 '{"name": "Ada"}',
                 "--workspace",
@@ -907,18 +898,115 @@ class TestFunctionSubmitVerb:
             kwargs.setdefault("transport", transport)
             return original_client(*args, **kwargs)
 
-        monkeypatch.setattr("nemo_helix_plugin.commands.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.httpx.Client", _client_factory)
 
         app = _app_with_functions(_CountFunction)
         result = runner.invoke(
             app,
-            ["count", "submit", "--spec", '{"upto": 1}'],
+            ["count", "--spec", '{"upto": 1}'],
             obj=_BaseUrlState("http://test"),
         )
         assert result.exit_code == 0, result.output
         lines = [line for line in result.output.splitlines() if line.strip()]
         kinds = [json.loads(line)["kind"] for line in lines]
         assert kinds == ["heartbeat", "done"]
+
+    def test_submit_reuses_shared_cli_transport_when_available(self, monkeypatch) -> None:
+        requests: list[httpx.Request] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"message": "ok"})
+
+        original_client = httpx.Client
+        posted_clients: list[httpx.Client] = []
+        original_post = _post_function_submit
+
+        def _client_factory(*args, **kwargs):
+            kwargs.setdefault("transport", httpx.MockTransport(_handler))
+            return original_client(*args, **kwargs)
+
+        def _capture_post(
+            url: str,
+            body: dict[str, object],
+            *,
+            headers: dict[str, str],
+            http_client: httpx.Client,
+            timeout: float = 30.0,
+            renderer_cls: type[CLIRenderer] | None = None,
+            cli_kwargs: Mapping[str, Any] | None = None,
+        ) -> None:
+            posted_clients.append(http_client)
+            original_post(
+                url,
+                body,
+                headers=headers,
+                http_client=http_client,
+                timeout=timeout,
+                renderer_cls=renderer_cls,
+                cli_kwargs=cli_kwargs,
+            )
+
+        monkeypatch.setattr("nemo_helix_ext.client.bootstrap.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _capture_post)
+        state = _SubmitCLIContext(base_url=HttpUrl("http://localhost:8080"), token="shared-client-token")
+        try:
+            app = _app_with_functions(_GreetFunction)
+            result = runner.invoke(
+                app,
+                ["greet", "--spec", '{"name": "Ada"}'],
+                obj=state,
+            )
+        finally:
+            if state._client is not None:
+                state._client.close()
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {"message": "ok"}
+        assert state.timeout is None
+        assert state._client is not None
+        assert posted_clients == [state._client.http_client]
+        assert [request.url.path for request in requests] == ["/apis/packages/v2/workspaces/default/greet"]
+        assert requests[0].headers["Authorization"] == "Bearer shared-client-token"
+
+    def test_submit_preserves_resolved_auth_when_shared_transport_has_no_auth(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"message": "ok"})
+
+        with httpx.Client(transport=httpx.MockTransport(_handler)) as http_client:
+            state = _SharedSubmitClientState(
+                "http://localhost:8080",
+                http_client,
+                default_headers={"Authorization": "Bearer configured-token"},
+            )
+            app = _app_with_functions(_GreetFunction)
+            result = runner.invoke(
+                app,
+                ["greet", "--spec", '{"name": "Ada"}'],
+                obj=state,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert requests[0].headers["Authorization"] == "Bearer configured-token"
+
+    def test_submit_propagates_active_cli_client_failures(self) -> None:
+        class BrokenState(_BaseUrlState):
+            def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+                raise ValueError("client bootstrap failed")
+
+        app = _app_with_functions(_GreetFunction)
+        result = runner.invoke(
+            app,
+            ["greet", "--spec", '{"name": "Ada"}'],
+            obj=BrokenState("http://test"),
+        )
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, ValueError)
+        assert str(result.exception) == "client bootstrap failed"
 
     def test_submit_returns_exit_code_2_on_http_error(self, monkeypatch) -> None:
         # Regression: ``client.stream`` opens the response unbuffered,
@@ -948,12 +1036,12 @@ class TestFunctionSubmitVerb:
             kwargs.setdefault("transport", transport)
             return original_client(*args, **kwargs)
 
-        monkeypatch.setattr("nemo_helix_plugin.commands.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.httpx.Client", _client_factory)
 
         app = _app_with_functions(_GreetFunction)
         result = runner.invoke(
             app,
-            ["greet", "submit", "--spec", '{"name": "x"}'],
+            ["greet", "--spec", '{"name": "x"}'],
             obj=_BaseUrlState("http://test"),
         )
         # Exit 2 marks "transport / server reported failure" — distinct
@@ -965,7 +1053,7 @@ class TestFunctionSubmitVerb:
         assert "Request: POST http://test/" in combined
         assert "Target:" not in combined
 
-    def test_submit_uses_nhx_base_url_env_without_a_cli_context(self, monkeypatch) -> None:
+    def test_submit_requires_cli_state(self, monkeypatch) -> None:
         captured_url: list[str] = []
 
         def _fake_post(url: str, body: dict, *, headers: dict, timeout: float = 30.0, **_kwargs) -> None:  # noqa: ARG001
@@ -977,10 +1065,12 @@ class TestFunctionSubmitVerb:
         app = _app_with_functions(_GreetFunction)
         result = runner.invoke(
             app,
-            ["greet", "submit", "--spec", '{"name": "x"}'],
+            ["greet", "--spec", '{"name": "x"}'],
         )
-        assert result.exit_code == 0, result.output
-        assert captured_url[0].startswith("http://from-env:1234/")
+        assert result.exit_code == 1
+        assert isinstance(result.exception, RuntimeError)
+        assert "No NeMo Helix CLI state" in str(result.exception)
+        assert captured_url == []
 
     def test_non_legacy_function_name_submits_remotely(self, monkeypatch) -> None:
         captured: dict[str, object] = {}
@@ -1012,7 +1102,7 @@ class TestFunctionSubmitVerb:
         assert captured["body"] == {"name": "Ada"}
 
         assert runner.invoke(app, ["greet", "run"]).exit_code != 0
-        assert runner.invoke(app, ["greet", "submit"]).exit_code != 0
+        assert runner.invoke(app, ["greet", "--help"]).exit_code == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1039,7 +1129,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "greet"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1065,7 +1155,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "greet"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1090,7 +1180,7 @@ class TestApiSegmentForFunction:
 
         class _Fn(NemoFunction[_Spec]):
             name: ClassVar[str] = "x"
-            spec_schema: ClassVar[type[BaseModel]] = _Spec
+            spec_schema: ClassVar[type[_Spec]] = _Spec
 
             async def run(self, spec: _Spec) -> dict:
                 del spec
@@ -1125,7 +1215,7 @@ class _NestedSpec(BaseModel):
 class _NestedFunction(NemoFunction[_NestedSpec]):
     name: ClassVar[str] = "ping"
     description: ClassVar[str] = "Ping a nested target."
-    spec_schema: ClassVar[type[BaseModel]] = _NestedSpec
+    spec_schema: ClassVar[type[_NestedSpec]] = _NestedSpec
 
     async def run(self, spec: _NestedSpec) -> dict:
         return {
@@ -1135,188 +1225,20 @@ class _NestedFunction(NemoFunction[_NestedSpec]):
         }
 
 
-class TestFunctionAutoSpecFlags:
-    """Per-field flags auto-derived from a function's ``spec_schema``.
-
-    The wiring is shared with the jobs CLI via
-    :mod:`nemo_helix_plugin._spec_flags`; these tests pin the wiring on the
-    function side specifically so a future refactor can't silently
-    break the function ergonomics.
-    """
-
-    def test_run_help_lists_one_flag_per_scalar_leaf(self) -> None:
-        app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "run", "--help"])
-        assert result.exit_code == 0
-        plain = _plain(result.output)
-        assert "--name" in plain
-        assert "Function Spec" in plain
-        # The epilog tells the user where the flags came from — without
-        # this, "schema discovery" still requires reading source.
-        assert "GreetSpec" in plain
-
-    def test_run_accepts_per_field_flag(self) -> None:
-        app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "run", "--name", "Razvan"])
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"message": "Hello, Razvan!"}
-
-    def test_per_field_flag_overlays_on_top_of_spec(self) -> None:
-        app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(
-            app,
-            [
-                "greet",
-                "run",
-                "--spec",
-                '{"name": "from-spec"}',
-                "--name",
-                "from-flag",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"message": "Hello, from-flag!"}
-
-    def test_nested_field_uses_dotted_flag_name(self) -> None:
-        # ``target.url`` and ``target.timeout-seconds`` are the canonical
-        # rendering of a nested submodel field. Underscores within a
-        # segment kebab-case; the dot between segments is preserved.
-        app = _app_with_functions(_NestedFunction)
-        result = runner.invoke(app, ["ping", "run", "--help"])
-        assert result.exit_code == 0
-        plain = _plain(result.output)
-        assert "--name" in plain
-        assert "--target.url" in plain
-        assert "--target.timeout-seconds" in plain
-
-    def test_nested_field_overlay_round_trips(self) -> None:
-        app = _app_with_functions(_NestedFunction)
-        result = runner.invoke(
-            app,
-            [
-                "ping",
-                "run",
-                "--name",
-                "site-a",
-                "--target.url",
-                "https://example.test",
-                "--target.timeout-seconds",
-                "5",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {
-            "name": "site-a",
-            "url": "https://example.test",
-            "timeout": 5,
-        }
-
-    def test_workspace_field_in_spec_does_not_collide_with_static_flag(self) -> None:
-        # A spec field literally named ``workspace`` would alias the
-        # static ``--workspace`` flag (which feeds ``ctx.workspace``,
-        # not the spec). The reserved-flag set drops it from the
-        # auto-generated panel; users still pass it via --spec.
-        class _ConfusingSpec(BaseModel):
-            workspace: str = "default-ws"
-
-        class _ConfusingFunction(NemoFunction[_ConfusingSpec]):
-            name: ClassVar[str] = "confuse"
-            spec_schema: ClassVar[type[BaseModel]] = _ConfusingSpec
-
-            async def run(self, spec: _ConfusingSpec) -> dict:
-                return {"in_spec": spec.workspace}
-
-        app = _app_with_functions(_ConfusingFunction)
-        # Declared exactly once — the static-input version under the "Spec
-        # Source" panel, not duplicated by the spec field of the same name.
-        assert len(_workspace_params_on(app, "confuse", "run")) == 1
-
-        # And --spec still wins for the spec-side workspace value.
-        run_result = runner.invoke(
-            app,
-            ["confuse", "run", "--spec", '{"workspace": "from-spec"}', "--workspace", "ctx-ws"],
-        )
-        assert run_result.exit_code == 0, run_result.output
-        assert json.loads(run_result.output) == {"in_spec": "from-spec"}
-
-    def test_submit_help_lists_per_field_flags_under_function_spec_panel(self) -> None:
-        app = _app_with_functions(_GreetFunction)
-        result = runner.invoke(app, ["greet", "submit", "--help"])
-        plain = _plain(result.output)
-        assert "--name" in plain
-        assert "Function Spec" in plain
-        # `--workspace` is a submission-side flag (URL segment), so it
-        # stays in the Submission panel and isn't auto-derived even if
-        # a spec field happened to share the name.
-        assert "Submission" in plain
-
-    def test_no_spec_schema_fields_falls_back_to_no_flags_epilog(self) -> None:
-        # Functions with an empty spec_schema (or only unsupported
-        # types) get the "no per-field flags" epilog so users still
-        # learn how to pass values.
-        class _EmptySpec(BaseModel):
-            pass
-
-        class _EmptyFunction(NemoFunction[_EmptySpec]):
-            name: ClassVar[str] = "noop"
-            spec_schema: ClassVar[type[BaseModel]] = _EmptySpec
-
-            async def run(self, spec: _EmptySpec) -> dict:
-                del spec
-                return {}
-
-        app = _app_with_functions(_EmptyFunction)
-        result = runner.invoke(app, ["noop", "run", "--help"])
-        plain = _plain(result.output)
-        assert "Function Spec" not in plain
-        assert "no per-field flags" in plain
-
-
-# ---------------------------------------------------------------------------
-# Job CLI — auto-generated per-field flags from spec_schema
-# ---------------------------------------------------------------------------
-
-
-class _GreetJobSpec(BaseModel):
-    name: str = "world"
-    loud: bool = False
-
-
 class _GreetSpecJob(NemoJob):
-    name = "greet-spec"
-    description = "Return a greeting validated against a schema."
-    spec_schema: ClassVar[type[BaseModel]] = _GreetJobSpec
+    name: ClassVar[str] = "greet-spec"
+    spec_schema: ClassVar[type[BaseModel]] = _GreetSpec
 
     def run(self, config: dict) -> dict:
-        spec = _GreetJobSpec.model_validate(config)
-        message = f"Hello, {spec.name}!"
-        if spec.loud:
-            message = message.upper()
-        return {"message": message}
-
-
-class _NestedJobTarget(BaseModel):
-    url: str
-    timeout_seconds: int = 30
-
-
-class _NestedJobSpec(BaseModel):
-    name: str
-    target: _NestedJobTarget
+        return config
 
 
 class _NestedSpecJob(NemoJob):
-    name = "ping-spec"
-    description = "Ping a nested target."
-    spec_schema: ClassVar[type[BaseModel]] = _NestedJobSpec
+    name: ClassVar[str] = "ping-spec"
+    spec_schema: ClassVar[type[BaseModel]] = _NestedSpec
 
     def run(self, config: dict) -> dict:
-        spec = _NestedJobSpec.model_validate(config)
-        return {
-            "name": spec.name,
-            "url": spec.target.url,
-            "timeout": spec.target.timeout_seconds,
-        }
+        return config
 
 
 class TestJobAutoSpecFlags:
@@ -1328,11 +1250,10 @@ class TestJobAutoSpecFlags:
 
     def test_submit_help_lists_one_flag_per_scalar_leaf(self) -> None:
         app = _app_with_jobs(_GreetSpecJob)
-        result = runner.invoke(app, ["greet-spec", "submit", "--help"])
+        result = runner.invoke(app, ["greet-spec", "--help"])
         assert result.exit_code == 0
         plain = _plain(result.output)
         assert "--name" in plain
-        assert "--loud" in plain
         assert "Job Spec" in plain
 
     def test_submit_accepts_per_field_flag(self, monkeypatch) -> None:
@@ -1344,7 +1265,7 @@ class TestJobAutoSpecFlags:
 
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
         app = _app_with_jobs(_GreetSpecJob)
-        result = runner.invoke(app, ["greet-spec", "submit", "--name", "Razvan"])
+        result = runner.invoke(app, ["greet-spec", "--name", "Razvan"])
         assert result.exit_code == 0, result.output
         assert captured["spec"] == {"name": "Razvan"}
 
@@ -1363,7 +1284,6 @@ class TestJobAutoSpecFlags:
             app,
             [
                 "greet-spec",
-                "submit",
                 "--spec",
                 '{"name": "from-spec", "loud": true}',
                 "--name",
@@ -1375,7 +1295,7 @@ class TestJobAutoSpecFlags:
 
     def test_nested_field_uses_dotted_flag_name(self) -> None:
         app = _app_with_jobs(_NestedSpecJob)
-        result = runner.invoke(app, ["ping-spec", "submit", "--help"])
+        result = runner.invoke(app, ["ping-spec", "--help"])
         assert result.exit_code == 0
         plain = _plain(result.output)
         assert "--name" in plain
@@ -1395,7 +1315,6 @@ class TestJobAutoSpecFlags:
             app,
             [
                 "ping-spec",
-                "submit",
                 "--name",
                 "site-a",
                 "--target.url",
@@ -1430,11 +1349,11 @@ class TestJobAutoSpecFlags:
         # The flag is declared exactly once on ``submit`` — the static
         # submission-side version under the "Submission" panel, not
         # duplicated by the spec field of the same name.
-        assert len(_workspace_params_on(app, "ws-confuse", "submit")) == 1
+        assert len(_workspace_params_on(app, "ws-confuse")) == 1
 
     def test_submit_help_lists_per_field_flags_under_job_spec_panel(self) -> None:
         app = _app_with_jobs(_GreetSpecJob)
-        result = runner.invoke(app, ["greet-spec", "submit", "--help"])
+        result = runner.invoke(app, ["greet-spec", "--help"])
         plain = _plain(result.output)
         assert "--name" in plain
         assert "Job Spec" in plain
@@ -1448,7 +1367,7 @@ class TestJobAutoSpecFlags:
         # panel — the user passes values exclusively via --spec /
         # --spec-file under the "Spec Source" panel.
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "submit", "--help"])
+        result = runner.invoke(app, ["greet", "--help"])
         plain = _plain(result.output)
         assert "Job Spec" not in plain
         assert "Spec Source" in plain
@@ -1472,7 +1391,7 @@ class TestJobAutoSpecFlags:
                 return {"got": config}
 
         app = _app_with_jobs(_TwoShapeJob)
-        result = runner.invoke(app, ["two-shape", "submit", "--help"])
+        result = runner.invoke(app, ["two-shape", "--help"])
         plain = _plain(result.output)
         # The flag follows ``input_spec_schema``, not ``spec_schema``.
         assert "--target-name" in plain
@@ -1493,6 +1412,9 @@ class _ContextState:
     def get_base_url(self, default: str | None = None) -> str:
         del default
         return "http://my-platform:9090"
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        return NemoClient(base_url="http://my-platform:9090", timeout=timeout)
 
     def get_workspace(self) -> str | None:
         return self._workspace
@@ -1555,35 +1477,6 @@ class TestWorkspaceResolution:
     (and ``$NHX_WORKSPACE``) were silently discarded.
     """
 
-    def test_function_run_uses_context_workspace(self) -> None:
-        app = _app_with_state(_app_with_functions(_WorkspaceFunction), _ContextState())
-        result = runner.invoke(app, ["plugin", "echo-workspace", "run", "--spec", "{}"])
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"workspace": "my-team-ws"}
-
-    def test_function_run_explicit_flag_wins_over_context(self) -> None:
-        app = _app_with_state(_app_with_functions(_WorkspaceFunction), _ContextState())
-        result = runner.invoke(
-            app,
-            ["plugin", "echo-workspace", "run", "--spec", "{}", "--workspace", "team-alpha"],
-        )
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"workspace": "team-alpha"}
-
-    def test_function_run_falls_back_to_default_without_state(self, monkeypatch) -> None:
-        monkeypatch.delenv("NHX_WORKSPACE", raising=False)
-        app = _app_with_state(_app_with_functions(_WorkspaceFunction), None)
-        result = runner.invoke(app, ["plugin", "echo-workspace", "run", "--spec", "{}"])
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"workspace": "default"}
-
-    def test_function_run_falls_back_to_env_without_state(self, monkeypatch) -> None:
-        monkeypatch.setenv("NHX_WORKSPACE", "env-ws")
-        app = _app_with_state(_app_with_functions(_WorkspaceFunction), None)
-        result = runner.invoke(app, ["plugin", "echo-workspace", "run", "--spec", "{}"])
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"workspace": "env-ws"}
-
     def test_function_submit_url_uses_context_workspace(self, monkeypatch) -> None:
         captured_url: list[str] = []
 
@@ -1595,7 +1488,7 @@ class TestWorkspaceResolution:
         monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _fake_post)
 
         app = _app_with_state(_app_with_functions(_GreetFunction), _ContextState())
-        result = runner.invoke(app, ["plugin", "greet", "submit", "--spec", '{"name": "Ada"}'])
+        result = runner.invoke(app, ["plugin", "greet", "--spec", '{"name": "Ada"}'])
         assert result.exit_code == 0, result.output
         assert captured_url[0].endswith("/v2/workspaces/my-team-ws/greet")
 
@@ -1612,7 +1505,7 @@ class TestWorkspaceResolution:
         app = _app_with_state(_app_with_functions(_GreetFunction), _ContextState())
         result = runner.invoke(
             app,
-            ["plugin", "greet", "submit", "--spec", '{"name": "Ada"}', "--workspace", "team-alpha"],
+            ["plugin", "greet", "--spec", '{"name": "Ada"}', "--workspace", "team-alpha"],
         )
         assert result.exit_code == 0, result.output
         assert captured_url[0].endswith("/v2/workspaces/team-alpha/greet")
@@ -1628,7 +1521,7 @@ class TestWorkspaceResolution:
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _fake_submit)
 
         app = _app_with_state(_app_with_jobs(_GreetJob), _ContextState())
-        result = runner.invoke(app, ["plugin", "greet", "submit", "--spec", "{}"])
+        result = runner.invoke(app, ["plugin", "greet", "--spec", "{}"])
         assert result.exit_code == 0, result.output
         assert captured[0] == "my-team-ws"
 
@@ -1643,7 +1536,7 @@ class TestWorkspaceResolution:
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _fake_submit)
 
         app = _app_with_state(_app_with_jobs(_GreetJob), _ContextState())
-        result = runner.invoke(app, ["plugin", "greet", "submit", "--spec", "{}", "--workspace", "team-alpha"])
+        result = runner.invoke(app, ["plugin", "greet", "--spec", "{}", "--workspace", "team-alpha"])
         assert result.exit_code == 0, result.output
         assert captured[0] == "team-alpha"
 

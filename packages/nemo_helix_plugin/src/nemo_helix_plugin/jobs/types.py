@@ -5,7 +5,7 @@
 
 These types define what job endpoints accept and return.  Both the server
 (FastAPI routes in ``nhx.core.jobs.api``) and the typed HTTP client import
-from here — one source of truth, no Stainless-generated duplicates.
+from here, so there is one source of truth.
 
 The deep spec types live in sibling modules:
 - :mod:`nemo_helix_plugin.jobs.spec` — ``HelixJobSpec`` and children
@@ -30,7 +30,7 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.schema import Value
-from pydantic import BaseModel, Field, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 _FILESET_NAME_RE = re.compile(FILESET_NAME_PATTERN)
 
@@ -291,6 +291,30 @@ class HelixJobListTaskResponse(Value):
 class CreateHelixJobRequest(BaseModel):
     """Request model for creating a new platform job."""
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "hello-world",
+                    "spec": {},
+                    "platform_spec": {
+                        "steps": [
+                            {
+                                "name": "run",
+                                "executor": {
+                                    "provider": "cpu",
+                                    "container": {"image": "python:3.11"},
+                                },
+                                "config": {},
+                            }
+                        ]
+                    },
+                    "source": "api-reference",
+                }
+            ]
+        }
+    )
+
     name: Optional[str] = None
     description: Optional[str] = None
     project: Optional[str] = None
@@ -317,6 +341,7 @@ class HelixJobStatusUpdateRequest(BaseModel):
     """Request model for updating job status."""
 
     status: HelixJobStatus = Field(..., description="The new status to set for the job.")
+    expected_step_id: str | None = Field(None, description="Reject the update if the step's entity ID has changed.")
     status_details: dict[str, Any] | None = Field(
         default_factory=dict, description="Optional status details related to the status update."
     )

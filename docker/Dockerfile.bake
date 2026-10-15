@@ -15,7 +15,6 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
     FROM scratch AS root-lib-source-artifacts
     WORKDIR /artifacts
     COPY packages /artifacts/packages
-    COPY sdk /artifacts/sdk
     COPY skills /artifacts/skills
     COPY docs /artifacts/docs
     COPY openapi /artifacts/openapi
@@ -97,7 +96,6 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
     COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi
     RUN uv sync --frozen --no-install-project --no-install-workspace --package=nhx-persistence
     COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
-    COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
     RUN uv sync --frozen --package=nhx-persistence
 
 #nhx-persistence-test:
@@ -111,7 +109,6 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
     COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi
     RUN uv sync --frozen --no-install-project --no-install-workspace --package=nhx-common
     COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
-    COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
     RUN uv sync --frozen --package=nhx-common
 
 #nhx-common-test:
@@ -125,7 +122,6 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
     COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi
     RUN uv sync --frozen --no-install-project --no-install-workspace --package=nemohelix
     COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
-    COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
     COPY --from=root-service-source-artifacts /artifacts/services /app/services
 
     # nemohelix is a top level package

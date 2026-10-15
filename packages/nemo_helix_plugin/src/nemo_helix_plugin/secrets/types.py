@@ -5,8 +5,7 @@
 
 These types define the HTTP contract for secret CRUD, value access, and the
 admin key-rotation endpoint. Both the server (FastAPI routes) and the client
-(NemoClient endpoints) import from here — one source of truth, no
-Stainless-generated duplicates.
+(NemoClient endpoints) import from here, so there is one source of truth.
 """
 
 from __future__ import annotations
@@ -95,6 +94,17 @@ class HelixSecretCreateRequest(BaseModel):
 
 class HelixSecretUpdateRequest(BaseModel):
     """Request body for updating a platform secret's metadata."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "description": "Updated secret description",
+                    "value": "new-secret-value",
+                }
+            ]
+        }
+    )
 
     description: str | None = Field(default=None, description="An optional description of the secret")
     value: SecretStr | None = Field(default=None, description="The new secret value")

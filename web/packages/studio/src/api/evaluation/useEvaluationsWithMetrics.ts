@@ -13,8 +13,8 @@ import {
   EvaluateJob,
   EvaluateJobsPage,
   HelixJobStatus as JobStatus,
-  EvaluatorListEvaluateJobsParams,
-} from '@nemo/sdk/generated/evaluator/schema';
+  EvalsListEvaluateJobsParams,
+} from '@nemo/sdk/generated/evals/schema';
 import { EvaluationApiError } from '@studio/api/evaluation/EvaluationApiError';
 import { fetchEvaluationsWithMetrics } from '@studio/api/evaluation/index';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -36,7 +36,7 @@ export interface UseEvaluationsWithMetricsOptions {
     UseQueryOptions<EvaluationJobsWithTaskMetricsPage, EvaluationApiError>,
     'queryFn' | 'queryKey'
   >;
-  query?: EvaluatorListEvaluateJobsParams;
+  query?: EvalsListEvaluateJobsParams;
   filters?: {
     tags?: {
       projectId?: string;
@@ -48,7 +48,7 @@ export interface UseEvaluationsWithMetricsOptions {
 
 export const getEvaluationsWithMetricsQueryOptions = (
   workspace: string,
-  query?: EvaluatorListEvaluateJobsParams
+  query?: EvalsListEvaluateJobsParams
 ) => {
   return queryOptions<EvaluationJobsWithTaskMetricsPage, EvaluationApiError>({
     queryKey: ['evaluationsWithMetrics', query],

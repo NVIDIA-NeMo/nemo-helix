@@ -122,8 +122,8 @@ def load_chat_jsonl_from_platform(
 
 def chat_metrics():
     """Build default metrics for CHAT SFT eval (exact match + ROUGE + BLEU)."""
-    from nemo_evaluator_sdk import BLEUMetric, ROUGEMetric
-    from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
+    from nhx_evals_sdk import BLEUMetric, ROUGEMetric
+    from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
     ref = CHAT_REFERENCE_TEMPLATE
     return [
@@ -328,7 +328,7 @@ def build_online_eval_config(
     limit_samples: int | None = None,
 ):
     """RunConfigOnlineModel defaults aligned with Qwen3 CHAT SFT eval."""
-    from nemo_evaluator_sdk.values import InferenceParams, RunConfigOnlineModel
+    from nhx_evals_sdk.values import InferenceParams, RunConfigOnlineModel
 
     extra_body = {"chat_template_kwargs": {"enable_thinking": enable_thinking}} if not enable_thinking else None
     inference_kwargs: dict[str, Any] = {"max_tokens": max_tokens, "temperature": temperature}
@@ -357,7 +357,7 @@ def build_platform_model_target(
     model-entity path always routes to the base VirtualModel and ignores adapter
     names in the request body.
     """
-    from nemo_evaluator_sdk.values.models import Model
+    from nhx_evals_sdk.values.models import Model
 
     resolved_provider = provider_name or find_ready_provider_for_model_entity(
         base_url=base_url,
@@ -449,7 +449,7 @@ def run_chat_online_eval(
     prompt_template: dict[str, Any] | None = None,
 ):
     """Run online eval on CHAT rows using shared templates."""
-    from nemo_evaluator_sdk import Evaluator
+    from nhx_evals_sdk import Evaluator
 
     for index, row in enumerate(rows):
         assert_chat_row(row, index=index)

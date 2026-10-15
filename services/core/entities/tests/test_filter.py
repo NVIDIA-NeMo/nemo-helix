@@ -111,6 +111,12 @@ class TestParseJsonSearch:
         assert result.operator == FilterOperator.NIN
         assert result.value == ["val1", "val2"]
 
+    def test_elem_match_keeps_its_criteria_object(self):
+        result = _parse_json_filter('{"data.meta":{"$elemMatch":{"key":"owner","value":"alice"}}}')
+        assert isinstance(result, ComparisonOperation)
+        assert result.operator == FilterOperator.ELEM_MATCH
+        assert result.value == {"key": "owner", "value": "alice"}
+
     def test_invalid_json(self):
         """Test invalid JSON raises ValueError."""
         with pytest.raises(ValueError, match="Invalid JSON"):

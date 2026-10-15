@@ -12,10 +12,10 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { logger } from '@nemo/common/src/utils/logger';
 import {
-  getEvaluatorGetEvaluateJobQueryKey,
-  useEvaluatorCancelEvaluateJob,
-} from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import type { EvaluateJob } from '@nemo/sdk/generated/evaluator/schema';
+  getEvalsGetEvaluateJobQueryKey,
+  useEvalsCancelEvaluateJob,
+} from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { Banner, Button, Flex, Modal, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
@@ -40,7 +40,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
-  const { mutateAsync: cancelJob, isPending: isCancelling } = useEvaluatorCancelEvaluateJob();
+  const { mutateAsync: cancelJob, isPending: isCancelling } = useEvalsCancelEvaluateJob();
 
   const handleRefreshClick = () => {
     navigate(0);
@@ -54,7 +54,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
       toast.success('Job cancellation requested');
 
       await queryClient.invalidateQueries({
-        queryKey: getEvaluatorGetEvaluateJobQueryKey(workspace, evaluationJob.name),
+        queryKey: getEvalsGetEvaluateJobQueryKey(workspace, evaluationJob.name),
       });
 
       setCancelModalOpen(false);

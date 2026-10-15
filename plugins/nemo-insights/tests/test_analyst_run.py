@@ -3,12 +3,15 @@
 
 """The ``run_analyst`` client injection contract."""
 
+import subprocess
+import sys
 from typing import Any, cast
 
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients
 from nemo_insights_plugin.analyst import run as run_module
+from nemo_insights_plugin.analyst import trace_intel, trace_snapshot
 from nemo_insights_plugin.analyst.observability import AnalystEvaluationContext
 from nooa.context_blocks import ResultStatus
 from nooa.events import LLMComplete, PythonOutput
@@ -82,15 +85,62 @@ def _stub_pipeline(monkeypatch: pytest.MonkeyPatch, seen: dict[str, object]) -> 
         seen["snapshot_kwargs"] = kwargs
         return object()
 
-    monkeypatch.setattr(run_module, "analyze_snapshot", fake_analyze_snapshot)
-    monkeypatch.setattr(run_module, "load_existing_insights", fake_load_existing)
-    monkeypatch.setattr(run_module, "load_trace_snapshot", fake_load_snapshot)
+    monkeypatch.setattr(trace_intel, "analyze_snapshot", fake_analyze_snapshot)
+    monkeypatch.setattr(trace_intel, "load_existing_insights", fake_load_existing)
+    monkeypatch.setattr(trace_snapshot, "load_trace_snapshot", fake_load_snapshot)
 
     class Observability:
         def shutdown(self) -> None:
             seen["shutdown"] = True
 
     monkeypatch.setattr(run_module, "setup_analyst_observability", lambda **_kwargs: Observability())
+
+
+@pytest.mark.parametrize("missing_dependency", ["insight_agent", "trace_ingest", "unexpected_dependency"])
+def test_missing_analyst_dependencies(missing_dependency: str) -> None:
+    # A fresh process exercises adapter imports without cached analyst dependencies.
+    script = """
+import asyncio
+import importlib.abc
+import sys
+from unittest.mock import AsyncMock
+
+missing = sys.argv[1]
+blocked = "insight_agent" if missing == "unexpected_dependency" else missing
+
+class BlockDependency(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] == blocked:
+            raise ModuleNotFoundError(f"No module named '{missing}'", name=missing)
+
+sys.meta_path.insert(0, BlockDependency())
+from nemo_insights_plugin import fabric_adapter
+from nemo_insights_plugin.analyst.run import run_analyst
+
+async def check():
+    client = AsyncMock()
+    expected = ModuleNotFoundError if missing == "unexpected_dependency" else RuntimeError
+    try:
+        await run_analyst(agent="agent", ethos=None, workspace="default", base_url=None, client=client)
+    except expected as error:
+        if missing == "unexpected_dependency":
+            assert error.name == missing
+        else:
+            assert error.__cause__.name == missing
+            message = str(error)
+            for text in ("insight-agent", "trace-ingest", "uv tool", "virtual-environment",
+                         "#install-analyst-dependencies-for-pypi-installations"):
+                assert text in message
+    else:
+        raise AssertionError("Missing dependency did not fail analyst execution")
+    client.close.assert_awaited_once()
+
+asyncio.run(check())
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, missing_dependency], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 async def test_injected_client_is_used_and_closed(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,7 +3,7 @@
 
 import type { ChatCompletionMessageRowValues } from '@nemo/common/src/components/ChatCompletionInput';
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2';
-import type { RunConfigOnlineModel } from '@nemo/sdk/generated/evaluator/schema';
+import type { RunConfigOnlineModel } from '@nemo/sdk/generated/evals/schema';
 import type { MetricRunSidePanelFormData } from '@studio/components/sidePanels/MetricRunSidePanel/types';
 import { parseEvaluationModelValue } from '@studio/util/evaluations';
 

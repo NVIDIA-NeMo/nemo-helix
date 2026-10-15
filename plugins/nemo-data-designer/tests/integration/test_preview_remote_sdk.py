@@ -3,7 +3,7 @@
 
 import logging
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -337,7 +337,7 @@ class _MessageCaptureHandler(logging.Handler):
 
 
 @contextmanager
-def capture_sdk_preview_log_messages() -> Iterator[list[str]]:
+def capture_sdk_preview_log_messages() -> Generator[list[str], None, None]:
     preview_logger = logging.getLogger("nemo_data_designer_plugin.sdk.resources")
     previous_level = preview_logger.level
     handler = _MessageCaptureHandler()

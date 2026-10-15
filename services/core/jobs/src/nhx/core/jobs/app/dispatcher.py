@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import weakref
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
@@ -36,6 +37,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     get_model_id,
     job_artifact_base_path,
 )
+from nhx.core.jobs.app.constants import JOB_TASK_CLEANUP_PENDING_KEY
 from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
@@ -126,6 +128,11 @@ def _get_job_mutation_lock(job_name: str, workspace: str) -> asyncio.Lock:
     return lock
 
 
+def _job_updated_at(job: HelixJob, attempt: HelixJobAttempt) -> datetime:
+    # Status changes only rewrite the attempt, so the job entity's own timestamp stays at creation.
+    return max(ts for ts in (job.updated_at, attempt.updated_at) if ts is not None)
+
+
 def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> HelixJobResponse:
     """Helper to create HelixJobResponse from job and attempt entities."""
     ownership = job.ownership
@@ -139,7 +146,7 @@ def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> Hel
         workspace=job.workspace,
         project=job.project,
         created_at=job.created_at,  # type: ignore
-        updated_at=job.updated_at,  # type: ignore
+        updated_at=_job_updated_at(job, attempt),
         source=job.source,
         spec=job.spec,
         platform_spec=job.platform_spec,
@@ -159,41 +166,44 @@ def _format_status_for_message(status: HelixJobStatus | str) -> str:
     return str(status)
 
 
-# Status lives on HelixJobAttempt, not HelixJob, so it cannot be
-# resolved by the HelixJob entity-store query. Instead, the full filter tree
-# is evaluated in-memory (op.apply(InMemoryFilterRepository(virtual_job))) against
-# a "virtual job" entity that carries the attempt's status. The store query
-# receives only a status-free *superset* of the filter (see _status_free_superset)
-# so it never drops a row the in-memory pass would accept; that pass then narrows
+# Status lives on HelixJobAttempt, not HelixJob, and the reported updated_at
+# folds in the attempt's timestamp, so neither can be resolved by the HelixJob
+# entity-store query. Instead, the full filter tree is evaluated in-memory
+# (op.apply(InMemoryFilterRepository(virtual_job))) against a "virtual job"
+# entity that carries the attempt-derived values. The store query receives only
+# an attempt-free *superset* of the filter (see _attempt_free_superset) so it
+# never drops a row the in-memory pass would accept; that pass then narrows
 # exactly.
 _STATUS_FIELD = "data.status"
+_ATTEMPT_DERIVED_FIELDS = frozenset({_STATUS_FIELD, "updated_at"})
 
 
-def _references_status(operation: FilterOperation | None) -> bool:
-    """Whether the operation tree contains any comparison on the status field."""
+def _references_attempt_field(operation: FilterOperation | None) -> bool:
+    """Whether the operation tree contains any comparison on an attempt-derived field."""
     if operation is None:
         return False
     if isinstance(operation, ComparisonOperation):
-        return operation.field == _STATUS_FIELD
+        return operation.field in _ATTEMPT_DERIVED_FIELDS
     if isinstance(operation, LogicalOperation):
-        return any(_references_status(child) for child in operation.operations)
+        return any(_references_attempt_field(child) for child in operation.operations)
     return False
 
 
-def _status_free_superset(operation: FilterOperation | None) -> FilterOperation | None:
-    """Build a status-free store filter that accepts a SUPERSET of ``operation``.
+def _attempt_free_superset(operation: FilterOperation | None) -> FilterOperation | None:
+    """Build an attempt-free store filter that accepts a SUPERSET of ``operation``.
 
-    Status lives on the attempt, not the job, so it cannot be pushed to the
-    HelixJob store query. We push down a relaxed, status-independent filter
-    that is guaranteed to keep every row the in-memory evaluation would accept;
-    that evaluation then narrows the candidate set exactly.
+    Status and the reported updated_at derive from the attempt, so they cannot
+    be pushed to the HelixJob store query. We push down a relaxed,
+    attempt-independent filter that is guaranteed to keep every row the
+    in-memory evaluation would accept; that evaluation then narrows the
+    candidate set exactly.
 
     ``None`` means "no store constraint" (accept all jobs in scope) — always a
     valid superset. The relaxation rules below preserve the superset property:
 
-    - Status comparison -> None. Replacing a constraint with "accept all" only
-      widens.
-    - Non-status comparison -> itself. Status-independent, so it is exact and
+    - Attempt-derived comparison -> None. Replacing a constraint with "accept
+      all" only widens.
+    - Any other comparison -> itself. Attempt-independent, so it is exact and
       safe to push verbatim.
     - ``$and`` -> AND of the children's supersets (children that relax to None
       are dropped). Any row satisfying the original AND satisfies every child,
@@ -203,21 +213,21 @@ def _status_free_superset(operation: FilterOperation | None) -> FilterOperation 
       None, in which case the whole OR relaxes to None (an unconstrained branch
       makes the union unconstrained). Each child-superset is a superset of its
       child, so the OR of supersets is a superset of the OR of children.
-    - ``$not`` -> kept verbatim only when its operand is status-free (then the
-      whole negation is exact and status-independent). If the operand references
-      status, negation can invert sub/superset relationships, so we relax the
+    - ``$not`` -> kept verbatim only when its operand is attempt-free (then the
+      whole negation is exact and attempt-independent). If the operand references
+      an attempt-derived field, negation can invert sub/superset relationships, so we relax the
       entire ``$not`` to None and let the in-memory pass do the work.
     """
     if operation is None:
         return None
     if isinstance(operation, ComparisonOperation):
-        return None if operation.field == _STATUS_FIELD else operation
+        return None if operation.field in _ATTEMPT_DERIVED_FIELDS else operation
     if isinstance(operation, LogicalOperation):
         if operation.operator == FilterOperator.NOT:
-            # not X is status-independent only when X is; otherwise relax to None.
-            return None if _references_status(operation) else operation
+            # not X is attempt-independent only when X is; otherwise relax to None.
+            return None if _references_attempt_field(operation) else operation
 
-        relaxed = [_status_free_superset(child) for child in operation.operations]
+        relaxed = [_attempt_free_superset(child) for child in operation.operations]
 
         if operation.operator == FilterOperator.OR:
             # An unconstrained branch makes the union unconstrained.
@@ -257,7 +267,7 @@ def _build_virtual_job_entity(job: HelixJob, attempt: HelixJobAttempt) -> dict[s
         "project": job.project,
         "entity_type": HelixJob.__entity_type__,
         "created_at": job.created_at,
-        "updated_at": job.updated_at,
+        "updated_at": _job_updated_at(job, attempt),
         "data": data,
     }
 
@@ -456,11 +466,11 @@ class JobDispatcher:
         """List platform jobs with their current attempts."""
         # Status lives on HelixJobAttempt, not HelixJob, so the full filter
         # tree is evaluated in-memory against a virtual job entity that carries the
-        # attempt status. The store query receives a status-free SUPERSET of the
-        # filter so it never drops a row the in-memory pass would accept (see
-        # _status_free_superset); that pass then narrows the page exactly.
+        # attempt-derived fields. The store query receives an attempt-free SUPERSET
+        # of the filter so it never drops a row the in-memory pass would accept (see
+        # _attempt_free_superset); that pass then narrows the page exactly.
         # The operation is already entity-translated by make_filter_dep.
-        store_operation = _status_free_superset(parsed.operation)
+        store_operation = _attempt_free_superset(parsed.operation)
 
         # Calculate page from offset
         page = 1
@@ -791,6 +801,11 @@ class JobDispatcher:
         filter_str: Optional[str] = None
         if filter.status:
             filter_str = json.dumps({"data.status": {"$in": filter.status}})
+        if filter.task_cleanup_pending is not None:
+            cleanup_filter = {"data.status_details." + JOB_TASK_CLEANUP_PENDING_KEY: filter.task_cleanup_pending}
+            filter_str = json.dumps(
+                {"$and": [json.loads(filter_str), cleanup_filter]} if filter_str else cleanup_filter
+            )
         sort_str = sort.value
 
         use_store_pagination = (not filter.job or filter.job == "-") and not filter.source
@@ -905,13 +920,7 @@ class JobDispatcher:
 
         step_statuses = []
         for step in steps_response.data:
-            # Get tasks for step
-            tasks_response = await self.store.list(
-                HelixJobTask,
-                workspace=workspace,
-                filter_obj={"step_id": step.id},
-                page_size=1000,
-            )
+            tasks = await self.list_tasks(step.id, workspace)
 
             task_statuses = [
                 HelixJobTaskStatusResponse(
@@ -924,7 +933,7 @@ class JobDispatcher:
                     created_at=task.created_at,
                     updated_at=task.updated_at,
                 )
-                for task in tasks_response.data
+                for task in tasks
             ]
 
             step_statuses.append(
@@ -979,12 +988,15 @@ class JobDispatcher:
         status: HelixJobStatus,
         status_details: Optional[Dict[str, Any]] = None,
         error_details: Optional[Dict[str, Any]] = None,
+        expected_step_id: str | None = None,
     ) -> tuple[HelixJobStep, HelixJobAttempt]:
         """Update a job's status based on the step's status.
 
         On EntityConflictError (e.g. reconciler updated the step concurrently), refetches
         the step and retries once if the requested transition is still valid.
         """
+        if expected_step_id is not None and expected_step_id != step.id:
+            raise StateTransitionConflictError("Job step was replaced by a new attempt")
         attempt = await self.get_attempt(step.attempt_id)
         if attempt is None:
             raise JobStatusUpdateSkippedError(f"Attempt does not exist: {step.attempt_id}")
@@ -1004,13 +1016,22 @@ class JobDispatcher:
         error_details: Optional[Dict[str, Any]] = None,
     ) -> tuple[HelixJobStep, HelixJobAttempt]:
         """Update a job from a step while holding the per-job mutation lock."""
-        step_to_save = step
+        step_to_save = await self.store.get_by_id(HelixJobStep, step.id)
         saved_step: HelixJobStep | None = None
         for attempt in range(2):
             if not step_to_save.status.can_transition_to(status):
                 raise StateTransitionConflictError(
                     f"Invalid status transition from {step_to_save.status} to {status} for step {step_to_save.id}"
                 )
+
+            if status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+                await self._finalize_step_tasks(
+                    step_to_save.model_copy(
+                        update={"status": status, "error_details": error_details or step_to_save.error_details}
+                    )
+                )
+                if status != step_to_save.status or step_to_save.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
+                    status_details = {**(status_details or {}), JOB_TASK_CLEANUP_PENDING_KEY: True}
 
             if self._step_update_would_be_noop(step_to_save, status, status_details, error_details):
                 saved_step = step_to_save
@@ -1042,6 +1063,9 @@ class JobDispatcher:
 
         if saved_step is None:
             raise RuntimeError("update_job_status_from_step did not produce a saved step")
+
+        if saved_step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+            await self._finalize_step_tasks(saved_step)
 
         # Update job / attempt status from step
         attempt = await self.get_attempt(saved_step.attempt_id)
@@ -1173,6 +1197,24 @@ class JobDispatcher:
                     },
                 )
 
+        if saved_step.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
+            for retry in range(2):
+                try:
+                    saved_step = await self.store.update(
+                        saved_step.model_copy(
+                            update={
+                                "status_details": {**saved_step.status_details, JOB_TASK_CLEANUP_PENDING_KEY: False}
+                            }
+                        )
+                    )
+                    break
+                except EntityConflictError:
+                    if retry:
+                        raise
+                    saved_step = await self.store.get_by_id(HelixJobStep, saved_step.id)
+                    if not saved_step.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
+                        break
+
         operations_counter.add(1, attributes={"operation": "update_job_status_from_step"})
         return saved_step, attempt
 
@@ -1216,17 +1258,14 @@ class JobDispatcher:
         # Check if the job has any created steps, and if so, check if all of them are in created state.
         # If so, cancel the job immediately without going through the normal cancellation process.
         if job_entity.current_attempt_id:
-            response = await self.store.list(
+            steps = await self._list_all_entities(
                 HelixJobStep,
                 filter_obj={"attempt_id": job_entity.current_attempt_id},
                 workspace=workspace,
             )
-            steps = response.data
             if steps and all(s.status == HelixJobStatus.CREATED for s in steps):
-                _, attempt = await self.update_job_status_from_step(
-                    steps[0],
-                    HelixJobStatus.CANCELLED,
-                )
+                for step in steps:
+                    _, attempt = await self.update_job_status_from_step(step, HelixJobStatus.CANCELLED)
                 operations_counter.add(1, attributes={"operation": "cancel_job"})
                 return create_platform_job_response(job_entity, attempt)
 
@@ -1240,6 +1279,14 @@ class JobDispatcher:
             attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
             if attempt is None:
                 raise Exception(f"Job Attempt with Job ID {job_entity.id} does not exist.")
+            steps = await self._list_all_entities(
+                HelixJobStep,
+                filter_obj={"attempt_id": attempt.id},
+                workspace=workspace,
+            )
+            for step in steps:
+                if step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+                    _, attempt = await self.update_job_status_from_step(step, step.status)
 
         operations_counter.add(1, attributes={"operation": "cancel_job"})
         return create_platform_job_response(job_entity, attempt)
@@ -1274,6 +1321,11 @@ class JobDispatcher:
 
         # Only allow re-run if the attempt is in a terminal state
         if attempt.status.is_terminal():
+            for step in await self._list_all_entities(
+                HelixJobStep, filter_obj={"attempt_id": attempt.id}, workspace=workspace
+            ):
+                if step.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
+                    await self._update_job_status_from_step_locked(step, step.status)
             seq = attempt.seq + 1
             # Use short ID prefix to stay within 32 char name limit
             attempt_ref_id = get_model_id("att")
@@ -1365,13 +1417,39 @@ class JobDispatcher:
 
     async def list_tasks(self, step_id: str, workspace: str) -> list[HelixJobTask]:
         """List all platform job tasks for a specific step."""
-        response = await self.store.list(
+        return await self._list_all_entities(
             HelixJobTask,
             workspace=workspace,
             filter_obj={"step_id": step_id},
-            page_size=1000,
         )
-        return list(response.data)
+
+    async def _finalize_step_tasks(self, step: HelixJobStep) -> None:
+        """Finalize nonterminal children to match a cancelled or errored step."""
+        for task in await self.list_tasks(step.id, step.workspace):
+            await self._finalize_task(task, step)
+
+    async def _finalize_task(self, task: HelixJobTask, step: HelixJobStep) -> HelixJobTask:
+        """Preserve terminal winners and retry one conflicting task write."""
+        for retry in range(2):
+            if task.status.is_terminal():
+                break
+            updates = {
+                "status": step.status,
+                "status_details": {
+                    **task.status_details,
+                    "message": f"Task finalized because job step is {step.status.value}",
+                },
+            }
+            if step.status == HelixJobStatus.ERROR:
+                updates["error_details"] = task.error_details or step.error_details or {"message": "Job step failed"}
+            try:
+                task = await self.store.update(task.model_copy(update=updates))
+                break
+            except EntityConflictError:
+                if retry:
+                    raise
+                task = await self.store.get_by_id(HelixJobTask, task.id)
+        return task
 
     async def create_or_update_task(
         self, job_name: str, task_name: str, workspace: str, task_update: HelixJobTaskUpdate, step: HelixJobStep
@@ -1385,9 +1463,23 @@ class JobDispatcher:
     ) -> HelixJobTask:
         """Create or update a task while holding the per-job mutation lock."""
         await self.store.get(HelixJob, job_name, workspace=workspace)
-        await self.store.get_by_id(HelixJobStep, step.id)
+        step = await self.store.get_by_id(HelixJobStep, step.id)
 
         task = await self.get_task(step.id, task_name, workspace=workspace)
+
+        if step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+            if task is not None and task.status.is_terminal():
+                return task
+            if not task_update.status.is_terminal() or (
+                task is not None and not task.status.can_transition_to(task_update.status)
+            ):
+                if task is not None:
+                    return await self._finalize_task(task, step)
+                task_update = HelixJobTaskUpdate(
+                    status=step.status,
+                    status_details={"message": f"Task finalized because job step is {step.status.value}"},
+                    error_details=step.error_details if step.status == HelixJobStatus.ERROR else None,
+                )
 
         if not task:
             task = await self.store.create(
@@ -1454,6 +1546,12 @@ class JobDispatcher:
                     "status": task.status,
                 },
             )
+
+        current_step = await self.store.get_by_id(HelixJobStep, step.id)
+        if current_step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+            if not task.status.is_terminal():
+                task = await self._finalize_task(task, current_step)
+            return task
 
         # Propagate task status_details to parent job for progress tracking.
         # Training callbacks report progress (percentage_done, epoch, step, loss) at the task level,

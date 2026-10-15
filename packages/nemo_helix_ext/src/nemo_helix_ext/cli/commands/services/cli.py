@@ -8,9 +8,9 @@ import importlib.util
 import logging
 import os
 import subprocess
-import time
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Annotated, NoReturn
 
 import httpx
@@ -133,18 +133,18 @@ def _wait_for_healthy(
     """
     effective_host = "localhost" if host in ("0.0.0.0", "::") else host  # noqa: S104
     url = str(httpx.URL(scheme="http", host=effective_host, port=port, path="/status"))
-    deadline = time.monotonic() + timeout
+    deadline = monotonic() + timeout
     while True:
         if _child_exited(proc):
             return False
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
             return False
         if _status_is_ready(url, min(_HEALTH_REQUEST_TIMEOUT, remaining)):
             return True
         if _child_exited(proc):
             return False
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
             return False
         sleep_for = min(poll_interval, remaining - _HEALTH_TAIL_SLICE)
@@ -152,7 +152,7 @@ def _wait_for_healthy(
         # spin. Spend the rest of the budget, then probe once more.
         if sleep_for < _HEALTH_TAIL_SLICE:
             return _ready_in_tail(url, proc, remaining)
-        time.sleep(sleep_for)
+        sleep(sleep_for)
 
 
 def _ready_in_tail(url: str, proc: subprocess.Popen[bytes] | None, remaining: float) -> bool:
@@ -161,7 +161,7 @@ def _ready_in_tail(url: str, proc: subprocess.Popen[bytes] | None, remaining: fl
     The follow-up is long enough for a local ``/status`` and capped so a short
     ``--ready-timeout`` cannot grow by a full status-request timeout.
     """
-    time.sleep(remaining)
+    sleep(remaining)
     if _child_exited(proc):
         return False
     return _status_is_ready(url, _HEALTH_TAIL_PROBE_TIMEOUT)
@@ -679,7 +679,7 @@ def restart_services(
         typer.Option(
             "--keep-alive-timeout-seconds",
             min=1,
-            help="Seconds Uvicorn keeps idle HTTP connections open. Defaults to the previous value or 5.",
+            help="Seconds Uvicorn keeps idle HTTP connections open. Defaults to the previous value or 10.",
         ),
     ] = None,
     instance: Annotated[

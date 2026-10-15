@@ -1,10 +1,11 @@
 {
   "private": true,
   "scripts": {
-    "prepare:openapi": "node scripts/filter-public-openapi.mjs",
     "prepare:helm": "node scripts/sync-helm-docs.mjs",
-    "prepare": "npm run prepare:openapi && npm run prepare:helm",
-    "check": "npm run prepare && npm run validate-lfs-assets && npx -y fern-api@latest check && npm run validate-mdx && npm run validate-notebook-viewer && npm run check:gated-links",
+    "sync:colab-links": "node scripts/sync-colab-links.mjs",
+    "check:colab-links": "node scripts/sync-colab-links.mjs --check",
+    "prepare": "npm run prepare:helm && npm run sync:colab-links",
+    "check": "npm run prepare && npm run check:colab-links && npm run validate-lfs-assets && npx -y fern-api@latest check && npm run validate-mdx && npm run validate-notebook-viewer && npm run check:gated-links",
     "check:fern": "npm run prepare && npx -y fern-api@latest check",
     "validate-lfs-assets": "node scripts/validate-lfs-assets.mjs",
     "validate-mdx": "node scripts/validate-mdx.mjs",

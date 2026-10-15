@@ -119,13 +119,11 @@ class TestTranslateAgentConfig:
         assert fabric_config.models["fast"].max_tokens == 256
 
     def test_repository_example_uses_current_codex_and_isolated_hermes_adapters(self) -> None:
-        example_path = Path(__file__).parents[2] / "examples/nemo-agent-config/agent.yaml"
-        config = load_agent_config(example_path)
-
-        codex_config = translate_agent_config(config, harness_name="codex")
-        claude_config = translate_agent_config(config, harness_name="claude")
-        deepagents_config = translate_agent_config(config, harness_name="deepagents")
-        hermes_config = translate_agent_config(config, harness_name="hermes")
+        examples = Path(__file__).parents[2] / "examples/nemo-agent-config"
+        codex_config = translate_agent_config(load_agent_config(examples / "agent-codex.yaml"))
+        claude_config = translate_agent_config(load_agent_config(examples / "agent-claude.yaml"))
+        deepagents_config = translate_agent_config(load_agent_config(examples / "agent-deepagents.yaml"))
+        hermes_config = translate_agent_config(load_agent_config(examples / "agent-hermes.yaml"))
 
         codex_harness = codex_config.harness
         claude_harness = claude_config.harness
@@ -229,6 +227,66 @@ class TestTranslateAgentConfig:
             == "http://legacy:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
         )
         assert "base_url" not in fabric_config.models["default"].settings
+
+    def test_flattens_model_extensions_to_top_level_metadata(self) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["models"]["default"]["extensions"] = {
+            "api": "openai-completions",
+            "context_window": 200000,
+            "cost": {"input": 1.0, "output": 2.0},
+            "input": ["text", "image"],
+        }
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # The Fabric northbound ModelConfig collects unknown top-level keys into
+        # its serde(flatten) extensions map, so the metadata must serialize as
+        # siblings of provider/model -- never under a nested "extensions" key,
+        # which would arrive double-nested and unreadable at the adapter.
+        dumped = fabric_config.models["default"].model_dump(exclude_none=True)
+        assert "extensions" not in dumped
+        assert dumped["api"] == "openai-completions"
+        assert dumped["context_window"] == 200000
+        assert dumped["cost"] == {"input": 1.0, "output": 2.0}
+        assert dumped["input"] == ["text", "image"]
+
+    def test_empty_model_extensions_adds_no_metadata(self) -> None:
+        config = AgentConfig.model_validate(_example_yaml_config())
+
+        fabric_config = translate_agent_config(config)
+
+        dumped = fabric_config.models["default"].model_dump(exclude_none=True)
+        assert "extensions" not in dumped
+        assert "api" not in dumped
+
+    def test_model_extensions_may_not_override_declared_fields(self) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["models"]["default"]["extensions"] = {"max_tokens": 4096}
+        config = AgentConfig.model_validate(payload)
+
+        with pytest.raises(FabricTranslationError, match="max_tokens"):
+            translate_agent_config(config)
+
+    def test_model_extensions_collision_lists_every_shadowed_field(self) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["models"]["default"]["extensions"] = {"max_tokens": 4096, "base_url": "http://x"}
+        config = AgentConfig.model_validate(payload)
+
+        with pytest.raises(FabricTranslationError, match="base_url, max_tokens"):
+            translate_agent_config(config)
+
+    def test_model_extensions_may_not_renest_an_extensions_key(self) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["models"]["default"]["extensions"] = {"extensions": {"api": "openai-completions"}}
+        config = AgentConfig.model_validate(payload)
+
+        with pytest.raises(FabricTranslationError, match="extensions"):
+            translate_agent_config(config)
 
     def test_translates_shared_capability_sections(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())
@@ -335,6 +393,7 @@ class TestTranslateAgentConfig:
             ("codex", "nvidia.fabric.codex"),
             ("deepagents", "nvidia.fabric.langchain.deepagents"),
             ("hermes", "nvidia.fabric.hermes"),
+            ("pi", "nvidia.fabric.pi"),
         ],
     )
     def test_supported_harness_kinds_translate_to_adapter_ids(
@@ -482,6 +541,42 @@ class TestTranslateAgentConfig:
         with pytest.raises(FabricTranslationError, match="no models.default is configured"):
             translate_agent_config(config)
 
+    def test_relay_defaults_pi_runtime_artifacts_when_unset(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # Fabric creates the runtime-owned Relay config under runtime.artifacts, so a
+        # Relay-enabled Pi agent must have it set or Pi startup fails.
+        assert fabric_config.runtime.artifacts == "./artifacts/pi"
+
+    def test_relay_preserves_explicit_pi_runtime_artifacts(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        payload["runtime"] = {"artifacts": "./custom/artifacts"}
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # An explicitly configured runtime.artifacts is never overwritten.
+        assert fabric_config.runtime.artifacts == "./custom/artifacts"
+
+    def test_relay_runtime_artifacts_default_only_applies_to_pi(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # A non-Pi Relay harness (hermes here) does not get the Pi artifacts default.
+        assert fabric_config.runtime.artifacts is None
+
     def test_relay_telemetry_uses_latest_fabric_shape(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())
         payload["telemetry"]["enabled"] = True
@@ -522,6 +617,60 @@ class TestTranslateAgentConfig:
                 ],
             },
         }
+
+    def test_relay_defaults_pi_extension_path_when_unset(self) -> None:
+        from nemo_agents_plugin.fabric.translator import PI_RELAY_EXTENSION_PATH
+
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # The Pi adapter hard-requires relay_extension_path when Relay is active; the
+        # translator defaults it to the image-staged copy so telemetry does not fail.
+        assert fabric_config.harness.settings["relay_extension_path"] == PI_RELAY_EXTENSION_PATH
+
+    def test_relay_preserves_explicit_pi_extension_path(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {
+            "kind": "nvidia.fabric.pi",
+            "settings": {"relay_extension_path": "/custom/pi-extension"},
+        }
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # An explicitly configured path is never overwritten by the default.
+        assert fabric_config.harness.settings["relay_extension_path"] == "/custom/pi-extension"
+
+    def test_relay_extension_default_only_applies_to_pi(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # Only the Pi adapter consumes relay_extension_path; a non-Pi harness (hermes
+        # here) must not have it injected.
+        assert "relay_extension_path" not in fabric_config.harness.settings
+
+    def test_relay_extension_default_skipped_when_telemetry_disabled(self) -> None:
+        payload = copy.deepcopy(_example_yaml_config())
+        payload["default_harness"] = "pi"
+        payload["harnesses"]["pi"] = {"kind": "nvidia.fabric.pi"}
+        # telemetry.enabled stays False (the _example default)
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        # No Relay, no extension-path default — a plain Pi agent is untouched.
+        assert fabric_config.relay is None
+        assert "relay_extension_path" not in fabric_config.harness.settings
 
     def test_relay_telemetry_prefers_platform_registered_agent_name(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())
@@ -669,3 +818,71 @@ def test_auto_wired_intake_telemetry_translates_to_a_relay_http_storage() -> Non
     # Relay identifies the trajectory by these; both come from the agent config.
     assert atif.agent_name == payload["name"]
     assert atif.model_name
+
+
+@pytest.mark.parametrize("target_id", ["nvidia.nooa.coding-agent", "com.example.workflow"])
+def test_workflow_reuses_shared_config_translation(target_id: str) -> None:
+    payload = _example_yaml_config()
+    payload["default_harness"] = "codex"
+    payload["telemetry"]["enabled"] = True
+    harness_config = translate_agent_config(AgentConfig.model_validate(payload))
+    del payload["default_harness"]
+    del payload["harnesses"]
+    payload["workflow"] = {"target_id": target_id, "settings": {"limit": 3}}
+
+    workflow_config = translate_agent_config(AgentConfig.model_validate(payload))
+
+    assert workflow_config.harness is None
+    assert workflow_config.workflow is not None
+    assert workflow_config.workflow.target_id == target_id
+    assert workflow_config.workflow.settings == {"limit": 3}
+    shared_fields = {"harness", "workflow"}
+    assert workflow_config.model_dump(exclude=shared_fields) == harness_config.model_dump(exclude=shared_fields)
+
+
+def test_workflow_rejects_harness_override() -> None:
+    config = AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "workflow-agent",
+            "workflow": {"target_id": "nvidia.nooa.coding-agent"},
+        }
+    )
+    with pytest.raises(FabricTranslationError, match="harness override"):
+        translate_agent_config(config, harness_name="codex")
+    with pytest.raises(FabricTranslationError, match="Workflow requires models.default"):
+        translate_agent_config(config)
+
+
+@pytest.mark.parametrize("kind", ["nooa-bench-agent", "nvidia.fabric.nooa.bench-agent"])
+def test_nooa_bench_harness_selection(kind: str) -> None:
+    config = AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "nooa-bench",
+            "default_harness": "bench",
+            "harnesses": {"bench": {"kind": kind}},
+            "models": {"default": {"provider": "openai", "model": "test-model"}},
+        }
+    )
+    translated = translate_agent_config(config)
+    assert translated.workflow is None
+    assert translated.harness is not None
+    assert translated.harness.adapter_id == "nvidia.fabric.nooa.bench-agent"
+    assert translated.harness.resolution == "preinstalled"
+
+
+@pytest.mark.parametrize("kind", ["mini-swe-agent", "nvidia.fabric.mini-swe-agent"])
+def test_mini_swe_agent_example(kind: str) -> None:
+    config = load_agent_config(Path(__file__).parents[2] / "examples/nemo-agent-config/agent-mini-swe-agent.yaml")
+    config.harnesses["mini-swe-agent"].kind = kind
+    translated = translate_agent_config(config)
+
+    assert translated.workflow is None
+    assert translated.harness is not None
+    assert translated.harness.adapter_id == "nvidia.fabric.mini-swe-agent"
+    assert translated.harness.settings == {"timeout": 30}
+    assert translated.harness.resolution == "preinstalled"
+    assert translated.runtime is not None
+    assert translated.runtime.max_turns == 50
+    assert translated.runtime.timeout_seconds == 1800

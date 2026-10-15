@@ -260,7 +260,6 @@ def test_role_bindings_code_output_does_not_create(runner, random_workspace: str
     assert_exit_code(result, 0)
     assert "from nemo_helix_plugin.iam.client import IAMClient" in result.stdout
     assert "client.create_role_binding(" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
     result = runner.invoke(app, ["iam", "role-bindings", "list", "--filter.principal", principal])
     assert_exit_code(result, 0)

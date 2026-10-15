@@ -122,7 +122,7 @@ def test_create_model_adapter_nested_path() -> None:
     prepared = endpoints.create_model_adapter(
         workspace="w",
         model_name="base",
-        body=CreateModelAdapterRequest(name="a", fileset="w/fs", finetuning_type=FinetuningType.LORA),
+        body=CreateModelAdapterRequest(name="a", fileset="ws/fs", finetuning_type=FinetuningType.LORA),
     )
     assert prepared.method == "POST"
     assert prepared.path_template == _PREFIX + "/models/{model_name}/adapters"
@@ -147,7 +147,7 @@ def test_delete_model_adapter_path() -> None:
 
 
 def test_create_adapter_top_level_conflict_resolver() -> None:
-    body = CreateAdapterRequest(name="a", fileset="w/fs", finetuning_type=FinetuningType.LORA, model="ws/base")
+    body = CreateAdapterRequest(name="a", fileset="ws/fs", finetuning_type=FinetuningType.LORA, model="ws/base")
     prepared = endpoints.create_adapter(workspace="w", body=body)
     assert prepared.path_template == _PREFIX + "/adapters"
     assert prepared.response_type is Adapter

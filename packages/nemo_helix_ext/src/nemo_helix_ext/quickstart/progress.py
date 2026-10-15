@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-import time
+from time import monotonic, sleep
 from typing import Any
 
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "error"}
@@ -33,11 +33,11 @@ def wait_for_training(
     poll_interval: float = 10,
 ) -> Any:
     """Poll a customization job until it finishes, refreshing the notebook output."""
-    start = time.monotonic()
+    start = monotonic()
     while True:
-        if timeout_seconds is not None and time.monotonic() - start > timeout_seconds:
+        if timeout_seconds is not None and monotonic() - start > timeout_seconds:
             raise TimeoutError(f"{job_name} took longer than {timeout_seconds} seconds")
-        status = client.jobs.get_status(name=job_name, workspace=workspace)
+        status = client.jobs.get_job_status(name=job_name, workspace=workspace).data()
         _clear_output()
         print(f"Job: {job_name}")
         print(f"Status: {status_text(status.status)}")
@@ -48,7 +48,7 @@ def wait_for_training(
             if state != "completed":
                 raise RuntimeError(f"Training job finished with status: {state}")
             return status
-        time.sleep(poll_interval)
+        sleep(poll_interval)
 
 
 def describe_training_progress(status: Any) -> str:

@@ -44,7 +44,7 @@ class Skill:
     source_plugin: str | None = None
     # Distribution (PyPI / wheel) name that registered this skill's entry point
     # (e.g. ``"nemo-agents-plugin"``, ``"nemo-helix-ext"``,
-    # ``"nemo-helix-sdk"``). This is what users see in ``pip list`` / what
+    # ``"nemo-helix"``). This is what users see in ``pip list`` / what
     # they ``uv add``'d, and is what the ``Source`` column in
     # ``nemo skills list`` renders.
     source_dist: str | None = None

@@ -29,6 +29,16 @@ from nhx.core.auth.api.v2.workload_token_exchange import (
     workload_token_issuer,
 )
 from nhx.core.auth.app.access_keys import AccessKeyRegistry, get_access_key_registry
+from nhx.core.auth.oidc_broker.routes import get_credential_store
+from nhx.core.auth.oidc_broker.web_session import (
+    WEB_SESSION_COOKIE,
+    WEB_SESSION_CSRF_HEADER,
+    WEB_SESSION_CSRF_VALUE,
+    mint_web_session_access_token,
+    resolve_web_session,
+    web_sessions_enabled,
+)
+from nhx.core.entities.app.repository import AccountCredentialStore
 
 router = APIRouter(tags=["Authentication"])
 logger = logging.getLogger(__name__)
@@ -63,6 +73,7 @@ def get_authenticate_dependencies(
 
 
 AuthenticateDependency = Annotated[AuthenticateDependencies, Depends(get_authenticate_dependencies)]
+CredentialStoreDependency = Annotated[AccountCredentialStore, Depends(get_credential_store)]
 
 
 class TokenIssuerBoundaryMisconfigurationError(Exception):
@@ -109,14 +120,13 @@ def _normalize_jwk_public_material(jwk: dict[Any, Any]) -> tuple[tuple[str, str]
 
 async def _validate_token_issuer_boundary(
     config: AuthConfig,
-    request: Request,
     workload_token_exchange_service: WorkloadTokenExchangeService,
     jwt_validator: JWTValidator,
 ) -> None:
-    if not (config.oidc.enabled and config.oidc.workload_token_exchange_enabled):
+    if not (config.oidc.enabled and config.oidc.workload is not None):
         return
 
-    workload_issuer = _normalize_url(workload_token_issuer(config, request))
+    workload_issuer = _normalize_url(workload_token_issuer(config))
     idp_issuers = {_normalize_url(issuer) for issuer in [config.oidc.issuer, *config.oidc.additional_issuers] if issuer}
     if workload_issuer in idp_issuers:
         raise TokenIssuerBoundaryMisconfigurationError("OIDC issuer must not match NeMo workload token issuer")
@@ -126,7 +136,7 @@ async def _validate_token_issuer_boundary(
     except (httpx.HTTPError, jwt.PyJWTError):
         return
 
-    nemo_jwks_uri = _normalize_url(workload_jwks_url(request))
+    nemo_jwks_uri = _normalize_url(workload_jwks_url())
     if idp_jwks_uri == nemo_jwks_uri:
         raise TokenIssuerBoundaryMisconfigurationError("OIDC JWKS URI must not match NeMo workload JWKS URI")
 
@@ -192,11 +202,10 @@ def _response_from_resolved(resolved: ResolvedBearerToken) -> AuthenticateRespon
 
 async def _validate_workload_access_token(
     config: AuthConfig,
-    request: Request,
     token: str,
     workload_token_exchange_service: WorkloadTokenExchangeService,
 ) -> TokenClaims | None:
-    if not config.oidc.workload_token_exchange_enabled:
+    if config.oidc.workload is None:
         return None
 
     try:
@@ -215,7 +224,7 @@ async def _validate_workload_access_token(
             public_key,
             algorithms=["RS256"],
             audience=list(allowed_audiences(config)),
-            issuer=workload_token_issuer(config, request),
+            issuer=workload_token_issuer(config),
             options={"require": ["sub", "iat", "nbf", "exp"]},
             leeway=30,
         )
@@ -236,11 +245,10 @@ async def _validate_workload_access_token(
 
 async def _resolve_workload_access_token(
     config: AuthConfig,
-    request: Request,
     workload_token_exchange_service: WorkloadTokenExchangeService,
     token: str,
 ) -> ResolvedBearerToken | None:
-    claims = await _validate_workload_access_token(config, request, token, workload_token_exchange_service)
+    claims = await _validate_workload_access_token(config, token, workload_token_exchange_service)
     if claims is None:
         return None
     return ResolvedBearerToken(claims=claims, token_kind="workload_access_token")
@@ -251,7 +259,8 @@ async def _resolve_workload_subject_token(
     workload_token_exchange_service: WorkloadTokenExchangeService,
     token: str,
 ) -> ResolvedBearerToken | None:
-    if not config.oidc.workload_token_exchange_enabled or not config.oidc.workload_subject_jwks_uri:
+    workload = config.oidc.workload
+    if workload is None or not workload.subject_jwks_uri:
         return None
 
     try:
@@ -284,13 +293,13 @@ async def _resolve_authenticated_bearer_token(
     jwt_validator = JWTValidator(config)
 
     async def resolve_workload_access(candidate: str) -> ResolvedBearerToken | None:
-        return await _resolve_workload_access_token(config, request, workload_token_exchange_service, candidate)
+        return await _resolve_workload_access_token(config, workload_token_exchange_service, candidate)
 
     async def resolve_workload_subject(candidate: str) -> ResolvedBearerToken | None:
         return await _resolve_workload_subject_token(config, workload_token_exchange_service, candidate)
 
     try:
-        await _validate_token_issuer_boundary(config, request, workload_token_exchange_service, jwt_validator)
+        await _validate_token_issuer_boundary(config, workload_token_exchange_service, jwt_validator)
     except TokenIssuerBoundaryMisconfigurationError as exc:
         logger.error("Authentication token issuer boundary is misconfigured: %s", exc)
         raise HTTPException(
@@ -334,13 +343,36 @@ async def _ext_authz_bearer_token(
     request: Request,
     workload_token_exchange_service: WorkloadTokenExchangeService,
     access_key_registry: AccessKeyRegistry,
+    credential_store: AccountCredentialStore,
 ) -> Response:
+    if request.headers.get("authorization") is None and request.cookies.get(WEB_SESSION_COOKIE):
+        if not web_sessions_enabled(get_auth_config()):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+        principal = await resolve_web_session(request, credential_store)
+        if principal is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and (
+            request.headers.get(WEB_SESSION_CSRF_HEADER) != WEB_SESSION_CSRF_VALUE
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing or invalid X-Source")
+        if get_auth_config().oidc.workload is not None:
+            access_token = await mint_web_session_access_token(
+                get_auth_config(),
+                workload_token_exchange_service,
+                principal,
+            )
+            return Response(
+                status_code=status.HTTP_200_OK,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        return Response(status_code=status.HTTP_200_OK, headers=principal.get_headers())
+
     resolved = await _resolve_authenticated_bearer_token(
         request,
         workload_token_exchange_service,
         access_key_registry,
     )
-    if get_auth_config().oidc.workload_token_exchange_enabled:
+    if get_auth_config().oidc.workload is not None:
         return Response(status_code=status.HTTP_200_OK)
     return Response(status_code=status.HTTP_200_OK, headers=resolved.principal_headers())
 
@@ -387,11 +419,13 @@ async def authenticate_bearer_token_post(
 async def ext_authz_bearer_token(
     request: Request,
     dependencies: AuthenticateDependency,
+    credential_store: CredentialStoreDependency,
 ) -> Response:
     return await _ext_authz_bearer_token(
         request,
         dependencies.workload_token_exchange_service,
         dependencies.access_key_registry,
+        credential_store,
     )
 
 
@@ -404,10 +438,12 @@ async def ext_authz_bearer_token_prefixed(
     request: Request,
     original_path: str,
     dependencies: AuthenticateDependency,
+    credential_store: CredentialStoreDependency,
 ) -> Response:
     _ = original_path
     return await _ext_authz_bearer_token(
         request,
         dependencies.workload_token_exchange_service,
         dependencies.access_key_registry,
+        credential_store,
     )

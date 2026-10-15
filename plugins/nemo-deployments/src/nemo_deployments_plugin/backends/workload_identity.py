@@ -37,7 +37,7 @@ def workload_identity_activation_error(
     except WorkloadIdentityConfigError as exc:
         return str(exc)
     if not token_exchange_enabled:
-        return "workload_identity requires auth.oidc.workload_token_exchange_enabled to be enabled"
+        return "workload_identity requires auth.oidc.workload to be configured"
     if auth_context is None:
         return "workload_identity requires deployment auth_context for on-behalf-of delegation"
     return None

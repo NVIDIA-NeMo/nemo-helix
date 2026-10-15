@@ -37,7 +37,7 @@ User-facing skills in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`:
 - `nemo-status`: read-only health dashboard.
 - `nemo-teardown`: guided shutdown with confirmation.
 
-Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, auditor, and Analyst telemetry analysis.
+Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, garak, and Analyst telemetry analysis.
 
 ### Working in a sandboxed environment
 
@@ -52,7 +52,7 @@ If you are inside a sandboxed coding-agent environment (macOS sandbox, CI contai
 
 NeMo Helix brings together NVIDIA NeMo libraries under one CLI, Python SDK, and web UI. Current capabilities:
 
-- **Harden agents**: guardrails (content safety, jailbreak detection, PII redaction), auditor (red-teaming via garak), anonymizer (PII handling for training data).
+- **Harden agents**: guardrails (content safety, jailbreak detection, PII redaction), garak (red-teaming), anonymizer (PII handling for training data).
 - **Evaluate agents**: evaluator (LLM-as-judge, deterministic, agentic, RAG benchmarks), Harbor-backed eval suites.
 - **Tune agents and models**: skill optimization, prompt/hyperparameter tuning, Switchyard model routing, and fine-tuning through Customizer.
 - **Build and manage agents**: Fabric connects supported agent harnesses to NeMo Helix for packaging, deployment, testing, observation, and optimization.
@@ -121,7 +121,7 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 ### Python Style notes
 
 - Always prefer concrete type hints over string based ones. DO NOT import these types under TYPE_CHECKING. Instead prefer to import the types a regular import when possible.
-- Use `nemo_helix_plugin` typed clients (`NemoClient`, `AsyncNemoClient`, and service clients built with `XClient.from_client(client)`) in service, plugin, package, and test code. Do not import the generated `nemo_helix` SDK outside `sdk/` and its bridge modules (`nemo_helix_plugin/client/adapter.py`, `nemo_helix_plugin/secrets/compat.py`, `nemo_helix_plugin/discovery*`, `nemo_helix_plugin/sdk.py`). Name variables holding typed clients `client`, `async_client`, or service-specific names such as `files_client`, `jobs_client`, or `models_client`, never `sdk`.
+- Use `nemo_helix_plugin` typed clients (`NemoClient`, `AsyncNemoClient`, and service clients built with `XClient.from_client(client)`) in service, plugin, package, and test code. Name variables holding typed clients `client`, `async_client`, or service-specific names such as `files_client`, `jobs_client`, or `models_client`, never `sdk`.
 
 ### Python Package Management
 

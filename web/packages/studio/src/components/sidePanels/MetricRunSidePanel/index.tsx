@@ -14,8 +14,8 @@ import type { VariableDef } from '@nemo/common/src/components/form/VariableTextA
 import { ModelSelectV2 } from '@nemo/common/src/components/ModelSelectV2';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
-import { useEvaluatorCreateEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import type { EvaluateJobRequest, MetricInline, Model } from '@nemo/sdk/generated/evaluator/schema';
+import { useEvalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import type { EvaluateJobRequest, MetricInline, Model } from '@nemo/sdk/generated/evals/schema';
 import {
   Button,
   Flex,
@@ -163,7 +163,7 @@ export const MetricRunSidePanel: FC<MetricRunSidePanelProps> = ({
     useState<MetricRunSidePanelFormData['jobType']>('online');
   const [modelSelectOpen, setModelSelectOpen] = useState(false);
   const modelSearch = useModelSearch({ workspace, enabled: open && modelSelectOpen });
-  const { mutateAsync: createEvaluateJob, isPending } = useEvaluatorCreateEvaluateJob();
+  const { mutateAsync: createEvaluateJob, isPending } = useEvalsCreateEvaluateJob();
 
   const modelSearchParam = searchParams.get(QUERY_PARAMETERS.model);
   const modelSelectionFromSearchParam = useMemo(

@@ -19,6 +19,10 @@ from nhx.core.secrets.config import SecretsServiceConfig
 logger = logging.getLogger(__name__)
 
 
+class EncryptionProviderNotConfiguredError(ValueError):
+    """Raised when no secrets encryption provider can be resolved."""
+
+
 def local_key_creation() -> HelixEncryptor:
     """Create a local secret key encryption provider."""
     config = get_service_config(SecretsServiceConfig)
@@ -42,13 +46,19 @@ def get_encryptor_by_name(name: str) -> HelixEncryptor:
     # Local key creation: empty name and allow_key_creation use file-based key
     if config.allow_key_creation and name == "":
         return local_key_creation()
-    encryptor_config = config.encryption.providers.get_provider_config(name)
+    try:
+        encryptor_config = config.encryption.providers.get_provider_config(name)
+    except ValueError as exc:
+        raise EncryptionProviderNotConfiguredError(str(exc)) from exc
     if isinstance(encryptor_config, SecretKeyEncryptorConfig):
         return SecretKeyEncryptor.from_config(config=encryptor_config, name=name)
     elif isinstance(encryptor_config, VaultEncryptorConfig):
-        return VaultEncryptor.from_config(config=encryptor_config, name=name)
+        try:
+            return VaultEncryptor.from_config(config=encryptor_config, name=name)
+        except ValueError as exc:
+            raise EncryptionProviderNotConfiguredError(f"Encryption provider {name!r} is misconfigured: {exc}") from exc
     else:
-        raise ValueError(f"Cannot get encryptor configuration for provider {name}.")
+        raise EncryptionProviderNotConfiguredError(f"Cannot get encryptor configuration for provider {name}.")
 
 
 def get_current_encryptor() -> HelixEncryptor:

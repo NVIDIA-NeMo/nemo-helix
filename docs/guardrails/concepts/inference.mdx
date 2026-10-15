@@ -14,6 +14,12 @@ Platform-managed agents are the canonical consumer: pointing an agent's `llms` b
 
 ## Prerequisites
 
+Set the base URL for your NeMo Helix deployment before running the curl examples:
+
+```bash
+export NHX_BASE_URL="${NHX_BASE_URL:-http://localhost:8080}"
+```
+
 - A guardrail configuration exists in your workspace. See [Manage Configurations](/documentation/guardrail-models/core-concepts/configurations/manage-configurations) to create one.
 - A VirtualModel is configured with `nemo-guardrails` middleware. See [Architecture](/documentation/guardrail-models/core-concepts/architecture) for wiring details.
 - The `curl` examples default to a local platform at `http://localhost:8080`. If your CLI context points at a remote deployment, export its URL as `NHX_BASE_URL` first, and for an authenticated deployment add `-H "Authorization: Bearer $(nemo auth token)"`. For details, refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
@@ -29,6 +35,7 @@ For the examples below, create a guardrail configuration and VirtualModel:
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
 client = NemoClient.from_config()
@@ -128,7 +135,7 @@ nemo inference virtual-models create guarded-nemotron \
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.create_virtual_model(
+VirtualModelsClient.from_client(client).create_virtual_model(
     body=CreateVirtualModelRequest(
         name="guarded-nemotron",
         default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -235,7 +242,7 @@ nemo inference virtual-models create guarded-nemotron-inline \
 
 ```python
 
-client.inference.virtual_models.create_virtual_model(
+VirtualModelsClient.from_client(client).create_virtual_model(
     body=CreateVirtualModelRequest(
         name="guarded-nemotron-inline",
         default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",

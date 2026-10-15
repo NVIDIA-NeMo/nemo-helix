@@ -2,13 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { Breadcrumbs } from '@studio/components/Breadcrumbs';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentOptimizationDetailRoute } from '@studio/routes/agents/AgentOptimizationDetailRoute';
-import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
-import { renderRoute, screen, within } from '@studio/tests/util/render';
+import {
+  getAgentDetailRoute,
+  getAgentOptimizationDetailRoute,
+  getAgentOptimizationsTabRoute,
+} from '@studio/routes/utils';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import { http, HttpResponse } from 'msw';
 
 const workspace = workspace1.workspace;
@@ -29,6 +34,7 @@ const step = (name: string, status: HelixJobStatus) => ({
 
 const renderStudy = (status: HelixJobStatus) => {
   server.use(
+    http.get(`${OPTIMIZE_JOB_URL}/results`, () => HttpResponse.json({ data: [] })),
     http.get(OPTIMIZE_JOB_URL, () =>
       HttpResponse.json({
         name: jobName,
@@ -36,7 +42,7 @@ const renderStudy = (status: HelixJobStatus) => {
         status,
         created_at: '2026-08-13T09:00:00Z',
         spec: {
-          strategy: 'legacy',
+          strategy: 'config-tuning',
           agent: 'hermes',
           optimize_config: 'optimize.yaml',
           optimize_config_fileset: 'hermes-bundle',
@@ -59,12 +65,33 @@ const renderStudy = (status: HelixJobStatus) => {
   return renderRoute(undefined, {
     history: getAgentOptimizationDetailRoute(workspace, jobName),
     routes: [
-      { path: ROUTES.workspace.agentOptimizationDetail, element: <AgentOptimizationDetailRoute /> },
+      {
+        path: ROUTES.workspace.agentOptimizationDetail,
+        element: (
+          <>
+            <Breadcrumbs />
+            <AgentOptimizationDetailRoute />
+          </>
+        ),
+      },
     ],
   });
 };
 
 describe('AgentOptimizationDetailRoute', () => {
+  it('links the agent and its optimizations tab in the breadcrumbs', async () => {
+    renderStudy('completed');
+
+    expect(await screen.findByRole('link', { name: 'hermes' })).toHaveAttribute(
+      'href',
+      getAgentDetailRoute(workspace, 'hermes')
+    );
+    expect(screen.getByRole('link', { name: 'Optimizations' })).toHaveAttribute(
+      'href',
+      getAgentOptimizationsTabRoute(workspace, 'hermes')
+    );
+  });
+
   it.each<[HelixJobStatus, string, string]>([
     ['created', 'Study queued', 'Waiting for the study to start. Trials appear once it finishes.'],
     ['pending', 'Study queued', 'Waiting for the study to start. Trials appear once it finishes.'],
@@ -82,7 +109,7 @@ describe('AgentOptimizationDetailRoute', () => {
     renderStudy('active');
 
     const inProgress = await screen.findByTestId('study-in-progress');
-    expect(within(inProgress).getByText('legacy')).toBeInTheDocument();
+    expect(within(inProgress).getByText('config-tuning')).toBeInTheDocument();
     expect(within(inProgress).getByText('hermes')).toBeInTheDocument();
     expect(within(inProgress).getByText('optimize.yaml')).toBeInTheDocument();
     expect(within(inProgress).getByText('hermes-bundle')).toBeInTheDocument();
@@ -92,6 +119,63 @@ describe('AgentOptimizationDetailRoute', () => {
     expect(within(steps[0]).getByText('prepare')).toBeInTheDocument();
     expect(within(steps[1]).getByText('optimize')).toBeInTheDocument();
 
-    expect(within(inProgress).getByText('Logs')).toBeInTheDocument();
+    expect(screen.getAllByText('Logs')).toHaveLength(1);
+    expect(await screen.findByText('No artifacts yet')).toBeInTheDocument();
   });
+
+  it.each<HelixJobStatus>(['completed', 'error', 'cancelled'])(
+    'keeps logs and generated artifacts visible when the job is %s',
+    async (status) => {
+      renderStudy(status);
+      server.use(
+        http.get(`${OPTIMIZE_JOB_URL}/results`, () =>
+          HttpResponse.json({
+            data: [
+              {
+                name: 'switchyard',
+                artifact_storage_type: 'fileset',
+                artifact_url: `fileset://${workspace}/routing-artifacts#results/switchyard`,
+              },
+            ],
+          })
+        ),
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/routing-artifacts/files`,
+          () =>
+            HttpResponse.json({
+              data: [
+                {
+                  path: 'results/switchyard/agent-routed.yaml',
+                  size: 128,
+                  file_ref: 'routed-config',
+                },
+              ],
+            })
+        ),
+        http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name/logs`, () =>
+          HttpResponse.json({
+            data: [
+              {
+                timestamp: '2026-08-13T09:30:00Z',
+                level: 'INFO',
+                message: 'Created routed virtual model',
+              },
+            ],
+            total: 1,
+            next_page: '',
+            prev_page: '',
+          })
+        )
+      );
+
+      expect(await screen.findByText('results/switchyard/agent-routed.yaml')).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.getByTestId('nv-code-snippet-code')).toHaveTextContent(
+          'Created routed virtual model'
+        )
+      );
+      expect(screen.getAllByText('Logs')).toHaveLength(1);
+      expect(screen.getByText('Artifacts')).toBeInTheDocument();
+    }
+  );
 });

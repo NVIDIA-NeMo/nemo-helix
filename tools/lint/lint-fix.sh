@@ -5,7 +5,7 @@
 set -euo pipefail
 # Run all auto-fix commands in dependency order:
 #   1. OpenAPI spec regeneration (other steps depend on this)
-#   2. Web SDK regeneration (Orval reads openapi/ga/individual/platform.openapi.yaml)
+#   2. Web SDK regeneration (Orval reads openapi/openapi.yaml)
 #   3. Python style (ruff)
 #   4. Wrapper wheel metadata (make vendor) + CLI reference docs
 #   5. Copyright headers (after generated files are in place)

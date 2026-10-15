@@ -3654,7 +3654,7 @@ components:
       - dataset
       - training
       title: RlJobInput
-      description: POST body / CLI JSON for ``nemo customization rl submit``.
+      description: POST body / CLI JSON for ``nemo customization rl --job-json``.
     RlJobOutput:
       properties:
         name:
@@ -4248,7 +4248,7 @@ components:
       - model
       - dataset
       title: UnslothJobInput
-      description: POST body / CLI JSON for ``nemo customization unsloth submit``.
+      description: POST body / CLI JSON for ``nemo customization unsloth --job-json``.
     UnslothJobOutput:
       properties:
         name:

@@ -12,10 +12,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from nemo_builder_plugin.completion import Caller, current_caller
+from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.service import BuilderService
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
+from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 
 
@@ -46,6 +47,27 @@ class TestListingOneJobsImages:
             "provenance.job": "team-a/demo-1",
             "status": "pending",
         }
+
+    def test_a_build_set_and_a_revision_filter_on_the_stored_provenance(self) -> None:
+        entities = AsyncMock()
+        entities.list.return_value = _empty_page()
+        response = TestClient(_app(entities)).get(
+            "/v2/workspaces/team-a/container-images", params={"build_set": "demo", "revision": "1"}
+        )
+        assert response.status_code == 200
+        assert entities.list.await_args.kwargs["filter_obj"] == {
+            "provenance.build_set": "demo",
+            "provenance.revision": 1,
+        }
+
+    @pytest.mark.parametrize("revision", ["0", "one"])
+    def test_a_revision_that_no_set_can_have_is_refused(self, revision: str) -> None:
+        entities = AsyncMock()
+        response = TestClient(_app(entities)).get(
+            "/v2/workspaces/team-a/container-images", params={"revision": revision}
+        )
+        assert response.status_code == 422
+        entities.list.assert_not_awaited()
 
     def test_the_job_is_always_in_the_path_workspace(self) -> None:
         entities = AsyncMock()
@@ -112,6 +134,7 @@ class TestComplete:
         response, entities = self._post(_row())
         assert response.status_code == 200
         assert (response.json()["status"], response.json()["digest"]) == ("ready", DIGEST)
+        assert response.json()["image_ref"] == f"reg.example.com/ws-a/app@{DIGEST}"
         entities.update.assert_awaited_once()
 
     def test_an_image_already_ready_at_that_digest_is_returned_as_it_is(self) -> None:
@@ -163,22 +186,37 @@ class TestReadingOneImage:
 
     @pytest.mark.parametrize(
         "caller",
-        [Caller(auth=False), Caller(auth=True, actor="carol"), STEP, SERVICE_STEP],
-        ids=["auth-off", "a-person", "a-step-with-token-exchange", "the-push-step-without"],
+        [
+            Caller(auth=False),
+            Caller(auth=True, actor="carol"),
+            STEP,
+            SERVICE_STEP,
+            Caller(auth=True, actor="service:evals", submitter="bob"),
+        ],
+        ids=[
+            "auth-off",
+            "a-person",
+            "a-step-with-token-exchange",
+            "the-push-step-without",
+            "a-service-for-another-person",
+        ],
     )
     def test_whom_the_policy_admits_reads_it(self, caller: Caller) -> None:
+        """A service acting for someone other than the submitter reads it too, so a build can be reused."""
         response = self._get(caller)
         assert response.status_code == 200
         assert response.json()["name"] == "build-1-0"
 
     @pytest.mark.parametrize(
         "caller",
-        [Caller(auth=True, actor="service:builder"), Caller(auth=True, actor="service:builder", submitter="bob")],
-        ids=["acting-for-no-one", "acting-for-someone-else"],
+        [Caller(auth=True, actor="service:evals"), Caller(auth=True, actor="service:evals", submitter="service:other")],
+        ids=["acting-for-no-one", "acting-for-a-service"],
     )
-    def test_a_service_not_acting_for_the_submitter_is_a_403(self, caller: Caller) -> None:
-        """The policy admits any service on its own permissions, so the handler holds it to the submitter."""
-        assert self._get(caller).status_code == 403
+    def test_a_service_not_acting_for_a_person_is_a_403(self, caller: Caller) -> None:
+        """The policy admits any service on its own permissions, so the handler holds it to acting for a person."""
+        response = self._get(caller)
+        assert response.status_code == 403
+        assert "acting for a person" in response.json()["detail"]
 
     def test_an_image_that_does_not_exist_is_a_404(self) -> None:
         entities = AsyncMock()
@@ -186,8 +224,39 @@ class TestReadingOneImage:
         assert TestClient(_app(entities, SERVICE_STEP)).get(IMAGE).status_code == 404
 
 
+class TestSubmitting:
+    BUILDS = "/v2/workspaces/ws-a/builds"
+    BODY = {"name": "demo", "revision": 1, "build_specs": [{"source": {"fileset": "fs-a"}}]}
+
+    @pytest.mark.parametrize(
+        "caller",
+        [Caller(auth=True, actor="service:evals"), Caller(auth=True, actor="service:evals", submitter="service:other")],
+        ids=["acting-for-no-one", "acting-for-a-service"],
+    )
+    def test_a_service_not_acting_for_a_person_is_a_403_and_nothing_is_written(self, caller: Caller) -> None:
+        entities, client = AsyncMock(), MagicMock()
+        app = _app(entities, caller)
+        app.dependency_overrides[get_nemo_client] = lambda: client
+        response = TestClient(app).post(self.BUILDS, json=self.BODY)
+        assert response.status_code == 403
+        assert "acting for a person" in response.json()["detail"]
+        assert entities.mock_calls == client.mock_calls == []
+
+    @pytest.mark.parametrize(
+        "caller",
+        [
+            Caller(auth=False),
+            Caller(auth=True, actor="alice"),
+            Caller(auth=True, actor="service:evals", submitter="alice"),
+        ],
+        ids=["auth-off", "a-person", "a-service-acting-for-a-person"],
+    )
+    def test_anyone_else_may(self, caller: Caller) -> None:
+        assert submit_refusal(caller) is None
+
+
 class TestWhoTheRoutesAdmit:
-    """The push step's two routes admit a service; the others, people only."""
+    """Submitting and the push step's two routes admit a service; listing, people only."""
 
     @staticmethod
     def _callers() -> dict[tuple[str, str], set[CallerKind]]:
@@ -199,13 +268,13 @@ class TestWhoTheRoutesAdmit:
             for method in route.methods or ()
         }
 
-    def test_the_push_steps_routes_admit_a_service(self) -> None:
+    def test_submitting_and_the_push_steps_routes_admit_a_service(self) -> None:
         callers = self._callers()
         both = {CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL}
+        assert callers[("POST", "/builds")] == both
         assert callers[("GET", "/container-images/{name}")] == both
         assert callers[("POST", "/container-images/{name}/complete")] == both
 
-    def test_submitting_and_listing_admit_people_only(self) -> None:
-        callers = self._callers()
-        assert callers[("POST", "/builds")] == {CallerKind.PRINCIPAL}
-        assert callers[("GET", "/container-images")] == {CallerKind.PRINCIPAL}
+    def test_listing_admits_people_only(self) -> None:
+        """A service could see every row at once; one row at a time, it must act for a person."""
+        assert self._callers()[("GET", "/container-images")] == {CallerKind.PRINCIPAL}

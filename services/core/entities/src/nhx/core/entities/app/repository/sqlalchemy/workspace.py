@@ -9,7 +9,7 @@ from typing import AsyncIterator, List, Optional
 
 from nhx.common.api.filter import FilterOperation
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
-from nhx.core.entities.app.repository.sqlalchemy.models import DBWorkspace
+from nhx.core.entities.app.repository.sqlalchemy.models import DBWorkspace, _utcnow
 from nhx.core.entities.app.repository.workspace import WorkspaceRepositoryInterface
 from nhx.core.entities.entities import Workspace
 from nhx.core.entities.utils.identifiers import generate_entity_id
@@ -154,7 +154,10 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
                     (DBWorkspace.name == name)
                     & (DBWorkspace.deletion_stage.is_(None) | (DBWorkspace.deletion_stage != deletion_stage))
                 )
-                .values(deletion_stage=deletion_stage)
+                .values(
+                    deletion_stage=deletion_stage,
+                    updated_at=_utcnow(),
+                )
                 .returning(DBWorkspace)
             )
             db_workspace = result.scalar_one_or_none()

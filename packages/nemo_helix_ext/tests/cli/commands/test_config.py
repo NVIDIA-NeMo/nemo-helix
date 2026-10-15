@@ -3,6 +3,7 @@
 
 """Tests for the config CLI commands."""
 
+import json
 import re
 from pathlib import Path
 
@@ -87,6 +88,41 @@ def test_view(config_file: Path):
     combined_output = f"{result.output}{getattr(result, 'stderr', '')}"
     assert "Showing config for context: local" in combined_output
     assert "--all-contexts" in combined_output
+
+
+def test_view_respects_environment_override(config_file: Path, monkeypatch):
+    monkeypatch.setenv("NHX_CURRENT_CONTEXT", "production")
+
+    result = runner.invoke(app, "config view --output-format json")
+
+    assert_exit_code(result, 0)
+    data = json.loads(result.stdout)
+    assert data["current_context"] == "production"
+    assert [context["name"] for context in data["contexts"]] == ["production"]
+    assert [cluster["name"] for cluster in data["clusters"]] == ["production"]
+    assert [user["name"] for user in data["users"]] == ["production"]
+    combined_output = f"{result.output}{getattr(result, 'stderr', '')}"
+    assert "Showing config for context: production" in combined_output
+
+
+def test_view_cli_flag_beats_env_var(config_file: Path, monkeypatch):
+    monkeypatch.setenv("NHX_CURRENT_CONTEXT", "local")
+
+    result = runner.invoke(app, "--context production config view --output-format json")
+
+    assert_exit_code(result, 0)
+    data = json.loads(result.stdout)
+    assert data["current_context"] == "production"
+    assert [context["name"] for context in data["contexts"]] == ["production"]
+
+
+def test_view_unknown_context_override_fails(config_file: Path, monkeypatch):
+    monkeypatch.setenv("NHX_CURRENT_CONTEXT", "missing")
+
+    result = runner.invoke(app, "config view --output-format json")
+
+    assert_exit_code(result, 1)
+    assert "missing" in result.output
 
 
 def test_view_all_contexts(config_file: Path):

@@ -72,8 +72,13 @@ def test_the_path_constant_matches_the_mounted_route() -> None:
 def test_strategies_lists_what_the_platform_has_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each entry is the declaration its own plugin made, forwarded unchanged."""
     installed = [
-        OptimizationStrategy(name="acme", description="Something else."),
-        OptimizationStrategy(name="legacy", description="Numeric HPO over a Fabric agent workflow."),
+        OptimizationStrategy(name="acme", title="Acme", description="Something else."),
+        OptimizationStrategy(
+            name="config-tuning",
+            title="HPO",
+            description="Numeric HPO over a Fabric agent workflow.",
+            requires_config=True,
+        ),
     ]
 
     response = _client(monkeypatch, installed).get("/apis/agent-optimization/v2/strategies")
@@ -81,8 +86,13 @@ def test_strategies_lists_what_the_platform_has_installed(monkeypatch: pytest.Mo
     assert response.status_code == 200
     assert response.json() == {
         "data": [
-            {"name": "acme", "description": "Something else."},
-            {"name": "legacy", "description": "Numeric HPO over a Fabric agent workflow."},
+            {"name": "acme", "title": "Acme", "description": "Something else.", "requires_config": False},
+            {
+                "name": "config-tuning",
+                "title": "HPO",
+                "description": "Numeric HPO over a Fabric agent workflow.",
+                "requires_config": True,
+            },
         ]
     }
 

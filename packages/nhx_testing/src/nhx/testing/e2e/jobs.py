@@ -18,7 +18,7 @@ capped below it via :func:`wait_budget` and raises its own diagnostic first.
 
 import logging
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
@@ -35,7 +35,7 @@ _wait_deadline: float | None = None
 
 
 @contextmanager
-def wait_budget(seconds: float | None) -> Iterator[None]:
+def wait_budget(seconds: float | None) -> Generator[None, None, None]:
     """Cap every job wait in this block to *seconds* of wall clock.
 
     The e2e harness publishes each test's share of its pytest budget here.

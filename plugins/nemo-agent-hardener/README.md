@@ -268,7 +268,7 @@ uv run nemo services run --service-group all --controllers models,jobs \
   --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 ```
 
-Open **http://localhost:8080/studio/** → **Governance → Agent Hardener**. If the entry is missing,
+Open **http://localhost:8080/studio/** → **Governance → Agent Hardening**. If the entry is missing,
 confirm the plugin is installed (`curl -s localhost:8080/apis/plugins`) and hard-reload (⌘⇧R).
 
 1. **Manifests → New Manifest** — pick `react-agent`, accept the detected port and secrets, add any
@@ -307,8 +307,9 @@ change an existing manifest. Take those changes deliberately:
 uv run nemo agent-hardener refresh --manifest-id react-agent
 ```
 
-Your egress, secrets, models, defenders and cached benign suite are all preserved; only the target
-itself is rebuilt. You don't need this after `apply-mitigation` — applying a hardened workflow
+Your egress, backends, secrets, models, defenders and cached benign suite are all preserved; only the
+target itself is rebuilt. Runs log a warning when the agent is newer than its manifest; in Studio use
+**Refresh Target** (or `POST /manifests/{name}/refresh`). You don't need this after `apply-mitigation` — applying a hardened workflow
 refreshes the manifest for you, so `run → harden → apply → run again` measures the change you just
 made.
 
@@ -322,6 +323,12 @@ uv run nemo agent-hardener init --agent react-agent --egress en.wikipedia.org
 A bare host opens **443 only**; write `host:80` for plain HTTP. Hosts can't be auto-discovered for a
 config-only agent, since its tool code lives in an installed package rather than in your project.
 
+If the agent calls a service on the host (say a remote MCP server), declare it with
+`--backend NAME:PORT[,PORT]` (repeatable). The sandbox reaches it via `host.docker.internal`. The
+Inference Gateway backend is added automatically and its name is reserved; your backends survive
+`refresh`. Gateway-routed model URLs in the hardener's copy of the agent also use
+`host.docker.internal` rather than `localhost`.
+
 If the agent reads non-secret environment variables — a host-backend URL, a feature flag — set them
 at init too:
 
@@ -330,8 +337,10 @@ uv run nemo agent-hardener init --agent react-agent --env BACKEND_URL=http://hos
 ```
 
 `--env` is repeatable and only the first `=` splits, so values may contain `=`. **Keep credentials out
-of it**: `--env` values are stored in plaintext on the manifest, whereas `--secrets` stores only the
-*names* and resolves the values from the platform Secrets store when the run starts.
+of it**: `--env` values are stored in plaintext on the manifest. Give credentials as
+`--secrets NAME=workspace/secret` instead; the run reads them from the platform Secrets store when it
+starts. A plain `--secrets NAME` takes its value from the operator environment or `--env-file`, and a
+deployed agent's own secret references are recorded for you.
 
 **`synth-benign` is not optional.** The war-game validates two things: that attacks are blocked, and
 that ordinary requests still work. Those ordinary requests are the *benign suite*, and `run` is a
@@ -375,7 +384,7 @@ uv run nemo agent-hardener sanity-check --manifest-id react-agent \
 
 ## Troubleshooting
 
-**Agent Hardener missing from the Studio side nav.** The UI ships with the plugin, so this means
+**Agent Hardening missing from the Studio side nav.** The UI ships with the plugin, so this means
 Studio did not load its bundle. Check the plugin is registered (`curl -s localhost:8080/apis/plugins`
 should list `agent-hardener` with a `bundleUrl`) and that the bundle is served
 (`curl -sI localhost:8080/plugin-ui/agent-hardener/index.js`). Then hard-reload the browser.
@@ -383,7 +392,7 @@ should list `agent-hardener` with a `bundleUrl`) and that the bundle is served
 **`Missing required secrets: <NAME>`.** The agent config references `${<NAME>}` and nothing provides
 it. Agent Hardener derives required secrets from the agent's *stored* config, so this means the variable
 was unset when the agent was registered. Export it and re-run `nemo agents create`, or supply it via
-`--env-file`.
+`--env-file`. Its values are merged into the victim's `.env` and win over the operator environment.
 
 **The victim never becomes healthy, and its log shows a pydantic `union_tag_invalid` for a
 `_type`.** The agent references a component the scaffolded victim can't resolve — it installs only

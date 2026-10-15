@@ -35,6 +35,14 @@ RESULT_MARKER = "NHX_IMAGE_RESULT"
 
 KANIKO_EXECUTOR = "/kaniko/executor"
 
+#: The osscontainertools fork's feature flags, pinned with its image: it reads them from the environment, and
+#: falls back to its default on a bad value without a word. Without these two, `--reproducible` writes a Docker
+#: v2s2 manifest and re-tars every base layer, rather than keeping the base's OCI format and layer digests.
+KANIKO_FEATURE_FLAGS = {
+    "FF_KANIKO_REPRODUCIBLE_PRESERVE_FORMAT": "true",
+    "FF_KANIKO_REPRODUCIBLE_PRESERVE_BASE_LAYERS": "true",
+}
+
 _POD_TIMEOUT_SECONDS = 60 * 60
 
 #: Enforced by the kubelet, so a sandbox ends even if this step is killed before it can delete it.
@@ -65,6 +73,10 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
             "--no-push",
             "--no-push-cache",
             f"--oci-layout-path={layout}",
+            # No build timestamps, so kaniko adds nothing that differs between builds. A `RUN` still can.
+            "--reproducible",
+            # Not the google, ECR, ACR and GitLab lookups compiled into the executor: the sandbox holds no credential.
+            "--credential-helpers=",
             "--cleanup",
             "--verbosity=info",
         ]
@@ -102,6 +114,14 @@ def sandbox_pod_name(workspace: str, job_id: str, index: int) -> str:
     return f"nhx-sbx-{job_id[:36].rstrip('-')}-{suffix}-g{index}"
 
 
+def _resources(sandbox: SandboxSpec) -> dict[str, str]:
+    """The sandbox's requests, which are also its limits."""
+    resources = {"cpu": sandbox.cpu, "memory": sandbox.memory}
+    if sandbox.ephemeral_storage:
+        resources["ephemeral-storage"] = sandbox.ephemeral_storage
+    return resources
+
+
 def _pod_manifest(
     *,
     name: str,
@@ -126,6 +146,7 @@ def _pod_manifest(
             # Otherwise the kubelet injects env vars naming every Service in the namespace.
             enable_service_links=False,
             node_selector=sandbox.node_selector or None,
+            image_pull_secrets=[k8s.V1LocalObjectReference(name=name) for name in sandbox.image_pull_secrets] or None,
             # Public resolvers, not cluster DNS, so a NetworkPolicy can block every cluster address.
             dns_policy="None",
             dns_config=k8s.V1PodDNSConfig(nameservers=list(sandbox.dns_nameservers)),
@@ -134,6 +155,7 @@ def _pod_manifest(
                     name="build",
                     image=sandbox.image,
                     command=["/busybox/sh", "-c", _build_script(group, sandbox)],
+                    env=[k8s.V1EnvVar(name=name, value=value) for name, value in KANIKO_FEATURE_FLAGS.items()],
                     security_context=k8s.V1SecurityContext(
                         # kaniko needs root to unpack layers whose files belong to many uids.
                         run_as_user=0,
@@ -143,9 +165,8 @@ def _pod_manifest(
                         capabilities=k8s.V1Capabilities(drop=["ALL"], add=KANIKO_CAPABILITIES),
                     ),
                     volume_mounts=_volume_mounts(group, job_sub_path),
-                    resources=k8s.V1ResourceRequirements(
-                        requests={"cpu": sandbox.cpu, "memory": sandbox.memory},
-                    ),
+                    # Bounded, so one Dockerfile can't take the node, and requested in full, so the node has room for it.
+                    resources=k8s.V1ResourceRequirements(requests=_resources(sandbox), limits=_resources(sandbox)),
                 )
             ],
             volumes=[

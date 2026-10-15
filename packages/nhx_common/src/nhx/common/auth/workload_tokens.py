@@ -12,7 +12,6 @@ import jwt
 from nemo_helix_plugin.client.auth import ServicePrincipalTokenProvider
 from nhx.common.auth.jwks import AsyncJWKSClient
 from nhx.common.config import AuthConfig, get_platform_config
-from starlette.requests import Request
 
 from .models import Principal
 from .signing_keys import RSASigningKey, RSASigningKeyCache
@@ -25,7 +24,7 @@ DEFAULT_WORKLOAD_AUDIENCE = "nemo-helix"
 DEFAULT_WORKLOAD_SCOPE = "openid email groups"
 
 _MISSING_WORKLOAD_TOKEN_KEY_ID_MESSAGE = (
-    "auth.oidc.workload_token_key_id or auth.token_signing.key_id must be configured for workload token exchange"
+    "auth.oidc.workload.token_key_id or auth.token_signing.key_id must be configured for workload token exchange"
 )
 _WORKLOAD_SIGNING_KEY_CACHE = RSASigningKeyCache()
 _WORKLOAD_SUBJECT_JWKS_CLIENTS: dict[tuple[str, int], AsyncJWKSClient] = {}
@@ -68,42 +67,41 @@ class ServiceWorkloadAccessTokenProvider(ServicePrincipalTokenProvider):
         )
 
 
-def _platform_base_url_from_request(request: Request | None) -> str:
-    if request is not None:
-        return str(request.base_url).rstrip("/")
-    return get_platform_config().base_url.rstrip("/")
+def _platform_base_url() -> str:
+    return get_platform_config().effective_advertised_base_url.rstrip("/")
 
 
-def workload_token_endpoint_url(request: Request | None = None) -> str:
+def workload_token_endpoint_url() -> str:
     """Return the externally reachable workload token exchange endpoint URL."""
-    return f"{_platform_base_url_from_request(request)}{WORKLOAD_TOKEN_PATH}"
+    return f"{_platform_base_url()}{WORKLOAD_TOKEN_PATH}"
 
 
-def workload_jwks_url(request: Request | None = None) -> str:
+def workload_jwks_url() -> str:
     """Return the externally reachable workload exchange JWKS URL."""
-    return f"{_platform_base_url_from_request(request)}{WORKLOAD_JWKS_PATH}"
+    return f"{_platform_base_url()}{WORKLOAD_JWKS_PATH}"
 
 
-def workload_token_issuer(config: AuthConfig, request: Request | None) -> str:
+def workload_token_issuer(config: AuthConfig) -> str:
+    workload = config.oidc.workload
     return (
-        config.oidc.workload_token_issuer
+        (workload.token_issuer if workload is not None else None)
         or config.token_signing.issuer
-        or f"{_platform_base_url_from_request(request)}/apis/auth"
+        or f"{_platform_base_url()}/apis/auth"
     )
 
 
-def workload_token_issuers(config: AuthConfig, request: Request | None) -> set[str]:
-    if config.oidc.workload_token_issuer or config.token_signing.issuer:
-        return {workload_token_issuer(config, request)}
-    return {workload_token_issuer(config, request), workload_token_issuer(config, None)}
+def workload_token_issuers(config: AuthConfig) -> set[str]:
+    return {workload_token_issuer(config)}
 
 
 def _workload_token_key_id(config: AuthConfig) -> str:
-    return config.oidc.workload_token_key_id or config.token_signing.key_id
+    workload = config.oidc.workload
+    return (workload.token_key_id if workload is not None else None) or config.token_signing.key_id
 
 
 def _workload_private_key_file(config: AuthConfig) -> str | None:
-    return config.oidc.workload_token_private_key_file or config.token_signing.private_key_file
+    workload = config.oidc.workload
+    return (workload.token_private_key_file if workload is not None else None) or config.token_signing.private_key_file
 
 
 def _workload_signing_key_load_request(config: AuthConfig) -> _SigningKeyLoadRequest:
@@ -160,23 +158,27 @@ async def workload_public_jwk_async(config: AuthConfig) -> dict[str, Any]:
 
 
 def _default_workload_audience(config: AuthConfig) -> str:
-    return config.oidc.workload_audience or config.oidc.audience or DEFAULT_WORKLOAD_AUDIENCE
+    workload = config.oidc.workload
+    return (workload.audience if workload is not None else None) or config.oidc.audience or DEFAULT_WORKLOAD_AUDIENCE
 
 
 def allowed_audiences(config: AuthConfig) -> set[str]:
-    return {_default_workload_audience(config), *config.oidc.workload_allowed_audiences}
+    workload = config.oidc.workload
+    return {_default_workload_audience(config), *(workload.allowed_audiences if workload is not None else [])}
 
 
 def _workload_subject_audience(config: AuthConfig) -> str:
-    return config.oidc.workload_client_id or config.oidc.client_id or DEFAULT_WORKLOAD_AUDIENCE
+    workload = config.oidc.workload
+    return workload.client_id if workload is not None else DEFAULT_WORKLOAD_AUDIENCE
 
 
 def _workload_subject_jwks_client(config: AuthConfig) -> AsyncJWKSClient | None:
-    jwks_uri = config.oidc.workload_subject_jwks_uri
-    if not jwks_uri:
+    workload = config.oidc.workload
+    if workload is None or not workload.subject_jwks_uri:
         return None
 
-    cache_ttl = config.oidc.workload_subject_jwks_cache_ttl_seconds
+    jwks_uri = workload.subject_jwks_uri
+    cache_ttl = workload.subject_jwks_cache_ttl_seconds
     key = (jwks_uri, cache_ttl)
     client = _WORKLOAD_SUBJECT_JWKS_CLIENTS.get(key)
     if client is None:
@@ -192,7 +194,8 @@ def _split_scope(scope: Any) -> list[str]:
 
 
 def granted_workload_scope(config: AuthConfig, requested_scope: Any) -> str | None:
-    allowed_scopes = _split_scope(config.oidc.workload_scope or DEFAULT_WORKLOAD_SCOPE)
+    workload = config.oidc.workload
+    allowed_scopes = _split_scope((workload.scope if workload is not None else None) or DEFAULT_WORKLOAD_SCOPE)
     requested_scopes = _split_scope(requested_scope) or allowed_scopes
     allowed = set(allowed_scopes)
     granted = [scope for scope in requested_scopes if scope in allowed]
@@ -225,18 +228,20 @@ def _encode_access_token(
     config: AuthConfig,
     signing_key: RSASigningKey,
     *,
-    request: Request | None,
     subject_claims: dict[str, Any],
     scope: str | None,
 ) -> str:
+    workload = config.oidc.workload
+    if workload is None:
+        raise RuntimeError("auth.oidc.workload must be configured for workload token exchange")
     now = int(time.time())
     claims: dict[str, Any] = {
-        "iss": workload_token_issuer(config, request),
+        "iss": workload_token_issuer(config),
         **subject_claims,
         "aud": _default_workload_audience(config),
         "iat": now,
         "nbf": now,
-        "exp": now + config.oidc.workload_token_ttl_seconds,
+        "exp": now + workload.token_ttl_seconds,
     }
     if scope:
         claims["scope"] = scope
@@ -253,13 +258,11 @@ def issue_service_workload_access_token(
     *,
     service_name: str,
     on_behalf_of: str | Principal | None = None,
-    request: Request | None = None,
 ) -> str:
     signing_key = workload_signing_key(config)
     return _encode_access_token(
         config,
         signing_key,
-        request=request,
         subject_claims=_service_token_claims(service_name, on_behalf_of),
         scope=granted_workload_scope(config, None),
     )
@@ -270,13 +273,11 @@ async def issue_service_workload_access_token_async(
     *,
     service_name: str,
     on_behalf_of: str | Principal | None = None,
-    request: Request | None = None,
 ) -> str:
     signing_key = await workload_signing_key_async(config)
     return _encode_access_token(
         config,
         signing_key,
-        request=request,
         subject_claims=_service_token_claims(service_name, on_behalf_of),
         scope=granted_workload_scope(config, None),
     )
@@ -303,10 +304,9 @@ def _actor_from_claims(claims: dict[str, object]) -> ActorClaims | None:
 
 async def validate_workload_access_token(
     config: AuthConfig,
-    request: Request | None,
     token: str,
 ) -> TokenClaims | None:
-    if not config.oidc.workload_token_exchange_enabled:
+    if config.oidc.workload is None:
         return None
 
     signing_key = await workload_signing_key_async(config)
@@ -322,7 +322,7 @@ async def validate_workload_access_token(
             leeway=30,
         )
         issuer = claims.get("iss")
-        if not isinstance(issuer, str) or issuer not in workload_token_issuers(config, request):
+        if not isinstance(issuer, str) or issuer not in workload_token_issuers(config):
             return None
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject:
@@ -341,10 +341,9 @@ async def validate_workload_access_token(
 
 async def resolve_workload_access_token(
     config: AuthConfig,
-    request: Request | None,
     token: str,
 ) -> ResolvedBearerToken | None:
-    claims = await validate_workload_access_token(config, request, token)
+    claims = await validate_workload_access_token(config, token)
     if claims is None:
         return None
     return ResolvedBearerToken(claims=claims, token_kind="workload_access_token")
@@ -354,9 +353,10 @@ async def validate_workload_subject_token(
     config: AuthConfig,
     token: str,
 ) -> TokenClaims | None:
-    if not config.oidc.workload_token_exchange_enabled:
+    workload = config.oidc.workload
+    if workload is None:
         return None
-    if not config.oidc.workload_subject_issuers:
+    if not workload.subject_issuers:
         return None
 
     jwks_client = _workload_subject_jwks_client(config)
@@ -374,7 +374,7 @@ async def validate_workload_subject_token(
             options={"require": ["exp"]},
         )
         issuer = claims.get("iss")
-        if issuer not in config.oidc.workload_subject_issuers:
+        if issuer not in workload.subject_issuers:
             return None
         subject = claims.get(config.oidc.subject_claim, claims.get("sub"))
         if not isinstance(subject, str) or not subject:

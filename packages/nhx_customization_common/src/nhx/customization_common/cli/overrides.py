@@ -3,14 +3,15 @@
 
 """Shared CLI override machinery for customization contributor plugins.
 
-After the platform's ``_add_submit_command`` registers the default submit verb,
-Customizer backends swap in the same shape:
+After the platform's ``_add_submit_command`` registers the default submit callback,
+Customizer backends swap in a flat ``--job-json JOB_JSON`` shape:
 
-- ``submit`` → positional ``JOB_JSON`` argument plus standard submit flags;
-  loads + validates the JSON (via the backend's ``load_job_json``), then
-  delegates to the original ``submit`` callback with ``--spec`` set.
-- any pre-existing generated ``run`` command is removed; Customizer jobs are
-  submitted to the platform, not executed through local CLI scheduling.
+- ``nemo customization <backend> --job-json JOB_JSON`` loads + validates the JSON
+  (via the backend's ``load_job_json``), then delegates to the original generated
+  callback with ``--spec`` set.
+- any pre-existing generated ``run`` / ``--job-json`` commands are removed;
+  Customizer jobs are submitted to the platform, not executed through local CLI
+  scheduling.
 - ``explain`` → unchanged.
 
 After a successful submit, the wrapper reports the created job and the commands
@@ -18,7 +19,7 @@ that track it, and follows the job to a terminal state for ``--wait`` and
 ``--watch``. That reporting lives in
 ``nhx.customization_common.cli.tracking``.
 
-Only the backend's name, ``load_job_json``, ``JOB_JSON`` help text and ``submit``
+Only the backend's name, ``load_job_json``, ``JOB_JSON`` help text and command
 help text differ; everything else is shared here.
 """
 
@@ -37,6 +38,7 @@ from nemo_helix_plugin.commands import (
     SubmittedJob,
     resolve_submit_auth_headers,
     resolve_submit_base_url,
+    take_job_submit,
 )
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.models.client import ModelsClient
@@ -72,28 +74,21 @@ def apply_job_cli_overrides(
     spec_refs: SpecRefs | None = None,
     validate_job_spec: ValidateJobSpec | None = None,
 ) -> None:
-    """Drop generated ``run``/``submit`` verbs, then re-register submit.
+    """Drop the generated ``run`` verb, then replace generated submit with the flat backend command.
 
     Order matters: drop first, then re-register. Typer iterates
     ``registered_commands`` in insertion order, so stale entries would route
     users back to the auto-generated shapes.
     """
     _drop_command(group, "run")
-    _replace_job_submit(group, backend, load_job_json, job_json_help, submit_help, spec_refs, validate_job_spec)
-
-
-def _pluck_callback(group: typer.Typer, verb: str) -> Callable[..., SubmittedJob | None]:
-    command = next((c for c in group.registered_commands if c.name == verb), None)
-    if command is None or command.callback is None:
-        raise RuntimeError(f"missing {verb!r} callback to override")
-    return command.callback
+    _replace_job_callback(group, backend, load_job_json, job_json_help, submit_help, spec_refs, validate_job_spec)
 
 
 def _drop_command(group: typer.Typer, name: str) -> None:
     group.registered_commands = [c for c in group.registered_commands if c.name != name]
 
 
-def _replace_job_submit(
+def _replace_job_callback(
     group: typer.Typer,
     backend: str,
     load_job_json: LoadJobJson,
@@ -102,16 +97,13 @@ def _replace_job_submit(
     spec_refs: SpecRefs | None = None,
     validate_job_spec: ValidateJobSpec | None = None,
 ) -> None:
-    """Replace ``submit`` with a ``JOB_JSON`` positional + standard submit flags."""
-    original = _pluck_callback(group, "submit")
-    # Drop the original before re-registering so we don't leave a duplicate
-    # ``submit`` entry (Typer would otherwise keep both and dispatch the last).
-    _drop_command(group, "submit")
+    """Replace generated submit with a flat ``--job-json JOB_JSON`` backend callback."""
+    original = take_job_submit(group)
 
-    @group.command("submit", help=submit_help)
+    @group.callback(invoke_without_command=True, help=submit_help)
     def submit(
         typer_ctx: typer.Context,
-        job_json: Path = typer.Argument(..., metavar="JOB_JSON", help=job_json_help),
+        job_json: Path | None = typer.Option(None, "--job-json", metavar="JOB_JSON", help=job_json_help),
         workspace: WorkspaceOption = None,
         profile: str | None = typer.Option(
             None,
@@ -187,6 +179,13 @@ def _replace_job_submit(
             rich_help_panel=_UPLOAD_PANEL,
         ),
     ) -> None:
+        if typer_ctx.invoked_subcommand is not None:
+            return
+        if job_json is None:
+            typer.echo("Error: --job-json is required.", err=True)
+            typer.echo(typer_ctx.get_help())
+            raise typer.Exit(code=1)
+
         workspace = resolve_cli_workspace(typer_ctx, workspace)
 
         if wait and watch:
@@ -214,13 +213,10 @@ def _replace_job_submit(
         submitted = original(
             typer_ctx,
             spec=spec_json,
-            spec_file=None,
+            workspace=workspace,
+            profile=profile,
             options=options,
             options_file=options_file,
-            profile=profile,
-            workspace=workspace,
-            config=None,
-            config_file=None,
         )
         _report_submitted(submitted, wait=wait, watch=watch, timeout=timeout, poll_interval=poll_interval)
 

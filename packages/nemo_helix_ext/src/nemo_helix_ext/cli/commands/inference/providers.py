@@ -235,7 +235,7 @@ def delete_providers(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
 ) -> None:
-    """Delete a provider and models that have no remaining providers."""
+    """Delete a provider and the models only it serves, unless it is a deployment's provider."""
     state: CLIContext = ctx.obj
     state.typed_client(ModelsClient).delete_provider(name=name, workspace=workspace)
 

@@ -58,7 +58,7 @@ pnpm gen:deployment-management
 pnpm gen:entity-store
 
 # Generate for Evaluator
-pnpm gen:evaluator
+pnpm gen:evals
 ```
 
 ### Using Generated Hooks

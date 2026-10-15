@@ -48,7 +48,7 @@ class _Strategy(NemoJob):
     name: ClassVar[str] = "optimize"
     description: ClassVar[str] = "The job's own description, which the listing does not use."
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
-        name="fake", description="What the strategy optimizes."
+        name="fake", title="Fake", description="What the strategy optimizes.", requires_config=True
     )
 
     def run(self, config: dict, *, ctx: JobContext) -> dict[str, Any]:
@@ -57,7 +57,7 @@ class _Strategy(NemoJob):
 
 class _OtherStrategy(NemoJob):
     name: ClassVar[str] = "tune"
-    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="fake")
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="fake", title="Fake")
 
     def run(self, config: dict, *, ctx: JobContext) -> dict[str, Any]:
         return {}
@@ -74,7 +74,7 @@ class _LateStrategy(NemoJob):
     """A second, differently named strategy — sorts after ``fake``."""
 
     name: ClassVar[str] = "tune"
-    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="acme")
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="acme", title="Acme")
 
     def run(self, config: dict, *, ctx: JobContext) -> dict[str, Any]:
         return {}
@@ -92,7 +92,7 @@ class _MistypedStrategy(NemoJob):
 
 class _BlankStrategy(NemoJob):
     name: ClassVar[str] = "blank"
-    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="")
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(name="", title="Blank")
 
     def run(self, config: dict, *, ctx: JobContext) -> dict[str, Any]:
         return {}
@@ -146,7 +146,11 @@ def test_strategies_are_listed_as_their_plugin_declared_them(monkeypatch: pytest
     """The description comes from the declaration, not from the job it hangs on."""
     monkeypatch.setattr(discovery, "discover_jobs", lambda: {"whatever.optimize": _Strategy})
 
-    assert discover_strategies() == [OptimizationStrategy(name="fake", description="What the strategy optimizes.")]
+    assert discover_strategies() == [
+        OptimizationStrategy(
+            name="fake", title="Fake", description="What the strategy optimizes.", requires_config=True
+        )
+    ]
 
 
 def test_strategies_are_sorted_by_name(monkeypatch: pytest.MonkeyPatch) -> None:

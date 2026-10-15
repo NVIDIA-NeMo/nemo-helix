@@ -59,7 +59,7 @@ export const flagDefinitions = {
     true
   ),
   agentOptimizationsEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', true),
-  agentOptimizationFormEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', false),
+  agentOptimizationFormEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', true),
   agentOverviewEnabled: booleanFlag('VITE_FF_AGENT_OVERVIEW_ENABLED', true),
   agentsEnabled: previewFlag('VITE_FF_AGENTS_ENABLED', true),
   anonymizerEnabled: booleanFlag('VITE_FF_ANONYMIZER_ENABLED', true),
@@ -72,8 +72,8 @@ export const flagDefinitions = {
   dataDesignerEnabled: previewFlag('VITE_FF_DATA_DESIGNER_ENABLED', true),
   datasetsEnabled: previewFlag('VITE_FF_DATASETS_ENABLED', true),
   deploymentsEnabled: previewFlag('VITE_FF_DEPLOYMENTS_ENABLED', true),
-  evaluatorBenchmarksEnabled: previewFlag('VITE_FF_EVALUATOR_BENCHMARKS_ENABLED', false),
-  evaluatorEnabled: previewFlag('VITE_FF_EVALUATOR_ENABLED', true),
+  evalsBenchmarksEnabled: previewFlag('VITE_FF_EVALS_BENCHMARKS_ENABLED', false),
+  evalsEnabled: previewFlag('VITE_FF_EVALS_ENABLED', true),
   experiment: previewFlag('VITE_FF_EXPERIMENT', true),
   filesetDetailsEnabled: previewFlag('VITE_FF_FILESET_DETAILS_ENABLED'),
   guardrailsEnabled: previewFlag('VITE_FF_GUARDRAILS_ENABLED'),
@@ -91,7 +91,7 @@ export const flagDefinitions = {
   settingsEnabled: previewFlag('VITE_FF_SETTINGS_ENABLED', true),
   toolCallingEnabled: booleanFlag('VITE_FF_TOOL_CALLING_ENABLED'),
   tourEnabled: booleanFlag('VITE_FF_TOUR_ENABLED', true),
-  traceGraphEnabled: booleanFlag('VITE_FF_TRACE_GRAPH_ENABLED'),
+  traceGraphEnabled: booleanFlag('VITE_FF_TRACE_GRAPH_ENABLED', true),
 } as const;
 
 // --- Types ---

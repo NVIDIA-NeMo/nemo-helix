@@ -116,11 +116,11 @@ def test_core_service_group_can_skip_embedded_clickhouse_dependency() -> None:
 def test_api_services_override_default_service_group() -> None:
     documents = _helm_template(
         "--set",
-        "api.services={evaluator,guardrails}",
+        "api.services={evals,guardrails}",
     )
 
     args = _api_container(documents)["args"]
-    assert "--services=evaluator,guardrails" in args
+    assert "--services=evals,guardrails" in args
     assert not any(arg.startswith("--service-group=") for arg in args)
 
 
@@ -138,11 +138,11 @@ def test_legacy_api_extra_args_service_selection_suppresses_default_service_grou
 def test_legacy_api_extra_args_services_selection_suppresses_default_service_group() -> None:
     documents = _helm_template(
         "--set-string",
-        "api.extraArgs[0]=--services=evaluator",
+        "api.extraArgs[0]=--services=evals",
     )
 
     args = _api_container(documents)["args"]
-    assert args.count("--services=evaluator") == 1
+    assert args.count("--services=evals") == 1
     assert not any(arg.startswith("--service-group=") for arg in args)
 
 
@@ -177,7 +177,7 @@ def test_controllers_override_default_controller_group() -> None:
 def test_api_services_must_be_a_list() -> None:
     stderr = _helm_template_failure(
         "--set-string",
-        "api.services=evaluator",
+        "api.services=evals",
     )
 
     assert "api.services must be a list when set" in stderr

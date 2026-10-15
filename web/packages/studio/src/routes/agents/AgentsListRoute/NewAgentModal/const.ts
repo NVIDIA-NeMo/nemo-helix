@@ -11,6 +11,8 @@ export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
 // Container staging skips this file, so its bytes never reach a deployment.
 export const AGENT_SPEC_FILENAME = 'AGENT-SPEC.md';
 
+export const AGENT_ETHOS_FILE = 'ETHOS.md';
+
 // Mirrors MAX_AGENT_SPEC_STAGED_BYTES / _FILES; the platform only enforces them at deploy.
 export const MAX_AGENT_SPEC_BYTES = 900_000;
 export const MAX_AGENT_SPEC_FILES = 500;

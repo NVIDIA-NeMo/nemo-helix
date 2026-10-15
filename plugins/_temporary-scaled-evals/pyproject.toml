@@ -9,6 +9,7 @@ version = "0.98.1"
 dependencies = [
   "nemo-helix-plugin",
   "nemo-helix",
+  "nhx-sandbox",
   "boto3>=1.35.0",
   "click>=8.1.0",
   "cryptography>=43.0.0",
@@ -26,8 +27,6 @@ dependencies = [
 
 [project.scripts]
 scaled-evals = "scaled_evals.cli.main:cli"
-scaled-evals-dispatch-worker = "scaled_evals.dispatch.main:main"
-scaled-evals-build-worker = "scaled_evals.api.build.main:main"
 scaled-evals-rotate-credential-key = "scaled_evals.api.rotate_credential_key:main"
 scaled-evals-migrate = "nemo_scaled_evals_plugin.migrations:main"
 
@@ -37,6 +36,7 @@ scaled-evals = "nemo_scaled_evals_plugin.service:ScaledEvalsService"
 [project.entry-points."nemo.jobs"]
 "scaled-evals.task-image-build" = "nemo_scaled_evals_plugin.jobs.task_image_build:TaskImageBuildJob"
 "scaled-evals.evaluation-execution" = "nemo_scaled_evals_plugin.jobs.evaluation_execution:EvaluationExecutionJob"
+"scaled-evals.benchmark-archive-build" = "nemo_scaled_evals_plugin.jobs.benchmark_archive_build:BenchmarkArchiveBuildJob"
 
 [project.entry-points."nemo.controllers"]
 scaled-evals-jobs = "nemo_scaled_evals_plugin.controller:ScaledEvalsJobsController"
@@ -62,8 +62,9 @@ packages = ["src/scaled_evals", "src/nemo_scaled_evals_plugin"]
 [tool.uv.sources]
 nemo-helix = { path = "../../packages/nemo_helix", editable = true }
 nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
+nhx-sandbox = { path = "../../packages/nhx_sandbox", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-pythonpath = ["src"]
+pythonpath = ["src", "opensandbox_ext"]

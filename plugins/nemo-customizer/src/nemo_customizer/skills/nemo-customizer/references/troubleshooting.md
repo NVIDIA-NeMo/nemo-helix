@@ -67,13 +67,13 @@ Each entry has `provider`, `profile` (name), and `backend` (e.g. `docker`, `kube
 | Response includes **`provider`: `gpu` or `gpu_distributed`** | **`automodel`** (default) |
 | No GPU profiles (only `subprocess` and/or CPU `provider`) | Report that GPU customization is unavailable |
 
-Automodel and unsloth are **`submit`-only**. After submit, the platform's **Docker executor** runs GPU container steps on the daemon attached to the connected platform host (`platform.runtime: docker`). (rl is also submit-only but runs on Kubernetes/Ray — see `rl-kubernetes-runtime.md`.) Training does not run in the CLI shell — query execution profiles on the platform (`NHX_BASE_URL`), not GPU availability in the agent's terminal.
+Automodel and unsloth run through the platform Jobs service. After submission, the platform's **Docker executor** runs GPU container steps on the daemon attached to the connected platform host (`platform.runtime: docker`). (rl also runs through Kubernetes/Ray — see `rl-kubernetes-runtime.md`.) Training does not run in the CLI shell — query execution profiles on the platform (`NHX_BASE_URL`), not GPU availability in the agent's terminal.
 
 ### Pick execution profile
 
 **Automodel** — set `training.execution_profile` in job JSON to the **`profile`** string of a GPU row from the list (e.g. `default`, `docker_gpu`). If omitted, the plugin default is usually `gpu` — submit errors mentioning an unknown profile mean you should re-list and set an exact name from the API.
 
-**Unsloth** — pass `--profile <name>` on `nemo customization unsloth submit …` when the default `gpu` profile is wrong. There is no `execution_profile` field in `UnslothJobInput` today.
+**Unsloth** — pass `--profile <name>` on `nemo customization unsloth --job-json …` when the default `gpu` profile is wrong. There is no `execution_profile` field in `UnslothJobInput` today.
 
 Quick filter (stdout only — do not use `2>&1` or `json.load` breaks on stderr warnings):
 
@@ -96,26 +96,26 @@ Do not run `nemo customization --help` unless submit returns unknown plugin.
 
 | Do | Don't |
 |----|-------|
-| Pipe **stdout only**: `… submit /tmp/job.json \| python3 -c "import sys,json; print(json.load(sys.stdin)['name'])"` | `… submit /tmp/job.json 2>&1 \| python3 -c "import sys,json; json.load(sys.stdin)"` |
+| Pipe **stdout only**: `nemo customization <plugin> --job-json /tmp/job.json \| python3 -c "import sys,json; print(json.load(sys.stdin)['name'])"` | `nemo customization <plugin> --job-json /tmp/job.json 2>&1 \| python3 -c "import sys,json; json.load(sys.stdin)"` |
 | Suppress stderr if noisy: append `2>/dev/null` to the `nemo` command (not `2>&1`) | Merge stderr into the JSON pipe with `2>&1` |
 | On `json.load` failure, check `nemo jobs list` before re-submitting | Assume submit failed and submit again |
 
 Same rule for `nemo jobs list-execution-profiles -f json`: parse stdout only; use `2>/dev/null` if needed, never `2>&1` into `json.load`.
 
-## Verb is backend-specific (both submit-only)
+## Verb is backend-specific (Jobs service only)
 
-- **Automodel**, **Unsloth**, and **RL** use **`submit` only**. Use `nemo customization <plugin> submit …`; these backends expose no local `run` verb.
+- **Automodel**, **Unsloth**, and **RL** run through the Jobs service. Use `nemo customization <plugin> --job-json …`; these backends expose no local `run` verb.
 - Dataset refs in job JSON: `default/<fileset>` (automodel: `dataset.training` / `dataset.validation`; unsloth: `dataset.path` / optional `dataset.validation_path`).
 
 ## Gated HuggingFace models
 
-Gated or private HuggingFace repos (e.g. Llama, Gemma) require a **platform secret** and **`token_secret`** on the model fileset. The Files service does **not** use your local `~/.cache/huggingface` or shell `HF_TOKEN`. Unlike W&B, the HF token is **not** set in job JSON — it is wired on the **model fileset** storage config.
+Gated or private HuggingFace repos require a **platform secret** and **`token_secret`** on the model fileset. The Files service does **not** use your local `~/.cache/huggingface` or shell `HF_TOKEN`. Unlike W&B, the HF token is **not** set in job JSON — it is wired on the **model fileset** storage config.
 
 | Symptom / log excerpt | Likely cause | Fix |
 |-----------------------|--------------|-----|
 | Job fails in **download** step; `Failed to access upstream storage`; `InternalServerError` 502; `Verify that the referenced credentials are valid` | Missing/stale `hf-token` secret, or fileset created without `token_secret` | Steps below — then re-submit |
 | Secret exists but download still fails | User has not **accepted the model license** on huggingface.co for that repo | Accept license with the same HF account as the token, then re-submit |
-| Public model (e.g. `Qwen/Qwen3-1.7B`) | No secret needed | Omit `token_secret` on the fileset |
+| Public model (e.g. `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`) | No secret needed | Omit `token_secret` on the fileset |
 
 **Convention:** secret name `hf-token` in workspace `default`. Any valid secret name works if referenced consistently in `token_secret`.
 
@@ -147,7 +147,7 @@ printf '%s' "$HF_TOKEN" | nemo secrets update "$HF_SECRET" \
 
 ```bash
 WEIGHTS=<weights-fileset>
-HF_REPO=<hf-repo>          # e.g. google/gemma-2-2b-it
+HF_REPO=<hf-repo>          # gated repo, <org>/<model>
 HF_SECRET=hf-token
 
 nemo files filesets create "$WEIGHTS" --workspace default --purpose model --exist-ok \
@@ -232,7 +232,7 @@ When submit or poll returns a missing-image error and the base URL is **user-ove
 ```bash
 export NHX_BASE_URL=<user's platform URL>
 cd /path/to/nemo-helix
-nemo customization <plugin> submit /tmp/job.json --workspace default [--profile <gpu-profile>]
+nemo customization <plugin> --job-json /tmp/job.json --workspace default [--profile <gpu-profile>]
 ```
 
 Then poll until terminal status. Offer to re-submit once the user confirms the image is on the target — do not attempt a local Docker build from the agent for a remote platform.
@@ -329,7 +329,7 @@ Automodel:
 
 | Action | Command |
 |--------|---------|
-| Submit | `nemo customization automodel submit <job.json> --workspace default` |
+| Submit | `nemo customization automodel --job-json <job.json> --workspace default` |
 | Status | `nemo jobs get-status automodel-<job-id>` |
 | Live schema | `nemo customization automodel explain` |
 
@@ -337,7 +337,7 @@ Unsloth:
 
 | Action | Command |
 |--------|---------|
-| Submit | `nemo customization unsloth submit <job.json> --workspace default [--profile P]` |
+| Submit | `nemo customization unsloth --job-json <job.json> --workspace default [--profile P]` |
 | Status | `nemo jobs get-status unsloth-<job-id>` |
 | Live schema | `nemo customization unsloth explain` |
 

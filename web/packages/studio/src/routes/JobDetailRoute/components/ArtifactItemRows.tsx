@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
-import { Text } from '@nvidia/foundations-react-core';
+import { Flex, Spinner, Text } from '@nvidia/foundations-react-core';
 import type { FileSystemFile } from '@studio/components/FilesTable/utils';
 import { ArtifactFileRow } from '@studio/routes/JobDetailRoute/components/ArtifactFileRow';
 import type { ArtifactItem } from '@studio/routes/JobDetailRoute/utils';
@@ -24,7 +24,13 @@ export const ArtifactItemRows: FC<ArtifactItemRowsProps> = ({ item, onPreview })
   const { data, isLoading, error } = useFilesListFilesetFiles(item.workspace, item.fileset, {
     path: item.objectPath,
   });
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <Flex justify="center" align="center" className="min-h-[200px] w-full">
+        <Spinner size="medium" aria-label={`Loading artifact ${item.resultName}...`} />
+      </Flex>
+    );
+  }
   if (error) {
     return (
       <Text kind="label/regular/sm" className="text-secondary">
@@ -38,7 +44,13 @@ export const ArtifactItemRows: FC<ArtifactItemRowsProps> = ({ item, onPreview })
   const files = (data?.data ?? []).filter(
     (f) => f.path === item.objectPath || f.path.startsWith(descendantPrefix)
   );
-  if (files.length === 0) return null;
+  if (files.length === 0) {
+    return (
+      <Text kind="label/regular/sm" className="text-secondary">
+        No files found for artifact <code>{item.resultName}</code>.
+      </Text>
+    );
+  }
 
   return (
     <>

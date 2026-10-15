@@ -284,7 +284,7 @@ async def test_authenticator_opens_circuit_and_recovers_after_window() -> None:
                 "get_platform_config",
                 return_value=HelixConfig(base_url="https://platform.example.com", services=""),
             ),
-            patch("nhx.common.auth.access_key_lifecycle.time.monotonic", side_effect=lambda: monotonic_now),
+            patch("nhx.common.auth.access_key_lifecycle.monotonic", side_effect=lambda: monotonic_now),
         ):
             for expected_retry_after in (None, None, 5):
                 with pytest.raises(AccessKeyLifecycleUnavailableError) as exc_info:

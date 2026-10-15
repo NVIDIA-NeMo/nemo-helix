@@ -18,7 +18,7 @@ from nhx.common.auth.exceptions import InvalidPermissionFormatError
 from nhx.common.auth.models import Principal
 from nhx.common.client_factory import get_nemo_client_on_behalf_of
 from nhx.common.config import AuthConfig
-from nhx.common.config.base import OIDCConfig, TokenSigningConfig
+from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
 
 
 def _write_private_key(path: Path) -> None:
@@ -140,7 +140,7 @@ class TestHasPermissionsFormatValidation:
                     key_id="test-workload",
                     private_key_file=str(workload_private_key_file),
                 ),
-                "oidc": OIDCConfig(workload_token_exchange_enabled=True),
+                "oidc": OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload")),
             }
         )
 
@@ -178,7 +178,7 @@ class TestHasPermissionsFormatValidation:
                     key_id="test-workload",
                     private_key_file=str(workload_private_key_file),
                 ),
-                "oidc": OIDCConfig(workload_token_exchange_enabled=True),
+                "oidc": OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload")),
             }
         )
 

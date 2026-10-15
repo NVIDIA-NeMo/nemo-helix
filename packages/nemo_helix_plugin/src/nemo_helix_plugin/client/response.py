@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator, Iterator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, overload
@@ -161,7 +161,7 @@ class NemoBinaryResponse:
             raise NemoTransportError(exc) from exc
 
     @contextmanager
-    def stream(self, chunk_size: int | None = None) -> Iterator[Iterator[bytes]]:
+    def stream(self, chunk_size: int | None = None) -> Generator[Iterator[bytes], None, None]:
         """Yield an iterator of raw byte chunks.
 
         Args:
@@ -211,7 +211,7 @@ class NemoStreamResponse(Generic[ModelT]):
         self.request = request
 
     @contextmanager
-    def stream(self) -> Iterator[Iterator[ModelT]]:
+    def stream(self) -> Generator[Iterator[ModelT], None, None]:
         """Yield an iterator of parsed model objects."""
         try:
             with self._stream_ctx as raw:
@@ -277,7 +277,7 @@ class AsyncNemoBinaryResponse:
             raise NemoTransportError(exc) from exc
 
     @asynccontextmanager
-    async def stream(self, chunk_size: int | None = None) -> AsyncIterator[AsyncIterator[bytes]]:
+    async def stream(self, chunk_size: int | None = None) -> AsyncGenerator[AsyncIterator[bytes], None]:
         """Yield an async iterator of raw byte chunks.
 
         Args:
@@ -325,7 +325,7 @@ class AsyncNemoStreamResponse(Generic[ModelT]):
         self.request = request
 
     @asynccontextmanager
-    async def stream(self) -> AsyncIterator[AsyncIterator[ModelT]]:
+    async def stream(self) -> AsyncGenerator[AsyncIterator[ModelT], None]:
         """Yield an async iterator of parsed model objects."""
         try:
             async with self._stream_ctx as raw:
@@ -436,6 +436,9 @@ class NemoPaginatedResponse(Generic[PaginatedModelT, PaginatedStrategyT_co]):
     def http_response(self) -> httpx.Response:
         return self._first_response
 
+    def __iter__(self) -> Iterator[PaginatedModelT]:
+        return self.items()
+
     def _parse_page(self, raw: httpx.Response) -> tuple[list[PaginatedModelT], dict, Any]:
         """Parse a page response into items, its raw body, and typed metadata."""
         raise_for_status(raw)
@@ -514,6 +517,9 @@ class AsyncNemoPaginatedResponse(Generic[PaginatedModelT, PaginatedStrategyT_co]
     @property
     def http_response(self) -> httpx.Response:
         return self._first_response
+
+    def __aiter__(self) -> AsyncIterator[PaginatedModelT]:
+        return self.items()
 
     def _parse_page(self, raw: httpx.Response) -> tuple[list[PaginatedModelT], dict, Any]:
         """Parse a page response into items, its raw body, and typed metadata."""

@@ -4,7 +4,6 @@
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { Badge, Banner, Card, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import type { OptimizationFormValues } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
 import type { OptimizationTarget } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
 import { type FC, type ReactNode } from 'react';
@@ -27,12 +26,10 @@ export interface EvaluationSectionProps {
 }
 
 /**
- * Which evaluation supplies the yardstick, and which model scores against it.
+ * Which evaluation supplies the prompts and accuracy rubric.
  *
- * The prompts and expected answers are read out of the selected experiment's latest run — an
- * optimization with nothing to score against cannot rank its trials, which is why an agent with no
- * evaluations gets a blocking banner instead of a picker. The judge is asked for separately because
- * the study re-scores every trial itself rather than reusing published numbers.
+ * The selected experiment's latest run supplies its dataset and LLM judge. Each trial is scored
+ * afresh using its rubric adapted to the optimization backend's custom scoring format.
  */
 export const EvaluationSection: FC<EvaluationSectionProps> = ({ targets, selected, isLoading }) => {
   const { control } = useFormContext<OptimizationFormValues>();
@@ -47,7 +44,7 @@ export const EvaluationSection: FC<EvaluationSectionProps> = ({ targets, selecte
   }
 
   return (
-    <Stack gap="density-md">
+    <Stack gap="density-md" className="w-full">
       <ControlledSelect
         useControllerProps={{ control, name: 'experimentId' }}
         loading={isLoading}
@@ -59,7 +56,7 @@ export const EvaluationSection: FC<EvaluationSectionProps> = ({ targets, selecte
       />
 
       {selected && (
-        <Card>
+        <Card className="w-full">
           <Stack gap="density-sm" className="w-full">
             <DetailRow label="Loaded from">
               <Text kind="body/regular/sm">{selected.evaluation.name}</Text>
@@ -89,20 +86,6 @@ export const EvaluationSection: FC<EvaluationSectionProps> = ({ targets, selecte
           </Stack>
         </Card>
       )}
-
-      <JudgeModelSelect<OptimizationFormValues>
-        formFieldName="judgeModel"
-        required
-        slotLabel="Judge model"
-        placeholder="Select a model to score trials with"
-      />
-
-      <Text kind="body/regular/xs" color="secondary">
-        The evaluation's prompts and expected answers are staged with the study and re-scored by the
-        judge above, so trial scores compare to each other rather than to the numbers this
-        evaluation published. The experiment id is written to optimizer.experiment_id, so trials sit
-        alongside its evaluations.
-      </Text>
     </Stack>
   );
 };

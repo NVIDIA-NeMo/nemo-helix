@@ -433,7 +433,6 @@ def test_providers_create_code_output_sends_nothing() -> None:
     assert "client.create_provider(" in result.stdout
     assert 'CreateModelProviderRequest(name="nvidia", host_url="https://h")' in result.stdout
     assert "exist_ok=True" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_providers_list_code_output() -> None:
@@ -552,7 +551,6 @@ def test_deployments_create_wait_code_output_renders_lifecycle() -> None:
     assert "deadline = time.monotonic() + 1200" in result.stdout
     assert "gateway.provider_ready(" in result.stdout
     assert "--wait" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_deployments_get_update_delete() -> None:
@@ -915,7 +913,6 @@ def test_deployment_configs_code_output() -> None:
     assert "client.create_deployment_config(" in result.stdout
     assert "Engine.VLLM" in result.stdout
     assert "ContainerExecutorConfig(gpu=1)" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -1037,7 +1034,6 @@ def test_virtual_models_code_output() -> None:
     assert result.exit_code == 0, result.output
     assert "from nemo_helix_plugin.virtual_models.client import VirtualModelsClient" in result.stdout
     assert "client.list_virtual_models()" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -1151,7 +1147,6 @@ def test_prompts_code_output() -> None:
     assert recorder.requests == []
     assert "client.create_prompt(" in result.stdout
     assert "PromptMessage(role=PromptMessageRole.USER" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -1323,7 +1318,6 @@ def test_gateway_post_code_output_renders_json_body() -> None:
     assert "from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient" in result.stdout
     assert 'body=JsonBody({"model": "x"})' in result.stdout
     assert "client.provider_post(" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_gateway_provider_ready() -> None:
@@ -1424,7 +1418,6 @@ def test_models_list_code_output() -> None:
 
     assert result.exit_code == 0, result.output
     assert "client.list_openai_models()" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------

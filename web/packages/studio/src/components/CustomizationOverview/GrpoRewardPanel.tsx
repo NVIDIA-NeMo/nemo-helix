@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatTile, type StatTileDiagnosticProps } from '@nemo/common/src/components/StatTile';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { RangeBand, type RangeBandSeries } from '@studio/components/charts/RangeBand';
 import type { RewardChartData } from '@studio/util/grpoMetrics';
+import { getTrainingMetricsEmptyState } from '@studio/util/trainingMetricsEmptyState';
 import type { FC } from 'react';
 
 interface Props {
+  jobStatus?: HelixJobStatus;
   reward?: RewardChartData;
   metrics: StatTileDiagnosticProps[];
   progress: StatTileDiagnosticProps[];
@@ -28,7 +31,8 @@ const NO_BAND: (number | null)[] = [];
  * Replaces the loss chart the other backends show: GRPO's loss is a policy-gradient surrogate
  * whose magnitude means nothing, so reward is the only curve that says whether the run works.
  */
-export const GrpoRewardPanel: FC<Props> = ({ reward = EMPTY, metrics, progress }) => {
+export const GrpoRewardPanel: FC<Props> = ({ reward = EMPTY, metrics, progress, jobStatus }) => {
+  const emptyState = getTrainingMetricsEmptyState(jobStatus, 'Reward');
   const series: RangeBandSeries[] = [
     {
       id: 'training',
@@ -86,7 +90,7 @@ export const GrpoRewardPanel: FC<Props> = ({ reward = EMPTY, metrics, progress }
             xAxis={reward.steps}
             xAxisLabel="Step"
             yAxisLabel="Mean reward"
-            emptyMessage="No reward data available"
+            emptyMessage={`${emptyState.title}. ${emptyState.description}`}
           />
         </Stack>
       </Panel>

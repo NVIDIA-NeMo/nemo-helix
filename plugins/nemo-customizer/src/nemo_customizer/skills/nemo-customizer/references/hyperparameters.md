@@ -22,6 +22,7 @@ All three schemas use `extra="forbid"` — unknown keys raise validation errors.
 | **`hyperparameters-automodel.md`** | Automodel job JSON layout, full template, `training` / `schedule` / `batch` / `optimizer` / `parallelism` field reference, LR & LoRA-rank tuning, presets, distillation/KD |
 | **`hyperparameters-unsloth.md`** | Unsloth job JSON layout, full template, `model` / `dataset` / `training` / `schedule` / `batch` / `optimizer` / `hardware` / `output` field reference, LR & LoRA-rank tuning, save-method picker |
 | **`hyperparameters-rl.md`** | NeMo-RL (DPO + GRPO) job JSON layout, shared knobs, DPO-specific (`ref_policy_kl_penalty` = β), GRPO-specific (`num_generations_per_prompt`, environment FileSet), convert CLI |
+| **`recipes.md`** | Benchmarked Automodel / NeMo-RL recipes per model (Nemotron first) and the recipe → job JSON field mapping |
 | **`batch-sizing.md`** | ≥48 GB VRAM batch tables, multi-GPU (data vs tensor parallel), OOM / throughput tuning (automodel + unsloth) |
 | **Integrations** (below) | W&B / MLflow `integrations` object — all three backends (automodel, unsloth, rl) |
 | **Source of truth** (below) | What is authoritative for a field, and what is only an example |

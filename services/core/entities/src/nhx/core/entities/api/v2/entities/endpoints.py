@@ -20,8 +20,9 @@ Cross-Workspace Queries:
 
 import logging
 import textwrap
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Body, HTTPException, Query, status
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.client import AuthClient
@@ -36,7 +37,6 @@ from nhx.core.entities.api.v2.utils import (
     add_workspace_filtering,
     bindings_cache_delete,
     get_accessible_workspaces,
-    raise_if_workspace_inaccessible,
     require_workspace_access,
 )
 from nhx.core.entities.app.repository import WorkspaceRepositoryInterface
@@ -56,6 +56,31 @@ API_TAG = "Entity Store"
 logger = logging.getLogger(__name__)
 
 PROJECT_ENTITY_TYPE = "project"
+
+_ENTITY_CREATE_OPENAPI_EXAMPLES = {
+    "entity": {
+        "summary": "Create an entity with required data",
+        "value": {
+            "name": "my-config",
+            "data": {
+                "target_id": "llama-2-7b",
+                "training_options": {"learning_rate": 0.01},
+            },
+        },
+    }
+}
+
+_ENTITY_UPDATE_OPENAPI_EXAMPLES = {
+    "entity": {
+        "summary": "Update an entity with required data",
+        "value": {
+            "data": {
+                "target_id": "llama-2-7b",
+                "training_options": {"learning_rate": 0.02},
+            },
+        },
+    }
+}
 
 
 async def validate_project_exists(repository: EntityRepository, workspace: str, project: str | None) -> None:
@@ -197,7 +222,7 @@ async def _invalidate_role_binding_cache_if_present(
 async def create_entity(
     workspace: str,
     entity_type: str,
-    entity: EntityCreateInput,
+    entity: Annotated[EntityCreateInput, Body(openapi_examples=_ENTITY_CREATE_OPENAPI_EXAMPLES)],
     repository: EntityRepository,
     workspace_repository: WorkspaceRepository,
     auth_client: AuthClientDep,
@@ -343,15 +368,15 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
-    accessible_workspaces = await get_accessible_workspaces(repository)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
+        accessible_workspaces = await get_accessible_workspaces(repository)
         # Build combined filter for workspace access and user's filter
         query_workspace = ALL_WORKSPACES
         effective_filter = add_workspace_filtering(accessible_workspaces, filter, field="workspace")
     else:
-        raise_if_workspace_inaccessible(
-            accessible_workspaces,
+        accessible_workspaces = await require_workspace_access(
+            repository,
             workspace,
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
@@ -361,15 +386,18 @@ async def list_entities(
         query_workspace = workspace
         effective_filter = filter
 
-    entities, total = await repository.list_entities(
-        workspace=query_workspace,
-        entity_type=entity_type,
-        page=page,
-        page_size=page_size,
-        sort=sort,
-        filter_op=effective_filter,
-        relationship_child_workspaces=accessible_workspaces,
-    )
+    try:
+        entities, total = await repository.list_entities(
+            workspace=query_workspace,
+            entity_type=entity_type,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+            filter_op=effective_filter,
+            relationship_child_workspaces=accessible_workspaces,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     group_counts = None
     if count_by is not None:
         try:
@@ -466,7 +494,7 @@ async def update_entity_by_name(
     workspace: str,
     entity_type: str,
     name: str,
-    entity_data: EntityUpdate,
+    entity_data: Annotated[EntityUpdate, Body(openapi_examples=_ENTITY_UPDATE_OPENAPI_EXAMPLES)],
     repository: EntityRepository,
     workspace_repository: WorkspaceRepository,
     auth_client: AuthClientDep,

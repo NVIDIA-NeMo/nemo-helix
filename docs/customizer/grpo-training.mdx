@@ -139,12 +139,15 @@ resources_servers/example_single_tool_call/
   app.py
   configs/example_single_tool_call.yaml
   requirements.txt
+responses_api_models/vllm_model/
+  configs/policy_model.yaml
 nemo-environment.yaml
 ```
 
 ```yaml
 format: native-v1
 config_paths:
+  - responses_api_models/vllm_model/configs/policy_model.yaml
   - resources_servers/example_single_tool_call/configs/example_single_tool_call.yaml
 metadata:
   name: example-single-tool-call

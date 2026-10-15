@@ -1,0 +1,188 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Evaluation Metrics"
+description: ""
+---
+<a id="eval-metrics-index"></a>
+
+Metrics define how to score the outputs of your models, agents, or pipelines.
+
+## What is a metric?
+
+A metric is a scoring definition that evaluates model or agent outputs. In the Evals plugin SDK, metrics are inline Python objects passed directly to `evaluator.submit(...)`.
+
+- **Inputs**: For custom metrics, inputs define scoring logic composed of dataset fields and model outputs; for judge-based custom metrics, this also includes judge-model inputs (for example, judge prompts/rubrics and configuration).
+- **Outputs**: Row-level scores and aggregate statistics.
+- **Execution**: Metric objects run with `dataset`, optional runtime configuration, and an optional model or agent target.
+
+<Note>
+
+Terminology on this page:
+
+</Note>
+    - **Metric definition**: The reusable scoring configuration.
+    - **Metric type**: The metric family (for example exact-match, BLEU, LLM-as-a-judge).
+    - **Metric score**: The numeric or rubric output produced at evaluation time.
+## The Evaluation Workflow
+
+```text
+[1] Choose and configure a metric object
+ |
+ v
+[2] Select a dataset and execution mode
+ |
+ v
+[3] Create and run an evaluation job
+ |
+ v
+[4] Review row-level and aggregate scores
+```
+
+## Quick Start
+
+Minimal sync evaluation with a built-in metric:
+
+```python
+from nemo_evals.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+from nhx_evals_sdk import ExactMatchMetric
+
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
+
+metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
+
+job = evaluator.submit(
+    metric=metric,
+    dataset=[
+        {"expected": "Paris", "output": "Paris"},
+        {"expected": "Berlin", "output": "Munich"},
+    ],
+)
+job.wait_until_done()
+result = job.get_result()
+
+print(result.aggregate_scores)
+```
+
+## Execution Modes
+
+Metrics can be executed in two modes:
+
+| Mode | Use Case | Response |
+|------|----------|----------|
+| **Live Evaluation** | Rapid prototyping, developing metrics, testing configurations. | Immediate (synchronous) |
+| **Job Evaluation** | Production workloads, full datasets, durability, and persistence | Async (poll for completion) |
+
+### Online Job Targets: Model or Agent
+
+Online evaluation jobs can target either a **model** (an OpenAI-compatible chat completions endpoint) or an **agent** (any HTTP endpoint, including agentic systems with tool use and multi-step reasoning). Provide one or the other — the platform routes your request to the correct job type automatically.
+
+| Target | When to use |
+|--------|-------------|
+| **Model** | Standalone LLM endpoints using a standard chat completions API. |
+| **Agent** | Agentic systems, NeMo Agent Toolkit workflows, or custom HTTP endpoints with non-standard response formats. |
+
+See [Model Configuration](/documentation/evaluate-models/metrics/model-configuration) and [Agent Configuration](/documentation/evaluate-models/metrics/agent-configuration) for setup details.
+
+## Built-in vs. Custom Metrics
+
+- **Built-in metrics**: Ready-to-use metrics provided by NeMo Helix (for example `exact-match`, `bleu`, `rouge`).
+- **Custom metrics**: Metrics you define for domain-specific evaluation needs.
+
+To configure inline metric objects, see [Manage Metrics](/documentation/evaluate-models/metrics/manage-metrics).
+For custom metric creation guides, start with [Similarity Metrics](/documentation/evaluate-models/metrics/similarity-metrics), [LLM-as-a-Judge](/documentation/evaluate-models/metrics/llm-as-a-judge), or [Bring Your Own Metric](/documentation/evaluate-models/metrics/bring-your-own-metric).
+
+## Datasets
+
+Evaluation jobs need dataset input. You can provide data in two ways:
+
+| Dataset Source | Description | Best For |
+|------|-------------|----------|
+| **DatasetRows** | Inline rows sent directly in the request | Quick testing and live evaluation |
+| **FilesetRef** | Reference to a persisted [fileset](/documentation/get-started/core-concepts/manage-files) (`workspace/fileset-name`) | Production jobs and reusable datasets |
+
+Example of providing a `FilesetRef` to reference specific files or globs:
+
+```python
+# Include all files in subdirectory
+dataset = "my-workspace/my-dataset#subdir/path"
+
+# Single file
+dataset = "my-workspace/my-dataset#file.jsonl"
+
+# Single file in a subdirectory
+dataset = "my-workspace/my-dataset#subdir/path/file.jsonl"
+
+# Glob match files
+dataset = "my-workspace/my-dataset#*.jsonl"
+
+# Glob match files in subdirectory
+dataset = "my-workspace/my-dataset#subdir/path/*.jsonl"
+```
+
+## Available Metric Types
+
+Use the metric-type pages below to create and configure custom metrics.
+
+<Cards>
+
+<Card title="LLM-as-a-Judge" href="/documentation/evaluate-models/metrics/llm-as-a-judge">
+
+Use another LLM to evaluate outputs with flexible scoring criteria. Define custom rubrics or numerical ranges.
+
+<small><span class="md-tag">custom-scoring</span> <span class="md-tag">rubrics</span></small>
+
+</Card>
+<Card title="Agentic Metrics" href="/documentation/evaluate-models/metrics/agentic-metrics">
+
+Evaluate agent workflows including tool calling accuracy, goal completion, and topic adherence.
+
+<small><span class="md-tag">RAGAS</span> <span class="md-tag">tool-calling</span></small>
+
+</Card>
+<Card title="RAG Metrics" href="/documentation/evaluate-models/metrics/rag-metrics">
+
+Evaluate RAG pipelines for retrieval quality and answer generation using RAGAS metrics.
+
+<small><span class="md-tag">faithfulness</span> <span class="md-tag">relevancy</span></small>
+
+</Card>
+<Card title="Similarity Metrics" href="/documentation/evaluate-models/metrics/similarity-metrics">
+
+Create metrics for text similarity, exact matching, and standard NLP evaluations using Jinja2 templating.
+
+<small><span class="md-tag">F1</span> <span class="md-tag">ROUGE</span> <span class="md-tag">BLEU</span></small>
+
+</Card>
+<Card title="Bring Your Own Metric" href="/documentation/evaluate-models/metrics/bring-your-own-metric">
+
+Integrate custom evaluation endpoints for domain-specific scoring.
+
+<small><span class="md-tag">remote</span> <span class="md-tag">custom</span></small>
+
+</Card>
+<Card title="Agent Configuration" href="/documentation/evaluate-models/metrics/agent-configuration">
+
+Configure agent endpoints (generic or NeMo Agent Toolkit) as targets for online evaluation jobs.
+
+<small><span class="md-tag">agent</span> <span class="md-tag">NAT</span></small>
+
+</Card>
+
+</Cards>
+
+## Understanding Scores
+
+Scores are the metric outputs produced during evaluation:
+
+| Score Type | Meaning | Typical Use |
+|------|---------|-------------|
+| **Row scores** | Score(s) for each dataset row | Debugging failures and error analysis |
+| **Aggregate scores** | Statistics computed over all rows | Tracking overall quality and regressions |
+
+## Manage Metric Definitions
+
+Create inline metric objects that can be reused from Python helpers or modules. See [Manage Metrics](/documentation/evaluate-models/metrics/manage-metrics) for SDK patterns.

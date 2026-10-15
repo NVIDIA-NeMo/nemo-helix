@@ -66,15 +66,20 @@ client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 spec = AutomodelJobInput(
-    model="default/qwen3-1.7b",
+    model="default/nemotron-3-5-lightning-30b-a3b",
     dataset={"training": "default/my-dataset"},
-    training={"training_type": "sft", "finetuning_type": "lora"},
+    training={
+        "training_type": "sft",
+        "finetuning_type": "lora",
+        "lora": {"exclude_modules": ["*.out_proj"]},
+    },
     schedule={"epochs": 3},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
     integrations={
         "wandb": {
             "project": "my-finetuning-project",
             "entity": "my-team",
-            "tags": ["fine-tuning", "qwen"],
+            "tags": ["fine-tuning", "nemotron"],
             "api_key_secret": "my-wandb-key",
         }
     },
@@ -107,13 +112,18 @@ Add an `mlflow` block to the same `integrations` object to request MLflow tracki
 
 ```python
 spec = AutomodelJobInput(
-    model="default/qwen3-1.7b",
+    model="default/nemotron-3-5-lightning-30b-a3b",
     dataset={"training": "default/my-dataset"},
-    training={"training_type": "sft", "finetuning_type": "lora"},
+    training={
+        "training_type": "sft",
+        "finetuning_type": "lora",
+        "lora": {"exclude_modules": ["*.out_proj"]},
+    },
     schedule={"epochs": 3},
+    parallelism={"num_gpus_per_node": 4, "expert_parallel_size": 4},
     integrations={
         "mlflow": {
-            "experiment_name": "qwen-finetuning",
+            "experiment_name": "nemotron-finetuning",
             "tracking_uri": "http://mlflow.example.com:5000",
         }
     },

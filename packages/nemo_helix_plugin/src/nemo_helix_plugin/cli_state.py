@@ -35,8 +35,12 @@ Example::
 
 import logging
 import os
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from typing import Any, Protocol, TypeVar, cast
 
+import click
+import httpx
 import typer
 from nemo_helix_plugin.cli_options import ListOutputFormat, TimestampFormat
 from nemo_helix_plugin.cli_output import is_tty
@@ -47,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 TypedClientT = TypeVar("TypedClientT", bound=NemoClient)
 AsyncTypedClientT = TypeVar("AsyncTypedClientT", bound=AsyncNemoClient)
+DEFAULT_BASE_URL = "http://localhost:8080"
 
 
 class CLIState(Protocol):
@@ -57,13 +62,19 @@ class CLIState(Protocol):
     from their own flags or config.
     """
 
-    def get_client(self, timeout: float = ...) -> NemoClient: ...
+    def get_client(self, timeout: float | httpx.Timeout | None = ...) -> NemoClient: ...
 
-    def get_async_client(self, timeout: float = ...) -> AsyncNemoClient: ...
+    def get_async_client(self, timeout: float | httpx.Timeout | None = ...) -> AsyncNemoClient: ...
 
-    def typed_client(self, client_cls: type[TypedClientT], timeout: float = ...) -> TypedClientT: ...
+    def typed_client(
+        self, client_cls: type[TypedClientT], timeout: float | httpx.Timeout | None = ...
+    ) -> TypedClientT: ...
 
-    def async_typed_client(self, client_cls: type[AsyncTypedClientT], timeout: float = ...) -> AsyncTypedClientT: ...
+    def async_typed_client(
+        self,
+        client_cls: type[AsyncTypedClientT],
+        timeout: float | httpx.Timeout | None = ...,
+    ) -> AsyncTypedClientT: ...
 
     def get_workspace(self) -> str | None: ...
 
@@ -80,10 +91,6 @@ class CLIState(Protocol):
 
     def get_no_truncate(self, override: bool | None = None) -> bool: ...
 
-    def get_agent_hints(self, command_path: str) -> list[str]:
-        """Hints printed after a command in agent mode; called by :func:`~nemo_helix_plugin.cli_warnings.collect_warnings`."""
-        ...
-
 
 def cli_state(typer_ctx: typer.Context) -> CLIState:
     """Return the ``nemo`` CLI state for *typer_ctx*.
@@ -98,18 +105,80 @@ def cli_state(typer_ctx: typer.Context) -> CLIState:
     return cast(CLIState, state)
 
 
+def current_cli_state() -> CLIState | None:
+    """Return the ambient ``nemo`` CLI state from Click's current context."""
+    ctx = click.get_current_context(silent=True)
+    if ctx is None or ctx.obj is None:
+        return None
+    return cast(CLIState, ctx.obj)
+
+
+def base_url_from_context() -> str | None:
+    """Return the base URL configured in the ambient CLI context, if any."""
+    state = current_cli_state()
+    if state is None:
+        return None
+    try:
+        return state.get_base_url(default=None)
+    except Exception:
+        logger.debug("Failed to resolve base URL from CLI context", exc_info=True)
+        return None
+
+
+def resolve_base_url() -> str:
+    """Resolve and announce the platform base URL for plugin commands.
+
+    The shared CLI context owns the real resolution order (global
+    ``nemo --base-url``, environment, config, defaults). The target is echoed
+    to stderr so command stdout remains parseable.
+    """
+    resolved = base_url_from_context() or DEFAULT_BASE_URL
+    click.echo(f"Targeting {resolved}", err=True)
+    return resolved
+
+
+def shared_cli_client(
+    client_cls: type[TypedClientT],
+    *,
+    timeout: float | httpx.Timeout | None = None,
+) -> TypedClientT:
+    """Return *client_cls* built on the ambient CLI state's shared platform client."""
+    state = current_cli_state()
+    if state is None:
+        raise RuntimeError("No NeMo Helix CLI state on this context; run the command through `nemo`.")
+    return state.typed_client(client_cls, timeout=timeout)
+
+
+@contextmanager
+def shared_cli_client_context(
+    client_cls: type[TypedClientT],
+    *,
+    timeout: float | httpx.Timeout | None = None,
+) -> Generator[TypedClientT, None, None]:
+    """Yield a CLI-owned shared client without taking ownership of its transport."""
+    yield shared_cli_client(client_cls, timeout=timeout)
+
+
+def resolve_context_headers(
+    headers: Mapping[str, str] | None = None,
+    *,
+    url: str | None = None,
+) -> dict[str, str] | None:
+    """Resolve per-request headers from the ambient CLI state's shared client."""
+    return shared_cli_client(NemoClient).request_headers(headers, url=url)
+
+
 def resolve_output_format(typer_ctx: typer.Context, explicit: ListOutputFormat | None = None) -> ListOutputFormat:
     """Resolve the output format a command should render with.
 
     Resolution order, the same for core and plugin commands:
 
     1. The command's ``--output-format`` flag.
-    2. Agent mode forces ``markdown``.
-    3. The global ``nemo --output-format`` flag, then the context preference.
-    4. A ``table`` result becomes ``json`` when stdout is not a TTY, so piped
+    2. The global ``nemo --output-format`` flag, then the context preference.
+    3. A ``table`` result becomes ``json`` when stdout is not a TTY, so piped
        output is parseable.
 
-    Steps 2-4 belong to the CLI state. Without one (a plugin app driven outside
+    Steps 2-3 belong to the CLI state. Without one (a plugin app driven outside
     ``nemo``), the fallback is ``table`` on a TTY and ``json`` otherwise.
     """
     if explicit is not None:

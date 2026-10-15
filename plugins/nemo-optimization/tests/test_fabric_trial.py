@@ -3,23 +3,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
-from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
-from nemo_evaluator_sdk.enums import ModelFormat
-from nemo_evaluator_sdk.metrics.protocol import MetricOutput
-from nemo_evaluator_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
-from nemo_evaluator_sdk.values.evidence import (
-    EVIDENCE_FORMAT_ATIF,
-    EVIDENCE_TRACE,
-    CandidateEvidence,
-    EvidenceDescriptor,
-)
+from nemo_optimization.backends.optuna.study_driver import StudyDriverError, run_numeric_study
 from nemo_optimization.candidate import CandidateEvaluationError, CandidateEvaluationResult
 from nemo_optimization.fabric_evaluator import (
     FabricCandidateEvaluator,
@@ -28,6 +19,25 @@ from nemo_optimization.fabric_evaluator import (
     build_agent_eval_tasks,
     reduce_agent_eval_scores,
 )
+from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
+from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
+from nhx_evals_sdk.agent_eval.scores import (
+    AgentEvalDiagnostic,
+    AgentEvalDiagnosticSeverity,
+    AgentEvalScoreStatus,
+    AgentEvalTaskScore,
+)
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
+from nhx_evals_sdk.enums import ModelFormat
+from nhx_evals_sdk.metrics.protocol import MetricOutput
+from nhx_evals_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluatorMetric
+from nhx_evals_sdk.values.evidence import (
+    EVIDENCE_FORMAT_ATIF,
+    EVIDENCE_TRACE,
+    CandidateEvidence,
+    EvidenceDescriptor,
+)
 
 
 def test_bounded_diagnostics_truncates_large_values() -> None:
@@ -35,6 +45,42 @@ def test_bounded_diagnostics_truncates_large_values() -> None:
 
     assert len(rendered) == 1_000
     assert rendered.endswith("... [truncated]")
+
+
+def test_timeout_survives_real_evaluator_and_study(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def timed_out_tasks(
+        self: FabricAgentRuntime, tasks: Sequence[AgentEvalTask], config: AgentEvalRunConfig | None = None
+    ) -> list[AgentEvalTrial]:
+        del self, config
+        try:
+            await asyncio.wait_for(asyncio.sleep(60), timeout=0.01)
+        except TimeoutError as exc:
+            return [
+                AgentEvalTrial(
+                    id=f"{task.id}:fabric",
+                    task_id=task.id,
+                    status=AgentEvalTrialStatus.FAILED,
+                    metadata={"error_type": type(exc).__name__, "error": str(exc)},
+                )
+                for task in tasks
+            ]
+        raise AssertionError("Expected an actual asyncio timeout")
+
+    monkeypatch.setattr(FabricAgentRuntime, "run_tasks", timed_out_tasks)
+    dataset = tmp_path / "rows.json"
+    dataset.write_text('[{"id": "timeout-row", "question": "q?"}]', encoding="utf-8")
+    payload = _payload(dataset)
+    payload["eval"]["evaluators"] = {"tools": {"_type": "tool_call_count", "tool_name": "test"}}
+    evaluator = FabricCandidateEvaluator(
+        payload=payload, metric_names=["average_score"], output_dir=tmp_path / "out", experiment_id="timeout-test"
+    )
+
+    with pytest.raises(StudyDriverError, match="TimeoutError.*timeout_s=30") as exc_info:
+        run_numeric_study(payload, tmp_path / "out", evaluator, seed=0)
+
+    assert exc_info.value.trial_count == 1
+    bundle = tmp_path / "out" / "agent_eval" / "trial-000" / "rep-000"
+    assert (bundle / "run.json").is_file()
 
 
 def _payload(dataset: Path) -> dict[str, Any]:
@@ -249,7 +295,7 @@ def test_reduce_agent_eval_scores_averages_requested_output() -> None:
     assert reduce_agent_eval_scores(scores, ["average_score"]) == {"average_score": 0.5}
 
 
-def test_reduce_agent_eval_scores_skips_failed_task_scores() -> None:
+def test_reduce_agent_eval_scores_skips_failed_task_scores(caplog: pytest.LogCaptureFixture) -> None:
     """One failed dataset row must not fail the Optuna trial reduction."""
     scores = [
         AgentEvalTaskScore(
@@ -269,11 +315,14 @@ def test_reduce_agent_eval_scores_skips_failed_task_scores() -> None:
             metric_type="tunable-rag-evaluator",
             status=AgentEvalScoreStatus.FAILED,
             outputs=[],
-            diagnostics=[],
+            diagnostics=[
+                AgentEvalDiagnostic(severity=AgentEvalDiagnosticSeverity.ERROR, message="judge request timed out")
+            ],
         ),
     ]
 
     assert reduce_agent_eval_scores(scores, ["average_score"]) == {"average_score": 1.0}
+    assert "judge request timed out" in caplog.text
 
 
 def test_reduce_agent_eval_scores_rejects_when_all_failed() -> None:
@@ -286,9 +335,12 @@ def test_reduce_agent_eval_scores_rejects_when_all_failed() -> None:
             metric_type="tunable-rag-evaluator",
             status=AgentEvalScoreStatus.FAILED,
             outputs=[],
+            diagnostics=[
+                AgentEvalDiagnostic(severity=AgentEvalDiagnosticSeverity.ERROR, message="judge request timed out")
+            ],
         ),
     ]
-    with pytest.raises(CandidateEvaluationError, match="did not produce"):
+    with pytest.raises(CandidateEvaluationError, match="judge request timed out"):
         reduce_agent_eval_scores(scores, ["average_score"])
 
 
@@ -351,7 +403,10 @@ def test_reasoning_for_metric_logs_and_skips_invalid_metric_values(caplog: pytes
     assert "task 'invalid'" in caplog.text
 
 
-def test_fabric_trial_evaluator_invokes_agent_evaluator(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("runtime_failed", [False, True])
+def test_fabric_trial_evaluator_invokes_agent_evaluator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runtime_failed: bool, caplog: pytest.LogCaptureFixture
+) -> None:
     dataset = tmp_path / "rows.json"
     dataset.write_text('[{"id": "1", "question": "q?", "answer": "a"}]\n', encoding="utf-8")
     captured: dict[str, Any] = {}
@@ -392,6 +447,11 @@ def test_fabric_trial_evaluator_invokes_agent_evaluator(monkeypatch: pytest.Monk
                     MetricOutput(name="reasoning", value="The answer is correct."),
                 ],
             )
+            if runtime_failed:
+                trial.status = AgentEvalTrialStatus.FAILED
+                trial.metadata = {"error_type": "TimeoutError", "error": ""}
+                score.status = AgentEvalScoreStatus.FAILED
+                score.outputs = []
             return AgentEvalResult(
                 run_id="r",
                 tasks=list(tasks),
@@ -413,12 +473,21 @@ def test_fabric_trial_evaluator_invokes_agent_evaluator(monkeypatch: pytest.Monk
         experiment_id="exp-test",
     )
 
-    result = evaluator.evaluate(
-        trial_number=7,
-        suggestions={"models.default.temperature": 0.2},
-        trial_overlay={"metadata": {"name": "trial-007"}},
-        rep=0,
-    )
+    def evaluate() -> CandidateEvaluationResult:
+        return evaluator.evaluate(
+            trial_number=7,
+            suggestions={"models.default.temperature": 0.2},
+            trial_overlay={"metadata": {"name": "trial-007"}},
+            rep=0,
+        )
+
+    if runtime_failed:
+        with pytest.raises(CandidateEvaluationError, match="TimeoutError.*timeout_s=30"):
+            evaluate()
+        assert "TimeoutError" in caplog.text
+        assert (tmp_path / "out" / "agent_eval" / "trial-007" / "rep-000" / "run.json").is_file()
+        return
+    result = evaluate()
 
     assert isinstance(result, CandidateEvaluationResult)
     assert result.aggregate_metrics == {"average_score": 0.9}
@@ -515,8 +584,8 @@ def test_resolve_mcp_server_paths_absolutizes_only_bundle_files(tmp_path: Path) 
 
 
 def test_build_metrics_accepts_tool_argument_matches_input_and_rejects_bad_normalize() -> None:
-    from nemo_evaluator_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric
     from nemo_optimization.fabric_evaluator import _build_metrics
+    from nhx_evals_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric
 
     (metric,) = _build_metrics(
         {},

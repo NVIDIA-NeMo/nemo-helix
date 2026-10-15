@@ -8,7 +8,7 @@ import {
   CUSTOMIZER_ENABLED,
   DATASETS_ENABLED,
   DEPLOYMENTS_ENABLED,
-  EVALUATOR_ENABLED,
+  EVALS_ENABLED,
   EXPERIMENT_ENABLED,
   INTAKE_ENABLED,
   OPTIMIZER_ENABLED,
@@ -23,14 +23,17 @@ import {
   getOptimizerRoute,
   getWorkspaceNewDeploymentRoute,
 } from '@studio/routes/utils';
+import { CreateSampleAgentModal } from '@studio/routes/WorkspaceDashboardHomeRoute/CreateSampleAgentModal';
 import { getQuickstartDismissedKey } from '@studio/routes/WorkspaceDashboardHomeRoute/quickstartDismissedStorage';
+import { useHasSampleWorkspace } from '@studio/routes/WorkspaceDashboardHomeRoute/useHasSampleWorkspace';
+import { isSampleWorkspace } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
 import {
   DashboardPanel,
   type DashboardPanelAction,
 } from '@studio/routes/WorkspaceDashboardRoute/DashboardPanel';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { Upload, X } from 'lucide-react';
-import type { FC, ReactNode } from 'react';
+import { Sparkles, Upload, X } from 'lucide-react';
+import { useState, type FC, type ReactNode } from 'react';
 
 export interface QuickstartSectionProps {
   workspace: string;
@@ -45,7 +48,7 @@ export interface QuickstartSectionProps {
    * how the section degrades as individual panels/actions are disabled.
    */
   agentsEnabled?: boolean;
-  evaluatorEnabled?: boolean;
+  evalsEnabled?: boolean;
   optimizerEnabled?: boolean;
   intakeEnabled?: boolean;
   experimentEnabled?: boolean;
@@ -71,7 +74,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
   workspace,
   onDismiss,
   agentsEnabled = AGENTS_ENABLED,
-  evaluatorEnabled = EVALUATOR_ENABLED,
+  evalsEnabled = EVALS_ENABLED,
   optimizerEnabled = OPTIMIZER_ENABLED,
   intakeEnabled = INTAKE_ENABLED,
   experimentEnabled = EXPERIMENT_ENABLED,
@@ -80,6 +83,11 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
   deploymentsEnabled = DEPLOYMENTS_ENABLED,
 }) => {
   const [dismissed, setDismissed] = useLocalStorage<boolean>(getQuickstartDismissedKey(workspace));
+  const [sampleModalOpen, setSampleModalOpen] = useState(false);
+  // Only offer a sample outside sample workspaces, once we know none is visible.
+  const sampleEligible = agentsEnabled && !isSampleWorkspace(workspace);
+  const hasSampleWorkspace = useHasSampleWorkspace(sampleEligible && !dismissed);
+  const canCreateSample = sampleEligible && hasSampleWorkspace === false;
 
   if (dismissed) {
     return null;
@@ -101,7 +109,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
           href: getAgentsListRoute(workspace),
         },
         {
-          enabled: evaluatorEnabled,
+          enabled: evalsEnabled,
           icon: <ENTITY_ICONS.evaluationResults className="size-4" />,
           label: 'Evaluate Performance',
           href: getEvaluationResultsRoute(workspace),
@@ -196,15 +204,23 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
       <Stack gap="density-lg">
         <Flex align="center" justify="between" className="w-full">
           <Text kind="title/md">Quickstart</Text>
-          <Button
-            kind="tertiary"
-            color="neutral"
-            size="small"
-            aria-label="Dismiss Quickstart"
-            onClick={handleDismiss}
-          >
-            <X className="size-4" />
-          </Button>
+          <Flex align="center" gap="density-sm">
+            {canCreateSample && (
+              <Button kind="secondary" size="small" onClick={() => setSampleModalOpen(true)}>
+                <Sparkles className="size-4" />
+                Try a Sample Agent
+              </Button>
+            )}
+            <Button
+              kind="tertiary"
+              color="neutral"
+              size="small"
+              aria-label="Dismiss Quickstart"
+              onClick={handleDismiss}
+            >
+              <X className="size-4" />
+            </Button>
+          </Flex>
         </Flex>
         <Text kind="body/regular/sm" className="text-secondary">
           Choose a workflow to connect an agent, import traces, or customize models—then follow the
@@ -222,6 +238,15 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
           />
         ))}
       </Grid>
+      {/* Gated on `sampleModalOpen` alone: the new sample workspace can appear in the list mid-stream,
+          and unmounting would abort setup. Mounting only while open also resets its state. */}
+      {sampleModalOpen && (
+        <CreateSampleAgentModal
+          open
+          onClose={() => setSampleModalOpen(false)}
+          workspace={workspace}
+        />
+      )}
     </Stack>
   );
 };

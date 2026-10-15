@@ -178,7 +178,7 @@ class TestWaitForModelsTelemetry:
 
         with (
             patch(f"{SETUP_MOD}._pause"),
-            patch(f"{SETUP_MOD}.time.monotonic", side_effect=[0, 0, 0, 1]),
+            patch(f"{SETUP_MOD}.monotonic", side_effect=[0, 0, 0, 1]),
         ):
             result = _wait_for_models(client, "nvidia-build", "default", round_seconds=30, max_rounds=1)
 
@@ -197,7 +197,7 @@ class TestWaitForModelsTelemetry:
 
         with (
             patch(f"{SETUP_MOD}._pause"),
-            patch(f"{SETUP_MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 100]),
+            patch(f"{SETUP_MOD}.monotonic", side_effect=[0, 0, 1, 2, 100]),
         ):
             result = _wait_for_models(client, "nvidia-build", "default", round_seconds=5, max_rounds=1)
 

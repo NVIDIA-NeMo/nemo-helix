@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { watch } from "node:fs";
 import { utimes } from "node:fs/promises";
 import { constants } from "node:os";
@@ -17,13 +17,10 @@ const helmDir = path.join(repoRoot, "k8s", "helm");
 const reloadTrigger = path.join(fernDir, "docs.yml");
 const reloadDebounceMs = 150;
 const ignoredPrefix = "fern/";
-const openapiInputPrefix = "fern/openapi/";
-const publicOpenapiPath = "fern/openapi/openapi.public.yaml";
-const filterOpenapiScriptPath = "fern/scripts/filter-public-openapi.mjs";
+const openapiInputPath = "fern/openapi/openapi.yaml";
 const helmWatchFiles = new Set(["values.yaml", "README.md"]);
 
 let debounceTimer = null;
-let pendingReloadRequiresOpenapi = false;
 let shuttingDown = false;
 
 function log(message) {
@@ -44,24 +41,14 @@ function clearPendingReload() {
   debounceTimer = null;
 }
 
-function scheduleReload(relativePath, requiresOpenapiPrepare = false) {
+function scheduleReload(relativePath) {
   clearPendingReload();
-  pendingReloadRequiresOpenapi = pendingReloadRequiresOpenapi || requiresOpenapiPrepare;
 
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
-    const shouldRunOpenapiPrepare = pendingReloadRequiresOpenapi;
-    pendingReloadRequiresOpenapi = false;
-    Promise.resolve()
-      .then(() => {
-        if (shouldRunOpenapiPrepare) {
-          prepareOpenapi();
-        }
-      })
-      .then(() => touchReloadTrigger(relativePath))
-      .catch((error) => {
-        log(`failed to trigger reload: ${error.message}`);
-      });
+    touchReloadTrigger(relativePath).catch((error) => {
+      log(`failed to trigger reload: ${error.message}`);
+    });
   }, reloadDebounceMs);
 }
 
@@ -69,29 +56,8 @@ function normalizeWatchedPath(relativePath) {
   return path.posix.normalize(relativePath.split(path.sep).join("/"));
 }
 
-function shouldPrepareOpenapi(normalizedPath) {
-  return (
-    normalizedPath === filterOpenapiScriptPath ||
-    (normalizedPath.startsWith(openapiInputPrefix) && normalizedPath !== publicOpenapiPath)
-  );
-}
-
 function shouldIgnore(normalizedPath) {
-  return normalizedPath.startsWith(ignoredPrefix) && !shouldPrepareOpenapi(normalizedPath);
-}
-
-function prepareOpenapi() {
-  const result = spawnSync("node", ["scripts/filter-public-openapi.mjs"], {
-    cwd: fernDir,
-    stdio: "inherit",
-  });
-
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
-  }
+  return normalizedPath.startsWith(ignoredPrefix) && normalizedPath !== openapiInputPath;
 }
 
 function prepareHelm() {
@@ -99,7 +65,6 @@ function prepareHelm() {
 }
 
 function spawnFernDev() {
-  prepareOpenapi();
   prepareHelm();
   return spawn("npx", ["-y", "fern-api@latest", "docs", "dev"], {
     cwd: fernDir,
@@ -118,7 +83,7 @@ const watcher = watch(
     if (shouldIgnore(normalizedPath)) {
       return;
     }
-    scheduleReload(relativePath, shouldPrepareOpenapi(normalizedPath));
+    scheduleReload(relativePath);
   },
 );
 

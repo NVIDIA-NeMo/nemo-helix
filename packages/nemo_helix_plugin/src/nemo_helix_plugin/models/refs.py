@@ -3,9 +3,8 @@
 
 """Pure Models route-reference helpers.
 
-These helpers mirror the convenience functions historically exported from the
-Stainless-backed ``models`` package. They live in the plugin client package so
-typed clients can build route references without importing generated resources.
+They live in the plugin client package so typed clients can build route
+references without importing server modules.
 """
 
 from __future__ import annotations

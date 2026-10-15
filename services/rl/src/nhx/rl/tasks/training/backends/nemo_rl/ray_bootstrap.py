@@ -25,10 +25,12 @@ import sys
 import threading
 import time
 from collections import deque
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
 
+from nhx.customization_common.training.progress import JobsServiceProgressReporter
 from nhx.rl.tasks.training.errors.exceptions import format_exception_string
 from nhx.rl.tasks.training.errors.parser import (
     MAX_OUTPUT_LINES,
@@ -188,6 +190,8 @@ class RayClusterBootstrap:
     """
 
     # Internal state
+    # Driver wall clock. None when the cluster is started without a driver.
+    progress: JobsServiceProgressReporter | None = field(default=None, repr=False)
     _stop_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _driver_output: deque[str] = field(default_factory=lambda: deque(maxlen=MAX_OUTPUT_LINES), repr=False)
     _driver_process: subprocess.Popen | None = field(default=None, repr=False)
@@ -661,38 +665,41 @@ class RayClusterBootstrap:
         # Reset the output buffer for this driver run
         self._driver_output.clear()
 
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
-        self._driver_process = process
+        # After workers have connected.
+        clock = self.progress.training_wall_clock() if self.progress is not None else nullcontext()
+        with clock:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+            self._driver_process = process
 
-        reader_thread = threading.Thread(
-            target=read_subprocess_output,
-            args=(process, self._driver_output),
-            daemon=True,
-        )
-        reader_thread.start()
+            reader_thread = threading.Thread(
+                target=read_subprocess_output,
+                args=(process, self._driver_output),
+                daemon=True,
+            )
+            reader_thread.start()
 
-        try:
-            process.wait()
-        except BaseException:
-            # If interrupted (e.g. SystemExit from signal handler), terminate the
-            # driver process so it doesn't become orphaned.
-            self.terminate_driver()
-            raise
-        finally:
-            self._driver_process = None
+            try:
+                process.wait()
+            except BaseException:
+                # If interrupted (e.g. SystemExit from signal handler), terminate the
+                # driver process so it doesn't become orphaned.
+                self.terminate_driver()
+                raise
+            finally:
+                self._driver_process = None
 
-        # Wait for reader thread to finish capturing remaining output
-        if reader_thread.is_alive():
-            reader_thread.join(timeout=5)
+            # Wait for reader thread to finish capturing remaining output
+            if reader_thread.is_alive():
+                reader_thread.join(timeout=5)
 
-        return process.returncode
+            return process.returncode
 
     def _monitor_for_termination(self) -> int:
         """Monitor for ENDED file and handle worker termination.

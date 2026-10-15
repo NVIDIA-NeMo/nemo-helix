@@ -11,7 +11,11 @@ from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.entities import ALL_WORKSPACES, ListResponse
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
-from nhx.core.models.api.service.model_entity_service import _adapter_to_adapter_schema, get_fileset_and_files_list
+from nhx.core.models.api.service.model_entity_service import (
+    _adapter_to_adapter_schema,
+    expand_bare_fileset_equality,
+    get_fileset_and_files_list,
+)
 from nhx.core.models.constants import parse_model_ref
 from nhx.core.models.entities import Adapter, Model
 from nhx.core.models.schemas import Adapter as AdapterSchema
@@ -271,7 +275,7 @@ class AdapterEntityService:
             page=page,
             page_size=page_size,
             sort=sort,
-            filter_operation=parsed_filter.operation,
+            filter_operation=expand_bare_fileset_equality(parsed_filter.operation, adapter_workspace),
         )
         parent_ids = {a.parent for a in result.data if a.parent}
         models: list[Model] = await self._fetch_all_entities(

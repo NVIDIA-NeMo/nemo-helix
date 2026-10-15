@@ -323,9 +323,8 @@ class RetryPolicy:
     respect_retry_after_headers: bool = False
 
 
-# The retry contract the generated ``NeMoHelix`` SDK applied by default. Clients
-# that replace a ``NeMoHelix`` use it to keep the same resilience against
-# transient gateway errors.
+# Platform-wide retry contract: retries timeouts, conflicts, rate limits, and all
+# 5xx responses, and honors ``x-should-retry`` and ``Retry-After`` headers.
 PLATFORM_DEFAULT_RETRY_POLICY = RetryPolicy(
     max_retries=2,
     retryable_status_codes=(408, 409, 429),

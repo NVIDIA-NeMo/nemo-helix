@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_insights_plugin.analyst.trace_snapshot import load_trace_snapshot
 
@@ -104,7 +105,21 @@ async def test_loads_all_pages_and_preserves_complete_traces() -> None:
                         "value": page / 10,
                         "created_at": since.isoformat(),
                         "ingested_at": since.isoformat(),
-                    }
+                    },
+                    # A judge that ran but produced no value: carries no `value`, so the snapshot's
+                    # evaluator-result model cannot hold it and the loader must leave it out.
+                    {
+                        "evaluator_result_id": f"failed-{page}",
+                        "span_id": f"{trace_id}-span-1",
+                        "session_id": "session",
+                        "workspace": "test",
+                        "name": "judge",
+                        "data_type": "NUMERIC",
+                        "status": "FAILED",
+                        "comment": "judge endpoint unreachable",
+                        "created_at": since.isoformat(),
+                        "ingested_at": since.isoformat(),
+                    },
                 ],
                 page,
                 3,
@@ -115,7 +130,7 @@ async def test_loads_all_pages_and_preserves_complete_traces() -> None:
         client = AsyncIntakeClient(
             base_url="https://platform.example",
             http_client=http_client,
-            auth="test-token",
+            auth=StaticToken("test-token"),
         )
         snapshot = await load_trace_snapshot(
             client,

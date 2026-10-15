@@ -9,10 +9,7 @@ using the ``method()`` descriptor, following the files/models pattern.
 
 from __future__ import annotations
 
-from functools import cached_property
-
 from nemo_helix_plugin.agents import endpoints
-from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.method import method
 
@@ -63,98 +60,9 @@ class _AgentsMethods:
     download_agent_job_result = method(endpoints.download_agent_job_result)
 
 
-def _execute_job_request(
-    *,
-    spec: JsonObject,
-    name: str | None,
-    description: str | None,
-) -> CreateExecuteJobRequest:
-    payload: dict[str, JsonObject | str] = {"spec": spec}
-    if name is not None:
-        payload["name"] = name
-    if description is not None:
-        payload["description"] = description
-    return CreateExecuteJobRequest.model_validate(payload)
-
-
-class _ExecuteJobsCompat:
-    def __init__(self, client: AgentsClient) -> None:
-        self._client = client
-
-    def create(
-        self,
-        *,
-        spec: JsonObject,
-        name: str | None = None,
-        description: str | None = None,
-        workspace: str | None = None,
-    ) -> JsonObject:
-        return self._client.create_execute_job(
-            workspace=workspace,
-            body=_execute_job_request(spec=spec, name=name, description=description),
-        ).data()
-
-    def get(self, name: str, *, workspace: str | None = None) -> JsonObject:
-        return self._client.get_execute_job(name=name, workspace=workspace).data()
-
-    def list_results(self, name: str, *, workspace: str | None = None) -> JsonObject:
-        return self._client.list_execute_job_results(name=name, workspace=workspace).data()
-
-
-class _AsyncExecuteJobsCompat:
-    def __init__(self, client: AsyncAgentsClient) -> None:
-        self._client = client
-
-    async def create(
-        self,
-        *,
-        spec: JsonObject,
-        name: str | None = None,
-        description: str | None = None,
-        workspace: str | None = None,
-    ) -> JsonObject:
-        response = await self._client.create_execute_job(
-            workspace=workspace,
-            body=_execute_job_request(spec=spec, name=name, description=description),
-        )
-        return response.data()
-
-    async def get(self, name: str, *, workspace: str | None = None) -> JsonObject:
-        return (await self._client.get_execute_job(name=name, workspace=workspace)).data()
-
-    async def list_results(self, name: str, *, workspace: str | None = None) -> JsonObject:
-        return (await self._client.list_execute_job_results(name=name, workspace=workspace)).data()
-
-
-class _JobsCompat:
-    def __init__(self, client: AgentsClient) -> None:
-        self._client = client
-
-    @cached_property
-    def execute(self) -> _ExecuteJobsCompat:
-        return _ExecuteJobsCompat(self._client)
-
-
-class _AsyncJobsCompat:
-    def __init__(self, client: AsyncAgentsClient) -> None:
-        self._client = client
-
-    @cached_property
-    def execute(self) -> _AsyncExecuteJobsCompat:
-        return _AsyncExecuteJobsCompat(self._client)
-
-
 class AgentsClient(_AgentsMethods, NemoClient):
     """Sync client for the Agents service API."""
-
-    @property
-    def jobs(self) -> _JobsCompat:
-        return _JobsCompat(self)
 
 
 class AsyncAgentsClient(_AgentsMethods, AsyncNemoClient):
     """Async client for the Agents service API."""
-
-    @property
-    def jobs(self) -> _AsyncJobsCompat:
-        return _AsyncJobsCompat(self)

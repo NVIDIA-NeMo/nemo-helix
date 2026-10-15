@@ -24,6 +24,7 @@ import httpx
 import pytest
 import yaml
 from _pytest.nodes import Node
+from nhx.testing.docker import remove_intake_clickhouse
 from nhx.testing.e2e import Docker as DockerE2EBackend
 from nhx.testing.e2e.config import deep_merge
 
@@ -92,6 +93,7 @@ class RunningServices:
     docker_container_alias: str | None = None
     docker_container_port: int | None = None
     compose_project_name: str | None = None
+    data_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -348,15 +350,19 @@ class E2EServicesPool:
                 returncode=services.proc.returncode,
                 url=services.url,
             )
-            return
-        logger.info("Terminating nemo services (pid %d)", services.proc.pid)
-        services.proc.terminate()
-        try:
-            services.proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            logger.warning("Process %d did not exit after SIGTERM, sending SIGKILL", services.proc.pid)
-            services.proc.kill()
-            services.proc.wait(timeout=5)
+        else:
+            logger.info("Terminating nemo services (pid %d)", services.proc.pid)
+            services.proc.terminate()
+            try:
+                services.proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.warning("Process %d did not exit after SIGTERM, sending SIGKILL", services.proc.pid)
+                services.proc.kill()
+                services.proc.wait(timeout=5)
+        # Intake keeps its local ClickHouse container across shutdowns, keyed by data dir, and the
+        # data dir lives under this session's tmp dir.
+        if services.data_dir is not None:
+            remove_intake_clickhouse(services.data_dir)
 
     def describe_module_binding(
         self,
@@ -417,6 +423,9 @@ def _docker_compose_generated_config_dir() -> Path:
 def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any]]:
     marker = node.get_closest_marker("e2e_config")
     if marker is None or not marker.args:
+        config_ref = os.environ.get("NHX_E2E_CONFIG_REF")
+        if config_ref:
+            return [config_ref]
         return [
             str(_DEFAULT_E2E_PLATFORM_CONFIG),
             str(_DEFAULT_E2E_DISABLE_DEPLOYMENTS_ORPHAN_CLEANUP),
@@ -433,7 +442,7 @@ def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any
 def _resolve_e2e_harness_config_from_node(node: Node) -> E2EHarnessConfig:
     marker = node.get_closest_marker("e2e_config")
     if marker is None:
-        return {"backend": "subprocess"}
+        return {"backend": os.environ.get("NHX_E2E_HARNESS_BACKEND", "subprocess")}
     unknown = set(marker.kwargs) - {"harness"}
     if unknown:
         raise pytest.UsageError(f"pytest.mark.e2e_config only supports the 'harness' keyword, got: {sorted(unknown)}")
@@ -673,6 +682,8 @@ def _docker_backend_overrides() -> DockerBackendOverrides:
         overrides["registry"] = registry
     if tag:
         overrides["tag"] = tag
+    if os.environ.get("NHX_E2E_GPU_REQUESTED", "").lower() in {"1", "true", "yes"}:
+        overrides["gpu_requested"] = True
     return overrides
 
 
@@ -914,6 +925,7 @@ def _start_services_subprocess(
         except Exception:
             proc.kill()
             proc.wait(timeout=5)
+        remove_intake_clickhouse(data_dir)
         pytest.fail(
             f"nemo services run did not become healthy within {_HEALTH_TIMEOUT}s.\nlog:\n{log_path.read_text()}"
         )
@@ -925,6 +937,7 @@ def _start_services_subprocess(
         except Exception:
             proc.kill()
             proc.wait(timeout=5)
+        remove_intake_clickhouse(data_dir)
         pytest.fail(
             f"Platform auth seed did not become ready within {_AUTH_READY_TIMEOUT}s.\nlog:\n{log_path.read_text()}"
         )
@@ -937,6 +950,7 @@ def _start_services_subprocess(
         config_path=config_path,
         auth_enabled=auth_enabled,
         key=_services_pool_key(config_hash),
+        data_dir=data_dir,
     )
 
 

@@ -16,10 +16,11 @@ import os
 import re
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from pathlib import Path
+from time import monotonic, sleep
+from time import time as wall_time
 from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
@@ -224,6 +225,13 @@ _PROBE_CONFIGS: dict[str, ProbeConfig] = {
     "google-gemini": ProbeConfig("GET", "models"),
 }
 
+# Custom names are not in the catalog. Probe the base URL the user entered as an
+# OpenAI-compatible root (``GET {base}/models``).
+_CUSTOM_PROVIDER_PROBE = ProbeConfig("GET", "models")
+_NVIDIA_BUILD_HOSTNAME = "integrate.api.nvidia.com"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_HTTPS_REQUIRED_MESSAGE = "API key validation requires an HTTPS provider URL."
+
 
 class KeyValidationStatus(StrEnum):
     """Outcome categories for an API key validation probe."""
@@ -330,7 +338,7 @@ _LOCAL_CONTEXT_NAME = "local"
 
 
 def _pause(seconds: float) -> None:
-    time.sleep(seconds)
+    sleep(seconds)
 
 
 # Filesystem markers that indicate which coding agents are in use.
@@ -515,7 +523,11 @@ def _ensure_platform_auth(cli_context: CLIContext) -> None:
         console.print(f"{CHECK} Using {runtime_token_source}\n")
         return
 
-    authenticated = _login_with_oidc(cli_context, selected_context=context.context_name)
+    authenticated = _login_with_oidc(
+        cli_context,
+        http_client=cli_context.get_http_client(),
+        selected_context=context.context_name,
+    )
     if not authenticated:
         Config.write(
             {"access_token": None, "refresh_token": None},
@@ -526,13 +538,8 @@ def _ensure_platform_auth(cli_context: CLIContext) -> None:
 
 def _platform_request_headers(cli_context: CLIContext) -> dict[str, str] | None:
     """Return authentication headers for direct Platform HTTP requests."""
-    context = cli_context.get_sdk_context()
-    if context.user is None:
-        return None
-    headers = context.user.get_client_config().get("default_headers")
-    if not isinstance(headers, dict):
-        return None
-    return {key: value for key, value in headers.items() if isinstance(key, str) and isinstance(value, str)}
+    headers = cli_context.get_http_headers()
+    return headers if isinstance(headers, dict) else None
 
 
 def _hosted_platform_without_status(base_url: str, *, timeout: float, tls_config: HttpxTLSConfig) -> bool:
@@ -796,12 +803,12 @@ def _wait_for_models_impl(
     flagged as non-compliant or unhealthy, so the user isn't left waiting
     for models that will never arrive.
     """
-    start = time.monotonic()
+    start = monotonic()
     for attempt in range(max_rounds):
-        deadline = time.monotonic() + round_seconds
+        deadline = monotonic() + round_seconds
         with console.status("[bold cyan]Waiting for model discovery...") as status:
-            while time.monotonic() < deadline:
-                elapsed = int(time.monotonic() - start)
+            while monotonic() < deadline:
+                elapsed = int(monotonic() - start)
                 status.update(f"[bold cyan]Waiting for model discovery... ({elapsed}s)")
                 try:
                     provider = clients.models.get_provider(name=provider_name, workspace=workspace).data()
@@ -925,7 +932,7 @@ def _probe_model_entity(gateway: InferenceGatewayClient, workspace: str, entity_
 
     Retries route 404s; timeouts skip; connection errors raise.
     """
-    route_ready_deadline = time.monotonic() + _MODEL_ROUTE_READY_SECONDS
+    route_ready_deadline = monotonic() + _MODEL_ROUTE_READY_SECONDS
     retries = 0
     while True:
         try:
@@ -953,7 +960,7 @@ def _probe_model_entity(gateway: InferenceGatewayClient, workspace: str, entity_
                 exc.status_code == 404
                 and not entitlement_miss
                 and retries < _MODEL_ROUTE_MAX_RETRIES
-                and time.monotonic() < route_ready_deadline
+                and monotonic() < route_ready_deadline
             ):
                 retries += 1
                 _pause(_MODEL_ROUTE_RETRY_INTERVAL)
@@ -979,14 +986,14 @@ def _select_usable_model_pair(clients: SetupClients, workspace: str, entity_ids:
 
     usable: dict[str, bool] = {}
     probe_client = clients.gateway.with_options(retry=RetryPolicy(max_retries=0), timeout=_MODEL_PROBE_TIMEOUT)
-    started = time.monotonic()
+    started = monotonic()
     deadline = started + _MODEL_PROBE_BUDGET_SECONDS
 
     def first_usable(ordered: list[str]) -> str | None:
         attempts = 0
         for entity_id in ordered:
             if entity_id not in usable:
-                if attempts >= _MODEL_PROBE_MAX_ATTEMPTS or time.monotonic() >= deadline:
+                if attempts >= _MODEL_PROBE_MAX_ATTEMPTS or monotonic() >= deadline:
                     return None
                 attempts += 1
                 usable[entity_id] = _probe_model_entity(probe_client, workspace, entity_id)
@@ -1032,6 +1039,33 @@ def _get_all_model_choices(
 def _display_model_name(model_entity_id: str) -> str:
     """Strip workspace prefix from a model entity ID for display."""
     return model_entity_id.split("/", 1)[-1] if "/" in model_entity_id else model_entity_id
+
+
+def _refuses_credential_probe(host_url: str) -> bool:
+    """Return whether a bearer token must not be sent to ``host_url``.
+
+    Remote ``http://`` URLs would carry the key in cleartext. Loopback HTTP stays
+    allowed so a local OpenAI-compatible server can still be checked.
+    """
+    parsed = urlparse(host_url)
+    if parsed.scheme == "https":
+        return False
+    hostname = (parsed.hostname or "").lower()
+    return not (parsed.scheme == "http" and hostname in _LOOPBACK_HOSTS)
+
+
+def _nvidia_build_catalog_root(host_url: str) -> str | None:
+    """Return the NVIDIA Build origin when ``host_url`` points at that API.
+
+    ``GET /v1/models`` there does not check the key, so a 200 must not count as
+    validation. A custom base that already includes ``/v1`` still maps to the
+    origin so the probe does not request ``/v1/v1/models``.
+    """
+    parsed = urlparse(host_url)
+    if (parsed.hostname or "").lower() != _NVIDIA_BUILD_HOSTNAME:
+        return None
+    scheme = parsed.scheme or "https"
+    return f"{scheme}://{parsed.hostname}"
 
 
 def _resolve_provider_for_url(base_url: str) -> KnownProvider | None:
@@ -1194,13 +1228,13 @@ def _wait_for_platform(
     When *proc* is provided, return False immediately if the service process
     exits before the platform becomes ready (avoid waiting the full timeout).
     """
-    start = time.monotonic()
+    start = monotonic()
     deadline = start + timeout
     with console.status("[bold cyan]Waiting for platform...") as status:
-        while time.monotonic() < deadline:
+        while monotonic() < deadline:
             if proc is not None and proc.poll() is not None:
                 return False
-            elapsed = int(time.monotonic() - start)
+            elapsed = int(monotonic() - start)
             svc = _last_startup_service(log_path)
             hint = f" — loaded {svc}" if svc else ""
             status.update(f"[bold cyan]Waiting for platform... ({elapsed}s){hint}")
@@ -1383,8 +1417,8 @@ def _maybe_start_services(
     if already_running:
         console.print("  Restarting Helix services...")
         _kill_existing_services(base_url)
-        deadline = time.time() + _KILL_WAIT_TIMEOUT
-        while time.time() < deadline and _check_platform_reachable(
+        deadline = wall_time() + _KILL_WAIT_TIMEOUT
+        while wall_time() < deadline and _check_platform_reachable(
             base_url,
             timeout=1.0,
             certificate_authority=certificate_authority,
@@ -1841,10 +1875,10 @@ def _print_sample_setup_complete(base_url: str, workspace: str, *, complete: boo
 def _wait_for_sample_deployment(agents_client: AgentsClient, sample: SampleAgentResponse, *, submitted: bool) -> bool:
     """Wait for the deployment returned by the sample-agent API to reach running."""
     status = sample.deployment_status
-    deadline = time.monotonic() + _AGENT_DEPLOY_TIMEOUT_SECONDS
+    deadline = monotonic() + _AGENT_DEPLOY_TIMEOUT_SECONDS
     activity = "Deploying" if submitted else "Waiting for"
     with console.status(f"[bold cyan]{activity} agent '{sample.agent}'..."):
-        while status not in {"running", "failed"} and time.monotonic() < deadline:
+        while status not in {"running", "failed"} and monotonic() < deadline:
             try:
                 status = agents_client.get_deployment(workspace=sample.workspace, name=sample.deployment).data().status
             except Exception:
@@ -1920,7 +1954,10 @@ def _prompt_custom_provider() -> tuple[str, str, str | None]:
         hint="Start with a lowercase letter, then lowercase letters, digits, or hyphens; 2-63 chars (e.g. my-vllm-provider)",
     ).strip()
 
-    host_url = prompt_text("Provider base URL: ").strip()
+    host_url = prompt_text(
+        "Provider base URL: ",
+        hint="OpenAI-compatible API root. Include /v1 when the API uses it (e.g. https://inference-api.nvidia.com/v1)",
+    ).strip()
     if not host_url:
         raise typer.Exit(1)
 
@@ -2169,23 +2206,33 @@ def _validate_api_key(
     """Probe the provider with the API key to detect auth failures early.
 
     Makes a lightweight request to an auth-required endpoint.
-    Returns ``REJECTED`` only on a definitive 401/403 credential rejection.
-    Unavailable probe targets, other HTTP statuses, network errors, and unknown
-    providers are ``INCONCLUSIVE`` (fail-open) so setup can still register the
-    provider after an explicit warning.
+    Returns ``REJECTED`` on a definitive 401/403 credential rejection, and when the
+    URL is not HTTPS (loopback HTTP is still probed).
+    Names outside the catalog use an OpenAI-compatible ``GET {base}/models`` probe.
+    A host on ``integrate.api.nvidia.com`` still uses the Build chat follow-up,
+    because that catalog listing does not check the key.
+    Unavailable probe targets, other HTTP statuses, and network errors are
+    ``INCONCLUSIVE`` (fail-open) so setup can still register the provider after
+    an explicit warning.
     """
     if not api_key:
         return KeyValidationResult(status=KeyValidationStatus.VALID)
 
-    probe = _PROBE_CONFIGS.get(provider_name)
-    if probe is None:
-        return KeyValidationResult(
-            status=KeyValidationStatus.INCONCLUSIVE,
-            message=(
-                f"Could not verify API key: no validation probe configured for "
-                f"provider '{provider_name}'. {_KEY_UNVERIFIED_SUFFIX}"
-            ),
-        )
+    if _refuses_credential_probe(host_url):
+        return KeyValidationResult(status=KeyValidationStatus.REJECTED, message=_HTTPS_REQUIRED_MESSAGE)
+
+    # Build's model list is unauthenticated even when the user typed a custom
+    # name and a base URL that already ends in /v1.
+    build_root = _nvidia_build_catalog_root(host_url)
+    if provider_name == "nvidia-build" or build_root is not None:
+        probe = _PROBE_CONFIGS["nvidia-build"]
+        probe_host = build_root or host_url
+    else:
+        probe = _PROBE_CONFIGS.get(provider_name, _CUSTOM_PROVIDER_PROBE)
+        probe_host = host_url
+
+    if _refuses_credential_probe(probe_host):
+        return KeyValidationResult(status=KeyValidationStatus.REJECTED, message=_HTTPS_REQUIRED_MESSAGE)
 
     headers: dict[str, str] = {}
     if auth_header_format:
@@ -2197,7 +2244,7 @@ def _validate_api_key(
     if default_extra_headers:
         headers.update(default_extra_headers)
 
-    url = f"{host_url.rstrip('/')}/{probe.path}"
+    url = f"{probe_host.rstrip('/')}/{probe.path}"
 
     try:
         resp = httpx.request(
@@ -2210,8 +2257,8 @@ def _validate_api_key(
         if resp.status_code in _KEY_REJECTED_STATUS_CODES:
             return _probe_status_result(resp)
         if resp.is_success:
-            if provider_name == "nvidia-build":
-                return _nvidia_build_chat_probe(host_url, headers, resp, timeout=timeout)
+            if provider_name == "nvidia-build" or build_root is not None:
+                return _nvidia_build_chat_probe(probe_host, headers, resp, timeout=timeout)
             return KeyValidationResult(status=KeyValidationStatus.VALID)
         return _probe_status_result(resp)
     except httpx.TimeoutException:
@@ -2441,7 +2488,7 @@ def setup_command(
             "--skills-from",
             help=(
                 "Comma-separated list of skill sources to install from "
-                "(e.g. 'nemo-helix,nemo-evaluator-plugin'). Use 'nemo-helix' "
+                "(e.g. 'nemo-helix,nemo-evals-plugin'). Use 'nemo-helix' "
                 "for the built-in set. Default: all sources. "
                 "Only applied when --install-skills is set."
             ),
@@ -2676,8 +2723,8 @@ def _run_auto_mode(
     console.print("\n  Waiting for model discovery...")
     entity_ids: list[str] = []
     for attempt in range(_MODEL_DISCOVERY_MAX_ROUNDS):
-        deadline = time.time() + _MODEL_DISCOVERY_ROUND_SECONDS
-        while time.time() < deadline:
+        deadline = wall_time() + _MODEL_DISCOVERY_ROUND_SECONDS
+        while wall_time() < deadline:
             entity_ids = _get_all_model_entity_ids(clients, workspace, provider_name=provider_name)
             if entity_ids:
                 break

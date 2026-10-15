@@ -26,7 +26,7 @@ export type JsonSchema = Record<string, unknown>;
 export interface CapabilityMeta {
   /** Stable, unique identifier used as the tool/operation name. */
   readonly name: string;
-  /** Owning service spec, e.g. `platform`, `agents`, `evaluator`. */
+  /** Owning service spec, e.g. `platform`, `agents`, `evals`. */
   readonly service: string;
   readonly method: HttpMethod;
   /** Path template, e.g. `/apis/models/v2/workspaces/{workspace}/models`. */

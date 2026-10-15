@@ -126,7 +126,7 @@ describe('InferenceProvidersDataView', () => {
 
     expect(
       await screen.findByText(
-        'Deleting this inference provider will also delete its model entities unless another provider serves them. Are you sure you want to proceed?'
+        "Deleting this inference provider will also delete its model entities unless another provider serves them or it is a model deployment's provider. Are you sure you want to proceed?"
       )
     ).toBeInTheDocument();
   });

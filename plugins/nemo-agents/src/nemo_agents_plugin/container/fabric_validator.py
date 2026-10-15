@@ -44,7 +44,7 @@ async def validate_fabric_agent_package(
     try:
         agent_config = load_agent_config(agent_config_path)
         fabric_config = translate_agent_config(agent_config)
-        plan = await plan_fabric_config(
+        plan = await _plan_unless_in_image_adapter(
             fabric_config,
             base_dir=agent_config_path.resolve().parent,
             fabric=fabric,
@@ -62,6 +62,31 @@ async def validate_fabric_agent_package(
         fabric_config=fabric_config,
         plan=plan,
     )
+
+
+# Adapters whose descriptor is staged INSIDE the built image rather than installed on
+# the producer host, so host-side `Fabric.plan` (preinstalled resolution) cannot resolve
+# them. For these the pre-build plan is skipped; translate + artifact validation still run.
+_IN_IMAGE_ADAPTER_IDS = frozenset({"nvidia.fabric.pi"})
+
+
+async def _plan_unless_in_image_adapter(
+    fabric_config: FabricConfig,
+    *,
+    base_dir: Path,
+    fabric: Any | None,
+) -> Any | None:
+    """Plan the config, unless its adapter is only installed inside the image.
+
+    The Pi adapter is an npm package staged into the image at build time, not a host
+    Python package, so host-side preinstalled resolution would always fail. Skip only
+    the plan for those adapters; config translation (above) and artifact checks (below)
+    still guard the package.
+    """
+    harness = getattr(fabric_config, "harness", None)
+    if harness is not None and getattr(harness, "adapter_id", None) in _IN_IMAGE_ADAPTER_IDS:
+        return None
+    return await plan_fabric_config(fabric_config, base_dir=base_dir, fabric=fabric)
 
 
 def validate_fabric_package_artifacts(

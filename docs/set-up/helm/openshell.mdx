@@ -1,0 +1,129 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "OpenShell"
+description: "Connect NeMo Helix to an independently installed OpenShell gateway for agent deployments."
+---
+
+NeMo Helix connects to an OpenShell gateway to deploy sandboxed agents. Agent
+deployments use `--mode openshell` with either gateway compute driver, Docker or
+Kubernetes. The gateway manages sandbox creation and policy enforcement.
+
+The NeMo Helix chart does not install OpenShell. Install a compatible gateway
+and its prerequisites using the [OpenShell Kubernetes guide](https://github.com/NVIDIA/OpenShell/blob/main/docs/kubernetes/setup.mdx).
+This page configures the platform's deployment executor. OpenShell Jobs profiles
+are a separate integration.
+
+## Prerequisites
+
+- A reachable OpenShell gateway, with its required Agent Sandbox controller and
+  a network-policy-capable cluster configured according to the gateway version's documentation.
+- A platform image containing the OpenShell deployments backend and its optional SDK dependency.
+- A registry image built with `nemo agents package --sandbox-runtime openshell`.
+  The gateway's compute nodes must be able to pull it. For private images,
+  configure OpenShell's `sandboxImagePullSecrets` using a registry Secret in the
+  sandbox namespace; the platform chart's image-pull credentials do not configure the gateway.
+- A working platform model endpoint and CLI context.
+
+<Warning>
+The example below uses a plaintext gateway suitable only for an isolated
+evaluation environment. Do not change a shared gateway's authentication settings
+to make this example work. The deployment executor supports TLS/mTLS connection
+material, but does not currently expose OIDC bearer-token configuration. A gateway
+requiring that authentication is not yet a supported deployment target; mTLS alone
+does not establish compatibility with the Kubernetes gateway's user authentication.
+</Warning>
+
+## Configure the deployment executor
+
+The source checkout includes `k8s/helm/examples/openshell/values.yaml` with this
+opt-in overlay:
+
+```yaml
+platformConfig:
+  agents:
+    deployments:
+      openshell_executor: openshell
+  deployments:
+    default_executor: local-k8s
+    executors:
+      - name: local-k8s
+        backend: k8s
+        config:
+          default_namespace: "{{ .Release.Namespace }}"
+      - name: openshell
+        backend: openshell
+        config:
+          gateway_endpoint: http://openshell.openshell.svc.cluster.local:8080
+          platform_egress:
+            host: '{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local'
+            port: 8080
+          serve_workdir: /tmp
+```
+
+Helm evaluates the template expressions in platform configuration. The platform
+egress host follows the actual API Service name, release namespace, and any
+`fullnameOverride`. Change the cluster domain if it is not `cluster.local`.
+Change `gateway_endpoint` to your gateway's reachable Service address.
+
+The generated sandbox policy permits platform access for the configured
+executables and denies other network destinations. The OpenShell deployment
+mode derives the agent's inference URL from `platform_egress`. If tools need external
+services, provide an explicit policy through `default_policy_path`, mounted into
+the platform controller. The mandatory platform egress rule is retained.
+
+<Note>
+Lists in `platformConfig` replace the defaults. Keep `local-k8s` and any other
+existing executors when adding OpenShell. The overlay preserves the default
+Kubernetes executor for other workloads and does not add a Jobs executor.
+</Note>
+
+The following command renders the overlay with your installation's release name
+and namespace:
+
+```sh
+helm template "$HELM_RELEASE" k8s/helm --namespace "$NAMESPACE" \
+  --values values.yaml \
+  --values k8s/helm/examples/openshell/values.yaml > rendered.yaml
+```
+
+The rendered platform ConfigMap contains the executor selection, gateway endpoint,
+and platform egress host. Apply the overlay alongside your existing values using
+[Install](/documentation/kubernetes-deployment/setup/helm/install).
+
+For a TLS gateway, use an `https` endpoint and configure these executor fields:
+
+```yaml
+tls:
+  ca_cert_path: /etc/openshell-tls/ca.crt
+  client_cert_path: /etc/openshell-tls/tls.crt
+  client_key_path: /etc/openshell-tls/tls.key
+```
+
+These are paths inside the platform process, not local CLI paths. Mount the
+certificate Secret with the chart's volume settings on the controller and any
+API process that needs the gateway connection. TLS configuration does not remove
+the authentication limitation described above.
+
+## Deploy an agent
+
+[Sandboxed Deployments](/documentation/agents/sandboxed-deployments) covers agent
+registration, deployment, invocation, and examples of the default network policy.
+
+The default Landlock compatibility setting is `best_effort`: on unsupported
+kernels it does not provide filesystem confinement. With
+`landlock_compatibility: hard_requirement`, deployment fails if the required
+Landlock support is unavailable.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Executor is skipped at startup | The platform image must include the OpenShell SDK dependency. |
+| Gateway rejects authentication | Check the gateway's required user authentication; the executor cannot supply an OIDC bearer token. |
+| Default executor disappears | Preserve existing entries when replacing `deployments.executors`. |
+| Agent cannot reach the platform | Use the actual API Service FQDN and port in `platform_egress`; verify the calling binary is permitted. |
+| Sandbox cannot pull the image | Configure registry access on the gateway, including `sandboxImagePullSecrets` for private images. |
+| Agent cannot write its working directory | Use a writable `serve_workdir`, such as `/tmp`, and inspect sandbox identity and policy. |
+| Deployment becomes ready but invocation fails | Check agent logs and platform-to-gateway service routing separately from sandbox-to-platform inference. |

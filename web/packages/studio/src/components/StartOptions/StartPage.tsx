@@ -1,29 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
-import { RadioCard } from '@nemo/common/src/components/RadioCard';
-import {
-  Badge,
-  Block,
-  Divider,
-  Flex,
-  PageHeader,
-  RadioGroupRoot,
-  Stack,
-  Text,
-} from '@nvidia/foundations-react-core';
-import {
-  CONTENT_WIDTH,
-  TILE_DESCRIPTION_KIND,
-  TILE_LABEL_KIND,
-  TILE_RADIUS,
-} from '@studio/components/StartOptions/tile';
+import { Block, Divider, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
+import { StartFooter } from '@studio/components/StartOptions/StartFooter';
+import { StartOptionCards } from '@studio/components/StartOptions/StartOptionCards';
+import { CONTENT_WIDTH } from '@studio/components/StartOptions/tile';
 import type { StartPageProps } from '@studio/components/StartOptions/types';
 import type { FC } from 'react';
-
-/** KUI names the group from a wrapping FormField only, and the design draws no prompt. */
-const GROUP_LABEL = 'How do you want to start?';
 
 /**
  * Pick a way in from the stacked cards, fill in whatever that way needs in the panel
@@ -35,10 +18,10 @@ export const StartPage: FC<StartPageProps> = ({
   options,
   value,
   onChange,
-  disabled = false,
+  disabled,
   slotDetail,
-  continueLabel = 'Continue',
-  continueLoading = false,
+  continueLabel,
+  continueLoading,
   canContinue,
   onContinue,
   blockedHint,
@@ -54,51 +37,12 @@ export const StartPage: FC<StartPageProps> = ({
         <Stack gap="density-2xl" className={CONTENT_WIDTH}>
           {slotBanner}
 
-          {/* Needs its own full width: without it the cards sit narrower than the
-              column, and stop lining up with the divider below. */}
-          <RadioGroupRoot
-            name="start-option"
-            aria-label={GROUP_LABEL}
-            value={value ?? ''}
-            onValueChange={onChange}
+          <StartOptionCards
+            options={options}
+            value={value}
+            onChange={onChange}
             disabled={disabled}
-            className="w-full"
-          >
-            <Stack gap="density-md">
-              {options.map((option) => (
-                <RadioCard
-                  key={option.id}
-                  value={option.id}
-                  label={option.title}
-                  description={option.description}
-                  icon={<option.icon size={16} aria-hidden />}
-                  slotEnd={
-                    option.tag ? (
-                      <Badge
-                        id={`${option.id}-tag`}
-                        kind={option.tag.kind}
-                        color={option.tag.color}
-                        size="medium"
-                      >
-                        {option.tag.label}
-                      </Badge>
-                    ) : undefined
-                  }
-                  attributes={
-                    option.tag
-                      ? { RadioGroupInput: { 'aria-describedby': `${option.id}-tag` } }
-                      : undefined
-                  }
-                  compact
-                  labelKind={TILE_LABEL_KIND}
-                  descriptionKind={TILE_DESCRIPTION_KIND}
-                  showIndicator={false}
-                  className={TILE_RADIUS}
-                  disabled={disabled || !option.enabled}
-                />
-              ))}
-            </Stack>
-          </RadioGroupRoot>
+          />
 
           {/* Sits in the fixed band, so the panel scrolls under it rather than past it. */}
           {slotDetail ? <Divider /> : null}
@@ -113,30 +57,13 @@ export const StartPage: FC<StartPageProps> = ({
       </Flex>
     </Block>
 
-    <Flex justify="center" className="shrink-0 border-t border-base bg-surface-base px-10 py-3">
-      <Flex align="center" justify="between" gap="density-2xl" className={CONTENT_WIDTH}>
-        {/* Not on the card: an interactive card is one click target, not a container. */}
-        <Flex align="center" gap="density-md">
-          {slotFooterStart}
-        </Flex>
-
-        <Flex align="center" gap="density-2xl">
-          {!canContinue && blockedHint ? (
-            <Text kind="label/regular/md" className="text-secondary">
-              {blockedHint}
-            </Text>
-          ) : null}
-          <LoadingButton
-            color="brand"
-            kind="primary"
-            loading={continueLoading}
-            onClick={onContinue}
-            disabled={!canContinue}
-          >
-            {continueLabel}
-          </LoadingButton>
-        </Flex>
-      </Flex>
-    </Flex>
+    <StartFooter
+      continueLabel={continueLabel}
+      continueLoading={continueLoading}
+      canContinue={canContinue}
+      onContinue={onContinue}
+      blockedHint={blockedHint}
+      slotFooterStart={slotFooterStart}
+    />
   </Stack>
 );

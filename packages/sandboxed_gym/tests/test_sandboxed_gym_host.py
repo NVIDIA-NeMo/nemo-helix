@@ -19,6 +19,18 @@ from sandboxed_gym.host.models import (
 from sandboxed_gym.wire import BROKER_TOKEN_ENV, BROKER_URL_ENV
 
 
+@pytest.fixture(autouse=True)
+def _cluster_resolver(tmp_path, monkeypatch):
+    """Pin the default resolver so policies don't depend on the host running the tests.
+
+    ``resolver_addresses=None`` reads ``/etc/resolv.conf``, and some CI runners list a public
+    nameserver there, which then shows up as an allowed public address.
+    """
+    resolv_conf = tmp_path / "cluster-resolv.conf"
+    resolv_conf.write_text("nameserver 10.96.0.10\n")
+    monkeypatch.setattr(egress, "RESOLV_CONF_PATH", str(resolv_conf))
+
+
 def _mount(claim: str, path: str, read_only: bool) -> GymHostVolumeMount:
     return GymHostVolumeMount(
         pvc_claim=claim,
@@ -540,7 +552,7 @@ def test_uv_env_passthrough_carries_no_credentials(monkeypatch):
     validate_bootstrap_env(uv_env_passthrough())
 
 
-def _offline_spec(*, environment_offline: bool):
+def _offline_spec(*, environment_offline: bool, reuse_image_gym_install: bool = False):
     from sandboxed_gym.config import BrokerEndpoint
     from sandboxed_gym.orchestrator import build_gym_host_spec
     from sandboxed_gym.serve_config import SandboxedGymServeConfig
@@ -549,6 +561,7 @@ def _offline_spec(*, environment_offline: bool):
         {
             "job_id": "job-1",
             "environment_offline": environment_offline,
+            "reuse_image_gym_install": reuse_image_gym_install,
             "sandbox": {
                 "image": "runtime:dev",
                 "network_policy": {"egress_allow": []},
@@ -573,6 +586,23 @@ def test_gym_host_spec_forwards_an_offline_environment():
     spec = _offline_spec(environment_offline=True)
 
     assert spec.bootstrap_env[ENVIRONMENT_OFFLINE_ENV_KEY] == "true"
+
+
+def test_gym_host_spec_forwards_reuse_of_the_image_gym_install():
+    """The caller decides whether wheels-v1 servers run on the image's Gym install.
+
+    Evaluator opts in; GRPO's documented wheels-v1 contract still vendors the full closure, so
+    the host must not change behaviour for it unasked.
+    """
+    from sandboxed_gym.runtime.gym_host_runtime import REUSE_IMAGE_GYM_INSTALL_ENV_KEY
+
+    assert (
+        _offline_spec(environment_offline=False, reuse_image_gym_install=True).bootstrap_env[
+            REUSE_IMAGE_GYM_INSTALL_ENV_KEY
+        ]
+        == "true"
+    )
+    assert REUSE_IMAGE_GYM_INSTALL_ENV_KEY not in _offline_spec(environment_offline=False).bootstrap_env
 
 
 def test_gym_host_spec_leaves_the_index_alone_by_default():

@@ -51,6 +51,27 @@ def test_database_display_logs_parse_failures(caplog: pytest.LogCaptureFixture) 
     assert records[0].exc_info is not None
 
 
+def test_display_banner_skips_database_resolution_without_services(monkeypatch, tmp_path) -> None:
+    # Service-less (sidecar-only) runs must not touch the default SQLite dir.
+    monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path / "unwritable" / "data"))
+    monkeypatch.setattr(runner.otel_settings, "log_format", "plain")
+    monkeypatch.setattr(runner, "get_platform_version", lambda: "0.0.0")
+
+    def fail(*_args, **_kwargs):
+        raise AssertionError("database config must not be resolved for service-less runs")
+
+    monkeypatch.setattr(runner, "get_service_config", fail)
+
+    class _Auth:
+        enabled = True
+
+    monkeypatch.setattr(runner, "get_auth_config", lambda: _Auth())
+
+    runner._display_banner(services=[], controllers=[], sidecars=["auth-proxy"], host="127.0.0.1", port=8080)
+
+    assert not (tmp_path / "unwritable").exists()
+
+
 def test_run_platform_marks_loaded_services_local_before_starting_controllers(monkeypatch):
     Configuration.clear_cache()
     captured: dict[str, str] = {}

@@ -4,9 +4,8 @@
 """Typed HTTP clients for the Models service.
 
 Wraps the endpoint functions from ``models.endpoints`` as direct methods using
-the ``method()`` descriptor (the Files/Secrets/Jobs pattern), and layers on the
-Models-specific ergonomics that used to live on the vendored Stainless
-``ModelsResource``:
+the ``method()`` descriptor (the Files/Secrets/Jobs pattern), and layers on
+Models-specific ergonomics:
 
 - OpenAI inference-gateway route builders (``get_openai_route_base_url`` and
   friends) -- pure string builders, safe from sync or async code, and
@@ -38,7 +37,6 @@ from datetime import datetime
 from typing import Protocol
 
 import openai
-from nemo_helix_plugin.client.auth import resolve_token_async
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.client.method import method
@@ -64,10 +62,7 @@ _TRANSIENT_GATEWAY_STATUS_CODES = frozenset({502, 503, 504})
 
 
 # The OpenAI-route builders only read a couple of attributes, so they accept any
-# object exposing them -- the plugin ``ModelProvider`` / ``ModelEntity`` models,
-# or the generated SDK equivalents.
-# Structural typing keeps the plugin free of a dependency on the generated SDK
-# types while still accepting them.
+# object exposing them, such as the plugin ``ModelProvider`` / ``ModelEntity`` models.
 
 
 class ProviderLike(Protocol):
@@ -482,7 +477,7 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
             token_provider = auth
 
             async def api_key() -> str:
-                return await resolve_token_async(token_provider)
+                return await token_provider.get_access_token_async()
 
         return openai.AsyncOpenAI(
             base_url=self.get_openai_route_base_url(workspace=workspace),

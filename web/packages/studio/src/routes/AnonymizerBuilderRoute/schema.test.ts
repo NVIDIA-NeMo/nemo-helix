@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  BUILTIN_DETECTOR_VALUE,
   DETECTION_ROLES,
   DETECTOR_ROLE,
   MAX_PREVIEW_ROWS,
@@ -194,6 +195,17 @@ describe('buildAnonymizerJobRequest', () => {
     expect(rew?.replace?.[REPLACE_ROLE]).toBe('model-2');
   });
 
+  it('omits entity_detector and emits no detector model_config when the built-in detector is used', () => {
+    const models = roleModels('nvidia/nemotron-3-nano-30b-a3b', 'default/nvidia');
+    models[DETECTOR_ROLE] = { modelId: BUILTIN_DETECTOR_VALUE, model: '', provider: '' };
+    const req = buildAnonymizerJobRequest(form({ strategy: 'substitute', roleModels: models }));
+
+    // The service runs its in-process GLiNER2 precisely when the request names no entity_detector.
+    expect(req.spec.selected_models?.detection).not.toHaveProperty('entity_detector');
+    expect(req.spec.selected_models?.detection?.entity_validator).toBeTruthy();
+    expect(req.spec.model_configs?.some((config) => config.model === '')).toBe(false);
+  });
+
   it('maps only detection roles for redact/annotate/hash', () => {
     for (const strategy of ['redact', 'annotate', 'hash'] as const) {
       const selected = buildAnonymizerJobRequest(form({ strategy })).spec.selected_models;
@@ -315,6 +327,23 @@ describe('anonymizerFormSchema', () => {
     ).toBe(true);
     expect(
       parse({ entityMode: 'custom', includeDefaultEntities: true, entityLabels: [] }).success
+    ).toBe(true);
+  });
+
+  it('accepts the built-in detector sentinel without a model or provider', () => {
+    const models = roleModels('nvidia/nemotron-3-nano-30b-a3b', 'default/nvidia');
+    models[DETECTOR_ROLE] = { modelId: BUILTIN_DETECTOR_VALUE, model: '', provider: '' };
+    const result = parse({ roleModels: models });
+    expect(result.success).toBe(true);
+  });
+
+  it('still requires a model for the detector when it is not the built-in sentinel', () => {
+    const models = roleModels('nvidia/nemotron-3-nano-30b-a3b', 'default/nvidia');
+    models[DETECTOR_ROLE] = { modelId: 'picked', model: '', provider: '' };
+    const result = parse({ roleModels: models });
+    expect(result.success).toBe(false);
+    expect(
+      result.error?.issues.some((i) => i.path.join('.') === `roleModels.${DETECTOR_ROLE}.modelId`)
     ).toBe(true);
   });
 });

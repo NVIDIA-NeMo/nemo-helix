@@ -85,6 +85,15 @@ def _normalize_tags(raw_tags: Any) -> set[str]:
     return {str(tag).strip().lower() for tag in raw_tags if str(tag).strip()}
 
 
+def alternate_hf_dir(model_dir: Path) -> Path:
+    """Return the Hugging Face tree inside a published checkpoint directory."""
+
+    nested = model_dir / "alternates" / "hf"
+    if (nested / "config.json").is_file():
+        return nested
+    return None
+
+
 def infer_model_head_type(model_dir: str) -> tuple[ModelHeadType, str]:
     """
     Infer the task-specific head already persisted in a Hugging Face checkpoint.
@@ -104,6 +113,20 @@ def infer_model_head_type(model_dir: str) -> tuple[ModelHeadType, str]:
     if not model_path.is_dir():
         return "unknown", f"Directory not found: {model_dir}"
 
+    alternate_dir = None
+    if not (model_path / "config.json").is_file():
+        alternate_dir = alternate_hf_dir(model_path)
+        if not alternate_dir:
+            return "unknown", "inconclusive:no_alternate_hf_dir"
+        model_path = alternate_dir
+
+    head_type, reason = _infer_head_type_from_hf_dir(model_path)
+    if alternate_dir:
+        reason = f"{reason};source=alternates/hf"
+    return head_type, reason
+
+
+def _infer_head_type_from_hf_dir(model_path: Path) -> tuple[ModelHeadType, str]:
     embedding_signals: list[str] = []
     cross_encoder_signals: list[str] = []
     causal_lm_signals: list[str] = []
@@ -123,7 +146,9 @@ def infer_model_head_type(model_dir: str) -> tuple[ModelHeadType, str]:
     sequence_classification_architectures: list[str] = []
     for architecture in architectures:
         architecture_lower = architecture.lower()
-        if "forsequenceclassification" in architecture_lower:
+        if "forsequenceclassification" in architecture_lower and "bidirectional" in architecture_lower:
+            cross_encoder_signals.append(f"architecture:{architecture}")
+        elif "forsequenceclassification" in architecture_lower:
             sequence_classification_architectures.append(architecture)
         elif "bidirectional" in architecture_lower or "embedding" in architecture_lower:
             embedding_signals.append(f"architecture:{architecture}")

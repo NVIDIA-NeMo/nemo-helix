@@ -7,9 +7,9 @@ How Studio runs agent evaluations.
 
 ## Overview
 
-- **Runner:** nemo-evaluator's **`agent-evaluate/jobs`** endpoint (task-based, `AgentEvaluateJob`),
+- **Runner:** nemo-evals's **`agent-evaluate/jobs`** endpoint (task-based, `AgentEvaluateJob`),
   with an **agent** target. This is the canonical path for Studio agent evaluation, per the
-  nemo-evaluator team — it is purpose-built for agent tasks with extensive artifact + trace
+  nemo-evals team — it is purpose-built for agent tasks with extensive artifact + trace
   collection. (A legacy row-based `evaluate/jobs` endpoint also exists — see the bottom.)
 - **Sample agents:** `public/sample-agents/<agent>/` is the seed repository (agent config +
   an `eval-config.json`). Studio reads these for the "Create experiment" flow.
@@ -31,7 +31,7 @@ The evaluation loop is `task × trial × metric → score`.
 
 ## Reusable eval configs (Filesets)
 
-nemo-evaluator has no "eval config" entity, so a reusable config is stored as an
+nemo-evals has no "eval config" entity, so a reusable config is stored as an
 **`eval-config.json`** file in a named **Fileset**. The tasks are stored **inline** in the
 config (the `agent-evaluate` spec takes inline `tasks[]`; a Task/Taskset _reference_ is planned
 but not yet implemented, so large datasets are inlined for now).
@@ -74,7 +74,7 @@ persisted spec into a new Fileset. The judge is now part of the stored yardstick
 `eval-config.json` **as-is** (`parsePersistedSpec`) — no re-fan, no judge re-pick — so the
 yardstick (tasks + metric + judge) is identical across every run. Only the agent **target** is
 injected at submit; the whole is wrapped as `{ spec }` for the job request. The saved spec is
-also a valid `nemo evaluator agent-evaluate --spec-file` input once a `target` is added.
+also a valid `nemo evals agent-evaluate --spec-file` input once a `target` is added.
 
 Injected by Studio **at submit** (never stored in the config): the agent **target** only. The
 judge model and `max_concurrent_tasks` are part of the persisted yardstick.
@@ -87,15 +87,15 @@ adding load while this upstream error classification remains. To tolerate failur
 
 ## Endpoints
 
-| Purpose     | Method + path (`/apis/evaluator/v2/workspaces/{ws}`) |
-| ----------- | ---------------------------------------------------- |
-| List jobs   | `GET .../agent-evaluate/jobs`                        |
-| Submit      | `POST .../agent-evaluate/jobs`                       |
-| Get job     | `GET .../agent-evaluate/jobs/{name}`                 |
-| Poll status | `GET .../agent-evaluate/jobs/{name}/status`          |
-| Cancel      | `POST .../agent-evaluate/jobs/{name}/cancel`         |
-| Logs        | `GET .../agent-evaluate/jobs/{name}/logs`            |
-| Results     | `GET .../agent-eval-results/{name}`                  |
+| Purpose     | Method + path (`/apis/evals/v2/workspaces/{ws}`) |
+| ----------- | ------------------------------------------------ |
+| List jobs   | `GET .../agent-evaluate/jobs`                    |
+| Submit      | `POST .../agent-evaluate/jobs`                   |
+| Get job     | `GET .../agent-evaluate/jobs/{name}`             |
+| Poll status | `GET .../agent-evaluate/jobs/{name}/status`      |
+| Cancel      | `POST .../agent-evaluate/jobs/{name}/cancel`     |
+| Logs        | `GET .../agent-evaluate/jobs/{name}/logs`        |
+| Results     | `GET .../agent-eval-results/{name}`              |
 
 Fileset create/upload (Files service), for seeding a config into a new Fileset:
 
@@ -307,7 +307,7 @@ per-task bundle (trials, evidence, traces) lives in the fileset referenced by `b
 
 ## Legacy: `evaluate/jobs` (row-based, not for agent eval)
 
-nemo-evaluator also exposes a row-based `evaluate/jobs` endpoint (`EvaluateJob`). It predates
+nemo-evals also exposes a row-based `evaluate/jobs` endpoint (`EvaluateJob`). It predates
 the agent path and serves **prompt/completion-style datasets**. It _can_ take an agent target
 and a `dataset` that is a **`FilesetRef`** (a CSV/JSONL file in a Fileset, no row inlining) —
 attractive for large datasets — but its agent-eval functionality is limited compared to

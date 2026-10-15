@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
+import type {
+  OptimizationStrategyList,
+  RunStrategyJob,
+} from '@nemo/sdk/generated/agent-optimization/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
+const STRATEGIES_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/strategies`;
 const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
 
 /**
@@ -20,7 +24,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     status: 'completed',
     created_at: '2026-08-14T09:00:00Z',
     updated_at: '2026-08-14T11:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-brevity.yaml',
+      agent: 'react-agent',
+    },
   },
   {
     id: 'opt-9a03',
@@ -31,7 +39,7 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     updated_at: '2026-08-13T09:30:00Z',
     // Workspace-qualified reference for the same agent — must still match.
     spec: {
-      strategy: 'legacy',
+      strategy: 'config-tuning',
       optimize_config: 'optimize-accuracy.yaml',
       agent: 'default/react-agent',
     },
@@ -42,7 +50,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     workspace: 'default',
     status: 'error',
     created_at: '2026-08-12T09:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-other.yaml', agent: 'other-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-other.yaml',
+      agent: 'other-agent',
+    },
   },
   {
     id: 'opt-7c15',
@@ -50,7 +62,11 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     workspace: 'staging',
     status: 'completed',
     created_at: '2026-08-11T09:00:00Z',
-    spec: { strategy: 'legacy', optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
+    spec: {
+      strategy: 'config-tuning',
+      optimize_config: 'optimize-brevity.yaml',
+      agent: 'react-agent',
+    },
   },
 ];
 
@@ -113,7 +129,27 @@ const applyFilter = (jobs: RunStrategyJob[], filter: FilterQuery): RunStrategyJo
   });
 };
 
+/** What a platform with the Switchyard plugin installed reports, beside the built-in strategy. */
+export const mockOptimizationStrategies: OptimizationStrategyList = {
+  data: [
+    {
+      name: 'config-tuning',
+      title: 'Hyper-parameter and prompt optimization',
+      description: 'Run an optimize config against the agent.',
+      requires_config: true,
+    },
+    {
+      name: 'switchyard',
+      title: 'Model routing using Switchyard',
+      requires_config: true,
+      description:
+        'Route the agent across pairs of acceptable models with Switchyard VirtualModels.',
+    },
+  ],
+};
+
 export const agentOptimizeJobsHandlers = [
+  http.get(STRATEGIES_URL, () => HttpResponse.json(mockOptimizationStrategies)),
   http.get(OPTIMIZE_JOBS_URL, ({ request, params }) => {
     const url = new URL(request.url);
     const workspace = String(params.workspace);

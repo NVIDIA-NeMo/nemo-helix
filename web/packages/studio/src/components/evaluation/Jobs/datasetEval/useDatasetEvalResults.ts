@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import { useEvaluatorGetEvalResult } from '@nemo/sdk/generated/evaluator/evaluator-plugin-eval-results-routes';
-import { useEvaluatorGetEvaluateJobResult } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { useEvalsGetEvalResult } from '@nemo/sdk/generated/evals/evals-plugin-eval-results-routes';
+import { useEvalsGetEvaluateJobResult } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import type { DatasetEvalRow } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import { useQuery } from '@tanstack/react-query';
@@ -48,13 +48,13 @@ export const useDatasetEvalResults = (workspace: string, jobName: string, status
     data: evalResult,
     isPending: isScoresPending,
     error: scoresError,
-  } = useEvaluatorGetEvalResult(workspace, jobName, { query: { enabled, retry: 3 } });
+  } = useEvalsGetEvalResult(workspace, jobName, { query: { enabled, retry: 3 } });
 
   const {
     data: rowsMetadata,
     isPending: isRowsMetadataPending,
     error: rowsMetadataError,
-  } = useEvaluatorGetEvaluateJobResult(workspace, jobName, 'row-scores', {
+  } = useEvalsGetEvaluateJobResult(workspace, jobName, 'row-scores', {
     query: { enabled, retry: 3 },
   });
 

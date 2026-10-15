@@ -231,7 +231,6 @@ def test_workspaces_code_output_does_not_create(runner, assert_exit_code) -> Non
     assert_exit_code(result, 0)
     assert "from nemo_helix_plugin.workspaces.client import WorkspacesClient" in result.stdout
     assert "client.create_workspace(" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
     result = runner.invoke(app, ["workspaces", "get", name])
     assert_exit_code(result, 3)

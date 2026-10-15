@@ -67,6 +67,10 @@ docker-build: ## Build Docker bake TARGET without pushing, default docker-cpu
 docker-load: ## Build and load single-platform Docker bake TARGET, default docker-cpu
 	docker buildx bake$(DOCKER_BAKE_ALLOW_FS_READ_FLAG) -f $(DOCKER_BAKE_FILE) $(DOCKER_TARGET) $(DOCKER_PLATFORM_SET) --load
 
+.PHONY: docker-check-sources
+docker-check-sources: ## Check a loaded IMAGE (e.g. nhx-kaniko), built with NHX_COLLECT_SOURCES=1, carries every component's source
+	docker/scripts/check-image-source-coverage.sh "$(or $(IMAGE_REGISTRY),my-registry)/$(IMAGE):$(or $(BAKE_TAG),local)" "$(IMAGE)"
+
 .PHONY: docker-push
 docker-push: ## Build and push Docker bake TARGET, default docker-cpu
 	docker buildx bake$(DOCKER_BAKE_ALLOW_FS_READ_FLAG) -f $(DOCKER_BAKE_FILE) $(DOCKER_TARGET) --push
@@ -116,7 +120,12 @@ docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link ch
 	cd docs/fern && npm run check
 
 DOCS_TYPED_SNIPPET_PATHS := \
+	docs/agents/add-guardrails.mdx \
+	docs/agents/deploy-agents.mdx \
+	docs/agents/optimization.mdx \
 	docs/anonymizer/tutorials/preview.mdx \
+	docs/garak/targets/index.mdx \
+	docs/garak/targets/inference-gateway.mdx \
 	docs/auth/authorization/plugin-authorization.mdx \
 	docs/auth/authorization/policy-engine.mdx \
 	docs/customizer/tutorials/embedding-customization-job.mdx \
@@ -126,13 +135,25 @@ DOCS_TYPED_SNIPPET_PATHS := \
 	docs/data-designer/retrieval-sdg.mdx \
 	docs/data-designer/tutorials/basics.mdx \
 	docs/data-designer/tutorials/seeding.mdx \
-	docs/evaluator/agent-eval/gym-runner.mdx \
-	docs/evaluator/agent-eval/index.mdx \
+	docs/evals/agent-eval/gym-runner.mdx \
+	docs/evals/agent-eval/index.mdx \
+	docs/get-started/concepts/filtering.mdx \
+	docs/guardrails/concepts/configurations/default-configs.mdx \
+	docs/guardrails/concepts/inference.mdx \
+	docs/guardrails/observability.mdx \
+	docs/guardrails/tutorials/content-safety.mdx \
+	docs/guardrails/tutorials/injection-detection.mdx \
+	docs/guardrails/tutorials/multimodal-data.mdx \
+	docs/guardrails/tutorials/parallel-rails.mdx \
 	docs/pysdk/client/index.mdx \
+	docs/run-inference/about.mdx \
+	docs/run-inference/tutorials/deploy-models.mdx \
+	docs/run-inference/tutorials/run-inference.mdx \
 	docs/safe-synthesizer/about/jobs.mdx \
 	docs/safe-synthesizer/about/reference.mdx \
 	docs/safe-synthesizer/tutorials/differential-privacy.mdx \
-	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx
+	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx \
+	docs/troubleshooting/studio.mdx
 
 .PHONY: docs-lint-snippets
 docs-lint-snippets: docs-check-base-url ## Syntax-check all Python fenced snippets, type-check curated executable docs, and check NHX_BASE_URL usage
@@ -519,6 +540,45 @@ endif
 	@echo "Running tests for package: $(PACKAGE)..."
 	$(UV) run --frozen pytest -v packages/$(PACKAGE)/tests/
 
+.PHONY: test-agents-mini-swe-agent
+test-agents-mini-swe-agent: ## Run Mini-SWE-Agent adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra mini-swe-agent --extra test \
+		python -c 'import minisweagent'
+	$(UV) run --frozen --package nemo-agents-plugin --extra mini-swe-agent --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_mini_swe_agent.py
+
+.PHONY: test-agents-nooa
+test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
+		python -c 'import nooa_cli; import nooa_bench'
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_nooa.py
+
+.PHONY: test-agents-claude
+test-agents-claude: ## Run Claude Code adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
+		python -c 'import claude_agent_sdk'
+	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_claude.py
+
+.PHONY: test-agents-codex
+test-agents-codex: ## Run Codex adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
+		python -c 'import openai_codex'
+	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_codex.py
+
+.PHONY: test-agents-hermes
+test-agents-hermes: ## Run Hermes adapter integration tests with its isolated harness installed
+	$(UV) run --frozen --package nemo-agents-plugin --extra test bash script/dev-install-hermes.sh
+	ADAPTER_PYTHON="$(CURDIR)/.venv-hermes/bin/python" \
+		$(UV) run --frozen --package nemo-agents-plugin --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_hermes.py
+
 .PHONY: test-deployments-openshell
 test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the platform-restricted [openshell] extra installed
 	# The openshell extra is not part of the default sync (platform-restricted
@@ -526,6 +586,12 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 	# run the backend's tests for real (mirrors the nemo-guardrails --extra bench job).
 	$(UV) run --frozen --package nemo-deployments-plugin --extra openshell \
 		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
+
+.PHONY: test-jobs-openshell
+test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed
+	$(UV) run --frozen --all-packages --extra openshell \
+		pytest -v services/core/jobs/tests/controllers/test_openshell_backend.py \
+		services/core/jobs/tests/integration/test_openshell_job_integration.py
 
 .PHONY: test-service
 test-service: ## Run tests for a specific service (usage: make test-service SERVICE=evaluator)
@@ -660,11 +726,6 @@ test-e2e-kubernetes-kai: ## Run KAI Scheduler e2e tests against Kubernetes (set 
 test-e2e-kubernetes-gpu: ## Run GPU e2e tests against Kubernetes (requires GPU nodes; set NHX_E2E_CLUSTER_URL)
 	@echo "Running GPU e2e tests with Kubernetes with feature gpu enabled..."
 	$(UV) run --frozen pytest e2e --kubernetes --feature gpu -v --junitxml=report-kubernetes-gpu.xml
-
-.PHONY: test-e2e-kubernetes-gpu-automodel
-test-e2e-kubernetes-gpu-automodel: ## Run GPU automodel customization e2e tests against Kubernetes (requires GPU nodes; set NHX_E2E_CLUSTER_URL)
-	@echo "Running GPU automodel customization e2e tests with Kubernetes..."
-	$(UV) run --frozen pytest tests/agentic-use/customizer-lora-job-cli/tests/test_outputs.py --kubernetes --feature gpu --log-cli-level=INFO -v --junitxml=report-kubernetes-gpu-automodel.xml
 
 .PHONY: benchmark-guardrails
 benchmark-guardrails: ## Run nemo-guardrails IGW benchmark sweep (set BENCHMARK_ARGS for extra flags)

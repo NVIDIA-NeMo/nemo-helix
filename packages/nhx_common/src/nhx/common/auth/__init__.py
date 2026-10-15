@@ -20,6 +20,16 @@ from .dependencies import (
     get_auth_client,
     get_principal_auth_headers,
 )
+from .discovery import (
+    AuthDiscoveryBearerTokenSourceError,
+    AuthDiscoveryResponse,
+    BearerTokenSource,
+    ConfidentialOidcAdvertisedClient,
+    OidcAdvertisedClient,
+    OIDCDiscoveryResponse,
+    PublicOidcAdvertisedClient,
+    parse_bearer_token_source,
+)
 from .exceptions import AuthorizationError, InvalidPermissionFormatError, InvalidScopeFormatError
 from .headers import AUTHENTICATION_CONTEXT_HEADERS, AUTHORIZATION_HEADER, TRUSTED_IDENTITY_HEADERS
 from .middleware import AuthorizationMiddleware
@@ -91,12 +101,16 @@ __all__ = [
     "AuthConfig",
     "AUTHENTICATION_CONTEXT_HEADERS",
     "AUTHORIZATION_HEADER",
+    "AuthDiscoveryBearerTokenSourceError",
     "AuthorizationError",
+    "AuthDiscoveryResponse",
     "InvalidPermissionFormatError",
     "InvalidPrincipalIdentifier",
     "InvalidScopeFormatError",
     "AuthorizationMiddleware",
     "AuthorizationResult",
+    "BearerTokenSource",
+    "ConfidentialOidcAdvertisedClient",
     "ACCESS_KEY_JWKS_PATH",
     "ACCESS_KEY_TOKEN_TYPE",
     "AccessKeyIssuerService",
@@ -116,6 +130,9 @@ __all__ = [
     "ParsedOpaqueDockerProofToken",
     "Principal",
     "PrincipalIdentifier",
+    "OidcAdvertisedClient",
+    "OIDCDiscoveryResponse",
+    "PublicOidcAdvertisedClient",
     "SyncWorkloadDelegationStore",
     "TRUSTED_IDENTITY_HEADERS",
     "WorkloadDelegationConflictError",
@@ -147,6 +164,7 @@ __all__ = [
     "docker_delegation_name",
     "principal_from_env",
     "parse_opaque_docker_proof_token",
+    "parse_bearer_token_source",
     "reference_delegation_name",
     "subject_token_type_for_exchange",
     "compute_accessible_workspaces",

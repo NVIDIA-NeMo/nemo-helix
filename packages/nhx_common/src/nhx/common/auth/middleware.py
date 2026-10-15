@@ -4,7 +4,7 @@
 """Authorization middleware for NeMo Helix services."""
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 import httpx
 from fastapi import Request, Response
@@ -187,19 +187,35 @@ def _identity_resolution_from_resolved_token(resolved: ResolvedBearerToken, conf
     return resolution
 
 
-# Health/metrics check endpoints - always allowed without authentication
-HEALTH_ENDPOINTS = {
-    "/status",
-    "/cluster-info",
-    "/health/live",
-    "/health/ready",
-    "/metrics",
-    "/apis/auth/discovery",  # Discovery endpoint for CLI/SDK
-    "/apis/auth/authenticate",  # Direct bearer-token validation JSON API
-    "/apis/auth/ext-authz",  # Envoy bearer-token validation callout
-    "/apis/auth/jwks",  # NeMo-minted bearer-token signing keys
-    "/apis/auth/token",  # Workload identity token exchange validates the subject token itself
-}
+class AuthMiddlewareExcludedRoute(NamedTuple):
+    path: str
+    include_subpaths: bool = False
+
+    def matches(self, request_path: str) -> bool:
+        return request_path == self.path or (self.include_subpaths and request_path.startswith(f"{self.path}/"))
+
+
+# Endpoints handled outside this middleware's normal authn/authz flow.
+AUTH_MIDDLEWARE_EXCLUDED_ROUTES = (
+    AuthMiddlewareExcludedRoute("/status"),
+    AuthMiddlewareExcludedRoute("/cluster-info"),
+    AuthMiddlewareExcludedRoute("/health/live"),
+    AuthMiddlewareExcludedRoute("/health/ready"),
+    AuthMiddlewareExcludedRoute("/metrics"),
+    AuthMiddlewareExcludedRoute("/apis/auth/discovery"),  # Discovery endpoint for CLI/SDK
+    AuthMiddlewareExcludedRoute("/apis/auth/v2/login"),
+    AuthMiddlewareExcludedRoute("/apis/auth/v2/login/callback"),
+    AuthMiddlewareExcludedRoute("/apis/auth/v2/logout"),
+    AuthMiddlewareExcludedRoute("/apis/auth/v2/session"),
+    AuthMiddlewareExcludedRoute("/apis/auth/v2/authorize", include_subpaths=True),
+    AuthMiddlewareExcludedRoute("/apis/auth/v2/token"),
+    AuthMiddlewareExcludedRoute("/apis/auth/authenticate"),  # Direct bearer-token validation JSON API
+    AuthMiddlewareExcludedRoute("/apis/auth/ext-authz", include_subpaths=True),  # Envoy callout
+    AuthMiddlewareExcludedRoute("/apis/auth/jwks"),  # NeMo-minted bearer-token signing keys
+    AuthMiddlewareExcludedRoute("/apis/auth/token"),  # Workload token exchange validates the subject token itself
+    AuthMiddlewareExcludedRoute("/studio", include_subpaths=True),  # Studio UI static files
+    AuthMiddlewareExcludedRoute("/plugin-ui", include_subpaths=True),  # Studio plugin bundles
+)
 
 # GET requests to these paths bypass authentication (e.g. / -> /studio redirect).
 PUBLIC_GET_PATHS = {
@@ -209,12 +225,9 @@ PUBLIC_GET_PATHS = {
     "/apis/plugins",  # Studio plugin manifest — fetched by the SPA before login completes
 }
 
-# Path prefixes that bypass authorization
-BYPASS_PREFIXES = (
-    "/apis/auth/ext-authz/",  # Envoy ext_authz path_prefix callout includes the original protected path
-    "/studio",  # Studio UI static files — the SPA handles its own OIDC login
-    "/plugin-ui/",  # Studio plugin bundles — loaded via dynamic import(), cannot send Authorization
-)
+
+def is_auth_middleware_excluded_path(path: str) -> bool:
+    return any(route.matches(path) for route in AUTH_MIDDLEWARE_EXCLUDED_ROUTES)
 
 
 class AuthorizationMiddleware(BaseHTTPMiddleware):
@@ -339,7 +352,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
                 del auth_ctx.__dict__["_fields"]
 
     def _reject_trusted_headers_in_token_exchange_mode(self, headers_dict: dict[str, str]) -> JSONResponse | None:
-        if not (self.config.enabled and self.config.oidc.workload_token_exchange_enabled):
+        if not (self.config.enabled and self.config.oidc.workload is not None):
             return None
         blocked_headers = sorted(header for header in TRUSTED_IDENTITY_HEADERS if header in headers_dict)
         if not blocked_headers:
@@ -458,7 +471,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
 
         The authorization decision follows this priority order:
 
-        1. Health endpoints (/health, /ready, etc.) - always allowed, no auth
+        1. Middleware-excluded endpoints (/health, /apis/auth, Studio assets, etc.) - always allowed, no auth
         2. Auth disabled (config.enabled=false) - allow all, extract principal
         3. Auth enabled - call PDP for authorization decision
 
@@ -474,15 +487,10 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         """
         path = request.url.path
 
-        # Skip authorization for health check endpoints
-        if path in HEALTH_ENDPOINTS:
+        if is_auth_middleware_excluded_path(path):
             return await call_next(request)
 
         if request.method in ("GET", "HEAD") and path in PUBLIC_GET_PATHS:
-            return await call_next(request)
-
-        # Skip authorization for bypass prefixes (e.g., /studio static files)
-        if path.startswith(BYPASS_PREFIXES):
             return await call_next(request)
 
         headers_dict = dict(request.headers)
@@ -501,7 +509,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             except MalformedBearerTokenError:
                 return JSONResponse(status_code=401, content={"detail": "Invalid bearer token"})
             if bearer_token is not None:
-                resolved = await resolve_workload_access_token(self.config, request, bearer_token)
+                resolved = await resolve_workload_access_token(self.config, bearer_token)
                 if resolved is not None and is_service_principal(resolved.principal.id):
                     return await self._handle_service_bearer_pdp_request(request, call_next, resolved)
             status_code = 401 if not principal_id else 403
@@ -687,10 +695,10 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
 
         try:
             extra_resolvers: tuple[ExtraBearerTokenResolver, ...] = ()
-            if self.config.oidc.workload_token_exchange_enabled:
+            if self.config.oidc.workload is not None:
 
                 async def resolve_workload_access(candidate: str) -> ResolvedBearerToken | None:
-                    return await resolve_workload_access_token(self.config, request, candidate)
+                    return await resolve_workload_access_token(self.config, candidate)
 
                 async def resolve_workload_subject(candidate: str) -> ResolvedBearerToken | None:
                     return await resolve_workload_subject_token(self.config, candidate)

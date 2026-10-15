@@ -296,9 +296,12 @@ async def test_resolve_model_clients_refreshes_auth_for_completion_calls(monkeyp
         def __init__(self) -> None:
             self.calls = 0
 
-        async def get_access_token(self) -> str:
+        async def get_access_token_async(self) -> str:
             self.calls += 1
             return f"token-{self.calls}"
+
+        async def get_access_token_or_none_async(self) -> str | None:
+            return await self.get_access_token_async()
 
     model_entity = _model_entity(
         workspace="default",

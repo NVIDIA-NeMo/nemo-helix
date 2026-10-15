@@ -104,11 +104,34 @@ names and task-kind discriminators also remain unchanged. Existing stored jobs
 are not migrated, so jobs with the old sources no longer appear in lists
 filtered by the new sources. This is an intentional breaking change.
 
+The profile also moves `docs/evaluator` to `docs/evals` and updates Fern source
+paths. Troubleshooting moves to the explicit `evals` navigation slug, with redirects
+from the previous `evaluator` URL; other published navigation slugs are preserved.
+It also renames the Studio Evals feature flags across typed definitions,
+runtime markers, configuration keys, route gates, and environment samples.
+Deployment owners must update their own overrides; follow the
+[upgrade guidance](../../docs/evals/upgrading-from-evaluator.mdx), especially for
+sandbox defaults and feature flags. Historical release example reports and the
+upgrade guide are excluded so version-specific URLs and old-to-new instructions
+are preserved on subsequent runs.
+It renames the web SDK service
+configuration, generation scripts, OpenAPI tags, and corresponding consumer
+imports together; regenerate the ignored SDK output before building Studio.
+`Evaluator` classes, local `evaluator` variables, telemetry fields, and existing
+permission namespaces are still valid names, so a raw count of `evaluator`
+matches is not a completeness check. Ignored files such as Python bytecode caches
+are left untouched and can keep old source directories on disk after all tracked
+files have moved. Use `rg` to search source without ignored caches.
+
 After applying a rename, review the diff, regenerate lockfiles with `uv`, run
 `make update-sdk` when API or SDK surfaces change, and validate library imports,
 packaging, plugin discovery, CLI, API routes and authorization. Generated files
 receive mechanical edits; regenerate them from their authoritative sources.
 Review service configuration, UI consumers and external integrations as well.
+Run `make vendor generate-cli-reference-docs` to refresh bundled wheel metadata
+and CLI documentation. Run `uv run ruff check` across the checkout, including
+notebooks (the pre-commit lint hook excludes them), and run `make lint` before
+publishing a broad rename.
 
 Document compatibility limitations in the rename's MR: serialized metric bundles
 and compiled job specifications may reference removed Python modules. The generic

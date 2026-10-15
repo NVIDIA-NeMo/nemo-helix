@@ -13,22 +13,55 @@ Verifies:
 
 from __future__ import annotations
 
+from typing import Any, TypeVar
 from unittest.mock import ANY, patch
 
 import httpx
 import pytest
 from nemo_agents_plugin.cli import AgentsCLI
+from nemo_helix_plugin.client.client import NemoClient
 from typer.testing import CliRunner
 
 runner = CliRunner()
 
 _PATCH_PREFIX = "nemo_agents_plugin.cli"
+ClientT = TypeVar("ClientT", bound=NemoClient)
+
+
+class _CLIState:
+    def __init__(self, base_url: str = "http://localhost:8080", workspace: str | None = "default") -> None:
+        self.base_url = base_url
+        self.workspace = workspace
+
+    def typed_client(self, client_cls: type[ClientT], timeout: float | httpx.Timeout | None = None) -> ClientT:
+        return client_cls(base_url=self.base_url, workspace=self.workspace, timeout=timeout)
+
+    def get_base_url(self, default: str | None = None) -> str | None:
+        return self.base_url
+
+    def get_workspace(self) -> str | None:
+        return self.workspace
+
+    def get_output_format(self, override: str | None = None, *, apply_non_tty_default: bool = True) -> str:
+        return override or "json"
 
 
 @pytest.fixture
 def app():
     """Build the ``nemo agents`` Typer app."""
     return AgentsCLI().get_cli()
+
+
+@pytest.fixture(autouse=True)
+def _default_cli_state_for_direct_invocations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Direct Typer invocations in these tests still run through a CLI state."""
+    original_invoke = CliRunner.invoke
+
+    def invoke(self: CliRunner, app: Any, args: Any | None = None, *pargs: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("obj", _CLIState())
+        return original_invoke(self, app, args, *pargs, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", invoke)
 
 
 def _install_mock_transport(handler):
@@ -129,15 +162,11 @@ class TestDeleteConfirmation:
             assert req.url.path.endswith("/agents/my-agent")
             return httpx.Response(204)
 
-        with (
-            _install_mock_transport(handler),
-            patch(f"{_PATCH_PREFIX}._platform_sdk") as mock_sdk,
-        ):
+        with _install_mock_transport(handler):
             result = runner.invoke(app, ["delete", "my-agent", "--yes"])
 
         assert result.exit_code == 0, result.output
         assert methods == ["DELETE"]
-        mock_sdk.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

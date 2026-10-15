@@ -3,11 +3,13 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import jwt
 import pytest
+from nhx.common.auth.access_keys import ACCESS_KEY_TOKEN_TYPE, ACCESS_KEY_TOKEN_TYPE_CLAIM
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims
 from nhx.common.auth.token_resolver import ResolvedBearerToken, ResolvedTokenKind, resolve_bearer_token
 from nhx.common.config import AuthConfig
-from nhx.common.config.base import AccessKeyConfig, OIDCConfig
+from nhx.common.config.base import AccessKeyConfig, OIDCConfig, OIDCPublicClientConfig
 
 
 def _claims(subject: str = "alice@example.com") -> TokenClaims:
@@ -56,6 +58,26 @@ def test_resolved_token_maps_actor_claims_to_delegated_principal_headers() -> No
         "X-NHX-Subject-Aliases": "user:alice,alice@example.test",
         "X-NHX-Scopes": "models.read",
     }
+
+
+def test_workload_access_token_preserves_signed_account_context() -> None:
+    claims = TokenClaims(
+        subject="user:alice",
+        email="alice@example.test",
+        groups=["researchers"],
+        scopes=[],
+        raw_claims={
+            "sub": "user:alice",
+            "nhx_actor_account_id": "account-1",
+            "nhx_actor_aliases": ["user:alice", "alice@example.test"],
+        },
+    )
+
+    principal = ResolvedBearerToken(claims=claims, token_kind="workload_access_token").principal
+
+    assert principal.id == "user:alice"
+    assert principal.account_id == "account-1"
+    assert principal.authz_aliases == ["user:alice", "alice@example.test"]
 
 
 @pytest.mark.parametrize("token_kind", ["oidc_access_token", "access_key", "workload_subject_token"])
@@ -127,7 +149,11 @@ async def test_resolver_uses_extra_resolvers_before_oidc() -> None:
     config = AuthConfig(
         enabled=True,
         access_keys=AccessKeyConfig(enabled=False),
-        oidc=OIDCConfig(enabled=True, issuer="https://sso.example.com", client_id="nemo-helix-cli"),
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
+        ),
     )
     workload_claims = _claims("system:serviceaccount:nemo:job")
     extra_resolver = AsyncMock(
@@ -155,7 +181,11 @@ async def test_resolver_falls_back_to_oidc_validator() -> None:
     config = AuthConfig(
         enabled=True,
         access_keys=AccessKeyConfig(enabled=True),
-        oidc=OIDCConfig(enabled=True, issuer="https://sso.example.com", client_id="nemo-helix-cli"),
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
+        ),
     )
     oidc_claims = _claims("bob@example.com")
     jwt_validator = MagicMock()
@@ -169,3 +199,44 @@ async def test_resolver_falls_back_to_oidc_validator() -> None:
 
     assert resolved == ResolvedBearerToken(claims=oidc_claims, token_kind="oidc_access_token")
     jwt_validator.validate_token.assert_awaited_once_with("oidc-token")
+
+
+@pytest.mark.asyncio
+async def test_resolver_rejects_an_invalid_access_key_without_trying_other_issuers() -> None:
+    """A token that names itself an access key is rejected outright when it fails validation.
+
+    Falling through costs the workload and OIDC resolvers' IdP round-trips, which pushed the
+    gateway's ext-authz callout past its timeout and turned a 401 into a 503.
+    """
+    config = AuthConfig(
+        enabled=True,
+        access_keys=AccessKeyConfig(enabled=True),
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
+        ),
+    )
+    tampered_access_key = jwt.encode(
+        {ACCESS_KEY_TOKEN_TYPE_CLAIM: ACCESS_KEY_TOKEN_TYPE, "jti": "ak_" + "a" * 32, "sub": "alice@example.com"},
+        key="",
+        algorithm="none",
+    )
+    extra_resolver = AsyncMock(return_value=None)
+    jwt_validator = MagicMock()
+    jwt_validator.validate_token = AsyncMock(return_value=_claims())
+
+    with patch(
+        "nhx.common.auth.access_keys.validate_access_key_token",
+        new=AsyncMock(return_value=None),
+    ):
+        resolved = await resolve_bearer_token(
+            config,
+            tampered_access_key,
+            jwt_validator=jwt_validator,
+            extra_resolvers=[extra_resolver],
+        )
+
+    assert resolved is None
+    extra_resolver.assert_not_called()
+    jwt_validator.validate_token.assert_not_called()

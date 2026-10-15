@@ -9,6 +9,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Self
 
+from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import validate_caller_tag, validate_repository
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -26,11 +27,11 @@ _SPEC_NAME_PATTERN = r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
 
 MAX_BUILD_SPECS = 100
 
+#: A set's job is `builder-<set>-<revision>`. Jobs names are per workspace, shared with every other job there.
+JOB_NAME_PREFIX = "builder-"
+
 # Jobs names a job's fileset `job-fileset-<job name>`: the longest name a set's name ends up in.
 _JOBS_FILESET_PREFIX = "job-fileset-"
-
-#: The archives a build context may come in: tar, compressed or not. `fetch` unpacks them.
-ARCHIVE_SUFFIXES = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
 
 
 def _relative_path(value: str, *, field: str) -> str:
@@ -53,8 +54,8 @@ class FileSetSource(BaseModel):
     archive: str | None = Field(
         default=None,
         description=(
-            "A tar archive in the fileset, compressed or not, to unpack and build from. "
-            "`context_path` is then a directory inside it."
+            "A tar archive in the fileset, compressed or not, to unpack and build from, under any file name. "
+            "`context_path` is then a directory inside it. A file that isn't a tar archive fails the build."
         ),
     )
     context_path: str | None = Field(
@@ -79,8 +80,8 @@ class FileSetSource(BaseModel):
         if value is None:
             return None
         _relative_path(value, field="archive")
-        if not value.lower().endswith(ARCHIVE_SUFFIXES):
-            raise ValueError(f"archive must be a tar archive, one of {', '.join(ARCHIVE_SUFFIXES)}; got {value!r}")
+        if PurePosixPath(value).as_posix() != value:
+            raise ValueError(f"archive must be written plainly, without '.' or empty segments, got {value!r}")
         return value
 
     @field_validator("context_path")
@@ -177,8 +178,11 @@ class BuildSet(BaseModel):
     @model_validator(mode="after")
     def _derived_names_fit(self) -> Self:
         """Valid parts can still compose a name over the limit; checked here, before anything is written."""
-        job = f"{self.name}-{self.revision}"
-        composed = [f"{_JOBS_FILESET_PREFIX}{job}", *(f"{job}.{spec.name}" for spec in self.build_specs if spec.name)]
+        base = f"{self.name}-{self.revision}"
+        composed = [
+            f"{_JOBS_FILESET_PREFIX}{JOB_NAME_PREFIX}{base}",
+            *(f"{base}.{spec.name}" for spec in self.build_specs if spec.name),
+        ]
         longest = max(composed, key=len)
         if len(longest) > NAME_MAX_LENGTH:
             raise ValueError(
@@ -186,3 +190,12 @@ class BuildSet(BaseModel):
                 f"over {NAME_MAX_LENGTH} characters"
             )
         return self
+
+
+class SubmitBuildResponse(BaseModel):
+    """The submitted build's job and images."""
+
+    job: str = Field(description="Name of the build job, for logs and debugging.")
+    images: list[ContainerImage] = Field(
+        description="One row per build spec, created `pending`. POLL THESE, not the job."
+    )

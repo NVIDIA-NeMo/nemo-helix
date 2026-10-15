@@ -27,12 +27,9 @@ DeploymentMode: TypeAlias = Literal["subprocess", "docker", "k8s", "openshell"]
 EndpointProtocol: TypeAlias = Literal["http", "https", "grpc", "tcp"]
 SessionLifecycleStatus: TypeAlias = Literal["active", "expired", "lost", "closed"]
 AgentJobCollection: TypeAlias = Literal[
-    "analyze",
     "evaluate",
-    "evaluate-suite",
     "execute",
     "optimize",
-    "optimize-skills",
     "package",
 ]
 
@@ -450,7 +447,7 @@ class DeploymentLogsResponse(BaseModel):
 
     data: list[LogLine]
     total_lines: int = Field(description="Number of lines actually returned.")
-    next_offset: int = Field(description="Byte offset just past the returned tail.")
+    next_offset: int | str = Field(description="Resume cursor just past the returned tail.")
 
 
 class AgentJobRequest(BaseModel):

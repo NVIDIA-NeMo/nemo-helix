@@ -320,10 +320,10 @@ function "get_platforms" {
 
 # Semantic groups for parallel CI builds
 
-# Auditor images
-group "docker-auditor" {
+# Garak images
+group "docker-garak" {
   targets = [
-    "nhx-auditor-tasks-docker",
+    "nhx-garak-tasks-docker",
   ]
 }
 
@@ -336,7 +336,7 @@ group "all-multi-platform" {
 group "docker-multi-platform" {
   targets = [
     "docker-cpu",
-    "nhx-auditor-tasks-docker",
+    "nhx-garak-tasks-docker",
   ]
 }
 
@@ -364,7 +364,7 @@ group "docker" {
   targets = [
     "docker-cpu",
     "docker-gpu",
-    "docker-auditor",
+    "docker-garak",
   ]
 }
 
@@ -378,7 +378,10 @@ group "docker-cpu" {
   targets = [
     "nhx-api-docker",
     "nhx-tasks-docker",
+    "nhx-tasks-openshell-docker",
     "nhx-gym-tasks-docker",
+    "nhx-builder-tasks-docker",
+    "nhx-kaniko-docker",
   ]
 }
 
@@ -391,6 +394,10 @@ group "docker-cpu-ci" {
     "nhx-tasks-smoke-test",
     "nhx-tasks-openshell-smoke-test",
     "nhx-gym-tasks-smoke-test",
+    "nhx-builder-tasks-docker",
+    "nhx-builder-tasks-smoke-test",
+    "nhx-kaniko-docker",
+    "nhx-kaniko-smoke-test",
   ]
 }
 
@@ -901,6 +908,77 @@ target "nhx-gym-host-smoke-test" {
   platforms  = get_platforms()
 }
 
+# The builder's step image: `nhx-build fetch|supervise|push`, and crane. Its push step holds a
+# workspace's registry credential and signing key.
+target "nhx-builder-tasks-docker" {
+  target     = "runtime"
+  context    = "."
+  dockerfile = "docker/builder/Dockerfile.nhx-builder-tasks"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+    nhx-workspace   = "target:nhx-workspace"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    NHX_PYTHON_IMAGE    = NHX_PYTHON_IMAGE
+  }
+  cache-to   = maybe_registry_cache_to("nhx-builder-tasks")
+  cache-from = maybe_registry_cache_from("nhx-builder-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-builder-tasks")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+target "nhx-builder-tasks-smoke-test" {
+  target     = "smoke-test"
+  context    = "."
+  dockerfile = "docker/builder/Dockerfile.nhx-builder-tasks"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+    nhx-workspace   = "target:nhx-workspace"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    NHX_PYTHON_IMAGE    = NHX_PYTHON_IMAGE
+  }
+  cache-from = maybe_registry_cache_from("nhx-builder-tasks")
+  output     = ["type=cacheonly"]
+  platforms  = get_platforms()
+}
+
+# The builder's sandbox: the osscontainertools kaniko fork's debug image, pinned by digest and republished.
+target "nhx-kaniko-docker" {
+  target     = "runtime"
+  context    = "."
+  dockerfile = "docker/builder/Dockerfile.nhx-kaniko"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-to   = maybe_registry_cache_to("nhx-kaniko")
+  cache-from = maybe_registry_cache_from("nhx-kaniko")
+  tags       = sha_and_maybe_latest_tags("nhx-kaniko")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+target "nhx-kaniko-smoke-test" {
+  target     = "smoke-test"
+  context    = "."
+  dockerfile = "docker/builder/Dockerfile.nhx-kaniko"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-from = maybe_registry_cache_from("nhx-kaniko")
+  output     = ["type=cacheonly"]
+  platforms  = get_platforms()
+}
+
 # Python wheel builders (causal-conv1d, mamba-ssm, magi-attention, av, opencv-python-headless).
 # CUDA extensions only ship source on PyPI (or git); av/opencv bundle FFmpeg. Pre-built for
 # amd64 and arm64. Wheels live at /wheels/*.whl inside each image.
@@ -1270,21 +1348,21 @@ target "nhx-guardrails-callout-mock-llm" {
   platforms  = get_platforms()
 }
 
-# Auditor
-target "nhx-auditor-tasks-docker" {
+# Garak
+target "nhx-garak-tasks-docker" {
   target  = "release"
   context = "."
   contexts = {
     root-lib-source-artifacts = "target:root-lib-source-artifacts"
     root-busybox              = "target:root-busybox"
   }
-  dockerfile = "docker/Dockerfile.nhx-auditor-tasks"
+  dockerfile = "docker/Dockerfile.nhx-garak-tasks"
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
-  cache-to   = maybe_registry_cache_to("nhx-auditor-tasks")
-  cache-from = maybe_registry_cache_from("nhx-auditor-tasks")
-  tags       = sha_and_maybe_latest_tags("nhx-auditor-tasks")
+  cache-to   = maybe_registry_cache_to("nhx-garak-tasks")
+  cache-from = maybe_registry_cache_from("nhx-garak-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-garak-tasks")
   output     = image_output()
   platforms  = get_platforms()
 }

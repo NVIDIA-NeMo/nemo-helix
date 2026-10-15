@@ -3,8 +3,8 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
-import { useEvaluatorDeleteEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
-import type { EvaluateJob } from '@nemo/sdk/generated/evaluator/schema';
+import { useEvalsDeleteEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import {
   Button,
   DropdownContent,
@@ -31,7 +31,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({ job, onNavigateToDetails, onJo
   const [modalOpen, setModalOpen] = useState<'edit' | 'delete' | undefined>(undefined);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const workspace = useWorkspaceFromPath();
-  const { mutateAsync: deleteEvaluateJob } = useEvaluatorDeleteEvaluateJob();
+  const { mutateAsync: deleteEvaluateJob } = useEvalsDeleteEvaluateJob();
   const toast = useToast();
   const jobName = getEvaluationJobName(job);
 

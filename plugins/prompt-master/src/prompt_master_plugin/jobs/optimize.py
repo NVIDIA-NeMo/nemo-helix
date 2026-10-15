@@ -88,10 +88,10 @@ class PromptMasterOptimizeJob(NemoJob):
     name: ClassVar[str] = STRATEGY_NAME
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
         name=STRATEGY_NAME,
+        title="Prompt optimization using Prompt Master",
         description="Rewrite the agent's system prompt using https://github.com/nidhinjs/prompt-master.",
     )
     description: ClassVar[str] = "Optimize a platform agent's system prompt with Prompt Master."
-    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = PromptMasterOptimizeSpec
 
     @classmethod

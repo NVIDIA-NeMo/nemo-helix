@@ -3,7 +3,11 @@
 
 import { FilesetEntry } from '@studio/api/files/types';
 import type { OptimizationFormOutput } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
-import type { StudyRow } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/studyDataset';
+import {
+  mimicEvaluation,
+  MIMICKED_JUDGE_PROMPT,
+} from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/mimicEvaluation';
+import type { StudyEvaluation } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/studyDataset';
 import {
   budgetById,
   type SearchParameter,
@@ -30,10 +34,6 @@ const bound = (value: number, type: SearchParameter['type']): Scalar<number> | n
 
 const gatewayBaseUrl = (workspace: string): string =>
   `\${NHX_BASE_URL}${GATEWAY_PATH_MARKER}v2/workspaces/${workspace}/openai/-/v1`;
-
-/** The gateway never routes across workspaces, so a `workspace/name` ref is served by its own. */
-const modelWorkspace = (modelRef: string, fallback: string): string =>
-  modelRef.includes('/') ? modelRef.slice(0, modelRef.indexOf('/')) : fallback;
 
 /** The model the agent runs, as the Fabric translation picks it: the default harness's own model
  *  outranks `models.default`, and is what the trial payload carries as `models.default`. */
@@ -71,7 +71,31 @@ export interface BuildOptimizeConfigParams {
   workspace: string;
   values: OptimizationFormOutput;
   agentModel?: Record<string, unknown>;
+  evaluationData: StudyEvaluation;
 }
+
+const originalJudgeModel = (workspace: string, model: unknown): Record<string, unknown> => {
+  if (typeof model === 'string') {
+    const modelWorkspace = model.includes('/') ? model.slice(0, model.indexOf('/')) : workspace;
+    return { provider: 'nvidia', model, base_url: gatewayBaseUrl(modelWorkspace) };
+  }
+  const inline = asRecord(model);
+  if (
+    typeof inline?.url !== 'string' ||
+    typeof inline.name !== 'string' ||
+    inline.api_key_secret ||
+    inline.default_headers
+  ) {
+    throw new Error(
+      'Frontend-generated optimization requires a registered judge model or an inline model without custom authentication.'
+    );
+  }
+  return {
+    provider: 'openai',
+    model: inline.served_model_name ?? inline.name,
+    base_url: inline.url,
+  };
+};
 
 /** The job merges only optimizer, eval and models onto the agent; metadata would be dropped.
  *  One repetition per row keeps the run count equal to trials × rows. */
@@ -79,15 +103,13 @@ export const buildOptimizeConfig = ({
   workspace,
   values,
   agentModel,
+  evaluationData,
 }: BuildOptimizeConfigParams): string => {
+  const mimicked = mimicEvaluation(evaluationData);
   const config = {
     models: {
       ...(agentModel ? { default: agentModel } : {}),
-      judge: {
-        provider: 'nvidia',
-        model: values.judgeModel,
-        base_url: gatewayBaseUrl(modelWorkspace(values.judgeModel, workspace)),
-      },
+      judge: originalJudgeModel(workspace, mimicked.model),
     },
     optimizer: {
       experiment_id: values.experimentId,
@@ -97,11 +119,7 @@ export const buildOptimizeConfig = ({
       },
       reps_per_param_set: 1,
       eval_metrics: {
-        average_score: {
-          evaluator_name: 'average_score',
-          direction: 'maximize',
-          weight: float(1),
-        },
+        average_score: { evaluator_name: 'average_score', direction: 'maximize', weight: float(1) },
       },
       search_space: {
         ...Object.fromEntries(
@@ -127,14 +145,9 @@ export const buildOptimizeConfig = ({
         accuracy: {
           _type: 'tunable_rag_evaluator',
           llm_name: 'judge',
-          inference: { temperature: float(0) },
-          default_scoring: true,
-          judge_llm_prompt:
-            'Score whether the generated answer correctly addresses the question compared to the ' +
-            'expected answer. Respond with exactly this JSON object and no other keys: ' +
-            '{"coverage_score": <number from 0.0 to 1.0>, "correctness_score": <number from 0.0 ' +
-            'to 1.0>, "relevance_score": <number from 0.0 to 1.0>, "reasoning": "<one or two ' +
-            'sentences>"}',
+          default_scoring: false,
+          inference: mimicked.inference,
+          judge_llm_prompt: MIMICKED_JUDGE_PROMPT,
         },
       },
     },
@@ -144,9 +157,7 @@ export const buildOptimizeConfig = ({
 };
 
 /** The two files a study's bundle fileset holds: the optimize config and the rows it scores. */
-export const buildStudyBundle = (
-  params: BuildOptimizeConfigParams & { rows: StudyRow[] }
-): FilesetEntry[] => [
+export const buildStudyBundle = (params: BuildOptimizeConfigParams): FilesetEntry[] => [
   {
     path: OPTIMIZE_CONFIG_PATH,
     file: new File([buildOptimizeConfig(params)], OPTIMIZE_CONFIG_PATH, {
@@ -155,8 +166,12 @@ export const buildStudyBundle = (
   },
   {
     path: STUDY_DATASET_PATH,
-    file: new File([JSON.stringify(params.rows, null, 2)], STUDY_DATASET_PATH, {
-      type: 'application/json',
-    }),
+    file: new File(
+      [JSON.stringify(mimicEvaluation(params.evaluationData).rows, null, 2)],
+      STUDY_DATASET_PATH,
+      {
+        type: 'application/json',
+      }
+    ),
   },
 ];

@@ -1,0 +1,214 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Troubleshooting NeMo Helix Evals"
+description: ""
+---
+<a id="evaluator-troubleshooting"></a>
+
+Use this documentation to troubleshoot issues that can arise when you work with [NVIDIA NeMo Helix Evals](/documentation/evaluate-models).
+
+<Tip>
+
+You can get metric logs or get benchmark logs for `COMPLETED` or `FAILED` jobs and use them to help troubleshoot.
+
+</Tip>
+---
+
+<a id="evaluator-hugging-face-error"></a>
+## Hugging Face Error
+
+Some benchmark evaluations may require Hugging Face access to the respective dataset or model tokenizer. If your job fails with the following errors, visit [https://huggingface.co/](https://huggingface.co/) and log in to request access to the dataset or model.
+
+```
+datasets.exceptions.DatasetNotFoundError: Dataset 'allenai/wildguardmix' is a gated dataset on the Hub. Visit the dataset page at https://huggingface.co/datasets/allenai/wildguardmix to ask for access.
+```
+
+```
+GatedRepoError: 403 Client Error.
+
+Cannot access gated repo for url https://huggingface.co/<model>/resolve/main/tokenizer_config.json.
+Your request to access model <model> is awaiting a review from the repo authors.
+```
+
+<a id="unsupported-judge-model"></a>
+## Unsupported Judge Model
+
+LLM-as-a-Judge evaluates the quality of another model's output using an evaluation prompt and an evaluation criteria. The prompt applies structure to the judge's output which is then parsed by the evaluation criteria to generate a metrics score.
+
+Not all models make good judges. If the judge produces inconsistent output and does not follow the format expected by the evaluation criteria, the evaluation can fail with parsing errors. This is commonly observed for smaller models.
+
+```
+Incoming request body={'messages': [{'content': 'The output string did not satisfy the constraints given in the prompt. Fix the output string and return it.\nPlease return the output in a JSON format that complies with the following schema as specified in JSON Schema:\n{"properties": {"text": {"title": "Text", "type": "string"}}, "required": ["text"], "title": "StringIO", "type": "object"}
+```
+
+## Dataset \{dataset} is not in the expected format; it needs to have the files_url property set
+
+This means that either the `files_url` is not provided as part of the dataset specification in the config,
+or that the `files_url` is not provided in the expected format.
+The dataset must be a JSON object with the `files_url` property set,
+pointing to the path of the file in the NeMo Data Store in the format: `hf://datasets/<dataset-namespace>/<dataset-namespace>/<file-path>`.
+
+## Error connecting to inference server
+
+This means that for a custom evaluation, the target LLM endpoint is unable to connect.
+
+## Inference SSL Error
+
+An evaluation job that uses an HTTPS model endpoint can fail if the endpoint certificate or DNS name is not trusted by the local environment. Verify that the model URL is reachable from the host running NeMo Helix and that the endpoint presents a valid certificate for its hostname.
+
+```
+Error: HTTPSConnectionPool(host="<NIM Proxy URL>", port=443): Max retries exceeded with url: /v1/chat/completions (Caused by SSLError(SSLError))
+```
+
+## Error occurred while checking the existence of file \{file_ref} on NeMo Data Store
+
+This could mean that the dataset is not specified correctly, or that the NeMo Data Store itself is unresponsive.
+
+- Verify that the files URL is correct and that the dataset and file exists in the NeMo Data Store.
+- Verify that the NeMo Data Store is responsive and reachable.
+
+If the error contains the string `Dataset {file_ref} is not present on datastore`,
+it means that the datastore is responsive, but the file reference does not exist.
+
+## Evaluation Job Takes a Long Time
+
+The time that an Evaluation job takes can vary from a few minutes to many hours,
+depending on the target model, config, and other factors.
+As long as the status is `RUNNING`, your job is still running.
+If there is a problem with your job, you will see `UNAVAILABLE` or `FAILED`.
+
+## Job cannot be launched
+
+This means that one of the pre-launch validations has failed.
+The error contains the details about the checks that failed.
+
+## What is EVALUATOR_BASE_URL?
+
+`EVALUATOR_BASE_URL` is a placeholder for the URL of the evaluator API in examples.
+For local setup, the platform API defaults to `http://localhost:8080`.
+If you use a different deployment, use the base URL saved in your current CLI context, shown by `nemo config view`. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+
+## Agent evaluation job failures
+
+Inspect the platform job and its logs before interpreting a partial result:
+
+```bash
+nemo jobs get-logs <job-name> --workspace default --limit 100
+```
+
+An `agent-evaluate` job can fail while generating trials, scoring them, or publishing optional
+Intake results. The authoritative result bundle is saved before required Intake publication runs,
+so a publication failure can leave a downloadable bundle on a failed job.
+
+Wait for a terminal job state before downloading results. Progress reaching 100 percent does not
+mean artifact finalization is complete.
+
+## Sandboxed Gym failures
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `Gym environment FileSets require sandboxed execution` | The target sets `environment`, but sandboxing is disabled | Enable `evaluator.sandboxed_gym_default` or omit the custom environment |
+| Cluster is not marked sandbox-capable | Evaluator is configured to sandbox, but its capability gate is false | Install OpenSandbox, then enable the platform and Evaluator capability settings |
+| Missing `sandbox_runtime_image` or `sandbox_job_storage_pvc_claim` | Required operator configuration is incomplete | Configure the `nhx-gym-host` image and shared Jobs PVC |
+| Sandbox has no route to a model | Both model base URLs and additional egress lists are empty or incomplete | Add the model endpoint to `sandbox_policy_base_urls` |
+| Credential-shaped `env_vars` are rejected | A plaintext API key, password, or token would be visible to environment code | Store the value in NeMo Helix Secrets and map it through `env_secrets` |
+| Jobs PVC and sandbox PVC do not match | FileSet staging writes to a different claim from the Gym host mount | Set `sandbox_job_storage_pvc_claim` to the Jobs execution profile's PVC |
+| FileSet has the wrong purpose or no manifest | The package is not an Evaluator Gym environment | Use `purpose=environment` and place `nemo-environment.yaml` at the FileSet root |
+| Agent produces no rollout | The package registers the agent instance under another name | Set `agent_ref_name` to the registered instance |
+
+See [Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration)
+for the complete operator configuration and
+[Run a Custom Gym Environment](/documentation/evaluate-models/agent-eval/gym-custom-environment)
+for package requirements.
+
+## Download agent evaluation results
+
+Platform agent evaluations publish `agent-eval-results` and `summary` as named Jobs results:
+
+```bash
+nemo jobs results download agent-eval-results \
+  --job <job-name> \
+  --output-file agent-eval-results.tar.gz
+```
+
+The task-driven job handle does not provide the dataset-evaluation `get_result()` or
+`download_artifacts()` methods. Query aggregates through `evaluator.agent_eval_results` (`evaluator = Evaluator.from_client(client)`) and
+download individual trials from its bundle reference.
+
+## Legacy Evaluator API troubleshooting
+
+The endpoints below apply only to deployments that still expose the legacy `/v1/evaluation/jobs`
+API. New Evals plugin jobs use `/apis/evals/v2`, the Jobs log command above, and named job
+results.
+
+<Warning>
+
+Do not use `skip_validation_checks` or the legacy download endpoint with Evals plugin jobs.
+
+</Warning>
+
+### Download legacy evaluation job logs
+
+To download the log files, use the `download-results` endpoint.
+This endpoint downloads the result directory containing configuration files, logs, and evaluation results for a specific evaluation run.
+The result directory is packaged and provided as a downloadable archive.
+
+To download the evaluation results directory, use the following code.
+
+```bash
+curl -X 'GET' \
+ '<BASE_URL>/v1/evaluation/jobs/<job-id>/download-results' \
+ -H 'accept: application/json' \
+ -o result.zip
+```
+
+After the download is complete, the log files are available inside the result.zip file.
+Log files can be found in the results folder with the file extension `*.log`.
+
+## Skip validation checks
+
+When you launch an evaluation job, NeMo Helix Evals performs availability checks (for example, checking if the dataset and files exist in NeMo Data Store).
+To speed up job launch, or due to strict constraints of validation checks, you can pass the query parameter `skip_validation_checks` during job launch.
+
+Use the following code to create an evaluation job that skips validation checks.
+
+<Tabs>
+
+<Tab title="curl">
+
+```bash
+curl -X 'POST' \
+'${EVALUATOR_BASE_URL}/v1/evaluation/jobs?skip_validation_checks=True' \
+-H 'accept: application/json' \
+-H 'Content-Type: application/json' \
+-d '{
+"namespace": "my-organization",
+"target": "<my-target-namespace/my-target-name>",
+"config": "<my-config-namespace/my-config-name>"
+}'
+```
+
+</Tab>
+<Tab title="Python">
+
+```python
+import requests
+
+EVALUATOR_BASE_URL = "http://localhost:8080"
+
+data = {
+    "namespace": "my-organization",
+    "target": "<my-target-namespace/my-target-name>",
+    "config": "<my-config-namespace/my-config-name>",
+}
+
+endpoint = f"{EVALUATOR_BASE_URL}/v1/evaluation/jobs?skip_validation_checks=True"
+
+response = requests.post(endpoint, json=data).json()
+```
+
+</Tab>
+
+</Tabs>

@@ -17,7 +17,6 @@ from scaled_evals.api.schemas.config_profiles import (
 )
 from scaled_evals.api.tenancy import is_admin, record_principal
 from scaled_evals.api.utils import make_id
-from scaled_evals.dispatch.switchyard import validate_switchyard_profile_config
 from scaled_evals.intake.config import validate_intake_profile_config
 from scaled_evals.models.gym_profile import validate_gym_profile_config
 from scaled_evals.models.harbor_profile import validate_harbor_profile_config
@@ -48,7 +47,6 @@ def _validate_profile_config(profile_type: ConfigProfileType, config: dict[str, 
     validators = {
         "harbor": validate_harbor_profile_config,
         "gym": validate_gym_profile_config,
-        "switchyard": validate_switchyard_profile_config,
         "intake": validate_intake_profile_config,
     }
     try:
@@ -122,7 +120,7 @@ def get_profile(profile_id: str, db: Db) -> ConfigProfile:
 @router.patch("/{profile_id}", response_model=ConfigProfile)
 def patch_profile(profile_id: str, body: ConfigProfileUpdate, db: Db, current: Principal) -> ConfigProfile:
     """Update a config profile's `name` and/or `config`. Type is immutable;
-    Gym and Switchyard config is validated before persistence.
+    Gym config is validated before persistence.
 
     Writes are owner-scoped: 404 if not found, or if the caller neither owns
     the profile nor is an admin.

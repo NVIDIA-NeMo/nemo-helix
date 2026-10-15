@@ -16,7 +16,7 @@ from typing import Literal
 from nemo_builder_plugin.identity import DIGEST_PATTERN
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class Provenance(BaseModel):
@@ -46,7 +46,6 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
     registry: str = Field(description="Registry host the image is published to.")
     repository: str = Field(description="Repository path within the registry.")
     provenance: Provenance
-    platform: str = Field(default="linux/amd64", pattern=r"^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$")
 
     # Written once, when the row becomes `ready`.
     digest: str | None = Field(
@@ -55,6 +54,11 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
         description="The manifest digest the push step pushed under the system tag, and signed.",
     )
 
+    # In every response, but never stored: the entity store writes a row without its computed fields.
+    @computed_field(
+        description="`<registry>/<repository>@<digest>`, the reference to pin, once the row is `ready`.",
+        json_schema_extra={"nullable": True},
+    )
     @property
     def image_ref(self) -> str | None:
         if self.digest is None:

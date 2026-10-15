@@ -18,7 +18,7 @@ triggers:
   - war-game a LangGraph Dockerfile project
   - war-game validation_failed result
 not-for:
-  - auditor (use for a one-shot garak scan without hardening)
+  - garak (use for a one-shot garak scan without hardening)
   - guardrails-plugin (use to author guardrails directly, without a war-game)
   - nemo-try-agent (use to chat with a deployed agent)
   - nemo-status (use for a read-only platform dashboard)
@@ -128,7 +128,7 @@ nemo agent-hardener init --project-dir ./my-agent --name my-agent --harness lang
 
 Stop honestly: Agent Hardener refuses these at `init` by design. They run behind a compiled gateway
 with no in-process interception point, so a guardrail could never actually block a tool call.
-Suggest the `auditor` skill for scan-only coverage.
+Suggest the `garak` skill for scan-only coverage.
 
 ## 3. Interview — Studio or CLI?
 
@@ -219,11 +219,20 @@ saw and ask the user.
 ## Gotchas
 
 - Manifests are **frozen targets**: after the agent changes, `nemo agent-hardener refresh
-  --manifest-id my-agent` re-resolves it.
+  --manifest-id my-agent` re-resolves it (Studio: **Refresh Target**). Runs log a warning when the
+  agent is newer than the manifest.
+- A host service the victim calls (e.g. a remote MCP server) is declared at init with
+  `--backend NAME:PORT[,PORT]` (repeatable) and reached via `host.docker.internal`. The gateway
+  backend is added automatically (its name is reserved); declared backends survive `refresh`.
+- `--env-file` values are merged into the victim's `.env` and win over the operator env.
+- A failed run keeps its hitlog, so it can be replayed with `--replay-hitlog`.
 - `nemo agent-hardener manifest show my-agent` / `manifest set` read and tweak the stored config;
   model-group overrides (`--attack-model`, `--attack-key-secret`, `--analysis-model`, …) live on
   `run`.
 - Env vars vs secrets: `--env KEY=VALUE` is for plain config; anything credential-shaped goes
-  through `--env-file` / stored secrets so it never lands in the manifest.
+  through `--secrets NAME=workspace/secret` (read from the Secrets store at run time) or `--env-file`,
+  so it never lands in the manifest. A deployed agent's own secret references are recorded for you.
+- A key exported in the shell that started the platform overrides `~/.agent-hardener/.env`; the run
+  logs `the platform environment overrides <NAME>` when that happens.
 - Running the platform from a source checkout needs
   `NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION=1` in the platform's environment.

@@ -5,7 +5,7 @@
 
 These types define the HTTP contract for filesets and file operations.
 Both the server (FastAPI routes) and the client (NemoClient endpoints)
-import from here — one source of truth, no Stainless-generated duplicates.
+import from here, so there is one source of truth.
 """
 
 from __future__ import annotations

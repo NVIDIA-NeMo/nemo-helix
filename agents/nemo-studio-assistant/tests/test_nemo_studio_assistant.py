@@ -175,10 +175,10 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
 
     assert error is None
     assert {skill["name"] for skill in skills} == {
-        "auditor",
+        "garak",
         "benchmark-execution",
         "entities",
-        "evaluator",
+        "evals",
         "files",
         "guardrails",
         "inference",
@@ -224,10 +224,10 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
     skills, error = _list_skills_with_errors(backend, skill_sources[0])
     assert error is None
     assert {skill["name"] for skill in skills} == {
-        "auditor",
+        "garak",
         "benchmark-execution",
         "entities",
-        "evaluator",
+        "evals",
         "files",
         "guardrails",
         "inference",
@@ -1400,9 +1400,9 @@ _JOB_STATUS = {
 @pytest.mark.parametrize(
     ("service", "path", "payload"),
     [
-        ("evaluator", "/apis/evaluator/v2/workspaces/default/evaluate/jobs/job-1/status", _JOB_STATUS),
+        ("evals", "/apis/evals/v2/workspaces/default/evaluate/jobs/job-1/status", _JOB_STATUS),
         ("data_designer", "/apis/data-designer/v2/workspaces/default/jobs/create/job-1/status", _JOB_STATUS),
-        ("auditor", "/apis/auditor/v2/workspaces/default/jobs/audit/job-1", {"name": "job-1", "status": "completed"}),
+        ("garak", "/apis/garak/v2/workspaces/default/jobs/audit/job-1", {"name": "job-1", "status": "completed"}),
         ("customization.automodel", "/apis/jobs/v2/workspaces/default/jobs/job-1/status", _JOB_STATUS),
     ],
 )
@@ -1422,7 +1422,7 @@ def test_check_status_reads_the_service_job(
 def test_check_status_reports_platform_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_client(monkeypatch, _FakeHelix().client())
 
-    response = register.check_status("evaluator", "missing", workspace="default")
+    response = register.check_status("evals", "missing", workspace="default")
 
     assert response.startswith("Error: NotFoundError:")
 

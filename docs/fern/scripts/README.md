@@ -34,10 +34,34 @@ After writing the `.ts` module, register it in `fern/components/NotebookViewer.t
 `@/` imports, so the registry pattern is required.
 
 ```mdx
-<NotebookViewer
-  name="sft-customization-job"
-  colabUrl="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/sft-customization-job.ipynb"
-/>
+<NotebookViewer name="sft-customization-job" />
+```
+
+Do not hand-maintain Colab URLs in MDX. `sync-colab-links.mjs` derives them from
+adjacent `.ipynb` files during Fern preparation.
+
+## `sync-colab-links.mjs`
+
+Keeps notebook actions consistent across Fern docs:
+
+- Inline MDX pages with an adjacent `.ipynb` get a top-of-page button for
+  running in Colab.
+- `NotebookViewer` wrapper pages with an adjacent `.ipynb` get a generated
+  `colabUrl` prop so the viewer renders the same action.
+- Pages without an adjacent `.ipynb` do not get generated notebook actions.
+
+`npm run prepare` runs this hook automatically. For `Latest`, generated URLs point at
+`main` by default, or at the current `release/*` ref when preparing docs from a
+release branch. `materialize-release-versions.mjs` also runs the hook over each
+release snapshot with the correct source ref: stable versions point at their tag,
+and pre-release/branch-overridden versions point at the release branch.
+
+To run it directly:
+
+```bash
+npm --prefix docs/fern run sync:colab-links
+npm --prefix docs/fern run check:colab-links
+node docs/fern/scripts/sync-colab-links.mjs --docs-root docs --ref release/0.6
 ```
 
 ## `ipynb-to-mdx.py`

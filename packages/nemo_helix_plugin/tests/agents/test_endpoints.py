@@ -40,12 +40,9 @@ from pydantic import JsonValue
 
 _PREFIX = "/apis/agents/v2/workspaces/{workspace}"
 _COLLECTIONS: tuple[AgentJobCollection, ...] = (
-    "analyze",
     "evaluate",
-    "evaluate-suite",
     "execute",
     "optimize",
-    "optimize-skills",
     "package",
 )
 

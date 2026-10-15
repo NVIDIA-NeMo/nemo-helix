@@ -64,14 +64,30 @@ def caller_refusal(row: ContainerImage, caller: Caller) -> str | None:
 def read_refusal(row: ContainerImage, caller: Caller) -> str | None:
     """Why ``caller`` may not read ``row``, or None if it may.
 
-    A person needs only the permission, which the policy checks. A service must act for the image's submitter, as
-    the push step does without workload token exchange: the policy admits a service on its own permissions, whoever
-    it acts for.
+    A person needs only the permission, which the policy checks. A service must act for a person, though not
+    necessarily the image's submitter, so that one person's build can be reused for another. The policy admits a
+    service on its own permissions, whoever it acts for, so the calling service must check that its user may read
+    images here.
     """
     if not caller.auth or caller.actor is None or not is_service_principal_id(caller.actor):
         return None
-    if caller.submitter != row.created_by:
-        return f"a service may read {row.name} only acting for its submitter"
+    if caller.submitter is None or is_service_principal_id(caller.submitter):
+        return f"a service may read {row.name} only acting for a person"
+    return None
+
+
+def submit_refusal(caller: Caller) -> str | None:
+    """Why ``caller`` may not submit builds, or None if it may.
+
+    A service must act for a person, as a platform service building for a user does. The entity store records the
+    rows as created by that person; acting for no one, or for a service, they would be the builder's own, which no push
+    step acts for, so none would ever complete. The policy admits a service on its own permissions, whoever it acts
+    for.
+    """
+    if not caller.auth or caller.actor is None or not is_service_principal_id(caller.actor):
+        return None
+    if caller.submitter is None or is_service_principal_id(caller.submitter):
+        return "a service may submit builds only acting for a person"
     return None
 
 

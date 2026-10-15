@@ -13,7 +13,7 @@ import {
   useFilesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
 import { useDownloadFileHead } from '@studio/components/filesets/hooks/useDownloadFileHead';
-import { isSupportedMappingPath } from '@studio/routes/evaluation/EvaluationNewRoute/types';
+import { isArrayPath } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import {
   detectFormatFromPath,
   resolveSchemaForFile,
@@ -44,26 +44,29 @@ export interface MessageSelector {
 const selectorIndex = (selector: string): number =>
   Number(selector.match(/\[(\d+)\]/)?.[1] ?? Number.NaN);
 
-/** The last assistant message and the user message directly before it, paired
- *  by selector index because contentless messages never reach ``selectors``. */
-export const lastExchange = (
-  selectors: MessageSelector[]
-): { user: string | null; assistant: string | null } => {
-  const assistant = selectors.filter((entry) => entry.role === 'assistant').at(-1) ?? null;
-  if (!assistant) {
-    return { user: lastSelectorForRole(selectors, 'user'), assistant: null };
-  }
-  const preceding = selectors.find(
-    (entry) => selectorIndex(entry.selector) === selectorIndex(assistant.selector) - 1
-  );
-  return preceding?.role === 'user'
-    ? { user: preceding.selector, assistant: assistant.selector }
-    : { user: null, assistant: null };
-};
+/** ``field_mapping`` path to the last turn with ``role`` in a messages column. */
+export const messagesPath = (column: string, role: 'user' | 'assistant'): string =>
+  `${column}[role=${role}].content`;
 
-/** The last message with a given role. */
-const lastSelectorForRole = (selectors: MessageSelector[], role: string): string | null =>
-  selectors.filter((entry) => entry.role === role).at(-1)?.selector ?? null;
+/** Which ``messagesPath`` bindings row 0 supports, under the evaluator's
+ *  last-match-per-role rule. Reference needs an assistant turn after the last
+ *  user turn: a file ending on a user turn is a prompt with no ground truth, not
+ *  a pairing with an earlier reply. Indices come from selectors, so contentless
+ *  messages never count. */
+export const messagesShape = (
+  selectors: MessageSelector[]
+): { input: boolean; reference: boolean } => {
+  const lastIndex = (role: string) =>
+    Math.max(
+      -1,
+      ...selectors
+        .filter((entry) => entry.role === role)
+        .map((entry) => selectorIndex(entry.selector))
+    );
+  const user = lastIndex('user');
+  const assistant = lastIndex('assistant');
+  return { input: user >= 0, reference: user >= 0 && assistant > user };
+};
 
 export interface DatasetPreview {
   /** The row at ``rowIndex``. Row 0 is also the row the live test scores. */
@@ -185,14 +188,9 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
   /** Bindable targets are TOP-LEVEL column names only.
    *
    *  Deliberately not ``extractUserFriendlyKeysFromRow``: for a messages column
-   *  that helper emits only ``messages[0].content``-style selectors and never
-   *  the bare column, and ``FieldMapping`` refuses any path containing ``[`` or
-   *  ``]`` ("array path segments are not supported for column mappings"). Using
-   *  it here would leave an OpenAI-format dataset with nothing bindable at all.
-   *
-   *  The array is reached instead by binding the whole column to the canonical
-   *  ``messages`` field and indexing it in the template, where brackets are
-   *  legal — see ``messageSelectors``. */
+   *  that helper emits row-0 positional selectors (``messages[1].content``),
+   *  which would pin a binding to row 0's turn layout. A messages column is
+   *  bound by role instead -- see ``messagesPath``. */
   const keyOptions = useMemo(() => {
     const options: DatasetKeyOption[] = row
       ? Object.keys(row).map((key) => ({ label: key, value: key }))
@@ -207,24 +205,19 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
     return options;
   }, [row, fileset, path]);
 
-  /** Role-labelled positional selectors for a detected messages array.
+  /** Role-labelled positional selectors for a detected messages array, read by
+   *  ``messagesShape`` to decide what row 0 can bind.
    *
    *  Sourced from ``extractUserFriendlyKeysFromRow`` so index derivation stays
    *  in one place: it walks the raw array, so a leading system message shifts
-   *  user to ``[1]`` and assistant to ``[2]``.
-   *
-   *  Positional, not role-matched, on purpose: a filter chain like
-   *  ``{{ (messages | selectattr('role','equalto','user') | list | last).content }}``
-   *  renders correctly but fails ``input_schema()`` with
-   *  ``TemplateSchemaInferenceError: unsupported Jinja expression for dataset
-   *  schema inference: Filter``, so it cannot be used in a metric. */
+   *  user to ``[1]`` and assistant to ``[2]``. */
   const { messagesColumn, messageSelectors } = useMemo(() => {
     const found = row ? findMessagesArray(row) : null;
     if (!row || !found) {
       return { messagesColumn: null, messageSelectors: [] as MessageSelector[] };
     }
     const selectors = extractUserFriendlyKeysFromRow(row, found)
-      .filter((option) => !isSupportedMappingPath(option.value))
+      .filter((option) => isArrayPath(option.value))
       .map((option) => {
         // The util encodes the real array index in the selector; read the role
         // back off the array rather than parsing it out of the display label.

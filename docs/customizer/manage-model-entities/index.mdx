@@ -59,7 +59,7 @@ Complete example of setting up a model for customization:
 
 <Tip>
 
-**Hugging Face Token**: If downloading from a gated Hugging Face repository (like Llama models), you will need to create a secret containing your Hugging Face API token first. Refer to [Manage Secrets](/documentation/get-started/core-concepts/manage-secrets) for instructions.
+**Hugging Face Token**: If downloading from a gated Hugging Face repository, you will need to create a secret containing your Hugging Face API token first. Refer to [Manage Secrets](/documentation/get-started/core-concepts/manage-secrets) for instructions.
 
 </Tip>
 ```python
@@ -76,10 +76,10 @@ client = NemoClient.from_config()
 try:
     fileset = client.files.create_fileset(
         body=CreateFilesetRequest(
-            name="qwen3-1.7b",
-            description="Qwen3 1.7B base model from Hugging Face",
+            name="nemotron-3-5-lightning-30b-a3b",
+            description="Nemotron 3.5 Lightning 30B A3B base model from Hugging Face",
             storage=HuggingfaceStorageConfig(
-                repo_id="Qwen/Qwen3-1.7B",
+                repo_id="nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
                 repo_type="model",
             ),
         ),
@@ -87,27 +87,27 @@ try:
     print(f"Created FileSet: {fileset.name}")
 except ConflictError:
     print("FileSet already exists, retrieving...")
-    fileset = client.files.get_fileset(name="qwen3-1.7b").data()
+    fileset = client.files.get_fileset(name="nemotron-3-5-lightning-30b-a3b").data()
 
 # Step 2: Create Model Entity
 try:
     model = client.models.create_model(
         body=CreateModelEntityRequest(
-            name="qwen3-1.7b",
-            fileset="default/qwen3-1.7b",  # Reference to the FileSet
-            description="Qwen3 1.7B base model for customization",
+            name="nemotron-3-5-lightning-30b-a3b",
+            fileset="default/nemotron-3-5-lightning-30b-a3b",  # Reference to the FileSet
+            description="Nemotron 3.5 Lightning 30B A3B base model for customization",
         ),
     ).data()
     print(f"Created Model Entity: {model.name}")
 except ConflictError:
     print("Model Entity already exists, retrieving...")
-    model = client.models.get_model(name="qwen3-1.7b").data()
+    model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 # Step 3: Wait for ModelSpec to be auto-populated
 print("Waiting for model spec to be populated...")
 while not model.spec:
     time.sleep(5)
-    model = client.models.get_model(name="qwen3-1.7b").data()
+    model = client.models.get_model(name="nemotron-3-5-lightning-30b-a3b").data()
 
 print(f"Model ready!")
 print(f" Architecture: {model.spec.family}")
@@ -117,6 +117,6 @@ print(f" Layers: {model.spec.num_layers}")
 
 <Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
-After the Model Entity is ready (has a `spec`), you can use it in customization jobs with `model: "default/qwen3-1.7b"`.
+After the Model Entity is ready (has a `spec`), you can use it in customization jobs with `model: "default/nemotron-3-5-lightning-30b-a3b"`.
 
 ---

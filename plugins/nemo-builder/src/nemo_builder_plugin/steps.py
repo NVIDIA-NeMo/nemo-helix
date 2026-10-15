@@ -102,6 +102,10 @@ class SandboxSpec(BaseModel):
     dns_nameservers: list[str]
     cpu: str
     memory: str
+    #: Secrets the kubelet pulls the kaniko image with. Unset in a spec from before it existed: none.
+    image_pull_secrets: list[str] = Field(default_factory=list)
+    #: Unset in a spec from before it existed: neither requested nor limited.
+    ephemeral_storage: str | None = None
 
 
 class SandboxImage(BaseModel):

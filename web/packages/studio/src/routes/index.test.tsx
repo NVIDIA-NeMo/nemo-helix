@@ -157,7 +157,7 @@ describe('Routes', () => {
 
     it('should exclude evaluation routes if evaluator is disabled', async () => {
       vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
-      vi.stubEnv('VITE_FF_EVALUATOR_ENABLED', 'false');
+      vi.stubEnv('VITE_FF_EVALS_ENABLED', 'false');
       vi.stubEnv('VITE_FF_INTAKE_ENABLED', 'true');
       const { routes } = await import('./index');
       const { getWorkspaceDetailsDefaultRoute } = await import('./utils');

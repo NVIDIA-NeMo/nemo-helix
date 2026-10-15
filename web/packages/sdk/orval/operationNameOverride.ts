@@ -182,7 +182,7 @@ const generatedNames = new Set<string>();
  * for disambiguation.
  *
  * @param operation - The operation object containing operationId
- * @returns Unique camelCase operation name (e.g., "evaluatorCreateBenchmarkV2")
+ * @returns Unique camelCase operation name (e.g., "evalsCreateBenchmarkV2")
  */
 export const operationNameOverride = (operation: { operationId?: string }) => {
   const operationId = operation.operationId ?? '';

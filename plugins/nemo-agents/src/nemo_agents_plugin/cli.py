@@ -6,7 +6,7 @@
 Registered under the ``nemo.cli`` entry-point group.  The platform
 discovers this class and mounts it as ``nemo agents <command>``.
 
-**Local commands (no platform required):**
+**Local commands:**
 
 These run against a local agent config and work without a running NeMo Helix
 instance.
@@ -45,31 +45,19 @@ import re
 import shlex
 import sys
 import tempfile
-import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from pkgutil import resolve_name
+from time import monotonic, sleep
 from typing import Any, ClassVar, Optional, TypeVar, cast
 
 import click
 import httpx
 import typer
 import yaml
-from nemo_agents_plugin.cli_context import (
-    DEFAULT_BASE_URL as _DEFAULT_BASE_URL,
-)
-from nemo_agents_plugin.cli_context import (
-    resolve_base_url as _resolve_base_url,
-)
-from nemo_agents_plugin.cli_context import (
-    resolve_context_headers as _resolve_context_headers,
-)
-from nemo_agents_plugin.cli_context import (
-    shared_cli_client,
-)
 from nemo_agents_plugin.deployment_routing import is_deployment_routable
 from nemo_agents_plugin.entities import (
     AGENT_SPEC_FILENAME,
@@ -86,10 +74,8 @@ from nemo_agents_plugin.entities import (
     ethos_fileset_name,
     supports_image_entrypoint,
 )
-from nemo_agents_plugin.leaderboard.cli import register_leaderboard_commands
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_agents_plugin.usage.cli import register_usage_commands
 from nemo_helix_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
 from nemo_helix_ext.cli.core.help_formatter import NhxGroup
 from nemo_helix_ext.ui.prompts import is_interactive
@@ -122,7 +108,15 @@ from nemo_helix_plugin.cli_options import (
 from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output, is_tty
 from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_pages, warn_if_more_pages
 from nemo_helix_plugin.cli_progress import request_progress
-from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
+from nemo_helix_plugin.cli_state import DEFAULT_BASE_URL as _DEFAULT_BASE_URL
+from nemo_helix_plugin.cli_state import (
+    cli_state,
+    resolve_cli_workspace,
+    resolve_output_format,
+    shared_cli_client,
+    shared_cli_client_context,
+)
+from nemo_helix_plugin.cli_state import resolve_base_url as _resolve_base_url
 from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -191,7 +185,7 @@ _COMPUTE_SPEC_LIST_COLUMNS = [
 ]
 
 
-_AGENT_CLI_PANEL = "Platform agents"
+_AGENT_CLI_PANEL = "Additional commands from plugins"
 
 
 @dataclass(frozen=True)
@@ -300,11 +294,8 @@ class AgentsCLI(NemoCLI):
         )
 
         _register_local_commands(app)
-        _register_package_command(app)
         _register_platform_commands(app)
         _register_environment_commands(app)
-        register_leaderboard_commands(app)
-        register_usage_commands(app)
         return app
 
 
@@ -443,31 +434,7 @@ def _register_local_commands(app: typer.Typer) -> None:
                 typer.echo(f"Error: server command {cmd[0]!r} was not found.", err=True)
             raise typer.Exit(code=1)
 
-
-# Note: job commands such as ``evaluate`` are auto-generated from ``agents.*``
-# ``nemo.jobs`` entry points. ``optimize`` is a sibling plugin's ``nemo.cli.agents``
-# contribution, mounted alongside the other ``nemo.cli.agents`` entries in ``AgentsCLI.get_cli``.
-
-
-# ---------------------------------------------------------------------------
-# Packaging command — no platform required
-# ---------------------------------------------------------------------------
-
-_PACKAGE_PANEL = "Packaging (no platform required)"
-
-
-def _register_package_command(app: typer.Typer) -> None:
-    """Register the unified ``package`` command onto *app*.
-
-    Single command whose flags select how far the render → validate → build
-    → publish pipeline runs:
-
-    * ``--no-build``               stop after render (Dockerfile + .dockerignore only)
-    * default                      render → validate → build
-    * ``--publish --registry ...`` render → validate → build → publish
-    """
-
-    @app.command(rich_help_panel=_PACKAGE_PANEL)
+    @app.command(rich_help_panel="Local commands")
     def package(
         agent: Path = typer.Option(
             ...,
@@ -715,6 +682,11 @@ def _register_package_command(app: typer.Typer) -> None:
         typer.echo(f"Published: {remote}")
 
 
+# Note: job commands such as ``evaluate`` are auto-generated from ``agents.*``
+# ``nemo.jobs`` entry points. ``optimize`` is a sibling plugin's ``nemo.cli.agents``
+# contribution, mounted alongside the other ``nemo.cli.agents`` entries in ``AgentsCLI.get_cli``.
+
+
 def _validate_package_flags(
     *,
     no_build: bool,
@@ -930,7 +902,7 @@ def _package_render_only(
 def _register_platform_commands(app: typer.Typer) -> None:
     """Register Agent Resources commands (require a running cluster) onto *app*."""
 
-    @app.command(rich_help_panel="Deployed agent interaction (requires running cluster)")
+    @app.command(rich_help_panel="Deployed agent interaction")
     def chat(
         typer_ctx: typer.Context,
         input: Optional[str] = typer.Option(
@@ -997,7 +969,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         help="Discover and manage persisted deployed-agent sessions.",
         no_args_is_help=True,
     )
-    app.add_typer(sessions_app, rich_help_panel="Deployed agent interaction (requires running cluster)")
+    app.add_typer(sessions_app, rich_help_panel="Deployed agent interaction")
 
     @sessions_app.command(name="list")
     @collect_warnings
@@ -1079,7 +1051,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         )
         typer.echo(f"Session '{name}' closed.")
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def create(
         typer_ctx: typer.Context,
         name: str = typer.Option(..., "--name", "-n", help="Agent name."),
@@ -1110,7 +1082,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         )
         typer.echo(json.dumps(resp, indent=2))
 
-    @app.command(name="list", rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(name="list", rich_help_panel="Agent Resources")
     @collect_warnings
     def list_agents(
         ctx: typer.Context,
@@ -1136,7 +1108,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             all_pages=all_pages,
         )
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def get(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
@@ -1149,7 +1121,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         client = _agents_client(base_url, workspace)
         _print_entity(typer_ctx, client, "get_agent", {"workspace": workspace, "name": name}, output_format)
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def delete(
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
@@ -1164,7 +1136,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         _delete_agent_entity(agent_name=name, workspace=workspace, base_url=base_url)
         typer.echo(f"Agent '{name}' deleted.")
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def deploy(
         typer_ctx: typer.Context,
         agent: str = typer.Option(..., "--agent", "-a", help="Name of the agent to deploy."),
@@ -1285,7 +1257,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         success = _wait_for_deployment(client, workspace, deployment_name, timeout=timeout)
         raise typer.Exit(code=0 if success else 1)
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def redeploy(
         typer_ctx: typer.Context,
         agent: str = typer.Option(..., "--agent", "-a", help="Name of the deployed agent to rebuild."),
@@ -1522,7 +1494,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         success = _wait_for_deployment(client, workspace, deployment_name, timeout=timeout)
         raise typer.Exit(code=0 if success else 1)
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def logs(
         typer_ctx: typer.Context,
         name: Optional[str] = typer.Argument(
@@ -1620,7 +1592,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         _print_log(log_path, tail=tail, follow=follow)
 
-    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    @app.command(rich_help_panel="Agent Resources")
     def undeploy(
         typer_ctx: typer.Context,
         name: Optional[str] = typer.Argument(None, help="Deployment name to remove."),
@@ -1665,7 +1637,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
     # deployments sub-group
     deps_app = typer.Typer(name="deployments", help="Manage agent deployments.", no_args_is_help=True)
-    app.add_typer(deps_app, rich_help_panel="Agent Resources (requires running cluster)")
+    app.add_typer(deps_app, rich_help_panel="Agent Resources")
 
     @deps_app.command(name="list")
     @collect_warnings
@@ -1832,7 +1804,7 @@ def _register_environment_commands(app: typer.Typer) -> None:
     Bodies are the ``*Inline`` shapes (see ``entities.py``); create takes a
     ``--spec-file`` (JSON/YAML) or an inline ``--spec`` JSON string.
     """
-    _PANEL = "Agent Resources (requires running cluster)"
+    _PANEL = "Agent Resources"
 
     # -- environment-specs ---------------------------------------------------
     espec_app = typer.Typer(name="environment-specs", help="Manage agent environment specs.", no_args_is_help=True)
@@ -2186,18 +2158,18 @@ def _wait_for_deployment(
         ``True`` if the deployment reached ``running``, ``False`` if it
         reached ``failed`` or the timeout expired.
     """
-    start = time.monotonic()
+    start = monotonic()
     last_status = ""
 
     typer.echo(f"Waiting for deployment '{name}' (timeout={timeout}s)...")
 
-    while time.monotonic() - start < timeout:
+    while monotonic() - start < timeout:
         dep = _run_sdk(
             "GET agent API",
             lambda: _json_from_response(client.get_deployment(workspace=workspace, name=name)),
         )
         status = dep.get("status", "")
-        elapsed = int(time.monotonic() - start)
+        elapsed = int(monotonic() - start)
 
         if status != last_status:
             line = f"  [{elapsed:>4}s] status: {status}"
@@ -2214,9 +2186,9 @@ def _wait_for_deployment(
             typer.echo(f"Deployment '{name}' failed.", err=True)
             return False
 
-        time.sleep(interval)
+        sleep(interval)
 
-    elapsed = int(time.monotonic() - start)
+    elapsed = int(monotonic() - start)
     typer.echo(f"Timeout after {elapsed}s. Last status: {last_status}", err=True)
     return False
 
@@ -2293,7 +2265,7 @@ def _print_log(log_path: Path, *, tail: Optional[int] = None, follow: bool = Fal
                     if chunk:
                         typer.echo(chunk, nl=False)
                     else:
-                        time.sleep(0.5)
+                        sleep(0.5)
             except KeyboardInterrupt:
                 return
     except BrokenPipeError:
@@ -2407,14 +2379,18 @@ def _platform_invoke(
         path = f"/apis/agents/v2/workspaces/{workspace}/deployments/{deployment}/-/v1/chat/completions"
 
     url = base_url.rstrip("/") + path
-    headers = _resolve_context_headers()
     target_label = agent or deployment
     for query in queries:
         payload = {"messages": [{"role": "user", "content": query}], "stream": False}
         try:
             with request_progress(f"Waiting for agent '{target_label}'...", disabled=no_progress):
-                with httpx.Client(timeout=timeout) as client:
-                    resp = client.post(url, json=payload, headers=headers or None)
+                with shared_cli_client_context(NemoClient) as platform:
+                    resp = platform.http_client.post(
+                        url,
+                        json=payload,
+                        headers=platform.request_headers(url=url),
+                        timeout=timeout,
+                    )
                     resp.raise_for_status()
                     body = resp.json()
                 typer.echo(json.dumps(body, indent=2))
@@ -2529,7 +2505,7 @@ class _HttpxStreamingResponse:
         return self._response
 
     @contextmanager
-    def stream(self) -> Iterator[Iterator[bytes]]:
+    def stream(self) -> Generator[Iterator[bytes], None, None]:
         try:
             yield self._response.iter_bytes()
         finally:
@@ -2551,7 +2527,6 @@ def _run_resolved_session_chat(
         f"{base_url.rstrip('/')}/apis/agents/v2/workspaces/{workspace}"
         f"/deployments/{deployment.name}/-/v1/chat/completions"
     )
-    headers = {**_resolve_context_headers(), SESSION_ID_HEADER: session_id}
     display_info = {
         "Deployment": deployment.name,
         "Session": session.name,
@@ -2561,7 +2536,11 @@ def _run_resolved_session_chat(
         display_info["Expires"] = session.expires_at.isoformat()
 
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with shared_cli_client_context(NemoClient) as platform:
+            client = platform.http_client
+            headers = platform.request_headers({SESSION_ID_HEADER: session_id}, url=url) or {
+                SESSION_ID_HEADER: session_id
+            }
 
             def send_turn(user_input: str) -> StreamingResponse:
                 request = client.build_request(
@@ -2569,6 +2548,7 @@ def _run_resolved_session_chat(
                     url,
                     headers=headers,
                     json={"messages": [{"role": "user", "content": user_input}], "stream": True},
+                    timeout=timeout,
                 )
                 response = client.send(request, stream=True)
                 try:
@@ -2837,17 +2817,8 @@ def _print_entity(
     format_output(resp, output_format=resolved_output_format)
 
 
-def _agents_client(base_url: str, workspace: str) -> AgentsClient:
-    shared = shared_cli_client(AgentsClient, timeout=30)
-    if shared is not None:
-        return shared
-    return AgentsClient(
-        base_url=base_url,
-        workspace=workspace,
-        default_headers=_resolve_context_headers() or None,
-        timeout=30,
-        http_client=httpx.Client(timeout=30),
-    )
+def _agents_client(_base_url: str, _workspace: str) -> AgentsClient:
+    return shared_cli_client(AgentsClient)
 
 
 def _json_from_response(response: NemoResponse[Any]) -> Any:
@@ -2889,17 +2860,6 @@ def _resolve_timestamp_format(ctx: typer.Context) -> str | None:
         except Exception:
             logger.debug("Failed to resolve global timestamp format for agents list", exc_info=True)
     return None
-
-
-def _platform_sdk(base_url: str) -> NemoClient:
-    """Return an auth-aware platform client for fileset upload/delete."""
-    shared = shared_cli_client(NemoClient)
-    if shared is not None:
-        return shared
-    headers = _resolve_context_headers()
-    if headers:
-        return NemoClient(base_url=base_url, default_headers=headers)
-    return NemoClient(base_url=base_url)
 
 
 def _run_sdk(action: str, call: Callable[[], _T]) -> _T:
@@ -3126,7 +3086,6 @@ def _create_agent_from_validated_config(
                 agent_name=name,
                 workspace=workspace,
                 agent_root=agent_config.parent,
-                base_url=base_url,
             )
         except Exception as exc:
             typer.echo(
@@ -3177,7 +3136,6 @@ def _upload_ethos_fileset(
     agent_name: str,
     workspace: str,
     agent_root: Path,
-    base_url: str,
 ) -> None:
     """Replace the executable snapshot in the conventional Ethos fileset.
 
@@ -3198,7 +3156,7 @@ def _upload_ethos_fileset(
         warn_on_binary=True,
     )
     fileset = ethos_fileset_name(agent_name)
-    sdk = _platform_sdk(base_url)
+    sdk = shared_cli_client(NemoClient)
     with tempfile.TemporaryDirectory(prefix=f".{agent_name}-ethos-upload-") as directory:
         staged = Path(directory) / agent_root.name
         staged.mkdir()
@@ -3257,9 +3215,18 @@ def _delete_agent_entity_if_present(client: AgentsClient, *, agent_name: str, wo
     return True
 
 
-def _load_yaml(path: Path) -> dict:
-    with open(path, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+def _load_yaml(path: Path) -> Any:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return yaml.safe_load(fh)
+    except yaml.YAMLError as error:
+        problem = getattr(error, "problem", None) or "could not parse YAML"
+        mark = getattr(error, "problem_mark", None)
+        location = ""
+        if mark is not None:
+            location = f" at line {mark.line + 1}, column {mark.column + 1}"
+        typer.echo(f"Error: invalid YAML in agent config {path}{location}: {problem}", err=True)
+        raise typer.Exit(code=1) from error
 
 
 # Mirrors ``nemo_agents_plugin.utils._ENV_VAR_PATTERN`` semantics: matches

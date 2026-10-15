@@ -5,6 +5,7 @@
 
 import pytest
 from nhx.common.config.base import DatabaseConfig
+from nhx.core.entities import initialize
 from nhx.core.entities.app.database import create_async_engine_for_entities
 from nhx.core.entities.app.repository import dispose_async_engine, initialize_async_engine
 from nhx.core.entities.config import EntitiesConfig
@@ -28,6 +29,26 @@ def test_engine_url_rendering_for_alembic_uses_unmasked_password(monkeypatch):
     assert "supersecret" not in str(engine.url)
     # Alembic path must use real password so DB auth succeeds
     assert "supersecret" in _engine_url_for_alembic(engine)
+
+
+def test_alembic_upgrade_accepts_url_encoded_password(monkeypatch, tmp_path):
+    """A URL-encoded password contains "%", which Alembic's ConfigParser must receive escaped."""
+    url = DatabaseConfig(
+        dialect="postgresql", user="nhx", password="p@ss/w%rd", name="nhx", host="db.example"
+    ).sqlalchemy_database_url()
+    assert "%" in url
+    captured: dict[str, str | None] = {}
+
+    def fake_upgrade(cfg, revision):
+        captured["url"] = cfg.get_main_option("sqlalchemy.url")
+
+    monkeypatch.setattr(initialize.command, "upgrade", fake_upgrade)
+    ini = tmp_path / "alembic.ini"
+    ini.write_text("[alembic]\n")
+
+    initialize._run_alembic_upgrade(ini, url.replace("postgresql", "postgresql+asyncpg", 1))
+
+    assert captured["url"] == url
 
 
 async def test_a_second_engine_for_a_different_database_is_refused_until_the_first_is_disposed(tmp_path):

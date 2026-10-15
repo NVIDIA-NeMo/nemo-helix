@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// This file covers the launch-modal path; the in-tab form flag defaults on, so pin it off here.
 vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
+  vi.stubEnv('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', 'false');
 });
 
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
@@ -92,6 +94,18 @@ describe('AgentDetailRoute optimizations tab', () => {
     expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
   });
 
+  it('shows the studies table for a create view while the in-tab flow is flagged off', async () => {
+    renderDetail('?tab=optimizations&view=strategy');
+
+    expect(
+      await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('radio', { name: /Hyper-parameter optimization/ })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('New optimization')).not.toBeInTheDocument();
+  });
+
   it('scopes the list server-side with a spec.agent filter', async () => {
     const filters: string[] = [];
     const capture = ({ request }: { request: Request }) => {
@@ -141,7 +155,7 @@ describe('AgentDetailRoute optimizations tab', () => {
   /** A study as Studio launches it: its marker names the bundle the study actually runs from. */
   const launchedByStudio = (bundle = BUNDLE) => ({
     spec: {
-      strategy: 'legacy',
+      strategy: 'config-tuning',
       optimize_config: 'optimize-brevity.yaml',
       agent: agentName,
       optimize_config_fileset: `${workspace}/${bundle}`,

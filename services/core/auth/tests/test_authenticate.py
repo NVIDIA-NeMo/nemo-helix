@@ -15,14 +15,24 @@ from fastapi.testclient import TestClient
 from nhx.common.auth.jwt import JWTValidator
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims
 from nhx.common.auth.token_resolver import ResolvedBearerToken
-from nhx.common.config import AuthConfig
-from nhx.common.config.base import AccessKeyConfig, OIDCConfig, TokenSigningConfig
+from nhx.common.config import AuthConfig, Configuration, HelixConfig
+from nhx.common.config.base import (
+    AccessKeyConfig,
+    OIDCConfidentialClientConfig,
+    OIDCConfig,
+    OIDCPublicClientConfig,
+    OIDCServerSessionsConfig,
+    OIDCWorkloadConfig,
+    TokenSigningConfig,
+)
 from nhx.core.auth.api.v2.authenticate import router
 from nhx.core.auth.api.v2.workload_token_exchange import (
     WorkloadTokenExchangeService,
     get_workload_token_exchange_service,
 )
 from nhx.core.auth.app.access_keys import get_access_key_registry
+from nhx.core.auth.oidc_broker.routes import get_credential_store
+from nhx.core.entities.app.repository import AccountCredentialRecord, AccountCredentialStore
 
 
 def _private_key_pem() -> bytes:
@@ -76,15 +86,26 @@ def _test_client(
     *,
     workload_token_exchange_service: WorkloadTokenExchangeService | None = None,
     access_key_registry: object | None = None,
+    credential_store: AccountCredentialStore | None = None,
 ) -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(router)
     registry = access_key_registry or AlwaysActiveAccessKeyRegistry()
     app.dependency_overrides[get_access_key_registry] = lambda: registry
+    if credential_store is None:
+        session_store = AsyncMock(spec=AccountCredentialStore)
+        session_store.get_active.return_value = None
+    else:
+        session_store = credential_store
+    app.dependency_overrides[get_credential_store] = lambda: session_store
     if workload_token_exchange_service is not None:
         app.dependency_overrides[get_workload_token_exchange_service] = lambda: workload_token_exchange_service
-    with patch("nhx.core.auth.api.v2.authenticate.get_auth_config", return_value=config):
-        yield TestClient(app)
+    Configuration.set_override(HelixConfig(base_url="http://testserver"))
+    try:
+        with patch("nhx.core.auth.api.v2.authenticate.get_auth_config", return_value=config):
+            yield TestClient(app)
+    finally:
+        Configuration.clear_override(HelixConfig)
 
 
 def _auth_config_with_workload_exchange(
@@ -109,8 +130,7 @@ def _auth_config_with_workload_exchange(
             issuer=oidc_issuer,
             additional_issuers=additional_issuers or [],
             jwks_uri=oidc_jwks_uri,
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
+            workload=OIDCWorkloadConfig(client_id="nemo-helix-workload", audience="nemo-helix"),
         ),
     )
 
@@ -260,11 +280,156 @@ def test_ext_authz_accepts_original_request_methods_and_returns_principal_header
     resolver.assert_awaited_once()
 
 
+def _web_session_config(tmp_path) -> AuthConfig:
+    return AuthConfig(
+        enabled=True,
+        token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")),
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            confidential_client=OIDCConfidentialClientConfig(
+                client_id="studio",
+                client_secret_env_var="NHX_OIDC_CLIENT_SECRET",
+                login_redirect_uri="https://platform.example.com/apis/auth/v2/login/callback",
+                authorization_endpoint="https://sso.example.com/authorize",
+                token_endpoint="http://sso.example.com/token",
+            ),
+            server_sessions=OIDCServerSessionsConfig(encryption_key_env_var="NHX_AUTH_SESSION_ENCRYPTION_KEY"),
+        ),
+    )
+
+
+def _web_session_record() -> AccountCredentialRecord:
+    now = datetime.now(tz=UTC)
+    return AccountCredentialRecord(
+        id="account-credential-1",
+        owner_account_id="account-1",
+        subject_account_id="account-1",
+        account_identity_id="identity-1",
+        credential_type="web_session",
+        lookup_hash="lookup-hash",
+        status="ACTIVE",
+        issued_at=now,
+        expires_at=now + timedelta(hours=8),
+        last_used_at=None,
+        revoked_at=None,
+        revoked_by=None,
+        public_metadata={
+            "principal_id": "user-1",
+            "email": "user@example.com",
+            "groups": ["users"],
+            "authz_aliases": ["user-1", "user@example.com"],
+        },
+        encrypted_payload="encrypted",
+        db_version=1,
+    )
+
+
+def test_ext_authz_resolves_web_session_to_principal_headers(tmp_path):
+    config = _web_session_config(tmp_path)
+    (tmp_path / "private.pem").write_bytes(_private_key_pem())
+    credential_store = AsyncMock(spec=AccountCredentialStore)
+    credential_store.get_active.return_value = _web_session_record()
+
+    with _test_client(config, credential_store=credential_store) as client:
+        response = client.get(
+            "/ext-authz/apis/entities/v2/workspaces/default",
+            cookies={"nhx_session": "session-handle"},
+        )
+
+    assert response.status_code == 200
+    assert response.content == b""
+    assert response.headers["X-NHX-Principal-Id"] == "user-1"
+    assert response.headers["X-NHX-Actor-Account-Id"] == "account-1"
+    assert response.headers["X-NHX-Principal-Email"] == "user@example.com"
+    assert response.headers["X-NHX-Principal-Groups"] == "users"
+    assert response.headers["X-NHX-Actor-Aliases"] == "user-1,user@example.com"
+    credential_store.get_active.assert_awaited_once_with("web_session", "session-handle")
+
+
+def test_ext_authz_web_session_requires_studio_source_for_mutations(tmp_path):
+    config = _web_session_config(tmp_path)
+    (tmp_path / "private.pem").write_bytes(_private_key_pem())
+    credential_store = AsyncMock(spec=AccountCredentialStore)
+    credential_store.get_active.return_value = _web_session_record()
+
+    with _test_client(config, credential_store=credential_store) as client:
+        rejected = client.post(
+            "/ext-authz/apis/entities/v2/workspaces",
+            cookies={"nhx_session": "session-handle"},
+        )
+        rejected_source = client.post(
+            "/ext-authz/apis/entities/v2/workspaces",
+            cookies={"nhx_session": "session-handle"},
+            headers={"X-Source": "Other Client"},
+        )
+        accepted = client.post(
+            "/ext-authz/apis/entities/v2/workspaces",
+            cookies={"nhx_session": "session-handle"},
+            headers={"X-Source": "NeMo Studio"},
+        )
+
+    assert rejected.status_code == 403
+    assert rejected_source.status_code == 403
+    assert accepted.status_code == 200
+
+
+def test_ext_authz_rejects_invalid_web_session(tmp_path):
+    config = _web_session_config(tmp_path)
+    (tmp_path / "private.pem").write_bytes(_private_key_pem())
+    credential_store = AsyncMock(spec=AccountCredentialStore)
+    credential_store.get_active.return_value = None
+
+    with _test_client(config, credential_store=credential_store) as client:
+        response = client.get(
+            "/ext-authz/apis/entities/v2/workspaces/default",
+            cookies={"nhx_session": "invalid-session"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid session"
+
+
+def test_internal_ext_authz_mints_token_for_web_session_in_workload_mode(tmp_path):
+    config = _web_session_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "oidc": config.oidc.model_copy(
+                update={"workload": OIDCWorkloadConfig(client_id="nemo-helix-workload", audience="nemo-helix")}
+            )
+        }
+    )
+    (tmp_path / "private.pem").write_bytes(_private_key_pem())
+    credential_store = AsyncMock(spec=AccountCredentialStore)
+    credential_store.get_active.return_value = _web_session_record()
+
+    with _test_client(config, credential_store=credential_store) as client:
+        response = client.get(
+            "/ext-authz/apis/entities/v2/workspaces/default",
+            cookies={"nhx_session": "session-handle"},
+        )
+
+    assert response.status_code == 200
+    _assert_no_principal_response_headers(response)
+    authorization = response.headers["Authorization"]
+    assert authorization.startswith("Bearer ")
+    claims = jwt.decode(authorization.removeprefix("Bearer "), options={"verify_signature": False})
+    assert claims["sub"] == "user-1"
+    assert claims["aud"] == "nemo-helix"
+    assert claims["nhx_actor_account_id"] == "account-1"
+    assert claims["nhx_actor_aliases"] == ["user-1", "user@example.com"]
+    assert claims["exp"] - claims["iat"] == 60
+
+
 def test_authenticate_oidc_access_token_with_actor_returns_direct_principal_json(tmp_path):
     config = AuthConfig(
         enabled=True,
         token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")),
-        oidc=OIDCConfig(enabled=True, issuer="https://sso.example.com", client_id="nemo-helix-cli"),
+        oidc=OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
+        ),
     )
     (tmp_path / "private.pem").write_bytes(_private_key_pem())
     claims = TokenClaims(
@@ -330,10 +495,7 @@ def test_authenticate_workload_access_token_returns_principal_json(tmp_path):
             key_id="test-workload",
             private_key_file=str(private_key_file),
         ),
-        oidc=OIDCConfig(
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
-        ),
+        oidc=OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload", audience="nemo-helix")),
     )
     signing_key = WorkloadTokenExchangeService().workload_signing_key(config)
     now = datetime.now(tz=UTC)
@@ -383,10 +545,7 @@ def test_authenticate_delegated_workload_access_token_returns_resolved_principal
             key_id="test-workload",
             private_key_file=str(private_key_file),
         ),
-        oidc=OIDCConfig(
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
-        ),
+        oidc=OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload", audience="nemo-helix")),
     )
     signing_key = WorkloadTokenExchangeService().workload_signing_key(config)
     now = datetime.now(tz=UTC)
@@ -442,10 +601,7 @@ def test_ext_authz_delegated_workload_access_token_returns_no_trusted_headers_in
             key_id="test-workload",
             private_key_file=str(private_key_file),
         ),
-        oidc=OIDCConfig(
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
-        ),
+        oidc=OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload", audience="nemo-helix")),
     )
     signing_key = WorkloadTokenExchangeService().workload_signing_key(config)
     now = datetime.now(tz=UTC)
@@ -486,11 +642,12 @@ def test_authenticate_workload_subject_token_uses_resolver_callback(tmp_path):
         token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")),
         oidc=OIDCConfig(
             issuer="https://sso.example.com/application/o/nemo-cli/",
-            client_id="nemo-helix-cli",
-            workload_token_exchange_enabled=True,
-            workload_client_id="nemo-helix-workload",
-            workload_subject_jwks_uri="https://sso.example.com/application/o/nemo-workload/jwks/",
-            workload_subject_issuers=["https://sso.example.com/application/o/nemo-workload/"],
+            public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-helix-workload",
+                subject_jwks_uri="https://sso.example.com/application/o/nemo-workload/jwks/",
+                subject_issuers=["https://sso.example.com/application/o/nemo-workload/"],
+            ),
         ),
     )
     (tmp_path / "private.pem").write_bytes(_private_key_pem())
@@ -538,10 +695,7 @@ def test_authenticate_invalid_workload_access_token_returns_401(tmp_path):
             key_id="test-workload",
             private_key_file=str(private_key_file),
         ),
-        oidc=OIDCConfig(
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
-        ),
+        oidc=OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload", audience="nemo-helix")),
     )
     with _test_client(config) as client:
         response = client.get(
@@ -557,10 +711,7 @@ def test_authenticate_workload_access_token_surfaces_signing_key_misconfiguratio
     config = AuthConfig(
         enabled=True,
         token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "missing-private.pem")),
-        oidc=OIDCConfig(
-            workload_token_exchange_enabled=True,
-            workload_audience="nemo-helix",
-        ),
+        oidc=OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload", audience="nemo-helix")),
     )
     with _test_client(config) as client, caplog.at_level(logging.ERROR, logger="nhx.core.auth.api.v2.authenticate"):
         response = client.get(

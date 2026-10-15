@@ -47,6 +47,7 @@ class TestEpochFromValue:
 class TestHfTrainerProgressCallback:
     @pytest.fixture
     def progress(self) -> tuple[TrainingProgressCallback, MagicMock]:
+        pytest.importorskip("transformers")
         reporter = MagicMock()
         reporter.fetch_current_metrics.return_value = {"train_loss": [], "val_loss": []}
         return TrainingProgressCallback(reporter), reporter

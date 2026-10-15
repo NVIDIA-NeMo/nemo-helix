@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -135,7 +134,7 @@ def _no_telemetry() -> Iterator[None]:
 
 @pytest.fixture
 def frozen_time() -> Iterator[MagicMock]:
-    with patch(f"{WAITERS_MODULE}.time.monotonic", return_value=0) as time:
+    with patch(f"{WAITERS_MODULE}.monotonic", return_value=0) as time:
         yield time
 
 
@@ -174,7 +173,7 @@ def test_platform_job_wait_live_display_recomputes_elapsed() -> None:
 
     with (
         patch(f"{WAITERS_MODULE}.datetime") as datetime_mock,
-        patch(f"{WAITERS_MODULE}.time.monotonic", side_effect=[101.0, 109.0]),
+        patch(f"{WAITERS_MODULE}.monotonic", side_effect=[101.0, 109.0]),
     ):
         datetime_mock.now.return_value.strftime.return_value = "12:34:56"
 
@@ -193,7 +192,7 @@ def test_wait_for_platform_job_uses_dynamic_live_display_for_unchanged_status_po
 
     with (
         patch(f"{WAITERS_MODULE}.Live", _RecordingLive),
-        patch(f"{WATCH_MODULE}.time.sleep"),
+        patch(f"{WATCH_MODULE}.sleep"),
     ):
         assert waiters.wait_for_platform_job(jobs, "job-a", workspace="default") is True
 
@@ -206,7 +205,7 @@ def test_wait_for_platform_job_uses_dynamic_live_display_for_unchanged_status_po
 def test_wait_for_inference_deployment_uses_remaining_timeout_for_gateway(gateway_wait: MagicMock) -> None:
     client = _scripted_client([httpx.Response(200, json=_deployment_json("READY"))])
 
-    with patch(f"{WAITERS_MODULE}.time.monotonic", side_effect=[100.0, 104.0, 104.0, 104.0]):
+    with patch(f"{WAITERS_MODULE}.monotonic", side_effect=[100.0, 104.0, 104.0, 104.0]):
         assert waiters.wait_for_inference_deployment(
             client,
             "deployment-a",
@@ -226,7 +225,7 @@ def test_wait_for_inference_deployment_uses_model_provider_id_for_gateway(gatewa
         [httpx.Response(200, json=_deployment_json("READY", model_provider_id="provider-workspace/generated-provider"))]
     )
 
-    with patch(f"{WAITERS_MODULE}.time.monotonic", side_effect=[100.0, 104.0, 104.0, 104.0]):
+    with patch(f"{WAITERS_MODULE}.monotonic", side_effect=[100.0, 104.0, 104.0, 104.0]):
         assert waiters.wait_for_inference_deployment(
             client,
             "deployment-a",
@@ -241,7 +240,7 @@ def test_wait_for_inference_deployment_uses_model_provider_id_for_gateway(gatewa
 def test_wait_for_inference_deployment_quiet_mode_uses_quiet_gateway(gateway_wait: MagicMock) -> None:
     client = _scripted_client([httpx.Response(200, json=_deployment_json("READY"))])
 
-    with patch(f"{WAITERS_MODULE}.time.monotonic", side_effect=[100.0, 104.0, 104.0, 104.0]):
+    with patch(f"{WAITERS_MODULE}.monotonic", side_effect=[100.0, 104.0, 104.0, 104.0]):
         assert waiters.wait_for_inference_deployment(
             client,
             "deployment-a",
@@ -297,7 +296,7 @@ def test_wait_for_inference_deployment_does_not_sleep_past_timeout(waiter_pause:
     client = _scripted_client([httpx.Response(200, json=_deployment_json("PENDING"))] * 3)
 
     with (
-        patch(f"{WAITERS_MODULE}.time.monotonic", side_effect=[0.0, 0.0, 0.0, 4.0, 5.0, 5.0]),
+        patch(f"{WAITERS_MODULE}.monotonic", side_effect=[0.0, 0.0, 0.0, 4.0, 5.0, 5.0]),
     ):
         assert (
             waiters.wait_for_inference_deployment(
@@ -318,18 +317,12 @@ def test_wait_for_platform_job_does_not_sleep_past_timeout() -> None:
     jobs = MagicMock()
     jobs.get_job_status.return_value = _status_response("active")
 
-    # ``time.monotonic`` is one global attribute, so script it per caller: the
-    # waiter's own elapsed reads stay at 0 while the watch loop sees the clock
-    # advance to 4s and then 5s of its 5s deadline.
-    watch_clock = iter([0.0, 0.0, 4.0, 5.0])
-
-    def monotonic() -> float:
-        caller = sys._getframe(1).f_globals["__name__"]
-        return next(watch_clock) if caller == WATCH_MODULE else 0.0
-
+    # The waiter's own elapsed reads stay at 0 while the watch loop sees the clock advance to
+    # 4s and then 5s of its 5s deadline.
     with (
-        patch("time.monotonic", monotonic),
-        patch(f"{WATCH_MODULE}.time.sleep") as watch_sleep,
+        patch(f"{WAITERS_MODULE}.monotonic", return_value=0.0),
+        patch(f"{WATCH_MODULE}.monotonic", side_effect=[0.0, 0.0, 4.0, 5.0]),
+        patch(f"{WATCH_MODULE}.sleep") as watch_sleep,
     ):
         assert waiters.wait_for_platform_job(jobs, "job-a", workspace="default", timeout=5, poll_interval=10) is False
 
@@ -345,7 +338,7 @@ def test_wait_for_platform_job_retries_transient_status_error(frozen_time: Magic
         _status_response("completed"),
     ]
 
-    with patch(f"{WATCH_MODULE}.time.sleep") as watch_sleep:
+    with patch(f"{WATCH_MODULE}.sleep") as watch_sleep:
         assert waiters.wait_for_platform_job(jobs, "job-a", workspace="default", timeout=10, poll_interval=1) is True
 
     frozen_time.assert_called()
@@ -355,7 +348,7 @@ def test_wait_for_platform_job_retries_transient_status_error(frozen_time: Magic
 def test_wait_for_gateway_does_not_sleep_past_timeout(waiter_pause: MagicMock) -> None:
     client = _scripted_client([httpx.ConnectError("connection refused")] * 3)
 
-    with patch(f"{WAITERS_MODULE}.time.monotonic", side_effect=[0.0, 0.0, 0.0, 4.0, 5.0, 5.0]):
+    with patch(f"{WAITERS_MODULE}.monotonic", side_effect=[0.0, 0.0, 0.0, 4.0, 5.0, 5.0]):
         assert (
             waiters.wait_for_gateway(
                 client,

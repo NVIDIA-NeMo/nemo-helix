@@ -451,6 +451,7 @@ paths:
               schema:
                 oneOf:
                 - $ref: '#/components/schemas/LogFrame'
+                - $ref: '#/components/schemas/ModelDownloadFrame'
                 - $ref: '#/components/schemas/PreviewDatasetFrame'
                 - $ref: '#/components/schemas/TraceDatasetFrame'
                 - $ref: '#/components/schemas/FailedRecordsFrame'
@@ -461,6 +462,7 @@ paths:
                   propertyName: kind
                   mapping:
                     log: '#/components/schemas/LogFrame'
+                    model_download: '#/components/schemas/ModelDownloadFrame'
                     preview_dataset: '#/components/schemas/PreviewDatasetFrame'
                     trace_dataset: '#/components/schemas/TraceDatasetFrame'
                     failed_records: '#/components/schemas/FailedRecordsFrame'
@@ -1259,6 +1261,37 @@ components:
         \ Must match the ``name`` field of a\n        ``ModelProvider`` registered\
         \ with the surrounding ``DataDesigner`` instance.\n    skip_health_check:\
         \ Whether to skip the health check for this model. Defaults to False."
+    ModelDownloadFrame:
+      properties:
+        kind:
+          type: string
+          const: model_download
+          title: Kind
+          default: model_download
+        status:
+          type: string
+          enum:
+          - started
+          - complete
+          title: Status
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - kind
+      - message
+      - status
+      title: ModelDownloadFrame
+      description: 'Signals the first-use GLiNER detector weight download so UIs can
+        show it.
+
+
+        Emitted with ``status=''started''`` before the (one-time, ~1.7G) pull-through
+
+        download and ``status=''complete''`` once the weights are cached. Only emitted
+
+        when a real download happens; a warm cache yields no frame.'
     PaginationData:
       properties:
         page:

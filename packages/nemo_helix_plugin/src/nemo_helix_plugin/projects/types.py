@@ -3,8 +3,7 @@
 
 """Shared request/response types for Projects (Entity Store).
 
-Single source of truth for the HTTP contract. Replaces the Stainless-generated
-``nemo_helix.types.projects`` module.
+Single source of truth for the HTTP contract.
 """
 
 from __future__ import annotations

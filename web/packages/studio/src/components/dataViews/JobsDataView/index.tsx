@@ -10,6 +10,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
@@ -105,6 +106,8 @@ export const JobsDataView = () => {
         placeholderData: keepPreviousData,
         staleTime: 0,
         refetchOnWindowFocus: true,
+        refetchInterval: (query) =>
+          query.state.status === 'error' ? false : JOB_POLLING_INTERVAL_MS,
       },
     }
   );

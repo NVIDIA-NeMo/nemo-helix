@@ -3,7 +3,7 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { EVALUATOR_ENABLED } from '@studio/constants/environment';
+import { EVALS_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import {
@@ -80,7 +80,7 @@ export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
 const NavIcon = ENTITY_ICONS.evaluationResults;
 
 export const getEvaluationSideNavItems = (workspace: string) =>
-  EVALUATOR_ENABLED
+  EVALS_ENABLED
     ? [
         {
           id: 'evaluation-results',

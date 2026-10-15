@@ -256,16 +256,34 @@ export function extractUserFriendlyKeysFromRow(
 /**
  * Resolves a dot-bracket path (e.g. "messages[0].content") against a row object.
  * These paths match the key format produced by extractUserFriendlyKeysFromRow.
+ * A predicate segment such as "messages[role=assistant]" selects the last array
+ * element whose field equals that string, as the evaluator's field_mapping does.
  * @param row The data row object
  * @param path The dot-bracket path to resolve
  * @returns The value at that path, or undefined if the path doesn't resolve
  */
 export function resolveKeyPath(row: Record<string, unknown>, path: string): unknown {
-  const segments = path.replace(/\[(\d+)\]/g, '.$1').split('.');
+  const segments = path
+    .replace(/\[(\d+)\]/g, '.$1')
+    .replace(/\[([^[\]=.]+=[^[\]=.]+)\]/g, '.[$1]')
+    .split('.');
   let current: unknown = row;
   for (const segment of segments) {
     if (current === null || current === undefined || typeof current !== 'object') {
       return undefined;
+    }
+    const predicate = /^\[(.+)=(.+)\]$/.exec(segment);
+    if (predicate) {
+      if (!Array.isArray(current)) return undefined;
+      const [, key, literal] = predicate;
+      current = current.findLast(
+        (item: unknown) =>
+          typeof item === 'object' &&
+          item !== null &&
+          (item as Record<string, unknown>)[key] === literal
+      );
+      if (current === undefined) return undefined;
+      continue;
     }
     if (!Object.prototype.hasOwnProperty.call(current, segment)) {
       return undefined;

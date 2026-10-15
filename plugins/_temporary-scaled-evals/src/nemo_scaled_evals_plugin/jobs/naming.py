@@ -23,6 +23,11 @@ def evaluation_execution_job_name(evaluation_id: str, execution_number: int) -> 
     return _bounded_name(f"scaled-evals-evaluation-{evaluation_id}-e{execution_number}")
 
 
+def benchmark_archive_job_name(benchmark_run_id: str, generation: str, attempt: int) -> str:
+    """Return the stable Platform Job name for a benchmark archive build attempt."""
+    return _bounded_name(f"scaled-evals-benchmark-archive-{benchmark_run_id}-{generation[:8]}-a{attempt}")
+
+
 def _bounded_name(value: str) -> str:
     normalized = re.sub(r"-+", "-", re.sub(r"[^a-z0-9@.+_-]+", "-", value.lower())).strip("-")
     if len(normalized) <= _JOB_NAME_MAX_LENGTH:

@@ -6,8 +6,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import time
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Literal, TextIO
 
 import httpx
@@ -151,12 +151,12 @@ class DockerComposeE2EBackend:
 
         self._run("up", "-d")
 
-        deadline = time.monotonic() + self.wait_timeout_seconds
-        while time.monotonic() < deadline:
+        deadline = monotonic() + self.wait_timeout_seconds
+        while monotonic() < deadline:
             ready, _not_ready = self._stack_readiness(expected_services)
             if ready:
                 break
-            time.sleep(2)
+            sleep(2)
         else:
             _ready, not_ready = self._stack_readiness(expected_services)
             raise TimeoutError(f"compose services did not become ready for {self.project_name}: {not_ready}")
@@ -170,10 +170,10 @@ class DockerComposeE2EBackend:
             or self.env.get("SSL_CERT_FILE")
             or True
         )
-        deadline = time.monotonic() + self.wait_timeout_seconds
+        deadline = monotonic() + self.wait_timeout_seconds
         pending = list(dict.fromkeys(self.wait_urls))
         last_results: dict[str, str] = {}
-        while time.monotonic() < deadline and pending:
+        while monotonic() < deadline and pending:
             for wait_url in list(pending):
                 try:
                     response = httpx.get(wait_url, timeout=5, verify=verify)
@@ -185,7 +185,7 @@ class DockerComposeE2EBackend:
                     last_results[wait_url] = str(exc)
             if not pending:
                 return
-            time.sleep(2)
+            sleep(2)
         raise TimeoutError(f"compose backend did not become ready: {pending}; last_results={last_results}")
 
     def stop(self) -> None:

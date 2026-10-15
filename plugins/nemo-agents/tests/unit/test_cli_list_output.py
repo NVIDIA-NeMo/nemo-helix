@@ -6,17 +6,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
 import httpx
 import pytest
 from nemo_agents_plugin.cli import AgentsCLI
+from nemo_helix_plugin.client.client import NemoClient
 from typer.testing import CliRunner
 
 runner = CliRunner()
-
-_PATCH_PREFIX = "nemo_agents_plugin.cli"
 
 
 @pytest.fixture
@@ -79,15 +79,7 @@ def _deployments_response(
 
 
 def _install_mock_transport(response: dict[str, Any]):
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, request=request, json=response))
-    real_client = httpx.Client
-
-    class _Client(real_client):
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            kwargs["transport"] = transport
-            super().__init__(*args, **kwargs)
-
-    return patch(f"{_PATCH_PREFIX}.httpx.Client", _Client)
+    return lambda request: httpx.Response(200, request=request, json=response)
 
 
 def _on_a_terminal():
@@ -96,9 +88,9 @@ def _on_a_terminal():
 
 
 class TestListAgentsOutput:
-    def test_agents_list_defaults_to_table(self, app) -> None:
-        with _install_mock_transport(_agents_response()), _on_a_terminal():
-            result = runner.invoke(app, ["list"])
+    def test_agents_list_defaults_to_table(self, app, make_cli_state) -> None:
+        with _on_a_terminal():
+            result = runner.invoke(app, ["list"], obj=make_cli_state(_install_mock_transport(_agents_response())))
 
         assert result.exit_code == 0, result.output
         assert "nemo-agent" in result.output
@@ -107,18 +99,16 @@ class TestListAgentsOutput:
         assert '"data"' not in result.output
         assert "test-model" not in result.output
 
-    def test_agents_list_defaults_to_json_when_piped(self, app) -> None:
-        with _install_mock_transport(_agents_response()):
-            result = runner.invoke(app, ["list"])
+    def test_agents_list_defaults_to_json_when_piped(self, app, make_cli_state) -> None:
+        result = runner.invoke(app, ["list"], obj=make_cli_state(_install_mock_transport(_agents_response())))
 
         assert result.exit_code == 0, result.output
         assert [agent["name"] for agent in json.loads(result.stdout)["data"]] == ["nemo-agent"]
 
     @pytest.mark.parametrize("flag", ["--output-format", "--output", "-f"])
-    def test_agents_list_supports_json_output(self, app, flag: str) -> None:
+    def test_agents_list_supports_json_output(self, app, make_cli_state, flag: str) -> None:
         response = _agents_response()
-        with _install_mock_transport(response):
-            result = runner.invoke(app, ["list", flag, "json"])
+        result = runner.invoke(app, ["list", flag, "json"], obj=make_cli_state(_install_mock_transport(response)))
 
         assert result.exit_code == 0, result.output
         # The resolved-target banner goes to stderr; stdout stays clean JSON.
@@ -134,9 +124,13 @@ class TestListAgentsOutput:
 
 
 class TestDeploymentsListOutput:
-    def test_deployments_list_defaults_to_table(self, app) -> None:
-        with _install_mock_transport(_deployments_response()), _on_a_terminal():
-            result = runner.invoke(app, ["deployments", "list"])
+    def test_deployments_list_defaults_to_table(self, app, make_cli_state) -> None:
+        with _on_a_terminal():
+            result = runner.invoke(
+                app,
+                ["deployments", "list"],
+                obj=make_cli_state(_install_mock_transport(_deployments_response())),
+            )
 
         assert result.exit_code == 0, result.output
         assert "nemo-agent-deployment" in result.output
@@ -149,10 +143,13 @@ class TestDeploymentsListOutput:
         assert "67890" not in result.output
 
     @pytest.mark.parametrize("flag", ["--output-format", "--output", "-f"])
-    def test_deployments_list_supports_json_output(self, app, flag: str) -> None:
+    def test_deployments_list_supports_json_output(self, app, make_cli_state, flag: str) -> None:
         response = _deployments_response()
-        with _install_mock_transport(response):
-            result = runner.invoke(app, ["deployments", "list", flag, "json"])
+        result = runner.invoke(
+            app,
+            ["deployments", "list", flag, "json"],
+            obj=make_cli_state(_install_mock_transport(response)),
+        )
 
         assert result.exit_code == 0, result.output
         # The resolved-target banner goes to stderr; stdout stays clean JSON.
@@ -161,33 +158,39 @@ class TestDeploymentsListOutput:
         assert printed["data"][0]["status"] == "running"
 
     @pytest.mark.parametrize("fmt", ["table", "markdown", "csv"])
-    def test_container_list_shows_projected_http_url(self, app, fmt: str) -> None:
+    def test_container_list_shows_projected_http_url(self, app, make_cli_state, fmt: str) -> None:
         response = _deployments_response(
             name="local-calc-docker",
             endpoint="",
             endpoints=[{"name": "port-8000", "url": "http://localhost:49154", "protocol": "http"}],
         )
-        with _install_mock_transport(response):
-            result = runner.invoke(app, ["deployments", "list", "--output-format", fmt])
+        result = runner.invoke(
+            app,
+            ["deployments", "list", "--output-format", fmt],
+            obj=make_cli_state(_install_mock_transport(response)),
+        )
 
         assert result.exit_code == 0, result.output
         # Rich clips the default table to the terminal; markdown and CSV keep the full URL.
         expected = "http://loc" if fmt == "table" else "http://localhost:49154"
         assert expected in result.stdout
 
-    def test_list_prefers_scalar_endpoint_over_projected_urls(self, app) -> None:
+    def test_list_prefers_scalar_endpoint_over_projected_urls(self, app, make_cli_state) -> None:
         response = _deployments_response(
             endpoint="http://127.0.0.1:49153",
             endpoints=[{"name": "port-8000", "url": "http://localhost:49154", "protocol": "http"}],
         )
-        with _install_mock_transport(response):
-            result = runner.invoke(app, ["deployments", "list", "--output-format", "markdown"])
+        result = runner.invoke(
+            app,
+            ["deployments", "list", "--output-format", "markdown"],
+            obj=make_cli_state(_install_mock_transport(response)),
+        )
 
         assert result.exit_code == 0, result.output
         assert "http://127.0.0.1:49153" in result.stdout
         assert "http://localhost:49154" not in result.stdout
 
-    def test_list_prefers_http_endpoint_over_earlier_non_http(self, app) -> None:
+    def test_list_prefers_http_endpoint_over_earlier_non_http(self, app, make_cli_state) -> None:
         response = _deployments_response(
             name="local-calc-docker",
             endpoint="",
@@ -196,39 +199,48 @@ class TestDeploymentsListOutput:
                 {"name": "port-8000", "url": "http://localhost:49154", "protocol": "http"},
             ],
         )
-        with _install_mock_transport(response):
-            result = runner.invoke(app, ["deployments", "list", "--output-format", "markdown"])
+        result = runner.invoke(
+            app,
+            ["deployments", "list", "--output-format", "markdown"],
+            obj=make_cli_state(_install_mock_transport(response)),
+        )
 
         assert result.exit_code == 0, result.output
         assert "http://localhost:49154" in result.stdout
         assert "tcp://localhost:9090" not in result.stdout
 
-    def test_list_shows_first_url_when_no_http_endpoint_exists(self, app) -> None:
+    def test_list_shows_first_url_when_no_http_endpoint_exists(self, app, make_cli_state) -> None:
         response = _deployments_response(
             name="local-calc-docker",
             endpoint="",
             endpoints=[{"name": "metrics", "url": "tcp://localhost:9090", "protocol": "tcp"}],
         )
-        with _install_mock_transport(response):
-            result = runner.invoke(app, ["deployments", "list", "--output-format", "markdown"])
+        result = runner.invoke(
+            app,
+            ["deployments", "list", "--output-format", "markdown"],
+            obj=make_cli_state(_install_mock_transport(response)),
+        )
 
         assert result.exit_code == 0, result.output
         assert "tcp://localhost:9090" in result.stdout
 
-    def test_list_stays_blank_when_deployment_has_no_address(self, app) -> None:
+    def test_list_stays_blank_when_deployment_has_no_address(self, app, make_cli_state) -> None:
         response = _deployments_response(name="local-calc-docker", endpoint="", endpoints=[])
-        with _install_mock_transport(response), _on_a_terminal():
-            result = runner.invoke(app, ["deployments", "list"])
+        with _on_a_terminal():
+            result = runner.invoke(app, ["deployments", "list"], obj=make_cli_state(_install_mock_transport(response)))
 
         assert result.exit_code == 0, result.output
         assert "http" not in result.stdout
         assert "tcp://" not in result.stdout
 
-    def test_container_list_json_keeps_empty_scalar_endpoint(self, app) -> None:
+    def test_container_list_json_keeps_empty_scalar_endpoint(self, app, make_cli_state) -> None:
         endpoints = [{"name": "port-8000", "url": "http://localhost:49154", "protocol": "http"}]
         response = _deployments_response(name="local-calc-docker", endpoint="", endpoints=endpoints)
-        with _install_mock_transport(response):
-            result = runner.invoke(app, ["deployments", "list", "--output-format", "json"])
+        result = runner.invoke(
+            app,
+            ["deployments", "list", "--output-format", "json"],
+            obj=make_cli_state(_install_mock_transport(response)),
+        )
 
         assert result.exit_code == 0, result.output
         printed = json.loads(result.stdout)
@@ -239,28 +251,36 @@ class TestDeploymentsListOutput:
 class _CodeState:
     """The slice of the ``nemo`` CLI state ``-f code`` needs: the base URL for the snippet."""
 
+    def __init__(self, requests: list[httpx.Request]) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, request=request, json={})
+
+        self._client = NemoClient(
+            base_url="http://nhx.example.com",
+            workspace="default",
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+
     def get_base_url(self, default: str | None = None) -> str | None:
         return "http://nhx.example.com"
 
     def get_output_format(self, override: str | None = None, *, apply_non_tty_default: bool = True) -> str:
         return override or "json"
 
+    def typed_client(self, client_cls: type[NemoClient], timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        return client_cls.from_client(self._client)
 
-def _paged_transport(pages: list[dict[str, Any]], requests: list[httpx.Request]):
+
+def _paged_handler(
+    pages: list[dict[str, Any]], requests: list[httpx.Request]
+) -> Callable[[httpx.Request], httpx.Response]:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         page = int(request.url.params.get("page", "1"))
         return httpx.Response(200, request=request, json=pages[page - 1])
 
-    transport = httpx.MockTransport(handler)
-    real_client = httpx.Client
-
-    class _Client(real_client):
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            kwargs["transport"] = transport
-            super().__init__(*args, **kwargs)
-
-    return patch(f"{_PATCH_PREFIX}.httpx.Client", _Client)
+    return handler
 
 
 def _agents_page(name: str, *, page: int, total_pages: int) -> dict[str, Any]:
@@ -271,19 +291,21 @@ def _agents_page(name: str, *, page: int, total_pages: int) -> dict[str, Any]:
 
 
 class TestPagination:
-    def test_list_warns_when_more_pages_exist(self, app) -> None:
+    def test_list_warns_when_more_pages_exist(self, app, make_cli_state) -> None:
         requests: list[httpx.Request] = []
-        with _paged_transport([_agents_page("a", page=1, total_pages=2)], requests):
-            result = runner.invoke(app, ["list"])
+        result = runner.invoke(
+            app,
+            ["list"],
+            obj=make_cli_state(_paged_handler([_agents_page("a", page=1, total_pages=2)], requests)),
+        )
 
         assert result.exit_code == 0, result.output
         assert "--all-pages" in result.stderr
 
-    def test_list_all_pages_fetches_every_page(self, app) -> None:
+    def test_list_all_pages_fetches_every_page(self, app, make_cli_state) -> None:
         requests: list[httpx.Request] = []
         pages = [_agents_page("a", page=1, total_pages=2), _agents_page("b", page=2, total_pages=2)]
-        with _paged_transport(pages, requests):
-            result = runner.invoke(app, ["list", "--all-pages"])
+        result = runner.invoke(app, ["list", "--all-pages"], obj=make_cli_state(_paged_handler(pages, requests)))
 
         assert result.exit_code == 0, result.output
         assert [agent["name"] for agent in json.loads(result.stdout)["data"]] == ["a", "b"]
@@ -293,8 +315,7 @@ class TestPagination:
 class TestCodeOutput:
     def test_list_code_prints_the_typed_client_call_without_sending(self, app) -> None:
         requests: list[httpx.Request] = []
-        with _paged_transport([], requests):
-            result = runner.invoke(app, ["deployments", "list", "-f", "code"], obj=_CodeState())
+        result = runner.invoke(app, ["deployments", "list", "-f", "code"], obj=_CodeState(requests))
 
         assert result.exit_code == 0, result.output
         assert requests == []
@@ -304,24 +325,26 @@ class TestCodeOutput:
 
     def test_get_code_prints_the_typed_client_call_without_sending(self, app) -> None:
         requests: list[httpx.Request] = []
-        with _paged_transport([], requests):
-            result = runner.invoke(app, ["get", "nemo-agent", "-f", "code"], obj=_CodeState())
+        result = runner.invoke(app, ["get", "nemo-agent", "-f", "code"], obj=_CodeState(requests))
 
         assert result.exit_code == 0, result.output
         assert requests == []
         assert 'client.get_agent(workspace="default", name="nemo-agent")' in result.stdout
 
     def test_sessions_filtered_by_deployment_cannot_be_rendered_as_code(self, app) -> None:
-        result = runner.invoke(app, ["sessions", "list", "--agent-deployment", "d", "-f", "code"], obj=_CodeState())
+        result = runner.invoke(app, ["sessions", "list", "--agent-deployment", "d", "-f", "code"], obj=_CodeState([]))
 
         assert result.exit_code == 2
         assert "--agent-deployment cannot be combined with --output-format code" in result.stderr
 
 
-def test_get_supports_yaml_output(app) -> None:
+def test_get_supports_yaml_output(app, make_cli_state) -> None:
     agent = _agents_response()["data"][0]
-    with _install_mock_transport(agent):
-        result = runner.invoke(app, ["get", "nemo-agent", "--output-format", "yaml"])
+    result = runner.invoke(
+        app,
+        ["get", "nemo-agent", "--output-format", "yaml"],
+        obj=make_cli_state(_install_mock_transport(agent)),
+    )
 
     assert result.exit_code == 0, result.output
     assert "name: nemo-agent" in result.stdout

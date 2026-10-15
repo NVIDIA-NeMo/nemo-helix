@@ -35,7 +35,7 @@ from nemo_relay.plugin import PluginConfig
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 
 class Message(BaseModel):
@@ -53,7 +53,7 @@ class ChatRequest(BaseModel):
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Start Relay before the first request.
 
     ``PluginConfig()`` is the empty base config: Relay layers the *discovered* ``plugins.toml``

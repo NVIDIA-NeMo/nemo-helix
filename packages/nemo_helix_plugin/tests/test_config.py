@@ -344,3 +344,44 @@ def test_default_client_config_fast_model_falls_back_to_env_default_model(
 
     assert context.default_model == "default/quality"
     assert context.fast_model == "default/quality"
+
+
+def test_client_config_access_token_refresh_preserves_broker_url() -> None:
+    from nemo_helix_plugin.client.config.models import ConfigFile, OAuthUser
+
+    config = ConfigFile()
+    config.ensure_context(
+        "default",
+        {
+            "base_url": "https://nemo.example.com",
+            "access_token": "old-token",
+            "token_broker_url": "https://nemo.example.com/apis/auth/v2/token?client=public",
+        },
+    )
+
+    _cluster, user, _context = config.ensure_context("default", {"access_token": "new-token"})
+
+    assert isinstance(user, OAuthUser)
+    assert user.token_broker_url == "https://nemo.example.com/apis/auth/v2/token?client=public"
+
+
+def test_client_config_access_token_refresh_clears_explicit_broker_url() -> None:
+    from nemo_helix_plugin.client.config.models import ConfigFile, OAuthUser
+
+    config = ConfigFile()
+    config.ensure_context(
+        "default",
+        {
+            "base_url": "https://nemo.example.com",
+            "access_token": "old-token",
+            "token_broker_url": "https://nemo.example.com/apis/auth/v2/token?client=public",
+        },
+    )
+
+    _cluster, user, _context = config.ensure_context(
+        "default",
+        {"access_token": "new-token", "token_broker_url": None},
+    )
+
+    assert isinstance(user, OAuthUser)
+    assert user.token_broker_url is None

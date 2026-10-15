@@ -34,10 +34,12 @@ const specAgent = (harnessModel?: Record<string, unknown>) => ({
 
 const study = (
   searchSpace: Record<string, SearchSpaceEntry>,
-  overlayModels: Record<string, Record<string, unknown>> = {}
+  overlayModels: Record<string, Record<string, unknown>> = {},
+  evaluatorModels: string[] = []
 ): StudyConfig => ({
   searchSpace: new Map(Object.entries(searchSpace)),
   overlayModels: new Map(Object.entries(overlayModels)),
+  evaluatorModels: new Set(evaluatorModels),
 });
 
 describe('parseStudyConfig', () => {
@@ -67,8 +69,25 @@ describe('parseStudyConfig', () => {
     ).toEqual(new Map([['judge', { model: 'x' }]]));
   });
 
+  it('collects the models the evaluators score with', () => {
+    expect(
+      parseStudyConfig({
+        eval: {
+          evaluators: {
+            accuracy: { _type: 'tunable_rag_evaluator', llm_name: 'judge' },
+            exact: { _type: 'exact_match' },
+          },
+        },
+      }).evaluatorModels
+    ).toEqual(new Set(['judge']));
+  });
+
   it('returns an empty study config when the optimizer section is missing', () => {
-    expect(parseStudyConfig({})).toEqual({ searchSpace: new Map(), overlayModels: new Map() });
+    expect(parseStudyConfig({})).toEqual({
+      searchSpace: new Map(),
+      overlayModels: new Map(),
+      evaluatorModels: new Set(),
+    });
   });
 });
 
@@ -76,7 +95,11 @@ describe('studyConfigLocation', () => {
   it('resolves a bare fileset name against the study workspace', () => {
     expect(
       studyConfigLocation(
-        { strategy: 'legacy', optimize_config: 'optimize.yaml', optimize_config_fileset: 'bundle' },
+        {
+          strategy: 'config-tuning',
+          optimize_config: 'optimize.yaml',
+          optimize_config_fileset: 'bundle',
+        },
         'ws'
       )
     ).toEqual({ workspace: 'ws', fileset: 'bundle', path: 'optimize.yaml' });
@@ -86,7 +109,7 @@ describe('studyConfigLocation', () => {
     expect(
       studyConfigLocation(
         {
-          strategy: 'legacy',
+          strategy: 'config-tuning',
           optimize_config: 'optimize.yaml',
           optimize_config_fileset: 'other/bundle',
         },
@@ -96,12 +119,12 @@ describe('studyConfigLocation', () => {
   });
 
   it('is undefined without a fileset or config path', () => {
-    expect(studyConfigLocation({ strategy: 'legacy', optimize_config: 'o.yaml' }, 'ws')).toBe(
-      undefined
-    );
-    expect(studyConfigLocation({ strategy: 'legacy', optimize_config_fileset: 'b' }, 'ws')).toBe(
-      undefined
-    );
+    expect(
+      studyConfigLocation({ strategy: 'config-tuning', optimize_config: 'o.yaml' }, 'ws')
+    ).toBe(undefined);
+    expect(
+      studyConfigLocation({ strategy: 'config-tuning', optimize_config_fileset: 'b' }, 'ws')
+    ).toBe(undefined);
   });
 });
 
@@ -237,6 +260,63 @@ describe('applyTrialToAgentConfig', () => {
     ]);
   });
 
+  describe('when the optimize wizard routed the study model through the gateway', () => {
+    const gatewayUrl = '${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1';
+    const agent = {
+      ...specAgent(),
+      models: {
+        default: {
+          provider: 'nvidia',
+          model: 'llama',
+          temperature: 0.7,
+          settings: { base_url: 'https://integrate.api.nvidia.com/v1', stream: true },
+        },
+      },
+    };
+    const routed = (overrides: Record<string, unknown> = {}) => ({
+      provider: 'nvidia',
+      model: 'llama',
+      temperature: 0.7,
+      settings: { stream: true },
+      base_url: gatewayUrl,
+      api_key_env: 'NEMO_AGENTS_IGW_API_KEY',
+      ...overrides,
+    });
+
+    it('does not report or deploy the gateway routing', () => {
+      const { config: next, modelDifferences } = applyTrialToAgentConfig(
+        agent,
+        trial({ temperature: '0.2' }),
+        study({ temperature: { path: 'models.default.temperature' } }, { default: routed() })
+      );
+
+      expect(modelDifferences).toEqual([]);
+      expect(next.models).toEqual({
+        default: { ...agent.models.default, temperature: 0.2 },
+      });
+    });
+
+    it('still reports settings the study ran differently', () => {
+      const { modelDifferences } = applyTrialToAgentConfig(
+        agent,
+        trial({ temperature: '0.2' }),
+        study(
+          { temperature: { path: 'models.default.temperature' } },
+          { default: routed({ model: 'llama-big', settings: { stream: false } }) }
+        )
+      );
+
+      expect(modelDifferences).toEqual([
+        {
+          modelKey: 'default',
+          fields: ['model', 'settings'],
+          studyModel: 'llama-big',
+          agentModel: 'llama',
+        },
+      ]);
+    });
+  });
+
   it('compares against the model id the trial deploys', () => {
     const { modelDifferences } = applyTrialToAgentConfig(
       specAgent(),
@@ -270,6 +350,39 @@ describe('applyTrialToAgentConfig', () => {
     });
   });
 
+  it('leaves out a judge model only the evaluators use, along with its params', () => {
+    const {
+      config: next,
+      addedModels,
+      deployedParams,
+    } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ temperature: '0.2', judge_temperature: '0' }),
+      study(
+        {
+          temperature: { path: 'models.default.temperature' },
+          judge_temperature: { path: 'models.judge.temperature', values: [0, 0.5] },
+        },
+        { judge: { provider: 'nvidia', model: 'judge-model' } },
+        ['judge']
+      )
+    );
+
+    expect(addedModels).toEqual([]);
+    expect(next.models).not.toHaveProperty('judge');
+    expect(deployedParams.map((param) => param.name)).toEqual(['temperature']);
+  });
+
+  it('keeps tuning an evaluator model the agent also defines', () => {
+    const { config: next } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ fast_temperature: '0.1' }),
+      study({ fast_temperature: { path: 'models.fast.temperature' } }, {}, ['fast'])
+    );
+
+    expect(next.models).toMatchObject({ fast: { model: 'llama-mini', temperature: 0.1 } });
+  });
+
   it('rejects a model neither the agent nor the optimize config defines', () => {
     expect(() =>
       applyTrialToAgentConfig(
@@ -287,8 +400,94 @@ describe('applyTrialToAgentConfig', () => {
         trial({ depth: '3' }),
         study({ depth: { path: 'adapter.settings.depth' } })
       )
-    ).toThrow(/only model settings are supported/);
+    ).toThrow(/only model settings and system instructions are supported/);
   });
+
+  it('leaves out the gateway credential the optimize wizard sweeps', () => {
+    const source = specAgent();
+    const { config: next } = applyTrialToAgentConfig(
+      source,
+      trial({ temperature: '0.5', gateway_credential: 'not-used' }),
+      study({
+        temperature: { path: 'models.default.temperature' },
+        gateway_credential: {
+          path: 'environment.env.NEMO_AGENTS_IGW_API_KEY',
+          values: ['not-used'],
+        },
+      })
+    );
+    expect(next.models).toMatchObject({ default: { temperature: 0.5 } });
+    expect(next).not.toHaveProperty('environment');
+  });
+
+  it('writes the system instructions a trial ran onto a platform agent', () => {
+    const source = specAgent();
+    const { config: next } = applyTrialToAgentConfig(
+      source,
+      trial({ instructions: 'Today is 2026-05-07.' }),
+      study({
+        instructions: {
+          path: 'instructions.system.content',
+          values: ['Baseline.', 'Today is 2026-05-07.'],
+        },
+      })
+    );
+
+    expect(next.instructions).toEqual({ system: { content: 'Today is 2026-05-07.' } });
+    expect(source).not.toHaveProperty('instructions');
+  });
+
+  it('replaces system instructions the agent already has', () => {
+    const { config: next } = applyTrialToAgentConfig(
+      { ...specAgent(), instructions: { system: { content: 'Old.', mode: 'replace' } } },
+      trial({ instructions: 'New.' }),
+      study({ instructions: { path: 'instructions.system.content' } })
+    );
+
+    expect(next.instructions).toEqual({ system: { content: 'New.', mode: 'replace' } });
+  });
+
+  it('accepts a system instruction mode listed before its content', () => {
+    const { config: next } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ mode: 'replace', instructions: 'New.' }),
+      study({
+        mode: { path: 'instructions.system.mode' },
+        instructions: { path: 'instructions.system.content' },
+      })
+    );
+
+    expect(next.instructions).toEqual({ system: { mode: 'replace', content: 'New.' } });
+  });
+
+  it('rejects a system instruction mode with no content', () => {
+    expect(() =>
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ mode: 'replace' }),
+        study({ mode: { path: 'instructions.system.mode' } })
+      )
+    ).toThrow(/non-empty system instruction content/);
+  });
+
+  it('rejects blank system instruction content', () => {
+    expect(() =>
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ instructions: '   ' }),
+        study({ instructions: { path: 'instructions.system.content' } })
+      )
+    ).toThrow(/non-empty system instruction content/);
+  });
+
+  it.each(['instructions.system.extra', 'instructions.user.content', 'instructions.system'])(
+    'rejects the instructions path %s that the platform spec does not define',
+    (path) => {
+      expect(() =>
+        applyTrialToAgentConfig(specAgent(), trial({ p: 'x' }), study({ p: { path } }))
+      ).toThrow(/only model settings and system instructions are supported/);
+    }
+  );
 
   it('rejects params that are not in the search space', () => {
     expect(() =>

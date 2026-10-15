@@ -38,10 +38,37 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Calculate the config from structured and unrendered base platform, with overrides
+Calculate the config from structured and unrendered base platform, with overrides.
+
+The chart's own Jobs execution profiles (nemo-helix.chartExecutors) are added after the merge, which replaces lists:
+merged, a user's jobs.executors would drop them. A user's profile with the same provider and profile replaces the chart's.
 */}}
 {{- define "nemo-helix.calculatedConfig" -}}
-{{ tpl (mergeOverwrite (include "nemo-helix.unstructuredConfig" . | fromYaml) .Values.platformConfig | toYaml) . }}
+{{- $config := mergeOverwrite (include "nemo-helix.unstructuredConfig" . | fromYaml) (include "nemo-helix.builder.platformConfig" . | fromYaml) (deepCopy .Values.platformConfig) -}}
+{{- $chartExecutors := include "nemo-helix.chartExecutors" . | fromYamlArray -}}
+{{- if $chartExecutors }}
+{{- $jobs := default (dict) $config.jobs -}}
+{{- $executors := default (list) $jobs.executors -}}
+{{- $taken := dict -}}
+{{- range $executors }}
+{{- $_ := set $taken (printf "%s/%s" .provider .profile) true -}}
+{{- end }}
+{{- range $chartExecutors }}
+{{- if not (hasKey $taken (printf "%s/%s" .provider .profile)) }}
+{{- $executors = append $executors . -}}
+{{- end }}
+{{- end }}
+{{- $_ := set $jobs "executors" $executors -}}
+{{- $_ := set $config "jobs" $jobs -}}
+{{- end -}}
+{{ tpl ($config | toYaml) . }}
+{{- end -}}
+
+{{/*
+Jobs execution profiles the chart adds, as a YAML list. Only the builder's, so far.
+*/}}
+{{- define "nemo-helix.chartExecutors" -}}
+{{ include "nemo-helix.builder.executors" . }}
 {{- end -}}
 
 {{/*
@@ -348,8 +375,12 @@ nemo-common.database.secret-name chooses between externalDatabase and the embedd
 nemo-common.database.password-key chooses between externalDatabase and the embedded postgresql existing secret key values
 */}}
 {{- define "nemo-common.postgresql.password-key" -}}
-{{- if or .Values.postgresql.enabled (not .Values.externalDatabase.existingSecret) -}}
+{{- if .Values.postgresql.enabled -}}
+{{- if .Values.postgresql.auth.existingSecret -}}
+{{- print (.Values.postgresql.auth.existingSecretPasswordKey | default "password") -}}
+{{- else -}}
 {{- print "password" -}}
+{{- end -}}
 {{- else -}}
 {{- print .Values.externalDatabase.existingSecretPasswordKey -}}
 {{- end -}}

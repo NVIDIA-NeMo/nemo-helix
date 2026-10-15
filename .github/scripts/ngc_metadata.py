@@ -42,8 +42,9 @@ WORD_OVERRIDES = {
     "sdk": "SDK",
 }
 COMPONENT_DISPLAY_NAMES = {
-    "nhx-auditor-tasks": "Auditor Tasks",
+    "nhx-garak-tasks": "Garak Tasks",
     "nhx-safe-synthesizer-tasks": "Safe Synthesizer Tasks",
+    "nhx-tasks-openshell": "OpenShell Tasks",
 }
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)

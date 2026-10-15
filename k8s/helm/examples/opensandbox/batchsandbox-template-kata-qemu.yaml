@@ -39,3 +39,30 @@ data:
             katacontainers.io/kata-runtime: "true"
           tolerations:
             - operator: Exists
+          # Harbor (scaled-evals harbor_opensandbox) creates its directories under
+          # these paths through execd, which runs as the image's USER. Writable
+          # emptyDirs let non-root images start without running the container as
+          # root. /tests is deliberately not mounted: verifier images bake their
+          # tests into /tests, and an empty mount would hide them.
+          volumes:
+            - name: harbor-logs
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: harbor-solution
+              emptyDir:
+                sizeLimit: 1Gi
+            - name: harbor-installed-agent
+              emptyDir:
+                sizeLimit: 2Gi
+          # OpenSandbox v0.2.1 copies only volumeMounts from the container named
+          # "sandbox" onto the task container; other container fields here are
+          # ignored.
+          containers:
+            - name: sandbox
+              volumeMounts:
+                - name: harbor-logs
+                  mountPath: /logs
+                - name: harbor-solution
+                  mountPath: /solution
+                - name: harbor-installed-agent
+                  mountPath: /installed-agent

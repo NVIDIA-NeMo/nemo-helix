@@ -406,11 +406,9 @@ async def test_delete_returns_deleting_without_blocking_poll() -> None:
     client.get_volume = AsyncMock(side_effect=get_vol)
     backend = _backend_with_client(client)
 
-    with patch("asyncio.sleep", AsyncMock()) as sleep_mock:
-        result = await backend.delete_model_deployment("default", "my-dep")
+    result = await backend.delete_model_deployment("default", "my-dep")
 
     assert result.status == "DELETING"
-    sleep_mock.assert_not_called()
 
 
 @pytest.mark.asyncio

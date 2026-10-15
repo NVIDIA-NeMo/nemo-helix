@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
-import type { EvaluateJob } from '@nemo/sdk/generated/evaluator/schema';
+import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import type { FilesetOutputsPage, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { MetricItemWithId } from '@studio/components/dataViews/EvaluationMetricsDataView/types';
@@ -58,7 +58,7 @@ const commonHandlers = [
     () => HttpResponse.json(datasets as FilesetOutputsPage)
   ),
   http.post<{ workspace: string }, never, EvaluateJob>(
-    '/apis/evaluator/v2/workspaces/:workspace/evaluate/jobs',
+    '/apis/evals/v2/workspaces/:workspace/evaluate/jobs',
     () => HttpResponse.json(mockEvaluateJob)
   ),
 ];

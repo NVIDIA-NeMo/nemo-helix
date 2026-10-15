@@ -7,7 +7,6 @@ queries:
   - uses: security-extended
 
 paths-ignore:
-  - sdk/python
   # A plugin's Studio UI ships as a built bundle committed alongside its Python
   # package, because the wheel installs it. The file is minified vendor code we
   # neither author nor can patch — scanning it reports third-party regexes

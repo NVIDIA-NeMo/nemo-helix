@@ -3,7 +3,7 @@
 
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Self, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -169,18 +169,18 @@ async def test_adapter_base_model_rejects_a_different_base() -> None:
 
 
 class _Jobs:
-    """Jobs client stand-in: returns *jobs* from ``list`` and records how it was called."""
+    """Jobs client stand-in: returns *jobs* from ``list_jobs`` and records how it was called."""
 
     def __init__(self, jobs: list[SimpleNamespace] | None = None, error: Exception | None = None) -> None:
         self._jobs = jobs or []
         self._error = error
         self.calls: list[dict[str, Any]] = []
 
-    def list(self, **kwargs: Any) -> AsyncIterator[SimpleNamespace]:
+    async def list_jobs(self, **kwargs: Any) -> Self:
         self.calls.append(kwargs)
-        return self._iterate()
+        return self
 
-    async def _iterate(self) -> AsyncIterator[SimpleNamespace]:
+    async def items(self) -> AsyncIterator[SimpleNamespace]:
         if self._error is not None:
             raise self._error
         for job in self._jobs:
@@ -202,7 +202,8 @@ async def test_output_name_check_queries_in_flight_customization_jobs_for_that_n
 
     (call,) = jobs.calls
     assert call["workspace"] == "default"
-    assert call["filter"] == {
+    assert call["query_params"]["page_size"] == 100
+    assert call["query_params"]["filter"] == {
         "source": CUSTOMIZATION_JOB_SOURCE,
         "status": {"$in": [status.value for status in HelixJobStatus.non_terminals()]},
         "spec.output.name": "my-lora",

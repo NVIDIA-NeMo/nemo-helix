@@ -644,7 +644,6 @@ def test_code_output_does_not_send_request() -> None:
         'CreateModelEntityRequest(name="llama", description="d", finetuning_type=FinetuningType.LORA)' in result.stdout
     )
     assert "exist_ok=True" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_code_output_for_list_uses_query_params() -> None:
@@ -660,7 +659,6 @@ def test_code_output_for_list_uses_query_params() -> None:
     assert "client.list_models(" in result.stdout
     assert '"page_size": 5' in result.stdout
     assert "for item in response.page().items:" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_code_output_for_nested_adapter_update() -> None:
@@ -677,4 +675,3 @@ def test_code_output_for_nested_adapter_update() -> None:
         'client.update_model_adapter(model_name="llama", adapter="lora-1", body=UpdateAdapterRequest(enabled=True))'
         in (result.stdout)
     )
-    assert "NeMoHelix" not in result.stdout

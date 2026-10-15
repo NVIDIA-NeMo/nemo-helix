@@ -77,6 +77,13 @@ imagePullSecrets: []
 # See the OpenSandbox section in this README.
 sandboxClusterCapable: false
 
+evals:
+  # -- Accept and run cloudpickle metric bundles. A cloudpickle metric is caller-supplied Python that runs
+  # with the Evals service's credentials, so enable this only when everyone who can create metrics or
+  # submit Evals jobs is trusted to run code as the platform. Sets both the API setting
+  # (`evals.allow_insecure_cloudpickle_metrics`) and the Kubernetes and Volcano job environment.
+  allowInsecureCloudpickleMetrics: false
+
 # -- Connection settings for an already-installed OpenSandbox server.
 # Used when sandboxClusterCapable is true. Copy the API-key Secret into the Helm
 # release namespace (the namespace jobs run in). Override domain for a Kata Service.
@@ -94,6 +101,68 @@ opensandbox:
 rbac:
   # -- Specifies whether to enable the core Controller to have RBAC permissions to Volcano for scheduling distributed jobs.
   volcanoEnabled: true
+
+# -- Container image builds: the builder plugin, which every platform image includes. Builds run in a namespace of
+# their own, which the chart creates with the builder's Jobs execution profiles when this is enabled. Set the
+# builder itself, such as the registry builds publish to, in `platformConfig.builder`. See the builder plugin's README.
+builder:
+  # -- Create the build namespace and the builder's Jobs execution profiles.
+  enabled: false
+  # -- Namespace builds run in, which the chart creates. Empty is `<release namespace>-builds`. Each release needs its own,
+  # and it can't be the release namespace.
+  namespace: ""
+  # -- Extra labels for the build namespace, such as one that has a cluster tool copy an image pull secret into it.
+  namespaceLabels: {}
+  # -- The work volume every build step and sandbox mounts.
+  # @default -- This object has the following default values for the work volume.
+  workVolume:
+    # -- StorageClass for the work volume. Empty uses the cluster's default.
+    storageClass: ""
+    # -- Access modes for the work volume. With ReadWriteOnce, every build pod has to run on the volume's one node.
+    accessModes:
+      - ReadWriteMany
+    # -- Size of the work volume.
+    size: 100Gi
+  # -- Resources for each container in the build namespace that sets none, so that no build goes unbounded.
+  # @default -- This object has the following default values for the build namespace's LimitRange.
+  limitRange:
+    # -- Create the LimitRange.
+    enabled: true
+    # -- Limits for a container that sets none.
+    default:
+      cpu: "2"
+      memory: 8Gi
+      ephemeral-storage: 20Gi
+    # -- Requests for a container that sets none.
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 1Gi
+  # -- What all builds together may use in the build namespace. Needs `limitRange`, whose defaults it relies on.
+  # @default -- This object has the following default values for the build namespace's ResourceQuota.
+  resourceQuota:
+    # -- Create the ResourceQuota.
+    enabled: true
+    # -- The quota's hard limits.
+    hard:
+      requests.cpu: "16"
+      requests.memory: 64Gi
+      limits.cpu: "32"
+      limits.memory: 128Gi
+      limits.ephemeral-storage: 400Gi
+      pods: "50"
+  # -- A registry in the release namespace for kind and minikube: plain HTTP, one username and password, and storage
+  # that doesn't survive a restart. Never for a shared cluster.
+  # @default -- This object has the following default values for the development registry.
+  devRegistry:
+    # -- Deploy the registry, and set `builder.registry` to it.
+    enabled: false
+    # -- The registry's image.
+    image: docker.io/library/registry:3.0.0
+    # -- The username the registry takes.
+    username: builder
+    # -- The password the registry takes. Required when enabled.
+    password: null
 
 # -- Multi-node networking configuration for distributed GPU training.
 # These settings control Kyverno policies that inject cloud-specific networking and NCCL configurations.
@@ -297,9 +366,10 @@ postgresql:
     username: nemo
     password: nemo
     database: nemohelix
-    # -- Name of an existing secret containing a "password" key (or use existingSecretPasswordKey). If set, the chart does not create a secret.
+    # -- Name of an existing secret containing the PostgreSQL password. If set, the chart does not create a secret.
     existingSecret: ""
-
+    # -- Key in the existing secret containing the PostgreSQL password.
+    existingSecretPasswordKey: password
 
   # -- PostgreSQL service configuration.
   service:
@@ -309,6 +379,8 @@ postgresql:
   persistence:
     enabled: true
     size: 5Gi
+    # -- Labels to preserve on the PostgreSQL volume claim template. Copy existing StatefulSet claim-template labels exactly and retain them on future upgrades; these labels are immutable. Supplied labels override the default component label.
+    claimTemplateLabels: {}
     # -- Storage class for the PostgreSQL PVC. If unset, the cluster default is used.
     storageClass: ""
   # -- Optional resource limits/requests for the PostgreSQL container.
@@ -545,6 +617,8 @@ baseHelixConfig: |
           pvc_name: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
           volume_permissions_image: {{ .Values.core.storage.volumePermissionsImage | quote }}
         pod_security_context: {{ .Values.podSecurityContext | toYaml | nindent 10 }}
+        env:
+          NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: {{ .Values.evals.allowInsecureCloudpickleMetrics | toString | quote }}
       volcano_job:
         service_account_name: {{ include "nhx-core.jobsServiceAccountName" . | quote }}
         launcher_image: {{ include "nhx-core.image" . | quote }}
@@ -552,6 +626,8 @@ baseHelixConfig: |
           pvc_name: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
           volume_permissions_image: {{ .Values.core.storage.volumePermissionsImage | quote }}
         pod_security_context: {{ .Values.podSecurityContext | toYaml | nindent 10 }}
+        env:
+          NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: {{ .Values.evals.allowInsecureCloudpickleMetrics | toString | quote }}
         {{- if include "nemo-helix.multinodeNetworkingEnabled" . }}
         # Enable multi-node networking (triggers Kyverno policies for cloud-specific configuration)
         enable_multi_node_networking: true
@@ -598,8 +674,8 @@ baseHelixConfig: |
       type: local
       path: /vol/files
 
-  # -- auditor is the configuration specific to the Auditor service
-  auditor: {}
+  # -- garak is the configuration specific to the Garak service
+  garak: {}
 
   # -- data_designer is the configuration specific to the Data Designer service
   data_designer:
@@ -638,8 +714,9 @@ baseHelixConfig: |
   safe_synthesizer:
     container_image: nhx-safe-synthesizer-tasks
 
-  # -- evaluator is the configuration specific to the Evaluator service
-  evaluator: {}
+  # -- evals is the configuration specific to the Evals service
+  evals:
+    allow_insecure_cloudpickle_metrics: {{ .Values.evals.allowInsecureCloudpickleMetrics }}
 
   # -- guardrails is the configuration specific to the Guardrails service
   guardrails: {}
@@ -680,6 +757,14 @@ ingress:
           pathType: Exact
           service: '{{ include "nemo-helix.ingressBackendService" . }}'
           port: '{{ include "nemo-helix.ingressBackendPort" . }}'
+        - path: /openapi.json
+          pathType: Exact
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
+        - path: /health/ready
+          pathType: Exact
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
 
 httpRoute:
   # -- Specifies whether to enable a Gateway API HTTP Route for the service.
@@ -704,6 +789,10 @@ httpRoute:
         - path: /cluster-info
           type: Exact
         - path: /status
+          type: Exact
+        - path: /openapi.json
+          type: Exact
+        - path: /health/ready
           type: Exact
       backends:
         - service: '{{ include "nemo-helix.ingressBackendService" . }}'
@@ -786,7 +875,7 @@ api:
   # -- Platform API server settings.
   server:
     # -- Seconds Uvicorn keeps idle HTTP connections open. Must be greater than envoyProxy.timeouts.upstreamIdle when Envoy is enabled.
-    keepAliveTimeoutSeconds: 5
+    keepAliveTimeoutSeconds: 10
 
   # -- Predefined service group passed to `nemo services run` with `--service-group`. Ignored when api.services is non-empty.
   serviceGroup: all

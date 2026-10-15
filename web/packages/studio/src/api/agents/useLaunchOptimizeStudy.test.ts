@@ -82,7 +82,7 @@ describe('launchOptimizeStudy', () => {
     ).toEqual(['dataset.json', 'optimize.yaml']);
     expect(agentOptimizationCreateRunStrategyJob).toHaveBeenCalledWith('ws', {
       spec: {
-        strategy: 'legacy',
+        strategy: 'config-tuning',
         optimize_config: 'optimize.yaml',
         optimize_config_fileset: `ws/${filesetName}`,
         agent: 'hermes',
@@ -90,6 +90,29 @@ describe('launchOptimizeStudy', () => {
       custom_fields: { studio_bundle_fileset: filesetName },
     });
     expect(filesDeleteFileset).not.toHaveBeenCalled();
+  });
+
+  it('runs from an existing fileset in place without claiming it', async () => {
+    await expect(
+      launchOptimizeStudy({
+        workspace: 'ws',
+        agentName: 'hermes',
+        fileset: 'curated-bundle',
+        optimizeConfig: 'configs/optimize.yaml',
+      })
+    ).resolves.toEqual({ name: 'study-1' });
+
+    expect(filesCreateFileset).not.toHaveBeenCalled();
+    expect(filesUploadFile).not.toHaveBeenCalled();
+    // No `studio_bundle_fileset`, so deleting the study can never delete the user's fileset.
+    expect(agentOptimizationCreateRunStrategyJob).toHaveBeenCalledWith('ws', {
+      spec: {
+        strategy: 'config-tuning',
+        optimize_config: 'configs/optimize.yaml',
+        optimize_config_fileset: 'ws/curated-bundle',
+        agent: 'hermes',
+      },
+    });
   });
 
   it('keeps the bundle name within a fileset name for a long agent name', () => {

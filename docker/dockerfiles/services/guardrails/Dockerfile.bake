@@ -36,7 +36,6 @@
 
     # Finally install the workspace members and the project
     COPY --from=root-lib-source-artifacts /artifacts/packages /app/packages
-    COPY --from=root-lib-source-artifacts /artifacts/sdk /app/sdk
     COPY --from=root-lib-source-artifacts /artifacts/docs /app/docs
     COPY --from=root-lib-source-artifacts /artifacts/openapi /app/openapi
 

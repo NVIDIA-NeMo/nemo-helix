@@ -447,7 +447,16 @@ class TestPublishedPackagingContract:
         declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
         assert any(spec.startswith(dependency) for spec in declared)
 
-    @pytest.mark.parametrize("dependency", ["python-on-whales", "jinja2", "nemo-fabric-adapters-remote-agent"])
+    @pytest.mark.parametrize(
+        "dependency",
+        [
+            "python-on-whales",
+            "jinja2",
+            "nemo-fabric-adapters-remote-agent",
+            "nemo-fabric-adapters-nooa",
+            "nemo-fabric-adapters-mini-swe-agent",
+        ],
+    )
     def test_published_platform_extra_includes_packaging_dependency(self, dependency: str) -> None:
         import tomllib
 
@@ -474,10 +483,13 @@ class TestPublishedPackagingContract:
             "nemo-fabric-adapters-codex",
             "nemo-fabric-adapters-deepagents",
             "nemo-fabric-adapters-hermes",
+            "nemo-fabric-adapters-nooa",
+            "nemo-fabric-adapters-mini-swe-agent",
             "nemo-fabric-adapters-remote-agent",
         }
         assert not any(
-            spec.startswith(("claude-agent-sdk", "deepagents", "hermes-agent", "openai-codex")) for spec in declared
+            spec.startswith(("claude-agent-sdk", "deepagents", "hermes-agent", "openai-codex", "mini-swe-agent"))
+            for spec in declared
         )
 
     def test_harness_extras(self) -> None:
@@ -485,10 +497,50 @@ class TestPublishedPackagingContract:
 
         pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
         extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
-        assert extras["all"] == ["nemo-agents-plugin[claude,codex,deepagents]"]
+        assert "all" not in extras
         assert extras["claude"] == ["nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0"]
         assert extras["codex"] == ["nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0"]
         assert extras["deepagents"] == ["nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0"]
+        assert extras["mini-swe-agent"] == ["nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0"]
+        assert extras["nooa"] == [
+            "nemo-fabric-adapters-nooa[harness]>=0.4.0,<0.5.0; python_version >= '3.12' and python_version < '3.14'"
+        ]
+
+    def test_published_mini_swe_agent_extra(self) -> None:
+        import tomllib
+
+        root = Path(__file__).resolve().parents[4]
+        extras = tomllib.loads((root / "packages/nemo_helix/pyproject.toml").read_text())["project"][
+            "optional-dependencies"
+        ]
+        assert extras["nemo-agents-plugin-mini-swe-agent"] == [
+            "nemo-helix[nemo-agents-plugin]",
+            "nemo-fabric-adapters-mini-swe-agent[harness]>=0.4.0,<0.5.0",
+        ]
+
+    @pytest.mark.parametrize(
+        ("python_version", "supported"), [("3.11", False), ("3.12", True), ("3.13", True), ("3.14", False)]
+    )
+    def test_nooa_package_markers(self, python_version: str, supported: bool) -> None:
+        import tomllib
+
+        root = Path(__file__).resolve().parents[4]
+        plugin = tomllib.loads((root / "plugins/nemo-agents/pyproject.toml").read_text())["project"]
+        bundled = tomllib.loads((root / "packages/nemo_helix/pyproject.toml").read_text())["project"][
+            "optional-dependencies"
+        ]
+        assert "nemo-agents-plugin-all" not in bundled
+        assert "nemo-helix[nemo-agents-plugin]" in bundled["nemo-agents-plugin-nooa"]
+        for specs, harness in [
+            (plugin["dependencies"], False),
+            (plugin["optional-dependencies"]["nooa"], True),
+            (bundled["nemo-agents-plugin"], False),
+            (bundled["nemo-agents-plugin-nooa"], True),
+        ]:
+            requirement = next(Requirement(spec) for spec in specs if spec.startswith("nemo-fabric-adapters-nooa"))
+            assert requirement.extras == ({"harness"} if harness else set())
+            assert requirement.marker is not None
+            assert requirement.marker.evaluate({"python_version": python_version}) is supported
 
 
 class TestTagNamespace:

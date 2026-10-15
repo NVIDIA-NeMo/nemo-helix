@@ -15,6 +15,7 @@ import pytest
 import yaml
 from nemo_helix_ext.auth.helpers import decode_jwt_claims, generate_unsigned_jwt
 from nemo_helix_ext.cli.app import app
+from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyCreateRequest,
     AccessKeyCreateResponse,
@@ -28,6 +29,7 @@ from nemo_helix_plugin.auth.access_keys.types import (
 )
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.oidc import AdvertisedOidcClient, BearerTokenSource, NHXOIDCConfig
 from typer.testing import CliRunner
 
 from ..utils import assert_exit_code
@@ -40,50 +42,52 @@ runner = CliRunner()
 # ---------------------------------------------------------------------------
 
 
-def _mock_oidc_config() -> SimpleNamespace:
-    return SimpleNamespace(
+def _mock_oidc_config(
+    *,
+    client_id: str = "test-client",
+    bearer_token_source: BearerTokenSource = "access_token",
+    default_scopes: str = "openid profile email offline_access",
+    scope_prefix: str | None = "api://nhx",
+    device_authorization_requires_device_id: bool = False,
+    device_authorization_display_name: str | None = None,
+    device_token_request_includes_scope: bool = True,
+) -> NHXOIDCConfig:
+    return NHXOIDCConfig(
         auth_enabled=True,
         issuer="https://idp.example.com",
-        client_id="test-client",
-        cli_client_id=None,
-        bearer_token_source="access_token",
-        token_endpoint="https://idp.example.com/token",
-        device_authorization_endpoint="https://idp.example.com/device",
-        device_authorization_requires_device_id=False,
-        device_authorization_display_name=None,
-        device_token_request_includes_scope=True,
-        default_scopes="openid profile email offline_access",
-        scope_prefix="api://nhx",
+        clients=(
+            AdvertisedOidcClient(
+                name="public",
+                client_id=client_id,
+                client_authentication="public",
+                default=True,
+                bearer_token_source=bearer_token_source,
+                token_endpoint="https://idp.example.com/token",
+                device_authorization_endpoint="https://idp.example.com/device",
+                device_authorization_requires_device_id=device_authorization_requires_device_id,
+                device_authorization_display_name=device_authorization_display_name,
+                device_token_request_includes_scope=device_token_request_includes_scope,
+                default_scopes=default_scopes,
+                scope_prefix=scope_prefix,
+            ),
+        ),
     )
 
 
-def _discover_auth_enabled(
-    url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-) -> SimpleNamespace:
+def _discover_auth_enabled(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
     return SimpleNamespace(auth_enabled=True)
 
 
-def _discover_auth_disabled(
-    url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-) -> SimpleNamespace:
+def _discover_auth_disabled(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
     return SimpleNamespace(auth_enabled=False)
 
 
-def _discover_oidc_config(
-    url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-) -> SimpleNamespace:
+def _discover_oidc_config(url: str, http_client: httpx.Client, timeout: float = 10.0) -> NHXOIDCConfig:
     return _mock_oidc_config()
 
 
-def _discover_no_oidc(url: str, timeout: float = 10.0, *, certificate_authority: str | None = None) -> SimpleNamespace:
-    return SimpleNamespace(
-        auth_enabled=True,
-        issuer=None,
-        client_id=None,
-        cli_client_id=None,
-        token_endpoint=None,
-        device_authorization_endpoint=None,
-    )
+def _discover_no_oidc(url: str, http_client: httpx.Client, timeout: float = 10.0) -> NHXOIDCConfig:
+    return NHXOIDCConfig(auth_enabled=True)
 
 
 def _decode_jwt_noop(token: str) -> dict:
@@ -321,14 +325,10 @@ def test_auth_refresh_updates_selected_context_only(oauth_config_file: Path, mon
         def force_refresh(self) -> None:
             self._on_tokens_refreshed(self.tokens)
 
-    def discover_refresh_config(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
-        return SimpleNamespace(
-            client_id="test-client-id",
-            cli_client_id="test-cli-client-id",
+    def discover_refresh_config(url: str, http_client: httpx.Client, timeout: float = 10.0) -> NHXOIDCConfig:
+        return _mock_oidc_config(
+            client_id="test-user-login-client-id",
             bearer_token_source="id_token",
-            token_endpoint="https://idp.example.com/token",
             default_scopes="openid profile email",
             scope_prefix=None,
         )
@@ -351,7 +351,7 @@ def test_auth_refresh_updates_selected_context_only(oauth_config_file: Path, mon
     assert foo_user["token"] == "foo-refreshed-token"
     assert foo_user["refresh_token"] == "foo-refreshed-refresh"
     assert foo_user["expires_at"] == 1893456000.0
-    assert provider_kwargs["client_id"] == "test-cli-client-id"
+    assert provider_kwargs["client_id"] == "test-user-login-client-id"
     assert provider_kwargs["bearer_token_source"] == "id_token"
     assert callable(provider_kwargs["load_tokens"])
     assert callable(provider_kwargs["refresh_lock"])
@@ -398,16 +398,17 @@ def test_config_backed_force_refresh_reloads_rotated_token_before_request(
     provider = _config_backed_token_provider(
         context_name="foo",
         token_endpoint="https://idp.example.com/token",
-        client_id="test-cli-client-id",
+        client_id="test-user-login-client-id",
         access_token=stale_access,
         refresh_token="stale-refresh",
         expires_at=None,
         refresh_scope="openid profile email",
         bearer_token_source="access_token",
+        refresh_kind="provider",
         certificate_authority=None,
     )
 
-    with patch("nemo_helix_ext.auth.token_provider.refresh_token_grant") as mock_refresh:
+    with patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_refresh:
         mock_refresh.return_value = {
             "access_token": refreshed_access,
             "refresh_token": "next-rotated-refresh",
@@ -424,7 +425,7 @@ def test_config_backed_force_refresh_reloads_rotated_token_before_request(
     assert persisted_foo["refresh_token"] == "next-rotated-refresh"
     assert before_refresh + 7200 <= persisted_foo["expires_at"] <= time.time() + 7200
 
-    from nemo_helix_ext.client.bootstrap import _make_config_token_loader
+    from nemo_helix_ext.auth.bootstrap import _make_config_token_loader
 
     loaded_tokens = _make_config_token_loader("foo", oauth_config_file)()
     assert loaded_tokens is not None
@@ -450,23 +451,20 @@ def test_ensure_valid_token_refreshes_expired_opaque_token_from_config(
     context = Config.load(config_path=oauth_config_file, overrides={"current_context": "foo"}).resolve()
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.auth.discover_nhx_config",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            client_id="web-client",
-            cli_client_id="cli-client",
-            bearer_token_source="access_token",
-            token_endpoint="https://idp.example.com/token",
+        lambda *_args, **_kwargs: _mock_oidc_config(
+            client_id="user-login-client",
             default_scopes="openid profile email",
             scope_prefix=None,
         ),
     )
 
-    with patch("nemo_helix_ext.auth.token_provider.refresh_token_grant") as mock_refresh:
+    with httpx.Client() as http_client, patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_refresh:
         mock_refresh.return_value = {
             "access_token": "opaque-current-access",
             "refresh_token": "opaque-rotated-refresh",
             "expires_in": 3600,
         }
-        assert ensure_valid_token(context, refresh_buffer_seconds=300) is True
+        assert ensure_valid_token(context, http_client=http_client, refresh_buffer_seconds=300) is True
 
     mock_refresh.assert_called_once()
     with open(oauth_config_file) as f:
@@ -500,7 +498,8 @@ def test_ensure_valid_token_rejects_expired_token_when_discovery_is_invalid(
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", invalid_discovery)
 
-    assert ensure_valid_token(context, refresh_buffer_seconds=300) is False
+    with httpx.Client() as http_client:
+        assert ensure_valid_token(context, http_client=http_client, refresh_buffer_seconds=300) is False
 
 
 def test_ensure_valid_token_uses_fresh_shared_token_instead_of_stale_refresh(
@@ -533,18 +532,15 @@ def test_ensure_valid_token_uses_fresh_shared_token_instead_of_stale_refresh(
 
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.auth.discover_nhx_config",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            client_id="web-client",
-            cli_client_id="cli-client",
-            bearer_token_source="access_token",
-            token_endpoint="https://idp.example.com/token",
+        lambda *_args, **_kwargs: _mock_oidc_config(
+            client_id="user-login-client",
             default_scopes="openid profile email",
             scope_prefix=None,
         ),
     )
 
-    with patch("nemo_helix_ext.auth.token_provider.refresh_token_grant") as mock_refresh:
-        assert ensure_valid_token(stale_context, refresh_buffer_seconds=300) is True
+    with httpx.Client() as http_client, patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_refresh:
+        assert ensure_valid_token(stale_context, http_client=http_client, refresh_buffer_seconds=300) is True
 
     mock_refresh.assert_not_called()
     with open(oauth_config_file) as f:
@@ -575,11 +571,8 @@ def test_ensure_valid_token_propagates_rotated_token_persistence_failure(
     context = Config.load(config_path=oauth_config_file, overrides={"current_context": "foo"}).resolve()
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.auth.discover_nhx_config",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            client_id="web-client",
-            cli_client_id="cli-client",
-            bearer_token_source="access_token",
-            token_endpoint="https://idp.example.com/token",
+        lambda *_args, **_kwargs: _mock_oidc_config(
+            client_id="user-login-client",
             default_scopes="openid profile email",
             scope_prefix=None,
         ),
@@ -594,8 +587,8 @@ def test_ensure_valid_token_propagates_rotated_token_persistence_failure(
         lambda **_kwargs: FailingProvider(),
     )
 
-    with pytest.raises(AuthError, match="rotated credentials could not be saved"):
-        ensure_valid_token(context, refresh_buffer_seconds=300)
+    with httpx.Client() as http_client, pytest.raises(AuthError, match="rotated credentials could not be saved"):
+        ensure_valid_token(context, http_client=http_client, refresh_buffer_seconds=300)
 
 
 def test_auth_refresh_regenerates_unsigned_token(oauth_config_file: Path) -> None:
@@ -616,6 +609,7 @@ def test_auth_refresh_regenerates_unsigned_token(oauth_config_file: Path) -> Non
     foo_user = next(user for user in data["users"] if user["name"] == "foo")
     foo_user["token"] = original_token
     foo_user["refresh_token"] = None
+    foo_user["token_broker_url"] = "https://nemo.example.com/apis/auth/v2/token"
 
     with open(oauth_config_file, "w") as f:
         yaml.safe_dump(data, f)
@@ -629,6 +623,7 @@ def test_auth_refresh_regenerates_unsigned_token(oauth_config_file: Path) -> Non
         refreshed_data = yaml.safe_load(f)
 
     refreshed_user = next(user for user in refreshed_data["users"] if user["name"] == "foo")
+    assert refreshed_user.get("token_broker_url") is None
     refreshed_claims = decode_jwt_claims(refreshed_user["token"])
 
     assert refreshed_claims["sub"] == "admin@example.com"
@@ -1369,24 +1364,25 @@ def test_auth_status_shows_config_file_credential_source(
 # ---------------------------------------------------------------------------
 
 
+def test_auth_login_help_hides_oidc_client_selector() -> None:
+    result = runner.invoke(app, ["auth", "login", "--help"])
+
+    assert_exit_code(result, 0)
+    assert "--oidc-client" not in result.output
+
+
 def test_auth_login_passes_device_compatibility_settings(
     oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[dict] = []
 
-    def discover_config(*_args, **_kwargs) -> SimpleNamespace:
-        return SimpleNamespace(
-            auth_enabled=True,
-            issuer="https://idp.example.com",
-            client_id="web-client",
-            cli_client_id="cli-client",
+    def discover_config(*_args, **_kwargs) -> NHXOIDCConfig:
+        return _mock_oidc_config(
+            client_id="user-login-client",
             bearer_token_source="id_token",
-            token_endpoint="https://idp.example.com/token",
-            device_authorization_endpoint="https://idp.example.com/device",
             device_authorization_requires_device_id=True,
             device_authorization_display_name=None,
             device_token_request_includes_scope=False,
-            default_scopes="openid profile email offline_access",
             scope_prefix=None,
         )
 
@@ -1401,7 +1397,7 @@ def test_auth_login_passes_device_compatibility_settings(
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", discover_config)
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_device_flow", device_flow)
-    monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
+    monkeypatch.setattr("nemo_helix_ext.auth.login.decode_jwt_claims", _decode_jwt_noop)
 
     result = runner.invoke(app, ["--context", "foo", "auth", "login", "--no-browser"])
 
@@ -1410,7 +1406,7 @@ def test_auth_login_passes_device_compatibility_settings(
         {
             "device_authorization_endpoint": "https://idp.example.com/device",
             "token_endpoint": "https://idp.example.com/token",
-            "client_id": "cli-client",
+            "client_id": "user-login-client",
             "scope": "openid profile email offline_access",
             "open_browser": False,
             "bearer_token_source": "id_token",
@@ -1432,8 +1428,7 @@ def test_auth_login_passes_device_compatibility_settings(
 def test_auth_login_id_token_without_scope_signal_skips_scope_preflight(
     oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    oidc_config = _mock_oidc_config()
-    oidc_config.bearer_token_source = "id_token"
+    oidc_config = _mock_oidc_config(bearer_token_source="id_token")
 
     async def device_flow(**_kwargs) -> SimpleNamespace:
         return SimpleNamespace(
@@ -1449,7 +1444,7 @@ def test_auth_login_id_token_without_scope_signal_skips_scope_preflight(
     )
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_device_flow", device_flow)
     monkeypatch.setattr(
-        "nemo_helix_ext.cli.commands.auth.decode_jwt_claims",
+        "nemo_helix_ext.auth.login.decode_jwt_claims",
         lambda _token: {"sub": "alice", "email": "alice@example.com"},
     )
 
@@ -1478,7 +1473,7 @@ def test_auth_login_without_refresh_token_uses_provider_neutral_guidance(
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", _discover_oidc_config)
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_device_flow", device_flow)
-    monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
+    monkeypatch.setattr("nemo_helix_ext.auth.login.decode_jwt_claims", _decode_jwt_noop)
 
     result = runner.invoke(app, ["--context", "foo", "auth", "login", "--no-browser"])
 
@@ -1499,7 +1494,7 @@ def test_auth_login_with_base_url_updates_selected_context(oauth_config_file: Pa
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", _discover_oidc_config)
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_password_grant", password_grant)
-    monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
+    monkeypatch.setattr("nemo_helix_ext.auth.login.decode_jwt_claims", _decode_jwt_noop)
 
     result = runner.invoke(
         app,
@@ -1544,7 +1539,7 @@ def test_auth_login_context_flag_updates_selected_context(oauth_config_file: Pat
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", _discover_oidc_config)
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_password_grant", password_grant)
-    monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
+    monkeypatch.setattr("nemo_helix_ext.auth.login.decode_jwt_claims", _decode_jwt_noop)
 
     result = runner.invoke(
         app,
@@ -1599,7 +1594,7 @@ def test_auth_login_warns_when_env_access_token_will_override_saved_credentials(
     )
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", _discover_oidc_config)
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_password_grant", password_grant)
-    monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
+    monkeypatch.setattr("nemo_helix_ext.auth.login.decode_jwt_claims", _decode_jwt_noop)
 
     result = runner.invoke(
         app,
@@ -1639,13 +1634,14 @@ def test_auth_login_uses_context_certificate_authority(
     with open(oauth_config_file, "w") as f:
         yaml.safe_dump(config_data, f)
 
-    discover_calls: list[tuple[str, str | None]] = []
+    discover_calls: list[str] = []
+    discovered_with: list[httpx.Client] = []
     password_grant_calls: list[dict] = []
+    shared_http_client = MagicMock(spec=httpx.Client)
 
-    def discover_config(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
-        discover_calls.append((url, certificate_authority))
+    def discover_config(url: str, http_client: httpx.Client, timeout: float = 10.0) -> NHXOIDCConfig:
+        discover_calls.append(url)
+        discovered_with.append(http_client)
         return _mock_oidc_config()
 
     def password_grant(**kwargs) -> SimpleNamespace:
@@ -1658,8 +1654,9 @@ def test_auth_login_uses_context_certificate_authority(
         )
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", discover_config)
+    monkeypatch.setattr(CLIContext, "get_http_client", lambda _self: shared_http_client)
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_password_grant", password_grant)
-    monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
+    monkeypatch.setattr("nemo_helix_ext.auth.login.decode_jwt_claims", _decode_jwt_noop)
 
     result = runner.invoke(
         app,
@@ -1676,7 +1673,8 @@ def test_auth_login_uses_context_certificate_authority(
     )
 
     assert_exit_code(result, 0)
-    assert discover_calls == [("https://foo.example.com", "/tmp/foo-ca.pem")]
+    assert discover_calls == ["https://foo.example.com"]
+    assert discovered_with == [shared_http_client]
     assert password_grant_calls[0]["certificate_authority"] == "/tmp/foo-ca.pem"
 
 
@@ -1691,7 +1689,7 @@ def test_auth_login_with_base_url_creates_selected_context(oauth_config_file: Pa
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", _discover_oidc_config)
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_password_grant", password_grant)
-    monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
+    monkeypatch.setattr("nemo_helix_ext.auth.login.decode_jwt_claims", _decode_jwt_noop)
 
     result = runner.invoke(
         app,
@@ -1727,6 +1725,12 @@ def test_auth_login_unsigned_token_writes_to_selected_context(
     oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", _discover_no_oidc)
+    with open(oauth_config_file) as f:
+        data = yaml.safe_load(f)
+    foo_user = next(user for user in data["users"] if user["name"] == "foo")
+    foo_user["token_broker_url"] = "https://nemo.example.com/apis/auth/v2/token"
+    with open(oauth_config_file, "w") as f:
+        yaml.safe_dump(data, f)
 
     result = runner.invoke(
         app,
@@ -1749,6 +1753,7 @@ def test_auth_login_unsigned_token_writes_to_selected_context(
 
     foo_user = next(user for user in data["users"] if user["name"] == "foo")
     assert foo_user["type"] == "oauth"
+    assert foo_user.get("token_broker_url") is None
     assert data["current_context"] == "foo"
     claims = decode_jwt_claims(foo_user["token"])
     assert claims["sub"] == "admin@example.com"
@@ -1774,17 +1779,8 @@ def test_auth_login_unsigned_options_require_unsigned_token() -> None:
 def test_auth_login_unsigned_token_fails_when_oidc_enabled(
     oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def discover_full_oidc(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
-        return SimpleNamespace(
-            auth_enabled=True,
-            issuer="https://idp.example.com",
-            client_id="nhx-client",
-            cli_client_id=None,
-            token_endpoint="https://idp.example.com/token",
-            device_authorization_endpoint="https://idp.example.com/device",
-        )
+    def discover_full_oidc(url: str, http_client: httpx.Client, timeout: float = 10.0) -> NHXOIDCConfig:
+        return _mock_oidc_config(client_id="nhx-client")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", discover_full_oidc)
 
@@ -1808,15 +1804,8 @@ def test_auth_login_unsigned_token_fails_when_oidc_enabled(
 def test_auth_login_unsigned_token_fails_when_cli_only_oidc_client_is_configured(
     oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def discover_cli_oidc(*_args, **_kwargs) -> SimpleNamespace:
-        return SimpleNamespace(
-            auth_enabled=True,
-            issuer="https://idp.example.com",
-            client_id=None,
-            cli_client_id="nhx-cli",
-            token_endpoint="https://idp.example.com/token",
-            device_authorization_endpoint="https://idp.example.com/device",
-        )
+    def discover_cli_oidc(*_args, **_kwargs) -> NHXOIDCConfig:
+        return _mock_oidc_config(client_id="nhx-user-login")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", discover_cli_oidc)
 
@@ -1840,17 +1829,8 @@ def test_auth_login_unsigned_token_fails_when_cli_only_oidc_client_is_configured
 def test_auth_login_unsigned_token_allows_partial_oidc_config(
     oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def discover_partial_oidc(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
-        return SimpleNamespace(
-            auth_enabled=True,
-            issuer="https://idp.example.com",
-            client_id=None,
-            cli_client_id=None,
-            token_endpoint=None,
-            device_authorization_endpoint=None,
-        )
+    def discover_partial_oidc(url: str, http_client: httpx.Client, timeout: float = 10.0) -> NHXOIDCConfig:
+        return NHXOIDCConfig(auth_enabled=True, issuer="https://idp.example.com")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", discover_partial_oidc)
 
@@ -1921,13 +1901,14 @@ class IsAuthDisabledCase:
     ids=lambda c: c.id,
 )
 def test_is_auth_disabled(monkeypatch: pytest.MonkeyPatch, case: IsAuthDisabledCase) -> None:
-    def mock_discover(url: str, timeout: float = 10.0, *, certificate_authority: str | None = None) -> SimpleNamespace:
+    def mock_discover(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         return SimpleNamespace(auth_enabled=case.auth_enabled)
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", mock_discover)
     from nemo_helix_ext.cli.commands.auth import is_auth_disabled
 
-    assert is_auth_disabled("http://localhost:8080") is case.expected
+    with httpx.Client() as http_client:
+        assert is_auth_disabled("http://localhost:8080", http_client=http_client) is case.expected
 
 
 def test_is_auth_disabled_raises_when_discovery_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1935,15 +1916,16 @@ def test_is_auth_disabled_raises_when_discovery_fails(monkeypatch: pytest.Monkey
     from nemo_helix_ext.auth.helpers import AuthError
     from nemo_helix_ext.cli.commands.auth import is_auth_disabled
 
-    def raise_connect_error(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def raise_connect_error(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         raise httpx.ConnectError("Connection refused")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", raise_connect_error)
 
-    with pytest.raises(AuthError, match="Failed to discover auth configuration: Connection refused"):
-        is_auth_disabled("http://localhost:8080")
+    with (
+        httpx.Client() as http_client,
+        pytest.raises(AuthError, match="Failed to discover auth configuration: Connection refused"),
+    ):
+        is_auth_disabled("http://localhost:8080", http_client=http_client)
 
 
 # ---------------------------------------------------------------------------
@@ -1975,9 +1957,7 @@ def test_auth_status_when_cluster_unreachable_shows_local_state(
 ) -> None:
     import httpx
 
-    def raise_connect_error(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def raise_connect_error(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         raise httpx.ConnectError("Connection refused")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", raise_connect_error)
@@ -2019,9 +1999,7 @@ def test_auth_logout_when_cluster_unreachable_clears_local_credentials(
 ) -> None:
     import httpx
 
-    def raise_connect_error(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def raise_connect_error(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         raise httpx.ConnectError("Connection refused")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", raise_connect_error)

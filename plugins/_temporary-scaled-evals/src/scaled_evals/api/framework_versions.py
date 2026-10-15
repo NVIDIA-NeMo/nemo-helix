@@ -13,6 +13,11 @@ from scaled_evals.api.settings import settings
 from scaled_evals.harbor_runners import resolve_harbor_runner
 from scaled_evals.models.gym_identity import GYM_RUNTIME_LANES
 
+# Runtime name evaluations select to run Harbor trials in OpenSandbox sandboxes.
+HARBOR_OPENSANDBOX_RUNTIME = "harbor_opensandbox"
+# The only Harbor release the runtime accepts: NemoOpenSandboxEnvironment overrides Harbor internals.
+HARBOR_OPENSANDBOX_HARBOR_VERSION = "0.20.0"
+
 
 @dataclass(frozen=True)
 class ResolvedFrameworkRunner:
@@ -29,8 +34,18 @@ class ResolvedFrameworkRunner:
 def resolve_framework_runner(
     framework: str, requested_version: str | None, *, runtime: str | None = None
 ) -> ResolvedFrameworkRunner:
+    if runtime == HARBOR_OPENSANDBOX_RUNTIME and framework != "harbor":
+        raise ValueError(f"runtime {runtime!r} requires framework 'harbor'")
     if framework == "harbor":
-        runner = resolve_harbor_runner(requested_version)
+        if runtime == HARBOR_OPENSANDBOX_RUNTIME:
+            runner = resolve_harbor_runner(requested_version or HARBOR_OPENSANDBOX_HARBOR_VERSION)
+            if runner.version != HARBOR_OPENSANDBOX_HARBOR_VERSION:
+                raise ValueError(
+                    f"runtime {runtime!r} supports only Harbor {HARBOR_OPENSANDBOX_HARBOR_VERSION}, "
+                    f"not {runner.version}"
+                )
+        else:
+            runner = resolve_harbor_runner(requested_version)
         resolved = ResolvedFrameworkRunner(
             requested_version=requested_version,
             version=runner.version,

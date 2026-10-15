@@ -3,24 +3,30 @@
 
 import {
   type EvaluationFormValues,
-  isSupportedMappingPath,
+  isArrayPath,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import {
-  lastExchange,
+  messagesPath,
+  messagesShape,
   useDatasetPreview,
 } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 import { useEffect } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 /**
- * Binds an OpenAI messages array, and the positional turns inside it, into
- * `fieldMapping`. The templates resolve those turns positionally, so there is
- * nothing for the user to decide; the assistant turn is recorded as the
- * reference so validation can tell a conversation apart from a prompts-only file.
+ * Binds an OpenAI messages array into `fieldMapping`: Input to the last user
+ * turn and Reference to the last assistant turn, by role so every row resolves
+ * its own turns. There is nothing for the user to decide; the Reference is only
+ * bound when row 0 has a reply to pair with, so validation can tell a
+ * conversation apart from a prompts-only file.
  *
- * A hook rather than an effect in the Dataset panel because `toFieldMapping`
- * drops array paths before submit: a saved configuration has no `input` or
- * `reference` to restore, so the re-use path has to re-derive them.
+ * `messages` stays bound to the whole column so configurations saved before
+ * role paths existed, whose judge prompts index `{{ messages[n].content }}`,
+ * still render.
+ *
+ * A hook rather than an effect in the Dataset panel because the re-use path
+ * needs it too: re-deriving is idempotent for a current saved configuration,
+ * and fills in Input and Reference for an older one that never carried them.
  */
 export function useMessagesBinding(): void {
   const { control, setValue } = useFormContext<EvaluationFormValues>();
@@ -30,9 +36,10 @@ export function useMessagesBinding(): void {
   // row the Live Test is pointed at.
   const { row, messagesColumn, messageSelectors } = useDatasetPreview(dataset ?? null);
 
-  const exchange = lastExchange(messageSelectors);
-  const assistantSelector = exchange.assistant ?? '';
-  const userSelector = exchange.user ?? '';
+  const shape = messagesShape(messageSelectors);
+  const userPath = messagesColumn && shape.input ? messagesPath(messagesColumn, 'user') : '';
+  const assistantPath =
+    messagesColumn && shape.reference ? messagesPath(messagesColumn, 'assistant') : '';
 
   useEffect(() => {
     if (!row) return;
@@ -43,14 +50,12 @@ export function useMessagesBinding(): void {
     const boundReference = fieldMapping?.reference ?? '';
     const boundInput = fieldMapping?.input ?? '';
     if (messagesColumn) {
-      if (boundReference !== assistantSelector)
-        setValue('fieldMapping.reference', assistantSelector);
-      if (boundInput !== userSelector) setValue('fieldMapping.input', userSelector);
+      if (boundReference !== assistantPath) setValue('fieldMapping.reference', assistantPath);
+      if (boundInput !== userPath) setValue('fieldMapping.input', userPath);
     } else {
-      // Left over from a messages dataset; a flat file cannot use array paths.
-      if (boundReference && !isSupportedMappingPath(boundReference))
-        setValue('fieldMapping.reference', '');
-      if (boundInput && !isSupportedMappingPath(boundInput)) setValue('fieldMapping.input', '');
+      // Left over from a messages dataset; a flat file binds columns, not turns.
+      if (isArrayPath(boundReference)) setValue('fieldMapping.reference', '');
+      if (isArrayPath(boundInput)) setValue('fieldMapping.input', '');
     }
-  }, [row, messagesColumn, assistantSelector, userSelector, fieldMapping, setValue]);
+  }, [row, messagesColumn, assistantPath, userPath, fieldMapping, setValue]);
 }

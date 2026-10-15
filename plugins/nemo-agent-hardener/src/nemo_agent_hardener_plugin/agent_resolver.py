@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -57,6 +58,15 @@ SANDBOX_RUNTIME = "openshell"
 IMAGE_VENV = "/workspace/.venv"
 IMAGE_AGENT_CONFIG = f"/workspace/{AGENT_CONFIG_FILENAME}"
 
+#: Route-only backend naming the host-side Inference Gateway; reserved so a user backend cannot shadow it.
+GATEWAY_BACKEND_NAME = "nemo-inference-gateway"
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
+#: How a container reaches the host's loopback.
+SANDBOX_HOST_ALIAS = "host.docker.internal"
+_BACKEND_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+_ENV_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_SECRET_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
+
 #: Processes allowed to egress. Scoped to the image's venv rather than left open, because the
 #: sandbox policy uses these globs to decide which binaries may reach the network at all.
 VICTIM_BINARIES = (f"{IMAGE_VENV}/bin/**",)
@@ -81,6 +91,10 @@ class ResolvedManifest:
     #: recomputed, so the summary cannot claim "no egress" while the manifest allow-lists a host.
     egress: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: The agent entity's timestamp when it was resolved; a later one means the frozen copy is stale.
+    agent_updated_at: str = ""
+    #: ``ENV_VAR -> workspace/secret`` from the running deployment, so the victim gets the same secrets.
+    deployed_secret_refs: dict[str, str] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------- #
@@ -101,6 +115,56 @@ def parse_agent_ref(ref: str, default_workspace: str) -> tuple[str, str]:
         workspace, name = ref.split("/", 1)
         return workspace or default_workspace, name
     return default_workspace, ref
+
+
+def parse_backends(specs: list[str] | None) -> list[dict[str, Any]]:
+    """Parse ``NAME:PORT[,PORT...]`` specs into manifest backend entries; ``ValueError`` on a bad spec."""
+    backends: list[dict[str, Any]] = []
+    for spec in specs or []:
+        name, _, port_list = spec.partition(":")
+        ports = port_list.split(",")
+        if not _BACKEND_NAME.fullmatch(name) or not all(
+            p.isascii() and p.isdigit() and 0 < int(p) < 65536 for p in ports
+        ):
+            raise ValueError(f"invalid backend {spec!r}: expected NAME:PORT[,PORT...] with ports 1-65535")
+        if name == GATEWAY_BACKEND_NAME:
+            raise ValueError(f"invalid backend {spec!r}: {GATEWAY_BACKEND_NAME!r} is reserved for the gateway")
+        backends.append({"name": name, "ports": [int(p) for p in ports]})
+    return backends
+
+
+def _is_secret_ref(ref: str) -> bool:
+    """``secret`` or ``workspace/secret``, each part lowercase kebab-case."""
+    parts = ref.split("/")
+    return len(parts) <= 2 and all(_SECRET_NAME.fullmatch(part) for part in parts)
+
+
+def parse_secret_specs(specs: list[str] | None) -> tuple[list[str] | None, dict[str, str]]:
+    """Split ``NAME`` / ``NAME=workspace/secret`` specs into ``(names, refs)``; ``ValueError`` on a bad spec.
+
+    ``names`` is ``None`` when no specs were given, so the caller still derives them from the agent.
+    """
+    if not specs:
+        return None, {}
+    names: list[str] = []
+    refs: dict[str, str] = {}
+    for spec in specs:
+        name, sep, ref = spec.partition("=")
+        if not _ENV_VAR_NAME.fullmatch(name) or (sep and not _is_secret_ref(ref)):
+            raise ValueError(f"invalid secret {spec!r}: expected NAME or NAME=[workspace/]secret-name")
+        names.append(name)
+        if sep:
+            refs[name] = ref
+    return names, refs
+
+
+def sandbox_reachable(url: str) -> str:
+    """Rewrite a loopback URL to the host alias a sandboxed victim can reach; other hosts are unchanged."""
+    parts = urlsplit(url)
+    if parts.hostname not in _LOOPBACK_HOSTS:
+        return url
+    netloc = SANDBOX_HOST_ALIAS + (f":{parts.port}" if parts.port else "")
+    return parts._replace(netloc=netloc).geturl()
 
 
 def inject_gateway_url(config: dict[str, Any], workspace: str, base_url: str) -> dict[str, Any]:
@@ -294,10 +358,17 @@ def gateway_backend(base_url: str) -> dict[str, Any] | None:
     egress route. Remote gateways are reachable directly (via egress discovery), so skip them.
     """
     parts = urlsplit(base_url)
-    if parts.hostname not in ("localhost", "127.0.0.1"):
+    if parts.hostname not in _LOOPBACK_HOSTS:
         return None
     port = parts.port or (443 if parts.scheme == "https" else 80)
-    return {"name": "nemo-inference-gateway", "ports": [port]}
+    return {"name": GATEWAY_BACKEND_NAME, "ports": [port]}
+
+
+def fabric_start_command(port: int) -> str:
+    return (
+        f"{IMAGE_VENV}/bin/python -m nemo_agents_plugin.fabric.server "
+        f"--agent-config {IMAGE_AGENT_CONFIG} --host 0.0.0.0 --port {port}"
+    )
 
 
 def build_manifest_dict(
@@ -326,10 +397,7 @@ def build_manifest_dict(
         # Not a victim *kind* — the launch shape is identical for every harness.
         "harness": harness,
         "dockerfile": DOCKERFILE_FILENAME,
-        "start_command": (
-            f"{IMAGE_VENV}/bin/python -m nemo_agents_plugin.fabric.server "
-            f"--agent-config {IMAGE_AGENT_CONFIG} --host 0.0.0.0 --port {port}"
-        ),
+        "start_command": fabric_start_command(port),
         "binaries": list(VICTIM_BINARIES),
         "port": port,
         "secrets": secrets,
@@ -478,38 +546,73 @@ def _agents_resource(client: NemoClient) -> AgentsResource:
     return AgentsResource(client)
 
 
-def _fetch_agent_config(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:
-    """Fetch the agent's stored NAT workflow config, raising a clean error if unusable."""
+def _fetch_agent(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:
+    """Fetch the stored agent, raising a clean error if it is missing or has no config."""
     try:
         agent = agents.get(name, workspace=workspace)
     except Exception as exc:  # any client/transport failure → one clean, actionable error
         raise AgentResolutionError(
             f"agent {workspace}/{name!r} not found. Deploy it first (nemo agents create + nemo agents deploy)."
         ) from exc
-    agent_config = agent.get("config") or {}
-    if not agent_config:
+    if not agent.get("config"):
         raise AgentResolutionError(f"agent {workspace}/{name!r} has an empty config; nothing to build a victim from.")
-    return agent_config
+    return agent
+
+
+def _fetch_agent_config(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:
+    """Fetch the agent's stored NAT workflow config, raising a clean error if unusable."""
+    return _fetch_agent(agents, workspace, name)["config"]
+
+
+def _agent_timestamp(agent: dict[str, Any]) -> str:
+    """When the stored agent last changed. Re-registering recreates the entity, so this moves."""
+    return str(agent.get("updated_at") or agent.get("created_at") or "")
+
+
+def current_agent_timestamp(client: NemoClient, workspace: str, name: str) -> str:
+    """The agent's present timestamp (``""`` when the platform reports none); raises if it cannot be read."""
+    return _agent_timestamp(_fetch_agent(_agents_resource(client), workspace, name))
 
 
 def _resolve_victim_port(agents: AgentsResource, workspace: str, name: str) -> tuple[int, list[str]]:
     """Return the running deployment's port (else agent-hardener's default 8000) plus any warnings."""
+    port, _refs, warnings = _resolve_deployment(agents, workspace, name)
+    return port, warnings
+
+
+def _resolve_deployment(agents: AgentsResource, workspace: str, name: str) -> tuple[int, dict[str, str], list[str]]:
+    """Return the running deployment's port and secret refs (defaults: 8000, none) plus any warnings."""
     try:
         resp = agents.deployments.list(workspace=workspace)
     except Exception:  # transport error → fall back to the default port, but surface why (not a silent miss)
         logger.warning(
             "could not list deployments for %s/%s; defaulting victim port to 8000", workspace, name, exc_info=True
         )
-        return 8000, [f"could not reach the deployments API for {workspace}/{name!r}; defaulting victim port to 8000."]
+        return (
+            8000,
+            {},
+            [f"could not reach the deployments API for {workspace}/{name!r}; defaulting victim port to 8000."],
+        )
     # The deployments API returns {"data": [...], "pagination": {...}}; normalize to the list of
     # deployment dicts (tolerating a bare list too, for robustness).
     deployments = resp.get("data", []) if isinstance(resp, dict) else (resp or [])
     running = [
         d for d in deployments if isinstance(d, dict) and d.get("agent") == name and d.get("status") == "running"
     ]
-    if running and running[0].get("port"):
-        return int(running[0]["port"]), []
-    return 8000, [f"no running deployment for {workspace}/{name!r}; defaulting victim port to 8000."]
+    no_port = [f"no running deployment for {workspace}/{name!r}; defaulting victim port to 8000."]
+    if not running:
+        return 8000, {}, no_port
+    deployment = running[0]
+    refs = deployment.get("secrets")
+    # An unqualified ref resolves against the deployment's workspace, as the deployment itself does.
+    secret_refs = {
+        str(env): ref if "/" in ref else f"{workspace}/{ref}"
+        for env, ref in (refs.items() if isinstance(refs, dict) else ())
+        if isinstance(ref, str) and ref
+    }
+    if deployment.get("port"):
+        return int(deployment["port"]), secret_refs, []
+    return 8000, secret_refs, no_port
 
 
 def inspect_agent(
@@ -549,6 +652,7 @@ def resolve_agent_to_manifest(
     egress: list[str] | None = None,
     port: int | None = None,
     secrets: list[str] | None = None,
+    backends: list[dict[str, Any]] | None = None,
 ) -> ResolvedManifest:
     """Resolve a deployed-agent reference into a ready Agent Hardener manifest.
 
@@ -563,13 +667,17 @@ def resolve_agent_to_manifest(
 
     ``egress`` allow-lists external hosts the victim may reach (needed for config-only agents,
     whose tool hosts live in packaged code and so aren't found by egress discovery). ``port`` and
-    ``secrets`` override the auto-derived victim port / secret names; leave them unset to derive.
+    ``secrets`` override the auto-derived victim port / secret names; leave them unset to derive. The
+    running deployment's secret refs are returned so a run can read the same values from the Secrets store.
+    ``backends`` are host services the victim calls (see :func:`parse_backends`); the gateway's own
+    route is added for a local platform.
     """
     workspace, name = parse_agent_ref(ref, default_workspace)
     agents = _agents_resource(client)
-    agent_config = _fetch_agent_config(agents, workspace, name)
+    agent = _fetch_agent(agents, workspace, name)
+    agent_config = agent["config"]
     harness = require_guardable_harness(agent_config, f"{workspace}/{name}")
-    resolved_port, warnings = _resolve_victim_port(agents, workspace, name)
+    resolved_port, deployed_secret_refs, warnings = _resolve_deployment(agents, workspace, name)
     port = port or resolved_port
 
     telemetry_complaint = check_relay_artifacts_dir(agent_config)
@@ -585,7 +693,8 @@ def resolve_agent_to_manifest(
             "stored config. Re-run with --project-dir pointing at the directory holding them."
         )
 
-    injected = inject_gateway_url(agent_config, workspace, base_url)
+    # The frozen agent.yaml runs inside the sandbox, where the host's `localhost` is not the host.
+    injected = inject_gateway_url(agent_config, workspace, sandbox_reachable(base_url))
 
     if project_dir is not None:
         project_path = Path(project_dir)
@@ -603,7 +712,8 @@ def resolve_agent_to_manifest(
         dockerfile_override=shipped_dockerfile(client, name, workspace),
         bundle=lambda destination: download_agent_bundle(client, name, workspace, destination),
     )
-    secrets = secrets or derive_secret_names(agent_config)
+    # The deployment's secret-backed env vars are victim secrets too, even if the config never names them.
+    secrets = list(dict.fromkeys([*(secrets or derive_secret_names(agent_config)), *deployed_secret_refs]))
 
     # The operator's --egress first: an explicit answer should win over a derived one.
     egress = [*(egress or []), *derive_egress(agent_config)]
@@ -614,7 +724,7 @@ def resolve_agent_to_manifest(
         port=port,
         secrets=secrets,
         egress=egress,
-        backends=[gw_backend] if gw_backend else [],
+        backends=[*([gw_backend] if gw_backend else []), *(backends or [])],
         harness=harness,
         env=derive_agent_env(agent_config),
     )
@@ -629,4 +739,6 @@ def resolve_agent_to_manifest(
         secrets=secrets,
         egress=egress,
         warnings=warnings,
+        agent_updated_at=_agent_timestamp(agent),
+        deployed_secret_refs=deployed_secret_refs,
     )

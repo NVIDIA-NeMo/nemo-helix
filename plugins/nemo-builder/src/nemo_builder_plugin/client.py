@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A typed client for the builder's routes, which the push step calls."""
+"""A typed client for the builder's routes, which the push step and other services call."""
 
 from __future__ import annotations
 
@@ -10,10 +10,12 @@ from typing import Literal, TypedDict
 
 from nemo_builder_plugin.completion import CompleteRequest
 from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.endpoint import get, post
 from nemo_helix_plugin.client.method import method
 
+_BUILDS = "/apis/builder/v2/workspaces/{workspace}/builds"
 _IMAGES = "/apis/builder/v2/workspaces/{workspace}/container-images"
 
 
@@ -22,6 +24,11 @@ class ListContainerImagesQueryParams(TypedDict, total=False):
     status: Literal["pending", "ready", "failed"]
     page: int
     page_size: int
+
+
+@post(_BUILDS)
+@abstractmethod
+def submit_build(*, workspace: str | None = None, body: BuildSet) -> SubmitBuildResponse: ...
 
 
 @get(_IMAGES)
@@ -42,6 +49,7 @@ def complete_container_image(*, workspace: str | None = None, name: str, body: C
 
 
 class _BuilderMethods:
+    submit_build = method(submit_build)
     list_container_images = method(list_container_images)
     get_container_image = method(get_container_image)
     complete_container_image = method(complete_container_image)

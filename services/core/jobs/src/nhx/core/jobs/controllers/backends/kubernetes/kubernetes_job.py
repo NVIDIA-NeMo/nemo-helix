@@ -7,7 +7,7 @@ from typing import Generic, Literal, TypeVar
 from kubernetes import client
 from kubernetes.client.models import V1Job, V1JobStatus
 from kubernetes.client.rest import ApiException
-from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, HelixJobTaskUpdate
+from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nhx.common.auth import get_workload_delegation_audience
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.constants import (
@@ -317,12 +317,6 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 return result
             return self.sync_pending(step, k8s_job)
         elif step.status == HelixJobStatus.CANCELLING:
-            if k8s_job is None:
-                # If the job doesn't exist, we consider it already cancelled since there are no resources to clean up.
-                return JobUpdate(
-                    status=HelixJobStatus.CANCELLED,
-                    status_details={"message": "Job is cancelled"},
-                )
             return self.sync_terminate_job(step, k8s_job)
         elif step.status == HelixJobStatus.PAUSING:
             # If the job doesn't exist, we can't suspend it, so we will
@@ -492,61 +486,16 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         else:
             return self.create_step_update(step, job)
 
-    def _cancel_active_step_tasks(self, step: HelixJobStepWithContext) -> None:
-        """Cancel every task still ACTIVE. Best effort: a task that fails is logged and skipped."""
-        tasks = self._jobs.list_job_step_tasks(
-            name=step.name,
-            job=step.job,
-            workspace=step.workspace,
-        ).data()
-        for task in tasks.data:
-            if task.status != HelixJobStatus.ACTIVE:
-                continue
-            if task.name is None:
-                logger.warning(
-                    "Skipping cancellation update for Kubernetes task with missing name",
-                    extra={"workspace": step.workspace, "job": step.job, "step": step.name},
-                )
-                continue
-            try:
-                self._jobs.update_job_step_task(
-                    name=task.name,
-                    workspace=step.workspace,
-                    job=step.job,
-                    step=step.name,
-                    body=HelixJobTaskUpdate(
-                        status=HelixJobStatus.CANCELLED,
-                        status_details={"message": "Task cancelled as part of job cancellation"},
-                    ),
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to cancel task as part of job cancellation",
-                    extra={
-                        "workspace": step.workspace,
-                        "job": step.job,
-                        "step": step.name,
-                        "task": task.name,
-                    },
-                )
-
     def sync_terminate_job(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:
             self._workload_delegations.revoke_by_key(namespace=self.namespace, name=name_for_step(step))
-            # Job already deleted, so every pod backing this step is gone too.
-            self._cancel_active_step_tasks(step)
             return JobUpdate(
                 status=HelixJobStatus.CANCELLED,
                 status_details={"message": "Job is cancelled"},
             )
         else:
             self.terminate_job(job)
-            update = self.create_step_update(step, job)
-            # update_all_tasks only updates tasks that still have a pod, so a task whose pod is
-            # already gone stays ACTIVE once the step reaches a terminal status.
-            if update.status == HelixJobStatus.CANCELLED:
-                self._cancel_active_step_tasks(step)
-            return update
+            return self.create_step_update(step, job)
 
     def sync_suspend_job(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:

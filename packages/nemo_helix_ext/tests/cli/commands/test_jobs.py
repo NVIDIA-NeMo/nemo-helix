@@ -58,7 +58,6 @@ class _BinaryResponse:
 
 def _ctx(client: object) -> SimpleNamespace:
     state = MagicMock()
-    state.agent_mode = False
     state.get_client.return_value = client
     state.get_output_format.return_value = None
     state.get_no_truncate.return_value = False

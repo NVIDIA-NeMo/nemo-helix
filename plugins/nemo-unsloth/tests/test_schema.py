@@ -63,7 +63,7 @@ def _model_json(*, is_embedding: bool = False, head_type: str | None = None) -> 
         "created_at": "2020-01-01T00:00:00Z",
         "updated_at": "2020-01-01T00:00:00Z",
         "spec": _model_spec_json(is_embedding=is_embedding, head_type=head_type),
-        "fileset": "default/m",
+        "fileset": "default/model",
         "trust_remote_code": False,
     }
 

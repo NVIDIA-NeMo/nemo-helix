@@ -5,7 +5,11 @@ title: "Embedding Model Customization"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb)
+<div className="notebook-actions">
+  <a href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">
+    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>
+  </a>
+</div>
 
 Fine-tune Nemotron 3 Embed 1B on domain retrieval data and score it against the base checkpoint with BEIR nDCG and Recall. This is the NeMo Helix mapping of the [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md).
 
@@ -19,7 +23,7 @@ This notebook starts from NVIDIA's published NVDocs Stage 0 dump instead of gene
 | 1 Prep | `nemo data-designer retrieval-prepare` with `enable_mining: true` | Writes `training.jsonl` and the frozen `eval_beir/` split |
 | 2 Finetune | Automodel `recipe: bi_encoder` | Alternate data: [SPECTER or triplet JSONL](/documentation/customizer-reference/tutorials/embedding-triplet-dataset) |
 | 3 Deploy | Retriever NIM 2.2.0 | Base and tuned endpoints |
-| 4 Eval | `nemo evaluator retrieve-eval` | nDCG@k, Recall@k, Precision@k, MAP@k |
+| 4 Eval | `nemo evals retrieve-eval` | nDCG@k, Recall@k, Precision@k, MAP@k |
 
 Deployment precedes evaluation because `retrieve-eval` scores Inference Gateway providers rather than filesets, so both models have to be served first. Export is a setting on the training job rather than a stage of its own.
 
@@ -279,7 +283,7 @@ import csv
 import tempfile
 from pathlib import Path
 
-results = client.jobs.results.list(prepare_job.name, workspace="default").data
+results = client.jobs.list_job_results(name=prepare_job.name, workspace="default").data().data
 artifacts = next(row for row in results if row.name == "artifacts")
 ARTIFACTS_REF = artifacts.artifact_url
 print("Stage 1 artifacts:", ARTIFACTS_REF)
@@ -469,7 +473,7 @@ import time
 
 # Poll the job until it reaches a terminal state
 while True:
-    status = client.jobs.get_status(name=JOB_NAME, workspace="default")
+    status = client.jobs.get_job_status(name=JOB_NAME, workspace="default").data()
     print(f"Status: {status.status}")
     if status.status.lower() in ("completed", "failed", "cancelled", "error"):
         break
@@ -615,7 +619,7 @@ print("dim", len(resp_body["data"][0]["embedding"]))
 Equivalent CLI:
 
 ```bash
-nemo evaluator retrieve-eval --workspace default --spec '{
+nemo evals retrieve-eval --workspace default --spec '{
   "dataset": "default/nvdocs-embed-artifacts",
   "target": "default/nemotron-3-embed-1b-tuned",
   "baseline": "default/nemotron-3-embed-1b",
@@ -655,7 +659,7 @@ eval_job_name = json.loads(proc.stdout[proc.stdout.index("{") :])["name"]
 print("retrieve-eval job:", eval_job_name)
 
 while True:
-    status = client.jobs.get_status(name=eval_job_name, workspace="default")
+    status = client.jobs.get_job_status(name=eval_job_name, workspace="default").data()
     print("eval status:", status.status)
     if status.status in ("completed", "failed", "cancelled", "error"):
         break
@@ -663,7 +667,7 @@ while True:
 if status.status != "completed":
     raise RuntimeError(f"retrieve-eval finished with status: {status.status}")
 
-for row in client.jobs.results.list(eval_job_name, workspace="default").data:
+for row in client.jobs.list_job_results(name=eval_job_name, workspace="default").data().data:
     print(json.dumps(row.model_dump(), default=str, indent=2)[:4000])
 ```
 

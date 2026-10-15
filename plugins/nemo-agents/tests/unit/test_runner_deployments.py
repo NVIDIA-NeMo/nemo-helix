@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from importlib.util import find_spec
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,6 +36,7 @@ from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentC
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from pydantic import ValidationError
 
 # The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
 requires_hermes_adapter = pytest.mark.skipif(
@@ -449,6 +452,8 @@ def test_build_deployment_config_always_single_container() -> None:
     assert not any(e.name == "NAT_CONFIG_YAML" for e in container.env)
     assert next(e.value for e in container.env if e.name == "NHX_BASE_URL") == "http://host.docker.internal:8080"
     assert container.readiness_probe is not None
+    assert container.readiness_probe.timeout_seconds == 1
+    assert container.readiness_probe.failure_threshold == 12
     assert cfg.init_containers == []
     assert len(cfg.config_files) == 1
     assert cfg.config_files[0].path == "/tmp/nemo/config.yaml"
@@ -907,6 +912,49 @@ def _backend(**deployments_kwargs: Any) -> DeploymentsRunnerBackend:
     return DeploymentsRunnerBackend(agents)
 
 
+@pytest.mark.parametrize("field", ["readiness_probe_timeout_seconds", "readiness_probe_failure_threshold"])
+@pytest.mark.parametrize("value", [0, -1])
+def test_readiness_probe_settings_require_positive_values(field: str, value: int) -> None:
+    with pytest.raises(ValidationError) as exc:
+        DeploymentsRunnerConfig.model_validate({field: value})
+    assert exc.value.errors()[0]["loc"] == (field,)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent_config", [{"llms": {}}, _FABRIC_AGENT_CONFIG], ids=["nat", "fabric"])
+@pytest.mark.parametrize(
+    "overrides", [{}, {"readiness_probe_timeout_seconds": 5, "readiness_probe_failure_threshold": 60}]
+)
+async def test_create_deployment_readiness_probe_settings(
+    agent_config: dict[str, Any], overrides: dict[str, int]
+) -> None:
+    backend = _backend(
+        default_image="agent:latest",
+        default_executor="k8s",
+        k8s_internal_base_url="http://nhx-api:8080",
+        **overrides,
+    )
+    entities = AsyncMock()
+    backend._entities = entities
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default", name="agent", config=agent_config, port=0, deployment_mode="k8s"
+        )
+
+    assert info.status == "starting"
+    deployment_config = entities.create.await_args_list[0].args[0]
+    assert isinstance(deployment_config, DeploymentConfig)
+    probe = deployment_config.containers[0].readiness_probe
+    assert probe is not None
+    assert probe.model_dump(by_alias=True, exclude_none=True) == {
+        "httpGet": {"path": "/health", "port": 8000, "scheme": "HTTP"},
+        "initialDelaySeconds": 2,
+        "periodSeconds": 5,
+        "timeoutSeconds": overrides.get("readiness_probe_timeout_seconds", 1),
+        "failureThreshold": overrides.get("readiness_probe_failure_threshold", 12),
+    }
+
+
 def test_entity_client_builds_typed_entities_client() -> None:
     backend = _backend()
     client = MagicMock()
@@ -932,6 +980,40 @@ def test_entity_client_builds_typed_entities_client() -> None:
     mock_adapter.assert_called_once_with(client)
     mock_entity_client.assert_called_once_with(typed_client)
     assert result is entity_client
+
+
+@pytest.mark.asyncio
+async def test_registry_initialization_is_shared_across_concurrent_log_requests() -> None:
+    backend = _backend()
+    registry = MagicMock()
+    backend._build_registry = MagicMock(return_value=registry)  # type: ignore[method-assign]
+
+    first, second = await asyncio.gather(backend._registry(), backend._registry())
+
+    assert first is registry
+    assert second is registry
+    backend._build_registry.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.LogCaptureFixture) -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    entities.get = AsyncMock(
+        side_effect=[
+            Deployment(name="dep", workspace="default", deployment_config="dep"),
+            DeploymentConfig(name="dep", workspace="default", labels={"nemo.agents/deployment": "dep"}),
+        ]
+    )
+    backend._entities = entities
+    registry = MagicMock()
+    registry.resolve.side_effect = KeyError("missing")
+    backend._executor_registry = registry
+
+    with pytest.raises(RuntimeError, match="Failed to resolve deployment log backend"), caplog.at_level(logging.ERROR):
+        await backend.get_logs(workspace="default", name="dep")
+
+    assert "Failed to resolve deployment log backend" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1619,7 +1701,7 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     entities.delete = AsyncMock()
     backend._entities = entities
 
-    with patch("nemo_agents_plugin.runner.deployments_backend.asyncio.sleep", new_callable=AsyncMock):
+    with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
         cleaned = await backend.delete_deployment("default", "hello-dep")
 
     assert cleaned
@@ -1647,8 +1729,8 @@ async def test_delete_returns_false_when_deployment_still_present() -> None:
     entities.delete = AsyncMock()
     backend._entities = entities
 
-    with patch("nemo_agents_plugin.runner.deployments_backend.asyncio.sleep", new_callable=AsyncMock):
-        with patch("nemo_agents_plugin.runner.deployments_backend.time.monotonic", side_effect=[0.0, 0.0, 6.0]):
+    with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
+        with patch("nemo_agents_plugin.runner.deployments_backend.monotonic", side_effect=[0.0, 0.0, 6.0]):
             cleaned = await backend.delete_deployment("default", "hello-dep")
 
     assert not cleaned

@@ -20,7 +20,6 @@ from nemo_agent_optimization_plugin.schemas.strategies import (
     OptimizationStrategy,
     OptimizationStrategyList,
 )
-from nemo_agents_plugin import cli_context
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoTransportError
 from typer.main import get_command
 from typer.testing import CliRunner
@@ -36,7 +35,7 @@ def _register_badly(group: typer.Typer) -> None:
     raise RuntimeError("this contribution is broken")
 
 
-_LISTING = {"data": [{"name": "legacy", "description": "Numeric HPO."}]}
+_LISTING = {"data": [{"name": "config-tuning", "title": "HPO", "description": "Numeric HPO."}]}
 
 
 def install(monkeypatch: pytest.MonkeyPatch, contributions: dict[str, Any] | None = None) -> None:
@@ -59,7 +58,6 @@ def test_the_group_carries_the_router_job_and_list_strategies(monkeypatch: pytes
 def test_run_strategy_submits_without_a_legacy_verb(monkeypatch: pytest.MonkeyPatch) -> None:
     """``run-strategy`` submits on its own; there is no legacy ``run`` / ``submit`` beneath it.
 
-    ``generate_legacy_verbs = False`` hangs submission off the command's own
     callback, so the command may still carry ``explain``.  What must not come
     back is a nested ``submit`` the caller has to type.
     """
@@ -123,7 +121,7 @@ def test_a_contribution_that_fails_to_register_does_not_take_the_group_down(
     assert "'broken' failed to register" in caplog.text
 
 
-def _remote(monkeypatch: pytest.MonkeyPatch, strategies: list[dict[str, str]] | Exception) -> None:
+def _remote(monkeypatch: pytest.MonkeyPatch, strategies: list[dict[str, Any]] | Exception) -> None:
     """Stand in for the platform's `GET /strategies`, or make reaching it fail."""
 
     def _fake() -> tuple[list[OptimizationStrategy], str]:
@@ -135,8 +133,8 @@ def _remote(monkeypatch: pytest.MonkeyPatch, strategies: list[dict[str, str]] | 
 
 
 _STRATEGIES = [
-    {"name": "legacy", "description": "Numeric HPO."},
-    {"name": "acme", "description": "Prompt rewriting."},
+    {"name": "config-tuning", "title": "HPO", "description": "Numeric HPO.", "requires_config": True},
+    {"name": "acme", "title": "Acme", "description": "Prompt rewriting.", "requires_config": False},
 ]
 
 
@@ -171,7 +169,7 @@ def test_piped_list_strategies_is_json(monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies"])
 
     assert result.exit_code == 0, result.output
-    assert [s["name"] for s in json.loads(result.stdout)] == ["legacy", "acme"]
+    assert [s["name"] for s in json.loads(result.stdout)] == ["config-tuning", "acme"]
 
 
 def test_list_strategies_code_prints_the_client_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,35 +227,12 @@ def test_a_rejected_request_is_reported_and_exits_nonzero(monkeypatch: pytest.Mo
     assert "token expired" in result.stderr
 
 
-def test_the_listing_builds_a_client_for_the_resolved_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Covers the plumbing the stubbed tests skip; the request itself is tested in test_client.py."""
-    captured: dict[str, Any] = {}
+def test_the_listing_requires_cli_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI state owns platform client construction; this helper has no local fallback."""
+    monkeypatch.setattr(cli_module, "resolve_base_url", lambda: "http://platform")
 
-    class _StubClient:
-        def __init__(self, **kwargs: Any) -> None:
-            captured.update(kwargs)
-
-        def __enter__(self) -> "_StubClient":
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            captured["closed"] = True
-
-        def list_strategies(self) -> Any:
-            return SimpleNamespace(data=lambda: OptimizationStrategyList.model_validate(_LISTING))
-
-    monkeypatch.setattr(cli_module, "AgentOptimizationClient", _StubClient)
-    monkeypatch.setattr(cli_context, "resolve_base_url", lambda: "http://platform")
-    monkeypatch.setattr(cli_context, "resolve_context_headers", lambda: {"Authorization": "Bearer token"})
-
-    strategies, target = cli_module._remote_strategies()
-
-    assert [s.name for s in strategies] == ["legacy"]
-    assert target == "http://platform"
-    assert captured["base_url"] == "http://platform"
-    assert captured["default_headers"] == {"Authorization": "Bearer token"}
-    # The client is used as a context manager, so its connection pool is released.
-    assert captured["closed"] is True
+    with pytest.raises(RuntimeError, match="No NeMo Helix CLI state"):
+        cli_module._remote_strategies()
 
 
 def test_under_nemo_the_listing_uses_the_cli_shared_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -283,7 +258,7 @@ def test_under_nemo_the_listing_uses_the_cli_shared_client(monkeypatch: pytest.M
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies", "-f", "json"], obj=_State())
 
     assert result.exit_code == 0, result.output
-    assert [s["name"] for s in json.loads(result.stdout)] == ["legacy"]
+    assert [s["name"] for s in json.loads(result.stdout)] == ["config-tuning"]
     assert requested == [cli_module.AgentOptimizationClient]
     assert "Targeting http://shared-platform" in result.stderr
 

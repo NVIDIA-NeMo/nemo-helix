@@ -146,6 +146,36 @@ class TestValidateFabricAgentPackage:
         with pytest.raises(FabricPackageArtifactError, match="skills/missing"):
             await validate_fabric_agent_package(agent_config_path, context_dir=tmp_path)
 
+    async def test_pi_adapter_skips_host_plan_but_validates_artifacts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The Pi adapter's descriptor is staged inside the image, not on the host, so
+        # host-side plan resolution must be skipped — while artifact validation still runs.
+        valid_config = _write_package_config(tmp_path / "agent.yaml")
+        fabric_config = MagicMock()
+        fabric_config.harness.adapter_id = "nvidia.fabric.pi"
+        monkeypatch.setattr(fabric_validator, "translate_agent_config", lambda config: fabric_config)
+        plan = AsyncMock(side_effect=AssertionError("plan_fabric_config must not run for a Pi agent"))
+        monkeypatch.setattr(fabric_validator, "plan_fabric_config", plan)
+
+        result = await validate_fabric_agent_package(valid_config, context_dir=tmp_path)
+
+        plan.assert_not_awaited()
+        assert result.plan is None
+
+    async def test_non_pi_adapter_still_plans_on_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        valid_config = _write_package_config(tmp_path / "agent.yaml")
+        fabric_config = MagicMock()
+        fabric_config.harness.adapter_id = "nvidia.fabric.codex"
+        monkeypatch.setattr(fabric_validator, "translate_agent_config", lambda config: fabric_config)
+        plan = AsyncMock(return_value={"plan": "ok"})
+        monkeypatch.setattr(fabric_validator, "plan_fabric_config", plan)
+
+        result = await validate_fabric_agent_package(valid_config, context_dir=tmp_path)
+
+        plan.assert_awaited_once()
+        assert result.plan == {"plan": "ok"}
+
 
 class TestFabricBuilderValidationHook:
     @pytest.fixture(autouse=True)

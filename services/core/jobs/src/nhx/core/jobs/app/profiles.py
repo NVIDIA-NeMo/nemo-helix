@@ -8,6 +8,7 @@ from nhx.core.jobs.controllers.backends.kubernetes import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
 )
+from nhx.core.jobs.controllers.backends.openshell import OpenShellJobExecutionProfile
 from nhx.core.jobs.controllers.backends.subprocess import SubprocessJobExecutionProfile
 from nhx.core.jobs.controllers.backends.test import E2EJobExecutionProfile
 
@@ -17,4 +18,5 @@ ExecutionProfileT = Union[
     VolcanoJobExecutionProfile,
     SubprocessJobExecutionProfile,
     E2EJobExecutionProfile,
+    OpenShellJobExecutionProfile,
 ]

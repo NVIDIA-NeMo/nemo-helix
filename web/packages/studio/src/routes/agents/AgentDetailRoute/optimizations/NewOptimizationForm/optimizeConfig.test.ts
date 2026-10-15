@@ -3,6 +3,7 @@
 
 import { optimizeBundleProblems } from '@studio/api/agents/optimizeBundle';
 import type { OptimizationFormOutput } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
+import { CANDIDATE_MARKER } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/mimicEvaluation';
 import {
   buildOptimizeConfig,
   buildStudyBundle,
@@ -10,6 +11,7 @@ import {
   OPTIMIZE_CONFIG_PATH,
   STUDY_DATASET_PATH,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizeConfig';
+import type { StudyEvaluation } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/studyDataset';
 import { intentById } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
 import { parse } from 'yaml';
 
@@ -18,13 +20,38 @@ const values = (overrides: Partial<OptimizationFormOutput> = {}): OptimizationFo
   intent: 'cost',
   budget: 'quick',
   experimentId: 'exp-1',
-  judgeModel: 'default/judge-model',
   searchSpace: intentById('cost').parameters,
   ...overrides,
 });
 
+const evaluationData: StudyEvaluation = {
+  spec: {
+    dataset: 'ws/data#rows.jsonl',
+    prompt_template: '{{ item.question }}',
+    metrics: [
+      {
+        bundle_kind: 'metric-bundle',
+        bundle_format_version: 'v1',
+        metric_type: 'llm-judge',
+        outputs: [{ name: 'accuracy', value_json_schema: { type: 'number' } }],
+        payload: {
+          kind: 'inline',
+          metric: {
+            type: 'llm-judge',
+            model: 'ws/original-judge',
+            inference: { max_tokens: 1024 },
+            scores: [{ name: 'accuracy', minimum: 0, maximum: 1 }],
+            prompt_template: 'Compare {{ item.expected_answer }} against {{ sample.output_text }}.',
+          },
+        },
+      },
+    ],
+  },
+  records: [{ question: 'q', expected_answer: 'a' }],
+};
+
 describe('buildOptimizeConfig', () => {
-  const text = buildOptimizeConfig({ workspace: 'ws', values: values() });
+  const text = buildOptimizeConfig({ workspace: 'ws', values: values(), evaluationData });
   const config = parse(text);
 
   it('sweeps each parameter at its config path, with the budget as the trial count', () => {
@@ -46,30 +73,27 @@ describe('buildOptimizeConfig', () => {
     expect(text).toMatch(/low: 256\n\s+high: 1024/);
   });
 
-  it('scores with the picked judge through the gateway, maximizing its average score', () => {
+  it('uses the original judge and custom scoring supported by the unchanged backend', () => {
     expect(config.models.judge).toEqual({
       provider: 'nvidia',
-      model: 'default/judge-model',
-      // The gateway does not route across workspaces, so the judge's own serves it.
-      base_url: '${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1',
+      model: 'ws/original-judge',
+      base_url: '${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/ws/openai/-/v1',
     });
+    expect(config.eval.original_evaluation).toBeUndefined();
     expect(config.eval.evaluators.accuracy).toMatchObject({
       _type: 'tunable_rag_evaluator',
       llm_name: 'judge',
-      inference: { temperature: 0 },
+      default_scoring: false,
+      inference: { max_tokens: 1024 },
     });
+    expect(config.eval.evaluators.accuracy.judge_llm_prompt).toContain('"score"');
     expect(config.optimizer.eval_metrics).toEqual({
-      average_score: { evaluator_name: 'average_score', direction: 'maximize', weight: 1 },
+      average_score: {
+        evaluator_name: 'average_score',
+        direction: 'maximize',
+        weight: 1,
+      },
     });
-  });
-
-  it('names every key the default-scoring parser reads, so an unenforced schema still parses', () => {
-    const { judge_llm_prompt: prompt, default_scoring: defaultScoring } =
-      config.eval.evaluators.accuracy;
-    expect(defaultScoring).toBe(true);
-    for (const key of ['coverage_score', 'correctness_score', 'relevance_score', 'reasoning']) {
-      expect(prompt).toContain(`"${key}"`);
-    }
   });
 
   it('carries the experiment on the optimizer, which survives the merge onto the agent', () => {
@@ -167,6 +191,7 @@ describe('gatewayAgentModel', () => {
       buildOptimizeConfig({
         workspace: 'ws',
         values: values(),
+        evaluationData,
         agentModel: gatewayAgentModel('ws', providerAgent),
       })
     );
@@ -175,22 +200,28 @@ describe('gatewayAgentModel', () => {
       base_url: '${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/ws/openai/-/v1',
       api_key_env: 'NEMO_AGENTS_IGW_API_KEY',
     });
-    expect(config.models.judge.model).toBe('default/judge-model');
+    expect(config.models.judge.model).toBe('ws/original-judge');
   });
 
   it('adds no models.default without an agent model', () => {
-    expect(parse(buildOptimizeConfig({ workspace: 'ws', values: values() })).models.default).toBe(
-      undefined
-    );
+    expect(
+      parse(buildOptimizeConfig({ workspace: 'ws', values: values(), evaluationData })).models
+        .default
+    ).toBe(undefined);
   });
 });
 
 describe('buildStudyBundle', () => {
   it('stages the config and the rows it points at', async () => {
-    const rows = [{ id: '1', question: 'q', answer: 'a' }];
-    const entries = buildStudyBundle({ workspace: 'ws', values: values(), rows });
+    const entries = buildStudyBundle({ workspace: 'ws', values: values(), evaluationData });
 
     expect(entries.map((entry) => entry.path)).toEqual([OPTIMIZE_CONFIG_PATH, STUDY_DATASET_PATH]);
-    expect(JSON.parse(await entries[1].file.text())).toEqual(rows);
+    expect(JSON.parse(await entries[1].file.text())).toEqual([
+      {
+        id: '0',
+        question: 'q',
+        answer: expect.stringContaining(`Compare a against ${CANDIDATE_MARKER}.`),
+      },
+    ]);
   });
 });

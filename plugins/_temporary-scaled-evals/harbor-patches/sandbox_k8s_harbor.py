@@ -790,8 +790,7 @@ class K8sSandboxEnvironment(_HarborBaseEnvironment):
         # That overwrites a raw Kubernetes policy placed under the same key in
         # environment.kwargs.  Keep a deliberately Kubernetes-specific escape
         # hatch for open-book runs that need concrete DNS/port rules.
-        # Closed-book runs omit this and rely on namespace default-deny plus
-        # the evaluation-scoped Switchyard policy.
+        # Other runs omit this and rely on namespace default-deny.
         if k8s_network_policy is not None:
             sandbox_kwargs["network_policy"] = k8s_network_policy
         if template_name:

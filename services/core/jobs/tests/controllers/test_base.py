@@ -113,9 +113,10 @@ class TestWorkloadIdentityAudience:
     def test_uses_workload_client_id_for_projected_subject_tokens(self):
         auth_config = SimpleNamespace(
             oidc=SimpleNamespace(
-                workload_client_id="nemo-helix-workload",
-                client_id="nemo-helix-cli",
-                workload_audience="nemo-helix",
+                workload=SimpleNamespace(
+                    client_id="nemo-helix-workload",
+                    audience="nemo-helix",
+                ),
                 audience="nemo-helix",
             )
         )

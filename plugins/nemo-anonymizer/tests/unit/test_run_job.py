@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -33,6 +34,25 @@ from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.job_usage import LocalJobUsageReporter
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+
+
+def _patch_gliner_build(monkeypatch: pytest.MonkeyPatch, anonymizer_factory: Callable[..., object]) -> None:
+    """Stub the in-process GLiNER seams the run-job uses.
+
+    ``anonymizer_factory`` stands in for the constructed ``Anonymizer``; the
+    weight-ensure and runtime-stop calls are no-ops under test.
+    """
+    monkeypatch.setattr(task_run_module, "ensure_gliner_weights", lambda *a, **k: None)
+    monkeypatch.setattr(task_run_module, "stop_gliner_runtime", lambda: None)
+    monkeypatch.setattr(
+        task_run_module,
+        "build_gliner_anonymizer",
+        lambda *, model_configs_yaml, dd_providers, artifact_path=None: anonymizer_factory(
+            model_configs=model_configs_yaml,
+            model_providers=dd_providers,
+            artifact_path=artifact_path,
+        ),
+    )
 
 
 def _make_job_context(tmp_path: Path, *, workspace: str = "team-a") -> JobContext:
@@ -243,7 +263,7 @@ def test_run_step_config_uses_ctx_results(
         dd_model_providers=[],
     )
 
-    monkeypatch.setattr(task_run_module, "Anonymizer", FakeAnonymizer)
+    _patch_gliner_build(monkeypatch, FakeAnonymizer)
     ctx = _make_job_context(tmp_path)
     logging_snapshot = _snapshot_task_loggers()
 
@@ -305,7 +325,9 @@ def test_run_step_config_requires_resolved_model_configs(
         dd_model_providers=[],
     )
     anonymizer = Mock(side_effect=AssertionError("Anonymizer should not be constructed"))
-    monkeypatch.setattr(task_run_module, "Anonymizer", anonymizer)
+    monkeypatch.setattr(task_run_module, "ensure_gliner_weights", lambda *a, **k: None)
+    monkeypatch.setattr(task_run_module, "stop_gliner_runtime", lambda: None)
+    monkeypatch.setattr(task_run_module, "build_gliner_anonymizer", anonymizer)
     ctx = _make_job_context(tmp_path)
     logging_snapshot = _snapshot_task_loggers()
 
@@ -387,7 +409,7 @@ def test_run_step_config_writes_trace_with_roundtrippable_skipped_span_label_cou
         dd_model_providers=[],
     )
 
-    monkeypatch.setattr(task_run_module, "Anonymizer", FakeAnonymizer)
+    _patch_gliner_build(monkeypatch, FakeAnonymizer)
     ctx = _make_job_context(tmp_path)
     logging_snapshot = _snapshot_task_loggers()
     try:

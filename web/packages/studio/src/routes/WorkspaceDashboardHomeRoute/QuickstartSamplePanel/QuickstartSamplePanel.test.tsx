@@ -278,9 +278,7 @@ describe('QuickstartSamplePanel', () => {
       await waitForAllSnippets();
 
       expect(within(stepAt(2)).getByTestId('nv-code-snippet-code').textContent).toBe(
-        ['nemo evaluator evaluate', "--spec-file '<spec>.json'", `--workspace '${WS}'`].join(
-          ' \\\n  '
-        )
+        ['nemo evals evaluate', "--spec-file '<spec>.json'", `--workspace '${WS}'`].join(' \\\n  ')
       );
       expect(stepAt(2)).not.toHaveTextContent('evaluate submit');
     });
@@ -289,8 +287,8 @@ describe('QuickstartSamplePanel', () => {
       renderPanel({ defaultView: 'cli' });
       await waitForAllSnippets();
 
-      // `optimize` alone is a command group, and `optimize-skills` jobs never reach the
-      // Optimizations tab that "View results" opens. Exact text, so the one-flag-per-line
+      // `optimize` alone is a command group; `run-strategy` is the study the Optimizations
+      // tab that "View results" opens. Exact text, so the one-flag-per-line
       // `\` continuations are checked too — a stray character after one breaks the paste.
       expect(within(stepAt(3)).getByTestId('nv-code-snippet-code').textContent).toBe(
         [
@@ -304,7 +302,7 @@ describe('QuickstartSamplePanel', () => {
           ].join(' \\\n  '),
           [
             'nemo agents optimize run-strategy',
-            '--strategy legacy',
+            '--strategy config-tuning',
             `--agent '${AGENT_NAME}'`,
             `--optimize-config-fileset '${WS}/${AGENT_NAME}-optimize'`,
             "--optimize-config 'optimize.yaml'",
@@ -367,7 +365,7 @@ describe('QuickstartSamplePanel', () => {
         within(stepAt(2)).getByRole('button', { name: 'Copy the Evaluate the agent command' })
       );
 
-      expect(await navigator.clipboard.readText()).toContain('nemo evaluator evaluate');
+      expect(await navigator.clipboard.readText()).toContain('nemo evals evaluate');
     });
   });
 

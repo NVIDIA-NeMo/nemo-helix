@@ -1,25 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared typed platform client construction for analyst read methods.
-
-Auth lives in the active ``nemo auth login`` context in
-``~/.config/nhx/config.yaml``. The config bootstrap wires up that context (and
-the transparent OIDC token refresh that comes with it). A direct client built
-from ``base_url`` alone skips the bootstrap and injects **no** auth headers,
-which is fine for an unauthenticated local ``nemo services run`` but 401s
-against a remote deployment. To authenticate against a remote URL we run the
-bootstrap so the explicit ``base_url`` is combined with the context's
-credentials.
-
-The analyst run takes ``base_url`` from its CLI/job context, so this helper is
-the one place that branch lives.
-"""
+"""Shared typed platform client construction for analyst read methods."""
 
 from urllib.parse import urlparse
 
-import httpx
-from nemo_helix_ext.auth.helpers import discover_nhx_config
 from nemo_helix_ext.client.bootstrap import build_async_nemo_client, build_direct_async_nemo_client
 from nemo_helix_ext.config.config import Config
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -35,10 +20,8 @@ def make_client(base_url: str | None) -> AsyncNemoClient:
 
     - No ``base_url``: use the active nhx context for both URL and auth.
     - Loopback ``base_url``: direct mode (local platform is unauthenticated).
-    - Authenticated remote ``base_url`` with an nhx config present: combine the
-      URL with the context's auth so the client injects and refreshes a Bearer token.
-    - Unauthenticated remote ``base_url``: direct mode, even when an unrelated
-      OAuth context exists locally.
+    - HTTPS remote ``base_url`` with an nhx config present: combine the URL
+      with the context's auth/bootstrap state.
     - Remote ``base_url`` without an nhx config: direct mode (no credentials to
       use; the request will surface a clear auth error).
     """
@@ -49,14 +32,6 @@ def make_client(base_url: str | None) -> AsyncNemoClient:
     host = (parsed.hostname or "").lower()
     config_path = Config.get_default_config_path()
     if host in LOOPBACK_HOSTS or not config_path.exists():
-        return build_direct_async_nemo_client(base_url=base_url)
-
-    try:
-        nhx_config = discover_nhx_config(base_url)
-    except (httpx.HTTPError, ValueError) as exc:
-        raise RuntimeError(f"could not discover NeMo Helix auth configuration at {base_url}: {exc}") from exc
-
-    if not nhx_config.auth_enabled:
         return build_direct_async_nemo_client(base_url=base_url)
 
     if parsed.scheme.lower() != "https":

@@ -71,6 +71,13 @@ one. Pick up the change deliberately:
 nemo agent-hardener refresh --manifest-id <name>
 ```
 
+In Studio, use **Refresh Target**. A run logs a warning when the agent is newer
+than its manifest.
+
+**The agent cannot reach a service on the host.**
+Declare it when you create the manifest with `--backend NAME:PORT[,PORT]`. The
+sandbox reaches it through `host.docker.internal`, not `localhost`.
+
 **A run fails in seconds with `model_unavailable`.**
 Every model group you set explicitly — `--attack-model`, `--analysis-model` and
 `--safety-model`, together with their `--*-base-url` and `--*-key-secret` — is
@@ -91,7 +98,18 @@ default.
 The agent config references `${<NAME>}` and nothing supplies it. Required secrets
 are derived from the agent's stored config, so this means the variable was unset
 when the agent was registered. Export it and re-run `nemo agents create`, or
-supply it with `--env-file`.
+supply it with `--env-file` or `--secrets NAME=workspace/secret`.
+
+**A run fails with `could not read secret <workspace>/<name>`.**
+The manifest maps a secret to a Secrets-store entry the run cannot read, or that
+is empty. Check it with `nemo secrets list --workspace <workspace>`. For a
+deployed agent, the mapping comes from its running deployment; `refresh` the
+manifest after changing it.
+
+**A model call fails with `401` although the key in `~/.agent-hardener/.env` works.**
+The environment of the shell that started the platform wins over that file, and
+the run logs `the platform environment overrides <NAME>`. Unset the variable
+there, or remove its export from your shell profile, and restart the platform.
 
 **The victim never becomes healthy, and its log shows a pydantic `union_tag_invalid` for a `_type`.**
 The agent references a component the scaffolded victim cannot resolve. The victim
@@ -109,7 +127,7 @@ at `nemo agents create` time.
 
 ## Studio
 
-**Agent Hardener is missing from the Studio side nav.**
+**Agent Hardening is missing from the Studio side nav.**
 The UI ships with the plugin, so a missing entry means Studio did not load its
 bundle. Confirm the plugin is registered and the bundle is served:
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from nemo_evaluator_sdk.agent_eval.scores import AgentEvalTaskScore
+from nhx_evals_sdk.agent_eval.scores import AgentEvalTaskScore
 
 
 @dataclass

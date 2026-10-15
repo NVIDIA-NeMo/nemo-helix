@@ -12,6 +12,7 @@ import typer
 from nemo_helix_ext.cli.commands.inference.deployments import create_deployments
 from nemo_helix_ext.cli.commands.jobs import create_jobs, watch_platform_job
 from nemo_helix_ext.cli.core.job_watch_renderer import JobWatchRenderResult
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelDeploymentRequest
 
@@ -38,13 +39,22 @@ class _Response:
 
 def _ctx(client: object) -> SimpleNamespace:
     state = MagicMock()
-    state.agent_mode = False
     state.get_client.return_value = client
     state.get_output_format.return_value = None
     state.get_no_truncate.return_value = False
     state.get_timestamp_format.return_value = None
     state.get_job_telemetry_custom_fields.return_value = {}
     return SimpleNamespace(obj=state)
+
+
+def _platform_client(workspace: str | None = "default") -> NemoClient:
+    """A real NemoClient standing in for the CLI's platform client.
+
+    Using a real client (not a stub of a private helper) is what lets these
+    tests catch a regression where a command calls a workspace accessor the
+    typed client does not provide.
+    """
+    return NemoClient(base_url="http://nemo.test", workspace=workspace)
 
 
 def _patch_jobs_client(jobs_client: MagicMock):
@@ -86,7 +96,7 @@ def _deployments_ctx(client: object, created: object) -> SimpleNamespace:
 
 def test_jobs_create_watch_uses_sdk_watcher_and_outputs_created_job() -> None:
     created_job = _CreatedJob()
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     ctx = _ctx(client)
     events = object()
     jobs_client = MagicMock()
@@ -156,7 +166,7 @@ def test_jobs_create_watch_uses_sdk_watcher_and_outputs_created_job() -> None:
 
 
 def test_jobs_create_watch_exits_when_renderer_reports_failure() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     jobs_client = MagicMock()
     jobs_client.create_job.return_value = _Response(_CreatedJob())
     jobs_client.watch_job.return_value = object()
@@ -185,7 +195,7 @@ def test_jobs_create_watch_exits_when_renderer_reports_failure() -> None:
 
 
 def test_jobs_create_watch_exits_130_when_renderer_reports_interrupted() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     jobs_client = MagicMock()
     jobs_client.create_job.return_value = _Response(_CreatedJob())
     jobs_client.watch_job.return_value = object()
@@ -214,7 +224,7 @@ def test_jobs_create_watch_exits_130_when_renderer_reports_interrupted() -> None
 
 
 def test_jobs_create_watch_has_no_default_timeout() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     ctx = _ctx(client)
     events = object()
     jobs_client = MagicMock()
@@ -251,7 +261,7 @@ def test_jobs_create_watch_has_no_default_timeout() -> None:
 
 def test_jobs_create_wait_uses_quiet_waiter_and_outputs_created_job() -> None:
     created_job = _CreatedJob()
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     ctx = _ctx(client)
     jobs_client = MagicMock()
     jobs_client.create_job.return_value = _Response(created_job)
@@ -319,8 +329,37 @@ def test_jobs_create_wait_uses_quiet_waiter_and_outputs_created_job() -> None:
     render_events.assert_not_called()
 
 
+def test_jobs_create_wait_falls_back_to_client_workspace_accessor() -> None:
+    # Neither the created job nor the request carries a workspace, so --wait must
+    # resolve it from the client via require_workspace(). A stub of the removed
+    # _get_workspace_path_param helper would regress here (AttributeError).
+    created_job = _CreatedJob(workspace="")
+    client = _platform_client(workspace="client-default-ws")
+    jobs_client = MagicMock()
+    jobs_client.create_job.return_value = _Response(created_job)
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.handle_code_generation", return_value=False),
+        _patch_jobs_client(jobs_client),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+        patch("nemo_helix_ext.cli.commands.jobs.wait_for_platform_job", return_value=True) as wait_for_job,
+    ):
+        create_jobs(
+            _ctx(client),
+            name="input-job",
+            workspace=None,
+            platform_spec=PLATFORM_SPEC_JSON,
+            source="test-source",
+            spec="{}",
+            wait=True,
+            watch=False,
+        )
+
+    assert wait_for_job.call_args.kwargs["workspace"] == "client-default-ws"
+
+
 def test_jobs_create_stamps_telemetry_custom_fields() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     jobs_client = MagicMock()
     jobs_client.create_job.return_value = _Response(_CreatedJob())
     ctx = _ctx(client)
@@ -354,7 +393,7 @@ def test_jobs_create_stamps_telemetry_custom_fields() -> None:
 
 
 def test_jobs_create_wait_uses_waiter_default_timeout() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     jobs_client = MagicMock()
     jobs_client.create_job.return_value = _Response(_CreatedJob())
 
@@ -383,7 +422,7 @@ def test_jobs_create_wait_uses_waiter_default_timeout() -> None:
 
 
 def test_jobs_create_wait_exits_when_waiter_reports_failure() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     jobs_client = MagicMock()
     jobs_client.create_job.return_value = _Response(_CreatedJob())
 
@@ -408,7 +447,7 @@ def test_jobs_create_wait_exits_when_waiter_reports_failure() -> None:
 
 
 def test_jobs_create_rejects_wait_and_watch_together() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
 
     with pytest.raises(SystemExit) as exc_info:
         create_jobs(
@@ -426,7 +465,7 @@ def test_jobs_create_rejects_wait_and_watch_together() -> None:
 
 
 def test_jobs_watch_command_uses_sdk_watcher() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     events = object()
     jobs_client = MagicMock()
     jobs_client.watch_job.return_value = events
@@ -466,7 +505,7 @@ def test_jobs_watch_command_uses_sdk_watcher() -> None:
 
 
 def test_jobs_watch_command_exits_130_when_renderer_reports_interrupted() -> None:
-    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    client = _platform_client()
     jobs_client = MagicMock()
     jobs_client.watch_job.return_value = object()
 

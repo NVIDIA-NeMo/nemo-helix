@@ -3,7 +3,7 @@
   "tests": [
     {
       "type": "explicit",
-      "prompt": "Use the nemo-customizer skill to fine-tune Qwen with automodel.",
+      "prompt": "Use the nemo-customizer skill to fine-tune Nemotron with automodel.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -18,12 +18,17 @@
     },
     {
       "type": "implicit",
-      "prompt": "Fine-tune a model with LoRA SFT via nemo customization and a qwen3 Hugging Face weights fileset.",
+      "prompt": "Fine-tune a model with LoRA SFT via nemo customization and a Nemotron Hugging Face weights fileset.",
       "expected_skill": "nemo-customizer"
     },
     {
       "type": "implicit",
       "prompt": "Help me run SFT LoRA training with nemo customization automodel.",
+      "expected_skill": "nemo-customizer"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I want to train Nemotron 3.5 Lightning with LoRA using customizer. Which hyperparameters and how many GPUs should the job use?",
       "expected_skill": "nemo-customizer"
     },
     {

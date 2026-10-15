@@ -8,7 +8,7 @@ description = "`nemo agents optimize` — routes an optimization run to the inst
 requires-python = ">=3.11,<3.15"
 # No strategy plugin is listed here on purpose: strategies are discovered through the
 # `nemo.jobs` entry points of whatever is installed, so depending on one would invert that
-# relationship and drag optuna, matplotlib, and the evaluator SDK into every install of the
+# relationship and drag optuna, matplotlib, and the evals SDK into every install of the
 # router.
 dependencies = [
   "fastapi>=0.115",

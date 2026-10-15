@@ -3,15 +3,15 @@
 
 import { NamedEntity } from '@nemo/common/src/namedEntity';
 import {
-  evaluatorGetEvaluateJob,
-  evaluatorListEvaluateJobResults,
-  evaluatorListEvaluateJobs,
-} from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+  evalsGetEvaluateJob,
+  evalsListEvaluateJobResults,
+  evalsListEvaluateJobs,
+} from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import {
   EvaluateJob,
   EvaluateJobsPage,
   HelixJobListResultResponse,
-} from '@nemo/sdk/generated/evaluator/schema';
+} from '@nemo/sdk/generated/evals/schema';
 import { useDetailsChartsStore } from '@studio/api/evaluation/details/useDetailsChartsStore';
 import { getEvaluationJobModel, isEvaluationJobSucceeded } from '@studio/selectors/evaluationJob';
 import { useQuery } from '@tanstack/react-query';
@@ -40,7 +40,7 @@ const fetchAllEvaluationsByConfig = async (
   const pageSize = 100;
 
   while (currentPage <= totalPages) {
-    const response = await evaluatorListEvaluateJobs(workspace, {
+    const response = await evalsListEvaluateJobs(workspace, {
       page_size: pageSize,
       page: currentPage,
       sort: '-created_at',
@@ -130,7 +130,7 @@ export const useAggregatedEvaluationResults = (config: NamedEntity) => {
       }
       return await Promise.all(
         selectedEvaluations.map((evaluationId) =>
-          evaluatorListEvaluateJobResults(config.workspace!, evaluationId)
+          evalsListEvaluateJobResults(config.workspace!, evaluationId)
         )
       );
     },
@@ -159,7 +159,7 @@ export const useAggregatedEvaluations = (config: NamedEntity) => {
       }
       return await Promise.all(
         selectedEvaluations.map((evaluationId) =>
-          evaluatorGetEvaluateJob(config.workspace!, evaluationId)
+          evalsGetEvaluateJob(config.workspace!, evaluationId)
         )
       );
     },

@@ -3,9 +3,13 @@
 
 """Unit tests for the Automodel training runner."""
 
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import pytest
 
 sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
@@ -13,7 +17,12 @@ sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
 
 from nhx.automodel.entities.values import TrainingType  # noqa: E402
 from nhx.automodel.tasks.training.runner import TrainingRunner  # noqa: E402
-from nhx.automodel.tasks.training.schemas import DistillationConfig, ModelConfig, TrainingStepConfig  # noqa: E402
+from nhx.automodel.tasks.training.schemas import (  # noqa: E402
+    DistillationConfig,
+    ModelConfig,
+    TrainingMetrics,
+    TrainingStepConfig,
+)
 from nhx.customization_common.service.context import NHXJobContext  # noqa: E402
 
 
@@ -62,3 +71,66 @@ def test_normalizes_legacy_job_storage_paths_to_runtime_mount(tmp_path: Path) ->
     assert normalized.training.kd.teacher_model.path == str(storage / "teacher_model")
     assert normalized.workspace_path == str(storage / "training")
     assert normalized.output_path == str(storage / "output_model")
+
+
+def runner_with_duration(tmp_path: Path, duration: float | None) -> TrainingRunner:
+    runner = TrainingRunner.__new__(TrainingRunner)
+    runner._config = SimpleNamespace(seed=1)
+    runner._progress = SimpleNamespace(
+        training_duration_seconds=duration,
+        report_running=lambda *args, **kwargs: None,
+        report_completed=lambda *args, **kwargs: None,
+        report_error=lambda *args, **kwargs: None,
+    )
+    runner._dist_ctx = SimpleNamespace(is_coordinator=True, sync_point=lambda name: None)
+    runner._workspace_path = tmp_path
+    runner._output_path = tmp_path / "output"
+    runner._backend = MagicMock()
+    return runner
+
+
+def written_duration(tmp_path: Path) -> float | None:
+    payload = json.loads((tmp_path / "customizer_training_result.json").read_text())
+    return payload["training_duration_seconds"]
+
+
+def test_result_json_copies_the_recorded_training_duration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+    runner = runner_with_duration(tmp_path, 17.5)
+    runner._compile_config_phase = lambda: MagicMock()  # type: ignore[method-assign]
+    runner._training_phase = lambda library: TrainingMetrics()  # type: ignore[method-assign]
+    runner._backend.find_checkpoints.return_value = {}
+    runner._backend.process_checkpoints.return_value = None
+
+    result = runner.run()
+
+    assert result.training_duration_seconds == 17.5
+    assert written_duration(tmp_path) == 17.5
+
+
+def test_result_json_keeps_the_recorded_duration_when_training_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+    runner = runner_with_duration(tmp_path, 9.25)
+    runner._compile_config_phase = lambda: MagicMock()  # type: ignore[method-assign]
+    runner._training_phase = MagicMock(side_effect=RuntimeError("train failed"))  # type: ignore[method-assign]
+
+    result = runner.run()
+
+    assert result.success is False
+    assert result.training_duration_seconds == 9.25
+    assert written_duration(tmp_path) == 9.25
+
+
+def test_result_json_omits_duration_when_training_never_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+    runner = runner_with_duration(tmp_path, None)
+    runner._compile_config_phase = MagicMock(side_effect=RuntimeError("compile failed"))  # type: ignore[method-assign]
+
+    result = runner.run()
+
+    assert result.training_duration_seconds is None
+    assert written_duration(tmp_path) is None

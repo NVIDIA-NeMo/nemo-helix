@@ -30,7 +30,7 @@ const SEARCH_SCHEMA: JsonSchema = {
     },
     service: {
       type: 'string',
-      description: 'Optional: restrict to one service spec (e.g. platform, agents, evaluator).',
+      description: 'Optional: restrict to one service spec (e.g. platform, agents, evals).',
     },
     readOnly: {
       type: 'boolean',

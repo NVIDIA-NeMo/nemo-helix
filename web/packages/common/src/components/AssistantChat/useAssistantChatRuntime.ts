@@ -9,6 +9,11 @@ import {
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
 import {
+  computeCompletionMetrics,
+  getReasoningDelta,
+  getUsageCompletionTokens,
+} from '@nemo/common/src/components/AssistantChat/completionMetrics';
+import {
   getCompletionImages,
   getCompletionText,
   isAbortError,
@@ -119,7 +124,12 @@ export const useAssistantChatRuntime = ({
       // TODO: provide time metric from backend inference gateway (issue 219)
       const startMs = performance.now();
       let ttftMs = 0;
+      let firstTokenMs = 0;
       let chunkCount = 0;
+      let responseModel: string | undefined;
+      let generatedChunkCount = 0;
+      let reasoningChars = 0;
+      let usageTokens: number | undefined;
 
       try {
         const result = await createChatCompletion({
@@ -130,6 +140,7 @@ export const useAssistantChatRuntime = ({
           max_tokens: promptData?.inference_params?.max_tokens,
           temperature: promptData?.inference_params?.temperature,
           stream: true,
+          stream_options: { include_usage: true },
           tools: tools?.length ? tools : undefined,
           signal: runController.signal,
         });
@@ -152,8 +163,16 @@ export const useAssistantChatRuntime = ({
           if (runController.signal.aborted) streamController.abort();
           for await (const chunk of result) {
             if (runController.signal.aborted || !isCurrentRun()) break;
+            responseModel ??= chunk.model || undefined;
+            usageTokens = getUsageCompletionTokens(chunk) ?? usageTokens;
             const delta = chunk.choices[0]?.delta.content ?? '';
+            const reasoningDelta = getReasoningDelta(chunk);
             const images = getCompletionImages(chunk);
+            if (reasoningDelta || delta || images.length > 0) {
+              if (firstTokenMs === 0) firstTokenMs = Math.round(performance.now() - startMs);
+              generatedChunkCount += 1;
+            }
+            reasoningChars += reasoningDelta.length;
             if (delta || images.length > 0) {
               if (ttftMs === 0) ttftMs = Math.round(performance.now() - startMs);
               responseText += delta;
@@ -175,20 +194,22 @@ export const useAssistantChatRuntime = ({
           );
           if (!runController.signal.aborted && onMessageComplete) {
             const totalMs = Math.round(performance.now() - startMs);
-            const completionTokens = Math.max(chunkCount, Math.round(responseText.length / 4));
-            // Throughput over total wall-clock. Using the post-first-token
-            // window instead collapses to a near-zero interval when tokens
-            // arrive in a single chunk or an end-of-stream burst, inflating the
-            // rate by orders of magnitude. Total time is stable and matches the
-            // duration shown alongside it.
+            const { completionTokens, tokensPerSec } = computeCompletionMetrics({
+              totalMs,
+              firstTokenMs,
+              usageTokens,
+              outputChars: responseText.length + reasoningChars,
+              chunkCount: generatedChunkCount,
+            });
             onMessageComplete({
               assistantMessageId: assistantMessage.id!,
               text: responseText,
               ttftMs,
               totalMs,
               chunkCount,
-              tokensPerSec: (completionTokens * 1000) / Math.max(1, totalMs),
+              tokensPerSec,
               completionTokens,
+              responseModel,
             });
           }
         } else {
@@ -201,15 +222,22 @@ export const useAssistantChatRuntime = ({
           );
           if (onMessageComplete) {
             const totalMs = Math.round(performance.now() - startMs);
-            const completionTokens = Math.round(text.length / 4);
+            const { completionTokens, tokensPerSec } = computeCompletionMetrics({
+              totalMs,
+              firstTokenMs: 0,
+              usageTokens: getUsageCompletionTokens(result),
+              outputChars: text.length,
+              chunkCount: 1,
+            });
             onMessageComplete({
               assistantMessageId: assistantMessage.id!,
               text,
               ttftMs: totalMs,
               totalMs,
               chunkCount: 1,
-              tokensPerSec: (completionTokens * 1000) / Math.max(1, totalMs),
+              tokensPerSec,
               completionTokens,
+              responseModel: result.model || undefined,
             });
           }
         }

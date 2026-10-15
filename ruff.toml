@@ -29,14 +29,11 @@ exclude = [
     "node_modules",
     "site-packages",
     "venv",
-    "services/auditor/fixes/cve-2025-8194",
     "services/guardrails/fixes/cve-2025-8194",
     "services/safe-synthesizer/fixes/cve-2025-8194",
     "services/safe-synthesizer-api/fixes/cve-2025-8194",
     "architecture/examples",
     "docs",
-    # auto-generated SDK
-    "sdk/python",
     # files borrowed verbatim from garak
     "packages/garak_api/garakapi/_config.py",
     "packages/garak_api/garakapi/_plugins.py",

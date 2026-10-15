@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Operator template for the harbor_opensandbox runtime (HARBOR_OPENSANDBOX_CONFIG_PATH).
+# The oracle agent runs the task's reference solution, so it needs no model credentials.
+#
+# The backend owns job_name, jobs_dir, n_attempts, n_concurrent_trials, tasks and the
+# environment block (class, protocol, sandbox timeout, egress allowlist, ownership
+# labels). Only the adapter tuning kwargs below may be set here.
+timeout_multiplier: 1.0
+
+retry:
+  max_retries: 0
+
+environment:
+  kwargs:
+    use_server_proxy: true
+    request_timeout_sec: 900
+    ready_timeout_sec: 900
+
+agents:
+  - name: oracle

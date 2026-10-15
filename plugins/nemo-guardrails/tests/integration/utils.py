@@ -71,10 +71,9 @@ InlineGuardrailsMiddlewareCall = GuardrailsMiddlewareCall
 def expect_harness_http_error(action: Callable[[], object], expected_status: HTTPStatus) -> HarnessHTTPError:
     """Run a harness action and return HTTP error details.
 
-    The IGW integration harness raises generated SDK HTTP errors for sync SDK
+    The IGW integration harness raises typed-client HTTP errors for client
     calls and ``httpx.HTTPStatusError`` for direct TestClient streaming calls.
-    Keep that dynamic boundary here so tests assert typed status/body values
-    without importing generated SDK errors in the plugin suite.
+    Both are normalized here so tests assert status/body values the same way.
     """
     try:
         action()

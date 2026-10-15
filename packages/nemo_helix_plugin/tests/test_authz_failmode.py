@@ -15,6 +15,7 @@ from collections.abc import Callable
 
 import pytest
 from fastapi import APIRouter
+from nemo_helix_plugin import authz_discovery
 from nemo_helix_plugin.authz import (
     AuthzContribution,
     AuthzEndpointMethod,
@@ -90,6 +91,100 @@ def test_permissions_outside_service_namespace_fail_closed() -> None:
     assert contrib.endpoints["/apis/svc/v2/y"]["get"].deny is True
     assert contrib.permissions == {}
     assert any("outside the service namespace" in e and "other.y.read" in e for e in errors)
+
+
+def test_permission_namespace_overrides_service_name_for_legacy_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A renamed service can keep its legacy permission ids via ``permission_namespace``: the
+    mount follows ``name`` while the ownership fence checks the legacy namespace."""
+    monkeypatch.setattr(authz_discovery, "LEGACY_PERMISSION_NAMESPACES", {"renamed": "legacy"})
+    router = APIRouter()
+
+    @router.get("/v2/x")
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[Permission("legacy", "x", "read", "Read x")])
+    async def x() -> None: ...
+
+    class _Svc(NemoService):
+        name = "renamed"
+        permission_namespace = "legacy"
+
+        def get_routers(self) -> list[RouterSpec]:
+            return [RouterSpec(router)]
+
+    contrib, errors, _warnings = _derive_service_contribution(_Svc())
+    assert errors == []
+    assert contrib.endpoints["/apis/renamed/v2/x"]["get"].permissions == ["legacy.x.read"]
+    assert "legacy.x.read" in contrib.permissions
+
+
+def test_permission_namespace_still_fences_other_namespaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With ``permission_namespace`` set, the service's own name is no longer its namespace and
+    permissions outside the declared namespace still fail closed."""
+    monkeypatch.setattr(authz_discovery, "LEGACY_PERMISSION_NAMESPACES", {"renamed": "legacy"})
+    router = APIRouter()
+
+    @router.get("/v2/x")
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[Permission("legacy", "x", "read", "Read x")])
+    async def x() -> None: ...
+
+    @router.get("/v2/y")
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[Permission("renamed", "y", "read", "Read y")])
+    async def y() -> None: ...
+
+    class _Svc(NemoService):
+        name = "renamed"
+        permission_namespace = "legacy"
+
+        def get_routers(self) -> list[RouterSpec]:
+            return [RouterSpec(router)]
+
+    contrib, errors, _warnings = _derive_service_contribution(_Svc())
+    assert contrib.endpoints["/apis/renamed/v2/x"]["get"].deny is True
+    assert contrib.endpoints["/apis/renamed/v2/y"]["get"].deny is True
+    assert contrib.permissions == {}
+    assert any("outside the service namespace 'legacy'" in e and "renamed.y.read" in e for e in errors)
+
+
+def test_approved_legacy_namespace_applies_without_declaration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A service listed in ``LEGACY_PERMISSION_NAMESPACES`` keeps its legacy ids even if the
+    plugin declares no ``permission_namespace`` (as the evals plugin does)."""
+    monkeypatch.setattr(authz_discovery, "LEGACY_PERMISSION_NAMESPACES", {"renamed": "legacy"})
+    router = APIRouter()
+
+    @router.get("/v2/x")
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[Permission("legacy", "x", "read", "Read x")])
+    async def x() -> None: ...
+
+    class _Svc(NemoService):
+        name = "renamed"
+
+        def get_routers(self) -> list[RouterSpec]:
+            return [RouterSpec(router)]
+
+    contrib, errors, _warnings = _derive_service_contribution(_Svc())
+    assert errors == []
+    assert "legacy.x.read" in contrib.permissions
+
+
+def test_unapproved_permission_namespace_fails_closed() -> None:
+    """A plugin cannot claim another service's namespace by declaring it as its
+    ``permission_namespace``: only aliases approved in ``LEGACY_PERMISSION_NAMESPACES`` count."""
+    router = APIRouter()
+
+    @router.get("/v2/x")
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[Permission("guardrails", "x", "read", "Read x")])
+    async def x() -> None: ...
+
+    class _Svc(NemoService):
+        name = "squatter"
+        permission_namespace = "guardrails"
+
+        def get_routers(self) -> list[RouterSpec]:
+            return [RouterSpec(router)]
+
+    contrib, errors, _warnings = _derive_service_contribution(_Svc())
+    assert contrib.endpoints["/apis/squatter/v2/x"]["get"].deny is True
+    assert contrib.permissions == {}
+    assert any("not an approved legacy namespace" in e and "'guardrails'" in e for e in errors)
 
 
 def test_malformed_permission_id_fails_closed() -> None:

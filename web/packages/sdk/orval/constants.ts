@@ -21,7 +21,7 @@ export type ServiceConfig = {
 export const serviceConfigs: Record<string, ServiceConfig> = {
   platform: {
     path: 'platform',
-    url: `../../../../openapi/ga/individual/platform.openapi.yaml`,
+    url: `../../../../openapi/openapi.yaml`,
     apiEnvKeys: ['VITE_PLATFORM_BASE_URL'],
     zod: true,
   },
@@ -55,9 +55,9 @@ export const serviceConfigs: Record<string, ServiceConfig> = {
     apiEnvKeys: ['VITE_PLATFORM_BASE_URL'],
     zod: true,
   },
-  evaluator: {
-    path: 'evaluator',
-    url: `../../../../plugins/nemo-evaluator/openapi/openapi.yaml`,
+  evals: {
+    path: 'evals',
+    url: `../../../../plugins/nemo-evals/openapi/openapi.yaml`,
     apiEnvKeys: ['VITE_PLATFORM_BASE_URL'],
     zod: true,
   },

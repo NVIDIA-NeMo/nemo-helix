@@ -8,8 +8,15 @@ import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import type { QuickstartSampleAgent } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel';
 import { useMemo } from 'react';
 
-/** Mirrors `_SAMPLE_WORKSPACE_NAME` in `nemo setup` (`nemo_helix_ext/cli/commands/setup.py`). */
-export const SAMPLE_WORKSPACE = 'sample';
+/**
+ * Mirrors `SAMPLE_WORKSPACE_PREFIX` (`nemo_helix_plugin/workspaces/constants.py`): the sample flow
+ * names each workspace `sample-<uid>`, and the entities service reserves the prefix for it.
+ */
+export const SAMPLE_WORKSPACE_PREFIX = 'sample-';
+
+export const isSampleWorkspace = (workspace: string): boolean =>
+  workspace.startsWith(SAMPLE_WORKSPACE_PREFIX);
+
 /** Mirrors `_SAMPLE_AGENT_NAME` in `nemo setup`, which deploys it into the sample workspace. */
 export const SAMPLE_AGENT_NAME = 'email-security-triage';
 
@@ -20,13 +27,14 @@ const TRANSITIONAL_STATUSES = new Set(['pending', 'starting', 'deleting']);
 const ROUTABLE_SOON_STATUSES = new Set(['pending', 'starting']);
 
 /**
- * `unavailable` is everything that is not a sample to show: disabled, missing (a workspace
- * someone named `sample` by hand, or an incomplete `nemo setup`), forbidden, or failing.
- * The dashboard falls back to the regular Quickstart for all of them; only `loading` shows neither.
+ * `disabled` is the only state that sends the dashboard to the regular Quickstart. `error` is a
+ * lookup that settled without the agent: missing (an incomplete `nemo setup`), forbidden, or
+ * failing. It is still polled, so it can turn `ready` on its own; `retry` just asks again now.
  */
 export type SampleQuickstartAgentState =
   | { readonly state: 'loading' }
-  | { readonly state: 'unavailable' }
+  | { readonly state: 'disabled' }
+  | { readonly state: 'error'; readonly retry: () => Promise<unknown> }
   | { readonly state: 'ready'; readonly agent: QuickstartSampleAgent };
 
 /** The sample agent `nemo setup` provisions, shaped for the QuickstartSamplePanel. */
@@ -34,19 +42,19 @@ export const useSampleQuickstartAgent = (
   workspace: string,
   enabled: boolean
 ): SampleQuickstartAgentState => {
-  const { data: agent, isFetched: isAgentFetched } = useAgentsGetAgent(
-    workspace,
-    SAMPLE_AGENT_NAME,
-    {
-      query: {
-        enabled,
-        // A missing agent is an answer, not a transient failure. Keep looking while it is absent:
-        // a re-run of `nemo setup` creates it, and the panel should appear without a reload.
-        retry: (failureCount, error) => !isNotFoundError(error) && failureCount < 3,
-        refetchInterval: (query) => (query.state.data ? false : JOB_POLLING_INTERVAL_LONG),
-      },
-    }
-  );
+  const {
+    data: agent,
+    isFetched: isAgentFetched,
+    refetch: refetchAgent,
+  } = useAgentsGetAgent(workspace, SAMPLE_AGENT_NAME, {
+    query: {
+      enabled,
+      // A missing agent is an answer, not a transient failure. Keep looking while it is absent:
+      // a re-run of `nemo setup` creates it, and the panel should appear without a reload.
+      retry: (failureCount, error) => !isNotFoundError(error) && failureCount < 3,
+      refetchInterval: (query) => (query.state.data ? false : JOB_POLLING_INTERVAL_LONG),
+    },
+  });
 
   const { data: deploymentsResponse, isFetched: isDeploymentsFetched } = useAgentsListDeployments(
     workspace,
@@ -67,10 +75,12 @@ export const useSampleQuickstartAgent = (
   );
 
   return useMemo((): SampleQuickstartAgentState => {
-    if (!enabled) return { state: 'unavailable' };
+    if (!enabled) return { state: 'disabled' };
     // `isFetched`, not `isPending`: a query that errored without data goes back to pending on
-    // every poll, which would swap the dashboard between Quickstarts each time.
-    if (!agent) return { state: isAgentFetched ? 'unavailable' : 'loading' };
+    // every poll, which would flash the skeleton over the error each time.
+    if (!agent) {
+      return isAgentFetched ? { state: 'error', retry: refetchAgent } : { state: 'loading' };
+    }
     // Held back until the first deployments response, rather than flashing "Unknown" and a
     // placeholder command.
     if (!isDeploymentsFetched) return { state: 'loading' };
@@ -97,5 +107,5 @@ export const useSampleQuickstartAgent = (
         deploymentName: reachable?.name,
       },
     };
-  }, [enabled, agent, isAgentFetched, isDeploymentsFetched, deploymentsResponse]);
+  }, [enabled, agent, isAgentFetched, refetchAgent, isDeploymentsFetched, deploymentsResponse]);
 };

@@ -20,24 +20,31 @@ from __future__ import annotations
 import base64
 import json
 import time
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import httpx
-
-from nemo_helix_ext.client.tls import httpx_tls_config_from_env
-
-DEFAULT_OAUTH_SCOPES = "openid profile email offline_access"
-BearerTokenSource = Literal["access_token", "id_token"]
-
-
-def parse_bearer_token_source(value: object) -> BearerTokenSource:
-    """Validate a bearer-token response field received from discovery."""
-    if value == "access_token":
-        return "access_token"
-    if value == "id_token":
-        return "id_token"
-    raise ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'")
+from nemo_helix_plugin.authz_format import is_valid_nhx_scope_id
+from nemo_helix_plugin.client.oidc import (
+    AdvertisedOidcClient as AdvertisedOidcClient,
+)
+from nemo_helix_plugin.client.oidc import (
+    BearerTokenSource as BearerTokenSource,
+)
+from nemo_helix_plugin.client.oidc import (
+    NHXOIDCConfig as NHXOIDCConfig,
+)
+from nemo_helix_plugin.client.oidc import (
+    parse_bearer_token_source as parse_bearer_token_source,
+)
+from nemo_helix_plugin.client.oidc import (
+    parse_nhx_config,
+)
+from nemo_helix_plugin.client.oidc import (
+    refresh_target as refresh_target,
+)
+from nemo_helix_plugin.client.oidc import (
+    select_advertised_client as select_advertised_client,
+)
 
 
 class AuthError(Exception):
@@ -144,64 +151,41 @@ def generate_unsigned_jwt(
     return f"{header_segment}.{claims_segment}."
 
 
-@dataclass(frozen=True)
-class NHXOIDCConfig:
-    """OIDC configuration discovered from the NeMo Helix."""
-
-    auth_enabled: bool
-    issuer: str | None = None
-    client_id: str | None = None
-    token_endpoint: str | None = None
-    device_authorization_endpoint: str | None = None
-    default_scopes: str = DEFAULT_OAUTH_SCOPES
-    scope_prefix: str | None = None
-    workload_token_exchange_enabled: bool = False
-    workload_client_id: str | None = None
-    workload_token_endpoint: str | None = None
-    workload_audience: str | None = None
-    workload_scope: str | None = None
-    cli_client_id: str | None = None
-    bearer_token_source: BearerTokenSource = "access_token"
-    device_authorization_requires_device_id: bool = False
-    device_authorization_display_name: str | None = None
-    device_token_request_includes_scope: bool = True
-
-
 def discover_nhx_config(
     base_url: str,
+    http_client: httpx.Client,
     timeout: float = 10.0,
-    *,
-    certificate_authority: str | None = None,
 ) -> NHXOIDCConfig:
     """Fetch OIDC configuration from the NeMo Helix auth discovery endpoint."""
-    response = httpx.get(
-        f"{base_url.rstrip('/')}/apis/auth/discovery",
-        timeout=timeout,
-        **httpx_tls_config_from_env(certificate_authority),
-    )
+    url = f"{base_url.rstrip('/')}/apis/auth/discovery"
+    # TLS verification belongs to the caller-owned httpx.Client; do not override it here.
+    # codeql[py/request-without-cert-validation]
+    response = http_client.get(url, timeout=timeout)
     response.raise_for_status()
-    data = response.json()
+    return _parse_nhx_config(response.json())
 
-    oidc = data.get("oidc") or {}
-    return NHXOIDCConfig(
-        auth_enabled=data.get("auth_enabled", False),
-        issuer=oidc.get("issuer"),
-        client_id=oidc.get("client_id"),
-        cli_client_id=oidc.get("cli_client_id"),
-        bearer_token_source=parse_bearer_token_source(oidc.get("bearer_token_source", "access_token")),
-        token_endpoint=oidc.get("token_endpoint"),
-        device_authorization_endpoint=oidc.get("device_authorization_endpoint"),
-        device_authorization_requires_device_id=oidc.get("device_authorization_requires_device_id", False),
-        device_authorization_display_name=oidc.get("device_authorization_display_name"),
-        device_token_request_includes_scope=oidc.get("device_token_request_includes_scope", True),
-        default_scopes=oidc.get("default_scopes", DEFAULT_OAUTH_SCOPES),
-        scope_prefix=oidc.get("scope_prefix"),
-        workload_token_exchange_enabled=oidc.get("workload_token_exchange_enabled", False),
-        workload_client_id=oidc.get("workload_client_id"),
-        workload_token_endpoint=oidc.get("workload_token_endpoint"),
-        workload_audience=oidc.get("workload_audience"),
-        workload_scope=oidc.get("workload_scope"),
-    )
+
+async def discover_nhx_config_async(
+    base_url: str,
+    http_client: httpx.AsyncClient,
+    timeout: float = 10.0,
+) -> NHXOIDCConfig:
+    """Fetch OIDC configuration from the NeMo Helix auth discovery endpoint."""
+    url = f"{base_url.rstrip('/')}/apis/auth/discovery"
+    # TLS verification belongs to the caller-owned httpx.AsyncClient; do not override it here.
+    # codeql[py/request-without-cert-validation]
+    response = await http_client.get(url, timeout=timeout)
+    response.raise_for_status()
+    return _parse_nhx_config(response.json())
+
+
+def _parse_nhx_config(payload: object) -> NHXOIDCConfig:
+    try:
+        return parse_nhx_config(payload)
+    except ValueError as exc:
+        if "bearer_token_source" in str(exc):
+            raise
+        raise AttributeError("auth discovery response did not match expected shape") from exc
 
 
 def build_effective_scope(requested_scopes: str, scope_prefix: str | None) -> str:
@@ -228,7 +212,7 @@ def validate_requested_scopes_granted(
     Compares in short form so IdPs (e.g. Azure AD) that return scp as "platform:read"
     match requested "api://nhx/platform:read".
     """
-    requested_platform = {s for s in effective_scope.split() if ":" in s}
+    requested_platform = {s for s in effective_scope.split() if is_valid_nhx_scope_id(scope_short(s, scope_prefix))}
     requested_short = {scope_short(s, scope_prefix) for s in requested_platform}
     granted_set = set(granted_scopes)
     granted_short = {scope_short(s, scope_prefix) for s in granted_set}

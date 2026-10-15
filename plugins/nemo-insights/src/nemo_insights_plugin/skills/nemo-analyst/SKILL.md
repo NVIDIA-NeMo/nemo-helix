@@ -21,7 +21,7 @@ triggers:
 not-for:
   - nemo-intake (use to instrument an agent, ingest telemetry, or query raw spans; this skill interprets telemetry that already landed)
   - nemo-experiments-upload (use to upload traces and evaluation results into Intake; this skill reads them back out)
-  - nemo-evaluator (use to author evaluations and metrics; this skill analyzes production behavior)
+  - nemo-evals (use to author evaluations and metrics; this skill analyzes production behavior)
 compatibility: >-
   nemo-helix >= 0.1.0; requires the Insights plugin, a reachable platform
   with Intake telemetry for the target agent, and a model the platform can call

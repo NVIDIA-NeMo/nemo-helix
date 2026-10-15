@@ -105,9 +105,6 @@ services/core/infrastructure/jobs/jobs.db
 *.enc
 *.csr
 
-# SDK artifacts
-sdk/openapi_schema_mapping_report.txt
-
 # Terraform
 **/.terraform
 *.tfstate

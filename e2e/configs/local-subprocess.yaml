@@ -46,7 +46,7 @@ jobs:
       ttl_seconds_active: 3600
       ttl_seconds_after_finished: 300
 
-evaluator:
+evals:
   recreate_existing_system_entities: true
 
 safe_synthesizer: {}

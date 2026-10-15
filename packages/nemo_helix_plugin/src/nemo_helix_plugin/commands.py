@@ -8,38 +8,30 @@ Two parallel helpers, one per primitive:
 - :func:`add_job_commands` — job submit callbacks plus ``explain`` per
   :class:`~nemo_helix_plugin.job.NemoJob`, routed through
   :class:`~nemo_helix_plugin.scheduler.NemoJobScheduler`.
-- :func:`add_function_commands` — two-verb subgroups
-  (``run``/``submit``) per :class:`~nemo_helix_plugin.function.NemoFunction`.
-  Functions don't have an ``explain`` verb because their only schema
+- :func:`add_function_commands` — flat remote callbacks per
+  :class:`~nemo_helix_plugin.function.NemoFunction`. Functions don't have an ``explain`` verb because their only schema
   is :attr:`~nemo_helix_plugin.function.NemoFunction.spec_schema` and that's
   introspected through ``--help`` directly.
 
 :func:`add_job_commands` is the bridge between the ``nemo.jobs`` and
 ``nemo.cli`` surfaces. The platform calls it at startup for each plugin that
 has registered both a CLI group and jobs, injecting generated job commands into
-the plugin's :class:`typer.Typer` group. Legacy jobs expose a sub-group with
-``submit`` and ``explain``; non-legacy jobs expose flat submit callbacks while
-retaining ``explain`` as a schema subcommand.
-
-Plugin authors do **not** call this themselves — it is called automatically
-by the platform's CLI loader. Jobs that set ``generate_legacy_verbs = False``
-become available as::
+the plugin's :class:`typer.Typer` group. Jobs expose flat remote callbacks while
+retaining ``explain`` as a schema subcommand::
 
     nemo <plugin> <job-name>          [--profile ...] [-o ...]
     nemo <plugin> <job-name> explain  [--profile ...]
 
-The platform comes from the global ``nemo --base-url`` / ``nemo --context``
-flags and the active CLI context, like every other ``nemo`` command.
-
-Legacy jobs that keep ``generate_legacy_verbs = True`` use
-``nemo <plugin> <job-name> submit`` for remote submission instead.
+Plugin authors do **not** call this themselves — it is called automatically
+by the platform's CLI loader. The platform comes from the global ``nemo --base-url`` /
+``nemo --context`` flags and the active CLI context, like every other ``nemo``
+command.
 
 Generated command interface
 ---------------------------
 
-``submit``
-    Submit the job to a cluster. For non-legacy jobs this is the group
-    callback; for legacy jobs this is a nested ``submit`` command.
+``<job-name>``
+    Submit the job to the Jobs service through the selected platform.
 
 ``explain``
     Print the job's spec / options schemas.
@@ -73,16 +65,17 @@ The platform generates::
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import inspect
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Callable, Generator, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, Optional, Protocol, cast
 
+import click
 import httpx
 import typer
 from nemo_helix_plugin._spec_flags import (
@@ -99,10 +92,8 @@ from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_helix_plugin.cli_options import workspace_help, workspace_option
 from nemo_helix_plugin.cli_renderer import CLIRenderer, RendererContext
-from nemo_helix_plugin.cli_state import resolve_cli_workspace, resolve_local_cli_sdks
-from nemo_helix_plugin.errors import LocalRunError
-from nemo_helix_plugin.function import NemoFunction, returns_async_iterator
-from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace
+from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.functions.frames import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs._cli_options import (
@@ -156,10 +147,23 @@ _JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = (
     | _RETIRED_ROUTING_FLAGS
 )
 
+# Set on the Typer context by :func:`_programmatic_submit` so the job submit
+# callback skips its no-input help fallback for wrapper-supplied specs.
+_PROGRAMMATIC_SUBMIT_ATTR = "_nemo_programmatic_submit"
+
 
 # ---------------------------------------------------------------------------
 # Renderer plumbing
 # ---------------------------------------------------------------------------
+
+
+def _parameter_was_provided(typer_ctx: typer.Context, name: str) -> bool:
+    """Return True when Click says *name* came from the CLI or env, not a default."""
+    try:
+        source = typer_ctx.get_parameter_source(name)
+    except Exception:
+        return False
+    return source not in (None, click.core.ParameterSource.DEFAULT)
 
 
 def _output_format_is_json(typer_ctx: typer.Context | None) -> bool:
@@ -326,33 +330,12 @@ def _register_job_subgroup(
     cli: NemoCLI | None = None,
 ) -> None:
     """Register a ``<job-name>`` command surface for submit / explain."""
-    if not job_cls.generate_legacy_verbs:
-        job_group = typer.Typer(
-            name=job_cls.name,
-            help=job_cls.description or f"Manage the {job_cls.name} job.",
-            no_args_is_help=False,
-        )
-        _add_submit_command(job_group, job_cls, scheduler, cli=cli, as_callback=True)
-        _add_explain_command(job_group, job_cls, scheduler)
-        if cli is not None:
-            cli.update_job_cli(job_cls, job_group)
-        cli_app.add_typer(job_group, name=job_cls.name, rich_help_panel="Jobs")
-        return
-
     job_group = typer.Typer(
         name=job_cls.name,
         help=job_cls.description or f"Manage the {job_cls.name} job.",
-        no_args_is_help=False,  # we override bare behavior to exit non-zero
+        no_args_is_help=False,
     )
-
-    @job_group.callback(invoke_without_command=True)
-    def _root(ctx: typer.Context) -> None:  # pragma: no cover - trivial delegation
-        """Stub callback — prints usage and exits 1 when no verb is given."""
-        if ctx.invoked_subcommand is None:
-            typer.echo(ctx.get_help())
-            raise typer.Exit(code=1)
-
-    _add_submit_command(job_group, job_cls, scheduler, cli=cli)
+    _add_submit_command(job_group, job_cls, scheduler, cli=cli, as_callback=True)
     _add_explain_command(job_group, job_cls, scheduler)
 
     if cli is not None:
@@ -452,6 +435,11 @@ def _add_submit_command(
 
         effective_spec_str = config if config is not None else spec_str
         effective_spec_file = config_file if config_file is not None else spec_file
+        spec_source_provided = any(
+            _parameter_was_provided(typer_ctx, name) for name in ("spec", "spec_file", "config", "config_file")
+        )
+        field_flag_provided = any(_parameter_was_provided(typer_ctx, leaf.param_name) for leaf in leaves)
+
         base = _load_spec(effective_spec_str, effective_spec_file)
         overlay = build_overlay(leaves, kwargs, unset_sentinel=UNSET)
         spec_data = deep_merge(base, overlay)
@@ -461,6 +449,11 @@ def _add_submit_command(
         except (OSError, ValueError) as exc:
             typer.echo(f"Error: invalid options — {exc}", err=True)
             raise typer.Exit(code=1) from exc
+
+        is_programmatic = bool(getattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, False))
+        if as_callback and not is_programmatic and not spec_source_provided and not field_flag_provided:
+            typer.echo(typer_ctx.get_help())
+            raise typer.Exit(code=1)
 
         renderer_resolved: type[CLIRenderer] | None = None
         if not _output_format_is_json(typer_ctx):
@@ -731,7 +724,7 @@ def _merge_options_inputs(options: list[str], options_file: Path | None) -> dict
 
 
 # ---------------------------------------------------------------------------
-# NemoFunction CLI — two verbs (run / submit), no `explain`
+# NemoFunction CLI — flat remote invocation, no `explain`
 # ---------------------------------------------------------------------------
 
 
@@ -775,222 +768,10 @@ def _register_function_subgroup(
     *,
     cli: NemoCLI | None = None,
 ) -> None:
-    """Register a ``<fn-name>`` sub-group with run / submit verbs."""
-    if not fn_cls.generate_legacy_verbs:
-        _add_function_submit_command(cli_app, fn_cls, cli=cli, command_name=fn_cls.name, rich_help_panel="Functions")
-        if cli is not None:
-            cli.update_function_cli(fn_cls, cli_app)
-        return
-
-    fn_group = typer.Typer(
-        name=fn_cls.name,
-        help=fn_cls.description or f"Manage the {fn_cls.name} function.",
-        no_args_is_help=False,
-    )
-
-    @fn_group.callback(invoke_without_command=True)
-    def _root(ctx: typer.Context) -> None:  # pragma: no cover - trivial delegation
-        """Stub callback — prints usage and exits 1 when no verb is given."""
-        if ctx.invoked_subcommand is None:
-            typer.echo(ctx.get_help())
-            raise typer.Exit(code=1)
-
-    _add_function_run_command(fn_group, fn_cls, cli=cli)
-    _add_function_submit_command(fn_group, fn_cls, cli=cli)
-
+    """Register a flat ``<fn-name>`` remote invocation command."""
+    _add_function_submit_command(cli_app, fn_cls, cli=cli, command_name=fn_cls.name, rich_help_panel="Functions")
     if cli is not None:
-        cli.update_function_cli(fn_cls, fn_group)
-
-    cli_app.add_typer(fn_group, name=fn_cls.name, rich_help_panel="Functions")
-
-
-# ---- run --------------------------------------------------------- #
-
-
-def _add_function_run_command(
-    group: typer.Typer,
-    fn_cls: type[NemoFunction],
-    *,
-    cli: NemoCLI | None = None,
-) -> None:
-    """Register the ``run`` verb. Generates per-field flags from ``spec_schema``.
-
-    Each scalar leaf in ``spec_schema`` becomes a Typer option named
-    after its dotted path, kebab-cased per segment (``--name``,
-    ``--target.url``).  Precedence at runtime is ``--spec-file`` (base)
-    → ``--spec`` JSON (overlay) → per-field flags (top overlay).
-    Validation happens after the merge — surfaces a single
-    ``ValidationError`` for the merged spec rather than per-overlay.
-
-    When *cli* supplies a renderer via ``get_function_renderer(verb="run")``
-    (and ``--output-format json`` is not set), the renderer's lifecycle
-    drives the streamed output instead of the default per-frame echo.
-    """
-    unavailable: list[str] = []
-    leaves = walk_spec_leaves(fn_cls.spec_schema, reserved=_FN_RUN_RESERVED_FLAGS, unavailable=unavailable)
-
-    def _run(typer_ctx: typer.Context, **kwargs: object) -> None:
-        original_kwargs = dict(kwargs)
-        spec_str: str = cast(str, kwargs.pop("spec", "{}"))
-        spec_file: Path | None = cast("Path | None", kwargs.pop("spec_file", None))
-        workspace = resolve_cli_workspace(typer_ctx, cast("str | None", kwargs.pop("workspace", None)))
-        original_kwargs["workspace"] = workspace
-
-        base = _load_spec(spec_str, spec_file)
-        overlay = build_overlay(leaves, kwargs, unset_sentinel=UNSET)
-        merged = deep_merge(base, overlay)
-        try:
-            spec_obj = fn_cls.spec_schema.model_validate(merged, context={"is_local": True})
-        except ValidationError as exc:
-            typer.echo(f"Error: invalid spec for {fn_cls.name}: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
-
-        sdk, async_sdk = resolve_local_cli_sdks(typer_ctx)
-        ctx = FunctionContext(workspace=workspace)
-        renderer_cls: type[CLIRenderer] | None = None
-        if cli is not None and not _output_format_is_json(typer_ctx):
-            renderer_cls = cli.get_function_renderer(fn_cls, verb="run")
-        try:
-            outcome = asyncio.run(
-                _invoke_function_locally(
-                    fn_cls,
-                    spec_obj,
-                    ctx,
-                    sdk=sdk,
-                    async_sdk=async_sdk,
-                    renderer_cls=renderer_cls,
-                    cli_kwargs=original_kwargs,
-                )
-            )
-        except LocalRunError as exc:
-            typer.echo(f"Error: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
-        except KeyboardInterrupt as exc:  # pragma: no cover - terminal-only
-            typer.echo("Interrupted.", err=True)
-            raise typer.Exit(code=130) from exc
-
-        # Fire on_complete *outside* asyncio.run so renderers using event-loop-bound
-        # libraries (e.g. prompt_toolkit's Application.run for an interactive
-        # record browser) don't collide with the loop we just tore down.
-        if outcome is not None:
-            renderer, rctx = outcome
-            renderer.on_complete(ctx=rctx)
-
-    help_text = f"Run {fn_cls.name} locally, in-process."
-    epilog = build_epilog(schema=fn_cls.spec_schema, leaves=leaves, kind="Function", unavailable=unavailable)
-    setattr(_run, "__signature__", _build_function_run_signature(leaves))
-    group.command(name="run", help=help_text, epilog=epilog)(_run)
-
-
-def _build_function_run_signature(leaves: list[SpecLeafField]) -> inspect.Signature:
-    """Compose the synthetic signature for the function ``run`` verb."""
-    static_params = [
-        # ``typer.Context`` is auto-injected by Click via ``pass_context``,
-        # which passes it as the first positional argument. Hand-built
-        # rather than via ``kw()`` because ``kw()`` only emits
-        # ``KEYWORD_ONLY`` params (which Click's positional injection
-        # would reject).
-        inspect.Parameter(
-            "typer_ctx",
-            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=typer.Context,
-        ),
-        kw(
-            "spec",
-            str,
-            typer.Option(
-                "{}",
-                "--spec",
-                help="Spec as a JSON string.",
-                rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-        kw(
-            "spec_file",
-            Optional[Path],
-            typer.Option(
-                None,
-                "--spec-file",
-                help="Path to a YAML or JSON spec file (used as base; per-flag values override).",
-                rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-        kw(
-            "workspace",
-            Optional[str],
-            workspace_option(
-                help=workspace_help("Workspace identity passed to the function as ctx.workspace."),
-                rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-    ]
-    return build_callback_signature(
-        static_params,
-        leaves,
-        rich_help_panel=_PANEL_FUNCTION_SPEC,
-    )
-
-
-async def _invoke_function_locally(
-    fn_cls: type[NemoFunction],
-    spec_obj: BaseModel,
-    ctx: FunctionContext,
-    *,
-    sdk: object | None,
-    async_sdk: object | None,
-    renderer_cls: type[CLIRenderer] | None = None,
-    cli_kwargs: Mapping[str, Any] | None = None,
-) -> tuple[CLIRenderer, RendererContext] | None:
-    """Call ``fn_cls().run(spec, ...)`` and print result(s) to stdout.
-
-    Injects SDK parameters when the function declares them, leaves optional
-    parameters unbound so Python defaults apply, and raises
-    :class:`LocalRunError` only when the function declared a required SDK
-    parameter that we can't satisfy.
-
-    When *renderer_cls* is supplied, drive the renderer's ``on_start`` +
-    ``on_frame`` around the streamed iterator and return ``(renderer, rctx)``
-    so the caller can fire ``on_complete`` *after* :func:`asyncio.run`
-    returns — see :func:`_drive_async_renderer`. Renderers don't apply to
-    non-streaming returns — those still echo via
-    :func:`_format_value_for_stdout` and this function returns ``None``.
-    """
-    instance = fn_cls()
-    run_params = fn_cls.run_signature().parameters
-    kwargs: dict[str, Any] = {}
-    if "ctx" in run_params:
-        kwargs["ctx"] = ctx
-    if "is_local" in run_params:
-        kwargs["is_local"] = True
-    for param_name, value in (("sdk", sdk), ("async_sdk", async_sdk)):
-        param = run_params.get(param_name)
-        if param is None:
-            continue
-        if value is not None:
-            kwargs[param_name] = value
-            continue
-        if param.default is inspect.Parameter.empty:
-            raise LocalRunError(
-                f"{fn_cls.__name__}.run requires a `{param_name}` argument; "
-                f"configure your `nemo` CLI context (e.g. `nemo config use-context ...`) "
-                f"or pass `{param_name}` to the local invoker."
-            )
-
-    result = instance.run(spec_obj, **kwargs)
-    if returns_async_iterator(result):
-        if renderer_cls is not None:
-            rctx = _make_renderer_context(
-                cli_kwargs=cli_kwargs or {},
-                verb="run",
-                is_local=True,
-            )
-            renderer = await _drive_async_renderer(result, renderer_cls, rctx=rctx)
-            return renderer, rctx
-        async for frame in result:
-            typer.echo(_format_frame_for_stdout(frame))
-        return
-    awaited = await result
-    typer.echo(_format_value_for_stdout(awaited))
+        cli.update_function_cli(fn_cls, cli_app)
 
 
 def resolve_submit_auth_headers(typer_ctx: typer.Context) -> dict[str, str]:
@@ -1047,7 +828,7 @@ def _add_function_submit_command(
             raise typer.Exit(code=1) from exc
 
         url = _build_function_submit_url(typer_ctx, fn_cls, workspace=workspace)
-        headers = resolve_submit_auth_headers(typer_ctx)
+        headers: dict[str, str] = {}
         if request_id is not None:
             headers["X-Request-ID"] = request_id
 
@@ -1056,10 +837,12 @@ def _add_function_submit_command(
             renderer_cls = cli.get_function_renderer(fn_cls, verb="submit")
 
         try:
+            sdk = cli_state(typer_ctx).get_client()
             _post_function_submit(
                 url,
                 spec_data,
-                headers=headers,
+                headers=sdk.request_headers(headers, url=url) or {},
+                http_client=sdk.http_client,
                 renderer_cls=renderer_cls,
                 cli_kwargs=original_kwargs,
             )
@@ -1073,14 +856,14 @@ def _add_function_submit_command(
             typer.echo(f"Error: submit {fn_cls.name} failed: {exc}", err=True)
             raise typer.Exit(code=2) from exc
 
-    help_text = f"Submit {fn_cls.name} over HTTP."
+    help_text = f"Invoke {fn_cls.name} over HTTP."
     epilog = build_epilog(schema=fn_cls.spec_schema, leaves=leaves, kind="Function", unavailable=unavailable)
     setattr(_submit, "__signature__", _build_function_submit_signature(leaves))
     group.command(name=command_name, help=help_text, epilog=epilog, rich_help_panel=rich_help_panel)(_submit)
 
 
 def _build_function_submit_signature(leaves: list[SpecLeafField]) -> inspect.Signature:
-    """Compose the synthetic signature for the function ``submit`` verb."""
+    """Compose the synthetic signature for the function command."""
     static_params = [
         inspect.Parameter(
             "typer_ctx",
@@ -1138,6 +921,7 @@ def _post_function_submit(
     body: dict,
     *,
     headers: dict[str, str],
+    http_client: httpx.Client,
     timeout: float = 30.0,
     renderer_cls: type[CLIRenderer] | None = None,
     cli_kwargs: Mapping[str, Any] | None = None,
@@ -1154,37 +938,33 @@ def _post_function_submit(
     :meth:`CLIRenderer.on_frame`. The non-NDJSON fallback path is unchanged.
     """
     logger.debug("submit %s", url)
-    with httpx.Client(timeout=timeout) as client:
-        with client.stream("POST", url, json=body, headers=headers) as response:
-            if response.status_code >= 400:
-                # Buffer the body so the caller's error formatter
-                # can read ``exc.response.text`` without raising
-                # ``ResponseNotRead`` — ``client.stream`` opens the
-                # response unbuffered, and the ``with`` block closes
-                # the stream before the caller sees the exception.
-                response.read()
-                response.raise_for_status()
-            content_type = response.headers.get("content-type", "")
-            if NDJSON_MEDIA_TYPE in content_type:
-                if renderer_cls is not None:
-                    rctx = _make_renderer_context(
-                        cli_kwargs=cli_kwargs or {},
-                        verb="submit",
-                        is_local=False,
-                    )
-                    renderer = _drive_sync_renderer(response.iter_lines(), renderer_cls, rctx=rctx)
-                    renderer.on_complete(ctx=rctx)
-                    return
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    typer.echo(_pretty_print_jsonl_line(line))
-                return
+    with http_client.stream("POST", url, json=body, headers=headers, timeout=timeout) as response:
+        if response.status_code >= 400:
+            # Buffer the body so the caller's error formatter can read
+            # ``exc.response.text`` without raising ``ResponseNotRead``.
             response.read()
-            try:
-                typer.echo(json.dumps(response.json(), indent=2))
-            except ValueError:
-                typer.echo(response.text)
+            response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if NDJSON_MEDIA_TYPE in content_type:
+            if renderer_cls is not None:
+                rctx = _make_renderer_context(
+                    cli_kwargs=cli_kwargs or {},
+                    verb="submit",
+                    is_local=False,
+                )
+                renderer = _drive_sync_renderer(response.iter_lines(), renderer_cls, rctx=rctx)
+                renderer.on_complete(ctx=rctx)
+                return
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                typer.echo(_pretty_print_jsonl_line(line))
+            return
+        response.read()
+        try:
+            typer.echo(json.dumps(response.json(), indent=2))
+        except ValueError:
+            typer.echo(response.text)
 
 
 # ---- helpers ----------------------------------------------------- #
@@ -1203,6 +983,153 @@ def resolve_submit_base_url(typer_ctx: typer.Context) -> str:
             return cast(str, resolved)
 
     return os.environ.get(_DEFAULT_BASE_URL_ENV_VAR) or _DEFAULT_BASE_URL
+
+
+@contextlib.contextmanager
+def _programmatic_submit(typer_ctx: typer.Context) -> Generator[None, None, None]:
+    """Mark a job submit callback call as carrying a caller-built spec.
+
+    Without it, a callback called from a replacement command inspects the
+    replacement's Click parameter sources, finds no spec flag, and prints
+    help instead of submitting. Overrides get this through
+    :func:`take_job_submit` rather than calling it directly.
+    """
+    had_marker = hasattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
+    previous = getattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, False)
+    setattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, True)
+    try:
+        yield
+    finally:
+        if had_marker:
+            setattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR, previous)
+        else:
+            delattr(typer_ctx, _PROGRAMMATIC_SUBMIT_ATTR)
+
+
+def _generated_param_names(callback: Callable[..., object]) -> frozenset[str]:
+    """Names a generated submit callback binds itself: ``typer_ctx``, static flags, and spec leaves."""
+    variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    return frozenset(
+        name for name, param in inspect.signature(callback).parameters.items() if param.kind not in variadic
+    )
+
+
+def _checked_renderer_kwargs(
+    renderer_kwargs: Mapping[str, object] | None,
+    generated_names: frozenset[str],
+    label: str,
+) -> dict[str, object]:
+    """Return *renderer_kwargs* as a dict, rejecting names the generated callback would treat as its own."""
+    extra = dict(renderer_kwargs or {})
+    collisions = sorted(generated_names.intersection(extra))
+    if collisions:
+        raise ValueError(f"renderer_kwargs collide with generated {label} flags: {', '.join(collisions)}")
+    return extra
+
+
+class JobSubmit(Protocol):
+    """A generated job submit callback detached by :func:`take_job_submit`."""
+
+    def __call__(
+        self,
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        profile: str | None = None,
+        options: list[str] | None = None,
+        options_file: Path | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> SubmittedJob | None: ...
+
+
+def take_job_submit(group: typer.Typer) -> JobSubmit:
+    """Detach the generated submit callback from *group* for a replacement to delegate to.
+
+    Call this from a CLI override before registering the replacement
+    callback on *group*. The returned callable submits *spec* (JSON) as
+    ``--spec`` would, inside :func:`_programmatic_submit`, so the generated
+    callback never mistakes the call for one without input. *renderer_kwargs*
+    reach the job renderer as ``RendererContext.cli_kwargs`` and never the
+    spec, so their names must not collide with a generated flag.
+    """
+    callback_info = group.registered_callback
+    original = callback_info.callback if callback_info is not None else None
+    if original is None:
+        raise RuntimeError("missing generated job submit callback to override")
+    group.registered_callback = None
+    generated_names = _generated_param_names(original)
+
+    def submit(
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        profile: str | None = None,
+        options: list[str] | None = None,
+        options_file: Path | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> SubmittedJob | None:
+        extra = _checked_renderer_kwargs(renderer_kwargs, generated_names, "job submit")
+        with _programmatic_submit(typer_ctx):
+            return original(
+                typer_ctx,
+                spec=spec,
+                spec_file=None,
+                options=options or [],
+                options_file=options_file,
+                profile=profile,
+                workspace=workspace,
+                config=None,
+                config_file=None,
+                **extra,
+            )
+
+    return submit
+
+
+class FunctionSubmit(Protocol):
+    """A generated function submit command detached by :func:`take_function_submit`."""
+
+    def __call__(
+        self,
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        request_id: str | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> None: ...
+
+
+def take_function_submit(app: typer.Typer, fn_cls: type[NemoFunction]) -> FunctionSubmit:
+    """Detach *fn_cls*'s generated submit command from *app* for a replacement to delegate to.
+
+    Call this from :meth:`~nemo_helix_plugin.cli.NemoCLI.update_function_cli`
+    before registering the replacement command. The returned callable submits
+    *spec* (JSON) as ``--spec`` would. *renderer_kwargs* reach the function
+    renderer as ``RendererContext.cli_kwargs`` and never the spec, so their
+    names must not collide with a generated flag.
+    """
+    command = next((c for c in app.registered_commands if c.name == fn_cls.name), None)
+    original = command.callback if command is not None else None
+    if original is None:
+        raise RuntimeError(f"missing generated submit command for function {fn_cls.name!r} to override")
+    app.registered_commands = [c for c in app.registered_commands if c is not command]
+    generated_names = _generated_param_names(original)
+
+    def submit(
+        typer_ctx: typer.Context,
+        *,
+        spec: str,
+        workspace: str | None,
+        request_id: str | None = None,
+        renderer_kwargs: Mapping[str, object] | None = None,
+    ) -> None:
+        extra = _checked_renderer_kwargs(renderer_kwargs, generated_names, repr(fn_cls.name))
+        original(typer_ctx, spec=spec, spec_file=None, workspace=workspace, request_id=request_id, **extra)
+
+    return submit
 
 
 def _build_function_submit_url(

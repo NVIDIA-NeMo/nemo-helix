@@ -8,7 +8,7 @@ import SafeSynthesizerLogo from '@nemo/common/src/svgs/safe_synthesizer_logo.svg
 import { Grid, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   CUSTOMIZER_ENABLED,
-  EVALUATOR_ENABLED,
+  EVALS_ENABLED,
   MODEL_COMPARE_ENABLED,
   SAFE_SYNTHESIZER_ENABLED,
 } from '@studio/constants/environment';
@@ -61,7 +61,7 @@ export const WorkspaceDashboardRoute: FC = () => {
                 />
               )}
               {/* Evaluate a Model or Dataset */}
-              {EVALUATOR_ENABLED && (
+              {EVALS_ENABLED && (
                 <DashboardCard
                   icon={<ModelEvaluationIcon className="w-8 h-8" />}
                   title="Evaluate a Model or Dataset"

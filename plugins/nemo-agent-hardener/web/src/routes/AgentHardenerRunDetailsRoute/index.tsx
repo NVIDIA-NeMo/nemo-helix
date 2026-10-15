@@ -110,7 +110,7 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
 
   useBreadcrumbs({
     items: [
-      { href: getAgentHardenerRunListRoute(workspace), slotLabel: 'Agent Hardener' },
+      { href: getAgentHardenerRunListRoute(workspace), slotLabel: 'Agent Hardening' },
       { slotLabel: agentHardenerRunName },
     ],
   });
@@ -181,7 +181,7 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
     'War-game run failed.';
 
   return (
-    <AccessibleTitle title={`Agent Hardener — ${agentHardenerRunName}`}>
+    <AccessibleTitle title={`Agent Hardening — ${agentHardenerRunName}`}>
       <Stack className="min-h-full" gap="density-xl" padding="density-2xl">
         <PageHeader
           className="p-0"

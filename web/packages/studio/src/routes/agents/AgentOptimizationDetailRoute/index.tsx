@@ -9,13 +9,26 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
-import { useAgentOptimizationGetRunStrategyJob } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
+import {
+  useAgentOptimizationGetRunStrategyJob,
+  useAgentOptimizationListRunStrategyJobResults,
+} from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
-import { Flex, PageHeader, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  Banner,
+  Button,
+  Flex,
+  PageHeader,
+  Panel,
+  Spinner,
+  Stack,
+  Text,
+} from '@nvidia/foundations-react-core';
 import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDataView';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { SWITCHYARD_STRATEGY } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
 import { DeployTrialModal } from '@studio/routes/agents/AgentOptimizationDetailRoute/DeployTrialModal';
 import { StudyInProgress } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyInProgress';
 import {
@@ -23,10 +36,17 @@ import {
   type Trial,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import { StudyStatTiles } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyStatTiles';
-import { getAgentOptimizationsTabRoute, getAgentsListRoute } from '@studio/routes/utils';
+import { fetchSwitchyardResults } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/switchyardResults';
+import { SwitchyardResultsView } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/SwitchyardResultsView';
+import { ArtifactFilesPanel } from '@studio/routes/JobDetailRoute/components/ArtifactFilesPanel';
+import {
+  getAgentDetailRoute,
+  getAgentOptimizationsTabRoute,
+  getAgentsListRoute,
+} from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery } from '@tanstack/react-query';
-import { ScrollText } from 'lucide-react';
+import { FolderOpen, ScrollText } from 'lucide-react';
 import { type FC, useCallback, useEffect, useState } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
@@ -61,18 +81,23 @@ export const AgentOptimizationDetailRoute: FC = () => {
   const hasFailed = status ? FAILED_STATUSES.has(status) : false;
   const isQueued = status ? QUEUED_STATUSES.has(status) : false;
   const agentName = job?.spec?.agent?.split('/').pop() ?? undefined;
+  const isSwitchyard = job?.spec?.strategy === SWITCHYARD_STRATEGY;
+  const loadResults = !!workspace && !!jobName && isTerminal && !hasFailed;
 
   const { setBreadcrumbs } = useBreadcrumbs();
   useEffect(() => {
     setBreadcrumbs([
       { slotLabel: 'Agents', href: getAgentsListRoute(workspace) },
-      agentName
-        ? {
-            slotLabel: 'Optimizations',
-            href: getAgentOptimizationsTabRoute(workspace, agentName),
-            preserveQuery: true,
-          }
-        : { slotLabel: 'Optimizations' },
+      ...(agentName
+        ? [
+            { slotLabel: agentName, href: getAgentDetailRoute(workspace, agentName) },
+            {
+              slotLabel: 'Optimizations',
+              href: getAgentOptimizationsTabRoute(workspace, agentName),
+              preserveQuery: true,
+            },
+          ]
+        : [{ slotLabel: 'Optimizations' }]),
       { slotLabel: jobName },
     ]);
     return () => setBreadcrumbs([]);
@@ -86,19 +111,45 @@ export const AgentOptimizationDetailRoute: FC = () => {
   } = useQuery({
     queryKey: ['optimize-study-results', workspace, jobName] as const,
     queryFn: ({ signal }) => fetchStudyResults(workspace, jobName, signal),
-    enabled: !!workspace && !!jobName && isTerminal && !hasFailed,
+    enabled: loadResults && !isSwitchyard,
+    refetchInterval: (query) => (query.state.data === undefined ? JOB_POLLING_INTERVAL_MS : false),
+  });
+
+  const {
+    data: switchyardResults,
+    isLoading: isLoadingSwitchyard,
+    isError: isSwitchyardError,
+    error: switchyardError,
+  } = useQuery({
+    queryKey: ['switchyard-results', workspace, jobName] as const,
+    queryFn: ({ signal }) => fetchSwitchyardResults(workspace, jobName, signal),
+    enabled: loadResults && isSwitchyard,
     refetchInterval: (query) => (query.state.data === undefined ? JOB_POLLING_INTERVAL_MS : false),
   });
 
   const {
     data: logs,
     isLoading: isLoadingLogs,
+    error: logsError,
     loadProgress,
+    refetch: refetchLogs,
   } = useJobLogs({
     workspace,
     name: jobName,
     jobStatus: status,
-    enabled: hasFailed,
+    enabled: !!job,
+  });
+
+  const {
+    data: artifacts,
+    isLoading: isLoadingArtifacts,
+    error: artifactsError,
+  } = useAgentOptimizationListRunStrategyJobResults(workspace, jobName, {
+    query: {
+      queryKey: ['optimization-artifacts', workspace, jobName, status],
+      enabled: !!job,
+      refetchInterval: isTerminal ? false : JOB_POLLING_INTERVAL_MS,
+    },
   });
 
   if (isLoadingJob && !job) {
@@ -133,7 +184,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
 
   return (
     <AccessibleTitle title={`Optimization - ${jobName}`}>
-      <Stack className="w-full p-density-2xl h-full min-h-0" gap="density-2xl">
+      <Stack className="w-full p-density-2xl min-h-full" gap="density-2xl">
         <PageHeader
           className="p-0 shrink-0"
           slotHeading={
@@ -155,19 +206,27 @@ export const AgentOptimizationDetailRoute: FC = () => {
         />
 
         {hasFailed ? (
-          <>
-            <ErrorPanel errorMessage={errorMessage} />
-            <Panel slotHeading="Logs" slotIcon={<ScrollText />} elevation="high" density="compact">
-              <LogViewer
-                logs={logs ?? []}
-                isLoading={isLoadingLogs}
-                loadProgress={loadProgress}
-                downloadFilename={`optimize-${jobName}-logs.txt`}
-              />
-            </Panel>
-          </>
+          <ErrorPanel errorMessage={errorMessage} />
         ) : !isTerminal ? (
           <StudyInProgress workspace={workspace} job={job} isQueued={isQueued} />
+        ) : isSwitchyard ? (
+          isSwitchyardError ? (
+            <ErrorMessage
+              header="Could not load virtual models"
+              message={switchyardError.message}
+              height="auto"
+            />
+          ) : isLoadingSwitchyard ? (
+            <Flex align="center" justify="center" className="min-h-[200px] w-full">
+              <Spinner size="medium" aria-label="Loading virtual models..." />
+            </Flex>
+          ) : !switchyardResults ? (
+            <Text kind="body/regular/md" className="text-secondary">
+              This run did not register any virtual models.
+            </Text>
+          ) : (
+            <SwitchyardResultsView workspace={workspace} job={job} results={switchyardResults} />
+          )
         ) : isResultsError ? (
           <ErrorMessage
             header="Could not load trials"
@@ -194,6 +253,51 @@ export const AgentOptimizationDetailRoute: FC = () => {
             />
           </>
         )}
+        <Panel slotHeading="Logs" slotIcon={<ScrollText />} elevation="high" density="compact">
+          {logsError && logs.length === 0 ? (
+            <Banner
+              kind="inline"
+              status="error"
+              slotActions={
+                <Button kind="secondary" size="small" onClick={() => void refetchLogs()}>
+                  Retry
+                </Button>
+              }
+            >
+              Could not load logs for this study.
+            </Banner>
+          ) : (
+            <LogViewer
+              logs={logs}
+              isLoading={isLoadingLogs && logs.length === 0}
+              loadProgress={loadProgress}
+              downloadFilename={`optimize-${jobName}-logs.txt`}
+              emptyMessage={
+                isQueued
+                  ? 'Logs appear once the study starts.'
+                  : !isTerminal
+                    ? 'Waiting for the study to emit its first log lines...'
+                    : undefined
+              }
+            />
+          )}
+        </Panel>
+        <Panel slotHeading="Artifacts" slotIcon={<FolderOpen />} elevation="high" density="compact">
+          {artifactsError ? (
+            <ErrorMessage
+              header="Could not load artifacts"
+              message={artifactsError.message}
+              height="auto"
+            />
+          ) : (
+            <ArtifactFilesPanel
+              workspace={workspace}
+              results={artifacts?.data ?? []}
+              isLoading={isLoadingArtifacts}
+              jobStatus={status}
+            />
+          )}
+        </Panel>
       </Stack>
     </AccessibleTitle>
   );

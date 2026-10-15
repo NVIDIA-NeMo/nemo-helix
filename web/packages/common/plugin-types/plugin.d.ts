@@ -756,6 +756,11 @@ interface AssistantMessageCompletion {
   completionTokens: number;
   /** Completion tokens per second of streaming wall-time (excludes TTFT). */
   tokensPerSec: number;
+  /**
+   * The `model` the backend reported serving the response. For a routing VirtualModel this is
+   * the upstream model the request was sent to, not the VirtualModel's own name.
+   */
+  responseModel?: string;
 }
 //#endregion
 //#region src/components/AssistantChat/index.d.ts

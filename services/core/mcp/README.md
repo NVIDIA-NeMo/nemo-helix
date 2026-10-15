@@ -147,7 +147,7 @@ uv run ruff format services/core/mcp
 
 **Future Phases**:
 
-- Phase 2: Evaluator service MCP
+- Phase 2: Evals service MCP
 - Phase 3: Data Designer service MCP
 - Phase 4: Customization service MCP
 - Phase 5: Guardrails & Inference service MCPs

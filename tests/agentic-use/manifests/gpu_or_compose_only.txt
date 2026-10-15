@@ -1,4 +1,0 @@
-# Tasks that require docker-compose orchestration and/or GPU-oriented runtime assumptions.
-customizer-lora-job-cli
-jobs-execute-gpu-cli
-jobs-multistep-cpu-cli

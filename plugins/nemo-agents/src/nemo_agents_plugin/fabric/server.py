@@ -319,7 +319,7 @@ def create_fabric_serving_app(
     config_path = Path(agent_config_path).resolve()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         agent_config = load_agent_config(config_path)
         runtime_base_dir = await asyncio.to_thread(resolve_runtime_base_dir, config_path)
         base_dir = runtime_base_dir.path
@@ -488,6 +488,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent-config", required=True, type=Path, help="Path to an agent YAML config file.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--socket-fd", type=int, help="Inherited loopback socket descriptor.")
     parser.add_argument(
         "--max-concurrent-invocations",
         type=int,
@@ -524,6 +525,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         host=args.host,
         port=args.port,
+        fd=args.socket_fd,
         log_config=None,
     )
     return 0

@@ -4,7 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
-import { useEvaluatorGetEvaluateJob } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
+import { useEvalsGetEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   Badge,
@@ -41,7 +41,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
     data: job,
     error,
     isPending: isJobPending,
-  } = useEvaluatorGetEvaluateJob(workspace, id, {
+  } = useEvalsGetEvaluateJob(workspace, id, {
     query: {
       refetchOnMount: 'always',
       refetchInterval: (query) => {

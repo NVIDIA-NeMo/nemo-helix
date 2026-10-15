@@ -54,7 +54,10 @@ import {
   type AgentDetailTab,
   DEFAULT_TAB,
   isAgentDetailTab,
+  isOptimizationView,
+  OptimizationView,
   TAB_SEARCH_PARAM,
+  VIEW_SEARCH_PARAM,
 } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import { useAgentDetails } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { deriveWalkthroughStep } from '@studio/routes/agents/AgentDetailRoute/walkthrough';
@@ -68,9 +71,6 @@ import { getAgentsListRoute } from '@studio/routes/utils';
 import { GitCommitHorizontal } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
-
-const VIEW_SEARCH_PARAM = 'view';
-const VIEW_NEW = 'new';
 
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -93,10 +93,14 @@ export const AgentDetailRoute: FC = () => {
   const [walkthroughDismissed, setWalkthroughDismissed] = useState(false);
   const tabFromUrl = searchParams.get(TAB_SEARCH_PARAM);
   const selectedTab: AgentDetailTab = isAgentDetailTab(tabFromUrl) ? tabFromUrl : DEFAULT_TAB;
+  const viewFromUrl = searchParams.get(VIEW_SEARCH_PARAM);
+  // Without the form flag there is nothing to create in the tab, so it only ever shows the table.
+  const optimizationView: OptimizationView =
+    AGENT_OPTIMIZATION_FORM_ENABLED && isOptimizationView(viewFromUrl)
+      ? viewFromUrl
+      : OptimizationView.Table;
   const isCreatingOptimization =
-    AGENT_OPTIMIZATION_FORM_ENABLED &&
-    selectedTab === 'optimizations' &&
-    searchParams.get(VIEW_SEARCH_PARAM) === VIEW_NEW;
+    selectedTab === 'optimizations' && optimizationView !== OptimizationView.Table;
 
   const {
     agent,
@@ -145,15 +149,17 @@ export const AgentDetailRoute: FC = () => {
     setSearchParams({ [TAB_SEARCH_PARAM]: tab }, { replace: true });
   };
 
-  const setOptimizationView = (creating: boolean) => {
+  const setOptimizationView = (view: OptimizationView) => {
     const params = new URLSearchParams({ [TAB_SEARCH_PARAM]: 'optimizations' });
-    if (creating) params.set(VIEW_SEARCH_PARAM, VIEW_NEW);
+    if (view !== OptimizationView.Table) params.set(VIEW_SEARCH_PARAM, view);
     setSearchParams(params);
   };
 
-  // The in-tab form is still behind its own flag; until it ships, Optimize opens the launch modal.
+  // The in-tab flow is still behind its own flag; until it ships, Optimize opens the launch modal.
   const openOptimize = () =>
-    AGENT_OPTIMIZATION_FORM_ENABLED ? setOptimizationView(true) : setLaunchOptimizeOpen(true);
+    AGENT_OPTIMIZATION_FORM_ENABLED
+      ? setOptimizationView(OptimizationView.Strategy)
+      : setLaunchOptimizeOpen(true);
 
   const switchToChat = (deployment: AgentDeployment) => {
     setSelectedDeploymentName(deployment.name);
@@ -219,7 +225,7 @@ export const AgentDetailRoute: FC = () => {
         next.delete(ACTION_SEARCH_PARAM);
         if (optimizeRequested && AGENT_OPTIMIZATION_FORM_ENABLED) {
           next.set(TAB_SEARCH_PARAM, 'optimizations');
-          next.set(VIEW_SEARCH_PARAM, VIEW_NEW);
+          next.set(VIEW_SEARCH_PARAM, 'strategy');
         }
         return next;
       },
@@ -331,9 +337,10 @@ export const AgentDetailRoute: FC = () => {
                 agentName={agentName}
                 evals={agentEvals}
                 isEvalsPending={isAgentEvalsPending}
-                isCreating={isCreatingOptimization}
+                view={optimizationView}
                 onOptimize={openOptimize}
-                onCloseForm={() => setOptimizationView(false)}
+                onViewChange={setOptimizationView}
+                onUploadConfig={() => setLaunchOptimizeOpen(true)}
               />
             </TabsContent>
           )}

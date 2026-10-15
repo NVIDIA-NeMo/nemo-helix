@@ -7,6 +7,7 @@ import io
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
 import urllib.error
@@ -379,6 +380,10 @@ def _write_manifest(env_dir, **fields):
         config = env_dir / relative_path
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text("test: {}\n", encoding="utf-8")
+        # Gym only discovers a server directory that carries an install marker.
+        server_dir = config.parent.parent
+        if server_dir.parent.name in ("resources_servers", "responses_api_agents"):
+            (server_dir / "requirements.txt").write_text("", encoding="utf-8")
     manifest_path = env_dir / runtime.ENVIRONMENT_MANIFEST_FILENAME
     manifest_path.write_text(yaml.safe_dump(fields), encoding="utf-8")
 
@@ -567,7 +572,12 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
 
     # Capture the uv command without trying to install these intentionally empty wheel fixtures.
     calls = []
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: calls.append((a, k)))
+
+    def record(*a, **k):
+        calls.append((a, k))
+        return subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runtime.subprocess, "run", record)
     monkeypatch.setenv("PYTHONPATH", "/image/packages")
 
     package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
@@ -593,7 +603,7 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
         str(wheels_dir / "a_dep-1.0-py3-none-any.whl"),
         str(wheels_dir / "b_dep-2.0-py3-none-any.whl"),
     ]
-    assert kwargs == {"check": True}
+    assert kwargs == {"capture_output": True, "text": True, "check": False}
     assert install_dir.is_dir()
     assert runtime.os.environ[runtime.UV_FIND_LINKS_ENV_KEY] == str(wheels_dir)
     # Child processes and the already-running host both prefer staged packages over image packages.
@@ -609,8 +619,61 @@ def _stage_wheelhouse(tmp_path, monkeypatch):
     wheels_dir = tmp_path / WHEELS_V1_SUBDIR
     wheels_dir.mkdir()
     (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+    )
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def _fail_uv(monkeypatch, stderr: str) -> None:
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout="", stderr=stderr)
+    )
+
+
+def test_a_failed_wheel_install_raises_uvs_reason_instead_of_the_command(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    """uv writes to the raw stderr fd, so without capture the failure would carry no reason."""
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    _fail_uv(monkeypatch, "Resolved 1 package\n  × No solution found when resolving dependencies\n")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    message = str(excinfo.value)
+    assert "failed with exit code 1" in message
+    assert "× No solution found when resolving dependencies" in message
+    # The command lists every wheel; with a real wheelhouse it buries the reason.
+    assert "a_dep-1.0-py3-none-any.whl" not in message
+
+
+def test_a_failed_wheel_install_reaches_the_output_tail(tmp_path, monkeypatch, isolated_gym_host_process_state):
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    _fail_uv(monkeypatch, "error: Failed to install: a_dep-1.0-py3-none-any.whl\n")
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+    monkeypatch.setattr(runtime.sys, "stderr", runtime._OutputTail(io.StringIO(), runtime._OUTPUT_TAIL))
+
+    with pytest.raises(RuntimeError):
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    assert runtime._OUTPUT_TAIL[-1] == "error: Failed to install: a_dep-1.0-py3-none-any.whl"
+
+
+def test_a_failed_wheel_install_keeps_only_the_last_stderr_lines_and_masks_secrets(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    package = _stage_wheelhouse(tmp_path, monkeypatch)
+    monkeypatch.setenv("NHX_TEST_API_KEY", "sk-secret-value")
+    noise = "".join(f"+ pkg{i}==1.0\n" for i in range(50))
+    _fail_uv(monkeypatch, noise + "error: token sk-secret-value rejected\n")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
+
+    reason = str(excinfo.value).split(":\n", 1)[1].splitlines()
+    assert len(reason) == runtime._UV_FAILURE_REASON_LINES
+    assert reason[-1] == "error: token *** rejected"
 
 
 def test_an_offline_environment_takes_uv_off_the_index(tmp_path, monkeypatch, isolated_gym_host_process_state):
@@ -2003,3 +2066,211 @@ def test_a_secret_straddling_the_retention_bound_is_still_masked(monkeypatch):
 
     assert "nvapi-straddlingsecret" not in buffer[0]
     assert "***" in buffer[0], "the secret crossed the bound and must survive whole to be masked"
+
+
+def _wheels_package_with_servers(
+    tmp_path, monkeypatch, *, servers=("resources_servers/custom",), markers=("requirements.txt",)
+):
+    """A wheels-v1 package whose server directories carry the given install markers, with uv stubbed."""
+    config_paths = [f"{server}/configs/{server.rsplit('/', 1)[1]}.yaml" for server in servers]
+    _write_manifest(tmp_path, format="wheels-v1", config_paths=config_paths)
+    for server in servers:
+        for existing in ("requirements.txt", "pyproject.toml"):
+            (tmp_path / server / existing).unlink(missing_ok=True)
+        for marker in markers:
+            (tmp_path / server / marker).write_text("", encoding="utf-8")
+    wheels_dir = tmp_path / WHEELS_V1_SUBDIR
+    wheels_dir.mkdir(exist_ok=True)
+    (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
+    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def _fake_container_venv(tmp_path, monkeypatch):
+    venv = tmp_path / "container-venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").write_text("", encoding="utf-8")
+    (venv / "bin" / "activate").write_text("", encoding="utf-8")
+    monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+    # The caller's opt-in; Evaluator sets it, GRPO does not.
+    monkeypatch.setenv(runtime.REUSE_IMAGE_GYM_INSTALL_ENV_KEY, "true")
+    return venv
+
+
+def test_without_the_callers_opt_in_wheels_v1_servers_build_their_own_venvs(tmp_path, monkeypatch):
+    """GRPO shares this host and documents a vendor-the-full-closure contract; it is not changed unasked."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    monkeypatch.delenv(runtime.REUSE_IMAGE_GYM_INSTALL_ENV_KEY, raising=False)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_wheels_v1_servers_get_the_containers_gym_install_as_their_venv(tmp_path, monkeypatch):
+    """The wheelhouse carries only the servers' extras; Gym itself comes from the image.
+
+    Gym skips a component's venv build when the venv path already holds bin/python and
+    bin/activate, so each package server's venv path is pointed at the container venv.
+    """
+    package = _wheels_package_with_servers(
+        tmp_path, monkeypatch, servers=("resources_servers/custom", "responses_api_agents/custom_agent")
+    )
+    container_venv = _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    config = {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)}
+
+    runtime._link_wheels_v1_component_venvs(package, config, str(tmp_path / "work"))
+
+    for kind, name in (("resources_servers", "custom"), ("responses_api_agents", "custom_agent")):
+        venv_path = venv_root / kind / name / runtime.COMPONENT_VENV_DIRNAME
+        assert venv_path.is_symlink()
+        assert venv_path.resolve() == container_venv.resolve()
+        # What Gym's skip check looks for.
+        assert (venv_path / "bin" / "python").exists() and (venv_path / "bin" / "activate").exists()
+    # The root was writable, so Gym keeps reading it from the same config key.
+    assert config[runtime.UV_VENV_DIR_KEY] == str(venv_root)
+
+
+def test_an_existing_component_venv_is_kept(tmp_path, monkeypatch):
+    """An image-baked venv for a same-named built-in is not replaced."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    baked = venv_root / "resources_servers" / "custom" / runtime.COMPONENT_VENV_DIRNAME
+    baked.mkdir(parents=True)
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert baked.is_dir() and not baked.is_symlink()
+
+
+def test_a_server_without_an_install_marker_is_not_linked(tmp_path, monkeypatch):
+    """Gym would not discover it, so there is nothing to build and nothing to link."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    (tmp_path / "resources_servers" / "custom" / "requirements.txt").unlink()
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not (venv_root / "resources_servers" / "custom").exists()
+
+
+def test_without_skip_venv_if_present_nothing_is_linked(tmp_path, monkeypatch):
+    """With the skip off, Gym would `uv venv --allow-existing` into the link target: the container venv."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: False, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_native_v1_servers_keep_building_their_own_venvs(tmp_path, monkeypatch):
+    _write_manifest(tmp_path, format="native-v1")
+    package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_a_read_only_venv_root_is_mirrored_into_the_work_mount(tmp_path, monkeypatch):
+    """`/opt/gym_venvs` is often read-only for the sandbox uid; the image's baked venvs must stay visible."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    container_venv = _fake_container_venv(tmp_path, monkeypatch)
+    image_root = tmp_path / "opt-gym_venvs"
+    baked = image_root / "resources_servers" / "mcqa"
+    (baked / runtime.COMPONENT_VENV_DIRNAME / "bin").mkdir(parents=True)
+    real_access = runtime.os.access
+    monkeypatch.setattr(
+        runtime.os, "access", lambda path, mode: False if str(path) == str(image_root) else real_access(path, mode)
+    )
+    work = tmp_path / "work"
+    config = {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(image_root)}
+
+    runtime._link_wheels_v1_component_venvs(package, config, str(work))
+
+    mirrored_root = work / runtime.COMPONENT_VENV_ROOT_SUBDIR
+    # Gym is pointed at the writable root...
+    assert config[runtime.UV_VENV_DIR_KEY] == str(mirrored_root)
+    # ...which still exposes the image's baked venv...
+    assert (mirrored_root / "resources_servers" / "mcqa").resolve() == baked.resolve()
+    # ...beside the package server's link to the container venv.
+    linked = mirrored_root / "resources_servers" / "custom" / runtime.COMPONENT_VENV_DIRNAME
+    assert linked.is_symlink() and linked.resolve() == container_venv.resolve()
+
+
+def _extras_only_wheels_package(tmp_path, monkeypatch):
+    """A wheels-v1 package that adds wheels for the image's built-in servers and declares no component."""
+    import yaml
+
+    (tmp_path / runtime.ENVIRONMENT_MANIFEST_FILENAME).write_text(
+        yaml.safe_dump({"format": "wheels-v1", "config_paths": [], "metadata": {"name": "extras-only"}}),
+        encoding="utf-8",
+    )
+    wheels_dir = tmp_path / WHEELS_V1_SUBDIR
+    wheels_dir.mkdir()
+    (wheels_dir / "extra_dep-1.0-py3-none-any.whl").write_bytes(b"")
+    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def test_an_extras_only_wheels_package_runs_the_selected_built_in_components(tmp_path, monkeypatch):
+    """Expectation: a FileSet may carry just the extra wheels a built-in environment needs."""
+    package = _extras_only_wheels_package(tmp_path, monkeypatch)
+    agent_config = "responses_api_agents/simple_agent/configs/simple_agent.yaml"
+
+    configured = runtime._compose_gym_config_with_environment_package(
+        _component_selection(agent_config=agent_config), package
+    )
+
+    assert configured["config_paths"] == [
+        agent_config,
+        "responses_api_models/inference_provider/configs/inference_provider.yaml",
+        "resources_servers/selected_resources/configs/selected_resources.yaml",
+    ]
+
+
+def test_an_extras_only_wheels_package_links_no_venv_but_still_stages_its_wheels(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    """Nothing to link (no package server), yet the wheels must reach the built-in servers via PYTHONPATH."""
+    package = _extras_only_wheels_package(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    work = tmp_path / "work"
+
+    runtime._install_wheels_v1_dependencies(package, str(work))
+    runtime._link_wheels_v1_component_venvs(
+        package, {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)}, str(work)
+    )
+
+    assert not venv_root.exists()
+    assert runtime.os.environ["PYTHONPATH"].split(runtime.os.pathsep)[0] == str(work / runtime.WHEELS_V1_INSTALL_SUBDIR)

@@ -1,11 +1,23 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
+
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 /** Abbreviates a commit SHA; any other revision (a branch, a tag) is shown whole. */
 export const shortRevision = (revision: string): string =>
   COMMIT_SHA.test(revision) ? revision.slice(0, 7) : revision;
+
+/**
+ * The URL to show for a deployment, by the backend's routing rule: a non-empty
+ * `endpoint` (subprocess), otherwise the first http(s) entry in `endpoints`
+ * (docker/k8s leave `endpoint` empty). Display only; never written back.
+ */
+export const deploymentUrl = (deployment: AgentDeployment): string | undefined =>
+  deployment.endpoint ||
+  deployment.endpoints?.find((e) => e.url && (e.protocol === 'http' || e.protocol === 'https'))
+    ?.url;
 
 // Matches the Runtime select in CreateDeploymentModal, so one deployment is not
 // named two things across the UI.

@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Per-invocation telemetry state bridged between the Typer callback and the Click main wrapper.
 
-The Typer ``@app.callback`` sees the parsed context (command name, agent mode, opt-out
-flag) but not the command outcome. The ``NhxErrorHandlingMixin.main`` wrapper sees the
+The Typer ``@app.callback`` sees the parsed context (command name, opt-out flag) but not the command outcome. The ``NhxErrorHandlingMixin.main`` wrapper sees the
 outcome and duration but not the parsed flags. This module is the single small piece of
 state both sides read, so exactly one ``command_invoked`` event is emitted per invocation
 from the root command path.
@@ -24,7 +23,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class _InvocationState:
     command_parts: list[str] = field(default_factory=list)
-    agent_mode: bool = False
     started: bool = False
     opted_out: bool = False
 
@@ -36,13 +34,12 @@ def reset() -> None:
     """Clear invocation state. Called at the top of the root ``main()`` so CliRunner
     invocations sharing a process never leak command names or flags between calls."""
     state.command_parts = []
-    state.agent_mode = False
     state.started = False
     state.opted_out = False
 
 
 def on_callback(ctx: click.Context, *, no_telemetry: bool) -> None:
-    """Capture command name + agent mode from the root Typer callback.
+    """Capture command name from the root Typer callback.
 
     Best effort: a telemetry bug must never break ``nemo <anything>``.
     """
@@ -52,7 +49,6 @@ def on_callback(ctx: click.Context, *, no_telemetry: bool) -> None:
         set_invocation_opt_out(no_telemetry)
         state.opted_out = no_telemetry
         state.started = True
-        state.agent_mode = bool(getattr(ctx.obj, "agent_mode", False))
         invoked = getattr(ctx, "invoked_subcommand", None)
         if invoked:
             state.command_parts = [invoked]
@@ -83,7 +79,6 @@ def emit_command_invoked(task_status: TaskStatusEnum, duration_sec: float) -> No
         event = CommandInvokedEvent(
             command=" ".join(state.command_parts),
             duration_sec=max(0.0, duration_sec),
-            agent_mode=state.agent_mode,
             task_status=task_status,
         )
         emit_event(event)

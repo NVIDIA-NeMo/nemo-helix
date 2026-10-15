@@ -74,4 +74,5 @@ test_runtimes:
       - workload_deployment
       - managed_workload_deployment_obo
       - device_flow
+      - confidential_oidc
       - kubernetes_token_review

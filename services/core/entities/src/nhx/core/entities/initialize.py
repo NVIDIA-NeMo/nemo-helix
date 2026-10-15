@@ -88,7 +88,8 @@ def _run_alembic_upgrade(alembic_ini_path: Path, database_url: str) -> None:
     """
     sync_url = database_url.replace("sqlite+aiosqlite", "sqlite").replace("postgresql+asyncpg", "postgresql")
     cfg = Config(str(alembic_ini_path))
-    cfg.set_main_option("sqlalchemy.url", sync_url)
+    # Alembic's ConfigParser treats "%" as interpolation; escape URL-encoded characters.
+    cfg.set_main_option("sqlalchemy.url", sync_url.replace("%", "%%"))
     command.upgrade(cfg, "head")
 
 

@@ -2,16 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
-import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
-import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { useAgentOptimizationGetRunStrategyJobStatus } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
-import { Banner, Button, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { ListChecks, ScrollText, SlidersHorizontal } from 'lucide-react';
+import { Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { routingStrategyTitle } from '@studio/components/dataViews/SwitchyardRoutesDataView/useRouteColumns';
+import { SWITCHYARD_STRATEGY } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
+import { ListChecks, SlidersHorizontal } from 'lucide-react';
 import type { FC } from 'react';
+
+/** A spec list field — strategy-specific, so untyped on `RunStrategySpec` — as one line. */
+const listText = (value: unknown, format: (item: string) => string = (item) => item) =>
+  Array.isArray(value) && value.length
+    ? value.map((item) => format(String(item))).join(', ')
+    : undefined;
 
 export interface StudyInProgressProps {
   workspace: string;
@@ -22,23 +28,38 @@ export interface StudyInProgressProps {
 
 /**
  * What a study shows before its trials exist: the submitted spec, the job's step-by-step
- * progress, and its live logs — all polled until the study reaches a terminal status.
+ * progress — polled until the study reaches a terminal status.
  */
 export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQueued }) => {
-  const { name: jobName, spec, status } = job;
+  const { name: jobName, spec } = job;
 
   const { data: jobStatus } = useAgentOptimizationGetRunStrategyJobStatus(workspace, jobName, {
     query: { enabled: !!workspace && !!jobName, refetchInterval: JOB_POLLING_INTERVAL_MS },
   });
   const steps = jobStatus?.steps ?? [];
+  const isSwitchyard = spec.strategy === SWITCHYARD_STRATEGY;
+  const resultNoun = isSwitchyard ? 'Virtual models' : 'Trials';
 
-  const {
-    data: logs,
-    isLoading: isLoadingLogs,
-    error: logsError,
-    loadProgress,
-    refetch: refetchLogs,
-  } = useJobLogs({ workspace, name: jobName, jobStatus: status, enabled: !!jobName });
+  const strategyItems = isSwitchyard
+    ? [
+        { key: 'models', label: 'Models', value: listText(spec.models), wrapValue: true },
+        {
+          key: 'routing-strategies',
+          label: 'Routing strategies',
+          value: listText(spec.routing_strategies, routingStrategyTitle),
+          wrapValue: true,
+        },
+      ]
+    : [
+        { key: 'config', label: 'Config', value: spec.optimize_config, wrapValue: true },
+        {
+          key: 'config-fileset',
+          label: 'Config fileset',
+          value: spec.optimize_config_fileset,
+          wrapValue: true,
+        },
+        { key: 'output', label: 'Output', value: spec.output, wrapValue: true },
+      ];
 
   return (
     <Stack gap="density-2xl" className="min-h-0 w-full" data-testid="study-in-progress">
@@ -51,21 +72,14 @@ export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQu
         <Stack gap="density-xl">
           <Text kind="body/regular/md" className="text-secondary" role="status">
             {isQueued
-              ? 'Waiting for the study to start. Trials appear once it finishes.'
-              : 'Trials appear once the study finishes.'}
+              ? `Waiting for the study to start. ${resultNoun} appear once it finishes.`
+              : `${resultNoun} appear once the study finishes.`}
           </Text>
           <KeyValueGrid
             items={[
               { key: 'strategy', label: 'Strategy', value: spec.strategy },
               { key: 'agent', label: 'Agent', value: spec.agent },
-              { key: 'config', label: 'Config', value: spec.optimize_config, wrapValue: true },
-              {
-                key: 'config-fileset',
-                label: 'Config fileset',
-                value: spec.optimize_config_fileset,
-                wrapValue: true,
-              },
-              { key: 'output', label: 'Output', value: spec.output, wrapValue: true },
+              ...strategyItems,
               {
                 key: 'submitted',
                 label: 'Submitted',
@@ -100,34 +114,6 @@ export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQu
           </Stack>
         </Panel>
       )}
-
-      <Panel slotHeading="Logs" slotIcon={<ScrollText />} elevation="high" density="compact">
-        {logsError && logs.length === 0 ? (
-          <Banner
-            kind="inline"
-            status="error"
-            slotActions={
-              <Button kind="secondary" size="small" onClick={() => void refetchLogs()}>
-                Retry
-              </Button>
-            }
-          >
-            Could not load logs for this study.
-          </Banner>
-        ) : (
-          <LogViewer
-            logs={logs}
-            isLoading={isLoadingLogs && logs.length === 0}
-            loadProgress={loadProgress}
-            downloadFilename={`optimize-${jobName}-logs.txt`}
-            emptyMessage={
-              isQueued
-                ? 'Logs appear once the study starts.'
-                : 'Waiting for the study to emit its first log lines...'
-            }
-          />
-        )}
-      </Panel>
     </Stack>
   );
 };

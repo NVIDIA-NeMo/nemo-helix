@@ -15,7 +15,7 @@ dependencies = [
     "nemo-agents-plugin",
     "nemo-helix-plugin",
     "nemo-helix",
-    "nemo-evaluator-sdk",
+    "nhx-evals-sdk",
     "matplotlib>=3.8.0",
     "numpy>=1.26.0",
     "optuna>=4.0.0",
@@ -26,7 +26,7 @@ dependencies = [
 ]
 version = "0.0.0"
 
-# Discovered by `nemo agents optimize` as the `legacy` strategy, via the
+# Discovered by `nemo agents optimize` as the `config-tuning` strategy, via the
 # `nemo_agent_optimization_strategy` class variable on OptimizeJob. The key sits under the
 # dispatcher's `agent-optimization` plugin namespace rather than minting a new one: plugin
 # allowlists and `nemo plugins list` group `nemo.jobs` entries by that prefix, so a deployment
@@ -57,7 +57,7 @@ nemo-agent-optimization-plugin = { workspace = true }
 nemo-agents-plugin = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 nemo-helix = { workspace = true }
-nemo-evaluator-sdk = { workspace = true }
+nhx-evals-sdk = { workspace = true }
 
 [dependency-groups]
 dev = [

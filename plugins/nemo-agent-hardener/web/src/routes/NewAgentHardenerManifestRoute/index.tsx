@@ -69,7 +69,7 @@ export const NewAgentHardenerManifestRoute: FC = () => {
 
   useBreadcrumbs({
     items: [
-      { href: getAgentHardenerRunListRoute(workspace), slotLabel: 'Agent Hardener' },
+      { href: getAgentHardenerRunListRoute(workspace), slotLabel: 'Agent Hardening' },
       { href: getAgentHardenerManifestListRoute(workspace), slotLabel: 'Manifests' },
       { slotLabel: 'New' },
     ],

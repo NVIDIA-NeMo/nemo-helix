@@ -71,7 +71,7 @@ class TokenClaimsExtractor:
         email = email_value if isinstance(email_value, str) else None
 
         scopes = scopes_from_claim(claims.get("scope") or claims.get("scp"))
-        prefix = self.config.oidc.scope_prefix
+        prefix = self.config.oidc.effective_scope_prefix
         if prefix:
             scopes = [scope.removeprefix(prefix) for scope in scopes]
 

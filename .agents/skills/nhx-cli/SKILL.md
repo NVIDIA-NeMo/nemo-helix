@@ -23,9 +23,7 @@ The `nemo` CLI host (entry point, global options, config, auth, lazy group loadi
 | `cli_codegen` | `handle_code_generation` for `--output-format code` |
 
 Every command talks to the platform through the typed clients in `nemo_helix_plugin`
-(`nemo_helix_plugin.<area>.client`, or a plugin's own `client.py`). The CLI has **no dependency on the
-generated `nemo_helix` (Stainless) SDK**; `packages/nemo_helix_ext/tests/cli/test_stainless_boundary.py`
-enforces this. Never add a `from nemo_helix` import under `cli/` or in plugin CLI code.
+(`nemo_helix_plugin.<area>.client`, or a plugin's own `client.py`).
 
 Plugin and service code must **not import `nemo_helix_ext`** — plugins only depend on
 `nemo_helix_plugin`.
@@ -35,7 +33,7 @@ Plugin and service code must **not import `nemo_helix_ext`** — plugins only de
 | Category | Location | Description |
 |----------|----------|-------------|
 | **Core resource groups** | `commands/<group>.py` (`files`, `inference/`, `jobs`, `models`, `secrets`, `workspaces`, hidden `adapters`, `iam`, `projects`) | Hand-written on typed clients, registered in `commands/manifest_registry.py` |
-| **Plugin-hosted groups** | owning package, `nemo.cli` entry point (`guardrail` → `plugins/nemo-guardrails`, `intake`/`experiments` → `services/intake`, `insights`, `agents`, `auditor`, ...) | Appear only when the package is installed |
+| **Plugin-hosted groups** | owning package, `nemo.cli` entry point (`guardrail` → `plugins/nemo-guardrails`, `intake`/`experiments` → `services/intake`, `insights`, `agents`, `garak`, ...) | Appear only when the package is installed |
 | **Generated job/function verbs** | `nemo_helix_plugin/commands.py` | `submit`/`explain`/`run` for every `NemoJob`/`NemoFunction` a plugin registers |
 | **Setup / use cases** | `commands/setup.py`, `commands/use_cases/`, `commands/auth.py`, `commands/config.py` | Wizards and workflows (`chat`, `wait`, ...) |
 | **Services** | `commands/services/`, `commands/quickstart/` | Run the platform locally (imports server packages by design) |
@@ -169,8 +167,8 @@ Conventions that keep the surface consistent:
 - **Errors**: let `nemo_helix_plugin.client.errors` propagate; `@handle_errors` maps them (API errors,
   including 404 and connection failures → exit 3; usage and client-side validation → exit 2). Raise
   `click.BadParameter` for bad input and `click.ClickException` for expected failures.
-- **Warnings**: decorate commands with `@collect_warnings` so `add_warning` (pagination, truncation) and
-  agent-mode hints are printed.
+- **Warnings**: decorate commands with `@collect_warnings` so `add_warning` (pagination, truncation)
+  warnings are printed.
 
 ### Register the group
 
@@ -186,8 +184,7 @@ group with the same name as a built-in core group replaces it.
 
 If the typed client lacks a route, add it to `nemo_helix_plugin/<area>/{endpoints,types,client}.py`
 (or the plugin's own `types/endpoints.py` + `client.py`) mirroring the server's FastAPI route exactly,
-with tests. Keep plugin clients in a module that does not import the generated SDK, so the CLI can use
-them.
+with tests.
 
 ## Testing
 
@@ -203,8 +200,6 @@ Required for a new or changed group:
 2. **Integration tests** (core, `tests/cli/integration/test_<group>.py`): the `runner` fixture injects a
    `NemoClient` backed by the in-process ASGI app from `nhx.testing`; add the service class to
    `create_test_client(...)` in `tests/cli/integration/conftest.py` if it is not hosted yet.
-3. **Boundary**: add a core group's `--help` and a `-f code` invocation to `RUNTIME_COMMANDS` in
-   `tests/cli/test_stainless_boundary.py`.
 
 ```bash
 uv run --frozen pytest packages/nemo_helix_ext/tests/cli -q
@@ -221,5 +216,5 @@ uv run --frozen pytest packages/nemo_helix_plugin/tests -q
   masking, datetimes, dicts, lists) and add a `compile()` test in `packages/nemo_helix_plugin/tests/test_cli_codegen.py`.
 - **`RuntimeError: No NeMo Helix CLI state on this context`**: a test invoked the command without
   `obj=`; pass a CLI state.
-- **Command needs a Stainless helper**: it does not; find the equivalent on the typed client or in
-  `packages/filesets/src/filesets/transfer.py` (fileset upload/download/list/delete).
+- **Command needs a helper the typed client lacks**: check `packages/filesets/src/filesets/transfer.py`
+  (fileset upload/download/list/delete) before adding a route.

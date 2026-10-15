@@ -4,6 +4,7 @@
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { datasetFileContentQueryOptions } from '@studio/api/datasets/useDatasetFileContent';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { parse as parseYaml } from 'yaml';
 
 // Matches nemo-environment.yaml at the fileset root or one directory deep
@@ -32,6 +33,12 @@ const ENVIRONMENT_FORMATS = ['native-v1', 'wheels-v1', 'adapter-wheels-v1'] as c
 
 type EnvironmentFormat = (typeof ENVIRONMENT_FORMATS)[number];
 
+/** The YAML is user-authored, so `adapter.agent` may be any type. */
+const agentOf = (yaml: NemoEnvironmentYaml): string | undefined => {
+  const agent: unknown = yaml.adapter?.agent;
+  return typeof agent === 'string' ? agent.trim() || undefined : undefined;
+};
+
 const isKnownFormat = (value: string | undefined): value is EnvironmentFormat =>
   !!value && (ENVIRONMENT_FORMATS as readonly string[]).includes(value);
 
@@ -44,6 +51,8 @@ const CONFIG_PATH_PREFIXES: Record<string, readonly string[]> = {
 export interface GymEnvironmentManifest {
   /** Value of the `format` field in nemo-environment.yaml (e.g. "adapter-wheels-v1"). */
   format: string;
+  /** `adapter.agent`, the NeMo Gym agent an adapter-wheels-v1 package runs. */
+  agent?: string;
   envName: string;
   description?: string;
   hubId?: string;
@@ -119,7 +128,7 @@ const collectManifestIssues = (yaml: NemoEnvironmentYaml, packagePaths: string[]
     );
   }
 
-  if (format === 'adapter-wheels-v1' && !yaml.adapter?.agent?.trim()) {
+  if (format === 'adapter-wheels-v1' && !agentOf(yaml)) {
     issues.push('adapter.agent is required for adapter-wheels-v1.');
   }
 
@@ -156,8 +165,12 @@ export const useGymEnvironmentManifest = ({
     query: { enabled },
   });
 
-  const allFiles = filesResponse?.data ?? [];
-  const manifestFile = allFiles.find((f) => NEMO_ENV_YAML_RE.test(f.path)) ?? null;
+  const files = filesResponse?.data;
+  const allFiles = useMemo(() => files ?? [], [files]);
+  const manifestFile = useMemo(
+    () => allFiles.find((f) => NEMO_ENV_YAML_RE.test(f.path)) ?? null,
+    [allFiles]
+  );
 
   const {
     data: fileContent,
@@ -176,23 +189,21 @@ export const useGymEnvironmentManifest = ({
 
   const totalSize = allFiles.reduce((sum, f) => sum + f.size, 0);
 
-  // The manifest may sit one directory deep (upload prefix). The backend treats its
-  // directory as `env_root` and resolves config_paths and wheels/ against it, so
-  // strip the prefix once and run every layout check on package-relative paths.
-  const packageRoot = manifestFile?.path.replace(/[^/]+$/, '') ?? '';
-  const packagePaths = manifestFile
-    ? allFiles
-        .map((f) => f.path)
-        .filter((p) => p.startsWith(packageRoot))
-        .map((p) => p.slice(packageRoot.length))
-    : [];
-  const wheelCount = packagePaths.filter((p) => WHEEL_RE.test(p)).length;
-
-  const { manifest, manifestIssues } = ((): {
+  // Parsed once per file list and manifest content, so callers can depend on `manifest`.
+  const { manifest, manifestIssues } = useMemo((): {
     manifest: GymEnvironmentManifest | null;
     manifestIssues: string[];
   } => {
     if (!manifestFile || fileContent == null) return { manifest: null, manifestIssues: [] };
+    // The manifest may sit one directory deep (upload prefix). The backend treats its
+    // directory as `env_root` and resolves config_paths and wheels/ against it, so
+    // strip the prefix once and run every layout check on package-relative paths.
+    const packageRoot = manifestFile.path.replace(/[^/]+$/, '');
+    const packagePaths = allFiles
+      .map((f) => f.path)
+      .filter((p) => p.startsWith(packageRoot))
+      .map((p) => p.slice(packageRoot.length));
+    const wheelCount = packagePaths.filter((p) => WHEEL_RE.test(p)).length;
     let parsed: unknown;
     try {
       parsed = parseYaml(fileContent);
@@ -213,6 +224,7 @@ export const useGymEnvironmentManifest = ({
     return {
       manifest: {
         format: yaml.format ?? 'unknown',
+        agent: agentOf(yaml),
         envName: meta.name ?? 'unknown',
         description: meta.description || undefined,
         hubId: meta.hub_id || undefined,
@@ -221,7 +233,7 @@ export const useGymEnvironmentManifest = ({
       },
       manifestIssues: collectManifestIssues(yaml, packagePaths),
     };
-  })();
+  }, [allFiles, manifestFile, fileContent]);
 
   return {
     isPending: isFilesPending || (enabled && !!manifestFile && isContentPending),

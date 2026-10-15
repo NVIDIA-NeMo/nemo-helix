@@ -152,6 +152,215 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn("NeMo Evaluator to NeMo Helix Evals", result.stdout)
         self.assertEqual((self.repo / "README.md").read_text(), "NeMo Evaluator")
 
+    def test_evals_renames_flags_and_inline_config_but_preserves_upgrade_and_release_history(self) -> None:
+        inputs = {
+            "web/packages/studio/env/.env.fastapi": "VITE_FF_EVALUATOR_ENABLED=STUDIO_UI_VITE_FF_EVALUATOR_ENABLED\n",
+            "web/packages/studio/env/.env.dev.local.sample": "VITE_FF_EVALUATOR_BENCHMARKS_ENABLED='preview'\n",
+            "web/packages/studio/src/constants/environment.ts": "export const EVALUATOR_ENABLED = featureFlags.evaluatorEnabled !== false;\n"
+            "export const EVALUATOR_BENCHMARKS_ENABLED = featureFlags.evaluatorBenchmarksEnabled !== false;\n",
+            "services/studio/src/nhx/studio/env_mappings.py": 'marker="STUDIO_UI_VITE_FF_EVALUATOR_ENABLED", config_path="studio.feature_flags.evaluator_enabled"\n'
+            'config_path="studio.feature_flags.evaluator_benchmarks_enabled"\n',
+            "k8s/helm/values.yaml": "  # -- evaluator is the configuration specific to the Evals service\n"
+            "  evaluator: {sandboxed_gym_default: true}\n",
+            "packages/nhx_platform/config/override.yaml": 'NEMO_PLUGIN_SERVICES_ALLOWLIST: "models,evaluator,studio"\n',
+        }
+        for path, contents in inputs.items():
+            self.write(path, contents)
+        preserved = {
+            ".agents/skills/release-test-scope/references/0.6.0-example-report.md": "nemo evaluator; docs/evaluator/index.mdx; nemo_evaluator_sdk\n",
+            "docs/evals/upgrading-from-evaluator.mdx": "Rename VITE_FF_EVALUATOR_ENABLED to VITE_FF_EVALS_ENABLED; nemo evaluator to nemo evals.\n",
+        }
+        for path, contents in preserved.items():
+            self.write(path, contents)
+        self.write("types.py", 'class Evaluator: pass\npermission = "evaluator.create"\nkind = "EVALUATOR"\n')
+
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for path, contents in inputs.items():
+            actual = (self.repo / path).read_text()
+            self.assertNotIn("EVALUATOR_", actual)
+            self.assertNotIn("evaluatorEnabled", actual)
+            self.assertNotIn("evaluator_benchmarks_enabled", actual)
+        config = (self.repo / "k8s/helm/values.yaml").read_text()
+        self.assertIn("evals: {sandboxed_gym_default: true}", config)
+        self.assertIn("# -- evals is the configuration", config)
+        self.assertIn('"models,evals,studio"', (self.repo / "packages/nhx_platform/config/override.yaml").read_text())
+        for path, contents in preserved.items():
+            self.assertEqual((self.repo / path).read_text(), contents)
+        self.assertIn('kind = "EVALUATOR"', (self.repo / "types.py").read_text())
+        self.assertIn('permission = "evaluator.create"', (self.repo / "types.py").read_text())
+        self.assertIn("class Evaluator:", (self.repo / "types.py").read_text())
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
+    def test_evals_preserves_published_release_notes_and_updates_current_notes(self) -> None:
+        original = "NeMo Evaluator: nemo evaluator, nemo_evaluator_sdk, docs/evaluator/index.mdx\n"
+        published = [
+            "docs/about/release-notes/release-0.6.0.mdx",
+            "docs/about/release-notes/release-older.md",
+        ]
+        for path in published:
+            self.write(path, original)
+        current = self.write("docs/about/release-notes/current-release.mdx", original)
+
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for path in published:
+            self.assertEqual((self.repo / path).read_text(), original)
+        self.assertEqual(
+            current.read_text(),
+            "NeMo Helix Evals: nemo evals, nhx_evals_sdk, docs/evals/index.mdx\n",
+        )
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
+    def test_evals_handles_notebook_product_spelling_without_renaming_classes(self) -> None:
+        notebook = self.write(
+            "docs/notebooks/ndd_evaluator.mdx",
+            "## **Step 2**: 📊 Nemo Evaluator\n"
+            "│ Nemo Evaluator │\n"
+            "NeMo Evaluator SDK\n"
+            "from nemo_evaluator.sdk import Evaluator, FilesetRef\n",
+        )
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            notebook.read_text(),
+            "## **Step 2**: 📊 NeMo Helix Evals\n"
+            "│ NeMo Helix Evals │\n"
+            "NeMo Helix Evals SDK\n"
+            "from nemo_evals.sdk import Evaluator, FilesetRef\n",
+        )
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
+    def test_evals_renames_skill_paths_and_service_identity_fixtures(self) -> None:
+        platform_skill = "packages/nemo_helix_ext/src/nemo_helix_ext/skills"
+        assistant_skills = (
+            "agents/nemo-studio-assistant/skills",
+            "agents/nemo-studio-assistant/src/nemo_studio_assistant/skills",
+        )
+        self.write(f"{platform_skill}/nemo-evaluator/SKILL.md", "---\nname: nemo-evaluator\n---\n")
+        for root in assistant_skills:
+            self.write(f"{root}/evaluator/SKILL.md", "---\nname: evaluator\n---\n")
+        identity_test = "packages/nhx_common/tests/client_factory/test_client_factory.py"
+        self.write(identity_test, 'client = get_task_nemo_client("evaluator")\nidentity = "service:evaluator"\n')
+        igw_test = "services/core/inference-gateway/tests/integration/test_igw_with_auth.py"
+        self.write(igw_test, 'principal = "service:evaluator"\npermission = "evaluator.create"\n')
+        helm_test = "tests/unit/test_helm_clickhouse.py"
+        self.write(helm_test, '"api.services={evaluator,guardrails}"\n"api.services=evaluator"\n')
+
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.repo / f"{platform_skill}/nemo-evaluator").exists())
+        self.assertIn("name: nemo-evals", (self.repo / f"{platform_skill}/nemo-evals/SKILL.md").read_text())
+        for root in assistant_skills:
+            self.assertFalse((self.repo / f"{root}/evaluator").exists())
+            self.assertIn("name: evals", (self.repo / f"{root}/evals/SKILL.md").read_text())
+        self.assertEqual(
+            (self.repo / identity_test).read_text(),
+            'client = get_task_nemo_client("evals")\nidentity = "service:evals"\n',
+        )
+        self.assertEqual(
+            (self.repo / igw_test).read_text(), 'principal = "service:evals"\npermission = "evaluator.create"\n'
+        )
+        self.assertEqual(
+            (self.repo / helm_test).read_text(), '"api.services={evals,guardrails}"\n"api.services=evals"\n'
+        )
+        verified = self.run_rename("--verify", profile=EVALS)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+
+    def test_evals_renames_docs_and_web_sdk_contract(self) -> None:
+        self.write("docs/evaluator/index.mdx", "Evaluator plugin SDK: `Evaluator.from_client(client)`\n")
+        self.write("docs/troubleshooting/evaluator.mdx", "evaluator plugin\n")
+        self.write(
+            "docs/troubleshooting/index.mdx",
+            '<Card href="/documentation/reference/troubleshooting/evaluator">Previous URL</Card>\n'
+            '<Card href="/documentation/reference/troubleshooting/evals">Renamed URL</Card>\n',
+        )
+        self.write(
+            "docs/fern/versions/latest.yml",
+            "path: ../../evaluator/index.mdx\n- page: Evaluator\n  path: ../../troubleshooting/evaluator.mdx\n",
+        )
+        self.write("docs/fern/docs.yml", "redirects:\n  - source: /old\n    destination: /existing\n")
+        self.write("docs/fern/gated-nav.yml", "- section: evaluator\n")
+        self.write("docs/fern/scripts/ipynb-to-mdx.py", r'pattern = r"\]\(\.\./\.\./evaluator/index"' + "\n")
+        self.write("web/packages/sdk/orval/constants.ts", "evaluator: { path: 'evaluator' },\n")
+        self.write(
+            "web/packages/sdk/src/capabilities/fetchers.ts",
+            "import { customFetch as evaluatorFetch } from '../../generated/fetchers/evaluator';\n"
+            "const fetchers = { evaluator: evaluatorFetch };\n",
+        )
+        self.write(
+            "web/packages/sdk/package.json",
+            json.dumps({"scripts": {"gen:evaluator": "tsx ./orval/generate.ts evaluator"}}),
+        )
+        self.write(
+            "web/packages/studio/src/example.ts",
+            "import { evalsListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';\n"
+            "import type { EvaluatorTaskDefinition } from '@nemo/sdk/generated/evaluator/schema';\n"
+            "vi.mock('@nemo/sdk/generated/fetchers/evaluator');\n"
+            "const permission = 'evaluator.create';\n",
+        )
+        self.write(
+            "web/packages/studio/src/routes/DashboardLandingRoute/skillActionTemplateCatalog.tsx",
+            "description: 'Work with evaluator jobs', requiredFeatureFlags: ['evaluatorEnabled'],\n",
+        )
+        self.write(
+            "plugins/nemo-evaluator/src/nemo_evaluator/service.py",
+            'tag="Evaluator Plugin Jobs Routes"\nnamespace="evaluator"\nkind="evaluator"\n',
+        )
+        self.write(
+            "plugins/nemo-evaluator/openapi/openapi.yaml",
+            "paths:\n  /apis/evaluator/v2/workspaces/{workspace}/evaluate/jobs:\n"
+            "    post:\n      operationId: create_job_apis_evaluator_v2_workspaces__workspace__evaluate_jobs_post\n"
+            "      tags: [Evaluator Plugin Jobs Routes]\n",
+        )
+        self.write("plugins/nemo-evaluator/README.md", "nemo.cli:evaluator\nEvaluator plugin\n")
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.repo / "docs/evaluator").exists())
+        self.assertTrue((self.repo / "docs/evals/index.mdx").is_file())
+        self.assertTrue((self.repo / "docs/troubleshooting/evals.mdx").is_file())
+        troubleshooting = (self.repo / "docs/troubleshooting/index.mdx").read_text()
+        self.assertEqual(troubleshooting.count('/documentation/reference/troubleshooting/evals"'), 2)
+        self.assertNotIn('/documentation/reference/troubleshooting/evaluator"', troubleshooting)
+        nav = (self.repo / "docs/fern/versions/latest.yml").read_text()
+        self.assertIn("../../evals/index.mdx", nav)
+        self.assertIn("../../troubleshooting/evals.mdx", nav)
+        self.assertIn("- page: Evals\n  slug: evals\n  path:", nav)
+        redirects = (self.repo / "docs/fern/docs.yml").read_text()
+        self.assertIn('source: "/documentation/reference/troubleshooting/evaluator"', redirects)
+        self.assertIn('destination: "/documentation/reference/troubleshooting/evals"', redirects)
+        self.assertIn('source: "/latest/documentation/reference/troubleshooting/evaluator"', redirects)
+        self.assertIn('destination: "/latest/documentation/reference/troubleshooting/evals"', redirects)
+        self.assertEqual((self.repo / "docs/fern/gated-nav.yml").read_text(), "- section: evals\n")
+        self.assertIn("evals/index", (self.repo / "docs/fern/scripts/ipynb-to-mdx.py").read_text())
+        self.assertEqual((self.repo / "web/packages/sdk/orval/constants.ts").read_text(), "evals: { path: 'evals' },\n")
+        scripts = json.loads((self.repo / "web/packages/sdk/package.json").read_text())["scripts"]
+        self.assertEqual(scripts, {"gen:evals": "tsx ./orval/generate.ts evals"})
+        fetchers = (self.repo / "web/packages/sdk/src/capabilities/fetchers.ts").read_text()
+        self.assertIn("../../generated/fetchers/evals", fetchers)
+        self.assertIn("evals: evalsFetch", fetchers)
+        consumer = (self.repo / "web/packages/studio/src/example.ts").read_text()
+        self.assertIn("@nemo/sdk/generated/evals/evals-plugin-jobs-routes", consumer)
+        self.assertIn("@nemo/sdk/generated/fetchers/evals", consumer)
+        self.assertIn("EvaluatorTaskDefinition", consumer)
+        self.assertIn("'evaluator.create'", consumer)
+        catalog = (
+            self.repo / "web/packages/studio/src/routes/DashboardLandingRoute/skillActionTemplateCatalog.tsx"
+        ).read_text()
+        self.assertIn("Work with evals jobs", catalog)
+        self.assertIn("'evalsEnabled'", catalog)
+        service = (self.repo / "plugins/nemo-evals/src/nemo_evals/service.py").read_text()
+        self.assertIn('tag="Evals Plugin Jobs Routes"', service)
+        self.assertIn('namespace="evaluator"', service)
+        self.assertIn('kind="evaluator"', service)
+        spec = (self.repo / "plugins/nemo-evals/openapi/openapi.yaml").read_text()
+        self.assertIn("/apis/evals/", spec)
+        self.assertIn("create_job_apis_evals_", spec)
+        self.assertIn("Evals Plugin Jobs Routes", spec)
+        self.assertNotIn("_apis_evaluator_", spec)
+        self.assertIn("nemo.cli:evals", (self.repo / "plugins/nemo-evals/README.md").read_text())
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
     def test_symlinks_ignored_files_and_binary_content(self) -> None:
         outside = Path(self.temp.name) / "outside.txt"
         outside.write_text("old_plugin")

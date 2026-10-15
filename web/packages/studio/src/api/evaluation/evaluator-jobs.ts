@@ -9,7 +9,7 @@ import type {
   HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
 
-const EVALUATOR_JOB_SOURCES = ['nemo-evaluator', 'nemo-evaluator.agent-evaluate'] as const;
+const EVALUATOR_JOB_SOURCES = ['nemo-evals', 'nemo-evals.agent-evaluate'] as const;
 
 const PAGE_SIZE = 50;
 

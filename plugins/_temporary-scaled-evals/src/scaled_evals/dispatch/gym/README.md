@@ -113,7 +113,7 @@ See ``examples/gym-sandbox-opensandbox/README.md`` for compose vs cluster notes.
 
 ## Shared gaps
 
-- Out-of-process dispatch worker claims active evaluation rows from Postgres; production still needs worker-pool sizing/observability
+- Hosted Kubernetes has no working Gym path yet (AALGO-906). Evaluations run as Platform Jobs in the plugin's app image, without the snapshot-pinned runner image, `GYM_RUNNER_MODE=process`, Gym resources, or `/dev/shm`, so the default docker runner mode fails in the Job pod. See the plugin README's "Background execution".
 - Provider quota/capacity can fail sandbox creation mid-run
 
 ## Three-path comparison (including K8s)

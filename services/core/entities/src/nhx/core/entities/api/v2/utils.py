@@ -96,6 +96,8 @@ async def bindings_cache_delete(principal: str) -> None:
 async def _fetch_bindings_for_principal(
     entity_repository: EntityRepositoryInterface,
     principal: str,
+    *,
+    refresh: bool = False,
 ) -> List[Entity]:
     """Fetch all role bindings for a specific principal.
 
@@ -106,12 +108,13 @@ async def _fetch_bindings_for_principal(
     Args:
         entity_repository: Repository for querying role binding entities
         principal: The principal identifier to fetch bindings for
+        refresh: Bypass cached bindings and replace them with repository results
 
     Returns:
         List of role binding entities
     """
     cache_cfg: EntitiesConfig = EntitiesConfig.get()
-    if cache_cfg.principal_bindings_cache_enabled:
+    if cache_cfg.principal_bindings_cache_enabled and not refresh:
         cached = await _bindings_cache_get(principal)
         if cached is not None:
             return list(cached)
@@ -176,6 +179,8 @@ def _applicable_principal_strings(principal: Principal) -> List[str]:
 
 async def get_accessible_workspaces(
     entity_repository: EntityRepositoryInterface,
+    *,
+    refresh: bool = False,
 ) -> Optional[Set[str]]:
     """Get accessible workspaces for the current principal.
 
@@ -192,6 +197,7 @@ async def get_accessible_workspaces(
 
     Args:
         entity_repository: Repository for querying role binding entities
+        refresh: Reload role bindings from the repository instead of the cache
 
     Returns:
         Set of workspace names, or None if all workspaces are accessible
@@ -226,13 +232,13 @@ async def get_accessible_workspaces(
     seen_binding_ids: Set[str] = set()
     principal_bindings_entities: List[Entity] = []
     for ident in _applicable_principal_strings(effective_principal):
-        for binding in await _fetch_bindings_for_principal(entity_repository, ident):
+        for binding in await _fetch_bindings_for_principal(entity_repository, ident, refresh=refresh):
             if binding.id not in seen_binding_ids:
                 seen_binding_ids.add(binding.id)
                 principal_bindings_entities.append(binding)
 
     # Also fetch wildcard principal "*" bindings (grants access to all authenticated users)
-    for binding in await _fetch_bindings_for_principal(entity_repository, WILDCARD_PRINCIPAL):
+    for binding in await _fetch_bindings_for_principal(entity_repository, WILDCARD_PRINCIPAL, refresh=refresh):
         if binding.id not in seen_binding_ids:
             seen_binding_ids.add(binding.id)
             principal_bindings_entities.append(binding)
@@ -286,6 +292,9 @@ async def require_workspace_access(
     no per-workspace filtering applies.
     """
     accessible = await get_accessible_workspaces(entity_repository)
+    if accessible is not None and workspace not in accessible and EntitiesConfig.get().principal_bindings_cache_enabled:
+        # Another replica may have granted access since this process cached the bindings.
+        accessible = await get_accessible_workspaces(entity_repository, refresh=True)
     raise_if_workspace_inaccessible(
         accessible,
         workspace,

@@ -11,9 +11,10 @@ import { NewOptimizationForm } from '@studio/routes/agents/AgentDetailRoute/opti
 import { useSubmitOptimization } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useSubmitOptimization';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { getAgentOptimizeRoute } from '@studio/routes/utils';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useLocation } from 'react-router';
 import { parse } from 'yaml';
 
 const AGENT = 'react-agent';
@@ -38,6 +39,8 @@ const EVALUATION: AgentEvaluationRow = {
   ],
 };
 
+const LocationSearch = () => <div data-testid="location-search">{useLocation().search}</div>;
+
 const SubmitForm = ({ evaluation = EVALUATION }: { evaluation?: AgentEvaluationRow }) => {
   const onSubmit = useSubmitOptimization({
     workspace: DEFAULT_WORKSPACE,
@@ -56,7 +59,7 @@ const SubmitForm = ({ evaluation = EVALUATION }: { evaluation?: AgentEvaluationR
 };
 
 describe('optimization form submission', () => {
-  it('uploads gateway models and a fixed credential from the selected judge and budget', async () => {
+  it('renders the original rubric into a legacy optimize bundle without requiring a new judge', async () => {
     const uploaded = new Map<string, string>();
     const submitted: unknown[] = [];
     server.use(
@@ -73,10 +76,22 @@ describe('optimization form submission', () => {
                 reference: { answer: 'phishing' },
                 metrics: [
                   {
-                    metric_type: 'exact-match',
-                    payload: { metric: {} },
+                    metric_type: 'llm-judge',
+                    outputs: [{ name: 'accuracy', value_json_schema: { type: 'number' } }],
+                    payload: {
+                      kind: 'inline',
+                      metric: {
+                        type: 'llm-judge',
+                        model: 'default/original-judge',
+                        scores: [{ name: 'accuracy', minimum: 0, maximum: 1 }],
+                        inference: { max_tokens: 1024 },
+                        prompt_template:
+                          'Compare {{ item.reference.answer }} against {{ sample.output_text }}.',
+                      },
+                    },
                   },
                 ],
+                inputs: { instruction: 'Classify this email' },
               },
             ],
           })
@@ -114,22 +129,30 @@ describe('optimization form submission', () => {
     renderRoute(undefined, {
       history: getAgentOptimizeRoute(DEFAULT_WORKSPACE, AGENT),
       routes: [
-        { path: ROUTES.workspace.agentDetail, element: <SubmitForm /> },
-        { path: ROUTES.workspace.agentOptimizationDetail, element: <div>Study detail page</div> },
+        {
+          path: ROUTES.workspace.agentDetail,
+          element: (
+            <>
+              <SubmitForm />
+              <LocationSearch />
+            </>
+          ),
+        },
       ],
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Select a model' }));
-    await user.click(await screen.findByText('codellama-70b'));
+    await screen.findByText('baseline');
     await user.click(screen.getByRole('radio', { name: /Quick/ }));
     await user.click(screen.getByRole('button', { name: 'Run optimization' }));
 
-    expect(await screen.findByText('Study detail page')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('location-search')).toHaveTextContent(/^\?tab=optimizations$/)
+    );
     expect(submitted).toHaveLength(1);
     expect(submitted[0]).toMatchObject({
       spec: {
         agent: AGENT,
-        strategy: 'legacy',
+        strategy: 'config-tuning',
         optimize_config: 'optimize.yaml',
         optimize_config_fileset: expect.stringMatching(
           new RegExp(`^${DEFAULT_WORKSPACE}/${AGENT}-optimize-`)
@@ -143,12 +166,14 @@ describe('optimization form submission', () => {
       base_url: baseUrl,
       api_key_env: 'NEMO_AGENTS_IGW_API_KEY',
     });
-    expect(config.models.judge).toMatchObject({
-      model: `${DEFAULT_WORKSPACE}/${entityStoreBaseModel1.name}`,
-      base_url: baseUrl,
+    expect(config.models.judge.model).toBe('default/original-judge');
+    expect(config.eval.original_evaluation).toBeUndefined();
+    expect(config.eval.evaluators.accuracy).toMatchObject({
+      _type: 'tunable_rag_evaluator',
+      default_scoring: false,
+      inference: { max_tokens: 1024 },
     });
-    expect(config.models.judge).not.toHaveProperty('api_key_env');
-    expect(config.models.judge).not.toHaveProperty('api_key_secret');
+    expect(config.optimizer.eval_metrics.average_score.direction).toBe('maximize');
     expect(config.optimizer.search_space.gateway_credential).toEqual({
       type: 'fabric',
       path: 'environment.env.NEMO_AGENTS_IGW_API_KEY',
@@ -156,9 +181,13 @@ describe('optimization form submission', () => {
     });
     expect(config.optimizer.numeric.n_trials).toBe(4);
     expect(config.optimizer.experiment_id).toBe('exp-quality');
-    expect(JSON.parse(uploaded.get('dataset.json')!)).toEqual([
-      { id: 'row-1', question: 'Classify this email', answer: 'phishing' },
-    ]);
+    expect(JSON.parse(uploaded.get('dataset.json')!)[0]).toMatchObject({
+      id: 'row-1',
+      question: 'Classify this email',
+      answer: expect.stringContaining(
+        'Compare phishing against __OPTIMIZATION_CANDIDATE_OUTPUT__.'
+      ),
+    });
   });
 
   it('says why the evaluation cannot be staged before the user runs the study', async () => {

@@ -63,19 +63,9 @@ paths:
         \ to authenticate with this NeMo Helix deployment.\n\n**Response fields:**\n\
         \n- `auth_enabled`: Whether authentication is enabled on this cluster\n- `oidc`:\
         \ OIDC configuration (only present when OIDC is enabled)\n  - `issuer`: The\
-        \ OIDC issuer URL\n  - `authorization_endpoint`: Authorization endpoint for\
-        \ browser-based flows\n  - `token_endpoint`: Token exchange endpoint\n  -\
-        \ `device_authorization_endpoint`: Device flow authorization endpoint (for\
-        \ CLI)\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `client_id`: OAuth\
-        \ client ID to use\n  - `cli_client_id`: Optional OAuth client ID dedicated\
-        \ to interactive CLI authentication\n  - `bearer_token_source`: Token response\
-        \ field clients send to NeMo Helix APIs\n  - `device_authorization_requires_device_id`:\
-        \ Whether CLI device requests must include a generated `device_id`\n  - `device_authorization_display_name`:\
-        \ Optional device name shown during device authorization\n  - `device_token_request_includes_scope`:\
-        \ Whether CLI device token requests include the requested scopes\n  - `default_scopes`:\
-        \ OAuth scopes to request during authentication\n  - `scope_prefix`: Prefix\
-        \ clients prepend to NeMo Helix API scopes and NeMo Helix strips from returned\
-        \ token scopes\n  - `workload_token_exchange_enabled`: Whether SDK workload\
+        \ OIDC issuer URL\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `clients`:\
+        \ Complete public and confidential user-login client contracts. Exactly one\
+        \ is the default.\n  - `workload_token_exchange_enabled`: Whether SDK workload\
         \ identity token exchange is enabled\n  - `workload_client_id`: OAuth client\
         \ ID to use for workload identity token exchange\n  - `workload_token_endpoint`:\
         \ Token endpoint to use only for workload identity token exchange\n  - `workload_audience`:\
@@ -493,6 +483,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/authorize:
+    post:
+      tags:
+      - Authentication
+      summary: Start Token Authorization
+      operationId: start_token_authorization_apis_auth_v2_authorize_post
+      parameters:
+      - name: client
+        in: query
+        required: false
+        schema:
+          enum:
+          - public
+          - confidential
+          type: string
+          default: confidential
+          title: Client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenAuthorizationStart'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Start Token Authorization Apis Auth V2 Authorize Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/authorize/{transaction_id}:
+    get:
+      tags:
+      - Authentication
+      summary: Continue Token Authorization
+      operationId: continue_token_authorization_apis_auth_v2_authorize__transaction_id__get
+      parameters:
+      - name: transaction_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Transaction Id
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/auth/v2/iam/role-bindings:
     get:
       tags:
@@ -647,6 +703,149 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/login:
+    get:
+      tags:
+      - Authentication
+      summary: Start Web Session Login
+      operationId: start_web_session_login_apis_auth_v2_login_get
+      parameters:
+      - name: return_to
+        in: query
+        required: false
+        schema:
+          type: string
+          default: /
+          title: Return To
+      - name: client
+        in: query
+        required: false
+        schema:
+          enum:
+          - public
+          - confidential
+          type: string
+          default: confidential
+          title: Client
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/login/callback:
+    get:
+      tags:
+      - Authentication
+      summary: Token Authorization Callback
+      operationId: token_authorization_callback_apis_auth_v2_login_callback_get
+      parameters:
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          title: State
+      - name: code
+        in: query
+        required: false
+        schema:
+          title: Code
+          type: string
+      - name: error
+        in: query
+        required: false
+        schema:
+          title: Error
+          type: string
+      - name: error_description
+        in: query
+        required: false
+        schema:
+          title: Error Description
+          type: string
+      responses:
+        '302':
+          description: Redirect to the identity provider or the CLI loopback callback
+          headers:
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/logout:
+    post:
+      tags:
+      - Authentication
+      summary: Logout
+      operationId: logout_apis_auth_v2_logout_post
+      responses:
+        '204':
+          description: Successful Response
+  /apis/auth/v2/session:
+    get:
+      tags:
+      - Authentication
+      summary: Web Session
+      operationId: web_session_apis_auth_v2_session_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSessionResponse'
+  /apis/auth/v2/token:
+    post:
+      tags:
+      - Authentication
+      summary: Broker Token
+      operationId: broker_token_apis_auth_v2_token_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - $ref: '#/components/schemas/AuthorizationCodeBrokerTokenRequest'
+              - $ref: '#/components/schemas/RefreshTokenBrokerTokenRequest'
+              title: Body
+              discriminator:
+                propertyName: grant_type
+                mapping:
+                  authorization_code: '#/components/schemas/AuthorizationCodeBrokerTokenRequest'
+                  refresh_token: '#/components/schemas/RefreshTokenBrokerTokenRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  anyOf:
+                  - type: string
+                  - type: integer
+                type: object
+                title: Response Broker Token Apis Auth V2 Token Post
         '422':
           description: Validation Error
           content:
@@ -986,6 +1185,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EntityCreateInput'
+            examples:
+              entity:
+                summary: Create an entity with required data
+                value:
+                  name: my-config
+                  data:
+                    target_id: llama-2-7b
+                    training_options:
+                      learning_rate: 0.01
       responses:
         '201':
           description: Successful Response
@@ -1230,6 +1438,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EntityUpdate'
+            examples:
+              entity:
+                summary: Update an entity with required data
+                value:
+                  data:
+                    target_id: llama-2-7b
+                    training_options:
+                      learning_rate: 0.02
       responses:
         '200':
           description: Successful Response
@@ -2046,15 +2262,58 @@ paths:
       responses:
         '200':
           description: Successful Response
-          content:
-            application/json:
-              schema: {}
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt"
+
+          response = requests.head(url)
+
+          response.raise_for_status()
+
+          print(response.status_code)
+
+          print(response.headers)'
+      - lang: JavaScript
+        source: "const response = await fetch(\n  \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          ,\n  { method: \"HEAD\" },\n);\n\nif (!response.ok) {\n  throw new Error(`HTTP\
+          \ ${response.status}`);\n}\nconsole.log(response.status);\nconsole.log(Object.fromEntries(response.headers));"
+      - lang: Go
+        source: "package main\n\nimport (\n  \"fmt\"\n  \"net/http\"\n)\n\nfunc main()\
+          \ {\n  req, err := http.NewRequest(\"HEAD\", \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          , nil)\n  if err != nil {\n    panic(err)\n  }\n  res, err := http.DefaultClient.Do(req)\n\
+          \  if err != nil {\n    panic(err)\n  }\n  defer res.Body.Close()\n\n  fmt.Println(res.Status)\n\
+          \  fmt.Println(res.Header)\n}"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+          )\nresponse = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme ==\
+          \ \"https\") do |http|\n  http.request(Net::HTTP::Head.new(uri))\nend\n\n\
+          puts response.code\nputs response.to_hash"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt");
+
+          curl_setopt($ch, CURLOPT_NOBODY, true);
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status;'
     get:
       tags:
       - Files
@@ -5391,6 +5650,7 @@ paths:
                   - $ref: '#/components/schemas/VolcanoJobExecutionProfile'
                   - $ref: '#/components/schemas/SubprocessJobExecutionProfile'
                   - $ref: '#/components/schemas/E2EJobExecutionProfile'
+                  - $ref: '#/components/schemas/OpenShellJobExecutionProfile'
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
@@ -5414,6 +5674,21 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateHelixJobRequest'
+            examples:
+              job:
+                summary: Create a CPU container job
+                value:
+                  name: hello-world
+                  spec: {}
+                  source: api-reference
+                  platform_spec:
+                    steps:
+                    - name: run
+                      executor:
+                        provider: cpu
+                        container:
+                          image: python:3.11
+                      config: {}
       responses:
         '201':
           description: Successful Response
@@ -6593,6 +6868,15 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateModelDeploymentConfigRequest'
+            examples:
+              deployment_config:
+                summary: Create a NIM deployment config
+                value:
+                  name: nim-config-v1
+                  engine: nim
+                  model_spec: {}
+                  executor_config:
+                    gpu: 1
       responses:
         '201':
           description: Create a new model deployment configuration
@@ -6749,6 +7033,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateModelDeploymentConfigRequest'
+            examples:
+              deployment_config:
+                summary: Update a NIM deployment config
+                value:
+                  engine: nim
+                  model_spec: {}
+                  executor_config:
+                    gpu: 1
       responses:
         '201':
           description: Update a model deployment configuration (creates new version)
@@ -8285,6 +8577,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/HelixSecretUpdateRequest'
+            examples:
+              secret:
+                summary: Update secret metadata and value
+                value:
+                  description: Updated secret description
+                  value: new-secret-value
       responses:
         '200':
           description: Successful Response
@@ -8921,8 +9219,11 @@ components:
         fileset:
           type: string
           title: Fileset
-          description: Fileset where the adapter files are stored expected format
-            {workspace}/{fileset_name}
+          description: 'Fileset where the adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -8983,8 +9284,15 @@ components:
           description: Filter by description.
           title: Description
         fileset:
-          description: Filter by fileset reference in the form {workspace}/{fileset_name}.
+          description: 'Filter by fileset reference. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           title: Fileset
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           type: string
         finetuning_type:
           allOf:
@@ -9703,7 +10011,7 @@ components:
       required:
       - auth_enabled
       title: AuthDiscoveryResponse
-      description: Auth discovery response for CLI/SDK.
+      description: Auth discovery response returned by the auth discovery endpoint.
     AuthenticateErrorResponse:
       properties:
         detail:
@@ -9764,6 +10072,28 @@ components:
       - token_kind
       title: AuthenticateResponse
       description: Successful bearer token authentication response for direct callers.
+    AuthorizationCodeBrokerTokenRequest:
+      properties:
+        grant_type:
+          type: string
+          const: authorization_code
+          title: Grant Type
+        code:
+          type: string
+          title: Code
+        code_verifier:
+          type: string
+          maxLength: 128
+          minLength: 43
+          pattern: ^[A-Za-z0-9._~-]+$
+          title: Code Verifier
+      additionalProperties: false
+      type: object
+      required:
+      - grant_type
+      - code
+      - code_verifier
+      title: AuthorizationCodeBrokerTokenRequest
     AutoAlignOptions:
       properties:
         guardrails_config:
@@ -10317,6 +10647,52 @@ components:
       type: object
       title: ComputeResources
       description: Resource requirements matching k8s ResourceRequirements format.
+    ConfidentialOidcAdvertisedClient:
+      properties:
+        client_id:
+          type: string
+          title: Client Id
+        default:
+          type: boolean
+          title: Default
+        bearer_token_source:
+          type: string
+          enum:
+          - access_token
+          - id_token
+          title: Bearer Token Source
+          default: access_token
+        default_scopes:
+          type: string
+          title: Default Scopes
+          default: openid profile email offline_access
+        scope_prefix:
+          title: Scope Prefix
+          type: string
+        name:
+          type: string
+          const: confidential
+          title: Name
+          default: confidential
+        client_authentication:
+          type: string
+          const: client_secret_basic
+          title: Client Authentication
+          default: client_secret_basic
+        authorization_start_endpoint:
+          type: string
+          title: Authorization Start Endpoint
+        broker_token_endpoint:
+          type: string
+          title: Broker Token Endpoint
+      type: object
+      required:
+      - client_id
+      - default
+      - authorization_start_endpoint
+      - broker_token_endpoint
+      title: ConfidentialOidcAdvertisedClient
+      description: Confidential client that talks only to the NeMo Helix broker.
     ContainerExecutorConfig:
       properties:
         gpu:
@@ -10533,8 +10909,15 @@ components:
           maxLength: 1000
         fileset:
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           title: Fileset
-          description: Location where adapter files are stored - expected format {workspace}/{fileset_name}
+          description: 'Location where adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -10663,6 +11046,18 @@ components:
       - source
       title: CreateHelixJobRequest
       description: Request model for creating a new platform job.
+      examples:
+      - name: hello-world
+        platform_spec:
+          steps:
+          - config: {}
+            executor:
+              container:
+                image: python:3.11
+              provider: cpu
+            name: run
+        source: api-reference
+        spec: {}
     CreateModelAdapterRequest:
       properties:
         name:
@@ -10684,8 +11079,15 @@ components:
           maxLength: 1000
         fileset:
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
           title: Fileset
-          description: Location where adapter files are stored - expected format {workspace}/{fileset_name}
+          description: 'Location where adapter files are stored. Either a fileset
+            name or ''workspace/fileset_name''. A bare name is resolved in the request
+            workspace (the platform default workspace is named ''default''). Each
+            segment is 2-63 characters: lowercase letters, digits, hyphens, and temporarily
+            @ . + _; no consecutive hyphens, and it cannot end with a hyphen.'
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -10759,6 +11161,12 @@ components:
       - executor_config
       title: CreateModelDeploymentConfigRequest
       description: Request model for creating a ModelDeploymentConfig.
+      examples:
+      - engine: nim
+        executor_config:
+          gpu: 1
+        model_spec: {}
+        name: nim-config-v1
     CreateModelDeploymentRequest:
       properties:
         name:
@@ -10830,9 +11238,16 @@ components:
           description: Set for full weight finetuned models
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
         base_model:
           title: Base Model
           description: Link to another model which is used as a base for the current
@@ -11626,6 +12041,10 @@ components:
           title: Data
           description: Entity-specific data (schema is opaque to entity store, validated
             by client SDK)
+          examples:
+          - target_id: llama-2-7b
+            training_options:
+              learning_rate: 0.01
       type: object
       required:
       - data
@@ -11636,6 +12055,12 @@ components:
         Name is optional - if not provided, it will be auto-generated.
 
         Workspace and entity_type come from the URL path parameters.'
+      examples:
+      - data:
+          target_id: llama-2-7b
+          training_options:
+            learning_rate: 0.01
+        name: my-config
     EntityUpdate:
       properties:
         new_name:
@@ -11657,6 +12082,10 @@ components:
           type: object
           title: Data
           description: Updated entity-specific data
+          examples:
+          - target_id: llama-2-7b
+            training_options:
+              learning_rate: 0.02
         expected_db_version:
           title: Expected Db Version
           description: Optional database version for optimistic locking. Update only
@@ -11667,6 +12096,11 @@ components:
       - data
       title: EntityUpdate
       description: Schema for updating an entity.
+      examples:
+      - data:
+          target_id: llama-2-7b
+          training_options:
+            learning_rate: 0.02
     EnvironmentMetadataContent:
       properties:
         format:
@@ -14426,6 +14860,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/HelixJobStatus'
           description: The new status to set for the job.
+        expected_step_id:
+          title: Expected Step Id
+          description: Reject the update if the step's entity ID has changed.
+          type: string
         status_details:
           title: Status Details
           description: Optional status details related to the status update.
@@ -14733,6 +15171,10 @@ components:
           description: The source of the job steps.
           title: Source
           type: string
+        task_cleanup_pending:
+          description: Whether terminal child-task cleanup is unfinished.
+          title: Task Cleanup Pending
+          type: boolean
       title: HelixJobStepsListFilter
       type: object
     HelixJobTask:
@@ -15069,6 +15511,9 @@ components:
       type: object
       title: HelixSecretUpdateRequest
       description: Request body for updating a platform secret's metadata.
+      examples:
+      - description: Updated secret description
+        value: new-secret-value
     HuggingfaceStorageConfig:
       properties:
         read_chunk_size:
@@ -15365,7 +15810,6 @@ components:
       title: JobExecutionProfileConfig
     JsonValue:
       title: JsonValue
-      x-stainless-any: true
     JsonWebKey:
       properties: {}
       additionalProperties: true
@@ -15812,7 +16256,7 @@ components:
         token_audience:
           title: Token Audience
           description: Audience for the projected service account token. Defaults
-            to auth.oidc.workload_client_id, auth.oidc.client_id, then 'nemo-helix'.
+            to auth.oidc.workload.client_id, then 'nemo-helix'.
           type: string
       additionalProperties: false
       type: object
@@ -16919,8 +17363,12 @@ components:
           description: Set for full weight finetuned models
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
         trust_remote_code:
           type: boolean
@@ -17036,9 +17484,16 @@ components:
         fileset:
           anyOf:
           - type: boolean
-          - type: string
+          - maxLength: 127
+            minLength: 2
+            pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
+            type: string
           description: 'Filter by fileset: true = has a fileset, false = no fileset,
-            string = match fileset reference in the form {workspace}/{fileset_name}.'
+            string = match a fileset reference. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           title: Fileset
         family:
           anyOf:
@@ -17722,49 +18177,21 @@ components:
         issuer:
           type: string
           title: Issuer
-        authorization_endpoint:
-          title: Authorization Endpoint
-          type: string
-        token_endpoint:
-          title: Token Endpoint
-          type: string
-        device_authorization_endpoint:
-          title: Device Authorization Endpoint
-          type: string
         userinfo_endpoint:
           title: Userinfo Endpoint
           type: string
-        client_id:
-          type: string
-          title: Client Id
-        cli_client_id:
-          title: Cli Client Id
-          type: string
-        bearer_token_source:
-          type: string
-          enum:
-          - access_token
-          - id_token
-          title: Bearer Token Source
-          default: access_token
-        device_authorization_requires_device_id:
-          type: boolean
-          title: Device Authorization Requires Device Id
-          default: false
-        device_authorization_display_name:
-          title: Device Authorization Display Name
-          type: string
-        device_token_request_includes_scope:
-          type: boolean
-          title: Device Token Request Includes Scope
-          default: true
-        default_scopes:
-          type: string
-          title: Default Scopes
-          default: openid profile email offline_access
-        scope_prefix:
-          title: Scope Prefix
-          type: string
+        clients:
+          items:
+            oneOf:
+            - $ref: '#/components/schemas/PublicOidcAdvertisedClient'
+            - $ref: '#/components/schemas/ConfidentialOidcAdvertisedClient'
+            discriminator:
+              propertyName: name
+              mapping:
+                confidential: '#/components/schemas/ConfidentialOidcAdvertisedClient'
+                public: '#/components/schemas/PublicOidcAdvertisedClient'
+          type: array
+          title: Clients
         workload_token_exchange_enabled:
           type: boolean
           title: Workload Token Exchange Enabled
@@ -17784,9 +18211,8 @@ components:
       type: object
       required:
       - issuer
-      - client_id
       title: OIDCDiscoveryResponse
-      description: OIDC discovery response for CLI/SDK.
+      description: OIDC discovery response returned by the auth discovery endpoint.
     OpenAIListModelsResp:
       properties:
         data:
@@ -17826,6 +18252,229 @@ components:
       title: OpenAIModelResp
       description: Duplicated structure for an OpenAI /v1/models individual model
         response.
+    OpenShellJobEgressConfig:
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Platform host reachable from inside a sandbox.
+          default: host.docker.internal
+        port:
+          type: integer
+          minimum: 1.0
+          title: Port
+          description: Platform port (the inference gateway / API listener).
+          default: 8080
+        protocol:
+          type: string
+          enum:
+          - rest
+          - websocket
+          - graphql
+          - sql
+          - ''
+          title: Protocol
+          description: 'OpenShell L7 protocol: "rest", "websocket", "graphql", "sql",
+            or "" for L4-only.'
+          default: rest
+        tls:
+          type: string
+          enum:
+          - ''
+          - skip
+          title: Tls
+          description: 'TLS handling: "" (default) for automatic inspection, "skip"
+            to disable inspection.'
+          default: ''
+        access:
+          type: string
+          enum:
+          - read-only
+          - read-write
+          - full
+          title: Access
+          description: 'OpenShell access preset: "read-only", "read-write", or "full".'
+          default: full
+        binaries:
+          items:
+            type: string
+          type: array
+          title: Binaries
+          description: Binaries permitted to open the egress connection. Empty uses
+            the backend default set, which must include the jobs-launcher and the
+            task venv python.
+      additionalProperties: false
+      type: object
+      title: OpenShellJobEgressConfig
+      description: 'The NeMo Helix endpoint a job sandbox must be able to reach directly.
+
+
+        Becomes the platform egress rule in the generated sandbox policy. This shape
+
+        is separate from the deployments plugin''s ``HelixEgressConfig`` so the jobs
+
+        service does not depend on that plugin; the values track it.'
+    OpenShellJobExecutionProfile:
+      properties:
+        provider:
+          type: string
+          title: Provider
+          description: The compute provider for the executor, e.g., cpu, gpu
+          default: cpu
+        profile:
+          type: string
+          title: Profile
+          description: The profile name for the executor, e.g., high_priority_a100,
+            low_priority, etc.
+          default: default
+        backend:
+          type: string
+          const: openshell
+          title: Backend
+          default: openshell
+        config:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobExecutionProfileConfig'
+          description: Additional configuration for the OpenShell executor
+      type: object
+      required:
+      - config
+      title: OpenShellJobExecutionProfile
+      description: Execution configuration for an OpenShell job.
+    OpenShellJobExecutionProfileConfig:
+      properties:
+        ttl_seconds_before_active:
+          type: integer
+          title: Ttl Seconds Before Active
+          default: 1800
+        ttl_seconds_active:
+          type: integer
+          title: Ttl Seconds Active
+          default: 86400
+        ttl_seconds_after_finished:
+          type: integer
+          title: Ttl Seconds After Finished
+          default: 3600
+        cleanup_completed_jobs_immediately:
+          type: boolean
+          title: Cleanup Completed Jobs Immediately
+          default: true
+        launcher_tool_path:
+          type: string
+          title: Launcher Tool Path
+          description: Path to the jobs launcher tool
+          default: /tools/jobs-launcher
+        default_task_image:
+          title: Default Task Image
+          description: Default container image for job task pods. Used when a job
+            step omits container.image. When unset, falls back to the platform CPU
+            tasks image (platform.image_registry/nhx-tasks:platform.image_tag).
+          type: string
+          minLength: 1
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
+            must not conflict with platform-reserved names. Job steps may override
+            these variables.
+        gateway_endpoint:
+          type: string
+          title: Gateway Endpoint
+          description: OpenShell gateway endpoint as a URL (http://host:port or https://host:port).
+            The gRPC target is the same host:port; http implies plaintext, https implies
+            TLS.
+          default: http://127.0.0.1:17670
+        workspace:
+          type: string
+          title: Workspace
+          description: OpenShell gateway workspace that every sandbox RPC is scoped
+            to. The gateway creates 'default'.
+          default: default
+        insecure:
+          title: Insecure
+          description: Force plaintext (True) or TLS (False). When None, derived from
+            the endpoint scheme.
+          type: boolean
+        tls:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobTLSConfig'
+          description: mTLS material for an https gateway.
+        request_timeout_seconds:
+          type: integer
+          minimum: 1.0
+          title: Request Timeout Seconds
+          description: Per-RPC deadline for control-plane calls (create/get/delete/list).
+          default: 120
+        platform_egress:
+          allOf:
+          - $ref: '#/components/schemas/OpenShellJobEgressConfig'
+          description: Platform endpoint a job sandbox reaches directly. Drives the
+            generated default sandbox policy and is injected into a policy_path policy
+            as a mandatory egress rule. Set to null to grant the sandbox NO direct
+            egress (breaks secrets fetch and OTLP log export).
+        policy_path:
+          title: Policy Path
+          description: Path to a hand-written OpenShell SandboxPolicy YAML applied
+            to created sandboxes. When unset, a default-deny policy is generated from
+            platform_egress plus the sandbox filesystem defaults.
+          type: string
+        image:
+          title: Image
+          description: Sandbox image for job steps. When unset, falls back to the
+            platform CPU tasks image (nhx-tasks); OpenShell needs the openshell variant
+            (nhx-tasks-openshell).
+          type: string
+        default_entrypoint:
+          title: Default Entrypoint
+          description: Entrypoint for job steps that do not declare one. The OpenShell
+            supervisor ignores the image ENTRYPOINT, so the sandbox command must name
+            the binary explicitly. When unset, defaults to the nhx-tasks entrypoint
+            (/app/.venv/bin/nemo-helix).
+          items:
+            type: string
+          type: array
+        egress_proxy:
+          title: Egress Proxy
+          description: 'HTTP proxy URL injected as HTTP_PROXY/HTTPS_PROXY for the
+            sandbox workload. The docker driver gives sandboxes no network of their
+            own: all egress goes through the supervisor''s proxy at http://127.0.0.1:3128,
+            which enforces the sandbox policy. The k8s driver fences with NetworkPolicies
+            instead, so leave this unset there.'
+          type: string
+      additionalProperties: false
+      type: object
+      title: OpenShellJobExecutionProfileConfig
+      description: 'Configuration for the OpenShell job execution profile.
+
+
+        Schedules job steps as OpenShell sandboxes via the gateway gRPC API. The
+
+        sandbox runs the jobs-launcher as its canonical main process
+
+        (``SandboxSpec.command``), which fetches the step config from the platform
+
+        (``jobs-launcher run --fetch-step-config``) and then runs the task command.'
+    OpenShellJobTLSConfig:
+      properties:
+        ca_cert_path:
+          title: Ca Cert Path
+          description: Path to the CA bundle that signed the gateway cert.
+          type: string
+        client_cert_path:
+          title: Client Cert Path
+          description: Path to the client certificate (mTLS).
+          type: string
+        client_key_path:
+          title: Client Key Path
+          description: Path to the client private key (mTLS).
+          type: string
+      additionalProperties: false
+      type: object
+      title: OpenShellJobTLSConfig
+      description: mTLS material for an https OpenShell gateway. Unused for plaintext
+        gateways.
     OtelExportLogsPartialSuccess:
       properties:
         rejectedLogRecords:
@@ -17979,9 +18628,9 @@ components:
       title: ParetoConfig
       description: "Default X/Y metrics for a group's cost-vs-accuracy Pareto view.\n\
         \nMetric ids use the same vocabulary as the evaluations list sort/filter fields\
-        \ \u2014 ``cost_usd``,\n``latency_ms``, or ``evaluators.<name>``. Defaults\
-        \ to cost (x) vs latency (y): both exist for\nevery group, so the chart always\
-        \ has something to render before anyone customizes it."
+        \ \u2014 ``cost_usd``,\n``latency_ms``, ``tokens``, or ``evaluators.<name>``.\
+        \ Defaults to cost (x) vs latency (y): both exist for\nevery group, so the\
+        \ chart always has something to render before anyone customizes it."
     PatronusEvaluateApiParams:
       properties:
         success_strategy:
@@ -18422,6 +19071,74 @@ components:
       required:
       - data
       title: PromptsPage
+    PublicOidcAdvertisedClient:
+      properties:
+        client_id:
+          type: string
+          title: Client Id
+        default:
+          type: boolean
+          title: Default
+        bearer_token_source:
+          type: string
+          enum:
+          - access_token
+          - id_token
+          title: Bearer Token Source
+          default: access_token
+        default_scopes:
+          type: string
+          title: Default Scopes
+          default: openid profile email offline_access
+        scope_prefix:
+          title: Scope Prefix
+          type: string
+        name:
+          type: string
+          const: public
+          title: Name
+          default: public
+        client_authentication:
+          type: string
+          const: public
+          title: Client Authentication
+          default: public
+        server_side_sessions:
+          type: boolean
+          title: Server Side Sessions
+          default: false
+        authorization_endpoint:
+          title: Authorization Endpoint
+          type: string
+        token_endpoint:
+          title: Token Endpoint
+          type: string
+        device_authorization_endpoint:
+          title: Device Authorization Endpoint
+          type: string
+        device_authorization_requires_device_id:
+          type: boolean
+          title: Device Authorization Requires Device Id
+          default: false
+        device_authorization_display_name:
+          title: Device Authorization Display Name
+          type: string
+        device_token_request_includes_scope:
+          type: boolean
+          title: Device Token Request Includes Scope
+          default: true
+        authorization_start_endpoint:
+          title: Authorization Start Endpoint
+          type: string
+        broker_token_endpoint:
+          title: Broker Token Endpoint
+          type: string
+      type: object
+      required:
+      - client_id
+      - default
+      title: PublicOidcAdvertisedClient
+      description: Public client using direct provider tokens or NeMo-managed sessions.
     RailStatus:
       properties:
         status:
@@ -18682,6 +19399,21 @@ components:
       type: object
       title: ReasoningConfig
       description: Configuration for reasoning mode in content safety models.
+    RefreshTokenBrokerTokenRequest:
+      properties:
+        grant_type:
+          type: string
+          const: refresh_token
+          title: Grant Type
+        refresh_token:
+          type: string
+          title: Refresh Token
+      additionalProperties: false
+      type: object
+      required:
+      - grant_type
+      - refresh_token
+      title: RefreshTokenBrokerTokenRequest
     RegexDetection:
       properties:
         input:
@@ -19706,6 +20438,28 @@ components:
       - task
       title: TaskPrompt
       description: Configuration for prompts that will be used for a specific task.
+    TokenAuthorizationStart:
+      properties:
+        redirect_uri:
+          type: string
+          title: Redirect Uri
+        code_challenge:
+          type: string
+          maxLength: 128
+          minLength: 43
+          pattern: ^[A-Za-z0-9_-]+$
+          title: Code Challenge
+        state:
+          type: string
+          maxLength: 512
+          minLength: 16
+          title: State
+      type: object
+      required:
+      - redirect_uri
+      - code_challenge
+      - state
+      title: TokenAuthorizationStart
     TokenRollupResponse:
       properties:
         sum:
@@ -20133,8 +20887,15 @@ components:
           type: boolean
         fileset:
           title: Fileset
-          description: Updated fileset for the adapter
+          description: 'Updated fileset for the adapter. Either a fileset name or
+            ''workspace/fileset_name''. A bare name is resolved in the request workspace
+            (the platform default workspace is named ''default''). Each segment is
+            2-63 characters: lowercase letters, digits, hyphens, and temporarily @
+            . + _; no consecutive hyphens, and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
       type: object
       title: UpdateAdapterRequest
       description: Request model for updating Adapter Sub Entity metadata.
@@ -20200,6 +20961,11 @@ components:
       title: UpdateModelDeploymentConfigRequest
       description: Request model for updating a ModelDeploymentConfig (creates new
         version).
+      examples:
+      - engine: nim
+        executor_config:
+          gpu: 1
+        model_spec: {}
     UpdateModelDeploymentRequest:
       properties:
         config:
@@ -20255,9 +21021,16 @@ components:
           description: Detailed specification for the model
         fileset:
           title: Fileset
-          description: A set of checkpoint files, configs, and other auxiliary info
-            associated with this model - expected format {workspace}/{fileset_name}
+          description: 'A set of checkpoint files, configs, and other auxiliary info
+            associated with this model. Either a fileset name or ''workspace/fileset_name''.
+            A bare name is resolved in the request workspace (the platform default
+            workspace is named ''default''). Each segment is 2-63 characters: lowercase
+            letters, digits, hyphens, and temporarily @ . + _; no consecutive hyphens,
+            and it cannot end with a hyphen.'
           type: string
+          maxLength: 127
+          minLength: 2
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)(/[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-))?$
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -21000,6 +21773,34 @@ components:
       type: object
       title: VolcanoJobExecutionProfileConfig
       description: Configuration for Volcano Job Execution Profile
+    WebSessionResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        email:
+          title: Email
+          type: string
+        groups:
+          items:
+            type: string
+          type: array
+          title: Groups
+        account_id:
+          type: string
+          title: Account Id
+        authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Authz Aliases
+      type: object
+      required:
+      - id
+      - groups
+      - account_id
+      - authz_aliases
+      title: WebSessionResponse
     WorkloadTokenExchangeErrorResponse:
       properties:
         error:

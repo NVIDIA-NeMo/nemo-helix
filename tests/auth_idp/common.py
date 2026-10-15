@@ -7,7 +7,9 @@ import os
 import shlex
 from typing import Protocol, runtime_checkable
 
+import httpx
 import pytest
+from nemo_helix_ext.auth.helpers import NHXOIDCConfig, discover_nhx_config
 from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 
 from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime, JsonObject
@@ -69,3 +71,15 @@ def runtime_tls_config(auth_idp_runtime: AuthIdpRuntime) -> HttpxTLSConfig:
             raise AssertionError("Auth IDP runtime verify must be a non-empty CA bundle path")
         return {"verify": ca_bundle}
     return httpx_tls_config_from_env()
+
+
+def discover_nhx_config_with_tls(base_url: str, tls_config: HttpxTLSConfig) -> NHXOIDCConfig:
+    with httpx.Client(timeout=10.0, follow_redirects=True, **tls_config) as http_client:
+        return discover_nhx_config(base_url, http_client=http_client)
+
+
+def discover_runtime_nhx_config(auth_idp_runtime: AuthIdpRuntime) -> NHXOIDCConfig:
+    return discover_nhx_config_with_tls(
+        auth_idp_runtime.gateway_base_url,
+        runtime_tls_config(auth_idp_runtime),
+    )

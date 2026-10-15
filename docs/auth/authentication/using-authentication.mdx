@@ -77,7 +77,7 @@ For CI pipelines, use the password grant to obtain a token without a browser: `n
 
 <Warning>
 
-Password grant sends credentials directly to the IdP and **bypasses MFA**. Many production IdPs disable it. Use a dedicated service account with minimal scopes where possible.
+Password grant sends credentials directly to the IdP and **bypasses MFA**. Many production IdPs disable it. Use a dedicated IdP automation identity with minimal scopes where possible.
 
 </Warning>
 ## Make API Calls
@@ -123,9 +123,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## Scoped Access Keys for Non-SDK Clients
 
-When Scoped Access Keys are enabled by the platform administrator, an
-authenticated user can mint a scoped bearer token for automation that cannot use
-the SDK's OIDC refresh flow:
+When Scoped Access Keys are enabled, a signed-in user can create a bearer token
+for automation that cannot use the SDK's OIDC refresh flow:
 
 ```bash
 # Create a Scoped Access Key with the platform default expiry and print the token once.
@@ -136,6 +135,32 @@ Scoped Access Key management commands live under the `auth` namespace as
 `nemo auth access-keys ...`. The `access-keys` command group is not a top-level CLI
 command and is not a separate NeMo Helix plugin.
 
+By default, `create` makes a user-bound key for the signed-in user's effective
+principal. A human HelixAdmin can instead create a service-account-bound key:
+
+```bash
+nemo auth access-keys create \
+  --service-account intake-otel-writer \
+  --name intake-otel-write \
+  --expires-in 604800
+```
+
+The service account does not need to exist in the IdP and does not run
+`nemo auth login`. NeMo stamps the token subject as
+`service-account:intake-otel-writer`; grant workspace access to that prefixed
+principal with `nemo workspaces members ...`.
+
+<Note>
+
+The access-key create CLI supports `--service-account`, `--expires-in`,
+`--scope`, and `--workspace`. Use `--scope` to restrict the key to service
+areas, and use workspace role bindings or `--workspace` to constrain which
+workspaces that service-account principal can access. API-scope checks also
+apply to bearer tokens that contain `scope` or `scp` claims, such as OIDC access
+tokens.
+
+</Note>
+
 `create` prints the Scoped Access Key token once. Store it in your secret
 manager and send it in the standard `Authorization` header:
 
@@ -144,8 +169,10 @@ curl -H "Authorization: Bearer $NHX_SCOPED_ACCESS_KEY" \
  https://nhx.company.com/apis/entities/v2/workspaces
 ```
 
-Scoped Access Keys are signed JWT bearer tokens scoped to the principal and
-groups present when the key is created. By default, new keys use the platform's
+Scoped Access Keys are signed JWT bearer tokens scoped to a principal identity.
+User-bound keys preserve the user's principal and groups at creation time.
+Service-account-bound keys use a non-human `service-account:<id>` principal and
+do not carry user email or group claims. By default, new keys use the platform's
 configured default expiry, which is 30 days unless the administrator changes it.
 Pass `--expires-in <seconds>` to request a specific finite lifetime. Pass
 `--expires-in none` only for deployments where the administrator has explicitly
@@ -192,12 +219,15 @@ nemo auth access-keys revoke ak_0123456789abcdef0123456789abcdef
 ```
 
 The list includes each key's `ACTIVE`, `EXPIRED`, `SUSPENDED`, `ROTATING`, or `REVOKED`
-status plus its description, issuer, audiences, creation time, expiration time, and last
-authentication time. Suspension and revocation take effect on subsequent authenticated
-platform requests. Use suspension to temporarily block a key, such as while investigating
-suspected misuse, without permanently revoking it. An unexpired suspended key can be
-restored with `unsuspend`. If the key expires while suspended, `unsuspend` is a no-op and
-reports `EXPIRED`. A revoked key cannot be restored.
+status plus its entity type, principal, description, issuer, audiences,
+creation time, expiration time, and last authentication time. Regular users see
+their own user-bound keys. HelixAdmins also see all service-account-bound keys,
+including keys created by other admins. Suspension and revocation take effect on
+subsequent authenticated platform requests. Use suspension to temporarily block
+a key, such as while investigating suspected misuse, without permanently
+revoking it. An unexpired suspended key can be restored with `unsuspend`. If the
+key expires while suspended, `unsuspend` is a no-op and reports `EXPIRED`. A
+revoked key cannot be restored.
 
 `rotate` mints a successor key with the same name, description, and lifetime
 characteristics, prints its token once, and transitions the original key to `ROTATING`.
@@ -223,13 +253,17 @@ Decode the token to inspect claims:
 nemo auth token --decode
 ```
 
-Key claims to check:
+Key claims to check on OIDC tokens:
 
 - `email` or `upn` — the principal identity
 - `scp` or `scope` — granted scopes
 - `exp` — expiry timestamp
 - `iss` — issuer URL (must match your config)
 - `aud` — audience (must match your config)
+
+For Scoped Access Keys, check `sub`, `jti`, `nhx_token_type`, and
+`nhx_access_key`. Service-account keys have `sub: service-account:<id>` and
+`nhx_access_key.entity_type: SERVICE_ACCOUNT`.
 
 ## Token Management
 
@@ -283,5 +317,6 @@ The OIDC token endpoint is **not** stored — it is discovered at runtime from y
 
 - [OIDC](/documentation/access-control/authentication/oidc-setup) — Configure your identity provider.
 - [API Scopes](/documentation/access-control/authorization/api-scopes) — Scope model and available scopes.
+- [Scoped Intake Tokens](/documentation/access-control/deployment/scoped-intake-tokens) — Create service-account access keys for Intake.
 - [Security Model](/documentation/access-control/security-model) — Trust boundaries and the principal model.
 - [Troubleshooting](/documentation/access-control/troubleshooting) — Fix common 401/403 errors and login failures.

@@ -15,7 +15,7 @@ from urllib.parse import parse_qs
 
 import httpx
 import pytest
-from nemo_helix_plugin.client.auth import TokenProviderAuth
+from nemo_helix_plugin.client.auth import AsyncClientTokenProviderAdapter, AsyncFromSyncTokenProvider, TokenProviderAuth
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.endpoint import get
 from nemo_helix_plugin.client.types import BinaryContent, Paginated, RetryPolicy
@@ -58,7 +58,7 @@ class AsyncRotatingProvider:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def get_access_token(self) -> str:
+    async def get_access_token_async(self) -> str:
         self.calls += 1
         return f"token-{self.calls}"
 
@@ -185,17 +185,6 @@ def test_transport_auth_hook_does_not_double_resolve() -> None:
     assert provider.calls == 3
 
 
-def test_sync_client_rejects_async_provider_at_send_time() -> None:
-    client = NemoClient(
-        base_url=BASE,
-        auth=AsyncRotatingProvider(),  # ty: ignore[invalid-argument-type]  # intentional runtime misuse
-        http_client=httpx.Client(transport=httpx.MockTransport(_paging_handler([]))),
-    )
-
-    with pytest.raises(TypeError, match="Async token provider"):
-        client.send(get_item(name="alice"))
-
-
 # ---------------------------------------------------------------------------
 # async
 # ---------------------------------------------------------------------------
@@ -206,7 +195,7 @@ async def test_async_each_page_uses_a_freshly_resolved_token() -> None:
     seen: list[str] = []
     client = AsyncNemoClient(
         base_url=BASE,
-        auth=AsyncRotatingProvider(),
+        auth=AsyncClientTokenProviderAdapter(AsyncRotatingProvider()),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(_paging_handler(seen))),
     )
 
@@ -221,7 +210,7 @@ async def test_async_each_retry_attempt_uses_a_freshly_resolved_token() -> None:
     seen: list[str] = []
     client = AsyncNemoClient(
         base_url=BASE,
-        auth=AsyncRotatingProvider(),
+        auth=AsyncClientTokenProviderAdapter(AsyncRotatingProvider()),
         retry=NO_BACKOFF,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(_retry_handler(seen, failures=2))),
     )
@@ -231,11 +220,11 @@ async def test_async_each_retry_attempt_uses_a_freshly_resolved_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_client_accepts_sync_provider() -> None:
+async def test_async_client_accepts_explicit_sync_provider_adapter() -> None:
     seen: list[str] = []
     client = AsyncNemoClient(
         base_url=BASE,
-        auth=RotatingProvider(),
+        auth=AsyncFromSyncTokenProvider(RotatingProvider()),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(_paging_handler(seen))),
     )
 

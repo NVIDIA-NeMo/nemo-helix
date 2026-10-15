@@ -21,10 +21,11 @@ from nemo_builder_plugin.completion import (
     complete,
     current_caller,
     read_refusal,
+    submit_refusal,
 )
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
-from nemo_builder_plugin.schema import BuildSet
+from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
 from nemo_builder_plugin.submit import BuildConflict, InvalidBuildRequest, MissingSecrets, submit_build_set
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -39,18 +40,8 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import NemoService, RouterSpec
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
-
-
-class SubmitBuildResponse(BaseModel):
-    """The submitted build's job and images."""
-
-    job: str = Field(description="Name of the build job, for logs and debugging.")
-    images: list[ContainerImage] = Field(
-        description="One row per build spec, created `pending`. POLL THESE, not the job."
-    )
 
 
 async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str) -> ContainerImage:
@@ -80,17 +71,22 @@ def _build_router() -> APIRouter:
 
     @router.post("/builds", response_model=SubmitBuildResponse, status_code=201, tags=["Builder"])
     @scope.write
-    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[BuildPerms.CREATE])
+    # A service too, for a platform service that builds for a user, acting for that user.
+    @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[BuildPerms.CREATE])
     async def submit_build(
         workspace: str,
         body: BuildSet,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         client: AsyncNemoClient = Depends(get_nemo_client),
+        caller: Caller = Depends(current_caller),
     ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 
         Creates one `pending` ``ContainerImage`` per spec, then the job that builds them.
         """
+        refusal = submit_refusal(caller)
+        if refusal is not None:
+            raise HTTPException(status_code=403, detail=refusal)
         jobs_client = AsyncJobsClient.from_client(client)
 
         async def create_job(request):
@@ -150,6 +146,10 @@ def _build_router() -> APIRouter:
             pattern=r"^[^/]+$",
             description="Only the images this build job produces: the `job` a submit returned, in this workspace.",
         ),
+        build_set: str | None = Query(
+            default=None, max_length=128, description="Only the images of the build set with this `name`."
+        ),
+        revision: int | None = Query(default=None, ge=1, description="Only the images of this `revision`."),
         status: Literal["pending", "ready", "failed"] | None = Query(
             default=None, description="Only images in this state."
         ),
@@ -157,10 +157,14 @@ def _build_router() -> APIRouter:
         page_size: int = Query(default=100, ge=1, le=100),
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> list[ContainerImage]:
-        """List the images in a workspace, in whatever state they are in, or only one job's."""
+        """List the images in a workspace, in whatever state they are in, or only one job's or one build set's."""
         filters: dict[str, object] = {}
         if job is not None:
             filters["provenance.job"] = f"{workspace}/{job}"
+        if build_set is not None:
+            filters["provenance.build_set"] = build_set
+        if revision is not None:
+            filters["provenance.revision"] = revision
         if status is not None:
             filters["status"] = status
         response = await entity_client.list(

@@ -34,7 +34,7 @@ def test_workload_identity_activation_error_when_exchange_disabled() -> None:
     ):
         error = workload_identity_activation_error(config=_config(), auth_context=_auth_context())
 
-    assert error == "workload_identity requires auth.oidc.workload_token_exchange_enabled to be enabled"
+    assert error == "workload_identity requires auth.oidc.workload to be configured"
 
 
 def test_workload_identity_activation_error_when_auth_context_missing() -> None:

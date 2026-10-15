@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.models.execution_snapshot import (
     canonical_sha256,
@@ -140,6 +141,9 @@ class TaskProvenance(BaseModel):
     image_ref: str | None = None
     image_digest: str | None = None
     image_tag: str | None = None
+    # Recorded on the revision for a verifier that runs in its own sandbox; null otherwise.
+    verifier_image_ref: str | None = None
+    verifier_image_digest: str | None = None
     tarball_sha256: str | None = None
     tarball_object_key: str | None = None
     identifiers: TaskIdentifierProvenance
@@ -179,7 +183,6 @@ class ConfigProvenance(BaseModel):
     runner_metadata: dict[str, Any] = Field(default_factory=dict)
     framework_profile_id: str | None = None
     harbor_profile_id: str | None = None
-    switchyard_profile_id: str | None = None
     intake_profile_id: str | None = None
     agent_bundle: AgentIdentifierProvenance | None = None
     config_hashes: dict[str, str] = Field(default_factory=dict)
@@ -326,41 +329,6 @@ class ArtifactProvenance(BaseModel):
     sbom_path: str
 
 
-class SwitchyardProvenance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    profile_id: str | None = None
-    topology: Literal["shared_campaign", "dedicated", "dedicated_retry"] | None = None
-    mode: str = "managed"
-    namespace: str | None = None
-    deployment: str | None = None
-    service: str | None = None
-    config_map: str | None = None
-    secret: str | None = None
-    network_policy: str | None = None
-    endpoint: str
-    openai_base_url: str | None = None
-    anthropic_base_url: str | None = None
-    inbound: str | None = None
-    book_mode: str | None = None
-    port: int | None = None
-    manifest_hash: str | None = None
-    config_hash: str | None = None
-    drain_until: str | None = None
-    artifact_path: str | None = None
-    endpoint_identity: str | None = None
-    trust_warning: str | None = None
-    image_ref: str | None = None
-    image_digest: str | None = None
-    source_project: str | None = None
-    source_ref: str | None = None
-    source_commit: str | None = None
-    context_path: str | None = None
-    dockerfile_path: str | None = None
-    dockerfile_sha256: str | None = None
-    context_hash: str | None = None
-
-
 class RunProvenanceManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -378,7 +346,6 @@ class RunProvenanceManifest(BaseModel):
     artifacts: ArtifactProvenance
     harbor: HarborProvenance | None = None
     gym: GymProvenance | None = None
-    switchyard: SwitchyardProvenance | None = None
     intake: IntakeProvenance | None = None
     execution_inputs: dict[str, Any] = Field(default_factory=dict)
     execution_identity: dict[str, Any] = Field(default_factory=dict)
@@ -420,6 +387,8 @@ def build_run_provenance_manifest(
             image_ref=_clean_optional(row.get("image_ref")),
             image_digest=_clean_optional(row.get("image_digest") or row.get("task_image_digest")),
             image_tag=task_identifiers.image_tag,
+            verifier_image_ref=_clean_optional(row.get("verifier_image_ref")),
+            verifier_image_digest=_clean_optional(row.get("verifier_image_digest")),
             tarball_sha256=_clean_optional(row.get("tarball_sha256")),
             tarball_object_key=_clean_optional(row.get("tarball_object_key")),
             identifiers=task_identifiers,
@@ -440,7 +409,6 @@ def build_run_provenance_manifest(
             runner_metadata=_redacted_value(dict(runner_metadata)),
             framework_profile_id=_clean_optional(row.get("framework_profile_id")),
             harbor_profile_id=_clean_optional(row.get("harbor_profile_id")),
-            switchyard_profile_id=_clean_optional(row.get("switchyard_profile_id")),
             intake_profile_id=_clean_optional(row.get("intake_profile_id")),
             agent_bundle=agent_bundle,
             config_hashes=_config_hashes(row),
@@ -461,7 +429,6 @@ def build_run_provenance_manifest(
         ),
         harbor=_harbor(row),
         gym=_gym(row),
-        switchyard=_switchyard(row),
         intake=_intake(row),
         execution_inputs=execution_inputs,
         execution_identity=current_process_identity(),
@@ -560,20 +527,78 @@ def _runtime(row: Mapping[str, Any], *, backend: str | None, handle: str | None)
         if runtime.startswith("gym"):
             runner_image_ref = runner_image_ref or _first_env("GYM_RUNNER_IMAGE")
             runner_image_digest = runner_image_digest or _first_env("GYM_RUNNER_IMAGE_DIGEST")
-    if runtime == "sandbox_k8s":
+    if runtime in ("sandbox_k8s", HARBOR_OPENSANDBOX_RUNTIME):
         runner_image_ref = runner_image_ref or _first_env("HARBOR_RUNNER_IMAGE")
         runner_image_digest = runner_image_digest or _first_env("HARBOR_RUNNER_IMAGE_DIGEST")
+    sandbox = (
+        {} if runtime.startswith("gym") and row.get("execution_snapshot") is not None else _selected_env(_RUNTIME_ENV)
+    )
+    isolation = _effective_isolation(row)
+    if runtime == HARBOR_OPENSANDBOX_RUNTIME:
+        sandbox = {**sandbox, **_opensandbox_sandbox(row)}
+        isolation = _opensandbox_isolation(row, isolation)
     return RuntimeProvenance(
         name=runtime,
         network_policy=str(row.get("network_policy") or "unrestricted"),
-        effective_isolation=_effective_isolation(row),
+        effective_isolation=isolation,
         backend=backend,
         handle=handle,
         runner_image_ref=runner_image_ref,
         runner_image_digest=runner_image_digest,
-        sandbox={}
-        if runtime.startswith("gym") and row.get("execution_snapshot") is not None
-        else _selected_env(_RUNTIME_ENV),
+        sandbox=sandbox,
+    )
+
+
+def _opensandbox_applied_egress(row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Return the per-sandbox egress records the evidence builder loaded, ignoring malformed entries."""
+    return [item for item in row.get("opensandbox_applied_egress") or [] if isinstance(item, Mapping)]
+
+
+def _opensandbox_sandbox(row: Mapping[str, Any]) -> dict[str, str]:
+    """Launch-time facts from the persisted handle, plus the per-sandbox results the evidence builder loaded."""
+    raw = backend_handle_raw(row.get("backend_handle"))
+    launch = _mapping(raw.get("provenance"))
+    ownership = _mapping(raw.get("ownership"))
+    fields: dict[str, Any] = {
+        "opensandbox_sdk_version": launch.get("opensandbox_sdk_version"),
+        # The verifier image bound into task.toml; absent when the verifier shared the agent sandbox.
+        "verifier_image_ref": launch.get("verifier_image_ref"),
+        "verifier_image_digest": launch.get("verifier_image_digest"),
+        "egress_allowed_hosts": ",".join(str(host) for host in launch.get("trusted_allowed_hosts") or []),
+        "egress_verification": launch.get("egress_verification"),
+        "ownership_labels": json.dumps(dict(ownership), sort_keys=True) if ownership else None,
+    }
+    if "opensandbox_applied_egress" in row:
+        applied = _opensandbox_applied_egress(row)
+        fields["verified_sandboxes"] = len(applied)
+        fields["applied_policy_sha256s"] = ",".join(
+            sorted({str(item["policy_sha256"]) for item in applied if item.get("policy_sha256")})
+        )
+    return {key: str(value) for key, value in fields.items() if value not in (None, "")}
+
+
+def _opensandbox_isolation(
+    row: Mapping[str, Any], isolation: EffectiveIsolationProvenance
+) -> EffectiveIsolationProvenance:
+    """``NemoOpenSandboxEnvironment`` records a sandbox only after its applied policy passes verification, and kills
+    it otherwise, so the presence of the records is the verification evidence."""
+    launch = _mapping(backend_handle_raw(row.get("backend_handle")).get("provenance"))
+    mode = launch.get("egress_verification")
+    applied = _opensandbox_applied_egress(row)
+    verified = (
+        mode in ("default_action", "strict") and bool(applied) and all(item.get("policy_sha256") for item in applied)
+    )
+    warnings = list(isolation.warnings)
+    if verified and mode == "default_action":
+        warnings.append(
+            "OpenSandbox egress verification checked the default action only; allowed hosts were not compared"
+        )
+    return isolation.model_copy(
+        update={
+            "direct_egress": "scoped" if launch.get("trusted_allowed_hosts") else "denied",
+            "platform_verified": verified,
+            "warnings": warnings,
+        }
     )
 
 
@@ -776,7 +801,6 @@ def _config_hashes(row: Mapping[str, Any]) -> dict[str, str]:
     for key in (
         "harbor_config",
         "framework_config",
-        "switchyard_config",
         "intake_config",
     ):
         value = row.get(key)
@@ -812,122 +836,18 @@ def _credential_refs(
     return refs
 
 
-def _switchyard(row: Mapping[str, Any]) -> SwitchyardProvenance | None:
-    raw = _switchyard_raw(row)
-    if raw is None:
-        return None
-    endpoint = _clean_optional(raw.get("endpoint"))
-    if endpoint is None:
-        return None
-    config = _mapping(row.get("switchyard_config"))
-    return SwitchyardProvenance(
-        profile_id=_clean_optional(raw.get("profile_id")),
-        topology=(
-            row.get("switchyard_topology")
-            if row.get("switchyard_topology") in {"shared_campaign", "dedicated", "dedicated_retry"}
-            else None
-        ),
-        mode=str(raw.get("mode") or "managed"),
-        namespace=_clean_optional(raw.get("namespace")),
-        deployment=_clean_optional(raw.get("name")),
-        service=_clean_optional(raw.get("service_name")),
-        config_map=_clean_optional(raw.get("config_map_name")),
-        secret=_clean_optional(raw.get("secret_name")),
-        network_policy=_clean_optional(raw.get("network_policy_name")),
-        endpoint=endpoint,
-        openai_base_url=_clean_optional(raw.get("openai_base_url")),
-        anthropic_base_url=_clean_optional(raw.get("anthropic_base_url")),
-        inbound=_clean_optional(raw.get("inbound")),
-        book_mode=_clean_optional(raw.get("book_mode") or _switchyard_book_mode(row)),
-        port=_clean_int(raw.get("port")),
-        manifest_hash=_clean_optional(raw.get("manifest_hash")),
-        config_hash=_clean_optional(raw.get("config_hash")),
-        drain_until=_timestamp_text(
-            row.get("switchyard_drain_until") or _mapping(row.get("switchyard_resource")).get("drain_until")
-        ),
-        artifact_path=_clean_optional(raw.get("artifact_path") or "switchyard/"),
-        endpoint_identity=_clean_optional(raw.get("endpoint_identity")),
-        trust_warning=_clean_optional(raw.get("trust_warning")),
-        image_ref=_clean_optional(raw.get("image_ref") or config.get("image")),
-        image_digest=_clean_optional(raw.get("image_digest") or config.get("image_digest")),
-        source_project=_clean_optional(raw.get("source_project") or config.get("source_project")),
-        source_ref=_clean_optional(raw.get("source_ref") or config.get("source_ref")),
-        source_commit=_clean_optional(raw.get("source_commit") or config.get("source_commit")),
-        context_path=_clean_optional(raw.get("context_path") or config.get("context_path")),
-        dockerfile_path=_clean_optional(raw.get("dockerfile_path") or config.get("dockerfile_path")),
-        dockerfile_sha256=_clean_optional(raw.get("dockerfile_sha256") or config.get("dockerfile_sha256")),
-        context_hash=_clean_optional(raw.get("context_hash") or config.get("context_hash")),
-    )
-
-
-def _switchyard_book_mode(row: Mapping[str, Any]) -> str | None:
-    config = _mapping(row.get("switchyard_config"))
-    value = config.get("book_mode")
-    return str(value) if value in {"closed", "open"} else None
-
-
 def _effective_isolation(row: Mapping[str, Any]) -> EffectiveIsolationProvenance:
     policy = str(row.get("network_policy") or "unrestricted")
-    has_switchyard = bool(row.get("switchyard_profile_id"))
-    book_mode = _switchyard_book_mode(row)
     direct_egress = {
         "unrestricted": "unrestricted",
-        "default_deny": "experiment_resources_only" if has_switchyard else "denied",
+        "default_deny": "denied",
         "scoped_egress": "scoped",
     }.get(policy, "unknown")
-    model_gateway = {
-        "closed": "restricted",
-        "open": "open",
-    }.get(book_mode, "profile_defined" if has_switchyard else "none")
-    bypass_resistant: bool | None = None
-    warnings: list[str] = []
-    if book_mode == "closed":
-        if policy == "default_deny":
-            warnings.append(
-                "Switchyard enforces closed-book for the configured inference endpoint; "
-                "proxy-only sandbox isolation still requires verification that no broader "
-                "namespace or platform egress policy also selects the sandbox"
-            )
-        elif policy == "unrestricted":
-            bypass_resistant = False
-            warnings.append(
-                "Switchyard enforces closed-book for the configured inference endpoint, "
-                "but unrestricted direct sandbox egress may allow a separate "
-                "endpoint/credential bypass"
-            )
-        elif policy == "scoped_egress":
-            bypass_resistant = False
-            warnings.append(
-                "Switchyard enforces closed-book for the configured inference endpoint, "
-                "but scoped direct egress may allow a separate endpoint/credential bypass "
-                "for allowed destinations"
-            )
     return EffectiveIsolationProvenance(
         direct_egress=direct_egress,
-        model_gateway=model_gateway,
-        bypass_resistant=bypass_resistant,
+        model_gateway="none",
         platform_verified=False,
-        warnings=warnings,
     )
-
-
-def _switchyard_raw(row: Mapping[str, Any]) -> dict[str, Any] | None:
-    resource = _mapping(row.get("switchyard_resource"))
-    for value in (
-        row.get("switchyard"),
-        row.get("switchyard_lease"),
-        resource.get("metadata"),
-    ):
-        if value is None:
-            continue
-        if isinstance(value, str):
-            try:
-                value = json.loads(value)
-            except json.JSONDecodeError:
-                continue
-        if isinstance(value, Mapping):
-            return dict(value)
-    return None
 
 
 def _env_hashes() -> dict[str, str]:

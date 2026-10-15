@@ -8,6 +8,12 @@
 Documentation can be found at: https://docs.nvidia.com/nemo-helix.
 For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup.
 
+## Ingress and Gateway API routing
+
+The default `ingress.hosts[0].paths` and `httpRoute.pathRules` route
+`/openapi.json` and `/health/ready` with exact matches. Custom route lists replace
+the defaults, so include these paths explicitly when overriding them.
+
 ## Upgrading installations from before the rename
 
 Kubernetes Deployment selectors are immutable. If your existing component labels
@@ -27,6 +33,14 @@ Retain these overrides on subsequent upgrades for the lifetime of those
 Deployments. Also preserve your existing release name, resource names, storage
 configuration, and encryption key and its Secret reference. Fresh installations
 use the chart defaults.
+
+### Preserve existing PostgreSQL claim-template labels
+
+For older embedded PostgreSQL installations, copy the labels from the existing
+StatefulSet's `data` claim template into `postgresql.persistence.claimTemplateLabels`.
+Retain those exact values on future upgrades, including old version labels.
+The default `{}` preserves current behavior. This addresses claim labels only;
+the other migration requirements above still apply.
 
 ## Platform Secrets Encryption Key
 

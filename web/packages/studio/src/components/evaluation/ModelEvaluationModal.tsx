@@ -217,7 +217,7 @@ const ModalBody: FC<{
       {step === 'start' ? (
         <>
           <Text kind="body/regular/md">
-            Run evaluation via NeMo Evaluator&apos;s built-in runner.{' '}
+            Run evaluation via NeMo Helix Evals&apos;s built-in runner.{' '}
             <Anchor
               kind="inline"
               textKind="body/regular/md"

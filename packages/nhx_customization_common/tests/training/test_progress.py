@@ -13,6 +13,7 @@ else, and the only read the reporter makes is the one-shot resume seeding.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -78,6 +79,7 @@ class _Reporter(JobsServiceProgressReporter):
         self._enabled = True
         self._max_steps = 0
         self._num_epochs = 0
+        self.training_duration_seconds = None
 
 
 class _Task:
@@ -499,3 +501,73 @@ def test_close_closes_the_owning_task_client(monkeypatch: pytest.MonkeyPatch) ->
     assert seen_clients == [task_client]
     assert task_client.closed
     assert not jobs_client.closed
+
+
+# --------------------------------------------------------------------------- #
+# Training wall clock
+# --------------------------------------------------------------------------- #
+
+
+CLOCK_START = 1_700_000_000.0
+CLOCK_END = 1_700_000_015.5
+
+
+def fixed_clock(*timestamps: float):
+    remaining = iter(timestamps)
+
+    def clock() -> float:
+        return next(remaining)
+
+    return clock
+
+
+def test_wall_clock_enter_writes_only_the_start(jobs: _Jobs) -> None:
+    reporter = _reporter(jobs)
+    with reporter.training_wall_clock(clock=fixed_clock(CLOCK_START, CLOCK_END)):
+        assert _details(jobs) == {
+            "training_started_at": datetime.fromtimestamp(CLOCK_START, tz=timezone.utc).isoformat(),
+        }
+        assert reporter.training_duration_seconds is None
+
+
+def test_wall_clock_exit_writes_finish_and_duration(jobs: _Jobs) -> None:
+    reporter = _reporter(jobs)
+    with reporter.training_wall_clock(clock=fixed_clock(CLOCK_START, CLOCK_END)):
+        pass
+
+    assert _details(jobs) == {
+        "training_finished_at": datetime.fromtimestamp(CLOCK_END, tz=timezone.utc).isoformat(),
+        "training_duration_seconds": CLOCK_END - CLOCK_START,
+    }
+    assert reporter.training_duration_seconds == CLOCK_END - CLOCK_START
+    assert jobs.sent[-1]["body"].status == "active"
+
+
+def test_wall_clock_exit_records_duration_when_the_block_raises(jobs: _Jobs) -> None:
+    reporter = _reporter(jobs)
+    with pytest.raises(RuntimeError, match="boom"):
+        with reporter.training_wall_clock(clock=fixed_clock(CLOCK_START, CLOCK_END)):
+            raise RuntimeError("boom")
+
+    assert reporter.training_duration_seconds == CLOCK_END - CLOCK_START
+    assert _details(jobs)["training_duration_seconds"] == CLOCK_END - CLOCK_START
+    assert "training_finished_at" in _details(jobs)
+
+
+def test_wall_clock_exit_runs_on_system_exit(jobs: _Jobs) -> None:
+    reporter = _reporter(jobs)
+    with pytest.raises(SystemExit):
+        with reporter.training_wall_clock(clock=fixed_clock(CLOCK_START, CLOCK_END)):
+            raise SystemExit(15)
+
+    assert reporter.training_duration_seconds == CLOCK_END - CLOCK_START
+    assert _details(jobs)["training_finished_at"] == datetime.fromtimestamp(CLOCK_END, tz=timezone.utc).isoformat()
+
+
+def test_later_report_does_not_restate_the_wall_clock(jobs: _Jobs) -> None:
+    reporter = _reporter(jobs)
+    with reporter.training_wall_clock(clock=fixed_clock(CLOCK_START, CLOCK_END)):
+        pass
+    reporter.report_running("training", step=3)
+
+    assert _details(jobs) == {"phase": "training", "step": 3}
